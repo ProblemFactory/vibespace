@@ -60,7 +60,13 @@
 //      normalizer + claude adapter + the one permission answer under the
 //      takeover/handback sweep (a restart keeps the reason; a patched copy of
 //      the announcer without the sweep leaves the card pending — the control);
-//      the one-answer census and the wiring pin.
+//      the one-answer census and the wiring pin. lane takeover-keyboard (userW
+//      inc-mum339id-1zsb): the user's OWN press yields — focusVerdict +
+//      byUserPress, userPressFocus (window / trust / same input), ownership's
+//      `yielded`, yieldAfter, keyboardYielded + the change signal, and five
+//      patched-copy controls each failing exactly its rows (the client model
+//      is scripts/test-takeover-keyboard.mjs, the chrome leg
+//      test-browser-live-input ⑥).
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -174,7 +180,41 @@ console.log('— ① the input side, the three moments, the refusal, the confirm
   const c1 = T.confirmationFromUpstream({ type: 'result', action: 'eval', id: 'r1', success: false, confirmation_required: true, confirmation_id: 'c_8f3a1234', timestamp: 5000 });
   ok(c1 && c1.id === 'c_8f3a1234' && c1.action === 'eval' && c1.expiresAt === 5000 + T.CONFIRM_TTL_MS && c1.commandId === 'r1', 'a top-level confirmation_required result is read (id, action, the 60 s ttl)');
   ok(T.confirmationFromUpstream({ type: 'result', action: 'download', data: { confirmation_required: true, confirmation_id: 'c_1', category: 'download' } }, 1).category === 'download', '…and a data-nested one');
-  ok(T.confirmationFromUpstream({ type: 'result', action: 'click', success: false, error: 'Action requires confirmation: run agent-browser confirm c_abcd12' }, 1)?.id === 'c_abcd12', '…and the id inside an error text');
+  // r6 A-F8: STRUCTURED FIELDS ONLY — an id / a flag spelled inside an error string is never a card (probe2's forge: a click
+  // whose error echoes the pending upload's id parsed as {id: the upload, action: 'click'})
+  ok(T.confirmationFromUpstream({ type: 'result', action: 'click', success: false, error: 'Action requires confirmation: run agent-browser confirm c_abcd12' }, 1) === null, 'r6 A-F8: an id inside an ERROR TEXT is never read as a confirmation (structured fields only)');
+  ok(T.confirmationFromUpstream({ type: 'result', id: 'cmd2', action: 'click', success: false, error: 'Element not found: text=requires confirmation c_9f3a1b2c' }, 2000) === null, 'r6 A-F8: probe2\'s forged record (a click whose error echoes the pending upload\'s id) is NOT a confirmation');
+  ok(T.confirmationFromUpstream({ type: 'command', action: 'click', confirmation_required: true, confirmation_id: 'c_1' }, 1) === null && T.confirmationFromUpstream({ action: 'click', confirmation_required: true, confirmation_id: 'c_1' }, 1) === null && T.confirmationFromUpstream({ type: 'result', action: 'x', confirmation_required: true, confirmation_id: 'c 1; rm' }, 1) === null, 'r6 A-F8: only a `result` record is one (a command / an untyped object is not), and an id the answer could never name is no card');
+  const cUp = T.confirmationFromUpstream({ type: 'result', id: 'cmd1', action: 'upload', success: true, data: { confirmation_required: true, confirmation_id: 'c_9f3a1b2c', category: 'upload' } }, 1000, { command: { type: 'command', id: 'cmd1', action: 'upload', params: { selector: '#file', files: ['/home/u/.ssh/id_rsa'] } } });
+  ok(cUp && cUp.id === 'c_9f3a1b2c' && cUp.action === 'upload' && cUp.target === '#file · /home/u/.ssh/id_rsa', 'r6 A-F8: the card names its TARGET off the paired command record (selector + the FILE being uploaded)', JSON.stringify(cUp));
+  ok(T.confirmationFromUpstream({ type: 'result', id: 'x', action: 'navigate', data: { confirmation_required: true, confirmation_id: 'c_2' } }, 1, { command: { type: 'command', id: 'other', params: { url: 'https://evil.test' } } }).target === null, 'r6 A-F8: a command record under ANOTHER id never lends its target');
+  ok(T.confirmationTarget({ params: { url: 'https://x.test/\u202Etxt.exe', value: 'secret-pw' } }) === 'https://x.test/⟨U+202E⟩txt.exe' && T.confirmationTarget({ params: { script: 'a'.repeat(300) } }).length <= 202 && T.confirmationTarget({ data: { description: 'plugin:vault credential.read my-app' } }) === 'plugin:vault credential.read my-app' && T.confirmationTarget({}) === null, 'r6 A-F8: the target is one visible line — a bidi override is SHOWN (⟨U+202E⟩), a fill value never, a script cut, upstream\'s own description when no params');
+  const dUp = T.confirmationDigest(cUp);
+  ok(/^[0-9a-f]{16}$/.test(dUp) && dUp === T.confirmationDigest({ ...cUp, at: 5, expiresAt: 9 }) && dUp !== T.confirmationDigest({ ...cUp, action: 'click' }) && dUp !== T.confirmationDigest({ ...cUp, target: '#file · /tmp/ok.txt' }) && dUp !== T.confirmationDigest({ ...cUp, id: 'c_9f3a1b2d' }), 'r6 A-F8: the digest covers exactly what the card shows (id, action, category, target) — not the clock');
+  ok(T.confirmationView(cUp, 1000).digest === dUp && T.confirmationView(cUp, 1000).target === cUp.target, 'r6 A-F8: the view record carries the target and its digest');
+  const forged = { ...cUp, action: 'click', target: null };
+  ok(T.pendingNoteVerdict(null, cUp).kind === 'new' && T.pendingNoteVerdict(cUp, { ...cUp, at: 7 }).kind === 'same' && T.pendingNoteVerdict(cUp, forged).kind === 'conflict' && /first is kept/.test(T.pendingNoteVerdict(cUp, forged).error), 'r6 A-F8: FIRST WRITE WINS — a re-mirror is `same`, other content under a held id is a `conflict` (kept, said)');
+  const gOk = T.answerGate({ entry: cUp, decision: 'confirm', shown: dUp, now: 2000 });
+  const gTable = [
+    ['no entry', T.answerGate({ entry: null, decision: 'deny', now: 2000 }).code, 'no_confirmation'],
+    ['expired', T.answerGate({ entry: cUp, decision: 'confirm', shown: dUp, now: cUp.expiresAt }).code, 'no_confirmation'],
+    ['confirm, no digest', T.answerGate({ entry: cUp, decision: 'confirm', now: 2000 }).code, 'shown_required'],
+    ['confirm, the forged card\'s digest', T.answerGate({ entry: cUp, decision: 'confirm', shown: T.confirmationDigest(forged), now: 2000 }).code, 'confirmation_changed'],
+    ['deny, no digest', T.answerGate({ entry: cUp, decision: 'deny', now: 2000 }).ok, true],
+  ];
+  ok(gOk.ok && gTable.every(([, got, want]) => got === want), 'r6 A-F8 answerGate: pending HERE or no_confirmation; a Confirm carries the digest of its card (missing ⇒ shown_required, another ⇒ confirmation_changed); a Deny needs only the pending entry', JSON.stringify(gTable));
+  // ⑤ the card's rows never move up under the pointer
+  let sl = T.confirmSlots([], ['a', 'b', 'c']);
+  sl = T.confirmSlots(sl, ['b', 'c']);
+  const s1 = sl.map((x) => x.id + (x.gone ? '†' : '')).join();
+  sl = T.confirmSlots(sl, ['b', 'c', 'd']);
+  const s2 = sl.map((x) => x.id + (x.gone ? '†' : '')).join();
+  sl = T.confirmSlots(sl, ['a', 'b']);
+  const s3 = sl.map((x) => x.id + (x.gone ? '†' : '')).join();
+  ok(s1 === 'a†,b,c' && s2 === 'a†,b,c,d' && s3 === 'a†,b' && T.confirmSlots(T.confirmSlots([], ['x']), []).length === 0, 'r6 A-F8 ⑤ confirmSlots: a row that goes keeps its slot while a live row sits below it (b and c never move up), a new row joins at the END, trailing tombstones go, a gone id never revives', JSON.stringify({ s1, s2, s3 }));
+  // r6 A-F9 (money): the count ONE explicit Hand back spends — the announcer's own verdict per conversation
+  ok(T.handbackWakes({}) === 1 && T.handbackWakes({ siblings: [{ rerun: [] }, { rerun: ['fill'] }, { rerun: ['open', 'click'] }] }) === 3 && T.handbackWakes({ own: false, siblings: [{ rerun: [] }] }) === 0, 'r6 A-F9 handbackWakes: the primary + each sibling with something to re-run (a sibling with nothing is the free notice)');
+  ok(T.handbackWakeEcho({ wakes: 3 }).ok && T.handbackWakeEcho({ wakes: 3, expect: 3 }).ok && T.handbackWakeEcho({ wakes: 3, expect: 1 }).code === 'wake_count_changed' && T.handbackWakeEcho({ wakes: 3, expect: 1 }).wakes === 3 && /nothing was handed back/.test(T.handbackWakeEcho({ wakes: 3, expect: 1 }).error) && T.handbackWakeEcho({ wakes: 1, expect: 'x' }).code === 'wake_count_changed', 'r6 A-F9 handbackWakeEcho: the count shown must be the count spent (absent = not checked; another ⇒ wake_count_changed with the count now)');
   ok(T.confirmationFromUpstream({ type: 'result', action: 'click', success: true, data: { ok: true } }, 1) === null && T.confirmationFromUpstream({ type: 'frame' }) === null, 'an ordinary result / a frame is not a confirmation');
   ok(T.confirmationResolvedFromUpstream({ type: 'command', action: 'confirm', params: { id: 'c_1' } })?.decision === 'confirm' && T.confirmationResolvedFromUpstream({ type: 'command', action: 'deny', params: { args: ['c_2'] } })?.id === 'c_2' && T.confirmationResolvedFromUpstream({ type: 'command', action: 'click', params: {} }) === null, 'a confirm/deny command resolves its id');
   ok(T.decisionArgv('c_1', 'deny').argv.join(' ') === 'deny c_1' && T.decisionArgv('c_1', 'yes').code === 'bad-request' && T.decisionArgv('../x', 'confirm').code === 'bad-request', 'an answer becomes upstream\'s own verb; a bad decision/id is refused before any spawn');
@@ -278,7 +318,7 @@ console.log('— ① the input side, the three moments, the refusal, the confirm
   const v = S.viewerMessageVerdict({ type: 'takeover' });
   ok(v.kind === 'takeover' && !v.forward && S.viewerMessageVerdict({ type: 'handback' }).kind === 'handback' && S.viewerMessageVerdict({ type: 'confirm', id: 'c_1', decision: 'deny' }).decision === 'deny' && S.viewerMessageVerdict({ type: 'confirm', id: 'c_1', decision: 'x' }).decision === 'confirm', 'the three control verbs are decided, never forwarded');
   ok(S.viewerMessageVerdict({ type: 'input_mouse' }, { mode: 'takeover', holder: 3, viewerId: 3 }).forward === true && S.viewerMessageVerdict({ type: 'input_mouse' }, { mode: 'takeover', holder: 3, viewerId: 4 }).refusal.code === 'watch-mode' && !/P3/.test(S.viewerMessageVerdict({ type: 'input_mouse' }, {}).refusal.error), 'input is forwarded only from the holder; the watch-mode refusal no longer says P3');
-  ok(S.hello({}).protocol.input === 'holder-only' && S.hello({}).protocol.control.join(',') === 'takeover,handback,confirm,pass', 'the hello names the input rule and the control verbs');
+  ok(S.hello({}).protocol.input === 'holder-only' && S.hello({}).protocol.control.join(',') === 'takeover,handback,confirm,pass,claim', 'the hello names the input rule and the control verbs (+ `claim`, B-6ae8: "Continue here" on the user\'s own browsing window)');
 }
 
 // ═══ ② THE REAL KEEPER ════════════════════════════════════════════════════
@@ -367,13 +407,29 @@ keeper.onConfirmation((ev) => confEvents.push(ev));
   ok(view && view.type === 'confirmation' && view.remainingMs === T.CONFIRM_TTL_MS && keeper.pendingFor(KEY_A, p.id).length === 1 && confEvents.length === 1 && confEvents[0].kind === 'pending', 'a pending confirmation is registered and emitted once');
   keeper.notePending({ browserKey: KEY_A, profileId: p.id, confirmation: { id: 'c_ok', action: 'eval', at: clock, expiresAt: clock + T.CONFIRM_TTL_MS } });
   ok(confEvents.length === 1, '…re-noting the same id emits nothing');
-  const ans = await keeper.answerConfirmation({ browserKey: KEY_A, profileId: p.id, id: 'c_ok', decision: 'confirm' });
+  // r6 A-F8: a Confirm names the card it was pressed on — without the digest, or with another, NOTHING reaches upstream
+  const okShown = keeper.pendingFor(KEY_A, p.id)[0].digest;
+  const noShown = await keeper.answerConfirmation({ browserKey: KEY_A, profileId: p.id, id: 'c_ok', decision: 'confirm' });
+  const badShown = await keeper.answerConfirmation({ browserKey: KEY_A, profileId: p.id, id: 'c_ok', decision: 'confirm', shown: T.confirmationDigest({ id: 'c_ok', action: 'click' }) });
+  ok(noShown.code === 'shown_required' && badShown.code === 'confirmation_changed' && badShown.digest === okShown && confirms().length === 0 && keeper.pendingFor(KEY_A, p.id).length === 1, 'r6 A-F8: a Confirm without the card\'s digest is shown_required, with another card\'s digest confirmation_changed — zero spawns, the confirmation still pending', JSON.stringify({ noShown, badShown }));
+  const ans = await keeper.answerConfirmation({ browserKey: KEY_A, profileId: p.id, id: 'c_ok', decision: 'confirm', shown: okShown });
   const cl = confirms();
   ok(ans.ok && ans.decision === 'confirm' && cl.length === 1 && cl[0].verb === 'confirm' && cl[0].id === 'c_ok' && cl[0].session === 'vs-' + KEY_A && cl[0].ns === B.sessionNameFor(p.id), 'the answer runs the CLI\'s own `confirm <id>` under the lease\'s session in the profile\'s namespace');
   ok(keeper.pendingFor(KEY_A, p.id).length === 0 && confEvents.length === 2 && confEvents[1].kind === 'resolved' && confEvents[1].decision === 'confirm', '…and the registry forgets it, emitting resolved');
   const gone = await keeper.answerConfirmation({ browserKey: KEY_A, profileId: p.id, id: 'c_gone', decision: 'deny' });
-  ok(!gone.ok && gone.code === 'no_confirmation', 'a gone id is the typed no_confirmation (the daemon\'s own words)');
-  ok((await keeper.answerConfirmation({ browserKey: KEY_A, profileId: p.id, id: 'c 1', decision: 'confirm' })).code === 'bad-request' && confirms().length === 2, 'a malformed id never reaches a spawn');
+  ok(!gone.ok && gone.code === 'no_confirmation' && confirms().length === 1, 'r6 A-F8: an id NOT pending for this browser is the typed no_confirmation BEFORE any spawn (nothing sent upstream)', JSON.stringify(gone));
+  ok((await keeper.answerConfirmation({ browserKey: KEY_A, profileId: p.id, id: 'c 1', decision: 'confirm' })).code === 'bad-request' && confirms().length === 1, 'a malformed id never reaches a spawn');
+  // r6 A-F8: FIRST WRITE WINS on the keeper — probe2's shape: the real pending upload, then a record under its id that says `click`
+  confEvents.length = 0;
+  const upl = T.confirmationFromUpstream({ type: 'result', id: 'cmd1', action: 'upload', data: { confirmation_required: true, confirmation_id: 'c_9f3a1b2c', category: 'upload' }, timestamp: clock }, clock, { command: { type: 'command', id: 'cmd1', action: 'upload', params: { selector: '#file', files: ['/home/u/secret.pdf'] } } });
+  keeper.notePending({ browserKey: KEY_A, profileId: p.id, sessionId: 'sess-1', confirmation: upl });
+  const fv = keeper.notePending({ browserKey: KEY_A, profileId: p.id, sessionId: 'sess-1', confirmation: { ...upl, action: 'click', target: null } });
+  const pend = keeper.pendingFor(KEY_A, p.id);
+  ok(fv.conflict === true && fv.action === 'upload' && pend.length === 1 && pend[0].action === 'upload' && pend[0].target === '#file · /home/u/secret.pdf' && confEvents.map((e) => e.kind).join() === 'pending,conflict' && confEvents[1].attempted.action === 'click', 'r6 A-F8: a second record under a held id with other content changes NOTHING (the upload\'s card stays, target and all) — the conflict is emitted, never a second `pending`', JSON.stringify({ fv, pend, ev: confEvents.map((e) => e.kind) }));
+  const forgedShown = T.confirmationDigest({ ...upl, action: 'click', target: null });
+  ok((await keeper.answerConfirmation({ browserKey: KEY_A, profileId: p.id, id: upl.id, decision: 'confirm', shown: forgedShown })).code === 'confirmation_changed' && confirms().length === 1, 'r6 A-F8: a Confirm pressed on a card that showed "click" never confirms the upload (confirmation_changed, zero spawns)');
+  ok((await keeper.answerConfirmation({ browserKey: KEY_B, profileId: null, id: upl.id, decision: 'confirm', shown: pend[0].digest, envPairs: ['AGENT_BROWSER_SESSION=vs-x'] })).code === 'no_confirmation' && confirms().length === 1, 'r6 A-F8: the same id answered from ANOTHER conversation\'s browser is no_confirmation (pending for THIS browser key only) — zero spawns');
+  ok((await keeper.answerConfirmation({ browserKey: KEY_A, profileId: p.id, id: upl.id, decision: 'deny' })).ok && confirms().at(-1).verb === 'deny' && confirms().at(-1).id === upl.id && keeper.pendingFor(KEY_A, p.id).length === 0, 'r6 A-F8: a Deny of the pending upload runs upstream\'s own deny (a Deny needs no digest — it runs nothing)');
   keeper.notePending({ browserKey: KEY_A, profileId: p.id, confirmation: { id: 'c_old', action: 'eval', at: clock, expiresAt: clock + 100 } });
   clock += 200; await keeper.tick();
   ok(keeper.pendingFor(KEY_A, p.id).length === 0 && confEvents.at(-1).decision === 'expired', 'a confirmation past the daemon\'s ttl is swept by the tick as expired');
@@ -615,6 +671,27 @@ function viewer(port, q) {
   await c.until((v) => !!v.last('confirmation-ack'));
   await b.until((v) => !!v.last('confirmation-resolved'));
   ok(c.last('confirmation-ack').ok && confirms().length === nConf + 1 && confirms().at(-1).verb === 'deny' && b.last('confirmation-resolved').id === 'c_ok' && keeper.pendingFor(KEY_A, p.id).length === 0, 'a viewer\'s confirm runs the CLI\'s deny under the lease, acks it, and every viewer sees it resolved');
+  // r6 A-F8 on the WIRED path: the command record pairs with its result (the card names the FILE), an error-string echo is
+  // nothing, a structured forge under the held id changes nothing (said as `confirmation-conflict`, never a resolve), and a
+  // Confirm pressed on another card's content runs nothing — the card's own digest runs upstream's confirm
+  up.send({ type: 'command', id: 'cmdU', action: 'upload', params: { selector: '#file', files: ['/home/u/secret.pdf'] } });
+  up.send({ type: 'result', id: 'cmdU', action: 'upload', success: true, data: { confirmation_required: true, confirmation_id: 'c_up1', category: 'upload' }, timestamp: clock });
+  await b.until((v) => v.by('confirmation').some((m) => m.id === 'c_up1'));
+  const cardU = b.by('confirmation').find((m) => m.id === 'c_up1');
+  ok(cardU && cardU.target === '#file · /home/u/secret.pdf' && cardU.digest === T.confirmationDigest(cardU) && c.by('confirmation').some((m) => m.id === 'c_up1' && m.target === cardU.target), 'r6 A-F8 bridge: the confirmation record every viewer gets names the TARGET off the paired command (the file) and carries its digest', JSON.stringify(cardU));
+  up.send({ type: 'result', id: 'cmdX', action: 'click', success: false, error: 'Element not found: text=requires confirmation c_up1' });
+  up.send({ type: 'result', id: 'cmdY', action: 'click', success: true, data: { confirmation_required: true, confirmation_id: 'c_up1' } });
+  await b.until((v) => v.by('confirmation-conflict').length >= 1);
+  await sleep(60);
+  ok(b.by('confirmation').filter((m) => m.id === 'c_up1').length === 1 && keeper.pendingFor(KEY_A, p.id).find((x) => x.id === 'c_up1').action === 'upload' && b.last('confirmation-conflict').id === 'c_up1' && b.last('confirmation-conflict').attempted.action === 'click' && !b.by('confirmation-resolved').some((m) => m.id === 'c_up1'), 'r6 A-F8 bridge: the error-string echo is nothing; the structured forge under the held id repaints NO card (one confirmation record, the keeper still says upload) — viewers get `confirmation-conflict`, never a resolve', JSON.stringify(b.msgs.filter((m) => /confirmation/.test(m.type)).map((m) => m.type + ':' + m.id + ':' + (m.action || (m.attempted && m.attempted.action) || ''))));
+  const nC = confirms().length;
+  b.send({ type: 'confirm', id: 'c_up1', decision: 'confirm', shown: T.confirmationDigest({ ...cardU, action: 'click', target: null }) });
+  await b.until((v) => v.by('confirmation-ack').some((m) => m.id === 'c_up1'));
+  const ackBad = b.by('confirmation-ack').filter((m) => m.id === 'c_up1').at(-1);
+  ok(ackBad && !ackBad.ok && ackBad.code === 'confirmation_changed' && confirms().length === nC, 'r6 A-F8 bridge: a Confirm carrying the digest of a card that said "click" is refused confirmation_changed — upstream never asked', JSON.stringify(ackBad));
+  b.send({ type: 'confirm', id: 'c_up1', decision: 'confirm', shown: cardU.digest });
+  await b.until((v) => v.by('confirmation-ack').some((m) => m.id === 'c_up1' && m.ok));
+  ok(confirms().length === nC + 1 && confirms().at(-1).verb === 'confirm' && confirms().at(-1).id === 'c_up1' && keeper.pendingFor(KEY_A, p.id).length === 0, 'r6 A-F8 bridge: the Confirm carrying the digest of the card it was pressed on runs upstream\'s own `confirm c_up1`');
   b.ws.close(); c.ws.close();
   await sleep(50);
   keeper.streamPortFor = origPort;
@@ -720,7 +797,10 @@ console.log('— ⑤ the routes in-process and ⑥ the shipped CLI\'s refusal');
   ok(h1.status === 200 && h1.json.ok && h1.json.cause === 'explicit' && h1.json.profileId === p.id && h1.json.input.input === 'agent', 'POST /handback finds the taken browser and hands it back (explicit)');
   ok((await post('/api/agent/browser/resolve', { handle: '' }, { Authorization: 'Bearer ' + TOKEN })).status === 200, '…and /resolve is open again');
   keeper.notePending({ browserKey: KEY_A, profileId: p.id, confirmation: { id: 'c_ok', action: 'eval', at: clock, expiresAt: clock + T.CONFIRM_TTL_MS } });
-  const c1 = await post('/api/browser/confirm', { sessionId: 'sess-1', id: 'c_ok', decision: 'confirm' });
+  const c0 = await post('/api/browser/confirm', { sessionId: 'sess-1', id: 'c_ok', decision: 'confirm' });
+  const c0b = await post('/api/browser/confirm', { sessionId: 'sess-1', id: 'c_ok', decision: 'confirm', shown: '0000000000000000' });
+  ok(c0.status === 400 && c0.json.code === 'shown_required' && c0b.status === 409 && c0b.json.code === 'confirmation_changed' && c0b.json.digest === keeper.pendingFor(KEY_A, p.id)[0].digest, 'r6 A-F8: POST /confirm without the card\'s digest is 400 shown_required; with another 409 confirmation_changed (+ the current digest) — nothing sent', JSON.stringify({ c0: c0.json, c0b: c0b.json }));
+  const c1 = await post('/api/browser/confirm', { sessionId: 'sess-1', id: 'c_ok', decision: 'confirm', shown: keeper.pendingFor(KEY_A, p.id)[0].digest });
   ok(c1.status === 200 && c1.json.ok && c1.json.decision === 'confirm' && c1.json.pending.length === 0, 'POST /confirm answers through the keeper and returns what is still pending');
   const c2 = await post('/api/browser/confirm', { sessionId: 'sess-1', id: 'c_gone', decision: 'deny' });
   ok(c2.status === 404 && c2.json.code === 'no_confirmation', 'a gone id is 404 no_confirmation');
@@ -801,6 +881,186 @@ console.log('— ⑦ lane J r2: keyboard ownership, the key routes, text records
   const o1 = KO.keyboardOwner()?.id; bOwns = false; const o2 = KO.keyboardOwner()?.id; aOwns = false; const o3 = KO.keyboardOwned();
   KO.releaseKeyboard('A'); KO.releaseKeyboard('B');
   ok(o1 === 'B' && o2 === 'A' && o3 === false && KO.keyboardOwned() === false, 'keyboard-owner.js: ownership is RE-ASKED every time (a view that stops owning releases without bookkeeping); released claims are gone');
+  // ── lane takeover-keyboard (userW inc-mum339id-1zsb, 2026-09-28): the chat beside the live view, Take over, three presses on
+  // the chat composer — the typing went to the PAGE. The user's OWN press on a text box YIELDS the keys; a script's focus
+  // (lane J r2's password case) is reclaimed exactly as before. ──
+  const FV_ROWS = [
+    [{ owns: true, editable: true, insideView: false, byUserPress: true }, 'yield', 'the user pressed the composer (userW)'],
+    [{ owns: true, editable: true, insideView: false, byUserPress: false }, 'reclaim', 'a script focused the composer while a password is typed (lane J r2)'],
+    [{ owns: true, editable: true, insideView: false }, 'reclaim', 'no press fact at all (fails closed)'],
+    [{ owns: true, editable: true, insideView: true, byUserPress: true }, 'allow', 'the view\'s own sink'],
+    [{ owns: true, editable: false, insideView: false, byUserPress: true }, 'allow', 'a button / a non-editable'],
+    [{ owns: false, editable: true, insideView: false, byUserPress: true }, 'allow', 'not owning (watch / yielded / another viewer)'],
+    [{ owns: false, editable: true, insideView: false, byUserPress: false }, 'allow', 'not owning, no press'],
+    // verify r2 (H1): the takeover MINE while the view does not drive (minimized / another desktop / reconnecting)
+    [{ owns: false, mine: true, editable: true, insideView: false, byUserPress: true }, 'yield', 'mine but not driving: the user pressed the composer (H1)'],
+    [{ owns: false, mine: true, editable: true, insideView: false, byUserPress: false }, 'allow', 'mine but not driving: a script\'s focus (the return moves the caret)'],
+    [{ owns: false, mine: true, editable: false, insideView: false, byUserPress: true }, 'allow', 'mine but not driving: a button'],
+    [{ owns: true, mine: true, editable: true, insideView: false, byUserPress: false }, 'reclaim', 'driving and mine: a script\'s focus is still reclaimed'],
+  ];
+  const fvBad = (TT) => FV_ROWS.filter(([o, want]) => TT.focusVerdict(o) !== want).map((r) => r[2]);
+  ok(fvBad(T).length === 0, `focusVerdict + byUserPress: the user's press ⇒ 'yield', a script's focus ⇒ 'reclaim' (the password guard), the sink / a button / not owning ⇒ 'allow' (${FV_ROWS.length} rows)`, fvBad(T).join(' | '));
+  const UP_ROWS = [
+    [{ press: { at: 1000, trusted: true }, sameInput: true, focusAt: 1000 }, true, 'pressed', 'the mousedown\'s own focus (same task)'],
+    [{ press: { at: 1000, trusted: true }, sameInput: true, focusAt: 1000 + T.USER_PRESS_MS }, true, 'pressed', 'at the window\'s edge'],
+    [{ press: { at: 1000, trusted: true }, sameInput: true, focusAt: 1001 + T.USER_PRESS_MS }, false, 'stale press', 'one ms past the window'],
+    [{ press: { at: 1000, trusted: true }, sameInput: true, focusAt: 999 }, false, 'stale press', 'a focus BEFORE the press'],
+    [{ press: { at: NaN, trusted: true }, sameInput: true, focusAt: 5 }, false, 'stale press', 'an unreadable press time'],
+    [{ press: { at: 1000, trusted: false }, sameInput: true, focusAt: 1001 }, false, 'synthetic press', 'a script-dispatched pointerdown'],
+    [{ press: { at: 1000 }, sameInput: true, focusAt: 1001 }, false, 'synthetic press', 'trust not proven'],
+    [{ press: { at: 1000, trusted: true }, sameInput: false, focusAt: 1001 }, false, 'pressed elsewhere', 'a press on the picture / a taskbar button, then a script focus'],
+    [{ press: null, sameInput: true, focusAt: 1001 }, false, 'no press', 'a script\'s .focus()'],
+    [{}, false, 'no press', 'nothing given'],
+  ];
+  const upBad = (TT) => UP_ROWS.filter(([o, by, why]) => { const r = TT.userPressFocus(o); return r.byUserPress !== by || r.why !== why; }).map((r) => r[3]);
+  ok(T.USER_PRESS_MS === 250 && upBad(T).length === 0, `userPressFocus: ONLY the user's own trusted press on THAT text box within ${T.USER_PRESS_MS} ms is a press — a script's focus, a synthetic press, a press elsewhere, a stale press are not, each named (${UP_ROWS.length} rows)`, upBad(T).join(' | '));
+  ok(!own({ mode: 'takeover', mine: true, yielded: true }) && T.keyboardOwnership({ mode: 'takeover', mine: true, yielded: true }).why === 'yielded' && own({ mode: 'takeover', mine: true, yielded: false })
+    && T.keyboardOwnership({ mode: 'watch', mine: true, yielded: true }).why === 'watch' && T.keyboardOwnership({ mode: 'takeover', mine: true, connected: false, yielded: true }).why === 'disconnected',
+    'keyboardOwnership: a YIELDED view owns no keys (why "yielded") — the takeover itself is untouched; the older refusals keep their names first');
+  const YA_ROWS = [[false, 'yield', true], [true, 'yield', true], [true, 'press-view', false], [true, 'claim', false], [true, 'release', false], [false, 'press-view', false], [true, 'key', true], [false, 'key', false], [true, undefined, true], [true, 'homeless', false]];
+  ok(YA_ROWS.every(([y, ev, w]) => T.yieldAfter(y, ev) === w) && T.YIELD_EVENTS.join() === 'yield,press-view,claim,release,homeless', 'yieldAfter: a yield holds until a press INSIDE the view, a fresh claim, the release or (verify r2) its home gone — any other event keeps it');
+  // verify r2 (H1b'): a yield made while the view was off screen whose HOME is gone when the view drives again ends
+  const YH_ROWS = [
+    [{ yielded: true, drivesNow: true, drovePrev: false, homeVisible: false }, 'end', 'back on the view\'s desktop, the pressed chat box on the other one (measured: keys went nowhere, the chip said "in the chat box")'],
+    [{ yielded: true, drivesNow: true, drovePrev: false, homeVisible: true }, 'keep', 'restored with the pressed chat box visible and focused (H1a) — the caret\'s home wins'],
+    [{ yielded: true, drivesNow: true, drovePrev: true, homeVisible: false }, 'keep', 'driving all along, the caret left the box (a click on the message list) — never ended in place'],
+    [{ yielded: true, drivesNow: false, drovePrev: true, homeVisible: false }, 'keep', 'going off screen'],
+    [{ yielded: false, drivesNow: true, drovePrev: false, homeVisible: false }, 'keep', 'nothing yielded'],
+    [{}, 'keep', 'nothing given'],
+  ];
+  const yhBad = (TT) => YH_ROWS.filter(([a, want]) => { let got; try { got = TT.yieldHomeVerdict(a); } catch { return true; } return got !== want; }).map((r) => r[2]);
+  ok(yhBad(T).length === 0, `yieldHomeVerdict (verify r2): a yield ends when the view comes back to driving and its home is not a visible, focused text box (${YH_ROWS.length} rows)`, yhBad(T).join(' | '));
+  {
+    const MY = mutantCopies('browser-takeover-home', REPO);
+    const TS5 = fs.readFileSync(path.join(REPO, 'src/browser-takeover.js'), 'utf8');
+    const c = { tag: 'yh-always-keep', from: "  return homeVisible ? 'keep' : 'end';", to: "  return 'keep';" };
+    const found = TS5.split(c.from).length === 2;
+    const Tm = found ? MY.load('src/browser-takeover.js', TS5.replace(c.from, c.to), c.tag) : null;
+    ok(found && JSON.stringify(yhBad(Tm)) === JSON.stringify([YH_ROWS[0][2]]), `NEGATIVE CONTROL (${c.tag}): the patched copy fails exactly the homeless row`, JSON.stringify({ found, bad: Tm && yhBad(Tm) }));
+    for (const r of copiesCensus(MY.files, MY.dir, REPO, { minCopies: 1, label: '⑦ yield home ' })) ok(r.pass, r.name, r.detail);
+  }
+  // verify r2 (H1): ONE ownership transition — measured on cd867c05: a view restored with the caret in the composer took
+  // the next key for the page and said nothing until then
+  const KT_ROWS = [
+    [{ was: null, now: { owns: true } }, { changed: true, moveCaret: false, release: false }, 'the first judgement redraws'],
+    [{ was: null, now: { owns: true }, caretOutside: true }, { changed: true, moveCaret: true, release: false }, 'the first judgement, owning, a caret outside'],
+    [{ was: { owns: false }, now: { owns: true }, caretOutside: true }, { changed: true, moveCaret: true, release: false }, 'restored with a SCRIPT\'s caret in the composer (H1b): the caret moves'],
+    [{ was: { owns: false }, now: { owns: true }, caretOutside: false }, { changed: true, moveCaret: false, release: false }, 'restored with the caret in the sink / on the body'],
+    [{ was: { owns: false, yielded: false }, now: { owns: false, yielded: true }, caretOutside: true }, { changed: true, moveCaret: false, release: false }, 'restored while yielded (H1a): redrawn, the caret stays the user\'s'],
+    [{ was: { owns: true }, now: { owns: false }, caretOutside: true }, { changed: true, moveCaret: false, release: true }, 'hidden: redrawn, the keys held in the page let go (H3)'],
+    [{ was: { owns: true, yielded: false }, now: { owns: false, yielded: true } }, { changed: true, moveCaret: false, release: true }, 'a yield: the keys held in the page let go (r1 K4, now also here)'],
+    [{ was: { owns: true }, now: { owns: true }, caretOutside: true }, { changed: false, moveCaret: false, release: false }, 'no transition: nothing (the belt\'s case, not this one)'],
+    [{ was: { owns: false, yielded: true }, now: { owns: false, yielded: true } }, { changed: false, moveCaret: false, release: false }, 'no transition while yielded'],
+    [{}, { changed: true, moveCaret: false, release: false }, 'nothing given'],
+  ];
+  // verify r2 (Q1): a reclaim the user's OWN press elsewhere caused is SAID (rate-limited); a script's focus never is
+  const RC_ROWS = [
+    [{ why: 'pressed elsewhere', press: { at: 1000, trusted: true }, focusAt: 1010 }, true, 'the expand button focused the box (a press of his, elsewhere, fresh)'],
+    [{ why: 'pressed elsewhere', press: { at: 1000, trusted: true }, focusAt: 1010, lastCueAt: 1010 - T.RECLAIM_CUE_MS + 1 }, false, 'said less than RECLAIM_CUE_MS ago'],
+    [{ why: 'pressed elsewhere', press: { at: 1000, trusted: true }, focusAt: 1010, lastCueAt: 1010 - T.RECLAIM_CUE_MS }, true, 'said exactly RECLAIM_CUE_MS ago'],
+    [{ why: 'pressed elsewhere', press: { at: 1000, trusted: true }, focusAt: 1001 + T.USER_PRESS_MS }, false, 'a stale press elsewhere (a message arriving later)'],
+    [{ why: 'pressed elsewhere', press: { at: 1000, trusted: false }, focusAt: 1010 }, false, 'a synthetic press elsewhere'],
+    [{ why: 'no press', press: null, focusAt: 1010 }, false, 'a script\'s focus — the password guard stays unsaid'],
+    [{ why: 'synthetic press', press: { at: 1000, trusted: false }, focusAt: 1010 }, false, 'a synthetic press on the box'],
+    [{}, false, 'nothing given'],
+  ];
+  const rcBad = (TT) => RC_ROWS.filter(([a, want]) => { let got; try { got = TT.reclaimCue(a); } catch { return true; } return got !== want; }).map((r) => r[2]);
+  ok(T.RECLAIM_CUE_MS === 6000 && rcBad(T).length === 0, `reclaimCue (verify r2, Q1): a reclaim caused by the user's own fresh press on something else is said, at most every ${T.RECLAIM_CUE_MS} ms; a script's focus never (${RC_ROWS.length} rows)`, rcBad(T).join(' | '));
+  {
+    const MQ = mutantCopies('browser-takeover-cue', REPO);
+    const TS4 = fs.readFileSync(path.join(REPO, 'src/browser-takeover.js'), 'utf8');
+    const QCTL = [
+      { tag: 'rc-no-limit', from: '  return !(lastCueAt != null && Number(focusAt) - Number(lastCueAt) < everyMs);', to: '  return true;', red: ['said less than RECLAIM_CUE_MS ago'] },
+      { tag: 'rc-any-reclaim', from: "  if (why !== 'pressed elsewhere' || !press || press.trusted !== true) return false;", to: "  if (!press) return why === 'no press';", red: ['a synthetic press elsewhere', 'a script\'s focus — the password guard stays unsaid', 'a synthetic press on the box'] },
+    ];
+    for (const c of QCTL) {
+      const found = TS4.split(c.from).length === 2;
+      const Tm = found ? MQ.load('src/browser-takeover.js', TS4.replace(c.from, c.to), c.tag) : null;
+      const bad = Tm ? rcBad(Tm) : null;
+      ok(found && JSON.stringify(bad) === JSON.stringify(c.red), `NEGATIVE CONTROL (${c.tag}): the patched copy fails exactly ${c.red.join(' · ')}`, JSON.stringify({ found, bad }));
+    }
+    for (const r of copiesCensus(MQ.files, MQ.dir, REPO, { minCopies: QCTL.length, label: '⑦ reclaim cue ' })) ok(r.pass, r.name, r.detail);
+  }
+  const ktBad = (TT) => KT_ROWS.filter(([a, want]) => { let got; try { got = TT.keyboardTransition(a); } catch { return true; } return !got || got.changed !== want.changed || got.moveCaret !== want.moveCaret || got.release !== want.release; }).map((r) => r[2]);
+  ok(typeof T.keyboardTransition === 'function' && ktBad(T).length === 0, `keyboardTransition (verify r2, H1 / H3): every ownership change redraws at once; keys moving to the page while a caret sits outside the view move the caret; keys leaving the page let go of what is held there (${KT_ROWS.length} rows)`, ktBad(T).join(' | '));
+  {
+    const MT = mutantCopies('browser-takeover-transition', REPO);
+    const TS3 = fs.readFileSync(path.join(REPO, 'src/browser-takeover.js'), 'utf8');
+    const TCTL = [
+      { tag: 'kt-no-move', from: 'moveCaret: n.owns && !w.owns && !!caretOutside,', to: 'moveCaret: false,', red: ['the first judgement, owning, a caret outside', 'restored with a SCRIPT\'s caret in the composer (H1b): the caret moves'] },
+      { tag: 'kt-owns-only', from: '  const changed = !was || w.owns !== n.owns || w.yielded !== n.yielded;', to: '  const changed = !was || w.owns !== n.owns;', red: ['restored while yielded (H1a): redrawn, the caret stays the user\'s'] },
+      { tag: 'kt-no-release', from: 'release: w.owns && !n.owns };', to: 'release: false };', red: ['hidden: redrawn, the keys held in the page let go (H3)', 'a yield: the keys held in the page let go (r1 K4, now also here)'] }, // verify r2 (H3)
+    ];
+    for (const c of TCTL) {
+      const found = TS3.split(c.from).length === 2;
+      const Tm = found ? MT.load('src/browser-takeover.js', TS3.replace(c.from, c.to), c.tag) : null;
+      const bad = Tm ? ktBad(Tm) : null;
+      ok(found && JSON.stringify(bad) === JSON.stringify(c.red), `NEGATIVE CONTROL (${c.tag}): the patched copy fails exactly ${c.red.join(' · ')}`, JSON.stringify({ found, bad }));
+    }
+    for (const r of copiesCensus(MT.files, MT.dir, REPO, { minCopies: TCTL.length, label: '⑦ transitions ' })) ok(r.pass, r.name, r.detail);
+  }
+  // the client registry: keyboardYielded + the change signal
+  {
+    let oY = true, yY = false; const seen = [];
+    const off = KO.onKeyboardChange(() => seen.push(KO.keyboardYielded()));
+    const offBad = KO.onKeyboardChange(() => { throw new Error('a broken subscriber'); });
+    KO.claimKeyboard({ id: 'Y', owns: () => oY, yielded: () => yY });
+    KO.keyboardChanged();                       // the view owns ⇒ not yielded
+    oY = false; yY = true; KO.keyboardChanged(); // the user pressed the composer ⇒ yielded (nobody owns)
+    KO.claimKeyboard({ id: 'Z', owns: () => true }); KO.keyboardChanged(); // another view owns ⇒ nobody reads it as yielded
+    KO.releaseKeyboard('Z'); off(); offBad(); KO.keyboardChanged();       // unsubscribed ⇒ no further call
+    const stillYielded = KO.keyboardYielded();
+    KO.releaseKeyboard('Y');
+    ok(seen.join() === 'false,true,false' && stillYielded === true && KO.keyboardYielded() === false && KO.keyboardOwned() === false,
+      'keyboard-owner.js: keyboardYielded() = nobody owns AND a driving view yielded; onKeyboardChange / keyboardChanged re-read (a throwing subscriber never stops the rest; an unsubscribed one is never called)', JSON.stringify({ seen, stillYielded }));
+  }
+  // PATCHED-COPY CONTROLS (scripts/mutant-copy.mjs): each rule removed turns ITS row red
+  {
+    const MK = mutantCopies('browser-takeover-tkbd', REPO);
+    const TS = fs.readFileSync(path.join(REPO, 'src/browser-takeover.js'), 'utf8');
+    const CTL = [
+      { tag: 'prefix-no-yield', from: "  return byUserPress ? 'yield' : 'reclaim';", to: "  return 'reclaim';", fv: ['the user pressed the composer (userW)'], up: [] },
+      { tag: 'guard-gone', from: "  return byUserPress ? 'yield' : 'reclaim';", to: "  return 'yield';", fv: ['a script focused the composer while a password is typed (lane J r2)', 'no press fact at all (fails closed)', 'driving and mine: a script\'s focus is still reclaimed'], up: [] },
+      { tag: 'no-window', from: "  if (!(Number.isFinite(age) && age >= 0 && age <= windowMs)) return { byUserPress: false, why: 'stale press' };\n", to: '', fv: [], up: ['one ms past the window', 'a focus BEFORE the press', 'an unreadable press time'] },
+      { tag: 'no-trust', from: "  if (press.trusted !== true) return { byUserPress: false, why: 'synthetic press' };\n", to: '', fv: [], up: ['a script-dispatched pointerdown', 'trust not proven'] },
+      { tag: 'no-same-input', from: "  if (!sameInput) return { byUserPress: false, why: 'pressed elsewhere' };\n", to: '', fv: [], up: ['a press on the picture / a taskbar button, then a script focus'] },
+      { tag: 'h1-prefix', from: "  if (!owns) return byUserPress && mine ? 'yield' : 'allow';", to: "  if (!owns) return 'allow';", fv: ['mine but not driving: the user pressed the composer (H1)'], up: [] }, // verify r2 (H1)
+    ];
+    for (const c of CTL) {
+      const found = TS.split(c.from).length === 2;
+      const Tm = found ? MK.load('src/browser-takeover.js', TS.replace(c.from, c.to), c.tag) : null;
+      const fb = Tm ? fvBad(Tm) : null, ub = Tm ? upBad(Tm) : null;
+      ok(found && JSON.stringify(fb) === JSON.stringify(c.fv) && JSON.stringify(ub) === JSON.stringify(c.up), `NEGATIVE CONTROL (${c.tag}): the patched copy fails exactly its rows — ${[...c.fv, ...c.up].join(' · ')}`, JSON.stringify({ found, fb, ub }));
+    }
+    for (const r of copiesCensus(MK.files, MK.dir, REPO, { minCopies: CTL.length, label: '⑦ takeover-keyboard ' })) ok(r.pass, r.name, r.detail);
+  }
+  // verify r1 (K4): a yield RELEASES in the page what is still held there — measured in chrome on cf24cf01: Shift held across
+  // a press on the composer, the page logged the Shift keydown and never its keyup (a held "x" the same)
+  {
+    const HR_ROWS = [
+      [[], [], 'nothing held — nothing sent'],
+      [[{ key: 'Shift', code: 'ShiftLeft', keyCode: 16 }], [['Shift', 'ShiftLeft', 16, 0]], 'Shift held across the press (the chrome finding)'],
+      [[{ key: 'Shift', code: 'ShiftLeft', keyCode: 16 }, { key: 'X', code: 'KeyX', keyCode: 88 }], [['X', 'KeyX', 88, 8], ['Shift', 'ShiftLeft', 16, 0]], 'Shift+X held: the X first, still carrying Shift, then Shift'],
+      [[{ key: 'Control', code: 'ControlLeft', keyCode: 17 }, { key: 'Alt', code: 'AltLeft', keyCode: 18 }, { key: 'k', code: 'KeyK', keyCode: 75 }], [['k', 'KeyK', 75, 3], ['Alt', 'AltLeft', 18, 2], ['Control', 'ControlLeft', 17, 0]], 'Ctrl+Alt+k: the last pressed first, each with what is still held'],
+      [[{ key: 'x', code: 'KeyX', keyCode: 88 }], [['x', 'KeyX', 88, 0]], 'a held letter (the page would keep it down)'],
+      [[null, { key: '' }, { code: 'KeyQ' }, { key: 'Meta', code: 'MetaLeft' }], [['Meta', 'MetaLeft', 0, 0]], 'unreadable rows are skipped, a missing keyCode is 0'],
+    ];
+    const hrBad = (TT) => HR_ROWS.filter(([held, want]) => { let got; try { got = TT.heldReleases(held).map((r) => [r.key, r.code, r.keyCode, r.modifiers, r.kind]); } catch { return true; } return JSON.stringify(got) !== JSON.stringify(want.map((w) => [...w, 'up'])); }).map((r) => r[2]);
+    ok(hrBad(T).length === 0 && JSON.stringify(T.heldReleases(undefined)) === '[]', `heldReleases: a yield releases in the page every key still held there, the last pressed first, each carrying the modifiers still held (${HR_ROWS.length} rows)`, hrBad(T).join(' | '));
+    const MH = mutantCopies('browser-takeover-held', REPO);
+    const TS2 = fs.readFileSync(path.join(REPO, 'src/browser-takeover.js'), 'utf8');
+    const HCTL = [
+      { tag: 'held-dropped', from: "  for (let i = list.length - 1; i >= 0; i--) {", to: "  for (let i = list.length - 1; i >= list.length; i--) {", red: HR_ROWS.filter(([h, w]) => w.length).map((r) => r[2]) },
+      { tag: 'held-no-mods', from: "    for (let j = 0; j < i; j++) modifiers |= MODIFIER_KEY_BITS[list[j].key] || 0;\n", to: '', red: ['Shift+X held: the X first, still carrying Shift, then Shift', 'Ctrl+Alt+k: the last pressed first, each with what is still held'] },
+    ];
+    for (const c of HCTL) {
+      const found = TS2.split(c.from).length === 2;
+      const Tm = found ? MH.load('src/browser-takeover.js', TS2.replace(c.from, c.to), c.tag) : null;
+      const bad = Tm ? hrBad(Tm) : null;
+      ok(found && JSON.stringify(bad) === JSON.stringify(c.red), `NEGATIVE CONTROL (${c.tag}): the patched copy fails exactly ${c.red.length} row(s)`, JSON.stringify({ found, bad }));
+    }
+    for (const r of copiesCensus(MH.files, MH.dir, REPO, { minCopies: HCTL.length, label: '⑦ held releases ' })) ok(r.pass, r.name, r.detail);
+  }
   // ── the focus guards sit where every attach / reconnect / window focus converges ──
   const src = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
   const focusBody = (file, head) => { const s = src(file); const i = s.indexOf(head); return i < 0 ? '' : s.slice(i, i + 400); };
@@ -946,7 +1206,10 @@ console.log('— ⑦ lane J r2: keyboard ownership, the key routes, text records
     // lane S1 verify r3: the ws case is ONE lookup into the ask's transition table (helper-asks.answerFrame), which alone calls THE one
     // permission answer — and strips a CLIENT frame's denyMessage (only the server-side sweep passes `serverDeny`)
     ok(/require\('\.\/server\/helper-asks'\)\.answerFrame\(data, \{ activeSessions, adapterRegistry, feedLive \}\)/.test(caseBody) && !/formatPermissionResponse|answerPermission\(/.test(caseBody) && !/denyMessage/.test(caseBody.replace(/^\s*\/\/.*$/gm, ''))
-      && /answerPermission\(target\.session, serverDeny \? \{ \.\.\.data \} : \{ \.\.\.data, denyMessage: undefined \}, \{ adapterRegistry, feedLive \}\)/.test(src('src/server/helper-asks.js')),
+      // verify r6 F6: a client frame now passes through answerFromRecord (the server's own record decides the input) — still
+      // with its denyMessage stripped; only the server-side sweep (`serverDeny`) keeps the frame it built
+      && /const shaped = serverDeny \? \{ ok: true, data: \{ \.\.\.data \} \} : answerFromRecord\(recordOf\(target\.session, data\.requestId\), \{ \.\.\.data, denyMessage: undefined \}\);/.test(src('src/server/helper-asks.js'))
+      && /answerPermission\(target\.session, shaped\.data, \{ adapterRegistry, feedLive \}\)/.test(src('src/server/helper-asks.js')),
       'the ws permission-response case answers through THE one permission answer (src/server/permission-answer.js, behind the ask table\'s lookup), and a CLIENT cannot name the deny\'s words (denyMessage is the server\'s: no client paints a card stale)');
     const rUser = JSON.parse(reg.get('claude').formatPermissionResponse({ requestId: 'r1', approved: false, denyMessage: undefined }));
     ok(rUser.response.response.message === 'User denied this action' && T.staleFromDenyMessage(rUser.response.response.message) === null, '…so a user\'s own Deny is the CLI\'s familiar sentence, never read back as stale');
@@ -1147,8 +1410,17 @@ console.log('— ⑨ verify r6: every conversation leased on the taken browser i
   const ps = k9.passControl({ browserKey: KEY_S1, profileId: shared.id, from: 911, to: 912, sessionId: 'sess-91' });
   ok(ps.ok && [KEY_S2, KEY_S3, KEY_S4].every((k) => k9.inputStateFor(k, shared.id).takenBy.viewerId === 912), '⑨ a pass (fold-back) moves every sibling\'s holder with the primary\'s');
   // the handback from S1's view hands the sibling back too — each with ITS OWN reminder (S2's fill + click; never S1's scroll)
-  const hb1 = k9.handback({ browserKey: KEY_S1, profileId: shared.id, viewerId: 912, cause: 'explicit', url: 'https://x/one', sessionId: 'sess-91' });
+  // r6 A-F9 (money): the Hand back control's count = the billed turns this handback starts — S1 (the primary), S2 (its fill
+  // cut + its click refused), S4 (its open refused); S3 had nothing ⇒ the free notice. A press carrying another count hands
+  // NOTHING back (the channels expectWakes precedent)
+  const w9 = k9.handbackWakesFor(KEY_S1, shared.id);
+  const ev9n = ev9.length;
+  const stale9 = k9.handback({ browserKey: KEY_S1, profileId: shared.id, viewerId: 912, cause: 'explicit', url: 'https://x/one', sessionId: 'sess-91', expectWakes: 1 });
+  await sleep(40);
+  ok(w9 === 3 && !stale9.ok && stale9.code === 'wake_count_changed' && stale9.wakes === 3 && [KEY_S1, KEY_S2, KEY_S3, KEY_S4].every((k) => k9.inputStateFor(k, shared.id).input === 'user') && ev9.length === ev9n && delivered9.length === 0, 'r6 A-F9: handbackWakesFor says 3 (S1 + S2 + S4 — S3 had nothing); a Hand back whose control said 1 is refused wake_count_changed {wakes: 3} — nobody handed back, nothing delivered', JSON.stringify({ w9, stale9 }));
+  const hb1 = k9.handback({ browserKey: KEY_S1, profileId: shared.id, viewerId: 912, cause: 'explicit', url: 'https://x/one', sessionId: 'sess-91', expectWakes: w9 });
   await until(() => delivered9.length === 3, 2000);
+  ok(hb1.ok && delivered9.length === w9, 'r6 A-F9: the press carrying the count it showed hands back — and the announcer delivered EXACTLY that many billed turns (the count is the announcer\'s own rule)', JSON.stringify({ w9, delivered: delivered9.map((d) => d.cid) }));
   const d2 = delivered9.find((d) => d.cid === 'conv-92'), d1 = delivered9.find((d) => d.cid === 'conv-91');
   // verify r7 (spend): S3 had NOTHING interrupted or refused — its mirrored handback is the zero-spend notice, never a billed wake
   ok(hb1.ok && hb1.rerun.join() === 'scroll' && [KEY_S2, KEY_S3, KEY_S4].every((k) => k9.inputStateFor(k, shared.id).input === 'agent') && delivered9.length === 3 && !delivered9.some((d) => d.cid === 'conv-93') && notices9.some((x) => x.id === 'sess-93' && x.n.kind === 'browser-handback'), '⑨ the handback from S1\'s view hands every sibling back with it — four conversations, THREE delivered (S1 the primary, S2 with its cut fill, S4 with its refused open — each through the one ladder site); S3, with nothing of its own to re-run, gets the zero-spend notice (verify r7)', JSON.stringify({ delivered: delivered9.map((d) => d.cid), notices: notices9.filter((x) => x.n.kind === 'browser-handback').map((x) => x.id) }));
@@ -1221,6 +1493,16 @@ console.log('— ⑨ verify r6: every conversation leased on the taken browser i
     v1.send({ type: 'input_mouse', eventType: 'mousePressed', x: 11, y: 11, button: 'left', clickCount: 1 }); v2.send({ type: 'input_mouse', eventType: 'mousePressed', x: 22, y: 22, button: 'left', clickCount: 1 });
     await until(() => up9.got.length >= 1, 1500); await sleep(100);
     ok(up9.got.length === 1 && up9.got[0].x === 22, '⑨ r7 bridge: exactly ONE view\'s input reaches the browser (the holder\'s)', JSON.stringify(up9.got.map((g) => g.x)));
+    // r6 A-F9 on the WIRED path: the driving view is told the count (the mode record, then `handback-wakes` as the siblings
+    // join); its Hand back carrying another count is refused by name with the count now — the browser stays driven
+    await sleep(60);
+    const w92 = k9.handbackWakesFor(KEY_S2, shared.id);
+    const lastCount = v2.msgs.filter((m) => m.type === 'mode' || m.type === 'handback-wakes').at(-1);
+    ok(lastCount && lastCount.wakes === w92 && w92 >= 1 && Number.isInteger(v2.last('mode').wakes), 'r6 A-F9 bridge: the driving view\'s last count (mode / handback-wakes) is the keeper\'s count for a Hand back from it', JSON.stringify({ w92, lastCount }));
+    v2.send({ type: 'handback', expectWakes: w92 + 5 });
+    await v2.until((v) => v.by('refused').some((m) => m.code === 'wake_count_changed'));
+    const rw = v2.by('refused').find((m) => m.code === 'wake_count_changed');
+    ok(rw && rw.wakes === w92 && k9.inputStateFor(KEY_S2, shared.id).input === 'user', 'r6 A-F9 bridge: a Hand back carrying another count is refused wake_count_changed {wakes} — the browser stays driven', JSON.stringify(rw));
     v2.ws.close();
     await until(() => k9.inputStateFor(KEY_S1, shared.id).input === 'agent' && k9.inputStateFor(KEY_S2, shared.id).input === 'agent', 3000);
     ok(k9.inputStateFor(KEY_S1, shared.id).input === 'agent' && k9.inputStateFor(KEY_S2, shared.id).input === 'agent', '⑨ r7 bridge: the holder\'s window closing (viewer-left) hands the browser back — S1 with S2');
@@ -1289,6 +1571,92 @@ console.log('— ⑨ verify r6: every conversation leased on the taken browser i
     w1.ws.close(); w2.ws.close(); await sleep(30); await upb.close(); kb.shutdown();
   }
   for (const r of copiesCensus(M9.files, M9.dir, REPO, { minCopies: 1, label: '⑨ ' })) ok(r.pass, r.name, r.detail);
+}
+
+// ═══ ⑩ r6 "what you approve is what runs" — NEGATIVE CONTROLS (scripts/mutant-copy.mjs): each fix reverted in a copy ⇒ red ═══
+console.log('— ⑩ r6 A-F8 / A-F9: the pre-fix rule in a patched copy makes each leg above go red');
+{
+  const M10 = mutantCopies('takeover-r6', REPO);
+  const tsrc = fs.readFileSync(path.join(REPO, 'src/browser-takeover.js'), 'utf8');
+  const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  const forge = { type: 'result', id: 'cmd2', action: 'click', success: false, error: 'Element not found: text=requires confirmation c_9f3a1b2c' };
+  // C1 the parser: the pre-fix error-string rungs restored
+  const parseType = "  if (!isObj(msg) || msg.type !== 'result') return null;\n";
+  const parseFlag = "  const flag = msg.confirmation_required === true || (d && d.confirmation_required === true) || msg.status === 'confirmation_required' || (d && d.status === 'confirmation_required');\n";
+  const parseId = "  if (!id || !CONFIRMATION_ID_RE.test(id)) return null; // an id the answer could never name is no card\n";
+  ok([parseType, parseFlag, parseId].every((l) => tsrc.split(l).length === 2), '⑩ C1 setup: the structured-only parse lines are each present once');
+  const T1 = M10.load('src/browser-takeover.js', tsrc.replace(parseType, '  if (!isObj(msg)) return null;\n')
+    .replace(parseFlag, "  const flag = msg.confirmation_required === true || (d && d.confirmation_required === true) || msg.status === 'confirmation_required' || (d && d.status === 'confirmation_required') || (typeof msg.error === 'string' && /confirmation[_ ]required|requires? (?:a )?confirmation/i.test(msg.error));\n")
+    .replace(parseId, "  let id2 = id; if (!id2 && typeof msg.error === 'string') { const mm = msg.error.match(/\\b(c_[0-9a-f]{4,})\\b/i); if (mm) id2 = mm[1]; } if (!id2) return null; return { id: id2, action: String(msg.action || 'action').slice(0, 40), category: null, target: null, at: num(now), expiresAt: num(now) + CONFIRM_TTL_MS, commandId: null };\n"), 'error-string');
+  const f1 = T1.confirmationFromUpstream(forge, 2000);
+  ok(f1 && f1.id === 'c_9f3a1b2c' && f1.action === 'click', '⑩ CONTROL C1 (the pre-fix error-string parse, in a copy): probe2\'s forged click parses as the pending UPLOAD\'s id with action "click" — the structured-only rule is what keeps it out', JSON.stringify(f1));
+  // C1b the card's slots: the pre-fix card rebuilt its rows from the live ids alone — a row that goes shifts the rest up
+  const slotLine = "  while (out.length && out[out.length - 1].gone) out.pop();\n";
+  ok(tsrc.split(slotLine).length === 2, '⑩ C1b setup: the trailing-tombstone rule is present once');
+  const T1b = M10.load('src/browser-takeover.js', tsrc.replace(slotLine, '  for (let i = out.length - 1; i >= 0; i--) if (out[i].gone) out.splice(i, 1);\n'), 'no-slots');
+  const sb = T1b.confirmSlots(T1b.confirmSlots([], ['a', 'b', 'c']), ['b', 'c']).map((x) => x.id).join();
+  ok(sb === 'b,c', '⑩ CONTROL C1b (rows rebuilt from the live ids, in a copy): the expired row\'s slot is taken by the next one (b moves up under the pointer) — keeping the slot is the rule', sb);
+  // a keeper factory for the copies (the ephemeral browser: no attach needed — its answer runs under the spawn pairs)
+  const mkK = (Kimpl, name, extra = {}) => Kimpl.create({ dataDir: path.join(ROOT, name), homeDir: HOME, env: () => rtEnv, broadcast: () => { }, serverSetting: (k) => settings[k], serverNotice: null, getTelemetry: () => null, liveKeys: () => new Set([KEY_A, KEY_B, 'bk-000000a1', 'bk-000000a2']), runtime: F.createBrowserRuntime({ env: rtEnv }), facts: F.createBrowserFacts({ env: rtEnv }), log: { log() { }, warn() { }, error() { } }, now, install: false, ...extra });
+  const upl = T.confirmationFromUpstream({ type: 'result', id: 'cmd1', action: 'upload', data: { confirmation_required: true, confirmation_id: 'c_ctl01', category: 'upload' }, timestamp: clock }, clock, { command: { type: 'command', id: 'cmd1', params: { selector: '#f', files: ['/x/secret'] } } });
+  const PAIRS = ['AGENT_BROWSER_SESSION=vs-ctl'];
+  const firstWriteLeg = async (Kimpl, name) => {
+    const kx = mkK(Kimpl, name);
+    kx.notePending({ browserKey: KEY_B, profileId: null, sessionId: 'sess-2', confirmation: upl });
+    kx.notePending({ browserKey: KEY_B, profileId: null, sessionId: 'sess-2', confirmation: { ...upl, action: 'click', target: null } });
+    const out = kx.pendingFor(KEY_B, null).map((x) => x.action).join();
+    kx.shutdown(); return out;
+  };
+  const gateLeg = async (Kimpl, name) => {
+    const kx = mkK(Kimpl, name);
+    kx.notePending({ browserKey: KEY_B, profileId: null, sessionId: 'sess-2', confirmation: upl });
+    const n0 = confirms().length;
+    const unknown = await kx.answerConfirmation({ browserKey: KEY_B, profileId: null, id: 'c_nothere', decision: 'confirm', envPairs: PAIRS });
+    const forged = await kx.answerConfirmation({ browserKey: KEY_B, profileId: null, id: upl.id, decision: 'confirm', shown: T.confirmationDigest({ ...upl, action: 'click', target: null }), envPairs: PAIRS });
+    const spawned = confirms().slice(n0).map((c) => c.verb + ' ' + c.id);
+    kx.shutdown(); return { unknown: unknown.ok || unknown.code, forged: forged.ok || forged.code, spawned };
+  };
+  // the REAL keeper through the same legs (the legs are the controls' twins)
+  const realFW = await firstWriteLeg(K, 'data10fw');
+  const realGate = await gateLeg(K, 'data10g');
+  ok(realFW === 'upload' && realGate.unknown === 'no_confirmation' && realGate.forged === 'confirmation_changed' && realGate.spawned.length === 0, '⑩ the REAL keeper over the control legs: the upload stays the card, an unknown id and a forged-card Confirm spawn nothing', JSON.stringify({ realFW, realGate }));
+  // C2 first write wins reverted: the pre-fix notePending (the second record overwrites, silently)
+  const nvLine = "    const nv = T.pendingNoteVerdict(held, confirmation);\n";
+  ok(ksrc.split(nvLine).length === 2, '⑩ C2 setup: notePending asks pendingNoteVerdict once');
+  const K2 = M10.load('src/server/browser-keeper.js', ksrc.replace(nvLine, "    const nv = { kind: 'new' }; // MUTANT: the pre-fix overwrite\n"), 'overwrite');
+  const mutFW = await firstWriteLeg(K2, 'data10fwm');
+  ok(mutFW === 'click', '⑩ CONTROL C2 (the pre-fix overwrite, in a copy): the forged record REPLACES the upload\'s card with "click" — first write wins is the rule', mutFW);
+  // C3 the answer's gate removed: an id pending nowhere and a Confirm pressed on another card both reach upstream
+  const gateLine = "    if (!gate.ok) { log.log?.(`[browser] ${browserKey}${profileId ? ' on ' + profileId : ''}: ${a.decision} ${a.id} refused before upstream — ${gate.code}`); return gate; }\n";
+  ok(ksrc.split(gateLine).length === 2, '⑩ C3 setup: answerConfirmation refuses on the gate once');
+  const K3 = M10.load('src/server/browser-keeper.js', ksrc.replace(gateLine, ''), 'no-gate');
+  const mutGate = await gateLeg(K3, 'data10gm');
+  ok(mutGate.spawned.includes('confirm c_nothere') && mutGate.spawned.includes('confirm ' + upl.id), '⑩ CONTROL C3 (the answer\'s gate removed, in a copy): `confirm c_nothere` and the forged-card `confirm ' + upl.id + '` both reach upstream — the gate is the rule', JSON.stringify(mutGate));
+  // C4 the Hand back echo removed: a press whose control said 1 hands back (and wakes 2)
+  const echoLine = "    if (d.cause === 'explicit' && mirror) { const echo = T.handbackWakeEcho({ wakes: handbackWakesFor(browserKey, profileId), expect: expectWakes }); if (!echo.ok) { log.log?.(`[browser] ${browserKey}${profileId ? ' on ' + profileId : ''}: handback refused (${echo.code}: ${echo.wakes} wake(s), the control said ${expectWakes})`); return echo; } }\n";
+  ok(ksrc.split(echoLine).length === 2, '⑩ C4 setup: the explicit handback checks the echo once');
+  const echoLeg = async (Kimpl, name) => {
+    const kx = mkK(Kimpl, name);
+    const sx = kx.createProfile({ label: 'Shared-' + name }, { owner: { kind: 'instance', id: null } });
+    await kx.attach({ profileId: sx.id, browserKey: 'bk-000000a1', sessionId: 'sess-a1' }); await kx.attach({ profileId: sx.id, browserKey: 'bk-000000a2', sessionId: 'sess-a2' });
+    kx.takeover({ browserKey: 'bk-000000a1', profileId: sx.id, viewerId: 1001, sessionId: 'sess-a1' });
+    kx.resolveFor({ browserKey: 'bk-000000a2', verb: 'click' }); // the sibling's agent is refused while the user drives ⇒ it has something to re-run
+    const wakes = kx.handbackWakesFor('bk-000000a1', sx.id);
+    const r = kx.handback({ browserKey: 'bk-000000a1', profileId: sx.id, viewerId: 1001, cause: 'explicit', sessionId: 'sess-a1', expectWakes: 1 });
+    const out = { wakes, ok: r.ok, code: r.code || null, input: kx.inputStateFor('bk-000000a1', sx.id).input };
+    await kx.stop(sx.id).catch(() => { }); kx.shutdown(); return out;
+  };
+  const realEcho = await echoLeg(K, 'data10e');
+  ok(realEcho.wakes === 2 && !realEcho.ok && realEcho.code === 'wake_count_changed' && realEcho.input === 'user', '⑩ the REAL keeper: a sibling with a refused click makes the count 2; a press that said 1 is refused, still driven', JSON.stringify(realEcho));
+  const K4 = M10.load('src/server/browser-keeper.js', ksrc.replace(echoLine, ''), 'no-echo');
+  const mutEcho = await echoLeg(K4, 'data10em');
+  ok(mutEcho.ok === true && mutEcho.input === 'agent', '⑩ CONTROL C4 (the echo removed, in a copy): the press whose control said 1 hands back — 2 billed turns under a button that said 1; the echo is the rule', JSON.stringify(mutEcho));
+  // WIRING PINS: the bridge pairs the command with its result and hands the keeper's view (never the raw parse) to the viewers;
+  // the live view sends the digest of the row it drew and the count its button said
+  const bs = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8'), lw = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
+  ok(/T\.confirmationFromUpstream\(msg, now\(\), \{ command: /.test(bs) && /if \(!unsubConfirm && view && !view\.conflict\) broadcast\(relay, view\)/.test(bs) && /else if \(ev\.kind === 'conflict'\) broadcast\(r, \{ type: 'confirmation-conflict'/.test(bs) && /shown: v\.shown/.test(bs) && /handbackFor\(relay, viewer\.id, 'explicit', v\.expectWakes\)/.test(bs), 'WIRING PIN (r6): the bridge pairs command → result, broadcasts only the keeper\'s first-written view, says a conflict as its own record, passes the digest and the count through');
+  ok(/send\(\{ type: 'confirm', id, decision, shown: confirmationDigest\(c\) \}\)/.test(lw) && /st\.confirmSlots = confirmSlots\(/.test(lw) && !/confirms\.innerHTML = ''/.test(lw) && /expectWakes: st\.wakes/.test(lw) && /t\('Hand back \(wakes \{n\}\)'/.test(lw), 'WIRING PIN (r6): the live view confirms with the digest of the row it drew, keeps KEYED slots (no whole-card rebuild), and its Hand back carries and says the count');
+  for (const r of copiesCensus(M10.files, M10.dir, REPO, { minCopies: 4, label: '⑩ ' })) ok(r.pass, r.name, r.detail);
 }
 
 keeper.shutdown();

@@ -8,10 +8,14 @@
  * `403` with the verdict's own sentence as the body, so a blocked fetch is a
  * named refusal in the browser's network log rather than a hang.
  *
- * Who uses it: the cloakserve container (src/browser-profiles.cloakservePlan
- * points HTTPS_PROXY/HTTP_PROXY at it from an INTERNAL docker network — the
- * container has no other route out of the host), and any profile whose
- * `proxy` field names it. Loopback and link-local targets are refused by the
+ * Who uses it: a local CloakBrowser browser (lane-cloak: the keeper starts ONE
+ * of these for cloak, its allowlist = the §7.2.1 record's run hosts + the sites
+ * this deployment names, and the browser gets `--proxy-server` pointing here
+ * with loopback NOT bypassed; the pinned DOWNLOAD runs through another one whose
+ * allowlist is the record's download hosts), the cloakserve container
+ * (src/browser-profiles.cloakservePlan points HTTPS_PROXY/HTTP_PROXY at it from
+ * an INTERNAL docker network — the container has no other route out of the
+ * host), and any profile whose `proxy` field names it. Loopback and link-local targets are refused by the
  * verdict itself — the proxy is never a way back into the hub's services.
  *
  * Not a general proxy: no auth (loopback only, like the stream port, §6.1),
@@ -35,10 +39,16 @@ function create({ allowlist = () => '', allow = null, log = console, connectTime
   // The verdict is always taken on the name the client asked for.
   const upstreamHost = (h) => { try { return String(resolve(h) || h); } catch { return h; } };
   const stats = { allowed: 0, refused: 0, errors: 0 };
+  // lane-cloak: the last refusals by NAME (host + the verdict's sentence) — a page that stays blank behind the
+  // allowlist is explained by what was refused, never guessed; bounded, no bodies, no paths, no secrets
+  const RECENT_MAX = 20;
+  const recentRefusals = [];
+  const noteRefused = (host, why) => { recentRefusals.push({ host: String(host || '').slice(0, 253), why: String(why || '').slice(0, 300), at: Date.now() }); if (recentRefusals.length > RECENT_MAX) recentRefusals.shift(); };
   let server = null;
 
   function refuse(res, v, host) {
     stats.refused++;
+    noteRefused(host, v.why);
     const body = `egress refused: ${v.why || 'not allowed'}\n`;
     try { res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Length': Buffer.byteLength(body), Connection: 'close' }); res.end(body); } catch { /* gone */ }
     log.log?.(`[egress] refused ${host}: ${v.why}`);
@@ -70,6 +80,7 @@ function create({ allowlist = () => '', allow = null, log = console, connectTime
     const v = host ? verdict(host) : { allow: false, why: 'malformed CONNECT target' };
     if (!v.allow || !port) {
       stats.refused++;
+      noteRefused(host || req.url, v.why || 'no port');
       const body = `egress refused: ${v.why}\n`;
       try { sock.write(`HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`); } catch { /* gone */ }
       try { sock.end(); } catch { /* gone */ }
@@ -104,7 +115,7 @@ function create({ allowlist = () => '', allow = null, log = console, connectTime
   function portOf() { return server ? server.address().port : null; }
   async function close() { if (!server) return; const s = server; server = null; await new Promise((r) => s.close(() => r())); }
 
-  return { listen, close, port: portOf, stats, verdict, url: () => (server ? `http://127.0.0.1:${server.address().port}` : null) };
+  return { listen, close, port: portOf, stats, verdict, recent: () => recentRefusals.map((r) => ({ ...r })), url: () => (server ? `http://127.0.0.1:${server.address().port}` : null) };
 }
 
 module.exports = { create, MAX_HEADER_BYTES };

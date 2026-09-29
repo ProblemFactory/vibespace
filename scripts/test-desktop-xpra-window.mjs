@@ -2288,7 +2288,9 @@ try {
     let devId = null;
     const devName = `vs-deskxpra-dev-${process.pid}`;
     try {
-      const pair = await p12.evalJs(`fetch('/api/device/dial-pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId: ${JSON.stringify(devName)} }) }).then((r) => r.json())`);
+      // the .197 integration (lane pairing, address choice): a pairing names the address the device DIALS — the route
+      // refuses a mint without one (`bad_base`, never a guess); this scratch device dials this server's loopback
+      const pair = await p12.evalJs(`fetch('/api/device/dial-pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId: ${JSON.stringify(devName)}, base: ${JSON.stringify(`http://127.0.0.1:${PORT}`)} }) }).then((r) => r.json())`);
       check('§13: the server mints a pairing (dial token + host token) for the scratch device', !!(pair && pair.dialToken && pair.hostToken && pair.deviceId), pair);
       fs.writeFileSync(path.join(devRoot, 'state', 'token'), pair.hostToken, { mode: 0o600 });
       const dev = spawn(process.execPath, [path.join(wt, 'data', 'bin', 'vibespace-agentd.js'), '--dial', `ws://127.0.0.1:${PORT}/api/device-dial?device=${pair.deviceId}`, '--dial-token', pair.dialToken], { cwd: devHome, env: { ...process.env, HOME: devHome, VIBESPACE_AGENTD_ROOT: devRoot }, stdio: 'ignore', detached: true });
@@ -2567,17 +2569,28 @@ try {
       const d1 = await P.evalJs(S15(o.id));
       const dx = d1.win.x - d0.win.x, dy = d1.win.y - d0.win.y;
       check(`§16 (3): a drag of Chrome's OWN tab strip by 120×64 moves the VibeSpace window by ${dx.toFixed(1)}/${dy.toFixed(1)} (±2 — our own press, not Chrome's root point: +10,+5 off, measured) through initiate-moveresize 8 (${JSON.stringify(d1.mr.slice(-1))}); X's main stays at 0,0`, Math.abs(dx - 120) <= 2 && Math.abs(dy - 64) <= 2 && d1.mr.some((m) => m[0] === 8 && m[1] === 'move' && m[2]) && d1.main.x === 0 && d1.main.y === 0, { dx, dy, mr: d1.mr });
-      // (4) Chrome's OWN caption buttons (Chrome 153's layout, pane-relative from the right edge: ✕ −23, □ −63, ─ −102, y 20)
+      // (4) Chrome's OWN caption buttons — a MEASURED fact per Chrome major (the .197 integration: the runner box moved to
+      // Chrome 154 on 2026-09-28 and ─ at 153's −102 missed): pane-relative centres from the right edge, y 20. A major
+      // with no measured row is a RED check naming the measurement to take — never a click at a guessed place.
+      //   153: ✕ −23, □ −63, ─ −102 (40 px apart — the lane-D measurement)
+      //   154: ✕ −20, □ −52, ─ −84 (32 px apart — measured 2026-09-29 on 154.0.8037.57: google-chrome under Xvfb, a 900×620
+      //        window, custom_chrome_frame seeded like the keeper's; the ink columns' centres −20.5 / −52.5 / −84.5)
+      const CAPTIONS = { 153: { close: 23, max: 63, min: 102 }, 154: { close: 20, max: 52, min: 84 } };
+      let chromeMajor = null;
+      try { chromeMajor = Number((/(\d+)\./.exec(execFileSync(String(CHROME15.path || CHROME15.exec).split(/\s+/)[0], ['--version'], { encoding: 'utf8', timeout: 10000 })) || [])[1]) || null; } catch { chromeMajor = null; }
+      const cap = CAPTIONS[chromeMajor] || null;
+      check(`§16 (4): Chrome ${chromeMajor}'s caption layout is a MEASURED row (${cap ? `✕ −${cap.close}, □ −${cap.max}, ─ −${cap.min}` : 'none — measure the ─ □ ✕ centres of this Chrome and add its row'})`, !!cap, { chromeMajor, exec: CHROME15.exec, path: CHROME15.path });
+      if (!cap) throw new Error(`no measured caption layout for Chrome ${chromeMajor}`);
       const clickPane = async (fromRight, y) => { const s = await P.evalJs(S15(o.id)); await trustedClickAt(P, s.pane.x + s.pane.w - fromRight, s.pane.y + y); };
-      await clickPane(63, 20);
+      await clickPane(cap.max, 20);
       const mx = await until(async () => { const s = await P.evalJs(S15(o.id)); return s && s.max ? s : null; }, 4000, 150);
       check(`§16 (4): Chrome's own □ ⇒ window-metadata {maximized:true} ⇒ OUR window maximized (${JSON.stringify(mx && mx.st)})`, !!mx && mx.st.includes('maximize'), mx && mx.st);
       await sleep(800);
-      await clickPane(63, 16);
+      await clickPane(cap.max, 16);
       const rs = await until(async () => { const s = await P.evalJs(S15(o.id)); return s && !s.max ? s : null; }, 4000, 150);
       check(`§16 (4): its restore ⇒ ours restored (${JSON.stringify(rs && rs.st)})`, !!rs && rs.st.includes('restore'), rs && rs.st);
       await sleep(800);
-      await clickPane(102, 20);
+      await clickPane(cap.min, 20);
       const mn = await until(async () => { const s = await P.evalJs(S15(o.id)); return s && s.min ? s : null; }, 4000, 150);
       check(`§16 (4): its ─ ⇒ {iconic:true} ⇒ OUR window minimized`, !!mn && mn.st.includes('minimize'), mn && mn.st);
       await P.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(o.id)}); app.wm.restore(w.id); return true; })()`);
@@ -2585,7 +2598,7 @@ try {
       check('§16 (4): restoring OUR window tells the display (Chrome un-iconified) and the picture is back', !!un && un.status === 'Connected', un && { main: un.main, status: un.status });
       await sleep(800);
       const wmId = (await P.evalJs(S15(o.id))).wmId;
-      await clickPane(23, 20);
+      await clickPane(cap.close, 20);
       const gone = await until(() => P.evalJs(`!app.wm.windows.has(${JSON.stringify(wmId)})`), 15000, 250);
       const endR = await (await fetch(`${O15}/api/desktop/apps/${o.id}`)).json();
       check(`§16 (4): Chrome's own ✕ ends Chrome (${endR.state}, code ${endR.exitCode}) and OUR window closes itself (A2)`, !!gone && endR.state === 'exited', { state: endR.state, code: endR.exitCode, windowsAtExit: endR.windowsAtExit });

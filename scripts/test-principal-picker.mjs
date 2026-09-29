@@ -126,6 +126,7 @@ console.log('② the census: every principal pick is the picker; no <select> of 
     'src/lib/channel-filter-editor.js': /principalPicker\(\{/,
     'src/lib/channel-group-dialogs.js': /principalPicker\(\{/,
     'src/lib/window-share.js': /principalPicker\(\{/,
+    'src/lib/exit-access-dialog.js': /principalPicker\(\{ items, app, multi: true/, // lane-pairing ⑥: "Who can use <machine>?" — two lists, each the ONE picker (multi)
   };
   for (const [f, re] of Object.entries(SITES)) ok(re.test(read(f)) && /from '\.\/principal-picker\.js'/.test(read(f)), `${f} picks its principals with the ONE picker`);
   const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
@@ -152,6 +153,10 @@ console.log('② the census: every principal pick is the picker; no <select> of 
   try { pre = execFileSync('git', ['show', 'HEAD~1:src/lib/channel-reach-editor.js'], { cwd: REPO, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { pre = null; }
   const planted = "const whoSel = el('select', 'chan-opt-input');\nfor (const p of roster) { const op = el('option', '', p.name); whoSel.appendChild(op); }\n";
   ok(judge(planted).length === 1, 'CONTROL: a planted `<select>` filled from `roster` IS flagged by the same judge');
+  // lane-pairing ⑥: a <select> planted into the exit dialog (its rows are the picker's shape) is red
+  const exitSrc = read('src/lib/exit-access-dialog.js');
+  const plantedExit = exitSrc.replace("const pickerWrap = el('div', 'exit-access-picker');", "const pickerWrap = el('div', 'exit-access-picker');\n      const whoSel = el('select', 'exit-who');\n      for (const r of roster()) { const op = el('option', '', r.name); whoSel.appendChild(op); }");
+  ok(plantedExit !== exitSrc && judge(plantedExit).length === 1 && judge(exitSrc).length === 0, 'CONTROL: a `<select>` planted into exit-access-dialog.js (filled from its roster) is flagged; the real dialog is clean');
   if (pre && /whoSel = el\('select'/.test(pre)) ok(judge(pre).length >= 1, 'CONTROL: the pre-picker reach editor (git HEAD~1) is flagged — the census has teeth on the real shape');
   else console.log('  … (the pre-picker reach editor is not reachable at HEAD~1 here — the planted control stands alone)');
 }

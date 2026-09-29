@@ -50,22 +50,69 @@ The machine **dials out** to your VibeSpace instance over a websocket, so no
 inbound access is needed.
 
 1. In VibeSpace: **Remote tab → "Pair a device (no ssh — it dials out)"** —
-   name the device and you get the exact one-line install command (copyable).
-   (Equivalent API: `POST /api/agentd/dial-pair {deviceId, serverUrl}`.)
+   name the device, **pick the address it will dial** and press **Create
+   pairing**; you get the exact one-line install command (copyable).
+   The address list is everything this server can name for itself: the
+   address your browser is using now (first), the relay (when published), this
+   machine's Tailscale / LAN / public IPs, its hostname, IPv6 — each saying who
+   can reach it — and **Custom…** (checked as you type). Pick the one the
+   DEVICE's network can see; both URLs in the command use it.
+   (Equivalent API: `GET /api/device/dial-addresses`, then
+   `POST /api/device/dial-pair {deviceId, base}` — the ONLY call that mints a
+   token.)
 2. On the machine, just run the command from step 1 — **nothing to install
    first** (see *Node runtime* below: the installer brings its own Node when the
    machine has none). It has this shape:
    ```bash
-   curl -fsSL https://<your-vibespace-host>/agentd-install.sh | bash -s -- \
+   curl -fsSL https://<your-vibespace-host>/agentd-install.sh | \
+     VIBESPACE_DIAL_TOKEN=<token> \
+     VIBESPACE_HOST_TOKEN=<hostToken> \
+     bash -s -- \
      --bundle-url https://<your-vibespace-host>/agentd.js \
-     --dial     'wss://<your-vibespace-host>/api/agentd-dial?device=<id>' \
-     --dial-token <token> \
-     --host-token <hostToken>
+     --dial     'wss://<your-vibespace-host>/api/agentd-dial?device=<id>'
    ```
-   (`--host-token` matters: it's what the daemon verifies the SERVER's commands
-   against — without it the device can dial in but rejects everything.)
+   (The host token matters: it's what the daemon verifies the SERVER's commands
+   against — without it the device can dial in but rejects everything. The two
+   tokens travel in the installer's ENVIRONMENT, never on a command line another
+   user of the machine could read in its process list; the installer passes the
+   dial token only to the one step that needs it and the daemon never inherits
+   either. The older `--dial-token` / `--host-token` flags still work.)
    The daemon keeps a persistent outbound connection (auto-reconnect with
    backoff), so the machine stays reachable to VibeSpace even behind NAT.
+3. **The installer checks the address first.** Before it writes anything it
+   runs the daemon's own dial once (`VIBESPACE_DIAL_TOKEN=<t> vibespace-device.js
+   --dial-check <url>`) and stops with the reason — `dns` (this device cannot
+   resolve the host), `tls` (a `wss://` to a plain-http port, or an untrusted
+   certificate), nothing answering, not a VibeSpace dial endpoint, or refused
+   (the token is from an older command — generate a new one) — "✗ nothing was
+   installed". `--no-check` skips it.
+
+**The row says why.** The machine row, the Machines card and the pairing sheet
+all read one state: *Connected since …* (and how many attempts failed before),
+*Connected, but the device refuses this server's key* (it was installed with a
+different command), *Last dial: refused (token mismatch) at …*, *Offline since
+… — no dial attempt has reached this server since*, *Never connected — the
+command generated at … has not reached this server*. The device keeps its own
+record in `<root>/state/dial-status.json` + one log line per attempt naming the
+class; the Machines card's **Dial history…** shows it.
+
+**A new command only when you ask for one.** The row's pairing icon opens the
+pairing sheet: it shows the dial state first and changes NOTHING until you
+press **Generate a new command** — which then says the previous command stops
+working. (A device dialed in right now is updated in place.)
+
+**Long roots on macOS.** When `<root>/state/agentd.sock` would exceed the unix
+socket limit (104 bytes on macOS), the daemon listens on a short per-user path
+(`$XDG_RUNTIME_DIR/vibespace/`, the per-user `$TMPDIR/vibespace/`, or
+`/tmp/vs-dev-<uid>/`, owner-checked) and records it in `<root>/state/socket-path`.
+
+**Exit access.** A paired machine can lend its network or run a command for an
+agent only when you allow it: the row's exit icon → **Who can use it** — two
+lists (borrow its network / run commands on it), each Nobody / All my
+conversations / Only these (conversations and Task Groups), and *Ask me each
+time* for commands (Allow / Deny in For you, 60 s). Every run is audited
+(`data/exit-audit.jsonl`), shown as a card in the calling chat, and the row
+shows the last one.
 
 To stop it: kill the daemon under its INSTANCE ROOT — dial pairings install per instance at `~/.vibespace/agentd@<dialhost>/` (or `device@<dialhost>`), so match that path: `pgrep -f "[v]ibespace-agentd" | xargs -r kill` (never `pkill -f vibespace-agentd`, which matches your own ssh command line).
 State (including the login/host token and the node key) lives under

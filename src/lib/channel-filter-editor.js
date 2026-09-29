@@ -37,7 +37,7 @@ import { icon, el, btn } from './channel-chrome.js';
 import * as F from '../channel-filter.js';
 import * as chanCaps from '../channel-caps.js';
 // a3 i18n: route failures by CODE; a principal's kind and a Task Group's title in words.
-import { routeErrorText, principalKindText, groupTitle, principalText, accessAuthorityText, watcherHowText, grainSummaryText, clampNoteText, notifySentence, notifyAnswers, watcherOfAnswers } from './channel-words.js';
+import { routeErrorText, wakeWhyText, principalKindText, groupTitle, principalText, accessAuthorityText, watcherHowText, grainSummaryText, clampNoteText, notifySentence, notifyAnswers, watcherOfAnswers } from './channel-words.js';
 // the ONE principal picker (search + list, keyed, recent picks) — never a <select> of the whole roster
 import { principalPicker, rosterFromApp } from './principal-picker.js';
 
@@ -50,6 +50,11 @@ const RULE_LABELS = () => ({
   'has-attachment': t('has an attachment'),
   'not-contains': t('does not contain'),
   'time-window': t('arrives between (HH:MM–HH:MM)'),
+  // lane channel-threads (spec §5.4): the two PLACE rules — a reply to the user's / this agent's message, a thread it is in.
+  // Owner decision A (2026-09-28): a thread is a real TOPIC (a quote chain never is), and a QUOTE of my message counts
+  // under both — said on the row, so the rule reads as what it does
+  'reply-to-mine': t('replies to or quotes a message of mine'),
+  'in-thread-with-me': t('is in a thread I am in, or quotes a message of mine'),
 });
 
 
@@ -65,7 +70,7 @@ function numberInput(value, { min = 0, max = 1000, step = 1 } = {}) { const i = 
 function field(label, input) { const f = el('div', 'chan-af-field'); f.append(fieldLabel(label), input); return f; }
 function noteEl(text, warn = false) { return el('div', 'chan-flow-note' + (warn ? ' chan-warn' : ''), text); }
 /** A fresh rule of one kind (the shape the PURE validator expects). */
-function freshRule(kind) { return kind === 'time-window' ? { kind, from: '09:00', to: '18:00' } : kind === 'sender-in-group' ? { kind, members: [] } : { kind, value: '' }; }
+function freshRule(kind) { return kind === 'time-window' ? { kind, from: '09:00', to: '18:00' } : kind === 'sender-in-group' ? { kind, members: [] } : F.PLACE_RULE_KINDS.includes(kind) || kind === 'has-attachment' ? { kind } : { kind, value: '' }; }
 
 /** The per-lane latency sentence from the digest's structure. */
 export function wakeLatencyText(wl) {
@@ -501,7 +506,7 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
       case 'mention': bind(textInput(rule.value, t('name or id')), 'value'); break;
       case 'keyword': case 'not-contains': case 'subject': case 'from-address': bind(textInput(rule.value, t('text')), 'value'); break;
       case 'sender-in-group': bind(textInput(Array.isArray(rule.members) ? rule.members.join(', ') : (rule.value || ''), t('ids or names, comma-separated')), 'members', (v) => v.split(',').map((x) => x.trim()).filter(Boolean)); break;
-      case 'has-attachment': break;
+      case 'has-attachment': case 'reply-to-mine': case 'in-thread-with-me': break;
       case 'time-window': bind(textInput(rule.from || '09:00', 'HH:MM'), 'from'); bind(textInput(rule.to || '18:00', 'HH:MM'), 'to'); break;
       default: break;
     }
@@ -669,7 +674,7 @@ export async function showNotifyDialog(app, target) {
   if (principals.some((p) => p.kind === 'group')) body.appendChild(noteEl(t('A group wakes one of its live sessions in turn (round-robin).')));
   const lw = st.stats && st.stats.lastWake;
   if (lw) body.appendChild(noteEl(lw.ok
-    ? t('Last wake: {n} message(s) delivered via {lane} — {why}', { n: lw.n, lane: chanCaps.deliveryLaneText(lw.lane || 'message', { t }), why: lw.whys ? lw.whys.join(', ') : '' })
+    ? t('Last wake: {n} message(s) delivered via {lane} — {why}', { n: lw.n, lane: chanCaps.deliveryLaneText(lw.lane || 'message', { t }), why: lw.whys ? lw.whys.map((w) => wakeWhyText(w)).join(', ') : '' })
     : t('Last wake was held or stashed: {why}', { why: chanCaps.wakeRefusalText(lw.refused, { t }) || lw.why || '' }), !lw.ok));
   if (st.stats && st.stats.pending) body.appendChild(noteEl(t('{n} matched message(s) are waiting for the next window or turn', { n: st.stats.pending })));
   const list = el('div', 'chan-watch-list');

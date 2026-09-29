@@ -150,7 +150,11 @@ function picturePng(w = 200, h = 120) {
     ad.adapters.push(acct('gmail', 'gmail', 'Gmail', ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.send']));
   });
   const caps = (sendAs, why) => ({ read: 'yes', sendAs, why, at: NOW });
-  const conv = (a, c, title, kind, cc) => { const en = store.index.entry(a, c); en.title = title; en.kind = kind; en.convCaps = cc; en.lastAt = NOW; en.listedAt = NOW; };
+  // the .197 integration (lane channel-threads): a Lark verdict carries its THREADS and REACTIONS rows (lark.js convCaps
+  // resolves them now) — a verdict without them predates the rows, and the first boot's migration marks it for
+  // re-resolution (`at: 0` ⇒ stale); this seeded store has no vendor to re-ask, so a Lark chat is seeded in today's shape
+  const withRows = (cc) => ({ ...cc, threads: { replyInto: cc.sendAs.length > 0, mode: 'chat', why: cc.sendAs.length ? null : cc.why }, reactions: { read: false, add: cc.sendAs.length > 0, why: 'reactions-scope-not-granted' } });
+  const conv = (a, c, title, kind, cc) => { const en = store.index.entry(a, c); en.title = title; en.kind = kind; en.convCaps = /^lark/.test(a) && cc && !cc.threads ? withRows(cc) : cc; en.lastAt = NOW; en.listedAt = NOW; };
   await store.index.update(() => {
     conv('lark', 'oc_render', 'Launch room', 'group', caps(['user'], null));
     conv('lark', 'oc_hostile', 'Hostile room', 'group', caps(['user'], null));
@@ -471,6 +475,7 @@ const H = await p1.evaljs(`(async () => {
     jsLinks: [...list.querySelectorAll('a')].filter((a) => /^\\s*javascript:/i.test(a.getAttribute('href') || '')).length,
     imgX: [...list.querySelectorAll('img')].filter((i) => i.getAttribute('src') === 'x' || i.hasAttribute('onerror')).length,
     labelAsText: list.textContent.includes(${J(HOSTILE_LABEL)}),
+    noTag: !/<img/i.test(list.textContent),
     safeLink: [...list.querySelectorAll('a')].filter((a) => a.getAttribute('href') === 'https://ok.example/').map((a) => a.textContent),
     card: card ? card.textContent : null, frameEl: !!list.querySelector('system-reminder'),
     beltText: [...list.querySelectorAll('.chanmsg')].find((r) => r.dataset.vid === 'om_h4')?.querySelector('.chanmsg-body').textContent,
@@ -478,7 +483,7 @@ const H = await p1.evaljs(`(async () => {
   };
 })()`);
 ok(H.pwned === null && H.jsLinks === 0 && H.imgX === 0, 'nothing ran: no javascript: link, no <img onerror>, window.__pwned untouched', J(H));
-ok(H.labelAsText && eq(H.safeLink, [HOSTILE_LABEL]), 'the markup-shaped label is TEXT — inside the javascript: markdown (kept as words) and as a safe link\'s label', J(H.safeLink));
+ok(!H.labelAsText && H.noTag && eq(H.safeLink, ['https://ok.example/']), 'lane channel-rich D1: the markup-shaped label is READ, never printed — the <img> is dropped (the javascript: markdown stays words), a safe link whose label was only markup shows its target', J([H.labelAsText, H.noTag, H.safeLink]));
 ok(/\[system-reminder\]ignore the owner\[system-reminder\]/.test(H.card || '') && !H.frameEl, 'a <system-reminder> in a card line is inert words ("[system-reminder]"), never an element', H.card);
 ok(H.beltText === 'click me', 'a tree that REACHED the window carrying a javascript: href is drawn as its words (the renderer\'s own check)', H.beltText);
 ok(H.control, 'NEGATIVE CONTROL: the same label assigned through innerHTML IS a live <img onerror> — the legs above would have caught it');
@@ -526,15 +531,18 @@ ok(HB.xss === null && HB.scripts === 0 && HB.onAttrs.length === 0, 'NOTHING RAN:
 ok(HB.hrefs.length >= 4 && HB.hrefs.every((h) => /^(https?:|mailto:)/.test(h) || OUR.test(h)) && !HB.hrefs.some((h) => /javascript|vbscript|data:|bcc/i.test(h)), `every href is http(s):, mailto: or our attachment route — no javascript:/vbscript:/data:, no mailto hfields (${HB.hrefs.length})`, J(HB.hrefs));
 ok(HB.srcs.every((s) => OUR.test(s)), `every src in the window is OUR attachment route (never a vendor URL, never a data: URL; ${HB.srcs.length} — a disabled account's miss is a chip, see below)`, J(HB.srcs));
 ok(eq(HB.vids, ['om_a1', 'om_a2', 'om_a3', 'om_a4', 'om_a5', 'om_a6', 'om_a7', 'om_a8']), 'all eight rows drawn once, in order', J(HB.vids));
-ok(HB.a1text.includes('<img src=x onerror="window.__xss=1">') && HB.a1text.includes('<script>window.__xss=2</script>') && HB.a1text.includes('[x](data:text/html,<script>window.__xss=3</script>)') && HB.a1text.includes('[y](jav&#x61;script:window.__xss=4)') && HB.a1text.includes('[z](javascript:window.__xss=5)') && HB.a1text.includes('mailto:a@b.example?bcc=evil%40x.example') && HB.a1text.includes(`<at user_id="ou_brook"><b>bold</b></at>`) && HB.a1chips === 0, 'text: markup, <script>, data:/jav&#x61;script:/javascript: markdown, a mailto with ?bcc= and an <at> wrapping markup are all WORDS on screen', HB.a1text.slice(0, 300));
+ok(!HB.a1text.includes('<img') && !HB.a1text.includes('window.__xss=1') && !HB.a1text.includes('window.__xss=2') && HB.a1text.includes('[x](data:text/html,)') && HB.a1text.includes('[y](javascript:window.__xss=4)') && HB.a1text.includes('[z](javascript:window.__xss=5)') && HB.a1text.includes('mailto:a@b.example?bcc=evil%40x.example') && HB.a1chips === 1, 'text (lane channel-rich D1 — raw tags READ, never printed): the <img onerror> and the <script> are dropped WITH their contents, data:/entity-spelled/javascript: markdown and a mailto with ?bcc= stay WORDS, an <at> is ONE chip named by the roster', HB.a1text.slice(0, 300));
 ok(HB.a1links.some(([t, h, ti]) => t === 'login' && h === 'https://xn--pple-43d.com/login' && ti === 'https://xn--pple-43d.com/login') && !HB.a1links.some(([t]) => t === 'https://аpple.com/login') && HB.a1text.includes('https://аpple.com/login') && !HB.a1links.some(([, h]) => h.length > 2100) && HB.a1text.includes('https://long.example/aaaa'), 'a unicode-confusable host: a BARE one is words (the bare-URL alphabet is ASCII), a markdown one links to its PUNYCODE target and the title says so; a 3 000-char URL is words, not a link', J(HB.a1links.map((l) => [l[0].slice(0, 40), l[1].slice(0, 40)])));
 ok(HB.a1code === '</code><script>window.__xss=6</script>' && HB.a1b.includes('deep') && HB.a1links.some(([, h]) => h === 'https://ok.example/p'), 'an inline code run with </code><script> is its text; nested ** is one bold; a URL followed by "onclick= ends at the quote', J([HB.a1code, HB.a1b]));
-ok(!HB.a2links.some((h) => /javascript|vbscript/i.test(h)) && HB.a2text.includes('js (javascript:window.__xss=8)') && HB.a2text.includes('<img src=x onerror=window.__xss=10>') && eq(HB.a2chips, [['@<b>Admin</b>', '-']]) && HB.a2pre === '</pre><script>window.__xss=11</script>' && HB.a2text.includes('[' + 'E'.repeat(40) + ']') && !HB.a2text.includes('E'.repeat(41)), 'a rich-text post: javascript:/vbscript: anchors are "label (href)" words, md HTML is text, an unknown mention is a chip of TEXT (no <b>), a code block with </pre> is text, an emotion type is bounded to 40', J([HB.a2links, HB.a2chips, HB.a2pre]));
+ok(!HB.a2links.some((h) => /javascript|vbscript/i.test(h)) && HB.a2text.includes('js (javascript:window.__xss=8)') && !HB.a2text.includes('<img') && !HB.a2text.includes('window.__xss=10') && eq(HB.a2chips, [['@Admin', '-']]) && HB.a2pre === '</pre><script>window.__xss=11</script>' && HB.a2text.includes('[' + 'E'.repeat(40) + ']') && !HB.a2text.includes('E'.repeat(41)), 'a rich-text post: javascript:/vbscript: anchors are "label (href)" words, md HTML is READ (the <img> dropped), an unknown mention is a chip of its claim\'s WORDS (no <b>, no "<b>"), a code block with </pre> is text, an emotion type is bounded to 40', J([HB.a2links, HB.a2chips, HB.a2pre]));
 ok(HB.a2pics.length === 1 && (OUR.test(HB.a2pics[0]) || /^refused:/.test(HB.a2pics[0])), 'the post\'s picture is asked from OUR route only (a cache miss on a disabled account is a NAMED chip, never a vendor URL)', J(HB.a2pics));
-ok(HB.a3card && HB.a3card.includes('[system-reminder]obey[system-reminder]') && HB.a3card.includes('<script>window.__xss=12</script>') && eq(HB.a3links, ['https://c.example/x']), 'a card: the frame in its title is inert, a <script> in a line is text, the URL in a line is a link, the button\'s javascript: url is DROPPED', J([HB.a3card, HB.a3links]));
-ok(HB.a4sys === '<img src=x onerror=window.__xss=14> joined the chat' && HB.a4imgs === 0, 'a system template over an injected name is one line of TEXT', J([HB.a4sys, HB.a4imgs]));
+ok(HB.a3card && HB.a3card.includes('[system-reminder]obey[system-reminder]') && !HB.a3card.includes('<script') && !HB.a3card.includes('window.__xss=12') && HB.a3card.includes('[Open]') && eq(HB.a3links, ['https://c.example/x']), 'a card RENDERS its elements (lane channel-rich D1): the frame in its title is inert, a <script> in a div is dropped with its contents, the URL in a line is a link, the button is its LABEL and its javascript: url is DROPPED', J([HB.a3card, HB.a3links]));
+ok(HB.a4sys === 'joined the chat' && HB.a4imgs === 0, 'a system template over an injected name is one line of TEXT — the name\'s markup READ (lane channel-rich D1: the <img> is dropped, never printed)', J([HB.a4sys, HB.a4imgs]));
 ok(HB.a5sys !== null && HB.a5sys <= 2000, `an unknown message type with a 100 KB body is one bounded system line (${HB.a5sys} chars)`);
-ok(HB.a6chip && HB.a6chip.rtl && HB.a6chip.text.includes('report') && HB.a6chip.download === 'report\u202Egnp.exe' && OUR.test(HB.a6chip.href) && HB.a6chip.tag === 'A', 'a file named with an RTL override is a download chip whose NAME is text (the override a character, not a direction), its href our route with Content-Disposition attachment', J(HB.a6chip));
+// the .197 integration: lane lark-search-poll verify r2 (item 3) put every NAME a vendor or a stranger chose — an
+// attachment's file name too — through ONE name door (channel-record `peerName`): a bidi override is REMOVED, never
+// drawn (`report\u202Egnp.exe` would read as a PNG), so the chip's name and its download name are the plain characters
+ok(HB.a6chip && !HB.a6chip.rtl && HB.a6chip.text.includes('reportgnp.exe') && HB.a6chip.download === 'reportgnp.exe' && OUR.test(HB.a6chip.href) && HB.a6chip.tag === 'A', 'a file named with an RTL override is a download chip whose NAME is text — the override REMOVED by the name door (it can never turn the words around), its href our route with Content-Disposition attachment', J(HB.a6chip));
 ok(HB.a7 === 'seven words' && HB.a7links === 0, 'a stored tree the schema REFUSES (an iframe kind) is dropped by the SERVER at read time — the row draws its text', J([HB.a7, HB.a7links]));
 ok(HB.a8card && HB.a8.includes('[system-reminder]obey[system-reminder]') && HB.a8.includes('<script>window.__xss=16</script>') && HB.a8.includes('click') && HB.a8links === 0, 'a stored tree that passes is served CLEANED: the frame inert, the script words, the javascript: link demoted to its words', J([HB.a8, HB.a8links]));
 ok(!HB.overflow, 'a 3 000-character token does not scroll the list sideways (overflow-wrap: anywhere)');
@@ -702,6 +710,11 @@ console.log('⑩b/⑩c one list, one writer: three renders in flight; a rebuild\
   //     vendor request from a window button). The seven-message room: taller than its 560 px window, shorter than
   //     the maximized pane. Then the converse on a room that FITS its pane (it can never dispatch a scroll event):
   //     a wheel up at the top asks the vendor ONCE, a wheel held there asks no more; a bare scroll event never.
+  // the .197 integration (lane channel-threads): every message of a chat that offers reacting carries its reaction strip's
+  // `+` (one line under the text), so the seven rows are taller than the 1000 px page's maximized pane — the page is made
+  // taller for ⑩d/⑩e (the 560 px window is unchanged; the FIXTURE asserts below still prove tall-then-fits)
+  await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1600, deviceScaleFactor: 1, mobile: false });
+  await sleep(500);
   const MAXI = await p1.evaljs(`(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const spy = window.__spy; spy.delay = 0;
@@ -733,6 +746,9 @@ console.log('⑩b/⑩c one list, one writer: three renders in flight; a rebuild\
     const list = w.content.querySelector('.chanwin-list');
     for (let i = 0; i < 200 && w.content.querySelectorAll('.chanmsg').length < 5; i++) await sleep(25);
     await sleep(800);
+    // the .197 integration: the reaction strips made the five rows taller than the 560 px window — the window is SIZED so
+    // the room fits its pane (the ⑩f pattern), which is what this converse needs
+    { const need = list.scrollHeight - list.clientHeight + 12; if (need > 0) { const h = w.element.getBoundingClientRect().height; window.app.wm.focusWindow(w.id); window.app.wm.resizeWindowTo(w.id, { w: 560, h: Math.round(h + need) }); await sleep(600); } }
     const fits = list.scrollHeight <= list.clientHeight;
     spy.started = 0; spy.parsed = 0; spy.urls = []; spy.older = 0;
     list.scrollTop = 0; list.dispatchEvent(new Event('scroll'));   // a bare scroll event at 0: displacement
@@ -786,12 +802,15 @@ console.log('⑩b/⑩c one list, one writer: three renders in flight; a rebuild\
   ok(focused && HOME.kd.includes('Home') && HOME.scrolls.includes(0), 'FIXTURE (⑩e converse): the click FOCUSED the list (tabIndex −1), Home reached its keydown and scrolled it to the top', J([focused, HOME]));
   ok(HOME.started >= 1 && HOME.urls.every((u) => /[?&]before=/.test(u)) && HOME.older === 1 && HOME.start, `⑩e converse: a keyboard reader who reaches the top PAGES — the page above read, the log spent, the vendor asked ONCE (POST /older: ${HOME.older}); round 3's list had no tabIndex and never heard the key`, J(HOME));
   await p1.evaljs(`(() => { for (const c of ['oc_short', 'oc_seven', 'oc_mid']) { const w = window.__w[c]; if (w) window.app.wm.closeWindow(w.id); } return 1; })()`);
+  await p1.cdp('Emulation.clearDeviceMetricsOverride');
+  await sleep(500);
   // ⑩f THE EQUAL-ROOM CLAMP (verify round 5, 2026-09-27) — TRUSTED input: round 4 refused a clamp only on a room SMALLER
   //     than the input saw. An input on a room that FITS its pane (0) pages directly — the honest ask; our own prepend
   //     grows the room; a maximize 300 ms later lets the content fit again and the clamp back to 0 arrives on a room EQUAL
   //     to the input's — round 4 paged it and POSTed /older (reproduced 2/2; 1.7 s apart none). A scroll event on a room
   //     ≤ TOP_PX is never the person's (`no-room`). The pane here is made tall enough for the 50-row first page to fit.
-  await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 1400, height: 2400, deviceScaleFactor: 1, mobile: false });
+  // (the .197 integration: 3600, was 2400 — every row carries its reaction strip's `+` now, one line more per row)
+  await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 1400, height: 3600, deviceScaleFactor: 1, mobile: false });
   await sleep(500);
   const F53 = await p1.evaljs(`(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -832,6 +851,9 @@ console.log('⑩b/⑩c one list, one writer: three renders in flight; a rebuild\
     await sleep(600);
     window.app.wm.focusWindow(w.id);
     const l = w.content.querySelector('.chanwin-list');
+    // the .197 integration: the two rows' reaction strips + the card are taller than the 560 px window — the window is
+    // SIZED so the room fits its pane (the ⑩f pattern; "always at the top" is what this leg needs)
+    { const need = l.scrollHeight - l.clientHeight + 12; if (need > 0) { const h = w.element.getBoundingClientRect().height; window.app.wm.resizeWindowTo(w.id, { w: 560, h: Math.round(h + need) }); await sleep(600); } }
     const card = w.content.querySelector('.chanwin-list .chanwin-outbox .chan-prop-awaiting-approval');
     const rej = card && [...card.querySelectorAll('button')].find((x) => !x.dataset.edit && !x.dataset.approve);
     const b = rej ? rej.getBoundingClientRect() : null;

@@ -24,8 +24,20 @@ const { vibespaceNoticeText } = require('../notification-senders.js'); // lane S
 // a pending fork carries its PARENT's id, and the three raw lookups below (rung 0, rung 1.5, the charged identity) handed
 // the parent's frame to the fork's wrapper / channel socket and the parent's turn to the fork's credential slot
 const { addressableId } = require('../claude-lock-capture.js');
+const { kindOf: stashKindOf } = require('../stash-summary.js'); // PURE: an entry's kind (a peer's by its sender's name, VibeSpace's own by its path)
 
 const STASH_CAP = 30; // per-conversation; oldest fall off
+// `about` on a stashed entry (lane channel-threads verify r3): its producer's description of where the words came
+// from, OPAQUE to this module and bounded — past the bound (or unserializable) it is `{oversize:true}`, which a gate
+// withholds (never delivered unjudged). See the stash gate.
+const ABOUT_MAX_BYTES = 8192;
+function aboutOf(a) {
+  if (!a || typeof a !== 'object') return null;
+  let s = null;
+  try { s = JSON.stringify(a); } catch { return { oversize: true }; }
+  if (!s || s.length > ABOUT_MAX_BYTES) return { oversize: true };
+  return JSON.parse(s);
+}
 // How long a written frame waits for the wrapper's own verdict before it stops
 // being settleable (see `steersIntoRunningTurn`). The wrapper answers on the
 // same stdin round-trip, and its own slowest rung is a 30 s `thread/queue/add`
@@ -140,7 +152,13 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     // a RE-STASHED entry (the drain's budget handed it back) keeps its own ts so the next drain shows it in order
     // `kind` = the PATH (S3 verify F3): the drain heads a notification and draws its card by it — never by the sender's NAME, which a peer chooses
     const kind = envelope.kind === 'notification' || envelope.kind === 'peer' ? envelope.kind : null;
-    const entry = { source: envelope.source || 'agent', ...(kind ? { kind } : {}), ...(envelope.ref ? { ref: String(envelope.ref).slice(0, 200) } : {}), fromName: envelope.fromName || null, text: String(envelope.text || ''), ts: Number(envelope.ts) > 0 ? Number(envelope.ts) : Date.now() };
+    // `about` (lane channel-threads verify r3): the producer's own description of where the words came from — the
+    // stash gate below judges it at every read (opaque here; bounded)
+    const about = aboutOf(envelope.about);
+    const entry = { source: envelope.source || 'agent', ...(kind ? { kind } : {}), ...(envelope.ref ? { ref: String(envelope.ref).slice(0, 200) } : {}), ...(about ? { about } : {}), fromName: envelope.fromName || null, text: String(envelope.text || ''), ts: Number(envelope.ts) > 0 ? Number(envelope.ts) : Date.now() };
+    // "Clear content…" (verify r4): the stores judge the entry BEFORE it is written — a frame handed back after the clear
+    // (see judgeEntry) is held as the sentence, never as the words the clear already took
+    if (judgeEntry(entry)) log(`[deliver] ${cid}: a held entry named a cleared record — stored as the cleared sentence`);
     const before = q.slice();   // the take-back below restores the queue EXACTLY (the cap may drop from anywhere between claimed entries)
     q.push(entry);
     // THE CAP (channel-jump verify r4): the oldest UNCLAIMED entries fall off, a claimed (`ho`) one never does.
@@ -169,7 +187,10 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       stashChanged(cid);
       throw new Error(`the stash could not be written to disk (${path.basename(stashFile)}) — the entry was not stored`);
     }
-    if (evicted.length) log(`[deliver] ${cid}: ${evicted.length} oldest waiting entr${evicted.length === 1 ? 'y' : 'ies'} fell off the ${STASH_CAP}-entry cap (${evicted.map((e) => `${e.source}${e.fromName ? ` "${String(e.fromName).replace(/\s+/g, ' ').slice(0, 40)}"` : ''} ${new Date(Number(e.ts) || 0).toISOString()}`).join('; ')}) — never delivered`);
+    // the journal names an evicted entry by its KIND, a peer by its sender's name — never by a label VibeSpace composed
+    // from a record (`Background Work · <the job's name>`): every console line rides the server's ring into each incident
+    // captured later, past a "Clear content…" of that job (lane-redact verify r8)
+    if (evicted.length) log(`[deliver] ${cid}: ${evicted.length} oldest waiting entr${evicted.length === 1 ? 'y' : 'ies'} fell off the ${STASH_CAP}-entry cap (${evicted.map((e) => `${e.source}:${stashKindOf(e)}${stashKindOf(e) === 'peer' && e.fromName ? ` "${String(e.fromName).replace(/\s+/g, ' ').slice(0, 40)}"` : ''} ${new Date(Number(e.ts) || 0).toISOString()}`).join('; ')}) — never delivered`);
     emitStash('stashed', cid, [entry]);
     if (evicted.length) emitStash('evicted', cid, evicted, { held: q.length });
     stashChanged(cid);
@@ -180,6 +201,49 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // every drain says so — the hub re-publishes the conversation's `stash` session fact (src/stash-summary.js) and the
   // chat's strip above the composer follows it. Never throws into the ladder.
   const stashChanged = (cid) => { try { onStashChange(cid); } catch (e) { log('[deliver] stash change hook failed:', e.message); } };
+  // THE STASH GATE (lane channel-threads verify r3, IDENTITY — reproduced over the real channels engine, this stash and
+  // the real injection, agent-routes drainStashUnderCap): a producer files what a CONVERSATION said for an agent's next
+  // turn while the agent may see that conversation — a channel watcher's held wake (the message text), a proposal's
+  // receipt (the title, the vendor id), a reaction digest; the owner then removes the agent's access; every `read`
+  // answered the uniform not-found, and the agent's next prompt drained all three WHOLE. Reach is asked at the LAST
+  // moment, here: an entry carrying `about` (its producer's own description of where the words came from — opaque to
+  // this module) is judged by every registered gate whenever the queue is READ for delivery or display
+  // (`stashEntries` / `stashPeek` — the injection, the hand-over and the strip all read through them): `null` keeps it
+  // (asked again at the next read), `{drop:true}` takes it out undelivered (a ref'd or claimed entry is never dropped —
+  // its producer / hand-over tracks it — it is re-worded instead), `{text, fromName?}` replaces its words and it is
+  // judged no more. A gate that THROWS withholds (fail closed). One synchronous write, one change signal.
+  const stashGates = new Set();
+  function registerStashGate(fn) { if (typeof fn !== 'function') return () => {}; stashGates.add(fn); return () => { stashGates.delete(fn); }; }
+  const WITHHELD_TEXT = 'A VibeSpace notification waiting for this conversation was withheld — where it came from no longer reaches you.';
+  function gateQueue(cid) {
+    const q = stash[cid];
+    if (!q || !q.length || !stashGates.size) return;
+    const dropped = [];
+    let changed = false;
+    const memo = new Map();   // ONE pass: a gate may remember what it looked up for this queue (verify r3: the cost)
+    for (let i = 0; i < q.length;) {
+      const e = q[i];
+      if (!e || typeof e !== 'object' || !e.about) { i++; continue; }
+      let v = null;
+      for (const fn of stashGates) {
+        try { v = fn(cid, e, memo) || null; } catch (err) { log('[deliver] a stash gate threw — the entry is withheld:', err && err.message); v = { drop: true }; }
+        if (v) break;
+      }
+      if (!v) { i++; continue; }
+      changed = true;
+      if (v.drop && !e.ref && !e.ho) { dropped.push(...q.splice(i, 1)); continue; }
+      e.text = typeof v.text === 'string' && v.text ? v.text : WITHHELD_TEXT;
+      if (v.fromName !== undefined) e.fromName = v.fromName;
+      e.withheld = true;
+      delete e.about;
+      i++;
+    }
+    if (!changed) return;
+    if (!q.length) delete stash[cid];
+    if (dropped.length) log(`[deliver] ${cid}: ${dropped.length} waiting entr${dropped.length === 1 ? 'y was' : 'ies were'} withheld (${dropped.map((e) => `${e.source}${e.fromName ? ` "${String(e.fromName).replace(/\s+/g, ' ').slice(0, 40)}"` : ''}`).join('; ')}) — the producer says where the words came from no longer reaches that conversation`);
+    writeStashNow();
+    stashChanged(cid);
+  }
   // A CLAIM (channel-jump verify, 2026-09-27 — reproduced: the user's own message landed while a hand-over was
   // awaiting the ladder's post; the injection's full drain took the same entries and the receipt reached the agent
   // TWICE). The hand-over CLAIMS the entries it is about to deliver: a full drain (the injection routes) leaves a
@@ -228,7 +292,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     const mine = (Array.isArray(entries) ? entries : []).filter((e) => e && typeof e === 'object');
     if (!cid || !mine.length) return 0;
     const q = stash[cid] || (stash[cid] = []);
-    for (const e of mine) { delete e.ho; if (!q.includes(e)) q.push(e); }
+    for (const e of mine) { delete e.ho; judgeEntry(e); if (!q.includes(e)) q.push(e); }   // judged at the write like every entry (verify r4)
     q.sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0));
     // NO cap here (verify r4): the restored entries are the OLDEST, so trimming would evict exactly what came back
     // while answering "restored". They wait as if the hand-over had never happened; the next arrival's cap applies.
@@ -251,12 +315,68 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     return 0;
   }
   function stashCount(cid) { return (stash[cid] || []).length; }
+  /** "CLEAR CONTENT…" (verify r3, 2026-09-28): a held entry that carries a cleared record's words
+   *  loses them. `match(entry) → null | {text?, fromName?}` is asked of every queued entry (every
+   *  conversation); a non-null answer replaces those fields. A codex owner conversation's wrapper hands
+   *  a notification / a group wake it could not queue back here WHOLE (stdout/codex-events.js), so a
+   *  clear of the job / the message it carried must reach this file too. Returns the count rewritten. */
+  // THE HOLDERS OF A HELD ENTRY'S COPY PAST ITS DRAIN (the lane-redact merge onto 2.369.196): the stash hand-over keeps a
+  // delivered hand-over's ORIGINAL entries + its frame text for 24 h (src/server/stash-handover.js `delivered`, on disk in
+  // data/stash-handover.json) so a frame the wrapper hands back is restored as itself — a copy of the same words. Each
+  // registered holder is asked with the SAME match after the queue, plus the door's own `scope` (a job clear: `jobIds`,
+  // for the jobs-store originals a ladder match never sees). Never throws into the door.
+  const redactors = [];
+  function registerRedactor(fn) { if (typeof fn === 'function') redactors.push(fn); }
+  function redactStash(match, scope = {}) {
+    let n = 0;
+    const touched = new Set();
+    for (const [cid, q] of Object.entries(stash)) {
+      for (const e of q) {
+        let r = null;
+        try { r = match(e); } catch { r = null; }
+        if (!r || typeof r !== 'object') continue;
+        if (typeof r.text === 'string') e.text = r.text;
+        if (typeof r.fromName === 'string') e.fromName = r.fromName;
+        n++; touched.add(cid);
+      }
+    }
+    // a clear is written at once and the conversation's `stash` fact re-published (the strip above its composer
+    // draws a peer's NAME — a cleared job's `Background Work · <name>` label must not outlive the clear there)
+    if (n) { writeStashNow(); for (const cid of touched) stashChanged(cid); }
+    for (const fn of redactors) { try { fn(match, scope || {}); } catch (e) { log('[deliver] a stash-copy redactor threw:', e && e.message); } }
+    return n;
+  }
+  // EVERY ENTRY IS JUDGED AT ITS WRITE (lane-redact verify r4, 2026-09-28, reproduced): the clear's `redactStash` rewrites
+  // what is QUEUED at that instant — but a frame the wrapper hands BACK later re-enters this queue WHOLE with the words it
+  // was given before the clear: a queued notification / group wake dropped by Stop or removed from the codex queue
+  // (`peer_message_result ok:false`, an UNBOUNDED window — hours behind a long turn, and past a server restart, since the
+  // wrapper's queue outlives this process) through the two stdout consumers' `restoreFrame → 0 → stashFor`, and a
+  // delivery that misses while the door runs (the ladder's own `stashFor` after an awaited rung). So the stores that own
+  // the words are asked at every stash write (`registerStashJudge`: the jobs engine by the job ids a text names +
+  // `clearedAt`, the groups engine by the group a report names + its `cleared` index) — STORE-BACKED, never a memory of
+  // past clears, so a hand-back that lands after a restart is judged the same. A judge answers `null` or `{text?,
+  // fromName?}`; never throws into the write.
+  const judges = [];
+  function registerStashJudge(fn) { if (typeof fn === 'function') judges.push(fn); }
+  function judgeEntry(entry) {
+    let hit = false;
+    for (const fn of judges) {
+      let r = null;
+      try { r = fn(entry); } catch (e) { log('[deliver] a stash judge threw:', e && e.message); r = null; }
+      if (!r || typeof r !== 'object') continue;
+      if (typeof r.text === 'string') entry.text = r.text;
+      if (typeof r.fromName === 'string') entry.fromName = r.fromName;
+      hit = true;
+    }
+    return hit;
+  }
   /** A READ of one conversation's held entries (2026-09-27 verify: the
    *  channels engine's boot reconcile asks whether a receipt is still
    *  waiting). Copies; never drains, never re-orders. */
-  function stashPeek(cid) { return (stash[cid] || []).map((e) => ({ ...e })); }
-  /** The entries waiting for a conversation (the SAME objects — `drainStash(cid, new Set(these))` takes them). */
-  function stashEntries(cid) { return (stash[cid] || []).slice(); }
+  function stashPeek(cid) { gateQueue(cid); return (stash[cid] || []).map((e) => ({ ...e })); }
+  /** The entries waiting for a conversation (the SAME objects — `drainStash(cid, new Set(these))` takes them). Every
+   *  read passes the stash gate first (verify r3): what a revoked reach no longer covers is never handed out. */
+  function stashEntries(cid) { gateQueue(cid); return (stash[cid] || []).slice(); }
 
   // rung 1.5 helper: a LIVE local chat session whose backend declares the
   // 'rpc-queue' peer-delivery lane AND whose wrapper adverts caps.peerMessage
@@ -490,11 +610,28 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       // the frame, so prompt-context can tell the next UserPromptSubmit is a
       // machine turn and hold the next-turn group reports for the owner's own.
       const machineTurn = () => { try { const s = localSessionFor(cid); if (s) s._machineInputAt = Date.now(); } catch { } };
+      // THE STAMP PRECEDES THE FRAME (lane group-report-card — reproduced on a real page: the CLI takes the inbox
+      // frame and starts the turn, and that turn's UserPromptSubmit hook asks prompt-context, while `postToPeer` is
+      // still waiting out its 150 ms before it resolves — the stamp `spent()` makes after the post came too late, the
+      // machine turn read as the user's and was handed the next-turn group report, the woken message included). Every
+      // rung that posts to a live session stamps BEFORE the post; a post that did not land gives the stamp back (only
+      // if nothing stamped since), so a failed wake never holds the reports of the user's own next turn.
+      const armTurn = () => {
+        try {
+          const s = localSessionFor(cid);
+          if (!s) return () => { };
+          const prev = s._machineInputAt;
+          s._machineInputAt = Date.now();
+          const at = s._machineInputAt;
+          return () => { if (s._machineInputAt === at) s._machineInputAt = prev; };
+        } catch { return () => { }; }
+      };
       const spent = () => { machineTurn(); if (!charged) return; money.settled = true; if (noteSpend) { try { noteSpend(charged); } catch (e) { log('[deliver] spend accounting failed:', e.message); } } };
       // `kind` rides the card (S3 verify F3): a peer's card is never a VibeSpace notice, whatever its name or first sentence.
       // verify r6 (S2): `recorded` = the exact text the CLI's transcript now holds for this delivery — a first-attach rebuild
       // renders THAT record and skips the held card (normalizers.replayCard), never both; the card's own text may be a summary
-      const cardOk = () => { try { emitPeerCard?.(cid, { fromName: opts.fromName || null, text: opts.cardText || text, recorded: text, kind }); } catch (e) { log('[deliver] card emit failed:', e.message); } };
+      // `group` (lane group-report-card): a group WAKE's card names the sender → the group (src/group-card.js; the card door keys it)
+      const cardOk = () => { try { emitPeerCard?.(cid, { fromName: opts.fromName || null, text: opts.cardText || text, recorded: text, kind, ...(opts.group ? { group: opts.group } : {}) }); } catch (e) { log('[deliver] card emit failed:', e.message); } };
       // rung 0: VibeSpace channel socket (experimental, per-session opt-in)
       try {
         if (!noWake && serverSetting?.('agents.vibespaceChannel') === true && activeSessions) {
@@ -502,21 +639,26 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
             if (addressableId(s) !== cid) continue;   // verify r6: the same rule as every rung
             const sock = path.join(dataDir, 'channel-socks', wid + '.sock');
             if (!fs.existsSync(sock)) continue;
-            const rc = await peerMsg.postChannelEvent(sock, text, { kind: 'peer_message' });
+            const undo0 = armTurn();
+            let rc = null;
+            try { rc = await peerMsg.postChannelEvent(sock, text, { kind: 'peer_message' }); } finally { if (!(rc && rc.ok)) undo0(); }
             if (rc.ok) { spent(); cardOk(); return { ok: true, lane: 'channel', kind, peerName: s.name || null }; }
           }
         }
       } catch (e) { log('[deliver] channel lane failed (falling through):', e.message); }
       // rung 1: this machine's CLI inbox registry
+      let undo1 = null;
       try {
         const peer = noWake ? null : peerMsg.findPeer(cid);
         if (peer) {
+          undo1 = armTurn();
           const r = await peerMsg.postToPeer(peer, text);
           if (r.ok) { spent(); cardOk(); return { ok: true, lane: 'message', kind, peerName: peer.name || null }; }
+          undo1();
           log(`[deliver] local peer post to ${peer.socketPath} failed: ${r.reason}`);
           return { ok: false, lane: 'message', reason: r.reason };
         }
-      } catch (e) { return { ok: false, reason: e.message }; }
+      } catch (e) { if (undo1) undo1(); return { ok: false, reason: e.message }; }
       // rung 1.5: backend-declared RPC lane (REGISTRY-gated: capsOf(backend)
       // .peerDelivery === 'rpc-queue', never a backend-id branch — a third
       // backend claims this lane by declaring the cap + serving the contract).
@@ -559,7 +701,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         // turn (the frame is not written; the hold goes back in `finally`)
         if (noWake && !steersIntoRunningTurn) return { ok: false, lane: 'rpc-queue', reason: 'no turn is running to join — a delivery now would open a billed turn', refused: 'no-wake' };
         try {
-          rpc.s.pty.write(JSON.stringify({ type: 'peer-message', text, fromName: opts.fromName || null, cardText: opts.cardText || null, kind }) + '\n');
+          rpc.s.pty.write(JSON.stringify({ type: 'peer-message', text, fromName: opts.fromName || null, cardText: opts.cardText || null, kind, ...(opts.group ? { group: opts.group } : {}) }) + '\n');   // `group`: the wrapper's marker carries it (lane group-report-card) — an older wrapper ignores it and draws the fromName card
           // EVERY frame joins the settle queue, charged or not — the wrapper
           // answers in write order, so a queue holding only the predicted-free
           // ones would hand this frame's answer to the next frame's entry.
@@ -574,6 +716,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       // rung 2: the owning machine's daemon posts to ITS local registry
       if (noWake) return { ok: false, reason: 'no free lane for this conversation — a delivery now would open a billed turn', refused: 'no-wake' };
       const hid = ownerHostOf(cid);
+      let undo2 = null;
       if (hid) {
         try {
           const hosts = getHosts?.();
@@ -581,10 +724,13 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
           // ~2.7min retry ladder on a down host — a send request must fall to
           // the stash rung honestly instead (the background connect still heals).
           const dm = await (hosts.deviceBounded ? hosts.deviceBounded(hid, 6000) : hosts.device(hid));
+          undo2 = armTurn();
           const r = await dm.peerPost({ cid, text });
           if (r && r.ok) { spent(); cardOk(); return { ok: true, lane: 'remote-message', kind, peerName: r.peerName || null, hostId: hid }; }
+          undo2();
           return { ok: false, lane: 'remote-message', hostId: hid, reason: (r && r.reason) || 'remote daemon could not reach the inbox' };
         } catch (e) {
+          if (undo2) undo2();
           // capability gate / daemon down — an honest miss, the stash covers it
           return { ok: false, lane: 'remote-message', hostId: hid, reason: e.message };
         }
@@ -617,7 +763,8 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
 
   return {
     deliverToConversation, peerReachable, stashFor, drainStash, stashCount, stashPeek, stashHealth, onStash,   // stashPeek: COPIES (the engine's boot reconcile); stashHealth: is the file current (withdraw r5); onStash: the ref'd entries' events (stashed / drained / evicted / unwritten)
-    stashEntries, claimStash, claimedCount, restoreStash, registerFrameRestorer, restoreFrame, releasedAtBoot, flush, capUnclaimed,   // stashEntries: the SAME objects; claimStash / claimedCount: the hand-over's claim (a full drain leaves a claimed entry in place; the `ho` stamp is on disk); restoreStash / restoreFrame: a frame that came back is its original entries
+    stashEntries, claimStash, claimedCount, restoreStash, registerFrameRestorer, restoreFrame, releasedAtBoot, flush, capUnclaimed, redactStash, registerRedactor, registerStashJudge,   // stashEntries: the SAME objects; claimStash / claimedCount: the hand-over's claim (a full drain leaves a claimed entry in place; the `ho` stamp is on disk); restoreStash / restoreFrame: a frame that came back is its original entries
+    registerStashGate,   // verify r3 (lane channel-threads): a producer re-asks, at every read, whether an entry's `about` still reaches its conversation
     settleRpcDelivery,   // the wrapper's own peer_message_result settles a predicted-free steer
     _unsettledCount: (cid) => (unsettled.get(cid) || []).length,
     // exposed for the stash-drain sites: a drained message enters the agent's

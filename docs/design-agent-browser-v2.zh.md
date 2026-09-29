@@ -598,6 +598,8 @@ profile 并**重开**这个浏览器"，菜单里就得这么写，而不是让�
 
 #### 3.2.6 一个有名字的 profile 给我的所有对话用 —— owner 裁定 A（2026-09-26，"A吧"）
 
+
+> **2026-09-28 —— 自己浏览（B-6ae8，docs/design-browse-yourself.md）：** 这一裁定的“一个 profile = 一个 Chrome，多个对话各用各的标签页”现在也包括**用户本人**：面板上每个本机 profile 的那一行有“自己浏览”，打开（或加入）这个浏览器，给他一个自己的标签页；“谁能使用”不限制他（行上写着“你随时可以自己浏览它。”）。他的操作像 agent 的一样被记录（每个 profile 可关）；“关闭”只关他自己的标签页，“退出整个浏览器”才会为所有人停止。
 **为什么。** 两轮 naive-user 研究在同一个任务上失败（`SharedContext/vibespace-naive-study-2.md` 的 T4/T5）。
 **路径 A**：对话 1 的 agent `new work` 并登录；对话 2 被要求用 work ⇒ `not_owner`，Ask-user 卡片唯一能用的选项是一条
 CLI 命令（`vibespace-browser new work --sharing instance`）；照做之后的记录是"owner = 会话、sharing = instance"——
@@ -1111,6 +1113,8 @@ gate 的对象相反。
 
 ### 4.3 接管与交还
 
+
+> **2026-09-28 —— 自己浏览（B-6ae8，docs/design-browse-yourself.md）：** 用户也可以自己打开一个 profile 的浏览器（Agent 浏览器面板的那一行）。这**不是**接管：他是这个浏览器的又一个持有者，用他自己的固定标签页，任何 agent 都不会被暂停或打断（owner：“我其实也相当于是一个agent而已”）。本节的接管（打断、告知、交还时提醒）只在他从某个对话的实时画面里操作 **agent 的**标签页时才适用。
 窗口上有三个模式，永远可见，永不含糊：
 
 | 模式 | 帧 | 用户输入 | Agent 命令 | 徽标 |
@@ -1830,6 +1834,42 @@ Chrome 版本和文件，代理每个 grant 记一次日志 —— 其他时候�
 补丁副本对照）+ test-browser-mediation-chrome ⑥（启动的那个 Chrome 自己的协议 —— 多出来的打印并变红 ——
 以及每个类别对着真实的暂停租约，以原始端点为 oracle）。
 
+**2026-09-28 —— Chrome 154.0.8037.57 普查（lane-cdp-154）。** 这台机器升到 154，重门 ⑥ 按设计变红：
+4 个方法没有行（用户驾驶期间被点名拒绝 —— 安全 —— 但没有类别）。现在普查读 **不止一个 Chrome**：
+`CENSUS_CHROMES` = 153.0.8010.47 + 154.0.8037.57，各有自己的 fixture（153 的保留不动）；一行的
+`chrome` = 第一个列出它的已普查 Chrome，`until` = 第一个不再列出它的已普查 Chrome；在每个已普查
+Chrome 上表格正好等于它的方法（`compare(protocol, {chrome})`：0 未分类 / 0 过时 / 0 标错）。**判决与版本
+无关**：一行在任何 Chrome 上都按它的类别判；没有行的方法在用户驾驶期间一律点名拒绝 —— 比普查新的、比
+普查旧的（fleet 上 Debian chromium 150；实测 149–152 各有 6–12 个方法没有行，没有一个是整个浏览器级的
+动作）都一样；拒绝语写出每一个已普查的 Chrome。153 → 154 的差（方法名来自两份 fixture；参数与事件来自
+Chrome for Testing 153.0.8010.12 —— 它的方法列表与 153.0.8010.47 的 fixture 逐字相同 —— 因为 153 的
+fixture 只记了方法名）：
+
+| | 153.0.8010.47 → 154.0.8037.57 |
+|---|---|
+| 方法 | +4、−7、0 个改了 deprecated / experimental 标记；域 0 增 0 减 |
+| 新增方法的类别 | `Ads.getAdScripts` **read**（取回页面的广告脚本 —— 自上次调用以来的增量，游标在 DevTools 自己的记录里，页面上什么都不动）· `Browser.getGlobalPrivacyControl` **read** · `Browser.addMockCamera` **refused** · `Browser.setGlobalPrivacyControl` **refused** |
+| 删除的方法 | `Storage.{get,set,delete,clear}SharedStorage*`、`resetSharedStorageBudget`、`setSharedStorageTracking`（Shared Storage 整个退出协议）—— 行保留、类别不变、标 `until: 154.0.8037.57`（153 还带着它们） |
+| 参数变了的方法 | `Page.startScreencast` +`maxFramesInFlight?` +`sendLastFrame?`（流控，仍是 read）；`WebAuthn.setCredentialProperties` 的 `signCount` integer → number（类型，名字层面看不见；仍是 page-mutation）；返回值 0 |
+| 事件 | +0、−2（`Storage.sharedStorageAccessed`、`Storage.sharedStorageWorkletOperationExecutionFinished`），事件参数 0 变 |
+| 类型 | +6（`Ads.AdScript`、`ServiceWorker.ServiceWorkerRouter*`）、−8（`Storage.SharedStorage*`）、5 个改了（`Storage.StorageType` 去掉 `shared_storage`、`ServiceWorkerVersion` +`typedRouterRules`、`WebMCP.Annotation` +`consequential`、两个枚举）—— 没有一个改变任何方法的类别 |
+
+两个 setter 都在 154 上 **实测**（一个临时的 headless Chrome、两个浏览器上下文 = 两个租约的标签页、一个
+loopback 页面服务器）：都不带 `browserContextId`，都够到 **每一个** 上下文，都只活到发起设置的 DevTools
+连接关闭为止，都不写进 profile。`addMockCamera` 之后另一个上下文里的标签页 videoinput 0 → 1，那里的
+`getUserMedia` 拿到一路 640×480 的画面；`setGlobalPrivacyControl`（功能打开时；原装 154 回答 -32000
+"Global Privacy Control is disabled."）之后每个上下文的每个标签页都报 `navigator.globalPrivacyControl`
+并在请求和导航里带上 `Sec-GPC`。租约拥有的是它自己的标签页，从来不是整个浏览器 ⇒ 两个都 `refused`（更严的
+那一类；需要其中任何一个的 agent 用自己的浏览器 —— 只有 instance 共享的浏览器才经过中介）。`refused` 从
+14 行变成 16 行，共 668 行（153 上 664，154 上 661）。fixture 从 154 起也记下参数名和事件名，下一个
+Chrome 的差可以直接从两份 fixture 读出（`scripts/cdp-protocol-fetch.mjs --diff <旧> <新>`）。门：新的快速门
+test-cdp-census（每个已普查的 fixture ⇔ 表、`chrome` / `until` 标记 ⇔ fixture 之差、四个新行过真实判决、
+任意版本上的未知规则；补丁副本对照：删掉一行新行 ⇒ 154 不再被覆盖且摄像头调用在空闲租约上被放行）+
+test-browser-mediation ⑥ + test-browser-mediation-chrome ⑥（按现场版本比较；这个 Chrome 每一个没有行的方法
+都在真实的暂停租约上被点名拒绝；154 上两个读照常应答、两个 setter 在 agent 驾驶时也是 `method_refused`，
+摄像头的效果从另一个标签页数出来，原始端点自己加的 mock 摄像头作正对照；`--chrome` 可以换一个 Chrome 跑，
+解出来的 152.0.7977.82 上 6 个没有行的方法全部点名拒绝）。
+
 #### 6.2.2 接管即打断 —— owner 的裁定（2026-09-27）
 
 > "关于接管浏览器的时候agent脚本，其实应该直接打断所有脚本和agent操作，告知agent发生了打断，交还时提醒它重新运行"
@@ -2067,7 +2107,9 @@ test-browser-live ⑧（heavy：聊天里的卡、toast、只提醒一次）。
 * 文档说下载会在解压之前，对着**一个被钉住的 Ed25519 签名、覆盖已发布的校验和**做校验。
 * 免费 = 一个较旧的 Chromium 大版本、一个并发会话，由登录门控；Pro = 当前大版本以及 5–2000 个会话，
   由 `CLOAKBROWSER_LICENSE_KEY` 门控（存在 `~/.cloakbrowser/license.key`）。
-  **校验是离线还是回传，没有文档说明。**
+  **校验是离线还是回传，没有文档说明。** ——已测（2026-09-28，§7.2.1a）：免费档（较旧的 146）**不需要登录、
+  不需要 key**，不做任何授权校验；"由登录门控"的是厂商更新的 151 构建（GitHub 登录领一把免费 key），那个
+  构建启动时向 cloakbrowser.dev 校验（读代码所得，未实测，VibeSpace 不安装它）。
 * CDP 是一等入口：`--remote-debugging-port=9222`，外加一个 `cloakserve` 模式
   （`docker run -d -p 127.0.0.1:9222:9222 …`），它接受每连接一个的 `?fingerprint=<seed>` ——
   恰好就是我们每 profile 一个 seed 想要的形状，而且白送一条容器边界。
@@ -2113,6 +2155,41 @@ test-browser-live ⑧（heavy：聊天里的卡、toast、只提醒一次）。
 `cloakserve`，用在那些一开始没有凭据的 profile 上。只有当一个被测量过的站点确实需要时才买一档。
 并且注意那个重要的次序：**对任何有账号的站点，通过实时视图（§4.3）做一次人工登录都胜过指纹规避** ——
 它免费、风险中性，而且是这个设计本来就会给我们的一项能力。
+
+#### 7.2.1a 测量结果（2026-09-28，lane-cloak；owner：「下载吧」）
+
+**这条前置条件已经测完，记录在 `src/browser-profiles.js` 的 `CLOAK_EGRESS_PROOF`（`status: 'measured'`）。**
+方法是 `scripts/measure-cloak-egress.mjs`：npm `cloakbrowser@0.5.10` 装进一个临时 prefix，它的 Chromium
+146.0.7680.177.5（linux-x64）只下载一次，缓存在 VibeSpace 自己的目录（`CLOAKBROWSER_CACHE_DIR`，从不是
+`~/.cloakbrowser`）；每次运行都是 `env -i HOME=<空目录>` + strace（外加 execve/clone 做进程归属、DNS 报文给
+每个地址命名），按产品自己的方式启动（浏览器驱动 0.38.1，可执行文件与参数放在驱动自己的环境变量里）。
+
+| 运行 | INET connect | 连到哪里 |
+|---|---|---|
+| 首次启动（下载 + 首次启动） | 21（其中 12 个是 getaddrinfo 的端口 0 源地址探测、4 个 DNS、1 个回环 CDP） | 下载器：cloakbrowser.dev ×2、github.com ×1、release-assets.githubusercontent.com ×1；浏览器：无 |
+| 从缓存第二次启动 | 1 | 仅回环 CDP（驱动 → 浏览器） |
+| 环境里带一把 key 启动 | 1 | 仅回环 CDP——这把 key（一个假值，没有账号）没有被发往任何地方 |
+| 空闲 10 分钟 | 1 | 仅回环 CDP |
+
+* **下载**：216 890 134 字节，由 cloakbrowser.dev 经 GitHub 的发布存储送达；包装层在本地用它代码里钉住的
+  Ed25519 公钥校验 SHA256SUMS 的签名，再校验归档的 SHA-256。**"校验是离线还是回传"的答案：签名校验是
+  本地的；免费档根本不做授权校验。**
+* **免费档不需要 key，也不需要登录**（§7.2 的"由登录门控"指的是厂商的新版本：用 GitHub 登录领一把免费
+  key，包装层就会改下载 Chromium 151 的那个构建，那个构建启动时会向 cloakbrowser.dev 校验 key——这一段
+  是读厂商代码得到的，没有实测，VibeSpace 也不安装它）。
+* **白名单（由记录推导，`egressHostsOf`）**：安装时 = 三个下载主机；运行时 = 空（浏览器本身不需要任何
+  站点）+ 部署在 `browser.cloak.egressAllowlist` 里点名的站点。其余一律拒绝并在记录里点名：
+  api.github.com（包装层每小时的更新检查 + 静默下载新构建——安装时用 `CLOAKBROWSER_AUTO_UPDATE=false` +
+  钉住的 `CLOAKBROWSER_VERSION` 关掉）、registry.npmjs.org（包装层自己的"有新版"检查）、cloakbrowser.dev
+  的授权接口。
+* **强制执行，而不是只观察**：运行中的 cloak 浏览器走 keeper 的白名单代理（`--proxy-server`，回环不绕行）；
+  安装的下载走另一个只放行三个下载主机的代理，下载出来的浏览器若没经过代理（它什么都没放行）就不用。
+* **测量顺带发现的两处产品缺陷**（都已修）：cloak 的启动参数只放在 `open` 的 argv 上时，keeper 紧接着的
+  `get cdp-url` 会让驱动不带参数地重启浏览器——现在参数放在驱动自己的环境变量里，每次调用都带；切换后
+  用 `--pin-tab open` 重开租约的标签页会得到 `tab_gone`（会话钉在已随旧浏览器消失的标签页上）——现在用
+  `tab new`。
+* **没测的**：带真 key 的运行（没有授权任何账号或 key）、§12.40（免费档席位被另一台机器占用时 cloakserve
+  说什么）、macOS / arm64 的构建（安装会以 `install_unmeasured_platform` 拒绝）。
 
 ### 7.3 远程与机队
 

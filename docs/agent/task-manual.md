@@ -17,6 +17,13 @@ vibespace-task --group <id> progress "one-line summary" --detail "specifics othe
   also be in your chat reply.
 - Write the detail as a handoff: ids, paths, decisions and WHY, gotchas.
 - Keep your own working steps in your session todo list, not here.
+- Logged something that does not belong in the shared log (another mailbox's
+  content, a secret, words the user asked you to remove)? Clear it:
+  `vibespace-task --group <id> progress-redact <P-id>`. The entry keeps its time
+  and its place; its text becomes "[cleared at the user's request]". `progress`
+  prints the new entry's id, and `show` prints the ids of YOUR entries. You can
+  clear only entries your own session wrote — the user clears anything from the
+  Task Group log window (right-click → Clear content…, or Select… → Clear selected).
 
 ## Backlog — the parking lot (NON-immediate only)
 

@@ -88,7 +88,15 @@ function mkVendor() {
     if (tm) {
       const id = decodeURIComponent(tm[1]);
       const full = u.searchParams.get('format') === 'full';
-      if (id === 'thr_ops_0001' && u.searchParams.getAll('metadataHeaders').includes('Message-ID')) return jsonRes(withDates(state.sentInThread ? FX.threadOpsMetaSent : FX.threadOpsMetaHeaders));
+      if (id === 'thr_ops_0001' && u.searchParams.getAll('metadataHeaders').includes('Message-ID')) {
+        const t0 = withDates(state.sentInThread ? FX.threadOpsMetaSent : FX.threadOpsMetaHeaders);
+        // r6 verify F3: a message that joins the thread AFTER the owner looked (a stranger, with a Reply-To of its own),
+        // and a thread whose answered message is gone
+        let msgs = t0.messages.slice();
+        if (state.lateMessage) msgs.push({ id: 'msg_late_evil', threadId: 'thr_ops_0001', labelIds: ['INBOX'], internalDate: String(T0 + 60e3), payload: { mimeType: 'text/plain', headers: [{ name: 'Subject', value: 'Re: Nightly job slow again' }, { name: 'From', value: 'Mallory <mallory@evil.example>' }, { name: 'Reply-To', value: 'drop@evil.example' }, { name: 'To', value: 'member.a@example.com' }, { name: 'Message-ID', value: '<late@evil.example>' }] } });
+        if (state.dropAnchor) msgs = msgs.filter((m) => m.id !== state.dropAnchor);
+        return jsonRes({ ...t0, messages: msgs });
+      }
       if (id === 'thr_ops_0001') return jsonRes(withDates(full ? (state.grown ? FX.threadOpsFullGrown : FX.threadOpsFull) : FX.threadOpsMeta));
       if (id === 'thr_invoice_0002') return jsonRes(withDates(FX.threadInvoiceMeta));
       if (id === 'thr_newsletter_0003') return jsonRes(withDates(FX.threadNewsletterMeta));
@@ -212,6 +220,22 @@ let flowState = null;
   ok(msgs[0].text === 'the nightly job was slow again, can someone look at the queue?' && msgs[0].author.name === 'Ada' && msgs[0].author.id === 'ada@example.com' && msgs[0].author.isSelf === false, 'the text is the text/plain part (the html sibling ignored); the author parsed from From');
   ok(msgs[1].author.isSelf === true && msgs[1].attachments.length === 1 && msgs[1].attachments[0].name === 'queue-graph.pdf' && msgs[1].attachments[0].bytes === 48213 && msgs[1].attachments[0].id === 'part:1', 'the authorizing user\'s own message is isSelf; an attachment is named by its PART (`part:1` — a Gmail attachmentId outgrows the record, 2026-09-26)');
   ok(msgs[0].raw.subject === 'Nightly job slow again' && msgs[0].raw.messageId === '<a1@example.com>' && msgs[0].at === T0 - 7200000, 'raw carries the subject + Message-ID; at = internalDate');
+  // lane channel-rich (D2): the text/html sibling is KEPT — as the record's formatted BODY (`role: 'body'`, first
+  // among the attachments), its bytes written into the attachment cache AT INGEST from the thread read already in
+  // hand: the window's formatted view costs ZERO vendor units
+  const bodyAtt = msgs[0].attachments[0];
+  ok(bodyAtt && bodyAtt.id === 'part:1' && bodyAtt.mime === 'text/html' && bodyAtt.role === 'body' && bodyAtt.name === 'message.html' && msgs[0].attachments.length === 1, 'D2: the html part is the record\'s formatted BODY (part:1, text/html, role body) — a plain-only message carries none', JSON.stringify(msgs[0].attachments));
+  const cached = eng.store.attachmentGet('gmail', 'thr_ops_0001', 'part:1');
+  ok(cached && fs.readFileSync(cached.file, 'utf-8').includes('<') && cached.meta.mime === 'text/html', 'D2: the body is in the attachment cache the moment the record is durable (kept at ingest — no request of its own)', JSON.stringify(cached && cached.meta));
+  const before = v.calls.length;
+  const served = await eng.attachment('gmail', 'thr_ops_0001', 'part:1', { msg: 'msg_ops_a' });
+  ok(served.ok && served.cached === true && v.calls.length === before, `D2: the window's ask is served from the cache — ZERO vendor calls (${v.calls.length - before})`);
+  const w = gmail.walkParts({ mimeType: 'multipart/related', partId: '', parts: [{ partId: '0', mimeType: 'text/html', body: { data: Buffer.from('<p><img src="cid:logo@x"></p>').toString('base64url'), size: 30 } }, { partId: '1', mimeType: 'image/png', filename: 'logo.png', headers: [{ name: 'Content-ID', value: '<logo@x>' }], body: { attachmentId: 'ANGjdJ_x', size: 9 } }, { partId: '2', mimeType: 'image/gif', headers: [{ name: 'X-Attachment-Id', value: 'ii_abc' }], body: { attachmentId: 'ANGjdJ_y', size: 5 } }] });
+  ok(w.htmlPart && w.htmlPart.id === 'part:0' && w.attachments.find((a) => a.id === 'part:1').cid === 'logo@x' && w.attachments.find((a) => a.id === 'part:2').cid === 'ii_abc', 'D2: a picture\'s Content-ID (angle brackets off; X-Attachment-Id too) rides as `cid` — the frame\'s cid: picture resolves through it', JSON.stringify(w.attachments));
+  const single = gmail.walkParts({ mimeType: 'text/html', partId: '', body: { data: Buffer.from('<b>x</b>').toString('base64url'), size: 8 } });
+  ok(single.htmlPart && single.htmlPart.id === 'part:root' && single.html === '<b>x</b>', 'D2: a single-part HTML mail\'s body is its ROOT payload (`part:root` — fetchAttachment reads the root for it)');
+  const rec = gmail.toRecord('gmail', 't', { id: 'm1', threadId: 't', internalDate: '1', payload: { mimeType: 'multipart/mixed', parts: Array.from({ length: 70 }, (_, i) => ({ partId: String(i + 1), mimeType: 'application/pdf', filename: `f${i}.pdf`, body: { attachmentId: 'x', size: 1 } })).concat([{ partId: '99', mimeType: 'text/html', body: { data: Buffer.from('<p>b</p>').toString('base64url'), size: 8 } }]) } });
+  ok(rec.attachments[0].role === 'body' && rec.attachments.length === 64, 'D2: the body is FIRST, so the record\'s 64-attachment bound never cuts it');
   const en = eng.store.index.snapshot().conversations['gmail/thr_ops_0001'];
   ok(en.anchor === 'msg_ops_b' && !('tracked' in en), 'the anchor advanced to the newest message after the COMPLETE pass');
   ok(full1 === 1, 'ONE full thread read for the first ingest');
@@ -373,9 +397,18 @@ let flowState = null;
   // the CONSENT asks readonly + compose (never gmail.send beside it: two rows for one thing)
   const src8 = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
   ok(/const scopesFor = \(\) => \(pushEnabled\(\) \? \[SCOPE, SCOPE_COMPOSE, PUBSUB_SCOPE\] : \[SCOPE, SCOPE_COMPOSE\]\);/.test(src8) && gmail.SCOPE_COMPOSE === 'https://www.googleapis.com/auth/gmail.compose', 'the consent asks readonly + gmail.compose (+ pubsub with push on) — gmail.send is recognised on a held token, never asked for');
+  // r6 verify F3: WHO A REPLY GOES TO is resolved when it is PROPOSED (`replyEnvelope`, for the anchor the engine
+  // picked from its store) and sent VERBATIM — the send never re-derives it from the thread's newest message
+  const env1 = await a.replyEnvelope(C, { anchorId: 'msg_ops_b' });
+  ok(env1.anchorId === 'msg_ops_b' && env1.to === 'ada@example.com' && env1.cc === null && env1.subject === 'Re: Nightly job slow again' && env1.inReplyTo === '<b1@example.com>' && env1.references === '<a1@example.com> <b1@example.com>', 'F3: replyEnvelope resolves the anchor\'s headers (ours ⇒ To = its To; Subject keeps ONE Re:; the threading chain) — ONE metadata read', JSON.stringify(env1));
+  const envElse = await threw(() => a.replyEnvelope(C, { anchorId: 'msg_of_another_thread' }));
+  ok(envElse && envElse.code === 'not-found' && envElse.detail.why === 'reply-anchor-elsewhere', 'F3: an anchor that is not in THIS thread ⇒ not-found (reply-anchor-elsewhere), never "the newest instead"', envElse && envElse.message);
+  v8.calls.length = 0;
+  const noEnv = await threw(() => a.send(C, { text: 'x', idemKey: 'p-ne', as: 'user' }));
+  ok(noEnv && noEnv.detail && noEnv.detail.why === 'reply-envelope-missing' && v8.calls.length === 0, 'F3: a reply with NO envelope resolved at propose is refused by name before ANY request (nothing is re-derived at send time)', noEnv && noEnv.message);
   const seen = [];
   v8.calls.length = 0;
-  const r1 = await a.send(C, { text: 'fixed & deployed, thanks', idemKey: 'p-0001', as: 'user', onHandle: async (h) => { seen.push({ h, callsSoFar: v8.calls.map((c) => `${c.method} ${c.path.replace('/gmail/v1/users/me', '')}`) }); } });
+  const r1 = await a.send(C, { text: 'fixed & deployed, thanks', idemKey: 'p-0001', as: 'user', envelope: env1, onHandle: async (h) => { seen.push({ h, callsSoFar: v8.calls.map((c) => `${c.method} ${c.path.replace('/gmail/v1/users/me', '')}`) }); } });
   const order = v8.calls.map((c) => `${c.method} ${c.path.replace('/gmail/v1/users/me', '').replace(/^\/threads\/.*$/, '/threads/:id')}`);
   ok(JSON.stringify(order) === JSON.stringify(['GET /threads/:id', 'POST /drafts', 'POST /drafts/send']), 'the two phases in order: ONE metadata read of the thread (the anchor), drafts.create, drafts.send', JSON.stringify(order));
   ok(seen.length === 1 && seen[0].h.draftId === 'r-draft-0001' && seen[0].h.messageId === 'msg_draft_0001' && seen[0].h.threadId === C && JSON.stringify(seen[0].callsSoFar) === JSON.stringify(['GET /threads/thr_ops_0001', 'POST /drafts']),
@@ -388,18 +421,47 @@ let flowState = null;
   const ds = v8.calls.find((c) => c.path.endsWith('/drafts/send'));
   ok(ds.json.id === 'r-draft-0001' && r1.ok && r1.vendorMessageId === 'msg_sent_0001' && r1.sentAs === 'user' && r1.handle.draftId === 'r-draft-0001' && r1.anchorId === 'msg_ops_b', 'drafts.send names the draft; the answer carries the SENT message id, sentAs user, the handle and the anchor', JSON.stringify(r1));
   v8.calls.length = 0;
-  await a.send(C, { text: 'to Ada directly', idemKey: 'p-0002', as: 'user', replyTo: 'msg_ops_a' });
+  const env2 = await a.replyEnvelope(C, { anchorId: 'msg_ops_a' });
+  v8.calls.length = 0;
+  await a.send(C, { text: 'to Ada directly', idemKey: 'p-0002', as: 'user', replyTo: 'msg_ops_a', envelope: env2 });
   const dc2 = v8.calls.find((c) => c.path.endsWith('/drafts') && c.method === 'POST');
   const mime2 = Buffer.from(dc2.json.message.raw, 'base64url').toString('utf-8');
   ok(/^To: Ada <ada@example\.com>\r\n/m.test(mime2) && /\r\nIn-Reply-To: <a1@example\.com>\r\n/.test(mime2) && /\r\nReferences: <a1@example\.com>\r\n/.test(mime2), 'replyTo picks the ANCHOR: somebody else\'s message ⇒ To = its From, threading on ITS Message-ID');
+  // r6 verify F3: a message joins the thread AFTER the owner looked (a stranger with a Reply-To) — the approved
+  // reply still goes to the recipients the card showed; the answered message gone ⇒ refused by name, nothing sent
+  {
+    v8.state.lateMessage = true; v8.calls.length = 0;
+    await a.send(C, { text: 'still to Ada', idemKey: 'p-late', as: 'user', envelope: env1 });
+    const dcL = v8.calls.find((c) => c.path.endsWith('/drafts') && c.method === 'POST');
+    const mimeL = dcL ? Buffer.from(dcL.json.message.raw, 'base64url').toString('utf-8') : '';
+    ok(/^To: ada@example\.com\r\n/m.test(mimeL) && !/evil\.example/.test(mimeL) && /\r\nIn-Reply-To: <b1@example\.com>\r\n/.test(mimeL), 'F3: a stranger\'s message landing in the thread after the proposal does NOT re-target the approved reply (To stays the shown ada@example.com, threading stays on the shown anchor)', mimeL.split('\r\n').slice(0, 5).join(' | '));
+    const Mf3 = mutantCopies('chan-gmail-f3', REPO);
+    const srcG = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
+    const LINE = "      const h = { to: String(env.to), cc: env.cc ? String(env.cc) : null, subject: String(env.subject || ''), inReplyTo: env.inReplyTo || null, references: env.references || null };";
+    ok(srcG.split(LINE).length === 2, 'the verbatim-envelope line is present once (the control restores the send-time derivation)');
+    const gNo = Mf3.load('src/channels/gmail.js', srcG.replace(LINE, '      const h = replyHeaders(msgs[msgs.length - 1], self);'), 'send-time-recipients');
+    const regNo = CH.createChannelRegistry(); regNo.register(gNo.adapter);
+    const vNo = mkVendor(); vNo.state.lateMessage = true;
+    const tokNo = { st: { token: { access_token: 'ya29.s', expiresAt: now() + 3600e3, refresh_token: '1//r', scopes: [gmail.SCOPE, gmail.SCOPE_COMPOSE], email: 'member.a@example.com' } }, read: () => ({ token: tokNo.st.token, why: null }), write: async (t2) => { tokNo.st.token = t2; }, clear: async () => { tokNo.st.token = null; } };
+    const aNo = regNo.create('gmail', { id: 'gmail', options: {} }, { now, fetch: vNo.fetchFn, tokens: tokNo, resolveIntegration: (id) => integrations.resolveIntegration(id), log: quiet });
+    await aNo.send(C, { text: 'still to Ada', idemKey: 'p-late', as: 'user', envelope: env1 }).catch(() => null);
+    const dcNo = vNo.calls.find((c) => c.path.endsWith('/drafts') && c.method === 'POST');
+    const mimeNo = dcNo ? Buffer.from(dcNo.json.message.raw, 'base64url').toString('utf-8') : '';
+    ok(/^To: drop@evil\.example\r\n/m.test(mimeNo), 'CONTROL: the send-time derivation (the pre-fix rule) addresses the approved reply to the late stranger\'s Reply-To — the leg above would go red', mimeNo.split('\r\n').slice(0, 3).join(' | '));
+    for (const r of copiesCensus(Mf3.files, Mf3.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
+    v8.state.lateMessage = false; v8.state.dropAnchor = 'msg_ops_b'; v8.calls.length = 0;
+    const gone = await threw(() => a.send(C, { text: 'x', idemKey: 'p-gone', as: 'user', envelope: env1 }));
+    ok(gone && gone.code === 'not-found' && gone.detail.why === 'reply-anchor-gone' && !v8.calls.some((c) => c.method === 'POST'), 'F3: the answered message is gone from the thread at send ⇒ refused by name (reply-anchor-gone), NO draft — never re-derived to another anchor', gone && gone.message);
+    v8.state.dropAnchor = null;
+  }
   // lost vs refused
   v8.state.sendFail = 'transport';
   const seen2 = [];
-  const lost = await threw(() => a.send(C, { text: 'lost', idemKey: 'p-l', as: 'user', onHandle: async (h) => seen2.push(h) }));
+  const lost = await threw(() => a.send(C, { text: 'lost', idemKey: 'p-l', as: 'user', envelope: env1, onHandle: async (h) => seen2.push(h) }));
   ok(lost && lost.code === 'transport' && lost.detail.lost === true && lost.detail.phase === 'send' && lost.detail.handle && lost.detail.handle.draftId === 'r-draft-0001' && seen2.length === 1, 'a transport failure in PHASE 2 (drafts.send) is LOST with the handle — the draft may have gone out; the handle had already been handed over', lost && JSON.stringify(lost.detail));
   v8.state.sendFail = 'transport-draft';
   const seen3 = [];
-  const ph1 = await threw(() => a.send(C, { text: 'x', idemKey: 'p-d', as: 'user', onHandle: async (h) => seen3.push(h) }));
+  const ph1 = await threw(() => a.send(C, { text: 'x', idemKey: 'p-d', as: 'user', envelope: env1, onHandle: async (h) => seen3.push(h) }));
   ok(ph1 && ph1.code === 'transport' && !ph1.detail.lost && ph1.detail.phase === 'draft' && ph1.detail.draftMayExist === true && seen3.length === 0, 'a transport failure in PHASE 1 (drafts.create) is a REFUSAL (nothing could have been sent; a stray draft is said), no handle');
   const bot = await threw(() => a.send(C, { text: 'x', idemKey: 'p-b', as: 'bot' }));
   ok(bot && bot.code === 'send-not-available', 'sending as `bot` is not declared ⇒ send-not-available');

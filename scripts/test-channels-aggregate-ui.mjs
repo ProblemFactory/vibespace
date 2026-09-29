@@ -108,22 +108,61 @@ setInterval(() => {}, 1 << 30);
   execFileSync('dtach', ['-n', path.join(SOCK_DIR, READER.sockName), '-E', '-z', process.execPath, STUB, READER.cid, READER.name], { env: { ...process.env, HOME: fakeHome } });
 }
 
+// ── ⑩ (lane channel-rich D2): THE BEACON — a local http server every HOSTILE mail in the fake world's mail room
+//    tries to reach (script, onerror, meta refresh, base, form, iframe, CSS url()/@import/image-set, srcset, an http
+//    tracker picture, …). It must NEVER be hit: before Show pictures, after it, ever.
+const http = require('node:http');
+const BEACON_PORT = await freePort();
+const beaconHits = [];
+const beacon = http.createServer((req, res) => { beaconHits.push(`${req.method} ${req.url}`); res.writeHead(204); res.end(); });
+// security verify r2 (continued): TCP CONNECTIONS are counted too — a preconnect / dns-prefetch-style leak opens a socket
+// and sends no request, which a request log never sees (process-independent: an out-of-process sandboxed frame included)
+let beaconConns = 0;
+beacon.on('connection', () => { beaconConns++; });
+await new Promise((r) => beacon.listen(BEACON_PORT, '127.0.0.1', r));
+const BEACON = `http://127.0.0.1:${BEACON_PORT}`;
+// ── ⑩x (security verify r2, 2026-09-28): THE ATTACK CORPUS (scripts/mail-attack-corpus.mjs) in its own room through the
+//    fake adapter's VIBESPACE_CHANNELS_FAKE_MAIL_DIR seam, an HTTPS beacon beside the http one (a self-signed cert;
+//    chrome ignores certificate errors for it) — every hit is recorded with its referer + cookie, attributed by path
+const https = require('node:https');
+const BEACON_TLS_PORT = await freePort();
+const tlsHits = [];
+const tlsDir = scratch('chan-agg-ui-tls');
+fs.mkdirSync(tlsDir, { recursive: true });
+let BEACON_S = null, beaconTls = null;
+try {
+  execSync(`openssl req -x509 -newkey rsa:2048 -nodes -keyout ${tlsDir}/key.pem -out ${tlsDir}/cert.pem -days 2 -subj "/CN=127.0.0.1"`, { stdio: 'ignore' });
+  beaconTls = https.createServer({ key: fs.readFileSync(`${tlsDir}/key.pem`), cert: fs.readFileSync(`${tlsDir}/cert.pem`) }, (req, res) => { tlsHits.push({ url: req.url, ref: req.headers.referer || null, cookie: req.headers.cookie || null }); res.writeHead(204); res.end(); });
+  await new Promise((r) => beaconTls.listen(BEACON_TLS_PORT, '127.0.0.1', r));
+  BEACON_S = `https://127.0.0.1:${BEACON_TLS_PORT}`;
+} catch { BEACON_S = null; }
+const { mailAttackCorpus } = await import('./mail-attack-corpus.mjs');
+const CORPUS = mailAttackCorpus(BEACON, BEACON_S || BEACON);
+const corpusDir = scratch('chan-agg-ui-corpus');
+fs.mkdirSync(corpusDir, { recursive: true });
+for (const c of CORPUS) fs.writeFileSync(path.join(corpusDir, `${c.name}.html`), c.html);
+const MAIL_N = 30;
+
 let srv = null;
 const bootServer = () => spawn(process.execPath, ['server.js'], {
   cwd: wt, stdio: 'ignore',
-  env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANNELS_FAKE: '1', VIBESPACE_CHANNELS_FAKE_CONVS: '3' },
+  // lane channel-rich: the fake PUSH account also carries the mail room (30 HTML mails + a pictures mail + a hostile
+  // mail + a plain one + a bot's line) — on the push fake, so the poll fake's five rooms stay every other leg's fixture
+  env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANNELS_FAKE: '1', VIBESPACE_CHANNELS_FAKE_CONVS: '3', VIBESPACE_CHANNELS_FAKE_MAIL: String(MAIL_N), VIBESPACE_CHANNELS_FAKE_BEACON: BEACON, VIBESPACE_CHANNELS_FAKE_MAIL_DIR: corpusDir },
 });
 srv = bootServer();
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
-  '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1400,1000', '--disable-background-timer-throttling',
+  '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1400,1000', '--disable-background-timer-throttling', '--ignore-certificate-errors',
   `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
 const cleanup = () => {
+  try { beacon.close(); } catch {}
+  try { beaconTls && beaconTls.close(); } catch {}
   try { chrome.kill('SIGKILL'); } catch {}
   try { srv && srv.kill('SIGKILL'); } catch {}
   // the fixture's dtach master + stub CLI are THIS suite's processes — ended by evidence (their argv names this scratch tree)
   if (HAVE_DTACH) { try { execFileSync('pkill', ['-KILL', '-f', STUB], { stdio: 'ignore' }); } catch {} try { execFileSync('pkill', ['-KILL', '-f', SOCK_DIR], { stdio: 'ignore' }); } catch {} }
   try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
-  for (const d of [chromeDir, fakeHome]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+  for (const d of [chromeDir, fakeHome, tlsDir, corpusDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 };
 process.on('exit', cleanup);
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
@@ -795,6 +834,408 @@ const race = await p1.evaljs(RACE(baseRooms[0]));
 const rp = await p1.evaljs(REPAINT(baseRooms[0]));
 ok(rp.before > 0 && rp.cleared && rp.parsed === rp.started && rp.after === rp.before, `ONE LIST, ONE WRITER (⑨b): a rebuild (a reconnect's re-read) repainting an open window (its clear dropping scrollTop to 0 and that scroll event dispatched) draws its ${rp.before} message(s) once (${rp.after} drawn; pages read: ${rp.urls.join(' ')})`, JSON.stringify(rp));
 ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.started && race.page > 0 && race.shown === race.page, `ONE LIST, ONE WRITER: three renders in flight together (the open's page answering last; ${race.started} of them fetched a page) — the window shows the page's ${race.page} record(s) ONCE (${race.shown} drawn)`, JSON.stringify(race));
+
+// ── ⑩ lane channel-rich (2026-09-28): A MAIL IS SHOWN FORMATTED, SAFELY; A BOT HAS ITS MARK ──
+// The owner: "gmail 这种富文本 html 内容似乎完全没有按照 html 渲染 … lark 里还有标记为 app 的情况". The fake push
+// account's MAIL ROOM (the Gmail record's shape: a `role: body` text/html part, a cid: picture) opened in a window:
+// the formatted body is in a FULLY SANDBOXED frame (`sandbox="allow-scripts"` only — an opaque origin), its remote
+// picture NOT requested until 显示图片, the plain text a toggle away, a hostile mail runs NOTHING and reaches NOTHING
+// (the beacon), the resizer's message trusted only from its own frame, 30 HTML mails hold ≤ LIVE_FRAME_CAP frames,
+// and the phone width; a bot's line wears the bot mark.
+{
+  const MF = require(path.join(repo, 'src/mail-frame.js'));
+  const MAIL = 'fake-push-mail';
+  let n = 0;
+  for (let i = 0; i < 160; i++) { const d = await api('GET', `/api/channels/fake-push/${MAIL}/messages?limit=60`); n = (d.json.records || []).length; if (n >= MAIL_N + 6) break; await sleep(250); }
+  ok(n >= MAIL_N + 6, `FIXTURE: the mail room is ingested (${n} records: ${MAIL_N} HTML mails + pictures + hostile + plain + wide + quoted + a bot)`);
+  const body = await api('GET', `/api/channels/fake-push/${MAIL}/messages?limit=60`);
+  const pic = (body.json.records || []).find((r) => r.vendorId === `${MAIL}-pictures`);
+  ok(pic && pic.attachments.some((a) => a.role === 'body' && a.mime === 'text/html') && pic.attachments.some((a) => a.cid === 'logo@fake'), 'the record names its formatted BODY (role body, text/html) and its cid: picture (the record keeps `role` and `cid`)', JSON.stringify(pic && pic.attachments));
+  // a frame goes live on the list's IntersectionObserver + a frame callback: a BACKGROUND tab runs no frames, so
+  // page 1 is brought to the front first (a person reads a mail in the tab they are looking at)
+  await p1.cdp('Page.bringToFront');
+  await p1.evaljs(`(async () => {
+    const w = window.app.openChannel('fake-push', '${MAIL}');
+    window.__mailW = w;
+    window.__xss = null;
+    for (let i = 0; i < 200; i++) { if (w.content.querySelectorAll('.chanmsg').length >= ${MAIL_N + 6}) break; await new Promise((r) => setTimeout(r, 100)); }
+    return true;
+  })()`);
+  const ROW = (vid) => `[...window.__mailW.content.querySelectorAll('.chanmsg')].find((r) => r.dataset.vid === '${vid}')`;
+  const waitFrame = async (vid, pred = 'true') => p1.evaljs(`(async () => {
+    for (let i = 0; i < 150; i++) {
+      const row = ${ROW(vid)};
+      const f = row && row.querySelector('iframe.chanmail-frame');
+      if (f && row.querySelector('.chanmail-box').dataset.h && (${pred})) return true;
+      if (row && i % 10 === 0) row.scrollIntoView({ block: 'center' });
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    const row = ${ROW(vid)};
+    const m = row && row.querySelector('.chanmail');
+    window.__mailDiag = m ? { cls: row.className, note: m.querySelector('.chanmail-note').textContent, box: m.querySelector('.chanmail-box').innerHTML.slice(0, 200), boxHidden: m.querySelector('.chanmail-box').hidden } : { row: !!row, chanmail: false };
+    return false;
+  })()`);
+  const diag = async () => JSON.stringify(await p1.evaljs('window.__mailDiag || null'));
+  // ⓐ the BOT's line wears its mark
+  const bot = await p1.evaljs(`(() => { const r = ${ROW(`${MAIL}-bot`)}; return r ? { name: r.querySelector('.chanmsg-head b') && r.querySelector('.chanmsg-head b').textContent, mark: !!r.querySelector('.chanmsg-head .chanmsg-bot svg'), title: r.querySelector('.chanmsg-bot') && r.querySelector('.chanmsg-bot').title, emoji: /[\\u{1F300}-\\u{1FAFF}]/u.test(r.textContent) } : null; })()`);
+  ok(bot && bot.name === 'Build Bot' && bot.mark && bot.title === '机器人' && !bot.emoji, 'D3: a bot\'s line shows its NAME with a small bot mark — the icon library\'s SVG (titled 机器人), never an emoji', JSON.stringify(bot));
+  // ⓑ a mail with NO html part renders as before (its markup-looking plain text is WORDS, no frame)
+  const plain = await p1.evaljs(`(() => { const r = ${ROW(`${MAIL}-plain`)}; return r ? { frame: !!r.querySelector('.chanmail'), text: r.querySelector('.chanmsg-body').textContent } : null; })()`);
+  ok(plain && !plain.frame && plain.text.includes('<td>markup in the plain part</td>'), 'a mail with no text/html part: no frame, its plain text as WORDS (a markup-looking line stays words)', JSON.stringify(plain));
+  // ⓒ the PICTURES mail: formatted, sandboxed, remote picture blocked, cid: drawn
+  ok(await waitFrame(`${MAIL}-pictures`), 'the pictures mail draws its FRAME and the frame reported its height (our resizer ran, its message was accepted)', await diag());
+  const F = await p1.evaljs(`(() => {
+    const r = ${ROW(`${MAIL}-pictures`)};
+    const f = r.querySelector('iframe.chanmail-frame');
+    const doc = f.srcdoc;
+    const pics = r.querySelector('.chanmail-pictures');
+    return {
+      sandbox: f.getAttribute('sandbox'), opaque: f.contentDocument === null, formatted: r.classList.contains('chanmail-formatted'),
+      bodyHidden: getComputedStyle(r.querySelector('.chanmsg-body')).display === 'none',
+      csp: (doc.match(/Content-Security-Policy" content="([^"]*)"/) || [])[1] || '', remote: /img\\.example\\.invalid/.test(doc), cid: /src="data:image\\/png;base64,/.test(doc),
+      blocked: (doc.match(/data-vs-blocked="1"/g) || []).length, scripts: (doc.match(/<script/g) || []).length, h: Number(r.querySelector('.chanmail-box').dataset.h),
+      pics: pics && !pics.hidden ? pics.textContent : null, modes: [...r.querySelectorAll('.chanmail-mode')].map((b) => [b.textContent, b.getAttribute('aria-pressed')]),
+      stripLogo: [...r.querySelectorAll('.chanmsg-atts [data-channel-image]')].map((n) => getComputedStyle(n.closest('.chanmsg-pic') || n).display),
+      docBody: doc.slice(doc.indexOf('<body>'), doc.lastIndexOf('<script')).replace(/base64,[A-Za-z0-9+/=]+/g, 'base64,…'),
+    };
+  })()`);
+  ok(F.sandbox === 'allow-scripts' && F.opaque && F.formatted && F.bodyHidden, 'the frame is sandboxed "allow-scripts" ONLY (an opaque origin: contentDocument is null to the parent); the row is formatted, its text body hidden', JSON.stringify(F));
+  ok(F.csp === MF.cspFor({ nonce: (F.csp.match(/'nonce-([^']+)'/) || [])[1] }) && !/https:/.test(F.csp) && !F.remote && F.blocked === 2 && F.scripts === 1, 'the frame document: OUR CSP (no https: before the press), the remote + tracker pictures carry NO src (blocked, marked), ONE script (ours)', JSON.stringify([F.csp, F.remote, F.blocked, F.scripts, F.docBody]));
+  ok(F.cid && F.stripLogo.every((d) => d === 'none'), 'the cid: picture is drawn IN the mail (a data: picture the parent fetched through our route) — and not drawn again in the strip under it', JSON.stringify(F.stripLogo));
+  ok(F.pics === '显示图片（2）' && F.modes[0][0] === '格式化' && F.modes[0][1] === 'true' && F.modes[1][0] === '纯文本' && F.h >= MF.HEIGHT_MIN, 'the bar says 格式化 | 纯文本 (formatted pressed) and 显示图片（2）', JSON.stringify(F));
+  // ⓓ the resizer message SPOOFED from another frame (carrying the REAL token) is ignored
+  const spoof = await p1.evaljs(`(async () => {
+    const r = ${ROW(`${MAIL}-pictures`)};
+    const f = r.querySelector('iframe.chanmail-frame');
+    const tok = (f.srcdoc.match(/var T="([^"]+)"/) || [])[1];
+    const h0 = f.style.height;
+    const evil = document.createElement('iframe');
+    evil.setAttribute('sandbox', 'allow-scripts');
+    evil.srcdoc = '<script>parent.postMessage({vsMail:' + JSON.stringify(tok) + ',h:7777},"*");parent.postMessage({vsMail:' + JSON.stringify(tok) + ',open:"https://evil.example/x"},"*");<\/script>';
+    const opened = []; const o0 = window.open; window.open = (...a) => { opened.push(a[0]); return null; };
+    document.body.appendChild(evil);
+    await new Promise((res) => setTimeout(res, 800));
+    evil.remove(); window.open = o0;
+    return { tok: !!tok, h0, h1: f.style.height, opened };
+  })()`);
+  ok(spoof.tok && spoof.h0 === spoof.h1 && !spoof.opened.length, 'a SPOOFED resizer message (another frame, carrying the real token) moves nothing and opens nothing — the parent checks the SOURCE window', JSON.stringify(spoof));
+  // ⓔ Show pictures: this message's frame is rebuilt with https: in its CSP and the remote src; the tracker never
+  await p1.evaljs(`(() => { ${ROW(`${MAIL}-pictures`)}.querySelector('.chanmail-pictures').click(); return true; })()`);
+  ok(await waitFrame(`${MAIL}-pictures`, "/img-src data: https:/.test(f.srcdoc)"), 'after 显示图片 the frame is rebuilt');
+  const P = await p1.evaljs(`(() => { const r = ${ROW(`${MAIL}-pictures`)}; const d = r.querySelector('iframe.chanmail-frame').srcdoc; return { https: /img-src data: https:/.test(d), remote: /src="https:\\/\\/img\\.example\\.invalid\\/pic\\.png"/.test(d), tracker: /tracker\\.gif/.test(d), button: r.querySelector('.chanmail-pictures').hidden }; })()`);
+  ok(P.https && P.remote && !P.tracker && P.button, 'Show pictures: https: joins img-src FOR THIS FRAME, the https picture gets its src, the http tracker never; the button is gone', JSON.stringify(P));
+  // ⓕ Plain text ⇄ Formatted
+  const T1 = await p1.evaljs(`(async () => {
+    const r = ${ROW(`${MAIL}-pictures`)};
+    r.querySelector('.chanmail-mode[data-mode="plain"]').click();
+    await new Promise((res) => setTimeout(res, 200));
+    const plain = { frame: !!r.querySelector('iframe.chanmail-frame'), formatted: r.classList.contains('chanmail-formatted'), body: getComputedStyle(r.querySelector('.chanmsg-body')).display !== 'none' && /Newsletter/.test(r.querySelector('.chanmsg-body').textContent) };
+    // naive-user verify (2026-09-28): the bar must not have moved UNDER the text — it stays where the pointer left it
+    plain.barAboveBody = r.querySelector('.chanmail-bar').getBoundingClientRect().bottom <= r.querySelector('.chanmsg-body').getBoundingClientRect().top + 1;
+    r.querySelector('.chanmail-mode[data-mode="formatted"]').click();
+    return plain;
+  })()`);
+  ok(!T1.frame && !T1.formatted && T1.body, '纯文本: the frame is gone and the TEXT body is shown', JSON.stringify(T1));
+  ok(T1.barAboveBody === true, '…and the 格式化 | 纯文本 bar stays ABOVE the text (it never jumps under the body when pressed)', JSON.stringify(T1));
+  ok(await waitFrame(`${MAIL}-pictures`), '格式化: the frame comes back');
+  // ⓖ THE HOSTILE MAIL: nothing runs, nothing is reached
+  ok(await waitFrame(`${MAIL}-hostile`), 'the hostile mail draws its frame (sanitized)');
+  await sleep(1500);
+  const HM = await p1.evaljs(`(() => {
+    const r = ${ROW(`${MAIL}-hostile`)};
+    const f = r.querySelector('iframe.chanmail-frame');
+    const d = f.srcdoc;
+    return { xss: window.__xss, opaque: f.contentDocument === null, sandbox: f.getAttribute('sandbox'), scripts: (d.match(/<script/gi) || []).length,
+      reach: /(src|style|href)="[^"]*127\\.0\\.0\\.1:${BEACON_PORT}|<style>[^<]*127\\.0\\.0\\.1:${BEACON_PORT}/.test(d), bad: (d.match(/<(iframe|object|embed|form|input|button|meta http|base|link|svg|math|video)\\b/gi) || []).length, on: /\\son[a-z]+\\s*=/i.test(d), js: /javascript:/i.test(d),
+      windowFrames: document.querySelectorAll('iframe').length, top: location.href };
+  })()`);
+  ok(HM.xss === null && HM.opaque && HM.sandbox === 'allow-scripts' && HM.scripts === 1 && !HM.reach && HM.bad <= 1 && !HM.on && !HM.js, 'HOSTILE: window.__xss untouched, the frame opaque + sandboxed, ONE script (ours), no load from the beacon, no dangerous element (the one match is our own CSP <meta>), no handler, no javascript:', JSON.stringify(HM));
+  ok(beaconHits.length === 0, `the BEACON was never hit — script / onerror / meta refresh / base / form / iframe / CSS url() / @import / srcset / the http tracker (${beaconHits.length} hits)`, beaconHits.join(', '));
+  ok(HM.top === `http://127.0.0.1:${PORT}/`, 'the page never navigated (a meta refresh / base / target=_top reached nothing)', HM.top);
+  // ⓖ2 (naive-user verify, 2026-09-28) THE QUOTED HISTORY IS FOLDED: a Gmail-shaped reply's `gmail_quote` is
+  //    marked ONCE (the outermost), hidden in the frame behind one "显示引用内容" button, shown on a press. The frame
+  //    is opaque to the parent, so the SAME srcdoc is read through a test-only same-origin probe frame (no
+  //    sandbox: the probe is this suite's, never the product's — the product's frame stays allow-scripts)
+  ok(await waitFrame(`${MAIL}-quoted`), 'the quoted mail draws its frame');
+  const QF = await p1.evaljs(`(async () => {
+    const r = ${ROW(`${MAIL}-quoted`)};
+    const doc = r.querySelector('iframe.chanmail-frame').srcdoc;
+    const probe = document.createElement('iframe'); probe.style.cssText = 'width:600px;height:400px;position:fixed;left:-2000px;top:0';
+    probe.srcdoc = doc; document.body.appendChild(probe);
+    await new Promise((res) => setTimeout(res, 600));
+    const d = probe.contentDocument;
+    // (ids never survive the sanitizer — DOMPurify forbids id — so the paragraphs are found by their words)
+    const byWords = (w) => [...d.querySelectorAll('p')].find((x) => x.textContent.trim() === w) || null;
+    const btn = d.querySelector('button.vs-q'), old = byWords('Can we ship the fix today?'), nu = byWords('Sounds good — shipping it.');
+    const bodyH = () => Math.round(d.body.getBoundingClientRect().height);
+    const out = { marks: (doc.match(/data-vs-quote="1"/g) || []).length, btn: btn ? btn.textContent : null, newShown: !!nu && nu.getBoundingClientRect().height > 0, oldHiddenBefore: !!old && old.getBoundingClientRect().height === 0, h0: bodyH() };
+    if (btn) btn.click();
+    await new Promise((res) => setTimeout(res, 300));
+    out.oldShownAfter = !!old && old.getBoundingClientRect().height > 0; out.btnAfter = btn ? btn.textContent : null; out.h1 = bodyH();
+    probe.remove();
+    return out;
+  })()`);
+  ok(QF.marks === 1 && QF.btn === '显示引用内容' && QF.newShown && QF.oldHiddenBefore, 'the quoted history is marked ONCE (the outermost gmail_quote), the new words show, the quote is folded behind 显示引用内容', JSON.stringify(QF));
+  ok(QF.oldShownAfter && QF.btnAfter === '收起引用内容' && QF.h1 > QF.h0, 'a press shows the quoted mail, the button says 收起引用内容, the document grew (the resizer posts the new height)', JSON.stringify(QF));
+  // ⓗ LAZY: 30 HTML mails never hold 30 frames — scrolled top to bottom; at every stop EVERY formatted row on
+  //    screen is live (security verify r2, continued: the cap used to blank visible mails past the sixth) and the
+  //    frames never outnumber max(LIVE_FRAME_CAP, the rows on screen)
+  const LZ = await p1.evaljs(`(async () => {
+    const w = window.__mailW, list = w.content.querySelector('.chanwin-list');
+    const counts = [], blank = [], over = [];
+    for (let y = 0; y <= list.scrollHeight; y += Math.max(200, list.clientHeight / 2)) {
+      list.scrollTop = y; list.dispatchEvent(new Event('scroll'));
+      await new Promise((r) => setTimeout(r, 900));
+      const L = list.getBoundingClientRect();
+      const fm = [...w.content.querySelectorAll('.chanmsg.chanmail-formatted')];
+      const onScreen = fm.filter((row) => { const b = row.querySelector('.chanmail-box').getBoundingClientRect(); return b.height > 0 && b.bottom > L.top && b.top < L.bottom; });
+      const n = w.content.querySelectorAll('iframe.chanmail-frame').length;
+      counts.push(n);
+      for (const row of onScreen) if (!row.querySelector('iframe.chanmail-frame')) blank.push(y + ':' + row.dataset.vid);
+      if (n > Math.max(${MF.LIVE_FRAME_CAP}, onScreen.length)) over.push(y + ':' + n + '>' + onScreen.length);
+    }
+    return { counts, blank, over, total: w.content.querySelectorAll('.chanmail').length };
+  })()`);
+  ok(LZ.total >= MAIL_N + 2 && Math.max(...LZ.counts) < LZ.total && Math.max(...LZ.counts) >= 1 && !LZ.over.length && !LZ.blank.length, `LAZY: ${LZ.total} formatted mails, at most ${Math.max(...LZ.counts)} live frames at any scroll position (never more than max(cap ${MF.LIVE_FRAME_CAP}, the rows on screen)) and every formatted row ON SCREEN is live at every stop`, JSON.stringify(LZ));
+  // ⓘ THE PHONE WIDTH: nothing leaves the row, the toggle is a finger's target
+  await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 375, height: 760, deviceScaleFactor: 2, mobile: true });
+  await sleep(600);
+  const PH = await p1.evaljs(`(async () => {
+    const r = ${ROW(`${MAIL}-pictures`)};
+    r.scrollIntoView({ block: 'center' });
+    await new Promise((res) => setTimeout(res, 800));
+    const list = window.__mailW.content.querySelector('.chanwin-list');
+    const box = r.querySelector('.chanmail-box').getBoundingClientRect(), row = r.getBoundingClientRect();
+    return { overflow: list.scrollWidth > list.clientWidth + 1, inside: box.right <= row.right + 1 && box.left >= row.left - 1, modeH: Math.round(r.querySelector('.chanmail-mode').getBoundingClientRect().height), vw: window.innerWidth };
+  })()`);
+  ok(PH.vw <= 400 && !PH.overflow && PH.inside && PH.modeH >= 36, 'the phone width: the frame stays inside its row, nothing scrolls sideways, the toggle is ≥ 36 px tall', JSON.stringify(PH));
+  // ⓘ2 (naive-user verify, 2026-09-28) FIT TO WIDTH: a 900 px newsletter at the phone's ~300 px frame is ZOOMED to
+  //    fit — its right edge is inside the frame, nothing is cut (the frame's overflow is hidden: a cut mail was
+  //    unreadable AND unreachable). Read through the test-only probe at the product frame's own width; the
+  //    CONTROL is the same document with our fit rule neutered (zoom pinned at 1) — it overflows.
+  ok(await waitFrame(`${MAIL}-wide`), 'the wide newsletter draws its frame at the phone width');
+  const FW = await p1.evaljs(`(async () => {
+    const r = ${ROW(`${MAIL}-wide`)};
+    const f = r.querySelector('iframe.chanmail-frame');
+    const w = Math.round(f.getBoundingClientRect().width);
+    const read = async (doc) => {
+      const probe = document.createElement('iframe'); probe.style.cssText = 'width:' + w + 'px;height:300px;position:fixed;left:-2000px;top:0';
+      probe.srcdoc = doc; document.body.appendChild(probe);
+      await new Promise((res) => setTimeout(res, 700));
+      const d = probe.contentDocument, m = [...d.querySelectorAll('td')].find((x) => x.textContent.trim() === 'Wide newsletter') || null;
+      const out = { zoom: d.body.style.zoom, sw: Math.round(d.body.getBoundingClientRect().width), cw: d.documentElement.clientWidth, right: m ? Math.round(m.getBoundingClientRect().right) : null, h: Math.round(d.body.getBoundingClientRect().height) };
+      probe.remove();
+      return out;
+    };
+    const fit = await read(f.srcdoc);
+    const neutered = f.srcdoc.replace("b.style.zoom=sw>cw+1?String(cw/sw):'1';", "b.style.zoom='1';");
+    const ctl = await read(neutered);
+    ctl.patched = neutered !== f.srcdoc;
+    return { w, fit, ctl, boxH: Number(r.querySelector('.chanmail-box').dataset.h) };
+  })()`);
+  ok(FW.w < 400 && FW.fit.zoom && Number(FW.fit.zoom) < 0.5 && FW.fit.sw <= FW.fit.cw + 1 && FW.fit.right <= FW.w, `FIT: the 900 px mail is zoomed to the ${FW.w} px frame (zoom ${FW.fit.zoom}), its right edge inside, nothing overflows`, JSON.stringify(FW));
+  ok(FW.ctl.zoom === '1' && FW.ctl.patched === true && FW.ctl.right > FW.w + 100, 'CONTROL: the same document with the fit rule neutered overflows the frame (the cut the owner would have seen)', JSON.stringify(FW.ctl));
+  ok(FW.boxH >= MF.HEIGHT_MIN && FW.boxH < 400, 'the product frame\'s reported height is the ZOOMED content\'s (a fitted mail is short, not a 900 px-wide mail\'s tall wrap)', JSON.stringify(FW.boxH));
+  await p1.cdp('Emulation.clearDeviceMetricsOverride');
+  await p1.evaljs(`(() => { window.app.wm.closeWindow(window.__mailW.id); return true; })()`);
+  ok(beaconHits.length === 0, `…and at the end of the leg the beacon is still untouched (${beaconHits.length})`, beaconHits.join(', '));
+  // CONTROL: the SAME hostile mail rendered RAW (the eml viewer's shape without its sandbox: no sanitizer, no CSP,
+  // same origin) reaches the beacon — the zeros above are the wall, not a dead fixture
+  await p1.evaljs(`(async () => {
+    const r = await fetch('/api/channels/fake-push/${MAIL}/attachment/' + encodeURIComponent('${MAIL}-hostile-body') + '?msg=${MAIL}-hostile');
+    const raw = document.createElement('iframe');
+    raw.srcdoc = await r.text();
+    document.body.appendChild(raw);
+    await new Promise((res) => setTimeout(res, 2000));
+    raw.remove();
+    return true;
+  })()`);
+  ok(beaconHits.length > 0 && beaconHits.some((h) => /\/script|\/onerror|\/css|\/import/.test(h)) && beaconConns > 0, `CONTROL: the same hostile mail rendered RAW reaches the beacon (${beaconHits.length} hits over ${beaconConns} TCP connections — the connection counter ⑩x reads is not blind: ${beaconHits.slice(0, 6).join(', ')})`);
+}
+
+// ── ⑩x (security verify r2, 2026-09-28): THE ATTACK CORPUS, IN REAL CHROME ──
+// Every mail of scripts/mail-attack-corpus.mjs (script in every syntax incl. the DOMPurify bypass classes, the CSP
+// meta, srcdoc / raw-text breakouts, DOM clobbering, every remote-load vector — link rels, media, srcset, CSS url() /
+// @import / image-set / cursor / content / @font-face / mask, table backgrounds, protocol-relative + relative pictures,
+// cid: abuse, an animated height, a fixed overlay, 1 000 pictures, a fake quote mark) rendered through the product's
+// own path in its own room (`fake-push-attack`): the srcdoc parsed as the frame parses it (a DOM census: ONE nonce'd
+// script, ours; the CSP meta right after the charset; no dangerous element / handler / javascript: / reach in any
+// attribute or style), the frame opaque + `allow-scripts`, ZERO beacon hits (http + https) before Show pictures — then
+// ONLY https images after it, with no referer and no cookie; a click on a javascript: / entity / data: link opens
+// nothing, on an https link the parent opens it (noopener) and the page never navigates; the animated mail moves
+// nothing; cid: names only the message's own part; a probe script under the product's OWN frame configuration reaches
+// nothing; the attachment route says Content-Length.
+{
+  const MF = require(path.join(repo, 'src/mail-frame.js'));
+  const ATK = 'fake-push-attack';
+  const BP = BEACON_PORT, SP = BEACON_TLS_PORT;
+  await p1.cdp('Page.bringToFront');
+  let n = 0;
+  for (let i = 0; i < 160; i++) { const d = await api('GET', `/api/channels/fake-push/${ATK}/messages?limit=200`); n = (d.json.records || []).length; if (n >= Math.min(50, CORPUS.length)) break; await sleep(250); }
+  // a FIRST ingest takes the newest 50: the rest through /older (the vendor's own page), honouring the floor
+  for (let i = 0; i < 40 && n < CORPUS.length; i++) {
+    const d = await api('GET', `/api/channels/fake-push/${ATK}/messages?limit=200`);
+    const recs = d.json.records || []; n = recs.length; if (n >= CORPUS.length) break;
+    const r = await api('POST', `/api/channels/fake-push/${ATK}/older`, { before: recs[0] ? recs[0].at : null, beforeId: recs[0] ? recs[0].vendorId : null, limit: 50 });
+    if (r.json && r.json.refused) { await sleep(Math.min(20000, Number(r.json.retryAfterMs) || 1000) + 100); continue; }
+    if (r.json && r.json.exhausted) { n = (await api('GET', `/api/channels/fake-push/${ATK}/messages?limit=200`)).json.records.length; break; }
+    await sleep(300);
+  }
+  ok(n === CORPUS.length, `FIXTURE: the attack room holds every corpus mail (${n} of ${CORPUS.length})`);
+  const rows = await p1.evaljs(`(async () => {
+    const w = window.app.openChannel('fake-push', '${ATK}');
+    window.__atkW = w; window.__xss = null; window.__opened = []; const o0 = window.open; window.open = (...a) => { window.__opened.push(String(a[0])); return null; };
+    for (let i = 0; i < 100; i++) { if (w.content.querySelectorAll('.chanmsg').length >= 20) break; await new Promise((r) => setTimeout(r, 100)); }
+    const list = w.content.querySelector('.chanwin-list');
+    for (let k = 0; k < 60 && w.content.querySelectorAll('.chanmsg').length < ${CORPUS.length}; k++) { list.scrollTop = 0; list.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true })); await new Promise((r) => setTimeout(r, 400)); }
+    return w.content.querySelectorAll('.chanmsg').length;
+  })()`);
+  ok(rows === CORPUS.length, `the window shows every corpus mail after paging up (${rows})`);
+  // A VISIBLE MAIL IS NEVER A BLANK BOX (security verify r2, continued): the attack room is mostly SHORT mails, so
+  // more than LIVE_FRAME_CAP of them sit on screen at once — around five of them, every formatted row on screen is
+  // live (the round-1 cap left the rest blank placeholders, their text hidden: run6's `custom-elements: timeout`)
+  const shortView = await p1.evaljs(`(async () => { const w = window.__atkW; const list = w.content.querySelector('.chanwin-list'); const out = { maxOnScreen: 0, blank: [] };
+    for (const name of ['script-src', 'svg-onload', 'iframe-src', 'math-mglyph', 'dom-clobber']) {
+      const row = [...w.content.querySelectorAll('.chanmsg')].find((r) => r.dataset.vid === '${ATK}-x-' + name); if (!row) { out.blank.push('no-row:' + name); continue; }
+      row.scrollIntoView({ block: 'center' }); await new Promise((r) => setTimeout(r, 2500)); row.scrollIntoView({ block: 'center' }); await new Promise((r) => setTimeout(r, 1200));
+      const L = list.getBoundingClientRect(); const on = [...w.content.querySelectorAll('.chanmsg.chanmail-formatted')].filter((r) => { const b = r.querySelector('.chanmail-box').getBoundingClientRect(); return b.height > 0 && b.bottom > L.top && b.top < L.bottom; });
+      out.maxOnScreen = Math.max(out.maxOnScreen, on.length);
+      for (const r of on) if (!r.querySelector('iframe.chanmail-frame')) out.blank.push(name + ':' + r.dataset.vid.replace(/.*-x-/, ''));
+    }
+    return out; })()`);
+  ok(shortView.maxOnScreen > MF.LIVE_FRAME_CAP && !shortView.blank.length, `around five short corpus mails up to ${shortView.maxOnScreen} formatted mails are on screen (> the cap ${MF.LIVE_FRAME_CAP}) and EVERY one is live — a visible mail is never a blank box`, JSON.stringify(shortView));
+  const AROW = (vid) => `[...window.__atkW.content.querySelectorAll('.chanmsg')].find((r) => r.dataset.vid === '${vid}')`;
+  const waitAtk = async (vid) => p1.evaljs(`(async () => { const t0 = Date.now(); while (Date.now() - t0 < 8000) { const row = ${AROW(vid)}; if (!row) return 'no-row'; const f = row.querySelector('iframe.chanmail-frame'); if (f && row.querySelector('.chanmail-box').dataset.h) return 'ok'; if (row.querySelector('.chanmail-note') && !row.querySelector('.chanmail-note').hidden) return 'note:' + row.querySelector('.chanmail-note').textContent; row.scrollIntoView({ block: 'center' }); await new Promise((r) => setTimeout(r, 120)); } return 'timeout'; })()`);
+  /** THE DOM CENSUS of one frame's srcdoc, parsed as the frame parses it. A STYLE is judged by the functions a browser
+   *  LOADS from (url / image / image-set / cross-fade / element / src) — a defanged escape (`\75 rl(<beacon>)` → `75 rl(…)`,
+   *  the css-escapes mail) names none, and the beacon count below proves it reaches nothing. */
+  const census = (vid) => p1.evaljs(`(() => { const r = ${AROW(vid)}; const f = r && r.querySelector('iframe.chanmail-frame'); if (!f) return null; const d = f.srcdoc; const pd = new DOMParser().parseFromString(d, 'text/html'); const rect = f.getBoundingClientRect();
+    return { sandbox: f.getAttribute('sandbox'), opaque: f.contentDocument === null, scripts: pd.querySelectorAll('script').length, nonced: pd.querySelectorAll('script[nonce]').length, ourScript: pd.querySelectorAll('script').length === 1 && /vsMail:T/.test(pd.querySelector('script').textContent),
+      heads: [...pd.head.children].map((x) => x.tagName.toLowerCase() + ':' + (x.getAttribute('http-equiv') || x.getAttribute('name') || (x.getAttribute('charset') ? 'charset' : ''))),
+      danger: [...pd.querySelectorAll('iframe,object,embed,form,input,button,base,link,svg,math,video,audio,picture,source,track,template,noscript,textarea,title,xmp,plaintext,dialog,portal,slot,applet,frame,frameset,select,option,marquee,meta[http-equiv=refresh],meta[name=referrer][content=unsafe-url]')].map((x) => x.tagName.toLowerCase()),
+      onAttrs: [...pd.querySelectorAll('*')].flatMap((x) => [...x.attributes].filter((a) => /^on/i.test(a.name)).map((a) => x.tagName + '@' + a.name)),
+      reach: [...pd.querySelectorAll('*')].flatMap((x) => [...x.attributes].filter((a) => /^(href|src|srcset|action|formaction|data|poster|background|ping|xlink:href|srcdoc|style|download|target)$/i.test(a.name) && (/^(srcset|action|formaction|data|poster|background|ping|xlink:href|srcdoc|download|target)$/i.test(a.name) || /javascript:|data:text|vbscript:|url\\s*\\(/i.test(a.value) || (a.name !== 'href' && a.name !== 'style' && new RegExp('127\\\\.0\\\\.0\\\\.1:${BP}\\\\b').test(a.value)) || (a.name === 'style' && /(?:^|[^a-z0-9_-])(?:image|image-set|-webkit-image-set|cross-fade|element|src)\\s*\\(/i.test(a.value)))).map((a) => x.tagName + '@' + a.name + '=' + a.value.slice(0, 40))),
+      styleReach: [...pd.querySelectorAll('style')].filter((x) => /url\\s*\\(|@import|expression|keyframes|animation|(?:^|[^a-z0-9_-])(?:image|image-set|-webkit-image-set|cross-fade|element|src)\\s*\\(/i.test(x.textContent)).length,
+      idsOrNames: [...pd.querySelectorAll('[id],[name]')].map((x) => x.tagName.toLowerCase()), custom: [...pd.querySelectorAll('*')].map((x) => x.tagName.toLowerCase()).filter((t) => t.includes('-') || t === 'x-foo'),
+      httpsImgs: (d.match(/src="https:\\/\\/127\\.0\\.0\\.1:${SP}\\//g) || []).length, dataImgs: (d.match(/src="data:image\\//g) || []).length, blocked: (d.match(/data-vs-blocked="1"/g) || []).length, quoteMarks: (d.match(/data-vs-quote="1"/g) || []).length,
+      h: Number(r.querySelector('.chanmail-box').dataset.h), rect: { x: rect.x, y: rect.y }, pics: r.querySelector('.chanmail-pictures').hidden ? null : r.querySelector('.chanmail-pictures').textContent }; })()`);
+  const bad = [], noFrame = [];
+  const h0 = beaconHits.length, s0 = tlsHits.length, c0 = beaconConns;
+  const clickOutcomes = {};
+  for (const c of CORPUS) {
+    const vid = `${ATK}-x-${c.name}`;
+    const st = await waitAtk(vid);
+    if (st !== 'ok') { noFrame.push(`${c.name}: ${st}`); continue; }
+    await sleep(300);
+    const x = await census(vid);
+    if (!x) { noFrame.push(`${c.name}: dropped before the census`); continue; }
+    const why = [];
+    if (x.sandbox !== 'allow-scripts' || !x.opaque) why.push(`sandbox=${x.sandbox} opaque=${x.opaque}`);
+    if (x.scripts !== 1 || x.nonced !== 1 || !x.ourScript) why.push(`scripts=${x.scripts} nonced=${x.nonced} ours=${x.ourScript}`);
+    if (x.heads.slice(0, 3).join() !== 'meta:charset,meta:Content-Security-Policy,meta:referrer') why.push(`head=${x.heads.join()}`);
+    if (x.danger.length) why.push(`danger=${x.danger.join()}`);
+    if (x.onAttrs.length) why.push(`on=${x.onAttrs.join()}`);
+    if (x.reach.length) why.push(`reach=${x.reach.join()}`);
+    if (x.styleReach) why.push(`styleReach=${x.styleReach}`);
+    if (x.idsOrNames.join() !== 'meta') why.push(`ids/names=${x.idsOrNames.join()}`);   // the referrer meta's own name
+    if (x.custom.length) why.push(`custom=${x.custom.join()}`);
+    if (x.h < MF.HEIGHT_MIN || x.h > MF.HEIGHT_MAX) why.push(`h=${x.h}`);
+    if (c.name === 'cid-abuse' && x.dataImgs !== 2) why.push(`cid pictures=${x.dataImgs} (the two spellings of the message's own logo@fake, nothing else)`);
+    if (c.name === 'quoted-inject' && x.quoteMarks !== 1) why.push(`quote marks=${x.quoteMarks} (only OUR mark on the gmail_quote)`);
+    if (c.name === 'many-images' && x.blocked !== MF.MAX_IMAGES) why.push(`blocked=${x.blocked} of 1 000 (MAX_IMAGES)`);
+    if (why.length) bad.push(`${c.name}: ${why.join('; ')}`);
+    if (c.click) {
+      const before = await p1.evaljs('window.__opened.length');
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if ((await waitAtk(vid)) !== 'ok') break;
+        // a LIVE frame may sit in the keep zone, above or below the list's visible band (waitAtk scrolls only a row
+        // whose frame is not live yet — run6 pressed a-download's frame at y = −28 + 40, i.e. above the list, and
+        // "opened nothing"): scroll it to the centre, let the neighbours' heights settle, and press only when the
+        // frame's top 40 px are inside the list's visible band
+        const rect = await p1.evaljs(`(async () => { const row = ${AROW(vid)}; const list = window.__atkW.content.querySelector('.chanwin-list'); let prev = null;
+          for (let k = 0; k < 30; k++) { row.scrollIntoView({ block: 'center' }); await new Promise((r) => setTimeout(r, 150)); const f = row.querySelector('iframe.chanmail-frame'); if (!f) continue; const r = f.getBoundingClientRect(), L = list.getBoundingClientRect(); const cur = Math.round(r.y);
+            if (prev === cur && r.y >= L.top && r.y + Math.min(40, r.height / 2) + 4 <= L.bottom) return { x: r.x, y: r.y, h: r.height, inBand: true }; prev = cur; }
+          const f = row.querySelector('iframe.chanmail-frame'); const r = f ? f.getBoundingClientRect() : { x: 0, y: 0, height: 0 }; return { x: r.x, y: r.y, h: r.height, inBand: false }; })()`);
+        if (!rect.inBand) continue;
+        const px = rect.x + 60, py = rect.y + Math.min(40, rect.h / 2);
+        await p1.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: px, y: py, button: 'left', clickCount: 1 });
+        await p1.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: px, y: py, button: 'left', clickCount: 1 });
+        await sleep(600);
+        clickOutcomes[c.name] = await p1.evaljs(`({ opened: window.__opened.slice(${before}), top: location.href, xss: window.__xss })`);
+        // a link expected to open: one more press if the first landed on a rebuilt frame; a link expected to open nothing never needs one
+        if (clickOutcomes[c.name].opened.length || /javascript|xlink|base-href|form-/.test(c.name)) break;
+      }
+    }
+  }
+  ok(!noFrame.length, `every corpus mail draws its frame (${CORPUS.length - noFrame.length} of ${CORPUS.length})`, noFrame.join('; '));
+  ok(!bad.length, `THE DOM CENSUS over ${CORPUS.length} hostile mails: opaque allow-scripts frame, ONE nonce'd script (ours), the CSP meta right after the charset, no dangerous element / handler / javascript: / srcset / action / ping / target / download / url() / keyframes, no id / name, no custom element; cid: only the message's own part; only our quote mark; 1 000 pictures capped`, bad.join('\n    '));
+  ok(beaconHits.length === h0 && tlsHits.length === s0 && beaconConns === c0, `ZERO beacon hits (http ${beaconHits.length - h0}, https ${tlsHits.length - s0}) and ZERO new TCP connections to the http beacon (${beaconConns - c0} — no preconnect / dns-prefetch / prefetch opened a socket) across the whole corpus before Show pictures — no script, no meta refresh / base / form / iframe / object / embed, no link rel, no media, no srcset, no CSS url() / @import / image-set / cursor / content / font / mask, no table background, no http picture`, [...beaconHits.slice(h0), ...tlsHits.slice(s0).map((h) => h.url)].join(', '));
+  const co = clickOutcomes;
+  ok(co['a-javascript'] && !co['a-javascript'].opened.length && co['a-javascript-entities'] && !co['a-javascript-entities'].opened.length && co['xlink-href'] && !co['xlink-href'].opened.length && co['base-href'] && !co['base-href'].opened.length && co['form-javascript'] && !co['form-javascript'].opened.length && co['form-post'] && !co['form-post'].opened.length, 'a real click on a javascript: / entity-spelled / xlink / base-relative link or a form button opens NOTHING', JSON.stringify(co));
+  ok(co['a-target-top'] && co['a-target-top'].opened.length === 1 && co['a-target-top'].opened[0] === `${BEACON_S || BEACON}/a-target-top/target-top` && co['a-download'] && co['a-download'].opened.length === 1 && /\/a-download\/download$/.test(co['a-download'].opened[0]), 'a real click on an https link: the PARENT opens exactly that URL (target=_top / ping / download dropped), through window.open with noopener', JSON.stringify([co['a-target-top'], co['a-download']]));
+  ok(Object.values(co).every((o) => o.top === `http://127.0.0.1:${PORT}/` && o.xss === null), 'the page never navigated and window.__xss is untouched after every click');
+  // SHOW PICTURES on the https mail: ONLY https images load (no referer, no cookie), the http one and every CSS /
+  // link / media vector still nothing — for THIS sender's frames (the press is per sender)
+  const t1 = beaconHits.length, u1 = tlsHits.length, c1 = beaconConns;
+  const pressed = await p1.evaljs(`(() => { const r = ${AROW(`${ATK}-x-pictures-https`)}; const b = r.querySelector('.chanmail-pictures'); if (b && !b.hidden) { b.click(); return 'pressed'; } return 'no-button'; })()`);
+  ok(pressed === 'pressed', 'Show pictures pressed on the https mail');
+  for (const name of ['pictures-https', 'css-reach', 'link-rels', 'media', 'img-srcset-lazy', 'table-background', 'svg-use-href', 'meta-referrer']) await waitAtk(`${ATK}-x-${name}`);
+  await sleep(2500);
+  const after = tlsHits.slice(u1);
+  ok(beaconHits.length === t1 && beaconConns === c1, `after Show pictures the http beacon is still untouched (${beaconHits.length - t1} hits, ${beaconConns - c1} new connections) — the http picture, every CSS url() / link / media / table background`, beaconHits.slice(t1).join(', '));
+  ok(after.length >= 2 && after.every((h) => /^\/(pictures-https|img-srcset-lazy|meta-referrer)\/(pic|pic2|lazy|referrer)\.png(\?.*)?$/.test(h.url) && h.ref === null && h.cookie === null), `after Show pictures ONLY the https <img src> pictures loaded (${after.length}: ${[...new Set(after.map((h) => h.url))].join(', ')}), each with NO referer and NO cookie — never a CSS url(), a font, a link rel, a media source, a protocol-relative or a relative path`, JSON.stringify(after));
+  if (BEACON_S) { await waitAtk(`${ATK}-x-css-reach`); await sleep(300); const cx = await census(`${ATK}-x-css-reach`); ok(cx && cx.styleReach === 0 && cx.reach.length === 0, 'the CSS-reach mail with pictures ON: still no url() / @import / image-set in any style (the CSP would allow an https url() — the sanitizer never writes one)', JSON.stringify(cx)); }
+  // THE ANIMATED MAIL moves nothing: no height message, one row height, one scrollTop over 3 s
+  await waitAtk(`${ATK}-x-height-animation`);
+  const storm = await p1.evaljs(`(async () => { const w = window.__atkW; const list = w.content.querySelector('.chanwin-list'); const row = ${AROW(`${ATK}-x-height-animation`)}; row.scrollIntoView({ block: 'center' }); await new Promise((r) => setTimeout(r, 2000)); const f = row.querySelector('iframe.chanmail-frame'); if (!f) return { noFrame: true };
+    let msgs = 0; const h = (e) => { if (e.source === f.contentWindow && e.data && e.data.h !== undefined) msgs++; }; window.addEventListener('message', h);
+    const tops = [], hs = []; const t0 = performance.now(); await new Promise((res) => { const tick = (t) => { tops.push(list.scrollTop); hs.push(row.getBoundingClientRect().height); if (t - t0 < 3000) requestAnimationFrame(tick); else res(); }; requestAnimationFrame(tick); });
+    window.removeEventListener('message', h); return { msgs, rowHeights: new Set(hs).size, scrollTops: new Set(tops).size, anim: /keyframes|animation/i.test(f.srcdoc) }; })()`);
+  ok(!storm.noFrame && storm.msgs === 0 && storm.rowHeights === 1 && storm.scrollTops === 1 && !storm.anim, `the height-animation mail: ${storm.msgs} height messages, ${storm.rowHeights} row height, ${storm.scrollTops} scrollTop in 3 s (its keyframes never reached the frame)`, JSON.stringify(storm));
+  // THE TRAILING EDGE (security verify r2, continued): a burst of heights past the settle — the window narrowed in 12
+  // steps 25 ms apart — ends with the row at the frame's LAST posted height (round 2's budget held it and the frame
+  // never posts a height twice: measured 677 → 696 posted, the row stayed 677, the mail's last line cut)
+  await waitAtk(`${ATK}-x-height-burst`);
+  const drag = await p1.evaljs(`(async () => { const w = window.__atkW; const el = w.element; const row = ${AROW(`${ATK}-x-height-burst`)}; row.scrollIntoView({ block: 'center' });
+    await new Promise((r) => setTimeout(r, 2500)); const f = row.querySelector('iframe.chanmail-frame'); if (!f) return { noFrame: true };
+    const posted = []; const h = (e) => { if (e.source === f.contentWindow && e.data && e.data.h !== undefined) posted.push(e.data.h); }; window.addEventListener('message', h);
+    const w0 = el.getBoundingClientRect().width; const target = Math.max(360, Math.round(w0 * 0.7));
+    for (let k = 1; k <= 12; k++) { el.style.width = Math.round(w0 - (w0 - target) * k / 12) + 'px'; await new Promise((r) => setTimeout(r, 25)); }
+    await new Promise((r) => setTimeout(r, 1500)); window.removeEventListener('message', h);
+    const out = { w0, wEnd: Math.round(el.getBoundingClientRect().width), posts: posted.length, seq: posted.join(','), last: posted[posted.length - 1], applied: parseInt(f.style.height, 10), frozen: row.querySelector('.chanmail-box').dataset.frozen || null };
+    el.style.width = w0 + 'px'; return out; })()`);
+  ok(!drag.noFrame && drag.posts >= 2 && drag.applied === drag.last && !drag.frozen, `a window narrowed in 12 quick steps: the frame posted ${drag.posts} heights (${drag.seq}) and the row ends at the LAST one (${drag.applied} px) — a held height lands at the gap's end`, JSON.stringify(drag));
+  // THE SANDBOX, PROVED WITH OUR OWN SCRIPT under the product's exact frame configuration: every reach fails
+  const probe = await p1.evaljs(`(async () => {
+    const r = ${AROW(`${ATK}-x-a-download`)}; r.scrollIntoView({ block: 'center' }); await new Promise((res) => setTimeout(res, 500));
+    const f = r.querySelector('iframe.chanmail-frame'); if (!f) return { noFrame: true };
+    const doc = f.srcdoc; const nonce = (doc.match(/nonce-([^']+)'/) || [])[1]; const B = '${BEACON}';
+    const js = \`(async()=>{const out={};const t=async(n,fn)=>{try{const v=await fn();out[n]='ok:'+String(v).slice(0,40)}catch(e){out[n]='ERR:'+(e&&e.message||e).slice(0,120)}};
+      await t('parentDocument',()=>parent.document.title);await t('topLocation',()=>{top.location='\${B}/probe/top';return 'set'});await t('parentLocation',()=>{parent.location='\${B}/probe/parent';return 'set'});
+      await t('windowOpen',()=>{const x=window.open('\${B}/probe/open');return x?'window':'null'});await t('form',()=>{const fm=document.createElement('form');fm.action='\${B}/probe/form';fm.method='post';document.body.appendChild(fm);fm.submit();return 'submitted'});
+      await t('alert',()=>{alert('x');return 'returned'});await t('sendBeacon',()=>navigator.sendBeacon('\${B}/probe/beacon','x'));await t('fetch',()=>fetch('\${B}/probe/fetch').then(r=>r.status));
+      await t('xhr',()=>new Promise((res,rej)=>{const x=new XMLHttpRequest();x.open('GET','\${B}/probe/xhr');x.onload=()=>res(x.status);x.onerror=()=>rej(new Error('xhr error'));x.send()}));await t('ws',()=>new Promise((res,rej)=>{const s=new WebSocket('ws://127.0.0.1:${BP}/probe/ws');s.onerror=()=>rej(new Error('ws error'));s.onopen=()=>res('open')}));
+      await t('img',()=>new Promise((res,rej)=>{const i=new Image();i.onload=()=>res('loaded');i.onerror=()=>rej(new Error('img blocked'));i.src='\${B}/probe/img.png'}));await t('localStorage',()=>localStorage.length);await t('cookie',()=>document.cookie.length);
+      await t('fullscreen',()=>document.body.requestFullscreen().then(()=>'ok'));await t('prefetch',()=>{const l=document.createElement('link');l.rel='prefetch';l.href='\${B}/probe/prefetch';document.head.appendChild(l);return 'appended'});
+      await t('cssImport',()=>{const s=document.createElement('style');s.textContent='@import url(\${B}/probe/import.css); body{background:url(\${B}/probe/css.png)}';document.head.appendChild(s);return 'appended'});await t('font',()=>{const s=document.createElement('style');s.textContent='@font-face{font-family:zz;src:url(\${B}/probe/font.woff)} body{font-family:zz}';document.head.appendChild(s);return 'appended'});
+      await t('iframe',()=>{const i=document.createElement('iframe');i.src='\${B}/probe/child';document.body.appendChild(i);return 'appended'});await t('object',()=>{const o=document.createElement('object');o.data='\${B}/probe/object';document.body.appendChild(o);return 'appended'});await t('video',()=>{const v=document.createElement('video');v.src='\${B}/probe/video.mp4';document.body.appendChild(v);v.load();return 'loaded'});
+      await t('eval',()=>eval('1+1'));await t('spoofHeight',()=>{parent.postMessage({vsMail:'wrong',h:9999},'*');return 'posted'});setTimeout(()=>parent.postMessage({probe:out},'*'),1500)})()\`;
+    const doc2 = doc.replace(/<script nonce="[^"]+">[\\s\\S]*<\\/script>/, '<script nonce="' + nonce + '">' + js + '</script>');
+    const pf = document.createElement('iframe'); pf.setAttribute('sandbox', f.getAttribute('sandbox')); pf.setAttribute('referrerpolicy', 'no-referrer'); pf.style.cssText = 'width:300px;height:100px;position:fixed;left:0;top:0';
+    const got = new Promise((res) => { const h = (e) => { if (e.source === pf.contentWindow && e.data && e.data.probe) { window.removeEventListener('message', h); res(e.data.probe); } }; window.addEventListener('message', h); setTimeout(() => res({ timeout: true }), 8000); });
+    pf.srcdoc = doc2; document.body.appendChild(pf); const out = await got; pf.remove(); out.__replaced = doc2 !== doc; out.__top = location.href; out.__opened = window.__opened.length; return out; })()`);
+  await sleep(1500);
+  const probeHits = [...beaconHits.slice(t1), ...tlsHits.slice(u1 + after.length).map((h) => h.url)].filter((u) => /\/probe\//.test(u));
+  ok(probe && probe.__replaced && !probe.timeout && /Blocked a frame/.test(probe.parentDocument) && /does not/.test(probe.topLocation) && /does not/.test(probe.parentLocation) && probe.windowOpen === 'ok:null' && /sandbox/.test(probe.localStorage) && /sandbox/.test(probe.cookie) && /Failed to fetch/.test(probe.fetch) && /error/.test(probe.xhr) && /error/.test(probe.ws) && /blocked/.test(probe.img) && /Content Security Policy/.test(probe.eval) && /permissions policy/i.test(probe.fullscreen), 'THE SANDBOX, with OUR script under the product\'s exact frame configuration: parent.document blocked, top / parent navigation refused, window.open null, no storage, no cookie, fetch / XHR / WebSocket / Image refused, eval refused, fullscreen refused', JSON.stringify(probe));
+  ok(!probeHits.length && probe.__top === `http://127.0.0.1:${PORT}/`, `…and NOTHING reached the beacon from it — form submit, sendBeacon, prefetch, @import, @font-face, a child iframe, object, video, self-navigation (${probeHits.length} hits)`, probeHits.join(', '));
+  // THE ATTACHMENT ROUTE SAYS ITS SIZE (finding A's chrome half: round 1's header guard had nothing to read)
+  {
+    const r = await fetch(`http://127.0.0.1:${PORT}/api/channels/fake-push/${ATK}/attachment/${encodeURIComponent(`${ATK}-x-script-plain-body`)}?msg=${ATK}-x-script-plain`);
+    const body = await r.arrayBuffer();
+    ok(r.status === 200 && Number(r.headers.get('content-length')) === body.byteLength && body.byteLength > 0 && r.headers.get('x-content-type-options') === 'nosniff' && /sandbox/.test(r.headers.get('content-security-policy') || ''), `the attachment route answers Content-Length (${r.headers.get('content-length')} = the body's ${body.byteLength} bytes) + nosniff + a sandbox CSP`, JSON.stringify([r.status, r.headers.get('content-length'), r.headers.get('transfer-encoding')]));
+  }
+  await p1.evaljs(`(() => { window.app.wm.closeWindow(window.__atkW.id); return true; })()`);
+}
 
 // ── ⑧ CONTROL: the PRE-FIX DIALOG (it draws the panel's copy) rebuilt into the scratch bundle ──
 // Under the same construction (page 1 holds its channels-updated frames, the grain moves through the route) the

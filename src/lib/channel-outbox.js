@@ -43,6 +43,15 @@
 // broadcast re-renders only a card whose record changed, a fate-only change
 // patches the fate line in place, and a card the user is editing is left
 // alone while its record stands.
+//
+// r6 verify (2026-09-28, "what you approve is what runs"): the ENVELOPE is one
+// fact per wrapping line (where · To · Cc · Subject — never a clipped
+// ellipsis), a reply says WHAT it answers ("In reply to <author> — <excerpt>")
+// and, for mail, WHO receives it (resolved when it was proposed, sent
+// verbatim); an invisible direction / zero-width character in the text is a
+// visible mark; a card that just appeared or MOVED is inert for `P.ARM_MS`
+// (`placeArmed`) and Approve posts `shown` = the PURE digest of the record the
+// card showed — the engine refuses anything else (`changed-since-shown`).
 import { fetchJson, showToast, showContextMenu } from './utils.js';
 import { t } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
@@ -95,6 +104,78 @@ export function rejectLabel(deliver, { box = false } = {}) {
 /** Decided-and-closed cards the inline section keeps (the newest N). */
 const INLINE_RECENT = 2;
 
+/** O1 (r6 verify, 2026-09-28): `s` into `node` as text, each invisible direction / zero-width character drawn as a
+ *  visible mark (`U+202E`) — never the character itself, so the line reads in the order it is SENT. Returns the
+ *  marks' names (distinct). textContent only. */
+function revealInto(node, s) {
+  const names = [];
+  for (const seg of P.revealSegments(s)) {
+    if (seg.hidden) {
+      const m = el('span', 'chan-prop-hidden', seg.hidden);
+      m.title = t('An invisible character that changes how the text reads — it is sent as it is');
+      node.appendChild(m);
+      if (!names.includes(seg.hidden)) names.push(seg.hidden);
+    } else node.appendChild(document.createTextNode(seg.text));
+  }
+  return names;
+}
+/** F4 (r6 verify): ONE envelope fact per line — its label, then its value, wrapping, never clipped. */
+function envRow(cls, label, value) {
+  const row = el('div', `chan-prop-env ${cls}`);
+  row.appendChild(el('span', 'chan-prop-env-k', label));
+  const v = el('span', 'chan-prop-env-v');
+  revealInto(v, value);
+  row.appendChild(v);
+  return row;
+}
+/** F1 / F3 (r6 verify): what the reply ANSWERS (its author + an excerpt of the stored message) and, where the
+ *  adapter derives them from it, WHO RECEIVES it — the recipients resolved when it was proposed, sent verbatim. */
+function appendReplyTarget(card, p) {
+  const a = p.replyAnchor;
+  if (a && a.vendorId) {
+    const au = a.author || {};
+    const who = au.isSelf ? t('you') : (au.name || au.id || '');
+    const row = el('div', 'chan-prop-env chan-prop-anchor');
+    row.appendChild(el('span', 'chan-prop-env-k', t('In reply to')));
+    const v = el('span', 'chan-prop-env-v');
+    if (who) { const w = el('span', 'chan-prop-anchor-who'); revealInto(w, who); v.appendChild(w); v.appendChild(document.createTextNode(' — ')); }
+    revealInto(v, a.excerpt || '');
+    row.appendChild(v);
+    row.title = t('message {id}', { id: a.vendorId });
+    card.appendChild(row);
+  }
+  const e = p.replyEnvelope;
+  if (e && e.to) {
+    card.appendChild(envRow('chan-prop-to', t('To'), e.to));
+    if (e.cc) card.appendChild(envRow('chan-prop-cc', t('Cc'), e.cc));
+    if (e.subject) card.appendChild(envRow('chan-prop-subject', t('Subject'), e.subject));
+  }
+}
+/** F6 (r6 verify): a card that just appeared or moved takes no decision for `P.ARM_MS` — it LOOKS inert
+ *  (`chan-prop-arming`) and a person's click on it does nothing but say so; the verdict is PURE (`P.armVerdict`). */
+const ARMING_TITLE = () => t('Just appeared or moved — read it first, then decide');
+function armCard(card, at = Date.now()) {
+  card.dataset.armedAt = String(at + P.ARM_MS);
+  card.classList.add('chan-prop-arming');
+  const act = card.querySelector(':scope > .chan-prop-actions');
+  if (act) act.title = ARMING_TITLE();
+  clearTimeout(card._armTimer);
+  card._armTimer = setTimeout(() => {
+    if ((Number(card.dataset.armedAt) || 0) > Date.now()) return;
+    card.classList.remove('chan-prop-arming');
+    if (act && act.title === ARMING_TITLE()) act.title = '';
+  }, P.ARM_MS + 30);
+}
+/** May THIS event decide on `card` now? A held click nudges the card (the look says why) and does nothing else. */
+export function cardArmed(card, ev) {
+  const v = P.armVerdict({ armedAt: Number(card && card.dataset && card.dataset.armedAt) || 0, now: Date.now(), trusted: !(ev && ev.isTrusted === false) });
+  if (!v.armed && card) {
+    card.classList.add('chan-prop-arming-nudge');
+    setTimeout(() => card.classList.remove('chan-prop-arming-nudge'), 400);
+  }
+  return v.armed;
+}
+
 const stamp = (ms) => {
   if (!ms) return '';
   const d = new Date(Number(ms));
@@ -124,6 +205,7 @@ export function reasonLabel(r) {
     case 'attachments': return t('it carries an attachment');
     case 'off-hours': return t('outside working hours');
     case 'authority': return t('the drafter holds draft authority only');
+    case 'reaction-policy': return t('agent reactions need your approval on this account');
     default: return String(r || '');
   }
 }
@@ -155,12 +237,14 @@ export function renderProposalCard(app, p, { compact = false } = {}) {
   head.appendChild(el('span', 'chan-prop-who', drafterLabel(p)));
   head.appendChild(el('span', 'chan-prop-when', stamp(p.updatedAt || p.at)));
   card.appendChild(head);
+  // F4 (r6 verify, 2026-09-28): the envelope is ONE FACT PER LINE — where, then To / Cc / Subject (a compose)
+  // or what it answers + its recipients (a reply) — each wrapping, nothing clipped (a 70-character subject used
+  // to push the Cc out of a one-line ellipsis with no tooltip)
   if (!compact) {
     const where = el('div', 'chan-prop-where');
     if (p.compose) {
       // R4 (B-6acc): a NEW message — its envelope, and a link only once the vendor named its thread
-      const env = t('New message to {to} — "{subject}"', { to: (p.compose.to || []).join(', '), subject: p.compose.subject || '' }) + ((p.compose.cc || []).length ? ' · ' + t('cc {list}', { list: p.compose.cc.join(', ') }) : '');
-      where.appendChild(el('span', 'chan-prop-link', `${p.adapterLabel || p.adapterId} · ${env}`));
+      where.appendChild(el('span', 'chan-prop-link', `${p.adapterLabel || p.adapterId} · ${t('New message')}`));
       if (p.convId) { const link = el('a', 'chan-prop-link', t('Open the conversation')); link.href = '#'; link.onclick = (ev) => { ev.preventDefault(); app.openChannel(p.adapterId, p.convId); }; where.appendChild(document.createTextNode(' · ')); where.appendChild(link); }
     } else {
       const link = el('a', 'chan-prop-link', `${p.adapterLabel || p.adapterId} · ${p.title || p.convId}`);
@@ -170,13 +254,45 @@ export function renderProposalCard(app, p, { compact = false } = {}) {
     }
     card.appendChild(where);
   }
-  // ── THE BODY — an agent's text, plain (or the editor while editing) ──
-  const body = el('div', 'chan-prop-text', p.text || '');
+  if (p.compose) {
+    card.appendChild(envRow('chan-prop-to', t('To'), (p.compose.to || []).join(', ')));
+    if ((p.compose.cc || []).length) card.appendChild(envRow('chan-prop-cc', t('Cc'), p.compose.cc.join(', ')));
+    card.appendChild(envRow('chan-prop-subject', t('Subject'), p.compose.subject || ''));
+  } else appendReplyTarget(card, p);
+  // lane channel-threads (spec §5.2) + 2026-09-28 THE PLACEMENT: a reply says WHERE it lands, above its text — a
+  // quote shown in the chat, a reply in the thread, a thread reply also shown in the chat (PURE `placementText`
+  // over the placement read through its alias — a proposal stored before the enum says `inThread`); a plain message
+  // says nothing. ONE QUOTE (the .197 integration, pairing r6 × threads): the "In reply to" row above quotes the
+  // answered message with every hidden character marked, so the placement line then names only WHERE — its own quote
+  // is drawn only for a proposal with no anchor row (one stored before the anchor existed)
+  const placement = P.placementOf(p);
+  const anchored = !!(p.replyAnchor && p.replyAnchor.vendorId);
+  const placeLine = P.placementText(placement, { t, quote: anchored ? null : (p.replyQuote || p.threadQuote || null) });
+  if (placeLine) {
+    const pe = el('div', 'chan-prop-thread chan-prop-place', placeLine);
+    pe.dataset.placement = placement;
+    card.appendChild(pe);
+  }
+  // ── THE BODY — an agent's text, plain (or the editor while editing); O1: every invisible direction / zero-width
+  // character is a visible mark, and the card says so once; a REACTION's sentence (spec §5.3) ──
+  const reaction = p.kind === 'reaction' && p.reaction ? p.reaction : null;
+  const body = el('div', 'chan-prop-text' + (reaction ? ' chan-prop-reaction' : ''));
+  let hiddenMarks = [];
+  if (reaction) body.textContent = reactionCardText(p);
+  else hiddenMarks = revealInto(body, p.text || '');
   card.appendChild(body);
+  if (hiddenMarks.length) {
+    const hw = el('div', 'chan-prop-idwarn chan-prop-hiddenwarn');
+    hw.appendChild(icon('alert', 11));
+    hw.appendChild(el('span', '', t('The text carries invisible characters that change how it reads ({list}) — each is shown as a mark and is sent as it is', { list: hiddenMarks.join(', ') })));
+    card.appendChild(hw);
+  }
   if (p.edited && p.originalText && p.originalText !== p.text) {
     const orig = el('details', 'chan-prop-orig');
     orig.appendChild(el('summary', '', t('Original text (before your edit)')));
-    orig.appendChild(el('div', 'chan-prop-text chan-prop-text-orig', p.originalText));
+    const origText = el('div', 'chan-prop-text chan-prop-text-orig');
+    revealInto(origText, p.originalText);
+    orig.appendChild(origText);
     card.appendChild(orig);
   }
   // ── ONE meta line: why · the policy verdict · the identity · expiry · the sender line ──
@@ -198,7 +314,7 @@ export function renderProposalCard(app, p, { compact = false } = {}) {
   }
   // THE IDENTITY ROW (§9.5): the fact on the meta line; the warning below, once.
   const asWho = p.sendAs === 'bot' ? t('the bot') : t('you');
-  meta.appendChild(el('span', 'chan-prop-identity', t('Will send as {who}', { who: asWho })));
+  meta.appendChild(el('span', 'chan-prop-identity', reaction ? t('Reacts as you') : t('Will send as {who}', { who: asWho })));
   // r3: approving a send that starts a turn WAKES the agent — the cost, said before the click
   if (p.wakes && p.state === 'awaiting-approval') meta.appendChild(el('span', 'chan-prop-wakes chan-warn', t('Approving wakes this agent: 1 billed turn')));
   if (p.state === 'awaiting-approval' && p.ttlAt) meta.appendChild(el('span', 'chan-prop-ttl', t('Expires unapproved at {when}', { when: stamp(p.ttlAt) })));
@@ -228,7 +344,7 @@ export function renderProposalCard(app, p, { compact = false } = {}) {
   // second English line. A digest from an older server (no `outcome`) still
   // shows its contract string rather than nothing. ──
   const outcome = p.outcome || P.outcomeOf(p);
-  const outcomeLine = outcome ? P.outcomeText(outcome, { t, errorCodeText: chanCaps.errorCodeText }) : (p.reason || '');
+  const outcomeLine = outcome ? P.outcomeText(outcome, { t, errorCodeText: chanCaps.errorCodeText, sendWhyText: chanCaps.sendWhyText }) : (p.reason || '');
   if (outcomeLine) card.appendChild(el('div', `chan-prop-reason${p.state === 'unknown' ? ' chan-warn' : ''}`, outcomeLine));
   if (p.state === 'unknown') card.appendChild(el('div', 'chan-prop-reason chan-warn', t('This send is never retried automatically. Check the conversation on the platform before proposing it again.')));
   // ── the quiet footer: reconcile facts, the receipt ──
@@ -275,6 +391,41 @@ export function renderProposalCard(app, p, { compact = false } = {}) {
     reject.dataset.reject = '1';
     const edit = btn(t('Edit…'), null);
     edit.dataset.edit = '1';
+    // a reaction has no text to edit and never wakes anyone (spec §5.3): plain Reject / Approve, the receipt rides the next turn
+    if (reaction) {
+      const approveR = btn(toAgent ? approveLabel('next-turn') : t('Approve'), null, 'mounts-btn-primary');
+      approveR.dataset.approve = '1';
+      approveR.dataset.deliver = 'next-turn';
+      approveR.onclick = async () => {
+        for (const b of act.querySelectorAll('button')) b.disabled = true;
+        const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/approve`, { expectWakes: 0, ...(toAgent ? { deliver: 'next-turn' } : {}) });
+        if (!r) { for (const b of act.querySelectorAll('button')) b.disabled = false; return; }
+        const sent = !!(r.proposal && r.proposal.state === 'sent');
+        const o = r.proposal ? (r.proposal.outcome || P.outcomeOf(r.proposal)) : null;
+        showToast(sent ? t('Reaction added') : t('Not sent: {why}', { why: (o && P.outcomeText(o, { t, errorCodeText: chanCaps.errorCodeText })) || routeErrorText(r) }), { type: sent ? 'info' : 'error' });
+      };
+      reject.onclick = () => {
+        const old = card.querySelector('.chan-prop-rejectbox');
+        if (old) old.remove();
+        const box = el('div', 'chan-prop-rejectbox');
+        const inp = el('input', 'chan-opt-input');
+        inp.type = 'text'; inp.placeholder = t('Reason (the agent reads it)');
+        const go = btn(t('Reject'), null, 'mounts-btn-primary');
+        go.onclick = async () => {
+          go.disabled = true;
+          const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/reject`, { reason: inp.value, ...(toAgent ? { deliver: 'next-turn', expectWakes: 0 } : {}) });
+          if (!r) { go.disabled = false; return; }
+          showToast(t('Rejected'));
+        };
+        inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') go.click(); });
+        box.append(inp, go);
+        act.after(box);
+        inp.focus();
+      };
+      act.append(reject, approveR);
+      card.appendChild(act);
+      return card;
+    }
     const approve = btn(toAgent ? approveLabel(rememberedDelivery()) : t('Approve'), null, 'mounts-btn-primary');
     approve.dataset.approve = '1';
     if (toAgent) approve.dataset.deliver = rememberedDelivery();
@@ -284,14 +435,16 @@ export function renderProposalCard(app, p, { compact = false } = {}) {
       const text = editor ? editor.value : null;
       // r3: a send that starts a turn echoes the count the card SAID (`expectWakes`) — and a receipt woken now is one more
       const woke = toAgent && deliver === 'wake-now' ? 1 : 0;
-      const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/approve`, { ...(text !== null && text !== p.text ? { text } : {}), expectWakes: (Number(p.wakes) || 0) + woke, ...(toAgent ? { deliver } : {}) });
+      // r6 verify F6: `shown` = the digest of the record THIS card was drawn from — the engine refuses the
+      // approval (409 changed-since-shown, nothing sent) when the proposal is no longer that record
+      const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/approve`, { ...(text !== null && text !== p.text ? { text } : {}), expectWakes: (Number(p.wakes) || 0) + woke, ...(toAgent ? { deliver } : {}), shown: P.shownDigest(p) });
       if (!r) { lock(false); return; }
       const sent = !!(r.proposal && r.proposal.state === 'sent');
       const o = r.proposal ? (r.proposal.outcome || P.outcomeOf(r.proposal)) : null;
-      showToast(sent ? t('Sent') : t('Not sent: {why}', { why: (o && P.outcomeText(o, { t, errorCodeText: chanCaps.errorCodeText })) || routeErrorText(r) }), { type: sent ? 'info' : 'error' });
+      showToast(sent ? t('Sent') : t('Not sent: {why}', { why: (o && P.outcomeText(o, { t, errorCodeText: chanCaps.errorCodeText, sendWhyText: chanCaps.sendWhyText })) || routeErrorText(r) }), { type: sent ? 'info' : 'error' });
       if (woke && r.proposal && r.proposal.receiptChoicePaced) showToast(t('The agent was not woken (paced: {why}) — it hears with its next message', { why: r.proposal.receiptChoicePaced }), { type: 'warn' });
     };
-    approve.onclick = () => doApprove(toAgent ? pressedDelivery(approve) : null);   // verify r3: what the button SAYS
+    approve.onclick = (ev) => { if (cardArmed(card, ev)) doApprove(toAgent ? pressedDelivery(approve) : null); };   // verify r3: what the button SAYS; r6 F6: armed only
     edit.onclick = () => {
       if (editor) return;
       editor = el('textarea', 'chan-prop-edit');
@@ -309,7 +462,8 @@ export function renderProposalCard(app, p, { compact = false } = {}) {
       inp.type = 'text'; inp.placeholder = t('Reason (the agent reads it)');
       const go = btn(toAgent ? rejectLabel(deliver, { box: true }) : t('Reject'), null, 'mounts-btn-primary');
       if (toAgent) go.dataset.deliver = deliver;
-      go.onclick = async () => {
+      go.onclick = async (ev) => {
+        if (!cardArmed(card, ev)) return;
         go.disabled = true;
         const woke = toAgent && deliver === 'wake-now' ? 1 : 0;
         const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/reject`, { reason: inp.value, ...(toAgent ? { deliver, expectWakes: woke } : {}) });
@@ -322,7 +476,7 @@ export function renderProposalCard(app, p, { compact = false } = {}) {
       act.after(box);
       inp.focus();
     };
-    reject.onclick = () => openReject(toAgent ? rememberedDelivery() : null);
+    reject.onclick = (ev) => { if (cardArmed(card, ev)) openReject(toAgent ? rememberedDelivery() : null); };
     /** THE ▾ HALF of a split button: the menu of delivery choices. */
     const chevron = (kind, items) => {
       const c = document.createElement('button');
@@ -334,6 +488,7 @@ export function renderProposalCard(app, p, { compact = false } = {}) {
       c.appendChild(icon('chevronDown', 11));
       c.onclick = (ev) => {
         ev.stopPropagation();
+        if (!cardArmed(card, ev)) return;
         const r = c.getBoundingClientRect();
         // ONE class name (the item class is derived from it); the modifier after
         const menu = showContextMenu(r.left, r.bottom + 2, items());
@@ -358,10 +513,23 @@ export function renderProposalCard(app, p, { compact = false } = {}) {
       act.append(rs, edit, as);
     } else act.append(reject, edit, approve);
     card.appendChild(act);
+    armCard(card);
   }
   return card;
 }
 
+/** A reaction proposal's sentence (spec §5.3): "{agent} wants to react {glyph} to {author}: "{quote}"" — the glyph is
+ *  CONTENT (text emoji, or `:key:` when the vocabulary has no glyph), every part textContent. */
+export function reactionCardText(p) {
+  const x = (p && p.reaction) || {};
+  const d = (p && p.draftedBy) || {};
+  const agent = d.kind === 'agent' ? (d.name || d.id || t('an agent')) : t('you');
+  const glyph = x.glyph || `:${x.key || '?'}:`;
+  const q = x.quote || {};
+  return x.op === 'remove'
+    ? t('{agent} wants to remove the reaction {glyph} from {author}: "{quote}"', { agent, glyph, author: q.author || '?', quote: q.text || '' })
+    : t('{agent} wants to react {glyph} to {author}: "{quote}"', { agent, glyph, author: q.author || '?', quote: q.text || '' });
+}
 /** The fate line's words for one proposal ('' = none). */
 function fateLineText(p) {
   const f = P.receiptFateOf(p);
@@ -424,6 +592,20 @@ function placeNodes(container, nodes) {
   for (const c of [...container.children]) if (!want.has(c)) c.remove();
   nodes.forEach((n, i) => { if (container.children[i] !== n) container.insertBefore(n, container.children[i] || null); });
 }
+/** F6 (r6 verify): `placeNodes`, then every awaiting card that is NEW here or whose top MOVED (a card inserted or
+ *  grown above it — the newest-first order puts a new or replacing proposal on top) is ARMED again: it was not where
+ *  the pointer found it. The verdict is PURE (`P.rearmVerdict`). */
+function placeArmed(container, nodes) {
+  const isCard = (n) => n && n.classList && n.classList.contains('chan-prop');
+  const before = new Map();
+  for (const c of container.children) if (isCard(c)) before.set(c, c.getBoundingClientRect().top);
+  placeNodes(container, nodes);
+  const at = Date.now();
+  for (const n of nodes) {
+    if (!isCard(n) || !n.querySelector(':scope > .chan-prop-actions button[data-approve]')) continue;
+    if (P.rearmVerdict({ isNew: !before.has(n), prevTop: before.get(n), top: n.getBoundingClientRect().top })) armCard(n, at);
+  }
+}
 
 /** The section a conversation window draws above its composer (design C4):
  *  the cards that need the user — awaiting first, then an unknown or failed
@@ -454,7 +636,7 @@ export function renderInlineProposals(app, proposals, prev = null) {
   if (head.firstElementChild.textContent !== title) head.firstElementChild.textContent = title;
   if (head.lastElementChild.textContent !== linkText) head.lastElementChild.textContent = linkText;
   const byId = new Map([...sec.querySelectorAll(':scope > .chan-prop')].map((c) => [c.dataset.proposal, c]));
-  placeNodes(sec, [head, ...shown.map((p) => keyedCard(app, p, byId.get(p.id) || null, { compact: true }))]);
+  placeArmed(sec, [head, ...shown.map((p) => keyedCard(app, p, byId.get(p.id) || null, { compact: true }))]);
   return sec;
 }
 
@@ -519,7 +701,7 @@ export function openChannelOutbox(app, opts = {}) {
         for (const p of mine) nodes.push(keyedCard(app, p, byId.get(p.id) || null));
       }
     }
-    placeNodes(list, nodes);
+    placeArmed(list, nodes);
   }
   segAwait.onclick = () => { view = 'awaiting'; draw(last); };
   segAll.onclick = () => { view = 'all'; draw(last); };

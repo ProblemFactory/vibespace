@@ -355,6 +355,7 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
       ["server.js", "declares USAGE_CACHE_DIR/USAGE_CACHE_FILE and hands them to the engine + usage routes; its own writes are layouts/session-meta/etc."],
       ["src/agentd/agentd.js", "the DEVICE's own ~/.vibespace/usage-cache, read for the usage-scan op — a machine's own store, and it reaches us only as usage-cache/host-*.json"],
       ["src/mounts.js", "matched on the identifier cacheDir — the rclone download cache under ~/.cache/vibespace, nothing to do with quota"],
+      ["src/server/browser-keeper.js", "matched on the identifier cacheDir — CloakBrowser's CLOAKBROWSER_CACHE_DIR (data/browser-tools/cloak-cache, the downloaded browser, lane-cloak), nothing to do with quota; its writes are data/browser-profiles.json, the browser configs and the install stamp"],
       ["src/server/agent-tool-generators.js", "ensureDir(USAGE_CACHE_DIR) at boot + it GENERATES data/bin/vibespace-status; the statusline tool it ships is the tracked file above"],
       ["src/server/migrations.js", "names this store in the two repair migrations' notes; the writing is reading-repair's"],
       ["src/server/otel-ingest.js", "names it in one warning string (\"no usage-cache orgUuid match\"); it writes the OTel stash"],

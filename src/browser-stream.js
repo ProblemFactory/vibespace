@@ -92,7 +92,7 @@ const MODES = Object.freeze(['watch', 'takeover', 'handback']);
 const VIEWER_INPUT_TYPES = Object.freeze(['input_mouse', 'input_keyboard', 'input_touch', 'input_text']); // lane live-input: `input_text` {text} = one paste / one IME commit — the BRIDGE cuts it into ≤3-unit `char` records (never forwarded as-is)
 /** P3 (§4.3): the viewer verbs that change WHO drives, and the answer to a
  *  pending `--confirm-actions` card. None is forwarded upstream as-is. */
-const VIEWER_CONTROL_TYPES = Object.freeze(['takeover', 'handback', 'confirm', 'pass']); // + lane P verify: `pass` {to} = the holder hands its controls to another view of the same browser (a fold-back)
+const VIEWER_CONTROL_TYPES = Object.freeze(['takeover', 'handback', 'confirm', 'pass', 'claim']); // + lane P verify: `pass` {to} = the holder hands its controls to another view of the same browser (a fold-back)
 /** lane S4 (naive study 2): the VIEW verbs — `fit` {width, height, dpr, visible, force} = this viewer's pane (the bridge
  *  sizes the page to the ruling pane, src/browser-fit.js), `refresh` = "I have no picture of this page — send a fresh
  *  one". Answered by the bridge, never forwarded; any viewer may send them (a watcher's pane counts too). */
@@ -238,6 +238,18 @@ function streamTargetFor({ browserKey, set = null, profileRef = '', envPairs = n
   return ephemeral('ephemeral');
 }
 
+/**
+ * BROWSE YOURSELF (B-6ae8): the target of the USER's own browsing window (`?browse=hu-<hex>`) — the profile's browser,
+ * the human session's own stream server (`vs-hu-<hex>` in the profile's namespace, over the keeper browser's RAW CDP url;
+ * never mediated), keyed `human:<key>` on the bridge. The key and the profile are the keeper's holder row's (a stale key
+ * is refused by the keeper before this). → a typed target or a typed refusal.
+ */
+function humanTarget({ key = '', profileId = '', label = null } = {}) {
+  const k = String(key || ''), pid = String(profileId || '');
+  if (!/^hu-[0-9a-f]{8}$/.test(k) || pid !== 'bp-' + k.slice(3)) return { ok: false, code: 'bad-request', error: 'not a browsing window of yours', handles: [] };
+  return { ok: true, kind: 'human', ref: pid, key: k, profileId: pid, alias: null, label: label ? String(label) : null, isDefault: false, chosen: 'human', ns: sessionNameFor(pid), sessionName: sessionNameFor(k) };
+}
+
 /** `['K=V', …]` → `{K: V}` (the P0 spawn pairs, for one CLI call). */
 function pairsToEnv(pairs) {
   const out = {};
@@ -291,9 +303,14 @@ function viewerMessageVerdict(msg, { holder = null, viewerId = null, mode = 'wat
   // P3 (§4.3): the control verbs are decided by the keeper (the bridge asks
   // it), never forwarded; `confirm` carries the id and the decision.
   if (t === 'takeover') return { kind: 'takeover', forward: false };
-  if (t === 'handback') return { kind: 'handback', forward: false };
-  if (t === 'confirm') return { kind: 'confirm', forward: false, id: typeof msg.id === 'string' ? msg.id.slice(0, 80) : '', decision: msg.decision === 'deny' ? 'deny' : 'confirm' };
+  // r6 A-F9: `expectWakes` = the count the Hand back control showed (checked by the keeper; absent = not checked)
+  if (t === 'handback') return { kind: 'handback', forward: false, ...(Number.isInteger(msg.expectWakes) ? { expectWakes: msg.expectWakes } : {}) };
+  // r6 A-F8: `shown` = the digest of what the card showed (a Confirm without it is refused by the keeper's gate)
+  if (t === 'confirm') return { kind: 'confirm', forward: false, id: typeof msg.id === 'string' ? msg.id.slice(0, 80) : '', decision: msg.decision === 'deny' ? 'deny' : 'confirm', shown: typeof msg.shown === 'string' ? msg.shown.slice(0, 40) : null };
   if (t === 'pass') return { kind: 'pass', forward: false, to: Number.isInteger(msg.to) ? msg.to : (typeof msg.to === 'string' && msg.to ? msg.to.slice(0, 40) : null) };
+  // BROWSE YOURSELF (B-6ae8, Q6): "Continue here" — a viewer of the user's OWN browsing window takes the controls from the
+  // user's other live window (the receiver-initiated pass: one holder always; the bridge allows it on a human relay only)
+  if (t === 'claim') return { kind: 'claim', forward: false };
   // lane S4: the view verbs (the bridge sanitizes a `fit` report with src/browser-fit.js fitReport)
   if (t === 'fit') return { kind: 'fit', forward: false };
   if (t === 'refresh') return { kind: 'refresh', forward: false };
@@ -964,6 +981,7 @@ module.exports = {
   STREAM_PATH, BACKPRESSURE, MAX_FPS_DEFAULT, MAX_FPS_CAP, UPSTREAM_TYPES, REPLAYED_TYPES, MODES, VIEWER_INPUT_TYPES, VIEWER_CONTROL_TYPES, VIEWER_VIEW_TYPES, KEY_MODIFIERS,
   frameGateWait, // lane S4: the trailing edge of the per-viewer frame gate
   EPHEMERAL_REF, sessionNameFor, classifyUpstream, parseStreamStatus, streamPlan, originHeaderFor, streamTargetFor, pairsToEnv,
+  humanTarget, // BROWSE YOURSELF (B-6ae8): the user's own browsing window's target
   // naive study 2: the sub-agent tap ref (finding 4), one view per session (finding 2), a stopped view resumes (finding 3)
   CHILD_REF_PREFIX, childRefFor, childKeyOfRef, liveViewPlan, viewTargetRunning,
   clampFps, maxFpsAcross, viewerMessageVerdict, frameGate, backpressureVerdict, hello, drawnRect, pointerToDevice, deviceToViewport, liveTitle,

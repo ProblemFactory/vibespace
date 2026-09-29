@@ -13,8 +13,9 @@ const { create: createEngine } = require('./channels-engine.js');
 const { create: createGroups } = require('./groups-engine.js');
 const channelsRoutes = require('../routes/channels.js');
 const { create: createTouches } = require('./channel-touches.js');
+const N = require('../normalizers.js');
 
-function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env = process.env, integrations = null, userTodos = null, deliver = null, serverSetting = () => undefined, liveSessions = () => [], groupSetting = () => 'none', authEnabled = () => false, getMounts = () => null, sessions = () => null, sessionMeta = () => null } = {}) {
+function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env = process.env, integrations = null, userTodos = null, deliver = null, serverSetting = () => undefined, liveSessions = () => [], groupSetting = () => 'none', authEnabled = () => false, getMounts = () => null, sessions = () => null, sessionMeta = () => null, onGroupsPending = () => {} } = {}) {
   if (!app) throw new Error('channels-wiring: app is required');
   if (!dataDir) throw new Error('channels-wiring: dataDir is required');
 
@@ -42,7 +43,34 @@ function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env
   // behind its serialized doors), the SAME ladder (a wake is a billed turn —
   // spendReason peer-message, the authorizer inside it), reach = msg-acl over
   // the live roster + the Task Groups' externalVisibility (`groupSetting`).
-  const groups = createGroups({ store: channels.store, deliver, broadcast: (msg) => bcastAll(msg), now, roster: liveSessions, groupSetting });
+  // the .197 integration (lane-redact × lane group-report-card): a cleared group message's CARD re-words in every live
+  // conversation that carded it (the ring + the drawn card; a stopped session's ring is never drawn again — a resume
+  // is a new session, a restart restores only the live ones, which are here)
+  const onGroupCardsCleared = (gid, keys) => {
+    const live = (() => { try { return sessions(); } catch { return null; } })();
+    if (!live || !keys.length) return;
+    const RCm = require('../record-clear.js');
+    for (const s of live.values()) { try { N.redactGroupCards(s, keys, RCm.CLEARED_TEXT); } catch (e) { console.warn('[groups] a group card was not re-worded:', e && e.message); } }
+  };
+  const groups = createGroups({ store: channels.store, deliver, broadcast: (msg) => bcastAll(msg), now, roster: liveSessions, groupSetting, onPending: onGroupsPending, onCleared: onGroupCardsCleared });
+  // THE GROUP CARDS' RING (lane group-report-card): the card door (src/normalizers.js feedGroupCard) keeps it on the live
+  // session; its meta write is HERE, beside the meta store — ONE write per session per burst (a report's N cards are
+  // emitted in one synchronous pass), on a MICROTASK: commitReports emits its cards before it asks the groups door for
+  // the marker, whose write rides that door's promise chain queued after this flush — the ring is on disk before the
+  // marker, so a re-report after a crash between the two finds its key and draws nothing twice. Flushed at shutdown.
+  const cardsDirty = new Set();
+  let cardsQueued = false;
+  const flushGroupCards = () => {
+    cardsQueued = false;
+    const ms = sessionMeta();
+    for (const s of cardsDirty) {
+      if (!s || !s.sockName || !ms) continue;
+      try { ms.writeSessionMeta(s.sockName, { ...(ms.readSessionMeta(s.sockName) || {}), groupCards: Array.isArray(s._groupCards) ? s._groupCards : [] }); }
+      catch (e) { console.warn(`[groups] the group cards of ${s.sockName} were not persisted: ${(e && e.message) || e}`); }
+    }
+    cardsDirty.clear();
+  };
+  N.setGroupCardPersist((s) => { cardsDirty.add(s); if (!cardsQueued) { cardsQueued = true; queueMicrotask(flushGroupCards); } });
   // `authEnabled` (r2): with auth OFF the owner's group routes are reachable by any
   // local caller, so they are PACED like an agent's (src/routes/channels.js ownerPacer)
   // THE WITNESS (§26, B-099e): every agent read / search / reply / compose of a conversation, recorded by the agent
@@ -53,7 +81,7 @@ function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env
   channelsRoutes.setup({ getEngine: () => channels, getGroups: () => groups, authEnabled, getTouches: () => touches });
   app.use(channelsRoutes.router);
   channels.start();
-  return { channels, groups, touches, shutdown: () => { try { touches.flush(); } catch (e) { console.warn('[channel-touches] flush:', e && e.message); } try { channels.stop(); } catch (e) { console.warn('[channels] shutdown:', e && e.message); } } };
+  return { channels, groups, touches, flushGroupCards, shutdown: () => { try { touches.flush(); } catch (e) { console.warn('[channel-touches] flush:', e && e.message); } try { flushGroupCards(); } catch (e) { console.warn('[groups] card flush:', e && e.message); } try { channels.stop(); } catch (e) { console.warn('[channels] shutdown:', e && e.message); } } };
 }
 
 module.exports = { create };

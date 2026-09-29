@@ -201,6 +201,9 @@ const caps = Object.freeze({
   listConversations: true,
   sendAs: ['user'],                // P4: as the USER; convCaps narrows until gmail.send is held
   compose: true,                   // R4 (B-6acc): a NEW message — `messages.send` under the same gmail.send scope
+  // r6 verify F3 (2026-09-28): a reply's To / Cc / Subject follow from the message it answers — resolved when
+  // the reply is PROPOSED (`replyEnvelope`), stored on the proposal, shown on the card, sent verbatim
+  replyEnvelope: true,
   identityMarking: 'marked',
   identityMarkingWhere: 'raw-headers',
   identityMarkingText: 'Mail sent through the Gmail API carries a Received: header naming gmailapi.google.com — invisible in mail clients, visible in "Show original".',
@@ -232,6 +235,12 @@ const caps = Object.freeze({
   // discovery page (threads.list 10 + up to META_PER_LIST metadata reads).
   pace: { unitsPerSec: 40, settingKey: 'channels.gmailUnitsPerSec', cost: { fetch: 40, discover: 10 + 40 * 10, scanHost: 1 } },
   vendorName: i18nKey('Google'),
+  // lane channel-threads (2026-09-28): the mail THREAD is the conversation (threadKey === convId — kind
+  // `conversation`, the window draws nothing new) and mail has no reactions — declared, so no control appears
+  // 2026-09-28 (reply PLACEMENTS): every reply lands in the mail thread (= the conversation) — `chat` answers the
+  // thread's newest message, `quote` a named one (In-Reply-To / References); nothing is a separate thread
+  threads: Object.freeze({ read: 'none', replyInto: false, listing: 'none', placements: Object.freeze(['chat', 'quote']), rootReply: 'quote' }),
+  reactions: Object.freeze({ read: 'none', add: false, remove: 'none', vocabulary: 'names', custom: 'none', perMessageMax: null }),
 });
 
 /** THE QUOTA COST of one Gmail API call (units, the vendor's published table
@@ -303,38 +312,94 @@ function header(headers, name) {
   return '';
 }
 /** `Name <addr>` / `addr` / `"Name" <addr>` → {id: addr, name}. */
+/** ONE LOOK, BOUNDED (security verify r2, 2026-09-28): the lazy `^(.*?)\s*<([^>]+)>\s*$` re-tried every prefix
+ *  for every `<` — a From header of 64 KB of `<` was 1.4 s, 128 KB 5.8 s of the event loop at ingest. The address
+ *  is the LAST `<…>` pair (found once); the header is cut at ADDRESS_MAX first (a From over 2 KB is not an address). */
+const ADDRESS_MAX = 2048;
 function parseAddress(s) {
-  const raw = String(s || '').trim();
-  const m = /^(.*?)\s*<([^>]+)>\s*$/.exec(raw);
-  if (m) return { id: m[2].trim().toLowerCase(), name: m[1].replace(/^"|"$/g, '').trim() || m[2].trim() };
+  const raw = String(s || '').slice(0, ADDRESS_MAX).trim();
+  const lt = raw.lastIndexOf('<');
+  const gt = lt >= 0 ? raw.indexOf('>', lt + 1) : -1;
+  if (lt >= 0 && gt > lt + 1 && !raw.slice(gt + 1).trim()) {
+    const addr = raw.slice(lt + 1, gt).trim();
+    if (addr && !addr.includes('>')) return { id: addr.toLowerCase(), name: raw.slice(0, lt).trim().replace(/^"|"$/g, '').trim() || addr };
+  }
   return { id: raw.toLowerCase(), name: raw };
 }
+/** The words of an HTML-only mail (no text/plain part) — the record's `text`, an agent's read. ONE WALK, BOUNDED
+ *  (security verify r2, 2026-09-28): the regex chain before it (`<[^>]+>`, `<style[\s\S]*?<\/style>`) re-scanned
+ *  to the end for every `<` with no `>` / every `<style` with no closer — 64 KB of `<` was 1.2 s and 128 KB 4.7 s of
+ *  the server's event loop AT INGEST, with no cap at all on the part (Gmail hands over megabytes). Now: the input is
+ *  cut at STRIP_HTML_MAX (the record's text is bounded to MAX_TEXT after it anyway), a tag's `>` and a raw-text
+ *  element's closer are each looked for ONCE (none ⇒ the rest is text / dropped, never re-walked). */
+const STRIP_HTML_MAX = 512 * 1024;
+const STRIP_RAW = /^(style|script|title|textarea|noscript|template)\b/i;
+const STRIP_BLOCK_CLOSE = /^(p|div|tr|li|h[1-6]|blockquote|pre|table|ul|ol|section|article|header|footer)$/i;
 function stripHtml(html) {
-  return String(html || '')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|tr|li|h[1-6])>/gi, '\n')
-    .replace(/<[^>]+>/g, ' ')
+  const s = String(html || '').slice(0, STRIP_HTML_MAX);
+  let out = '', i = 0;
+  while (i < s.length) {
+    const lt = s.indexOf('<', i);
+    if (lt < 0) { out += s.slice(i); break; }
+    out += s.slice(i, lt);
+    // a comment / a declaration: to its end, once
+    if (s.startsWith('<!--', lt)) { const e = s.indexOf('-->', lt + 4); i = e < 0 ? s.length : e + 3; out += ' '; continue; }
+    if (s[lt + 1] === '!' || s[lt + 1] === '?') { const e = s.indexOf('>', lt + 2); i = e < 0 ? s.length : e + 1; out += ' '; continue; }
+    const gt = s.indexOf('>', lt + 1);
+    if (gt < 0) { out += s.slice(lt); break; }   // an unfinished tag: the rest is words (a browser's rule)
+    const inner = s.slice(lt + 1, gt);
+    const nm = /^\/?([A-Za-z][A-Za-z0-9-]*)/.exec(inner);
+    const name = nm ? nm[1].toLowerCase() : '';
+    const closing = inner[0] === '/';
+    if (!closing && STRIP_RAW.test(name)) {
+      // raw text to the closer, found once; none ⇒ the rest is the element's (dropped)
+      const close = s.toLowerCase().indexOf(`</${name}`, gt + 1);
+      if (close < 0) { i = s.length; out += ' '; break; }
+      const end = s.indexOf('>', close);
+      i = end < 0 ? s.length : end + 1;
+      out += ' ';
+      continue;
+    }
+    if (name === 'br' || (closing && STRIP_BLOCK_CLOSE.test(name))) out += '\n'; else out += ' ';
+    i = gt + 1;
+  }
+  return out
     .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
     .replace(/[ \t]+/g, ' ').replace(/\n[ \t]+/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 /** Walk the MIME tree ONCE: the first text/plain body, the first text/html
  *  body, and every part that carries a filename (an attachment). */
+/** A part's Content-ID without its angle brackets (a `cid:` picture's name), or null. */
+function contentIdOf(p) {
+  const v = header(p && p.headers, 'Content-ID') || header(p && p.headers, 'X-Attachment-Id');
+  const id = String(v || '').trim().replace(/^<|>$/g, '').trim();
+  return id && id.length <= 256 ? id : null;
+}
+/** The formatted body's attachment name (never shown — the window draws the frame, an agent never sees it). */
+const BODY_NAME = 'message.html';
 function walkParts(payload) {
-  const out = { plain: null, html: null, attachments: [] };
+  // lane channel-rich (D2): the first text/html part is KEPT — as the record's `role: 'body'` attachment
+  // (`htmlPart`), its bytes handed to the adapter's ingest hold — and every picture carries its Content-ID
+  const out = { plain: null, html: null, htmlPart: null, attachments: [] };
   const visit = (p) => {
     if (!p || typeof p !== 'object') return;
     const mime = String(p.mimeType || '').toLowerCase();
     const body = p.body || {};
+    const cid = contentIdOf(p);
     // 2026-09-26: an attachment's id is `part:<partId>` — short and stable
     // (a Gmail attachmentId runs past the record's 256-char bound, and it
     // is re-minted per fetch); `fetchAttachment` finds the part again. An
     // INLINE image with no filename (a `cid:` picture) is an attachment too.
     if (p.filename) {
-      out.attachments.push({ id: p.partId != null && p.partId !== '' ? `part:${p.partId}` : String(body.attachmentId || p.filename), name: String(p.filename), bytes: Number.isFinite(Number(body.size)) ? Number(body.size) : null, mime: mime || null });
+      out.attachments.push({ id: p.partId != null && p.partId !== '' ? `part:${p.partId}` : String(body.attachmentId || p.filename), name: String(p.filename), bytes: Number.isFinite(Number(body.size)) ? Number(body.size) : null, mime: mime || null, ...(cid ? { cid } : {}) });
     } else if (mime.startsWith('image/') && (body.attachmentId || body.data) && p.partId != null && p.partId !== '') {
-      out.attachments.push({ id: `part:${p.partId}`, name: 'image', bytes: Number.isFinite(Number(body.size)) ? Number(body.size) : null, mime });
+      out.attachments.push({ id: `part:${p.partId}`, name: 'image', bytes: Number.isFinite(Number(body.size)) ? Number(body.size) : null, mime, ...(cid ? { cid } : {}) });
     } else if (mime === 'text/plain' && out.plain === null && body.data) out.plain = b64url(body.data);
-    else if (mime === 'text/html' && out.html === null && body.data) out.html = b64url(body.data);
+    else if (mime === 'text/html' && out.htmlPart === null && (body.data || body.attachmentId) && ((p.partId != null && p.partId !== '') || p === payload)) {
+      // a single-part HTML mail's body IS the root payload (Gmail's root partId is "") — named `part:root`
+      if (body.data) out.html = b64url(body.data);
+      out.htmlPart = { id: p.partId != null && p.partId !== '' ? `part:${p.partId}` : 'part:root', name: BODY_NAME, bytes: Number.isFinite(Number(body.size)) ? Number(body.size) : null, mime: 'text/html', role: 'body' };
+    } else if (mime === 'text/html' && out.html === null && body.data) out.html = b64url(body.data);
     for (const c of p.parts || []) visit(c);
   };
   visit(payload);
@@ -342,10 +407,16 @@ function walkParts(payload) {
 }
 /** ONE vendor message → ONE ChannelRecord. `selfEmail` is the authorizing
  *  user's address (from `users.getProfile`). */
-function toRecord(adapterId, convId, m, { selfEmail = null } = {}) {
+function toRecord(adapterId, convId, m, { selfEmail = null, onBody = null } = {}) {
   const headers = (m.payload && m.payload.headers) || [];
   const from = parseAddress(header(headers, 'From'));
   const parts = walkParts(m.payload);
+  // D2: the formatted body FIRST among the attachments (the record's 64-attachment bound never cuts it), its
+  // bytes handed to the adapter's hold (the engine keeps them the moment the record is durable)
+  if (parts.htmlPart) {
+    parts.attachments.unshift(parts.htmlPart);
+    if (parts.html && typeof onBody === 'function') { try { onBody(String(m.id || ''), parts.htmlPart.id, parts.html); } catch {} }
+  }
   const text = (parts.plain && parts.plain.trim()) ? parts.plain.trim() : (parts.html ? stripHtml(parts.html) : String(m.snippet || ''));
   const subject = header(headers, 'Subject') || null;
   return makeRecord({
@@ -657,6 +728,31 @@ function create(record = {}, deps = {}) {
     return callJson(fetchFn, `${API}${pathq}`, { ...opts, headers: { Authorization: `Bearer ${bearerNow(at)}`, ...(opts.headers || {}) } });
   };
   const selfEmail = () => { const t = readToken().token; return (t && t.email) || mailbox.self || null; };
+  /** D2 (lane channel-rich): the formatted bodies read at ingest, held until the engine takes them —
+   *  BOUNDED (HELD_MAX_BYTES, oldest first out; a body the engine never took is fetched on demand). */
+  const HELD_MAX_BYTES = 32 * 1024 * 1024;
+  const HELD_MAX_BODY = 4 * 1024 * 1024;
+  const held = new Map();
+  let heldBytes = 0;
+  function holdBody(messageId, attId, html) {
+    const data = Buffer.from(String(html || ''), 'utf-8');
+    if (!messageId || !data.length || data.length > HELD_MAX_BODY) return;
+    const k = `${messageId}|${attId}`;
+    const prev = held.get(k);
+    if (prev) { heldBytes -= prev.data.length; held.delete(k); }
+    held.set(k, { data, at: now() });
+    heldBytes += data.length;
+    while (heldBytes > HELD_MAX_BYTES && held.size) { const [k0, v0] = held.entries().next().value; held.delete(k0); heldBytes -= v0.data.length; }
+  }
+
+  /** A thread's messages with the reply headers (ONE metadata read through the gate), oldest first. */
+  async function anchorThread(convId) {
+    const t = await api(`/threads/${encodeURIComponent(convId)}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=Reply-To&metadataHeaders=Message-ID&metadataHeaders=References`, { what: 'gmail thread (reply anchor)' });
+    const msgs = (Array.isArray(t.messages) ? t.messages : []).filter((m) => m && m.id)
+      .sort((a, b) => (Number(a.internalDate) || 0) - (Number(b.internalDate) || 0) || String(a.id).localeCompare(String(b.id)));
+    if (!msgs.length) throw new ChannelError('not-found', `gmail: thread ${convId} holds no message to reply to`, { retryable: false });
+    return msgs;
+  }
 
   /** ONE `history.list` per pass (memoised): which threads gained messages
    *  since the cursor. A 404 is RESEED (the cursor is too old); no cursor is
@@ -858,17 +954,37 @@ function create(record = {}, deps = {}) {
      * was sent; at worst a stray draft, said in `detail`); in phase 2 it is
      * `detail.lost` with the handle (the draft may have gone out).
      */
-    async send(convId, { text, replyTo = null, idemKey, as = 'user', onHandle = null } = {}) {
+    /**
+     * WHO THIS REPLY GOES TO (r6 verify F3), asked when the reply is PROPOSED:
+     * ONE metadata read of the thread, the anchor = the message the ENGINE
+     * picked from its own store (`anchorId`, never "the newest now") — absent
+     * from the thread ⇒ `not-found` (`reply-anchor-elsewhere`) — and its
+     * headers through `replyHeaders`. The engine stores the answer on the
+     * proposal, the card shows it, `send` sends to exactly it.
+     */
+    async replyEnvelope(convId, { anchorId = null } = {}) {
+      const msgs = await anchorThread(convId);
+      const anchor = anchorId ? msgs.find((m) => String(m.id) === String(anchorId)) : null;
+      if (!anchor) throw new ChannelError('not-found', `gmail: message ${String(anchorId || '').slice(0, 80)} is not in thread ${convId} — a reply answers a message of its own thread`, { retryable: false, detail: { why: 'reply-anchor-elsewhere', anchorId: anchorId ? String(anchorId) : null } });
+      const h = replyHeaders(anchor, selfEmail());
+      if (!h.to) throw new ChannelError('vendor-error', `gmail: the anchor message ${anchor.id} names no recipient to reply to`, { retryable: false, detail: { anchorId: String(anchor.id) } });
+      return { anchorId: String(anchor.id), to: h.to, cc: h.cc, subject: h.subject, inReplyTo: h.inReplyTo, references: h.references };
+    },
+
+    async send(convId, { text, replyTo = null, idemKey, as = 'user', onHandle = null, envelope = null } = {}) {
       if (as !== 'user') throw new ChannelError('send-not-available', `gmail: sending as '${as}' is not declared (caps.sendAs: user)`, { retryable: false, detail: { sendAs: caps.sendAs } });
       if (!hasReplyScope()) throw new ChannelError('forbidden', 'gmail: the held token carries no scope covering drafts + sending (gmail.compose) — reconnect to request it', { retryable: false, detail: { why: 'send-scope-not-granted', held: heldVerbs() } });
-      const t = await api(`/threads/${encodeURIComponent(convId)}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=Reply-To&metadataHeaders=Message-ID&metadataHeaders=References`, { what: 'gmail thread (reply anchor)' });
-      const msgs = (Array.isArray(t.messages) ? t.messages : []).filter((m) => m && m.id)
-        .sort((a, b) => (Number(a.internalDate) || 0) - (Number(b.internalDate) || 0) || String(a.id).localeCompare(String(b.id)));
-      if (!msgs.length) throw new ChannelError('not-found', `gmail: thread ${convId} holds no message to reply to`, { retryable: false });
-      const anchor = (replyTo && msgs.find((m) => String(m.id) === String(replyTo))) || msgs[msgs.length - 1];
+      // r6 verify F3: the recipients were decided when the reply was PROPOSED and shown on the card; nothing is
+      // re-derived here — without them the send is refused by name (a reply proposed before this rule)
+      const env = envelope && typeof envelope === 'object' ? envelope : null;
+      if (!env || !env.anchorId || !env.to) throw new ChannelError('vendor-error', 'gmail: this reply carries no recipients resolved when it was proposed — nothing was sent (propose it again)', { retryable: false, detail: { why: 'reply-envelope-missing' } });
+      if (replyTo && String(replyTo) !== String(env.anchorId)) throw new ChannelError('vendor-error', `gmail: the reply's recipients were resolved for message ${env.anchorId}, not ${String(replyTo).slice(0, 80)} — nothing was sent`, { retryable: false, detail: { why: 'reply-envelope-mismatch' } });
+      const msgs = await anchorThread(convId);
+      // the message it answers must still be in the thread — gone ⇒ refused by name, never another anchor
+      const anchor = msgs.find((m) => String(m.id) === String(env.anchorId));
+      if (!anchor) throw new ChannelError('not-found', `gmail: the message this reply answers (${env.anchorId}) is no longer in thread ${convId} — nothing was sent`, { retryable: false, detail: { why: 'reply-anchor-gone', anchorId: String(env.anchorId) } });
       const self = selfEmail();
-      const h = replyHeaders(anchor, self);
-      if (!h.to) throw new ChannelError('vendor-error', `gmail: the anchor message ${anchor.id} names no recipient to reply to`, { retryable: false, detail: { anchorId: String(anchor.id) } });
+      const h = { to: String(env.to), cc: env.cc ? String(env.cc) : null, subject: String(env.subject || ''), inReplyTo: env.inReplyTo || null, references: env.references || null };
       const raw = Buffer.from(buildMime({ from: self, to: h.to, cc: h.cc, subject: h.subject, inReplyTo: h.inReplyTo, references: h.references, text }), 'utf-8').toString('base64url');
       let d;
       try { d = await api('/drafts', { method: 'POST', what: 'gmail draft create', json: { message: { threadId: convId, raw } } }); }
@@ -1047,7 +1163,7 @@ function create(record = {}, deps = {}) {
       if (drained) { if (mailbox.changed.delete(convId)) persistCursor(); mailbox.walked.add(convId); threads.delete(convId); }
       const self = selfEmail();
       return {
-        records: page.map((m) => toRecord(adapterId, convId, m, { selfEmail: self })),
+        records: page.map((m) => toRecord(adapterId, convId, m, { selfEmail: self, onBody: holdBody })),
         anchor: page.length ? String(page[page.length - 1].id) : (anchor || (msgs.length ? String(msgs[msgs.length - 1].id) : null)),
         reachedAnchor: drained,
         complete: drained,
@@ -1062,6 +1178,15 @@ function create(record = {}, deps = {}) {
      * (`attachments.get`, 20 more). A legacy id that IS an attachmentId is
      * fetched directly. Bounded at 100 MB.
      */
+    /** D2 (lane channel-rich): the formatted body this adapter READ at ingest, TAKEN once by the engine
+     *  (`persistHeldBodies`, or the route's first ask) — zero vendor units. */
+    heldAttachment(messageId, attachmentId) {
+      const k = `${messageId}|${attachmentId}`;
+      const h = held.get(k);
+      if (!h) return null;
+      held.delete(k); heldBytes -= h.data.length;
+      return { data: h.data, mime: 'text/html', name: BODY_NAME };
+    },
     async fetchAttachment(convId, { messageId, attachmentId, mime = null, name = null } = {}) {
       if (!messageId || !attachmentId) throw new ChannelError('not-found', 'gmail: an attachment needs its message id and part', { retryable: false });
       const id = String(attachmentId);
@@ -1075,7 +1200,8 @@ function create(record = {}, deps = {}) {
         const m = await api(`/messages/${encodeURIComponent(String(messageId))}?format=full`, { what: 'gmail message' });
         let part = null;
         const visit = (p) => { if (!p || part) return; if (String(p.partId) === partId) { part = p; return; } for (const c of p.parts || []) visit(c); };
-        visit(m && m.payload);
+        if (partId === 'root') part = (m && m.payload) || null;   // lane channel-rich: a single-part mail's body
+        else visit(m && m.payload);
         if (!part) throw new ChannelError('not-found', `gmail: message ${messageId} has no part ${partId}`, { retryable: false });
         partMime = String(part.mimeType || partMime || '') || null;
         partName = part.filename || partName;

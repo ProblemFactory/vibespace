@@ -96,10 +96,12 @@ ok(/101 Switching Protocols/.test(wsResp) && wsResp.includes('ECHO:/ws'), 'ws up
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pm-'));
   const { PortForwardManager } = require(REPO + '/src/port-forward.js');
   const pf = new PortForwardManager({ dataDir: dir, hosts: {}, log: () => { } });
-  pf._state.forwards.push({ id: 'pf-a', hostId: '__local__', remotePort: 1234 }, { id: 'pf-b', hostId: '__local__', remotePort: 5678 });
+  pf._state.forwards.push({ id: 'pf-a', hostId: '__local__', remotePort: 1234, label: 'service: nightly digest' }, { id: 'pf-b', hostId: '__local__', remotePort: 5678 });
   ok(pf.setPathMount('pf-a', 'myapp').pathMount === 'myapp', 'setPathMount stores a valid name');
   let threw = null; try { pf.setPathMount('pf-b', 'myapp'); } catch (e) { threw = e.message; }
-  ok(/already mounted/.test(threw || ''), 'duplicate name refused with the owner named', threw);
+  // lane-redact verify r8 ①: the owner is named by WHERE it points, never by its label (a service's label is a job's name,
+  // and this refusal is toasted into every device's toast history — "Clear content…" cannot reach it)
+  ok(/already mounted by the forward of this machine:1234$/.test(threw || '') && !/nightly digest/.test(threw || ''), 'duplicate name refused with the owner named by machine + port (never its label — a job\'s name)', threw);
   threw = null; try { pf.setPathMount('pf-b', 'Bad_Name'); } catch (e) { threw = e.message; }
   ok(/lowercase/.test(threw || ''), 'invalid name refused');
   ok(pf.setPathMount('pf-a', null).pathMount === null, 'unmount clears');

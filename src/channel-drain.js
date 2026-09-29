@@ -51,6 +51,8 @@
  *   agentShare { remaining } — agent units left in the minute (Infinity when
  *             the share is 100 %)
  *   floors    { key: lastFetchAt } for the keys of waiting requests · floorMs
+ *   feedPages { remaining } — rule 21: the change feed's pages left in its own
+ *             sliding minute (absent / 0 = none now)
  *   pace      null (no pacing — the adapter declares no `caps.pace`) | the
  *             account's PER-SECOND bucket (rule 18): { unitsPerSec, burst,
  *             tokens, lastRefillAt, cost: { fetch, discover, scanHost } } —
@@ -73,6 +75,7 @@
  *   { type: 'answer', waiters, outcome, code? }           a settlement (stop /
  *                                                          drop / failure / not-connected)
  *   { type: 'discover' }                                   the discovery walk
+ *   { type: 'feed' }                                       ONE change-feed page (rule 21)
  *   { type: 'scanHost' }                                   the scan lane's host facts
  *   { type: 'fetch', key, chargeTo: 'timer'|'owner'|'agent', waiters, due,
  *     rider, pressed }                                     ONE conversation
@@ -216,6 +219,8 @@ const PACE_EPS = 1e-6;
 const OLDER_FLOOR_MS = 1500;
 /** Rule 19: a remembered `exhausted` answers without a vendor call for this long (a belt against a false one). */
 const OLDER_MEMORY_MS = 6 * 3600e3;
+/** Rule 21: the change feed's pages per pass when the turn names none (the adapter's `caps.changeFeed.pagesPerPass`). */
+const FEED_PAGES_PER_PASS = 5;
 /** Rule 19's memory events (`olderApply`). */
 const OLDER_EVENTS = Object.freeze(['ask', 'landed', 'failed', 'changed']);
 
@@ -314,6 +319,7 @@ function open(snap, { origin = 'timer', force = false, backoff = false, timerDue
       origin, force: !!force, backoff: !!backoff, timerWork, turnPending: timerWork,
       due: [], fetchedAt: {}, inflight: null, last: null, streak: 0, calls: 0, fetches: 0, vendorCalls: 0,
       discovery: { wanted: false, done: false }, hostScan: { wanted: !!hostScan, done: false },
+      feed: { wanted: false, done: false, pages: 0, perPass: FEED_PAGES_PER_PASS },
       pressKey: null, failed: null, cut: false,
     },
   };
@@ -343,13 +349,35 @@ function mergeDue(p, rows, requests) {
   }
   return out;
 }
-/** THE TIMER'S TURN: the due list by the clock NOW (and whether discovery is due). */
-function turn(snap, { due = [], discoveryDue = false } = {}) {
+/** RULE 21 — the feed's rows go AHEAD of the plain due rows, in the page's order: a pending key moves up, a key in
+ *  flight or with a taken group is left where it is (it is served already), a key this pass fetched only when a hit is
+ *  NEWER than that fetch (rule 13). */
+function mergeFront(p, rows, requests) {
+  const skip = new Set();
+  if (p.inflight && p.inflight.key) skip.add(p.inflight.key);
+  for (const r of requests) if (r.taken) skip.add(r.key);
+  const front = [];
+  const moved = new Set();
+  for (const d of rows || []) {
+    if (!d || typeof d.key !== 'string' || !d.key || moved.has(d.key) || skip.has(d.key)) continue;
+    const dueAt = Number(d.dueAt) || 0;
+    const f = p.fetchedAt[d.key];
+    if (f !== undefined && !(dueAt > f)) continue;   // fetched this pass and no newer hit
+    front.push({ key: d.key, dueAt });
+    moved.add(d.key);
+  }
+  return front.concat(p.due.filter((d) => !moved.has(d.key)));
+}
+/** THE TIMER'S TURN: the due list by the clock NOW (and whether discovery / the change feed is due). */
+function turn(snap, { due = [], discoveryDue = false, feedDue = false, feedPerPass = FEED_PAGES_PER_PASS } = {}) {
   const p = snap.pass;
   if (!p || p.backoff || p.failed || p.cut) return snap;
   const q = { ...p, timerWork: true, turnPending: false };
   q.due = mergeDue(q, due, snap.requests);
   if (!q.discovery.done && (q.force || discoveryDue)) q.discovery = { wanted: true, done: false };
+  // RULE 21: the timer's turn marks the feed wanted (once per pass — a done feed is not re-armed by a later turn)
+  const f0 = q.feed || { wanted: false, done: false, pages: 0, perPass: FEED_PAGES_PER_PASS };
+  if (feedDue && !f0.done && !f0.wanted) q.feed = { ...f0, wanted: true, perPass: Math.max(1, Math.floor(Number(feedPerPass) || FEED_PAGES_PER_PASS)) };
   return { ...snap, pass: q };
 }
 /** Close a pass without a step (the engine's crash path). */
@@ -390,6 +418,14 @@ function verdict(s, g, pressFree) {
   if (!(s.budget.remainingUnits > 0)) return { refuse: true, code: 'vendor-budget', rule: 'budget' };   // THE VENDOR BUDGET
   if (!human) { const last = Number(s.floors && s.floors[g.key]) || 0; if (last && s.now - last < s.floorMs) return { refuse: true, code: 'refresh-floor', rule: 'floor' }; }   // THE FLOOR
   return { refuse: false, pressed };
+}
+/** RULE 21 — may the next step be ONE feed page? */
+function feedEligible(s, p, humanWaiting) {
+  const f = p.feed;
+  if (!f || !f.wanted || f.done || p.backoff || !p.timerWork || humanWaiting) return false;
+  if (!(s.budget && s.budget.remainingUnits > 0)) return false;
+  if (!(s.feedPages && Number(s.feedPages.remaining) > 0)) return false;
+  return f.pages < (Number(f.perPass) || FEED_PAGES_PER_PASS);
 }
 /** RULE 7's order: humans first, then the filing order of the earliest waiter. */
 const byRank = (a, b) => (Number(b.human) - Number(a.human)) || (a.minSeq - b.minSeq);
@@ -443,6 +479,8 @@ function next(s) {
   if (p.cut) return { ...base, type: 'end', ok: p.vendorCalls > 0, why: p.vendorCalls > 0 ? null : 'budget', cut: true, waiting: queue.length, timerWork: p.timerWork };
   // 12. discovery — once, with the timer's work, never ahead of a waiting human
   const humanWaiting = waiting.some((it) => it.human);
+  // 21. the change feed — the timer's work, never ahead of a waiting human, its own minute and per-pass bound, BEFORE discovery
+  if (feedEligible(s, p, humanWaiting)) return paced(s, base, { ...base, type: 'feed' });
   if (p.discovery.wanted && !p.discovery.done && !humanWaiting && s.budget.remainingUnits > 0) return paced(s, base, { ...base, type: 'discover' });
   // 16. nothing pending
   if (!queue.length) {
@@ -496,6 +534,18 @@ function apply(snap, act, result) {
     case 'end':
       return { ...snap, requests, pass: null };
     case 'wait':   // rule 18: the engine sleeps between two steps — nothing about the pass moves
+      break;
+    case 'feed':   // RULE 21: one page — its rows ahead of the plain due rows, `more` keeps it wanted, a skip ends it (never the pass)
+      if (!p) break;
+      if (result === undefined) { p.inflight = { type: 'feed', key: null }; break; }
+      p.inflight = null;
+      if (result && result.noCall) { p.feed = { ...p.feed, wanted: false, done: true }; break; }
+      p.vendorCalls++;
+      if (result && result.error) { p.failed = String(result.error); break; }
+      p.feed = { ...p.feed, pages: (Number(p.feed && p.feed.pages) || 0) + 1 };
+      if (result && result.skip) { p.feed = { ...p.feed, wanted: false, done: true, skipped: String(result.skip) }; break; }
+      if (result && Array.isArray(result.due) && result.due.length) p.due = mergeFront(p, result.due, requests);
+      { const more = !!(result && result.more) && p.feed.pages < (Number(p.feed.perPass) || FEED_PAGES_PER_PASS); p.feed = { ...p.feed, wanted: more, done: !more }; }
       break;
     case 'discover':
     case 'scanHost':
@@ -577,11 +627,147 @@ function olderApply(mem, ev, now) {
   }
 }
 
+// ── RULE 20: THE REACTION TRICKLE + THE THREAD WALK (lane channel-threads, 2026-09-28) ──
+/**
+ * 20. METERED READS A WINDOW CAUSES ABOUT MESSAGES (spec §3.3 / §6.1). Lark has no reactions in any message
+ *     answer (L4): one `GET messages/:id/reactions` per message — a 50-row page would be 50 units of a 60/min
+ *     budget. And a thread's replies are not in the chat listing (L3): one `container_id_type=thread` walk per
+ *     thread. Both are asked ONLY by an open window (a person looking), and both are bounded here:
+ *     20b THE REACTION LIST, per MESSAGE: a list in flight is JOINED (one flight per message); a message asked
+ *         inside `floorMs` (REACTIONS_FLOOR_MS, 300 s) is refused `reactions-floor` (the local fold answers);
+ *         a batch holds at most REACTIONS_BATCH_MAX ids; and per ACCOUNT at most `perMinute` list REQUESTS in any
+ *         rolling minute (THE CEILING, a setting — default 20, a third of Lark's 60/min default) — judged
+ *         FIRST, before the minute's vendor budget (rule 9), so a scrolling reader can never spend the minute
+ *         the timer's message passes need; past it the rest of the batch is refused `vendor-budget` (rule
+ *         `ceiling`) with the wait. `perMinute` 0 = never list (events only). The ceiling is RESERVED when a
+ *         batch is judged (never predicted to refund). verify r3: a list is PAGED (Lark ≤ 3 requests) — the engine
+ *         charges its extra pages as it lands (`rxReserve` per page) and a batch that overshoots gives back EXACTLY the
+ *         slots of the rows it then never sends (`rxRelease`) — the ceiling counts requests, never lists.
+ *     20a THE THREAD WALK, per THREAD: one flight (a second ask joins), at most once per `floorMs`
+ *         (THREAD_FLOOR_MS, 60 s — `thread-floor` with the wait), never from a timer and never from an agent's
+ *         `read` (the routes' rule — this model only answers "may a walk start now").
+ *     Rules 9 (the minute) and 18 (the pace) stay the OUTER caps: the engine asks them before each call.
+ */
+const REACTIONS_FLOOR_MS = 300e3;
+const REACTIONS_TTL_MS = 600e3;
+const REACTIONS_PER_MINUTE = 20;
+const REACTIONS_BATCH_MAX = 20;
+const THREAD_FLOOR_MS = 60e3;
+const RX_EVENTS = Object.freeze(['ask', 'landed', 'failed']);
+/** A message's reaction memory: never asked, nothing in flight, never fetched. */
+function rxEmpty() { return { askedAt: 0, inflight: false, fetchedAt: 0 }; }
+/** The account's ROLLING minute of reaction list calls as of `now`: `{calls: [instants in the last 60 s], n, at}`
+ *  (`at` = the oldest one — the next slot frees 60 s after it). A SLIDING window: no 60 s span ever holds more than
+ *  the ceiling (a tumbling one would let two halves of adjacent minutes hold twice as many). */
+function rxMinuteAt(minute, now) {
+  const t = Number(now) || 0;
+  const calls = (minute && Array.isArray(minute.calls) ? minute.calls : []).map(Number).filter((x) => Number.isFinite(x) && x <= t && t - x < 60e3).sort((a, b) => a - b);
+  return { calls, n: calls.length, at: calls.length ? calls[0] : t };
+}
+/**
+ * RULE 20b's VERDICT on one window's batch. `mem(id)` → a message's memory (rxEmpty when unknown).
+ * → `{ ask: [ids to fetch now], join: [ids in flight], refused: [{id, code, rule, retryAfterMs}], minute }` —
+ * `minute` is the account's minute AFTER the reservation (the engine stores it). Order: join, floor, ceiling.
+ */
+function reactionsVerdict({ ids = [], mem = () => null, now = 0, floorMs = REACTIONS_FLOOR_MS, perMinute = REACTIONS_PER_MINUTE, minute = null } = {}) {
+  const t = Number(now) || 0;
+  let m = rxMinuteAt(minute, t);
+  const ask = [], join = [], refused = [];
+  const seen = new Set();
+  const cap = Math.max(0, Math.floor(Number(perMinute) || 0));
+  for (const raw of Array.isArray(ids) ? ids.slice(0, REACTIONS_BATCH_MAX) : []) {
+    const id = String(raw || '');
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const x = mem(id) || rxEmpty();
+    if (x.inflight) { join.push(id); continue; }                                                          // ONE FLIGHT
+    const asked = Number(x.askedAt) || 0;
+    if (asked > 0 && t - asked < floorMs && t >= asked) { refused.push({ id, code: 'reactions-floor', rule: 'floor', retryAfterMs: Math.max(1, floorMs - (t - asked)) }); continue; }   // THE FLOOR
+    if (m.n >= cap) { refused.push({ id, code: 'vendor-budget', rule: 'ceiling', retryAfterMs: cap ? Math.max(1, m.at + 60e3 - t) : null }); continue; }   // THE CEILING (judged before the budget)
+    m = rxReserve(m, t);
+    ask.push(id);
+  }
+  for (const raw of Array.isArray(ids) ? ids.slice(REACTIONS_BATCH_MAX) : []) refused.push({ id: String(raw || ''), code: 'bad-request', rule: 'batch', retryAfterMs: null });
+  return { ask, join, refused, minute: m };
+}
+/** Reserve ONE list call of the minute at `now` (the verdict's reservation; an unreact's list-first call). */
+function rxReserve(minute, now) {
+  const m = rxMinuteAt(minute, now);
+  const calls = m.calls.concat([Number(now) || 0]);
+  return { calls, n: calls.length, at: calls[0] };
+}
+/** Give back `n` of the reservations made at `at` (verify r3): a batch cut part-way returns the slots of the rows it
+ *  never sent — EXACT (those calls did not happen), never a prediction; the newest such reservations go first. */
+function rxRelease(minute, n, at, now) {
+  const m = rxMinuteAt(minute, now);
+  let k = Math.max(0, Math.floor(Number(n) || 0));
+  const calls = m.calls.slice();
+  for (let i = calls.length - 1; i >= 0 && k > 0; i--) if (calls[i] === Number(at)) { calls.splice(i, 1); k--; }
+  return { calls, n: calls.length, at: calls.length ? calls[0] : Number(now) || 0 };
+}
+/** RULE 20b's memory mover: `ask` (a flight starts: the floor's clock), `landed` (the vendor answered —
+ *  fetchedAt), `failed` (no answer — nothing remembered but the floor's clock). Never mutates its input. */
+function rxApply(mem, ev, now) {
+  const m = { ...(mem || rxEmpty()) };
+  const t = Number(now) || 0;
+  switch (ev) {
+    case 'ask': return { ...m, askedAt: t, inflight: true };
+    case 'landed': return { ...m, inflight: false, fetchedAt: t };
+    case 'failed': return { ...m, inflight: false };
+    default: throw new Error(`channel-drain: no such reactions event ${ev}`);
+  }
+}
+/** RULE 20a — may a thread walk start now? `{act:'join'}` | `{act:'floor', retryAfterMs}` | `{act:'vendor'}`. */
+function threadVerdict(mem, now, floorMs = THREAD_FLOOR_MS) {
+  const m = mem || rxEmpty();
+  const t = Number(now) || 0;
+  if (m.inflight) return { act: 'join' };
+  const asked = Number(m.askedAt) || 0;
+  if (asked > 0 && t >= asked && t - asked < floorMs) return { act: 'floor', retryAfterMs: Math.max(1, floorMs - (t - asked)) };
+  return { act: 'vendor' };
+}
+/** RULE 20a's mover (the same three events). */
+function threadApply(mem, ev, now) { return rxApply(mem, ev, now); }
+
+// ── RULE 21: THE CHANGE FEED (lane lark-search-poll, 2026-09-28) ──
+/**
+ * 21. THE CHANGE FEED (lane lark-search-poll, B-5aab, 2026-09-28 — design §27):
+ *     an account whose feed is on reads its change feed with the TIMER's work
+ *     only — `turn(snap, {feedDue:true})` marks it wanted; never inside a
+ *     back-off (rule 5's opening), never on a request-only pass without the
+ *     timer's turn. ONE `feed` action = ONE vendor page; at most `perPass`
+ *     pages per pass (`turn`'s `feedPerPass`); a page is sent only with the
+ *     minute unspent (rule 9) AND `feedPages.remaining > 0` (the feed's own
+ *     sliding-minute ceiling — spent ⇒ the feed simply waits: nobody waits on
+ *     it) AND no human waiting (a human's fetch goes first, rule 7) — and
+ *     paced (rule 18, cost `feed`). It runs BEFORE discovery (rule 12) and
+ *     before any plain due-row fetch. Its result `{due:[{key, dueAt}], more}`
+ *     places its keys AHEAD of the pass's plain due rows (a pending key moves
+ *     up, in the page's order); a key this pass already fetched is due again
+ *     only when a hit is NEWER than that fetch (rule 13's `dueAt >
+ *     fetchedAt`, with `dueAt` = the hit's instant); `more` keeps the feed
+ *     wanted for the next page. A FEED-LOCAL refusal (`{skip: code}` — the
+ *     vendor refused the SEARCH: its scope, its own rate tier, its shape)
+ *     ends the feed for this pass and NEVER fails the pass: the
+ *     per-conversation polling is the fallback and the search's tier is not
+ *     the messages API's — a search that does not answer (a 5xx, a timeout;
+ *     verify r1) is the FEED's failure too. An ACCOUNT failure (`{error}`: a
+ *     dead token) is rule 3. `{noCall:true}` = the engine found nothing to ask
+ *     (a clock that went backwards) — no vendor call is counted. The feed is
+ *     nobody's request, so the agent route's retry-able table gains no code.
+ *     The page token and the window are the engine's (the drain never sees a
+ *     cursor — the discovery precedent).
+ *     The step is `next`'s (after the cut, before discovery), the merge `mergeFront`, the move `apply`'s `feed`.
+ */
+
 module.exports = {
-  REFRESH_QUEUE_CAP, REFRESH_OWNER_RESERVE, STREAK_MAX, ORIGINS, REFUSAL_CODES, ANSWER_OUTCOMES, PACE_WAIT_MAX_MS,
+  REFRESH_QUEUE_CAP, REFRESH_OWNER_RESERVE, STREAK_MAX, ORIGINS, REFUSAL_CODES, ANSWER_OUTCOMES, PACE_WAIT_MAX_MS, FEED_PAGES_PER_PASS,
   OLDER_FLOOR_MS, OLDER_MEMORY_MS, OLDER_EVENTS,
   empty, admit, withdraw, census, hasRequests, takenRequests, queueAsk,
-  open, wantsTurn, turn, close, next, apply,
+  open, wantsTurn, turn, close, next, apply, mergeFront,
   paceFresh, paceLevel, paceNeed, paceWaitMs, paceCharge, paceCost,
   olderEmpty, olderVerdict, olderApply,
+  // lane channel-threads: rule 20
+  REACTIONS_FLOOR_MS, REACTIONS_TTL_MS, REACTIONS_PER_MINUTE, REACTIONS_BATCH_MAX, THREAD_FLOOR_MS, RX_EVENTS,
+  rxEmpty, rxMinuteAt, rxReserve, rxRelease, reactionsVerdict, rxApply, threadVerdict, threadApply,
 };

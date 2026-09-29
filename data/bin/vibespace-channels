@@ -18,6 +18,17 @@
 // withdraw it and propose the new one in one step (the old one goes only if
 // the new one is accepted). Inside a Background Work job (VIBESPACE_JOB_TOKEN)
 // only `withdraw` is offered — as the conversation that owns the job.
+// lane channel-threads (2026-09-28): `read` shows each message's PLACE (what
+// it replies to, the thread it sits in) and its REACTIONS as counts (never
+// who); `read --thread <msg>` = that thread; `reply --to <msg>` answers a
+// message — WHERE it lands is its PLACEMENT (2026-09-28): `--to` alone = the
+// channel's norm (a message already in a thread ⇒ in the thread; outside one
+// ⇒ Lark / Telegram quote it, Slack threads it), `--in-thread` = inside its
+// thread, `--also-in-chat` = in the thread AND shown in the chat (where the
+// channel offers it — else refused by name, nothing created); `--reply-to`
+// is the old name of `--to`; `react` / `unreact` PROPOSE a reaction like a reply —
+// the user approves it unless the account's reaction policy is direct; a
+// reaction never wakes anyone. `refresh <conv> --thread <msg>` loads a thread.
 // Full manual: vibespace-docs channels.
 'use strict';
 const API = process.env.VIBESPACE_API;
@@ -34,19 +45,35 @@ async function call(method, p, body) {
   if (res._neterr) { console.error('vibespace-channels: server unreachable (' + res._neterr + ')'); process.exit(3); }
   let j = {};
   try { j = await res.json(); } catch { }
-  if (j.error) { console.error(j.error + (j.code ? ' [' + j.code + ']' : '')); process.exit(1); }
+  if (j.error) { console.error(j.error + (j.code ? ' [' + j.code + ']' : '')); placementHint(j); process.exit(1); }
   return j;
+}
+// THE NAIVE-USER PASS (2026-09-28): a `placement-not-offered` refusal names what IS offered in the placement's own
+// words ("offered here: chat, quote") — the agent asks for those with FLAGS, so it is told which flags, for what this
+// channel offers (a quote has no flag of its own: it is what --to alone gives where the channel quotes by default)
+const PLACEMENT_FLAGS = Object.freeze({ chat: 'chat: leave out --to', quote: 'quote: --to <msg id>', thread: 'thread: --to <msg id> --in-thread', 'thread+chat': 'thread+chat: --to <msg id> --also-in-chat' });
+function placementHint(j) {
+  if (!j || j.code !== 'placement-not-offered' || j.why !== 'not-declared' || !Array.isArray(j.offered)) return;
+  const how = j.offered.map((x) => PLACEMENT_FLAGS[x]).filter(Boolean);
+  console.error(how.length ? `ask for what is offered with: ${how.join(' · ')}` : 'nothing can be sent on this channel');
 }
 const flag = (name) => { const i = args.indexOf(name); return i >= 0 && i + 1 < args.length ? args[i + 1] : null; };
 const when = (ms) => (ms ? new Date(Number(ms)).toISOString().replace('T', ' ').slice(0, 16) + 'Z' : '');
 
 const USAGE = `vibespace-channels — read connected channels, PROPOSE replies (Communication panel)
   vibespace-channels list                          ← conversations visible to you (+ send/policy chips)
-  vibespace-channels read <conv> [--limit N] [--since <ms>] [--fresh]
-                                                   ← --fresh = refresh first (floor + budget apply)
-  vibespace-channels refresh <conv>                ← fetch the newest messages NOW (not a loop: a floor, the budget, a vendor back-off and a per-account queue cap apply)
-  vibespace-channels reply <conv> "text" [--why "…"] [--reply-to <vendor msg id>] [--replaces <proposalId>]
-                                                   ← PROPOSES; prints the policy verdict + proposal id
+  vibespace-channels read <conv> [--limit N] [--since <ms>] [--fresh] [--thread <msg id>]
+                                                   ← --fresh = refresh first (floor + budget apply); --thread = that thread only (no vendor call)
+  vibespace-channels refresh <conv> [--thread <msg id>]
+                                                   ← fetch the newest messages NOW (not a loop: a floor, the budget, a vendor back-off and a per-account queue cap apply); --thread loads that thread
+  vibespace-channels reply <conv> "text" [--why "…"] [--to <vendor msg id> [--in-thread] [--also-in-chat]] [--replaces <proposalId>]
+                                                   ← PROPOSES; prints the policy verdict + proposal id + WHERE it lands:
+                                                     no --to = a plain message in the chat; --to alone = this channel's norm
+                                                     (in a thread if that message is in one, else a quote — or the thread on Slack);
+                                                     --in-thread = inside that message's thread; --also-in-chat = in the thread AND shown in the chat
+  vibespace-channels react <conv> <msg id> <emoji key> [--why "…"]
+  vibespace-channels unreact <conv> <msg id> <emoji key> [--why "…"]
+                                                   ← PROPOSES a reaction (the user approves it unless the account's reaction policy is direct)
   vibespace-channels compose <account> --to <addr>[,<addr>] [--cc <addr>] --subject "…" "text" [--why "…"] [--replaces <proposalId>]
                                                    ← PROPOSES a NEW message (needs access to the whole account)
   vibespace-channels withdraw <proposalId> [--why "…"]
@@ -58,12 +85,14 @@ const USAGE = `vibespace-channels — read connected channels, PROPOSE replies (
   vibespace-channels request <conv> "why"          ← ask the user for access (only on a 'requestable' row)
 <conv> is the key list prints: <adapter>/<conversation id>.
 A reply is a PROPOSAL — the user may edit or reject it; the receipt lands in your next turn.
+Reactions show as counts ("(the account owner)" = the user's own) — never who reacted.
 Changed your mind? withdraw it (or --replaces it) — never leave the user a stale draft to reject.
 A conversation you cannot see and one that does not exist give the same answer.`;
 
 function printProposal(p, { full = false } = {}) {
   const rc = p.receipt;
   console.log(`${p.id}  ${p.state.toUpperCase()}  → ${p.adapterId}/${p.convId || '(new)'} (${p.title || ''})  ${when(p.updatedAt || p.at)}`);
+  if (p.accessRemoved) console.log(`    ${p.note || 'you no longer have access to that conversation'}`);   // verify r2: the fate only
   if (p.policy) console.log(`    policy: ${p.policy.mode}${p.policy.reasons && p.policy.reasons.length ? ' (' + p.policy.reasons.join(', ') + ')' : ''}`);
   if (p.state === 'awaiting-approval') console.log(`    waiting for the user (expires ${when(p.ttlAt)})`);
   if (p.reason) console.log(`    ${p.reason}`);
@@ -72,6 +101,10 @@ function printProposal(p, { full = false } = {}) {
     if (rc.status === 'sent' || rc.status === 'edited') console.log(`    the recipient sees: ${rc.identityMarking === 'none' ? 'you, with no application marker' : (rc.identityMarkingText || (rc.identityMarking === 'unknown' ? 'NOT VERIFIED for this channel' : 'marked as sent by an application'))}`);
   }
   if (p.compose) console.log(`    a NEW message to ${(p.compose.to || []).join(', ')}${(p.compose.cc || []).length ? ` (cc ${p.compose.cc.join(', ')})` : ''} — subject: ${p.compose.subject}`);
+  if (p.kind === 'reaction' && p.reaction) console.log(`    a reaction: ${p.reaction.op === 'remove' ? 'remove' : 'add'} ${p.reaction.glyph || `:${p.reaction.key}:`} on ${p.reaction.msg}`);
+  // 2026-09-28: WHERE the reply lands (the server's words; an older server's proposal carries `inThread` only)
+  const place = p.placementText || (p.inThread ? 'in a thread' : null);
+  if (place && p.placement !== 'chat') console.log(`    placed ${place}${p.replyTo ? ` — answering ${p.replyTo}` : ''}${p.inThread && p.threadKey ? ` (thread ${p.threadKey})` : ''}`);
   if (p.replaces) console.log(`    it replaces ${p.replaces}`);
   if (p.replacedBy) console.log(`    replaced by ${p.replacedBy}`);
   if (full) console.log(`    text: ${p.text}`);
@@ -125,6 +158,21 @@ function printReplaced(r) {
     if (j.error) { console.error(j.error + (j.code ? ' [' + j.code + ']' : '')); process.exit(1); }
     return j;
   };
+  // lane channel-threads: a thread walk (the only door by which an agent loads a thread): the per-thread floor,
+  // the agents' share of the budget and the vendor back-off refuse BY NAME (exit 4, like a refresh)
+  const THREAD_REFUSED = ['thread-floor', 'vendor-budget', 'backoff', 'account-changed', 'stopped', 'not-supported'];
+  if (verb === 'refresh' && flag('--thread')) {
+    const conv = args[1];
+    const i = conv ? conv.indexOf('/') : -1;
+    if (!conv || i <= 0 || conv.startsWith('--')) { console.error('usage: vibespace-channels refresh <conv> --thread <msg id>'); process.exit(1); }
+    const res = await fetch(API + `/api/agent/channels/${encodeURIComponent(conv.slice(0, i))}/${encodeURIComponent(conv.slice(i + 1))}/thread/${encodeURIComponent(flag('--thread'))}/refresh`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SESS }, body: '{}' }).catch((e) => ({ _neterr: e.message }));
+    if (res._neterr) { console.error('vibespace-channels: server unreachable (' + res._neterr + ')'); process.exit(3); }
+    let j = {}; try { j = await res.json(); } catch { }
+    if (THREAD_REFUSED.includes(j.code)) { console.log(`thread not loaded: ${j.error}${j.retryAfterSec ? ` (retry in ${j.retryAfterSec} s)` : ''} [${j.code}]`); process.exit(4); }
+    if (j.error) { console.error(j.error + (j.code ? ' [' + j.code + ']' : '')); process.exit(1); }
+    console.log(j.joined ? `the thread was being loaded already — read it: vibespace-channels read ${conv} --thread ${flag('--thread')}` : `loaded the thread: ${j.appended || 0} new message(s) — read it: vibespace-channels read ${conv} --thread ${flag('--thread')}`);
+    return;
+  }
   if (verb === 'refresh') {
     const conv = args[1];
     if (!conv) { console.error('usage: vibespace-channels refresh <conv>'); process.exit(1); }
@@ -144,11 +192,19 @@ function printReplaced(r) {
     const q = new URLSearchParams({ conv });
     if (flag('--limit')) q.set('limit', flag('--limit'));
     if (flag('--since')) q.set('since', flag('--since'));
+    if (flag('--thread')) q.set('thread', flag('--thread'));
     const r = await call('GET', '/api/agent/channels/read?' + q);
     const recs = r.records || [];
-    console.log(`${r.conversation.key} — ${r.conversation.title}${r.conversation.polledAt ? ` · fetched ${when(r.conversation.polledAt)}` : ''} · ${recs.length} message(s)`);
+    const th = r.thread || null;
+    console.log(`${r.conversation.key} — ${r.conversation.title}${r.conversation.polledAt ? ` · fetched ${when(r.conversation.polledAt)}` : ''} · ${recs.length} message(s)${th ? ` · thread ${th.key || flag('--thread')} (${th.count || 0} repl${th.count === 1 ? 'y' : 'ies'})` : ''}`);
+    if (r.note) console.log(r.note);
     for (const m of recs) {
-      console.log(`[${when(m.at)}] ${(m.author && (m.author.name || m.author.id)) || '?'}: ${String(m.text || '').replace(/\n/g, '\n    ')}${m.vendorId ? `  (id ${m.vendorId})` : ''}`);
+      // lane channel-threads (spec §5.1): the PLACE as words (the server's) — a root's thread tag on its line, a
+      // reply's "↳ replying to …" under it — and the reactions as counts, never who
+      const pl = m.placeText || {};
+      console.log(`[${when(m.at)}] ${(m.author && (m.author.name || m.author.id)) || '?'}: ${String(m.text || '').replace(/\n/g, '\n    ')}${m.vendorId ? `  (id ${m.vendorId})` : ''}${pl.tag ? `  ${pl.tag}` : ''}`);
+      if (pl.line) console.log(`    ${pl.line}`);
+      if (m.reactionsText) console.log(`    ${m.reactionsText}`);
       for (const a of (m.attachments || [])) console.log(`    attachment: ${a.name || a.id}${a.mime ? ` (${a.mime})` : ''}${Number(a.bytes) > 0 ? `, ${a.bytes} bytes` : ''}`);
     }
     return;
@@ -156,18 +212,60 @@ function printReplaced(r) {
   if (verb === 'reply') {
     const conv = args[1];
     const text = args[2];
-    if (!conv || !text || ['--why', '--reply-to', '--replaces'].includes(text)) { console.error('usage: vibespace-channels reply <conv> "text" [--why "…"] [--reply-to <id>] [--replaces <proposalId>]'); process.exit(1); }
+    const REPLY_USAGE = 'usage: vibespace-channels reply <conv> "text" [--why "…"] [--to <msg id> [--in-thread] [--also-in-chat]] [--replaces <proposalId>]';
+    if (!conv || !text || ['--why', '--reply-to', '--to', '--replaces', '--in-thread', '--also-in-chat'].includes(text)) { console.error(REPLY_USAGE); process.exit(1); }
     const body = { conv, text };
     if (flag('--why')) body.why = { kind: 'text', label: flag('--why') };
-    if (flag('--reply-to')) body.replyTo = flag('--reply-to');
+    // THE PLACEMENT (2026-09-28): --to <msg> answers that message (alone: the channel's norm, decided by the server);
+    // --in-thread = inside its thread; --also-in-chat = in its thread AND shown in the chat. `--reply-to` is the old
+    // name of --to, and `--in-thread <msg>` (without --to) still names the message the way it used to.
+    const valueOf = (name) => { const i = args.indexOf(name); const v = i >= 0 ? args[i + 1] : undefined; return v !== undefined && !v.startsWith('--') ? v : null; };
+    for (const f of ['--to', '--reply-to']) if (args.includes(f) && !valueOf(f)) { console.error(`${f} names the message the reply answers: ${f} <vendor msg id>\n${REPLY_USAGE}`); process.exit(1); }
+    const to = valueOf('--to') || valueOf('--reply-to');
+    const inThread = args.includes('--in-thread'), alsoInChat = args.includes('--also-in-chat');
+    const threadArg = inThread ? valueOf('--in-thread') : null;
+    if (to && threadArg && threadArg !== to) { console.error(`--to ${to} and --in-thread ${threadArg} name two different messages — pass the message once, with --to\n${REPLY_USAGE}`); process.exit(1); }
+    const msg = to || threadArg;
+    if ((inThread || alsoInChat) && !msg) { console.error(`${alsoInChat ? '--also-in-chat' : '--in-thread'} places a reply to a message — add --to <vendor msg id>\n${REPLY_USAGE}`); process.exit(1); }
+    if (msg) body.replyTo = msg;
+    if (alsoInChat) body.placement = 'thread+chat';
+    else if (inThread) body.placement = 'thread';
     if (flag('--replaces')) body.replaces = flag('--replaces');
     const r = await call('POST', '/api/agent/channels/reply', body);
     const p = r.proposal;
+    // WHERE it lands, in the server's words (an older server answers `inThread` only)
+    const placeWords = p.placementText || (p.inThread ? 'in a thread' : null);
+    const defaulted = p.placementDefaulted === 'parent-in-thread' ? ' — the default: that message is already in a thread' : p.placementDefaulted === 'root' ? ' — this channel\'s default for a reply' : '';
+    if (placeWords && p.placement !== 'chat') console.log(`(lands ${placeWords}${p.replyTo ? `, answering ${p.replyTo}` : ''}${p.inThread && p.threadKey ? ` — thread ${p.threadKey}` : ''}${defaulted})`);
     if (p.state === 'sent') console.log(`sent directly (policy: direct) — proposal ${p.id}, sent as ${(p.result && p.result.sentAs) || p.sendAs}`);
     else if (p.state === 'awaiting-approval') console.log(`proposed — proposal ${p.id} is awaiting the user's approval (${(p.policy.reasons || []).join(', ') || 'review'}); the receipt arrives in your next turn`);
     else console.log(`proposal ${p.id}: ${p.state}${p.reason ? ' — ' + p.reason : ''}`);
     printReplaced(r);
     if (p.identity && p.identity.marking !== 'none') console.log(`note: on this channel the recipient sees ${p.identity.marking === 'unknown' ? 'an UNVERIFIED sender identity' : 'an application marker'}${p.identity.text ? ' — ' + p.identity.text : ''}`);
+    return;
+  }
+  // lane channel-threads (spec §5.3): a reaction is a PROPOSAL — the account's reaction policy decides (propose by
+  // default: the user approves; direct only where the channel itself sends directly; off: refused by name)
+  if (verb === 'react' || verb === 'unreact') {
+    const [conv, msg, key] = [args[1], args[2], args[3]];
+    if (!conv || !msg || !key || [conv, msg, key].some((x) => x.startsWith('--'))) { console.error(`usage: vibespace-channels ${verb} <conv> <msg id> <emoji key> [--why "…"]`); process.exit(1); }
+    const body = { conv, msg, key, op: verb === 'unreact' ? 'remove' : 'add' };
+    if (flag('--why')) body.why = flag('--why');
+    const res = await fetch(API + '/api/agent/channels/react', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SESS }, body: JSON.stringify(body) }).catch((e) => ({ _neterr: e.message }));
+    if (res._neterr) { console.error('vibespace-channels: server unreachable (' + res._neterr + ')'); process.exit(3); }
+    let j = {}; try { j = await res.json(); } catch { }
+    // a REFUSAL (exit 4) names why — the policy, the emoji, the message's own state; an ERROR is exit 1
+    const RX_REFUSED = ['react-not-available', 'bad-emoji', 'already-reacted', 'reaction-not-mine', 'vendor-budget', 'backoff'];
+    if (RX_REFUSED.includes(j.code)) { console.log(`not proposed: ${j.error}${j.why ? ` (${j.why})` : ''} [${j.code}]`); process.exit(4); }
+    if (j.error) { console.error(j.error + (j.code ? ' [' + j.code + ']' : '')); process.exit(1); }
+    const p = j.proposal || {};
+    const x = p.reaction || {};
+    const em = x.glyph || `:${x.key || key}:`;
+    const what = `${x.op === 'remove' ? 'removing the reaction' : 'reacting'} ${em} on ${x.msg || msg}`;
+    if (j.already) console.log(`already proposed — proposal ${p.id} (${what}) is ${p.state}`);
+    else if (p.state === 'sent') console.log(`done directly (the account's reaction policy is direct) — ${what}; proposal ${p.id}`);
+    else if (p.state === 'awaiting-approval') console.log(`proposed — ${what} is awaiting the user's approval (proposal ${p.id}); the receipt arrives in your next turn`);
+    else console.log(`proposal ${p.id}: ${p.state}${p.reason ? ' — ' + p.reason : ''}`);
     return;
   }
   // 2026-09-27: the agent takes back its OWN proposal (never somebody else's,

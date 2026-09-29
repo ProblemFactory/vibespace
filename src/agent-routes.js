@@ -29,6 +29,7 @@ const { searchTouches } = require('./channel-touch.js'); // §26 (B-099e): a sea
 // the backlog's ONE read order (priority, then newest) + its closed priority set
 const { PRIORITIES: BACKLOG_PRIORITIES, sortBacklog, nudgeThreshold, backlogNudge, nudgeText } = require('./backlog-select.js');
 const { liveForkPending, addressableId } = require('./claude-lock-capture.js'); // verify r3 (lane channel-withdraw): a pending fork carries its PARENT's conversation id — never an owner of a channel draft
+const stashSummary = require('./stash-summary.js'); // the stash's kinds, spelled once (a reaction digest is not a channel message)
 const { VIBESPACE_NOTICE_HEAD, stashKindOf, withoutNoticeHead } = require('./notification-senders.js'); // lane S3: a stashed VibeSpace notification drains under the head that names VibeSpace as its speaker — decided by the entry's PATH (`kind`), never its sender's name (S3 verify F3)
 const MSG_STASH_LINE_MAX = 400;
 const MSG_STASH_MAX_ENTRIES = 6;
@@ -111,7 +112,8 @@ function renderMsgStash(entries, { maxEntries = MSG_STASH_MAX_ENTRIES, maxBytes 
   const held = rest.length ? `\n(${rest.length} older message(s) held for your next turn)` : '';
   const hints = [];
   if (shown.some((e) => !MSG_STASH_BLOCK_SOURCES.has(e.source) && stashKindOf(e) !== 'notification')) hints.push('reply to an agent with vibespace-msg send "<name>" "..." if a response is expected');
-  if (shown.some((e) => e.source === 'channel')) hints.push('a channel message is answered with vibespace-channels reply <conversation> "..." (this PROPOSES; the user approves)');
+  // the naive-user pass (2026-09-28): a reaction digest is not a message — the reply hint only where a channel MESSAGE rides
+  if (shown.some((e) => e.source === 'channel' && stashSummary.kindOf(e) !== 'channel-reaction')) hints.push('a channel message is answered with vibespace-channels reply <conversation> "..." (this PROPOSES; the user approves)');
   if (shown.some((e) => e.source === 'window-request')) hints.push('a window request is answered by acting on the window it names — vibespace-window attach <handle> (vibespace-docs window)');
   return { text: `### Messages that arrived while this conversation was unreachable\n${rows.join('\n')}${held}${hints.length ? `\n(${hints.join('; ')})` : ''}`, shown, rest };
 }
@@ -198,7 +200,7 @@ function stopNudgeReason(T = {}, extra = '') {
   if (T.task) steps.push('if you completed meaningful work, log it — vibespace-task progress "summary"');
   return (extra ? extra + '\n' : '') + 'VibeSpace bookkeeping before you stop (your board state is stale; this note is from VibeSpace, not from the user): ' + steps.map((t, i) => `(${i + 1}) ${t}`).join('; ') + '. ' + STOP_NUDGE_CLOSE;
 }
-function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard = null, integrationEnabled, scheduleCtxSync, remoteCtxBaseFor, readUserState, getJobs, deliver, getPublishedPages = () => null, getDesignKit = () => null, getChannels = () => null, getGroups = () => null, getTouches = () => null }) {
+function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard = null, integrationEnabled, scheduleCtxSync, remoteCtxBaseFor, readUserState, getJobs, deliver, getPublishedPages = () => null, getDesignKit = () => null, getChannels = () => null, getGroups = () => null, getTouches = () => null, getRecordClear = () => null }) {
   // THE NUMBERED LIST EACH SESSION WAS SHOWN (2026-09-22): `vibespace-task
   // backlog` prints 1-based numbers over GET task's sortBacklog order, and a
   // mutating verb run LATER (`backlog-done 3`) must mean the item that was
@@ -230,16 +232,19 @@ app.post('/api/agent/user-todo', (req, res) => {
   // owner's reply was typed into the parent. The placeholder key migrates to the fork's OWN key at its next ask.
   const key = liveForkPending(s) ? `webui:${id}` : sessionStatusKey(s, id);
   if (!key.startsWith('webui:')) userTodos.rekey(`webui:${id}`, key); // migrate early items once the real id exists
-  const { add, list, resolve, show } = req.body || {};
+  const { add, list, resolve, show, clear } = req.body || {};
   try {
     if (list) return res.json({ success: true, sessionKey: key, items: userTodos.forSession([key, `webui:${id}`]) });
+    // `vibespace-ask clear <id>` ("Clear content…", 2026-09-28): an item THIS session filed itself —
+    // its words become the one cleared sentence; the owner clears anything from the For-you window
+    if (clear) return clearAsAgent(hit, { kind: 'todo', id: String(clear) }, res);
     if (resolve) return res.json({ success: true, item: userTodos.resolveByAgent(key, resolve) });
     if (show) { const it = userTodos.getForSession([key, `webui:${id}`], String(show)); return it ? res.json({ success: true, item: it }) : res.status(404).json({ error: `no item ${String(show).slice(0, 40)} in this session` }); } // `vibespace-ask show <id>`: one item of THIS session whatever its status (a reply's quote cuts a long detail and points here)
     if (add && add.text) {
       const item = userTodos.add(key, { text: add.text, detail: add.detail, urgency: add.urgency, by: 'agent', origin: 'agent', sessionName: s.name || null, kind: add.kind || null, options: add.options == null ? null : add.options }); // kind: 'notice' = FYI only (vibespace-ask --notice); options = one-click answers (--options "A|B|C") — both validated by the store, a bad shape refused by name
       return res.json({ success: true, item });
     }
-    res.status(400).json({ error: 'pass {add:{text,...}} | {list:true} | {resolve:"id or text"} | {show:"id"}' });
+    res.status(400).json({ error: 'pass {add:{text,...}} | {list:true} | {resolve:"id or text"} | {show:"id"} | {clear:"id"}' });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.get('/api/session-status', (req, res) => res.json({ statuses: sessionStatus.snapshot() }));
@@ -287,15 +292,42 @@ app.post('/api/agent/session-status', (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 // Status-change history for the expanded card's timeline. Accepts a comma
-// list of keys (backend:id + webui:<serverId> placeholder) — first hit wins.
+// list of keys (backend:id + webui:<serverId> placeholder) — first hit wins;
+// `key` names the one it came from (a "Clear content…" on an entry addresses
+// the entry by that key and its `at`).
 app.get('/api/session-status/history', (req, res) => {
   const keys = String(req.query.sessionKey || '').split(',').filter(Boolean);
   for (const k of keys) {
     const h = sessionStatus.history(k);
-    if (h.length) return res.json({ history: h });
+    if (h.length) return res.json({ history: h, key: k });
   }
-  res.json({ history: [] });
+  res.json({ history: [], key: keys[0] || null });
 });
+// "CLEAR CONTENT…" AS AN AGENT (2026-09-28): the caller an agent's own verbs
+// hand the ONE clear entry point (src/server/record-clear.js) — its keys (the
+// status key and the pre-conversation webui key: an entry written before the
+// backend id existed is still its own), its conversation, and whether it is a
+// FORK still borrowing its parent's id (refused by name — its key is not yet
+// its own). The PURE clearVerdict decides; this route only names the caller.
+// THE FORK QUESTION IS `liveForkPending` (lane-redact verify r3 on the merged tree, reproduced): the raw `_forkRequested`
+// flag stays true for the LIFE of a codex fork (nothing clears it — the wrapper_meta adoption pushes the old id into
+// `forkedFrom`, claude-lock-capture's essay), so a codex fork that had long adopted its own thread was refused
+// `pending_fork` on every `progress-redact` / `ask clear` of its own entries. The ONE predicate every roster and caller
+// resolver uses (msgCaller / ownConversationIdOf / server.js liveSessions) reads the fact off the live fields; the
+// conversation an agent may own a record under is `addressableId` — its own, never a borrowed one.
+function agentClearCaller([s, id]) {
+  const key = sessionStatusKey(s, id);
+  return { role: 'agent', by: key, keys: [key, `webui:${id}`], conversationId: addressableId(s), pendingFork: liveForkPending(s) };
+}
+async function clearAsAgent(hit, item, res) {
+  const rc = getRecordClear && getRecordClear();
+  if (!rc) return res.status(503).json({ error: 'clearing records is not available on this instance', code: 'unavailable' });
+  let r;
+  try { r = await rc.clear(item, { caller: agentClearCaller(hit) }); }
+  catch (e) { return res.status(500).json({ error: e.message, code: 'failed' }); }
+  if (!r.ok) return res.status(r.status || 400).json({ error: r.why || 'refused', code: r.code });
+  return res.json({ success: true, cleared: r.cleared, already: r.already });
+}
 // Resolve the calling agent's session from its per-session bearer token.
 // Returns [session, id] or replies 401/403 and returns null.
 function agentSession(req, res) {
@@ -1054,8 +1086,26 @@ app.post('/api/agent/task-progress', (req, res) => {
   if (!gid) return;
   try {
     const t = tasks.addProgress(gid, { note: req.body?.note, detail: req.body?.detail, session: sessionStatusKey(hit[0], hit[1]) });
-    res.json({ success: true, progress: t.progress.slice(-3) });
+    // `entry` = the one just written (addProgress is synchronous — the last entry IS it): its P- id
+    // is what `vibespace-task progress-redact` names
+    res.json({ success: true, progress: t.progress.slice(-3), entry: t.progress[t.progress.length - 1] || null });
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+// `vibespace-task progress-redact <P-id|at>` ("Clear content…", 2026-09-28): an
+// Activity-log entry THIS session wrote keeps its time and place, its words
+// become the one cleared sentence. The owner clears any entry from the Task
+// Group log window. A job token never (a named 403, before anything is read).
+app.post('/api/agent/task/progress-redact', async (req, res) => {
+  const tok = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.body?.token || '';
+  if (String(tok).startsWith('jbt_')) return res.status(403).json({ error: 'a job token cannot clear records — ask the user to clear it, or clear it from the session that wrote it', code: 'job_token' });
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  if (!toolOn('Task')) return toolDisabled(res, 'vibespace-task progress-redact');
+  const gid = resolveAgentGroup(hit, req, res);
+  if (!gid) return;
+  const ref = String(req.body?.ref ?? req.body?.id ?? req.body?.at ?? '').trim();
+  if (!ref) return res.status(400).json({ error: 'pass the entry: its P- id (vibespace-task show prints your own) or its time in ms', code: 'bad_items' });
+  return clearAsAgent(hit, { kind: 'activity', groupId: gid, id: ref }, res);
 });
 // (Removed /api/agent/task-status — a Task Group has no status. A session
 // reports its own state via /api/agent/session-status (vibespace-status).)
@@ -1353,7 +1403,10 @@ function findVisible(jm, caller, ref) { return findVisibleIn([...jm.jobs.values(
 // COORDINATION boundary, not a security one (same-OS-user agents could always
 // reach the raw CLI sockets); it exists so groups stay quiet by default.
 const msgAcl = require('./msg-acl.js');
-const _msgRate = new Map(); // senderCid|targetKey → {ts, text}
+const _msgRate = new Map(); // senderCid|targetKey → {ts, h}
+// the identical-text floor compares a DIGEST (lane-redact verify r9): the map kept the last message's TEXT per pair — a group
+// message's words in the server's memory, pruned only past 500 pairs, that "Clear content…" of the message never reaches
+const _msgDigest = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
 // THE WAKE PACE (2026-09-23 verifier, r2): asked of EVERY wake a send /
 // invite would cause (an @mention, `--wake`, an invite, a member on
 // `always`), keyed by the conversation id the wake goes to, never by how
@@ -1503,14 +1556,14 @@ app.post('/api/agent/msg/send', async (req, res) => {
     if (!tgt.ok) return groupAnswer(res, tgt);
     const floorKey = myCid + '|' + (tgt.kind === 'group' ? tgt.group.id : tgt.cid);   // the RESOLVED target, never the `to` spelling
     const rate = _msgRate.get(floorKey) || {};
-    if (rate.text === text && rate.ts && Date.now() - rate.ts < 600000) return res.status(429).json({ error: 'identical message within 10min — not resent' });
+    if (rate.h === _msgDigest(text) && rate.ts && Date.now() - rate.ts < 600000) return res.status(429).json({ error: 'identical message within 10min — not resent' });
     const mayWake = wakeFloorFor(myCid);
     let r;
     const consent = agentConsent(req.body?.yes);
     try { r = tgt.kind === 'group' ? await ge.post({ group: tgt.group.id, from: myCid, text, wake: req.body?.wake === true, mayWake, consent }) : await ge.sendToAgent({ from: myCid, to: tgt.cid, text, wake: req.body?.wake === true, create: !who.job, mayWake, consent }); }
     catch (e) { return res.status(500).json({ error: 'group send failed: ' + e.message }); }
     if (!r || !r.ok) return groupAnswer(res, r);
-    _msgRate.set(floorKey, { ts: Date.now(), text });
+    _msgRate.set(floorKey, { ts: Date.now(), h: _msgDigest(text) });
     if (_msgRate.size > 500) { const cut = Date.now() - 600000; for (const [k, v] of _msgRate) if (v.ts < cut) _msgRate.delete(k); }
     const nm = (x) => x.map((w) => w.name);
     return res.json({ posted: true, group: { id: r.group.id, name: r.group.name, pair: !!r.group.pair }, pairCreated: !!r.pairCreated, woke: nm(r.woke), refused: r.refused.map((w) => ({ name: w.name, reason: w.reason })), nextTurn: nm(r.later) });
@@ -1529,9 +1582,9 @@ app.post('/api/agent/msg/send', async (req, res) => {
   // opens a BILLED turn on an idle receiver — never let two agents ping-pong)
   const rk = (myCid || id) + '|' + target.cid;
   const rate = _msgRate.get(rk) || {};
-  if (rate.text === text && rate.ts && Date.now() - rate.ts < 600000) return res.status(429).json({ error: 'identical message within 10min — not resent' });
+  if (rate.h === _msgDigest(text) && rate.ts && Date.now() - rate.ts < 600000) return res.status(429).json({ error: 'identical message within 10min — not resent' });
   if (rate.ts && Date.now() - rate.ts < 30000) return res.status(429).json({ error: 'rate floor: one message per target per 30s' });
-  _msgRate.set(rk, { ts: Date.now(), text });
+  _msgRate.set(rk, { ts: Date.now(), h: _msgDigest(text) });
   if (_msgRate.size > 500) { const cut = Date.now() - 600000; for (const [k, v] of _msgRate) if (v.ts < cut) _msgRate.delete(k); }
   const fromName = s.name || 'unnamed session';
   const framed = `Message from session "${fromName}" (via vibespace-msg; reply: vibespace-msg send "${fromName}" "..."):\n${text}`;
@@ -1651,7 +1704,11 @@ app.get('/api/agent/channels/read', (req, res) => {
   const key = splitConvKey(req.query.conv);
   if (!key) return res.status(400).json({ error: 'conv is required (<adapter>/<conversation id>, as vibespace-channels list prints it)', code: 'bad-request' });
   const since = req.query.since !== undefined && req.query.since !== '' ? Number(req.query.since) : null;
-  const r = eng.readFor(channelPrincipal(s, id), key.adapterId, key.convId, { limit: Number(req.query.limit) || 50, since: Number.isFinite(since) ? since : null });
+  // lane channel-threads (spec §5.1): `thread=<msg>` = that thread's local fold — never a vendor call (walked:false says so)
+  const thread = req.query.thread !== undefined && req.query.thread !== '' ? String(req.query.thread).slice(0, 512) : null;
+  const r = thread && typeof eng.readThreadFor === 'function'
+    ? eng.readThreadFor(channelPrincipal(s, id), key.adapterId, key.convId, thread, { limit: Number(req.query.limit) || 50 })
+    : eng.readFor(channelPrincipal(s, id), key.adapterId, key.convId, { limit: Number(req.query.limit) || 50, since: Number.isFinite(since) ? since : null });
   if (r && r.ok) touchChannel(id, [{ op: 'read', adapterId: key.adapterId, convId: key.convId, title: r.conversation && r.conversation.title, count: (r.records || []).length }]);
   chanAnswer(res, r);
 });
@@ -1693,14 +1750,64 @@ app.post('/api/agent/channels/reply', async (req, res) => {
   if (!ownR.cid) return res.status(409).json({ error: ownR.why, code: 'bad-member' });
   const cidR = ownR.cid;
   const ctxR = channelPrincipal(s, id);
-  const makeR = () => eng.propose(ctxR, key.adapterId, key.convId, { text: b.text, replyTo: b.replyTo, why: b.why, attachments: b.attachments }, { mayWake: cidR ? wakeFloorFor(cidR) : null });
+  // lane channel-threads (spec §5.2): `inThread` rides to the validator — a reply INTO a thread, refused BY NAME where not offered;
+  // 2026-09-28: `placement` (chat | quote | thread | thread+chat) — the CLI's --to / --in-thread / --also-in-chat; none
+  // with a message = the vendor's norm; an undeclared one is `placement-not-offered` (409, worded) and creates nothing
+  const makeR = () => eng.propose(ctxR, key.adapterId, key.convId, { text: b.text, replyTo: b.replyTo, why: b.why, attachments: b.attachments, ...(b.inThread !== undefined ? { inThread: b.inThread } : {}), ...(b.placement !== undefined ? { placement: b.placement } : {}) }, { mayWake: cidR ? wakeFloorFor(cidR) : null });
   // 2026-09-27: `replaces` = withdraw that proposal of yours + this new one, atomic (the old one goes only if the new one is accepted)
   const repR = replacesOf(b);
   if (!repR.ok) return res.status(400).json({ error: repR.error, code: 'bad-request' });
   try {
     const r = repR.id ? await eng.replaceProposal({ replaces: repR.id, by: ctxR, make: makeR }) : await makeR();
-    if (r && r.ok && r.proposal) touchChannel(id, [{ op: 'reply', adapterId: key.adapterId, convId: key.convId, title: r.proposal.title, account: r.proposal.adapterLabel, proposalId: r.proposal.id }]);   // §26 (B-099e): the drafted conversation is a row on the tool card
+    if (r && r.ok && r.proposal) touchChannel(id, [{ op: 'reply', adapterId: key.adapterId, convId: key.convId, title: r.proposal.title, account: r.proposal.adapterLabel, proposalId: r.proposal.id, placement: r.proposal.placement || null }]);   // §26 (B-099e): the drafted conversation is a row on the tool card (2026-09-28: the row says where the reply lands)
+    if (r && !r.ok && (r.code === 'topic-forbidden' || r.code === 'placement-not-offered')) return rxAnswer(res, r);   // a group that forbids thread replies / a placement the channel does not offer: 409, by name
     chanAnswer(res, r);
+  }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// lane channel-threads (spec §9): the reaction + thread verbs' OWN status table (chanAnswer's is the refresh
+// census's — test-channels-agent-cli derives the CLI's refused set from it and it stays unchanged)
+const RX_AGENT_STATUS = { 'not-found': 404, 'thread-not-loaded': 404, 'react-not-available': 409, 'already-reacted': 409, 'reaction-not-mine': 409, 'topic-forbidden': 409, 'placement-not-offered': 409, 'not-a-thread': 409, 'bad-member': 409, 'account-changed': 409, 'bad-emoji': 400, 'bad-proposal': 400, 'bad-request': 400, 'thread-floor': 429, 'vendor-budget': 429, 'backoff': 429, 'not-supported': 501, 'stopped': 503 };
+const rxAnswer = (res, r) => {
+  if (r && r.ok) return res.json(r);
+  const code = (r && r.code) || 'error';
+  if (r && r.retryAfterSec) res.setHeader('Retry-After', String(r.retryAfterSec));
+  return res.status(RX_AGENT_STATUS[code] || 500).json({ ...(r || {}), error: (r && r.error) || 'refused', code });
+};
+// REACT (spec §5.3): a PROPOSAL of kind `reaction` — the account's reaction row decides (propose by default: the
+// user approves; `off` refuses by name); never a text, never a wake; its receipt is one line in the next turn
+app.post('/api/agent/channels/react', async (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
+  const eng = channelsEngine();
+  if (!eng || typeof eng.proposeReaction !== 'function') return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
+  const [s, id] = hit;
+  const b = req.body || {};
+  const key = splitConvKey(b.conv);
+  if (!key) return res.status(400).json({ error: 'conv is required (<adapter>/<conversation id>)', code: 'bad-request' });
+  // the drafter is the conversation's OWN id (the reply rule: no `webui:` placeholder, no pending fork's borrowed id)
+  const ownX = ownConversationIdOf(s);
+  if (!ownX.cid) return res.status(409).json({ error: ownX.why, code: 'bad-member' });
+  try {
+    const r = await eng.proposeReaction(channelPrincipal(s, id), key.adapterId, key.convId, { msg: b.msg, key: b.key, op: b.op === 'remove' ? 'remove' : 'add', why: b.why });
+    if (r && r.ok && r.proposal) touchChannel(id, [{ op: 'react', adapterId: key.adapterId, convId: key.convId, title: r.proposal.title, account: r.proposal.adapterLabel, proposalId: r.proposal.id, glyph: (r.proposal.reaction && (r.proposal.reaction.glyph || `:${r.proposal.reaction.key}:`)) || null }]);
+    rxAnswer(res, r);
+  }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// THE AGENT'S THREAD WALK (spec §5.1): `refresh <conv> --thread <msg>` — the only door by which an agent causes one
+app.post('/api/agent/channels/:adapterId/:convId/thread/:msg/refresh', async (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
+  const eng = channelsEngine();
+  if (!eng || typeof eng.agentThreadRefresh !== 'function') return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
+  const [s, id] = hit;
+  try {
+    const r = await eng.agentThreadRefresh(channelPrincipal(s, id), String(req.params.adapterId), String(req.params.convId), String(req.params.msg));
+    if (r && r.ok) touchChannel(id, [{ op: 'refresh', adapterId: String(req.params.adapterId), convId: String(req.params.convId), title: r.conversation && r.conversation.title, count: r.appended || 0 }]);
+    rxAnswer(res, r);
   }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1750,7 +1857,10 @@ app.post('/api/agent/channels/proposals/:id/withdraw', async (req, res) => {
   // its OWN id — a pending fork carries its parent's and could take the parent's drafts back. A job (jbt_)
   // speaks for the conversation that OWNS it, whichever live session carries that id.
   if (who.s && !who.job) { const ownW = ownConversationIdOf(who.s); if (!ownW.cid) return res.status(409).json({ error: ownW.why, code: 'bad-member' }); }
-  const by = who.s ? channelPrincipal(who.s, who.id) : (who.cid ? { kind: 'agent', id: who.cid, name: (who.job && who.job.name) || null, groups: who.myGroups || [] } : null);
+  // A JOB SPEAKS FOR ITS CONVERSATION, NAMELESS (lane-redact verify r9): the engine stores this principal on the outbox
+  // proposal (`withdrawal.by` — data/channels outbox, every client's outbox broadcast); a job's NAME there was a copy of its
+  // words the job's "Clear content…" never reaches. The id is the conversation's; the name falls back to the draft's drafter.
+  const by = who.s ? channelPrincipal(who.s, who.id) : (who.cid ? { kind: 'agent', id: who.cid, name: null, groups: who.myGroups || [] } : null);
   if (!by) return res.status(409).json({ error: NO_CID_YET, code: 'bad-member' });
   const b = req.body || {};
   try { chanAnswer(res, await eng.withdrawProposal({ proposalId: String(req.params.id), why: typeof b.why === 'string' ? b.why : null, by })); }
@@ -2067,6 +2177,8 @@ function sessionToolsIntro(T, facts = {}) {
   L.push(
     'Other agent sessions may be working alongside you. `vibespace-msg list` shows the ones you can reach (your Task Group by default); `vibespace-msg send <name|id|group> "text"` posts into your direct (two-member) group with them, or into a group — by default it reaches them on THEIR next turn at no cost, `--wake` (or an @name in the text) wakes them now as a billed turn. `vibespace-msg group create <name> <member…>` makes a group. Group messages reach you here as a report on your next turn. Manual: vibespace-docs msg.');
   L.push(browserIntroLine(facts.browserVariant));
+  // lane browser-stuck (the owner's ruling 2026-09-28, rule 5): ONE line — a page dialog is a fact of the verb, never a timeout to guess from
+  L.push(BROWSER_DIALOG_LINE);
   // §3.8 layer ②: the session-start context lists the CURRENT attachment set
   // (a resumed conversation re-carries its leases, so the agent must not
   // assume the ephemeral default it would otherwise read from the line above)
@@ -2096,6 +2208,8 @@ function sessionToolsIntro(T, facts = {}) {
  * `vibespace-browser <verb>` — and never name the CLI VibeSpace hides behind
  * it (test-architecture §52 counts the name in this output).
  */
+/** lane browser-stuck (rule 5): the ONE tools-intro line that teaches page dialogs (the manual's "Page dialogs" section has the rest). */
+const BROWSER_DIALOG_LINE = 'A page dialog (confirm / prompt / leave-page) holds the page: a browser verb answering `dialog_open` names it — answer with `vibespace-browser dialog accept [text]` or `dismiss`.';
 function browserIntroLine(browserVariant) {
   const { isolatedVariant } = require('./browser-profiles');
   if (isolatedVariant(browserVariant)) {
@@ -2127,4 +2241,4 @@ function browserSetLine(set) {
 
 
 module.exports = {
-  turnIsUserInitiated, GROUP_REPORT_BUDGET, setupAgentRoutes, renderMsgStash, drainStashUnderCap, drainNotifsUnderCap, roomUnderCap, INLINE_CAP, INLINE_TAIL_MARGIN, JOBS_DIGEST_BUDGET, MSG_STASH_LINE_MAX, MSG_STASH_MAX_ENTRIES, MSG_STASH_MAX_BYTES, sessionToolsIntro, browserIntroLine, browserSetLine, stopNudgeReason, STOP_NUDGE_CLOSE };
+  turnIsUserInitiated, GROUP_REPORT_BUDGET, setupAgentRoutes, renderMsgStash, drainStashUnderCap, drainNotifsUnderCap, roomUnderCap, INLINE_CAP, INLINE_TAIL_MARGIN, JOBS_DIGEST_BUDGET, MSG_STASH_LINE_MAX, MSG_STASH_MAX_ENTRIES, MSG_STASH_MAX_BYTES, sessionToolsIntro, browserIntroLine, browserSetLine, stopNudgeReason, STOP_NUDGE_CLOSE, BROWSER_DIALOG_LINE };

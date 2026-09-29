@@ -354,9 +354,18 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
   const groupsNow = (await api('GET', '/api/channel-groups')).body.groups.filter((g) => !g.archivedAt);
   const ALL = convs.length + groupsNow.length;
   ok(convs.length >= 45, `FIXTURE: the fake accounts hold ${convs.length} conversations (the attention list is judged among ~50)`);
+  // the .197 integration (lane lark-search-poll, owner decision 1): a SINGLE chat with new messages whose newest is
+  // inside 24 h is on the attention list too — the `direct` tag (after held, before replied). The fixture's DMs (every
+  // fifth room) carry unread messages, so they open the list beside the groups; an untouched GROUP conversation never
+  // does. The set is read off the API's own rows (kind / unread / lastAt), never a count written here
+  const DAY = 24 * 3600e3;
+  const directsOf = (list) => new Set(list.filter((c) => c.kind === 'dm' && Number(c.unread) > 0 && Date.now() - Number(c.lastAt) < DAY).map((c) => `${c.adapterId}/${c.id}`));
+  const directs0 = directsOf(convs);
+  ok(directs0.size >= 3 && [...directs0].every((k) => /-room-\d+$/.test(k) && Number(k.split('-').pop()) % 5 === 0), `FIXTURE: ${directs0.size} single chats carry new messages inside 24 h (the \`direct\` rows — the fixture's every-fifth-room DMs)`, JSON.stringify([...directs0]));
   const f0 = await p1.evaljs(FOCUS);
-  ok(f0.view === 'focus' && f0.segs.find((x) => x.view === 'focus').on && f0.rows.length === groupsNow.length && f0.rows.every((r) => r.group), `the panel OPENS on the attention list: the ${groupsNow.length} agent groups and NO untouched conversation (${f0.rows.length} rows)`, JSON.stringify(f0.rows.map((r) => r.key)));
-  ok(f0.segs.map((x) => x.text).join(' | ') === `${groupsNow.length} need attention | All ${ALL}`, `the header is the switch: "${f0.segs.map((x) => x.text).join(' | ')}"`);
+  const f0conv = f0.rows.filter((r) => !r.group);
+  ok(f0.view === 'focus' && f0.segs.find((x) => x.view === 'focus').on && f0.rows.filter((r) => r.group).length === groupsNow.length && f0conv.length === directs0.size && f0conv.every((r) => directs0.has(r.key) && r.tag === 'direct'), `the panel OPENS on the attention list: the ${groupsNow.length} agent groups and the ${directs0.size} single chats with new messages (tag \`direct\`) — NO untouched group conversation (${f0.rows.length} rows)`, JSON.stringify(f0.rows.map((r) => `${r.key}=${r.tag}`)));
+  ok(f0.segs.map((x) => x.text).join(' | ') === `${groupsNow.length + directs0.size} need attention | All ${ALL}`, `the header is the switch: "${f0.segs.map((x) => x.text).join(' | ')}"`);
   const ids = convs.filter((c) => c.adapterId === 'fake-poll' && /-room-\d+$/.test(c.id)).map((c) => c.id).sort((a, b) => Number(a.split('-').pop()) - Number(b.split('-').pop()));
   const assigned = ids.slice(0, 5), readByBeta = ids.slice(5, 8), awaitingId = ids[8];
   // each PUT is the CONVERSATION grain (its own route) — listed on its own; a rule / account grain would list a row only once a wake was delivered or held (D4, 2026-09-27; test-channels-focus ①②⑤, test-channels-aggregate-ui ⑤)
@@ -368,12 +377,16 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
   }
   const prop = await api('POST', `/api/channels/fake-poll/${awaitingId}/propose`, { text: 'a draft that waits for approval' });
   ok(prop.status === 200 && prop.body && (prop.body.proposal || {}).state === 'awaiting-approval', `FIXTURE: a draft waits for approval on ${awaitingId}`, JSON.stringify(prop.body).slice(0, 200));
-  const want = { ...Object.fromEntries(assigned.map((id) => [`fake-poll/${id}`, 'assigned'])), ...Object.fromEntries(readByBeta.map((id) => [`fake-poll/${id}`, 'read'])), [`fake-poll/${awaitingId}`]: 'awaiting' };
-  const f1 = await until(`(() => { const f = ${FOCUS}; return f.rows.filter((r) => !r.group).length === 9 ? f : null; })()`, 20000);
+  const want9 = { ...Object.fromEntries(assigned.map((id) => [`fake-poll/${id}`, 'assigned'])), ...Object.fromEntries(readByBeta.map((id) => [`fake-poll/${id}`, 'read'])), [`fake-poll/${awaitingId}`]: 'awaiting' };
+  // the single chats stay beside them (`direct`); a DM among the 9 wears the stronger tag (assigned › direct, TAG_ORDER)
+  const directs1 = directsOf(((await api('GET', '/api/channels')).body.conversations || []).filter((c) => !c.unlisted));
+  const want = { ...Object.fromEntries([...directs1].map((k) => [k, 'direct'])), ...want9 };
+  const N1 = Object.keys(want).length;
+  const f1 = await until(`(() => { const f = ${FOCUS}; return f.rows.filter((r) => !r.group).length === ${N1} ? f : null; })()`, 20000);
   const convRows = f1 ? f1.rows.filter((r) => !r.group) : [];
-  ok(f1 && convRows.length === 9 && convRows.every((r) => want[r.key] === r.tag), `EXACTLY the 9 join the attention list, each with its ONE tag — repainted from the broadcasts (${convRows.map((r) => `${r.key.split('-').pop()}=${r.tag}`).join(' ')})`, JSON.stringify(f1 && f1.rows));
+  ok(f1 && convRows.length === N1 && convRows.every((r) => want[r.key] === r.tag) && Object.keys(want9).every((k) => convRows.some((r) => r.key === k)), `EXACTLY the 9 join the attention list beside the ${N1 - 9} single chats, each with its ONE tag — repainted from the broadcasts (${convRows.map((r) => `${r.key.split('-').pop()}=${r.tag}`).join(' ')})`, JSON.stringify(f1 && f1.rows));
   ok(convRows.filter((r) => r.tag === 'assigned').every((r) => r.tagText === '→ alpha' && r.who === 'alpha') && convRows.filter((r) => r.tag === 'read').every((r) => /^beta read /.test(r.tagText) && r.who === 'beta') && convRows.filter((r) => r.tag === 'awaiting').every((r) => r.tagText === '1 to approve'), 'the tags say it: "→ alpha", "beta read …" (the name its own part), "1 to approve"', JSON.stringify(convRows.map((r) => r.tagText)));
-  ok(f1 && f1.segs.map((x) => x.text).join(' | ') === `${groupsNow.length + 9} need attention | All ${ALL}`, `the header counts: "${f1 && f1.segs.map((x) => x.text).join(' | ')}"`);
+  ok(f1 && f1.segs.map((x) => x.text).join(' | ') === `${groupsNow.length + N1} need attention | All ${ALL}`, `the header counts: "${f1 && f1.segs.map((x) => x.text).join(' | ')}"`);
   // ALL: the whole list, one switch away
   await p1.evaljs(`(() => { document.querySelector('.rail-panel-channels .chan-view-btn[data-view="all"]').click(); return 1; })()`);
   const fa = await p1.evaljs(FOCUS);
@@ -402,11 +415,11 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
   const phone = await until(`(async () => {
     if (!document.querySelector('.chan-window .chan-groups')) { window.app.openChannels(); await new Promise((r) => setTimeout(r, 300)); }
     const rows = [...document.querySelectorAll('.chan-window .chan-groups > .chan-grow')].filter((r) => r.querySelector('.chan-grow-tag'));
-    if (rows.length < 9) return null;
+    if (rows.length < ${N1}) return null;
     const list = document.querySelector('.chan-window .chan-groups').getBoundingClientRect();
     return rows.map((r) => { const ti = r.querySelector('.chan-grow-title').getBoundingClientRect(), tg = r.querySelector('.chan-grow-tag').getBoundingClientRect(), rr = r.getBoundingClientRect(); const words = [...r.querySelectorAll('.chan-tag-words')]; const who = r.querySelector('.chan-tag-who'); return { key: r.dataset.grow, under: tg.top >= ti.bottom - 0.5, tagW: Math.round(tg.width), wordsWhole: words.every((w) => w.scrollWidth <= w.clientWidth + 0.5), whoWhole: !who || who.scrollWidth <= who.clientWidth + 0.5, rowW: Math.round(rr.width), listW: Math.round(list.width) }; });
   })()`, 20000);
-  ok(Array.isArray(phone) && phone.length === 9 && phone.every((x) => x.under && x.wordsWhole && x.whoWhole && Math.abs(x.rowW - x.listW) <= 2), `at 375 px every tagged row is ONE column with its tag UNDER the title, its words AND the agent's name whole (tags ${Array.isArray(phone) ? phone.map((x) => x.tagW).join(',') : phone} px)`, JSON.stringify(phone));
+  ok(Array.isArray(phone) && phone.length === N1 && phone.every((x) => x.under && x.wordsWhole && x.whoWhole && Math.abs(x.rowW - x.listW) <= 2), `at 375 px every tagged row is ONE column with its tag UNDER the title, its words AND the agent's name whole (tags ${Array.isArray(phone) ? phone.map((x) => x.tagW).join(',') : phone} px)`, JSON.stringify(phone));
   await p1.cdp('Emulation.clearDeviceMetricsOverride');
 
   // ── ⑩ 2026-09-27 (lane channel-withdraw): THE AGENT TAKES A DRAFT BACK; HOW IT HEARS OF A DECISION IS

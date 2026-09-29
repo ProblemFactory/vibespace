@@ -35,8 +35,9 @@
 //      pointed ⇒ 503, then the same url reaches the NEW browser; shut down ⇒
 //      503, no uncaught error — each fix layer alone refuses, and the pre-fix
 //      copy (both removed) upgrades the client (CONTROLS via mutant-copy).
-//   ⑥ (verify S2 r4) THE CENSUS: src/cdp-census.js has ONE row per method of the
-//      pinned /json/protocol (scripts/fixtures/cdp-protocol-<chrome>/), every row
+//   ⑥ (verify S2 r4) THE CENSUS: src/cdp-census.js has ONE row per method of
+//      every censused Chrome's pinned /json/protocol (scripts/fixtures/cdp-
+//      protocol-<chrome>/, compared at each version — lane-cdp-154), every row
 //      obeys its class (input / view / page-mutation refused while paused, lease-wide
 //      — the owner's ruling of 2026-09-27 retired the r4 switch, a passed `fenceScripts`
 //      changes nothing; read / session / harmless never; refused always), an unknown
@@ -208,22 +209,55 @@ console.log('— ②r3 verify r3: Input.setIgnoreInputEvents refused on every le
   for (const r of copiesCensus(MUT2.files, MUT2.dir, REPO_R3, { minCopies: 2, label: '②r3 ' })) ok(r.pass, r.name, r.detail);
 }
 
+// ═══ ②r4 (identity verify r4, 2026-09-28): a browser-level auto-attach that PAUSES new targets ══════════════
+console.log('— ②r4 identity r4: Target.setAutoAttach {waitForDebuggerOnStart} at the browser level is refused by name (it would freeze every other conversation\'s and the user\'s new tab); the page-level form and the no-pause form pass; CONTROL = a rules copy without the rule');
+{
+  // MEASURED on Chrome 153.0.8010.47 (two raw CDP clients on one headless browser, /tmp scratch profile): client 1 sends
+  // Target.setAutoAttach {autoAttach:true, waitForDebuggerOnStart:true, flatten:true} on the BROWSER connection; client 2
+  // then creates a tab, attaches, and its Runtime.evaluate answers (2) while its Page.navigate NEVER returns (3 s timeout)
+  // — the tab is paused until client 1 sends Runtime.runIfWaitingForDebugger on the session only IT was handed. Through
+  // the proxy that attachedToTarget is dropped for a foreign target (filterEvent), so the arming lease could not resume
+  // what it froze. The real 0.38.1 daemon (tapped through a logging proxy) sends setDiscoverTargets + getTargets +
+  // attachToTarget at the browser level and setAutoAttach {waitForDebuggerOnStart:true} ONLY on its page session.
+  const REPO_R4 = path.resolve(new URL('..', import.meta.url).pathname);
+  const sc = M.newScope({ targets: ['T-A'] }); M.admitReply({ id: 1, result: { sessionId: 'S-A' } }, { method: 'Target.attachToTarget', params: { targetId: 'T-A' } }, sc);
+  const code = (mod, m, o = {}) => { const v = mod.judge(m, sc, o); return v.kind === 'refuse' ? mod.refusalCodeOf(v.reply) : v.kind; };
+  const ARM = { id: 50, method: 'Target.setAutoAttach', params: { autoAttach: true, waitForDebuggerOnStart: true, flatten: true } };
+  const v0 = M.judge(ARM, sc, {});
+  ok(code(M, ARM) === 'auto_attach_pause_refused' && code(M, ARM, { paused: true }) === 'auto_attach_pause_refused' && v0.reply.error.message.endsWith(M.AUTO_ATTACH_PAUSE_WORDS) && /every NEW tab/.test(v0.reply.error.message) && /waitForDebuggerOnStart:false/.test(v0.reply.error.message), '②r4 the browser-level pause is refused by name, driven or not, with the way out in its words');
+  ok(code(M, { id: 51, method: 'Target.setAutoAttach', params: { autoAttach: true, waitForDebuggerOnStart: false, flatten: true } }) === 'forward' && code(M, { id: 52, method: 'Target.setAutoAttach', params: { autoAttach: false, waitForDebuggerOnStart: true } }) === 'forward', '②r4 the browser-level form WITHOUT the pause (and turning auto-attach off) passes');
+  ok(code(M, { id: 53, method: 'Target.setAutoAttach', params: { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }, sessionId: 'S-A' }) === 'forward', '②r4 the page-level form (a page\'s own frames / workers — what the 0.38.1 daemon sends) passes');
+  ok(code(M, { id: 54, method: 'Target.autoAttachRelated', params: { targetId: 'T-A', waitForDebuggerOnStart: true } }) === 'forward' && code(M, { id: 55, method: 'Target.autoAttachRelated', params: { targetId: 'T-X', waitForDebuggerOnStart: true } }) === 'target_out_of_scope', '②r4 autoAttachRelated with the pause: a tab of the lease\'s passes, a foreign target is refused by the scope rule');
+  const MUT4 = mutantCopies('mediation-r4-rules', REPO_R4);
+  const medSrc4 = fs.readFileSync(path.join(REPO_R4, 'src/browser-mediation.js'), 'utf8');
+  const needle = "if (method === 'Target.setAutoAttach' && !sid && params.autoAttach && params.waitForDebuggerOnStart === true) return";
+  ok(medSrc4.split(needle).length === 2, '②r4 control setup: the rule is found once in src/browser-mediation.js');
+  const mut4 = MUT4.load('src/browser-mediation.js', medSrc4.replace(needle, "if (false) return"), 'no-r4');
+  ok(code(mut4, ARM) === 'forward', '②r4 CONTROL (the rule removed in a copy): the browser-level pause is FORWARDED — the freeze reaches the shared browser');
+  for (const r of copiesCensus(MUT4.files, MUT4.dir, REPO_R4, { minCopies: 1, label: '②r4 ' })) ok(r.pass, r.name, r.detail);
+}
+
 // ═══ ⑥ THE CENSUS (verify S2 r4, 2026-09-26): the paused fence is a table over the vendor's own method list ═══
 console.log('— ⑥ the CDP census: every method of the pinned protocol has a row, the class rules, unknown = refused by name, the retired switch changes nothing; three patched-copy controls');
 {
   const REPO6 = path.resolve(new URL('..', import.meta.url).pathname);
   const C = M.CENSUS;
-  const fixtureFile = path.join(REPO6, 'scripts/fixtures', `cdp-protocol-${C.CENSUS_CHROME}`, 'protocol.json');
-  ok(fs.existsSync(fixtureFile), `⑥ the protocol fixture the census names exists (Chrome ${C.CENSUS_CHROME}: scripts/fixtures/cdp-protocol-${C.CENSUS_CHROME}/protocol.json — scripts/cdp-protocol-fetch.mjs writes it)`);
-  const fixture = JSON.parse(fs.readFileSync(fixtureFile, 'utf8'));
-  ok(C.validate().length === 0, '⑥ the table validates: a closed class vocabulary, dated rows, the one anchor-fenced row is a paused class', C.validate().slice(0, 5).join('; '));
-  const cmp = C.compare(fixture);
+  ok(C.validate().length === 0, '⑥ the table validates: a closed class vocabulary, dated rows, the one anchor-fenced row is a paused class, every version mark a censused Chrome', C.validate().slice(0, 5).join('; '));
   const cn = C.census();
-  console.log(`  (census: Chrome ${cn.chrome}, protocol ${fixture.protocolVersion}, ${fixture.domains.length} domains, ${cmp.listed} methods listed / ${cmp.rows} rows — ${Object.entries(cn.byClass).map(([k, v]) => k + ' ' + v).join(', ')})`);
-  if (cmp.unclassified.length) console.error('  UNCLASSIFIED (the protocol lists these, the census does not — write their rows in src/cdp-census.js):\n    ' + cmp.unclassified.join('\n    '));
-  if (cmp.stale.length) console.error('  STALE (rows naming no method of the pinned protocol):\n    ' + cmp.stale.join('\n    '));
-  ok(cmp.sameSet && cmp.listed >= 600, `⑥ the census covers EVERY method the pinned protocol lists and names none it lacks (${cmp.listed} = ${cmp.rows}; ${cmp.unclassified.length} unclassified, ${cmp.stale.length} stale)`);
-  ok(fixture.domains.every((d) => Array.isArray(d.commands) && d.commands.every((c) => c && typeof c.name === 'string')) && !JSON.stringify(fixture).includes('"parameters"'), '⑥ the fixture is the names-only listing (no parameter schemas — the census classes methods)');
+  // lane-cdp-154 (2026-09-28): the census reads MORE THAN ONE Chrome — each censused one's fixture, compared AT its
+  // version (the rows its `chrome` / `until` marks list there). The census's own fast gate is test-cdp-census.
+  for (const v of C.CENSUS_CHROMES) {
+    const fixtureFile = path.join(REPO6, 'scripts/fixtures', `cdp-protocol-${v}`, 'protocol.json');
+    if (!ok(fs.existsSync(fixtureFile), `⑥ the protocol fixture of censused Chrome ${v} exists (scripts/fixtures/cdp-protocol-${v}/protocol.json — scripts/cdp-protocol-fetch.mjs writes it)`)) continue;
+    const fixture = JSON.parse(fs.readFileSync(fixtureFile, 'utf8'));
+    const cmp = C.compare(fixture, { chrome: v });
+    console.log(`  (census vs Chrome ${v}: protocol ${fixture.protocolVersion}, ${fixture.domains.length} domains, ${cmp.listed} methods listed / ${cmp.rows} rows listed there — ${cmp.unclassified.length} unclassified, ${cmp.stale.length} stale, ${cmp.misdated.length} misdated)`);
+    if (cmp.unclassified.length) console.error('  UNCLASSIFIED (the protocol lists these, the census does not — write their rows in src/cdp-census.js):\n    ' + cmp.unclassified.join('\n    '));
+    if (cmp.stale.length || cmp.misdated.length) console.error('  STALE / MISDATED (rows whose chrome / until marks disagree with this Chrome):\n    ' + cmp.stale.concat(cmp.misdated).join('\n    '));
+    ok(cmp.sameSet && cmp.listed >= 600, `⑥ Chrome ${v}: the census covers EVERY method its protocol lists and names none it lacks (${cmp.listed} = ${cmp.rows}; ${cmp.unclassified.length} unclassified, ${cmp.stale.length} stale, ${cmp.misdated.length} misdated)`);
+    ok(fixture.domains.every((d) => Array.isArray(d.commands) && d.commands.every((c) => c && typeof c.name === 'string')) && !JSON.stringify(fixture).includes('"parameters"') && !JSON.stringify(fixture).includes('"description"'), `⑥ Chrome ${v}: the fixture is a names-only listing (no parameter schemas, no descriptions — the census classes methods)`);
+  }
+  console.log(`  (census: ${cn.total} rows over Chrome ${cn.chromes.join(' + ')} — ${Object.entries(cn.byClass).map(([k, v]) => k + ' ' + v).join(', ')})`);
   // the class rules over the whole table: a scope with the anchor's tab A (S-A) and another tab B (S-B), paused / not, switch on / off
   const sc = M.newScope({ targets: ['T-A', 'T-B'] });
   M.admitReply({ id: 1, result: { sessionId: 'S-A' } }, { method: 'Target.attachToTarget', params: { targetId: 'T-A' } }, sc);
@@ -390,6 +424,9 @@ const upgradeStatus = (url) => new Promise((res) => { const w = new WebSocket(ur
   const sid = att.result.sessionId;
   ok(!!sid && cB.events.some((e) => e.method === 'Target.attachedToTarget' && e.params.sessionId === sid), 'B attaches its own tab and sees the attachedToTarget for it');
   ok(M.refusalCodeOf(await cB.call('Runtime.evaluate', { expression: '1' }, 'S-foreign')) === 'session_out_of_scope', 'a message on a session B was never handed: session_out_of_scope');
+  // identity verify r4 (2026-09-28): the browser-level pause never reaches the browser; the page-level form of the same call does
+  { const n0 = fake.seen.length; const arm = await cB.call('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }); const pg = await cB.call('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }, sid);
+    ok(M.refusalCodeOf(arm) === 'auto_attach_pause_refused' && pg.result && fake.seen.slice(n0).filter((m) => m.method === 'Target.setAutoAttach').length === 1 && fake.seen.slice(n0).find((m) => m.method === 'Target.setAutoAttach').sessionId === sid, 'r4: through the proxy, B\'s browser-level pause is refused and never reaches the browser; its page-level auto-attach is forwarded on its own session'); }
   ok((await cB.call('Page.navigate', { url: 'about:nav' }, sid)).result.frameId === 'F1', 'B navigates its own tab');
   paused.b = true;
   ok(M.refusalCodeOf(await cB.call('Page.navigate', { url: 'about:nav2' }, sid)) === 'browser_interrupted' && M.refusalCodeOf(await cB.call('Input.dispatchKeyEvent', { type: 'keyDown' }, sid)) === 'browser_interrupted' && M.refusalCodeOf(await cB.call('Runtime.evaluate', { expression: 'document.title' }, sid)) === 'browser_interrupted', 'the paused reader is read LIVE: the moment the user holds B\'s input, B\'s navigate, input AND script evaluation are browser_interrupted');

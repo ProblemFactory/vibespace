@@ -19,6 +19,14 @@ const { readPpid } = require('../cli-identity');
 
 const { mk } = require('./lazy.js');
 
+/** THE CONVERSATION'S POOL PIN from a session meta (2026-09-28): {memberId, at, by} or null —
+ *  the ONE expression all three restore sites use (a pin the pool no longer lists is kept: the
+ *  per-session pass judges it `pin-member-unknown`, and the automatic rules place it meanwhile). */
+function poolPinFromMeta(meta) {
+  const p = meta && meta.poolPin;
+  return p && typeof p === 'object' && typeof p.memberId === 'string' && p.memberId ? { memberId: p.memberId, at: Number(p.at) || 0, by: typeof p.by === 'string' ? p.by : 'user' } : null;
+}
+
 /** Where a restored session's held pool member came from (design-reset-credits
  *  r4): 'ledger' = the engine derived it from the slot-transition ledger and
  *  persisted it; 'no-start' = no stamp AND the meta never recorded `createdAt`
@@ -384,7 +392,8 @@ function restoreSessions() {
       // user-data-dir rung it spawned on. Restored so a later resume of this
       // conversation finds its key and the orphan sweep sees this session as
       // live in memory as well as on disk.
-      _browserKey: meta.browserKey || null, _browserVariant: meta.browserVariant || null, _browserProfileId: meta.browserProfileId || null, _browserPinOrigin: meta.browserPinOrigin || null, _browserEnv: Array.isArray(meta.browserEnv) ? meta.browserEnv : null, _browserProfileActive: typeof meta.browserProfileActive === 'string' ? meta.browserProfileActive : null, _browserCap: Number.isInteger(meta.browserCap) ? meta.browserCap : null, _channelTouches: Array.isArray(meta.channelTouches) ? meta.channelTouches : null, // §26 (B-099e): the channel witness's ring survives the restart (the chat's rows are replayed) + MULTIVIEW D4: the conversation's explicit browser cap // + P2: the ephemeral live view's pairs + the last-used profile (§3.8 ③)
+      _poolPin: poolPinFromMeta(meta), // THE CONVERSATION'S PIN (2026-09-28) survives a restart
+      _browserKey: meta.browserKey || null, _browserVariant: meta.browserVariant || null, _browserProfileId: meta.browserProfileId || null, _browserPinOrigin: meta.browserPinOrigin || null, _browserEnv: Array.isArray(meta.browserEnv) ? meta.browserEnv : null, _browserProfileActive: typeof meta.browserProfileActive === 'string' ? meta.browserProfileActive : null, _browserCap: Number.isInteger(meta.browserCap) ? meta.browserCap : null, _channelTouches: Array.isArray(meta.channelTouches) ? meta.channelTouches : null, _groupCards: Array.isArray(meta.groupCards) ? meta.groupCards : null, // lane group-report-card: the group messages this conversation was handed (their cards re-placed by the rebuild; their keys keep a re-report from drawing twice) · §26 (B-099e): the channel witness's ring survives the restart (the chat's rows are replayed) + MULTIVIEW D4: the conversation's explicit browser cap // + P2: the ephemeral live view's pairs + the last-used profile (§3.8 ③)
       _modelLocked: !!meta.modelLocked,
       _lockedModel: meta.lockedModel || null,
       agentToken: meta.agentToken || null, // vibespace-status auth survives restarts
@@ -575,7 +584,8 @@ function restoreAgentdPipeSessions() {
       // user-data-dir rung it spawned on. Restored so a later resume of this
       // conversation finds its key and the orphan sweep sees this session as
       // live in memory as well as on disk.
-      _browserKey: meta.browserKey || null, _browserVariant: meta.browserVariant || null, _browserProfileId: meta.browserProfileId || null, _browserPinOrigin: meta.browserPinOrigin || null, _browserEnv: Array.isArray(meta.browserEnv) ? meta.browserEnv : null, _browserProfileActive: typeof meta.browserProfileActive === 'string' ? meta.browserProfileActive : null, _browserCap: Number.isInteger(meta.browserCap) ? meta.browserCap : null, _channelTouches: Array.isArray(meta.channelTouches) ? meta.channelTouches : null, // §26 (B-099e): the channel witness's ring survives the restart (the chat's rows are replayed) + MULTIVIEW D4: the conversation's explicit browser cap // + P2: the ephemeral live view's pairs + the last-used profile (§3.8 ③)
+      _poolPin: poolPinFromMeta(meta), // THE CONVERSATION'S PIN (2026-09-28) survives a restart
+      _browserKey: meta.browserKey || null, _browserVariant: meta.browserVariant || null, _browserProfileId: meta.browserProfileId || null, _browserPinOrigin: meta.browserPinOrigin || null, _browserEnv: Array.isArray(meta.browserEnv) ? meta.browserEnv : null, _browserProfileActive: typeof meta.browserProfileActive === 'string' ? meta.browserProfileActive : null, _browserCap: Number.isInteger(meta.browserCap) ? meta.browserCap : null, _channelTouches: Array.isArray(meta.channelTouches) ? meta.channelTouches : null, _groupCards: Array.isArray(meta.groupCards) ? meta.groupCards : null, // lane group-report-card: the group messages this conversation was handed (their cards re-placed by the rebuild; their keys keep a re-report from drawing twice) · §26 (B-099e): the channel witness's ring survives the restart (the chat's rows are replayed) + MULTIVIEW D4: the conversation's explicit browser cap // + P2: the ephemeral live view's pairs + the last-used profile (§3.8 ③)
       _spawnModel: meta.spawnModel || null, _pickedModel: meta.pickedModel || null, _pickedModelAt: meta.pickedModelAt || 0,
       _servedViaFallback: restoredFallback(meta), // the classifier reroute survives a restart (r3 §7)
       _msgReachability: meta.msgReachability || null,
@@ -687,7 +697,8 @@ async function readoptOrphanKeeperSessions() {
       // user-data-dir rung it spawned on. Restored so a later resume of this
       // conversation finds its key and the orphan sweep sees this session as
       // live in memory as well as on disk.
-      _browserKey: meta.browserKey || null, _browserVariant: meta.browserVariant || null, _browserProfileId: meta.browserProfileId || null, _browserPinOrigin: meta.browserPinOrigin || null, _browserEnv: Array.isArray(meta.browserEnv) ? meta.browserEnv : null, _browserProfileActive: typeof meta.browserProfileActive === 'string' ? meta.browserProfileActive : null, _browserCap: Number.isInteger(meta.browserCap) ? meta.browserCap : null, _channelTouches: Array.isArray(meta.channelTouches) ? meta.channelTouches : null, // §26 (B-099e): the channel witness's ring survives the restart (the chat's rows are replayed) + MULTIVIEW D4: the conversation's explicit browser cap // + P2: the ephemeral live view's pairs + the last-used profile (§3.8 ③)
+      _poolPin: poolPinFromMeta(meta), // THE CONVERSATION'S PIN (2026-09-28) survives a restart
+      _browserKey: meta.browserKey || null, _browserVariant: meta.browserVariant || null, _browserProfileId: meta.browserProfileId || null, _browserPinOrigin: meta.browserPinOrigin || null, _browserEnv: Array.isArray(meta.browserEnv) ? meta.browserEnv : null, _browserProfileActive: typeof meta.browserProfileActive === 'string' ? meta.browserProfileActive : null, _browserCap: Number.isInteger(meta.browserCap) ? meta.browserCap : null, _channelTouches: Array.isArray(meta.channelTouches) ? meta.channelTouches : null, _groupCards: Array.isArray(meta.groupCards) ? meta.groupCards : null, // lane group-report-card: the group messages this conversation was handed (their cards re-placed by the rebuild; their keys keep a re-report from drawing twice) · §26 (B-099e): the channel witness's ring survives the restart (the chat's rows are replayed) + MULTIVIEW D4: the conversation's explicit browser cap // + P2: the ephemeral live view's pairs + the last-used profile (§3.8 ③)
       _modelLocked: !!meta.modelLocked,
       _lockedModel: meta.lockedModel || null,
       _initialGroupId: meta.taskId || null,

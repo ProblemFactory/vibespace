@@ -250,11 +250,30 @@ function edfCompare(a, b) {
   return (b.eff - a.eff) || login();
 }
 
+// MANUAL PRIORITY (2026-09-28, owner: "手动切换整个池其实比较confusing，我建议移除这个功能，
+// 或者做成'手动优先级'这样的概念" + the 17:22 decision). `priority` = an ORDERED list
+// of member ids (the owner's preference, empty/null = automatic). Every SAFETY rule
+// is identical in both modes (hard/soft bands, login gates, exclude, credits-last,
+// reserve floor, overage) — priority only ORDERS what those rules leave: a listed
+// member ranks before every unlisted one, earlier before later; unlisted members
+// keep today's automatic order (EDF) among themselves. Empty ⇒ edfCompare, i.e.
+// byte-identical verdicts. `priorityOrder(priority)` → a comparator.
+function priorityRankOf(priority) {
+  const list = Array.isArray(priority) && priority.length ? priority : null;
+  if (!list) return null;
+  const idx = new Map(list.map((id, i) => [id, i]));
+  return (id) => (idx.has(id) ? idx.get(id) : list.length);
+}
+function priorityOrder(priority, base = edfCompare) {
+  const rank = priorityRankOf(priority);
+  return rank ? (a, b) => (rank(a.id) - rank(b.id)) || base(a, b) : base;
+}
+
 /** The ranked member snapshot pushed to the holding device (sealed orders):
  *  usable members in EDF order — the device executes a LOCAL fallback switch
  *  down this list only when it both sees a hard limit banner AND cannot
  *  reach the orchestrator. */
-function rankPoolMembers({ members, readCache, nowSec, readLogin = null, creditsIds = null }) {
+function rankPoolMembers({ members, readCache, nowSec, readLogin = null, creditsIds = null, priority = null }) {
   const out = [];
   // USAGE CREDITS (B-ad05): a member whose org bills pay-per-use past 100 %
   // ranks after EVERY member with quota left — the daemon's reflex walks this
@@ -277,8 +296,9 @@ function rankPoolMembers({ members, readCache, nowSec, readLogin = null, credits
     if (r.known && br.some((b) => b.remaining < THRESH[b.kind].hard)) continue;
     out.push(row);
   }
-  out.sort(edfCompare);
-  last.sort(edfCompare);
+  const order = priorityOrder(priority); // manual priority orders the snapshot too (the device walks it top-down)
+  out.sort(order);
+  last.sort(order);
   return out.concat(last);
 }
 
@@ -318,12 +338,40 @@ function rankPoolMembers({ members, readCache, nowSec, readLogin = null, credits
 // conversation that is mid-turn — `none('warm-soft-defer', {…, softBucket})`,
 // the move owed at its first stop; the HARD band and a dead login are decided
 // exactly as before. Omit it ⇒ byte-identical.
-function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false, hot = proactive, pessimism = {}, exclude = null, readLogin = null, reserveFloorPct = 0, overageIds = null, creditsIds = null, warm = null, explain = false }) {
+// membership = the pool's CONFIGURED member ids (accounts.poolMembership — the
+// explicit list, or every same-backend subscription for an implicit pool,
+// whatever their login state), or null (2026-09-28, owner: "如果用到一半把账号从
+// 池里排除，不会第一时间触发切走"). MEMBERSHIP IS A PLACEMENT FACT, NOT A CANDIDATE
+// FILTER: a `currentId` the pool no longer lists is a HARD wall for this
+// decision — `reason: 'not-a-member'`, `band: 'hard'`, every conversation moves
+// NOW, warm or mid-turn, with no gain floor and past the no-data hold (a removed
+// member's quota is beside the point: the owner took it out). No candidate left
+// ⇒ the existing blocked outcomes say it (`notMember: {id}`). It is a SEPARATE
+// input from `members` on purpose: `members` is the DECISION list (logged-in,
+// auth-failure-filtered), so a signed-out current member is missing from it and
+// must keep its own 'login-expired' verdict + re-login words. Omit it (or list
+// the current member) ⇒ byte-identical.
+// priority = the pool's MANUAL PRIORITY (ordered member ids; empty/null =
+// automatic — byte-identical). The earliest usable member takes the placement:
+// an exhausted one ⇒ the next (the move's reason stays the cause, 'exhausted',
+// with `placedBy: 'priority'`); a HIGHER-priority member that can SETTLE again
+// ⇒ `reason: 'priority-return'` — at the conversation's NEXT STOP, never
+// mid-turn (`warm.inTurn` ⇒ `none('priority-hold', {wouldTo…})`, owed at the
+// first stop the engine already re-decides on), and NOT held by the warm cache
+// (the owner's 17:22 decision: automatic keeps EDF + the warm hold; manual
+// priority returns at the next stop). Return needs SETTLE (every bucket over its
+// hot bar + MIN_GAIN): a member that just fell under the hard bar cannot flap
+// back on an estimate's wobble. The proactive EDF tier runs only between members
+// of EQUAL priority rank (both unlisted) — a listed member is never left for EDF.
+function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false, hot = proactive, pessimism = {}, exclude = null, readLogin = null, reserveFloorPct = 0, overageIds = null, creditsIds = null, warm = null, membership = null, priority = null, explain = false }) {
+  const prioRank = priorityRankOf(priority);
+  const order = priorityOrder(priority);
   const excluded = exclude && exclude.length ? new Set(exclude) : null;
+  const notMember = membership != null && !(typeof membership.has === 'function' ? membership : new Set(membership)).has(currentId);
   // `explain` keeps the historical contract (null = no switch) for every
   // existing caller and test, while letting the engine ask WHY nothing
   // happened — a pool sitting on a dead account must not be silent.
-  const none = (why, extra) => (explain ? { to: null, reason: why, ...extra } : null);
+  const none = (why, extra) => (explain ? { to: null, reason: why, ...extra, ...(notMember ? { notMember: { id: currentId } } : {}) } : null);
   // Which buckets are actually holding this decision back, by name — plus, as
   // a SEPARATE named output, the current member's own dead LOGIN.
   //
@@ -380,14 +428,16 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   // Per-KIND thresholds (user-designed): what matters is ABSOLUTE headroom —
   // a weekly bucket at 88% still holds ~$200, a 5h bucket at 90% one long
   // turn. exhausted = ANY bucket under its kind's (hot-raised) threshold.
-  const exhausted = curLoginDead || (cur.known && curBr.some(soft));
-  const hardDead = curLoginDead || (cur.known && curBr.some(dead));
+  const exhausted = notMember || curLoginDead || (cur.known && curBr.some(soft));
+  const hardDead = notMember || curLoginDead || (cur.known && curBr.some(dead));
   // No data on the current target → we cannot judge exhaustion; staying put is
   // safer than flapping on ignorance (the ledger will teach us eventually).
   // A DEAD LOGIN is not ignorance, so it overrides the no-data hold: the file
   // says this member cannot authenticate, which is a fact, not a gap.
-  if (!cur.known && !proactive && !curLoginDead) return none('no-data');
-  if (!exhausted && !proactive) return none('healthy', { fromRemaining: cur.known ? cur.remaining : null });
+  // (a manual priority keeps asking: a return to a higher-priority member is not
+  // a judgement about the CURRENT member, so its missing data is no reason to stay)
+  if (!cur.known && !proactive && !curLoginDead && !notMember && !prioRank) return none('no-data');
+  if (!exhausted && !proactive && !prioRank) return none('healthy', { fromRemaining: cur.known ? cur.remaining : null });
 
   // Rank candidates by EDF: known weekly deadline ascending; same deadline
   // (±60s) → MORE remaining first (equal-deadline order can't change total
@@ -456,9 +506,9 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     ...(overageBlocked.length ? { overageBlocked } : {}),
     ...(creditsHeld.length ? { creditsHeld } : {}),
   });
-  ranked.sort(edfCompare);
-  nearRanked.sort(edfCompare);
-  creditsRanked.sort((x, y) => ((x.dead ? 1 : 0) - (y.dead ? 1 : 0)) || edfCompare(x, y));
+  ranked.sort(order);
+  nearRanked.sort(order);
+  creditsRanked.sort((x, y) => ((x.dead ? 1 : 0) - (y.dead ? 1 : 0)) || order(x, y));
   // ESCAPE SCRAPS (round-2 verifier, reproduced: current hard-dead on 5h, the
   // only quota-healthy member 20 min from its login deadline ⇒ round 1 refused
   // to move AT ALL, a strict availability regression vs the shipped code). The
@@ -503,6 +553,17 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     // THAT (the engine notices it once per 6 h per (pool, member)) and never
     // feed auto-resume's "no usable member left" clause with it.
     if (why === 'no-members' && curCredits) why = 'on-credits';
+    // THE OWNER'S DECISION (2026-09-28, "全B"): a conversation on a member the pool no longer LISTS, with
+    // nobody to take it over, is NOT kept running on that member — whatever kind it is (a subscription, a
+    // pay-per-use credits member). It STOPS after its current turn and waits at a wall (`removed-hold`):
+    // the engine parks its link on `holdTo` — the listed member usable soonest (soonestUsableMember), whose
+    // own wall it then meets — and arms the ONE continue a member wake delivers. `to` stays null (nobody can
+    // serve it), `blockedWhy` keeps the sentence's own reason (all-rejected / all-logins-expired / …).
+    if (notMember) {
+      const listed = membership == null ? null : (typeof membership.has === 'function' ? membership : new Set(membership));
+      const holdTo = soonestUsableMember({ members: (members || []).filter((m) => m && m.id !== currentId && (!listed || listed.has(m.id))), readCache, nowSec, priority, creditsIds: credits });
+      return none('removed-hold', { holdTo, blockedWhy: why, fromRemaining: cur.known ? cur.remaining : null, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...bucketDetail(curBr) });
+    }
     return none(why, { fromRemaining: cur.known ? cur.remaining : null, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...(why === 'on-credits' ? { onCredits: { id: currentId }, billing: hardDead } : {}), ...barDetail(), ...bucketDetail(curBr) });
   }
 
@@ -520,6 +581,9 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     return { toLoginNear: { id: pick.id, name: pick.name, ...(loginBlocked.find((b) => b.id === pick.id) || {}) } };
   };
   const bestSettle = pool.find((r) => r.settleOk) || null;
+  // which rule ORDERED the target (reporting — the notices say "(priority #2)"):
+  // present only under a manual priority, so automatic verdicts are byte-identical
+  const placed = (pick) => (prioRank ? { placedBy: 'priority', priorityRank: prioRank(pick.id) < priority.length ? prioRank(pick.id) + 1 : null } : {});
   if (exhausted) {
     if (hardDead) {
       // genuinely unusable — any meaningfully-better member beats staying,
@@ -548,7 +612,9 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
       // unread member). A dead login always leaves.
       // …and a credits member's capacity is not its quota (it serves past
       // 100 %), so the gain floor does not apply to the last resort either.
-      if (!curLoginDead && !usingCredits && best.eff <= cur.remaining + MIN_GAIN_PCT) return none('stuck', { fromRemaining: cur.remaining, bestRemaining: best.remaining, bestName: best.name || best.id, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...bucketDetail(curBr) });
+      // …and a member the pool no longer lists is not a place to STAY at any
+      // gain (2026-09-28): its remaining quota is the owner's to withhold.
+      if (!curLoginDead && !notMember && !usingCredits && best.eff <= cur.remaining + MIN_GAIN_PCT) return none('stuck', { fromRemaining: cur.remaining, bestRemaining: best.remaining, bestName: best.name || best.id, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...bucketDetail(curBr) });
       // `reason` says why we LEFT (it gates the dwell-belt exemption and the
       // notice); `toLoginNear` says what we could get. Collapsing the two into
       // one string would have made a login-expired escape onto a scrap lose
@@ -556,7 +622,9 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
       // band 'hard': a bucket under its HARD bar or a dead login — every
       // conversation moves NOW, warm or mid-turn (the owner's rule below never
       // reaches this branch).
-      return { to: best.id, toName: best.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: best.remaining, reason: curLoginDead ? 'login-expired' : 'exhausted', band: 'hard', ...scrapsInfo(best) };
+      // a member the pool no longer LISTS leaves first: membership is the fact the
+      // owner changed, whatever its login or quota also say
+      return { to: best.id, toName: best.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: best.remaining, reason: notMember ? 'not-a-member' : curLoginDead ? 'login-expired' : 'exhausted', band: 'hard', ...scrapsInfo(best), ...placed(best) };
     }
     // soft-exhausted (only a hot-raised threshold tripped): still usable,
     // so only move somewhere that can actually SETTLE
@@ -578,14 +646,25 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
         ...bucketDetail(curBr),
       });
     }
-    return { to: bestSettle.id, toName: bestSettle.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: bestSettle.remaining, reason: 'exhausted', band: 'soft' };
+    return { to: bestSettle.id, toName: bestSettle.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: bestSettle.remaining, reason: 'exhausted', band: 'soft', ...placed(bestSettle) };
+  }
+  // THE PRIORITY RETURN (manual priority): the current member is usable, and a
+  // member the owner ranked HIGHER can settle again (its window reset, a re-login,
+  // a reset credit, a member wake) ⇒ back to it — at the conversation's next stop
+  // (mid-turn ⇒ owed: 'priority-hold'), never held by the warm cache.
+  if (prioRank && bestSettle && prioRank(bestSettle.id) < prioRank(currentId)) {
+    const rank = prioRank(bestSettle.id) + 1;
+    if (warm && warm.inTurn) return none('priority-hold', { wouldTo: bestSettle.id, wouldToName: bestSettle.name, priorityRank: rank, fromRemaining: cur.known ? cur.remaining : null });
+    return { to: bestSettle.id, toName: bestSettle.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: bestSettle.remaining, reason: 'priority-return', placedBy: 'priority', priorityRank: rank };
   }
   // Proactive tier (hot pools): jump to a strictly-sooner KNOWN deadline —
   // drain the soonest-expiring quota while the current target's keeps. Never
   // jump onto unknown data, never without a real deadline margin, and never
   // onto a member below the settle bar (the oscillation guard above).
+  // …under a manual priority only between members of EQUAL rank (both unlisted):
+  // a member the owner listed is never left for a sooner deadline
   if (proactive && bestSettle && bestSettle.deadline != null && curDeadline != null && bestSettle.known
-      && curDeadline - bestSettle.deadline > PROACTIVE_MARGIN_SEC) {
+      && curDeadline - bestSettle.deadline > PROACTIVE_MARGIN_SEC && (!prioRank || prioRank(bestSettle.id) === prioRank(currentId))) {
     // …and never while the conversation's prompt cache is still warm: the jump
     // is VOLUNTARY, and a re-point cold-starts it (THE WARM CACHE, above). The
     // pool asks again next cycle; the cache goes cold on its own.
@@ -593,6 +672,119 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     return { to: bestSettle.id, toName: bestSettle.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: bestSettle.remaining, reason: 'edf' };
   }
   return none('hold', { fromRemaining: cur.known ? cur.remaining : null });
+}
+
+/**
+ * decidePinnedPlacement(opts) — THE CONVERSATION'S PIN (2026-09-28, owner: "你可以加一个
+ * 手动overwrite这个会话的池对象选择功能…如果选择某个具体账号，那在这个账号耗尽之前就pin在这个账号
+ * 下，刷新后也优先切到这个账号"). A pin is a PREFERENCE WITH AUTHORITY for ONE conversation
+ * (the owner's 17:22 framing: a length-1 manual priority): PRECEDENCE — conversation pin >
+ * pool priority order > automatic. `pin` = a member id (or {memberId}); null/absent ⇒
+ * returns null and the caller decides exactly as before (decidePoolSwitch, byte-identical).
+ *
+ * The pinned member CAN SERVE (to stay) unless, in this order, it is NAMED:
+ *   'pin-member-unknown'   not in the pool's membership (removed), or not a candidate
+ *                          while its login reads usable (auth-failing)
+ *   'pin-member-excluded'  it just refused THIS conversation (the caller's `exclude`)
+ *   'pin-login-dead'       its login cannot serve a turn (signed out / expired — a member
+ *                          the candidate list lacks for that reason included)
+ *   'pin-exhausted'        a bucket of the conversation's family view under its HARD bar
+ *   'pin-recovering'       (engine return only) over its hard bar but not yet SETTLED — it is not out
+ *                          of quota; the automatic rules keep the conversation until it settles
+ * Usable ⇒ on it: `{to:null, reason:'pin'}` — it STAYS, the soft band included (no EDF,
+ * no most-remaining, no warm hold: nothing automatic decides a pinned conversation);
+ * elsewhere + `explicit` (the owner's act, the route) ⇒ `{to: pin, reason:'pin'}` NOW,
+ * mid-turn included (a manual choice is never held); elsewhere by the engine ⇒ a RETURN,
+ * which needs the pin to SETTLE (every bucket over its hot bar + MIN_GAIN, a login that is
+ * not about to die — the hysteresis that stops a flap on an estimate's wobble) ⇒
+ * `{to: pin, reason:'pin-return', fromRemaining}` at the conversation's first stop, mid-turn ⇒
+ * `{to:null, reason:'pin-hold', why:'pin-mid-turn', wouldTo}` — unless the member it runs on
+ * is a WALL (removed / login dead / under its hard bar): then the return is an escape, NOW,
+ * `{…'pin-return', band:'hard', escape:<why>}`; not yet settled ⇒ as if exhausted (the
+ * automatic rules run, the pin waits).
+ * Cannot serve ⇒ TODAY'S AUTOMATIC RULES (decidePoolSwitch with every input — priority
+ * included — on `autoReadCache || readCache`) and the pin STAYS: `{…auto verdict,
+ * reason:'pin-exhausted', autoReason: <auto's own reason>, pinWhy}` — the caller acts on
+ * `autoReason` exactly as it acts on an unpinned verdict. Every verdict carries `pinned`
+ * + `pinnedName`.
+ */
+function decidePinnedPlacement(opts = {}) {
+  const { pin, currentId, members = [], readCache, nowSec, warm = null, readLogin = null, exclude = null, pessimism = {}, membership = null, explicit = false, autoReadCache = null } = opts;
+  const pinId = typeof pin === 'string' ? pin : (pin && typeof pin === 'object' && typeof pin.memberId === 'string' ? pin.memberId : null);
+  if (!pinId) return null;
+  const m = (members || []).find((x) => x && x.id === pinId) || null;
+  const pinnedName = m ? m.name : pinId;
+  const base = { pinned: pinId, pinnedName };
+  const inMembership = membership == null || (typeof membership.has === 'function' ? membership.has(pinId) : membership.includes(pinId));
+  const li = readLogin ? (readLogin(pinId) || { state: 'unknown' }) : { state: 'unknown' };
+  const c = readCache(pinId);
+  const r = accountRemaining(c, nowSec);
+  const br = bucketRems(c, nowSec).map((b) => ({ ...b, remaining: Math.max(0, b.remaining - ((pessimism && pessimism[pinId]) || 0)) }));
+  let why = null;
+  // (a member the pool LISTS but the candidate list lacks is usually signed out — the candidates are
+  // the logged-in ones — and a login that cannot serve is named as that, never as "unknown": verify r1)
+  if (!inMembership) why = 'pin-member-unknown';
+  else if (!m) why = readLogin && !loginUsable(li) ? 'pin-login-dead' : 'pin-member-unknown';
+  else if (exclude && exclude.includes(pinId)) why = 'pin-member-excluded';
+  else if (readLogin && !loginUsable(li)) why = 'pin-login-dead';
+  else if (r.known && br.some((b) => b.remaining < THRESH[b.kind].hard)) why = 'pin-exhausted';
+  if (!why) {
+    if (currentId === pinId) return { to: null, reason: 'pin', held: true, ...base };
+    if (explicit) return { to: pinId, toName: pinnedName, fromRemaining: null, toRemaining: r.known ? r.remaining : null, reason: 'pin', ...base };
+    const settled = r.known && br.length > 0 && br.every((b) => b.remaining >= THRESH[b.kind].hot + MIN_GAIN_PCT) && (!readLogin || loginSwitchTarget(li));
+    if (settled) {
+      // `fromRemaining` = what the member the conversation RUNS ON has left (verify r1): the
+      // caller's dwell belt applies to a return like to every voluntary move — a pin whose
+      // reading wobbles across its bars must not cold-start the conversation on every
+      // evaluation — and exempts a move off a member under the hard bar, which this names
+      const fc = currentId ? readCache(currentId) : null;
+      const fr = accountRemaining(fc, nowSec);
+      const dockCur = (pessimism && pessimism[currentId]) || 0;
+      const fromRemaining = fr.known ? Math.max(0, fr.remaining - dockCur) : null;
+      // A WALL IS A WALL FOR A PINNED CONVERSATION TOO (verify r1): the member it runs on is no
+      // longer a member, cannot sign in, or has a bucket under its HARD bar (decidePoolSwitch's
+      // own `hardDead`, the same three facts) ⇒ the return is an ESCAPE — NOW, mid-turn included,
+      // on a pool that restarts to move as well. The return verdict used to pre-empt the automatic
+      // rules here: mid-turn it answered 'pin-hold' and the turn ran into the wall; on a pool
+      // without hot switching it was skipped and the conversation sat on the spent member.
+      const curGone = !!currentId && membership != null && !(typeof membership.has === 'function' ? membership.has(currentId) : membership.includes(currentId));
+      const curLoginDead = !!currentId && !!readLogin && !loginUsable(readLogin(currentId) || { state: 'unknown' });
+      const curSpent = !!currentId && fr.known && bucketRems(fc, nowSec).some((b) => Math.max(0, b.remaining - dockCur) < THRESH[b.kind].hard);
+      const escape = curGone ? 'not-a-member' : curLoginDead ? 'login-expired' : curSpent ? 'exhausted' : null;
+      if (escape) return { to: pinId, toName: pinnedName, fromRemaining, toRemaining: r.remaining, reason: 'pin-return', band: 'hard', escape, ...base };
+      if (warm && warm.inTurn) return { to: null, reason: 'pin-hold', why: 'pin-mid-turn', wouldTo: pinId, wouldToName: pinnedName, ...base };
+      return { to: pinId, toName: pinnedName, fromRemaining, toRemaining: r.remaining, reason: 'pin-return', ...base };
+    }
+    why = 'pin-recovering'; // can serve, but has not recovered enough to be RETURNED to — the automatic rules keep it for now (named apart from 'pin-exhausted': it is NOT out of quota, verify r2)
+  }
+  const auto = decidePoolSwitch({ ...opts, readCache: autoReadCache || readCache, explain: true });
+  return { ...(auto || { to: null, reason: 'hold' }), reason: 'pin-exhausted', autoReason: auto ? auto.reason : 'hold', pinWhy: why, ...base };
+}
+
+/**
+ * soonestUsableMember({members, readCache, nowSec, priority, creditsIds}) — THE DEFAULT'S FALLBACK
+ * (verify r2 of lane-pool-pin). The pool DEFAULT sits on a member the pool no longer lists and NO
+ * member can take it over (the removal verdict found nobody). The default is where a NEW conversation
+ * starts, so it must still name a member the pool LISTS — and the pick is a DECISION, never the
+ * list's first entry (the store's no-engine fallback): the member usable SOONEST by the pool's own
+ * hard bars (a reading that says usable, or no reading at all ⇒ now; else the reset its blocking
+ * buckets wait for — `quotaVerdict(…, {tier:'hard'}).blockedUntil`, grace included; no stated reset
+ * ⇒ last), then the owner's priority order, then the member-list order; a usage-credits member
+ * (pay-per-use past its quota, B-ad05) only after every other. `members` = the caller's candidates
+ * (logged-in members the pool lists, the member being left excluded). → id | null
+ */
+function soonestUsableMember({ members, readCache, nowSec, priority = null, creditsIds = null } = {}) {
+  const rank = priorityRankOf(priority);
+  const credits = creditsIds && (typeof creditsIds.has === 'function' ? creditsIds : new Set(creditsIds));
+  const rows = [];
+  (members || []).forEach((m, i) => {
+    if (!m || typeof m.id !== 'string') return;
+    const v = quotaVerdict(readCache(m.id), nowSec, { tier: 'hard' });
+    const at = v.usable === false ? (v.blockedUntil || Infinity) : 0;
+    rows.push({ id: m.id, at, credits: !!(credits && credits.has(m.id)), rank: rank ? rank(m.id) : 0, i });
+  });
+  rows.sort((x, y) => ((x.credits ? 1 : 0) - (y.credits ? 1 : 0)) || (x.at === y.at ? 0 : x.at < y.at ? -1 : 1) || (x.rank - y.rank) || (x.i - y.i));
+  return rows.length ? rows[0].id : null;
 }
 
 /**
@@ -660,6 +852,18 @@ function poolBlockedNotice(d, { poolName = '', currentName = 'the current member
   // with the sentence it decorates.
   const rest = (dead || low) && live ? ` (still available: ${live})` : '';
   const loginNames = loginBlockedText(d?.loginBlocked);
+  // THE CURRENT MEMBER WAS REMOVED FROM THE POOL (2026-09-28) and nobody can take
+  // its conversations: that is the whole story — its quota and its login are
+  // about an account the owner took out, so neither is narrated as the wall.
+  if (d?.notMember) {
+    const r0 = d.reason === 'removed-hold' ? d.blockedWhy : d.reason; // the hold keeps the sentence's own reason
+    const others = r0 === 'all-logins-expired' ? `every other member needs a re-login — ${loginNames}`
+      : r0 === 'all-rejected' ? 'every other member just refused this conversation'
+      : `every other member is out of quota${loginNames ? ` or needs a re-login (${loginNames})` : ''}`;
+    // (the owner's 全B, 2026-09-28: nothing keeps serving on the removed member — its conversations stop after
+    // their current turn and wait; the sentence says so instead of "keeps running")
+    return `Pool "${poolName}": ${currentName} is no longer a member of the pool and no member can take over its conversations — ${others}.${heldNote}${payNote}${creditsNote} Its conversations stop after their current turn and wait until a member can serve them — add a member to continue sooner.`;
+  }
   const loginWall = d?.reason === 'all-logins-expired'; // the OTHER members
   const curLoginWall = !!d?.fromLogin;                  // the CURRENT member
   // Quota facts are about the CURRENT member, so under a login wall they are a
@@ -1018,5 +1222,5 @@ function conversationDisplayName(session, customNames, fallbackId = '') {
 }
 
 module.exports = {
-  quotaVerdict, conversationDisplayName,
+  quotaVerdict, conversationDisplayName, priorityOrder, priorityRankOf, decidePinnedPlacement, soonestUsableMember,
   classifyAuthFailure, decideCliRefresh, cliRefreshWhy, nextScheduledReadMs, projectionBucketBought, projectionReadsAfter, PROJECTION_LEAD_SEC, PROJECTION_MOVE_MS, PROJECTION_WINDOW_MS, PROJECTION_MEMORY_MS, PROJECTION_RECORD_MAX_MS, projectCacheAhead, projectionCrossing, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, CACHE_TTL_SEC, CACHE_TTL_1M_SEC, cacheTtlSecFor, warmCache, conversationInTurn, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, decidePoolSwitch, poolBlockedNotice, poolCreditsNotice };

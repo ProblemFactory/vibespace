@@ -92,17 +92,63 @@ function helperParentOf(agentId, taskRecords) {
   return null;
 }
 
-/** WHAT the helper wants to do, in one line (the card and the inbox detail). */
-function askTarget(ask) {
+// ═══ HIDDEN CHARACTERS ON A PERMISSION SURFACE (verify r6 F7 — Trojan Source) ═══
+// A bidi control (U+202A–E, U+2066–9, U+200E/F, U+061C) reorders how a line READS without changing what RUNS,
+// and a zero-width / format character is not drawn at all — so `echo hi<U+202E> ; touch ~/m` can read as something
+// else on the card the user allows. The CLI owns the request (we cannot refuse it at a door, as the exit ask
+// does), so every permission surface SHOWS each such character as a marked `⟦U+202E⟧` token and the card asks
+// for a second, deliberate press before Allow. The set: the exit door's bidi set (src/exit-reach.js
+// hiddenOrderOf) + zero-width / invisible format characters + C0/C1 controls other than tab, line feed and
+// carriage return (a Windows line ending in a Write is not a trick) + the invisible tag block. Variation
+// selectors are left out (an emoji carries U+FE0F).
+// verify-r6 Z2: THE SET is src/hidden-chars.js (one answer for every approval surface) — a permission surface keeps a
+// Windows line ending (a Write's CR is not a trick) and marks everything else, joiners included
+const HC = require('./hidden-chars.js');
+const HIDDEN_CHAR_RE = HC.HIDDEN_RE;
+const HA_OPTS = Object.freeze({ allowCR: true, allowJoiners: false });
+/** The hidden characters a value holds, as `U+XXXX` codes (unique, in order of appearance; at most 32). */
+function hiddenCharsOf(value) { return HC.hiddenCharsOf(value, { ...HA_OPTS, max: 32 }); }
+/** A string cut into parts — `{text}` runs and one `{code}` per hidden character — so a DOM renderer can MARK
+ *  each (the renderer escapes the text; the code is `U+XXXX`, never the character itself). */
+function revealParts(s) { return HC.revealParts(s, HA_OPTS); }
+/** The same string with every hidden character spelled `⟦U+XXXX⟧` (a plain-text surface: the For-you detail,
+ *  the tool card's Input block, the plain words' params). */
+function revealHidden(s) { return HC.revealHidden(s, HA_OPTS); }
+/** THE SECOND PRESS (F7): with hidden characters in the request, the first press on Allow only ARMS it; a
+ *  press within SECOND_PRESS_MS of the arming is the same gesture (a double click) and does nothing; a later
+ *  press sends. `armedAt` = the arming instant (0/null = not armed). */
+const SECOND_PRESS_MS = 600;
+function secondPressVerdict(armedAt, now, gapMs = SECOND_PRESS_MS) {
+  if (!armedAt) return 'arm';
+  return (Number(now) || 0) - Number(armedAt) < gapMs ? 'early' : 'go';
+}
+
+/** WHAT the request asks for, WHOLE (verify r6 F3): the url / the command / the file / the path / the pattern /
+ *  the description — `{kind, text}` with the text exactly as the request carries it (every line; nothing cut),
+ *  or null. Allow sends the whole input, so the card shows the whole subject above it. */
+function askSubject(ask) {
   const i = (ask && ask.input) || {};
-  const one = (s) => String(s).split('\n')[0].trim().slice(0, 200);
-  if (typeof i.url === 'string' && i.url) return one(i.url);
-  if (typeof i.command === 'string' && i.command) return one(i.command);
-  if (typeof i.file_path === 'string' && i.file_path) return one(i.file_path);
-  if (typeof i.path === 'string' && i.path) return one(i.path);
-  if (typeof i.pattern === 'string' && i.pattern) return one(i.pattern);
-  if (ask && ask.description) return one(ask.description);
-  return '';
+  if (typeof i.url === 'string' && i.url) return { kind: 'url', text: i.url };
+  if (typeof i.command === 'string' && i.command) return { kind: 'command', text: i.command };
+  if (Array.isArray(i.command) && i.command.length) return { kind: 'command', text: i.command.map((x) => String(x)).join(' ') };
+  if (typeof i.file_path === 'string' && i.file_path) return { kind: 'file', text: i.file_path };
+  if (typeof i.path === 'string' && i.path) return { kind: 'path', text: i.path };
+  if (typeof i.pattern === 'string' && i.pattern) return { kind: 'pattern', text: i.pattern };
+  if (ask && ask.description) return { kind: 'description', text: String(ask.description) };
+  return null;
+}
+
+/** WHAT the helper wants to do, as a ONE-LINE SUMMARY (the settled line, the pending list). Never presented as
+ *  the whole request (r6 F3: it used to be the first line cut to 200 chars with no mark — `ls -la\ncurl … | sh`
+ *  read "ls -la"): a cut line ends in `…`, and further lines are COUNTED. `t` = the client's i18n. */
+function askTarget(ask, t = fmt) {
+  const s = askSubject(ask);
+  if (!s) return '';
+  const lines = String(s.text).split('\n');
+  let first = lines[0].trim();
+  if (first.length > 200) first = first.slice(0, 199) + '…';
+  const more = lines.length - 1;
+  return more > 0 ? t('{first} … (+{n} more lines)', { first, n: more }) : first;
 }
 
 const isTerminal = (ti) => !!(ti && typeof ti.status === 'string' && TERMINAL.has(ti.status));
@@ -395,11 +441,27 @@ function mainAskSettledWords(resolved, t = fmt) {
  *  is English (the store's dedupe key and the agent CLI's contract); `i18n` the
  *  same words as structure for the client; `action` names the request so the
  *  item is resolved when it is answered and a click lands on the card. */
+/** The request as the For-you detail carries it (verify r6 F3): the WHOLE subject — every line — with each
+ *  hidden character spelled `⟦U+XXXX⟧`; a subject longer than INBOX_SUBJECT_MAX is cut AND SAYS SO (the store
+ *  keeps a detail ≤ 8000 chars; the card in the conversation always has the whole request). The item is
+ *  navigation only (no Allow here), but it never shows part of a request as if it were all of it. */
+const INBOX_SUBJECT_MAX = 6000;
+function inboxSubjectText(ask, tool) {
+  const s = askSubject(ask || {});
+  if (!s) return '';
+  const whole = revealHidden(s.text);
+  const lines = whole.split('\n').length;
+  if (whole.length > INBOX_SUBJECT_MAX) return `${tool} (${whole.length} characters, ${lines} line${lines === 1 ? '' : 's'} — only the first ${INBOX_SUBJECT_MAX} are shown here; the helper's card in the conversation shows the whole request):\n${whole.slice(0, INBOX_SUBJECT_MAX)}\n[… cut here — ${whole.length - INBOX_SUBJECT_MAX} more characters]\n`;
+  if (lines > 1) return `${tool} (the whole request, ${lines} lines):\n${whole}\n`;
+  return `${tool}: ${whole}\n`;
+}
+
 function inboxItemFor(ask, { label = '', sessionId = null } = {}) {
   const tool = (ask && ask.toolName) || 'a tool';
   const text = label ? `Helper “${label}” needs your approval to use ${tool}` : `A helper needs your approval to use ${tool}`;
-  const target = askTarget(ask || {});
-  const detail = `${target ? tool + ': ' + target + '\n' : ''}The helper is paused until you answer. Open the conversation and use Allow or Deny on the helper's card (the “waiting for you” chip at the bottom of the chat jumps to it).`;
+  const subject = inboxSubjectText(ask, tool);
+  const block = subject.split('\n').length > 2 ? subject + '\n' : subject; // a multi-line request stands apart from the words below it
+  const detail = `${block}The helper is paused until you answer. Open the conversation and use Allow or Deny on the helper's card (the “waiting for you” chip at the bottom of the chat jumps to it).`;
   return {
     text, detail,
     i18n: { text: label ? { key: i18nKey('Helper “{name}” needs your approval to use {tool}'), params: { name: label, tool } } : { key: i18nKey('A helper needs your approval to use {tool}'), params: { tool } } },
@@ -460,6 +522,8 @@ function answerSessionFor(data, sessions) {
 }
 
 module.exports = {
+  // verify r6: the WHOLE subject (F3), the hidden-character screen + the second press (F7)
+  askSubject, INBOX_SUBJECT_MAX, HIDDEN_CHAR_RE, hiddenCharsOf, revealParts, revealHidden, SECOND_PRESS_MS, secondPressVerdict,
   HELPER_ASK_INBOX_MS, helperAskOf, askRecordOf, helperParentOf, askTarget, askState, hasPendingHelperAsk, helperLabelOf,
   pendingAsksOf, asksSignature, waitingChip, helperAskHead, helperAskSettledWords, mainAskSettledWords, inboxItemFor, inboxDueAt,
   isStopRejection, agentStatusWords, answerSessionFor, answerRefusalWords,

@@ -1221,6 +1221,8 @@ only from the viewer holding the user side of the lease.
 
 ### 4.3 Takeover and handback
 
+
+> **2026-09-28 — Browse yourself (B-6ae8, docs/design-browse-yourself.md):** the user may also open a profile's browser HIMSELF (the Agent browser panel's row). That is NOT a takeover: he is one more holder on his OWN pinned tab and nothing of any agent is paused or interrupted (the owner: "我其实也相当于是一个agent而已"). This section's takeover (interrupt, tell, remind) applies only when he drives an AGENT's tab from a conversation's live view.
 Three modes on the window, always visible, never ambiguous:
 
 | Mode | Frames | User input | Agent commands | Badge |
@@ -1251,7 +1253,9 @@ Three modes on the window, always visible, never ambiguous:
   CHAT COMPOSER ("tomsmithtomsmith…" — a credential one Enter from sent to the agent). The row now
   means: **a takeover owns the keyboard at document level** — every key, paste (as text) and IME
   composition goes to the page whatever has focus; the chat's focus calls stand down
-  (src/lib/keyboard-owner.js) and an editable element that takes focus anyway is reclaimed;
+  (src/lib/keyboard-owner.js) and an editable element that takes focus anyway is reclaimed
+  (unless the USER pressed it — lane takeover-keyboard, userW inc-mum339id-1zsb, 2026-09-28: the
+  keys go to that box while the takeover continues, a press in the view takes them back);
   only Ctrl+\ and Ctrl+Alt+←/→ stay the app's; Esc goes to the page and handing back stays the
   button; ownership ends on the hand back, a dropped socket or a hidden view. Every click
   ripples where it was sent and the bar echoes it (a lost input no longer looks like a frozen
@@ -2151,6 +2155,48 @@ retired switch ignored, three patched-copy controls) + test-browser-mediation-ch
 Chrome's own protocol — extras print and fail — and every class against a real paused lease, the
 raw endpoint as the oracle).
 
+**2026-09-28 — Chrome 154.0.8037.57 censused (lane-cdp-154).** This box moved to 154 and the heavy
+leg ⑥ went red as designed: 4 methods had no row (refused by name while the user drives — safe — but
+unclassed). The census now reads MORE THAN ONE Chrome: `CENSUS_CHROMES` = 153.0.8010.47 +
+154.0.8037.57, each with its fixture (the 153 one kept); a row's `chrome` = the first censused Chrome
+that lists it, its `until` = the first censused Chrome that no longer does; on every censused Chrome
+the table equals its methods (`compare(protocol, {chrome})`: 0 unclassified / stale / misdated). THE
+JUDGE IS VERSION-INDEPENDENT: a row is judged by its class on any Chrome, and a method with no row is
+refused by name while the user drives on a newer Chrome and an older one alike (the fleet's Debian
+chromium 150; measured 149–152 list 6–12 methods no row names, none a whole-browser act); the words
+name every censused Chrome. The 153 → 154 diff (methods from the two fixtures; parameters and events
+from Chrome for Testing 153.0.8010.12, whose method list equals the 153.0.8010.47 fixture exactly,
+because the 153 fixture recorded names only):
+
+| | 153.0.8010.47 → 154.0.8037.57 |
+|---|---|
+| methods | +4, −7, 0 re-flagged (deprecated / experimental); domains +0 −0 |
+| the added, classed | `Ads.getAdScripts` **read** (the page's ad scripts since the last call — a cursor in DevTools' own tracking; nothing on the page moves) · `Browser.getGlobalPrivacyControl` **read** · `Browser.addMockCamera` **refused** · `Browser.setGlobalPrivacyControl` **refused** |
+| the removed | `Storage.{get,set,delete,clear}SharedStorage*`, `resetSharedStorageBudget`, `setSharedStorageTracking` (Shared Storage left the protocol) — rows kept, classes unchanged, marked `until: 154.0.8037.57` (a 153 still ships them) |
+| parameters changed | `Page.startScreencast` +`maxFramesInFlight?` +`sendLastFrame?` (flow control — still read); `WebAuthn.setCredentialProperties` `signCount` integer → number (a type, invisible at name level — still page-mutation); returns: none |
+| events | +0, −2 (`Storage.sharedStorageAccessed`, `Storage.sharedStorageWorkletOperationExecutionFinished`); event parameters: none changed |
+| types | +6 (`Ads.AdScript`, `ServiceWorker.ServiceWorkerRouter*`), −8 (`Storage.SharedStorage*`), 5 changed — none moves a method's class |
+
+Both setters were MEASURED on 154 (a scratch headless Chrome, two browser contexts = two leases'
+worth of tabs, a loopback page server): neither takes a `browserContextId`, both reach EVERY
+context, both last only while the setting DevTools connection is open, neither is written to the
+profile. After `addMockCamera` a tab in the OTHER context lists a video input (0 → 1) and its
+`getUserMedia` receives a 640×480 track; after `setGlobalPrivacyControl` (the feature on — a stock
+154 answers -32000 "Global Privacy Control is disabled.") every tab of every context reports
+`navigator.globalPrivacyControl` and sends `Sec-GPC` on requests and navigations. A lease owns its
+tabs, never the whole browser ⇒ both `refused` (the stricter class; an agent that needs either uses
+a browser of its own — only an instance-shared browser is mediated). `refused` grows 14 → 16; 668
+rows (664 on 153, 661 on 154). From 154 on the fixture also records parameter and event NAMES, so the
+next Chrome's diff reads off two fixtures (`scripts/cdp-protocol-fetch.mjs --diff <old> <new>`).
+Gates: the NEW fast test-cdp-census (every censused fixture ⇔ the table, the `chrome` / `until` marks
+⇔ the fixtures' diff, the four new rows through the real judge, the unknown rule on any version;
+patched-copy controls — one new row removed ⇒ 154 uncovered AND the camera call forwarded on a free
+lease) + test-browser-mediation ⑥ + test-browser-mediation-chrome ⑥ (compared at the live version;
+each method of THIS Chrome with no row refused by name on the real paused lease; on 154 the two reads
+answer and the two setters are `method_refused` with the agent driving — the camera's effect counted
+from another tab, the raw endpoint's own mock camera the positive control; `--chrome` runs it on
+another Chrome — on an extracted 152.0.7977.82 its 6 row-less methods are each refused by name).
+
 #### 6.2.2 The takeover INTERRUPTS — the owner's ruling (2026-09-27)
 
 > "关于接管浏览器的时候agent脚本，其实应该直接打断所有脚本和agent操作，告知agent发生了打断，交还时提醒它重新运行"
@@ -2468,7 +2514,10 @@ Verified from the vendor site, the npm registry and the repository (2026-09):
 * Free = an older Chromium major, one concurrent session, gated by a sign-in; Pro = the current
   major and 5–2000 sessions, gated by `CLOAKBROWSER_LICENSE_KEY` (stored at
   `~/.cloakbrowser/license.key`). **Whether validation is offline or a phone-home is
-  undocumented.**
+  undocumented.** — Measured (2026-09-28, §7.2.1a): the free tier (the older 146) needs **no
+  sign-in and no key** and does no licence check; what a sign-in gates is the vendor's newer 151
+  build (a free key from a GitHub sign-in), which checks the key with cloakbrowser.dev at start
+  (read in the vendor's code, not measured; VibeSpace does not install it).
 * CDP is a first-class entry point: `--remote-debugging-port=9222`, plus a `cloakserve` mode
   (`docker run -d -p 127.0.0.1:9222:9222 …`) that accepts a per-connection `?fingerprint=<seed>`
   — exactly the shape our per-profile seed wants, and a container boundary for free.
@@ -2523,6 +2572,48 @@ Docker `cloakserve` on loopback, on profiles that start with no credentials. Buy
 a measured site actually needs it. And note the ordering that matters: **for any site with an
 account, a human login through the live view (§4.3) beats fingerprint evasion** — it is free, it
 is risk-neutral, and it is a capability this design gives us anyway.
+
+#### 7.2.1a The measurement (2026-09-28, lane-cloak; the owner: 「下载吧」)
+
+**The precondition is measured and recorded in `src/browser-profiles.js` `CLOAK_EGRESS_PROOF`
+(`status: 'measured'`).** Method: `scripts/measure-cloak-egress.mjs` — npm `cloakbrowser@0.5.10` into a
+scratch prefix, its Chromium 146.0.7680.177.5 (linux-x64) downloaded ONCE into a VibeSpace-owned cache
+(`CLOAKBROWSER_CACHE_DIR`, never `~/.cloakbrowser`), every run under `env -i HOME=<empty dir>` + strace
+(plus execve/clone for attribution and the DNS packets to name every address), launched the way the
+product launches it (the browser driver 0.38.1, executable + arguments in the driver's own env names).
+
+| Run | INET connects | Where to |
+|---|---|---|
+| first launch (download + first start) | 21 (12 getaddrinfo port-0 source-address probes, 4 DNS, 1 loopback CDP) | the downloader: cloakbrowser.dev ×2, github.com ×1, release-assets.githubusercontent.com ×1; the browser: none |
+| second launch from cache | 1 | loopback CDP only (driver → browser) |
+| a key in its environment | 1 | loopback CDP only — the key (a dummy; no account exists) went nowhere |
+| 10-minute idle | 1 | loopback CDP only |
+
+* **The download**: 216 890 134 bytes, served by cloakbrowser.dev through GitHub's release storage; the
+  wrapper checks an Ed25519 signature over SHA256SUMS against a key pinned in its own code — locally —
+  then the archive's SHA-256. **"Offline check or phone-home": the signature check is local; the free
+  tier does no licence check at all.**
+* **The free tier needs no key and no sign-in** (§7.2's "gated by login" is the vendor's NEWER build: a
+  free key from a GitHub sign-in makes the wrapper download the Chromium 151 build, which checks the key
+  with cloakbrowser.dev at start — read in the vendor's code, not measured, and not installed by VibeSpace).
+* **The allowlists (derived from the record, `egressHostsOf`)**: install = the three download hosts; run =
+  none (the browser itself needs no site) + the sites the deployment names in
+  `browser.cloak.egressAllowlist`. Everything else is refused and named in the record: api.github.com (the
+  wrapper's hourly update check + silent download of a newer build — off at install with
+  `CLOAKBROWSER_AUTO_UPDATE=false` + a pinned `CLOAKBROWSER_VERSION`), registry.npmjs.org (the wrapper's
+  own "update available" check), cloakbrowser.dev's licence API.
+* **Enforced, not observed**: a running cloak browser goes through the keeper's allowlisting proxy
+  (`--proxy-server`, loopback not bypassed); the install's download goes through another proxy admitting
+  only the three download hosts, and a browser that appeared without passing it (it admitted nothing) is
+  not used.
+* **Two product defects the measurement surfaced** (both fixed): with cloak's launch flags on `open`'s
+  argv only, the keeper's very next `get cdp-url` made the driver relaunch the browser without them — the
+  flags now ride the driver's env on every call; after a switch, re-opening a lease's tab with `--pin-tab
+  open` answered `tab_gone` (the session was pinned to a tab that died with the old browser) — it is
+  `tab new` now.
+* **Not measured**: a run with a real key (no account or key was authorized), §12.40 (what cloakserve says
+  when a free-tier seat is held on another machine), the macOS / arm64 builds (the install refuses them
+  with `install_unmeasured_platform`).
 
 ### 7.3 Remote and fleet
 

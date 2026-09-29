@@ -51,6 +51,7 @@ class Mux {
     this._sendQ = new Map();    // chan → [{buf}] waiting for credit
     this._dead = false;
     this._missedPongs = 0;
+    this._pongWaiters = []; // ping(ms): resolved by the next PONG of any kind
     stream.on('data', (d) => this._feed(d));
     stream.on('close', () => this._die('stream closed'));
     stream.on('error', () => this._die('stream error'));
@@ -71,6 +72,19 @@ class Mux {
 
   /** chan-0 control message (JSON line). */
   control(obj) { this._raw(T.DATA, 0, Buffer.from(JSON.stringify(obj) + '\n')); }
+
+  /** Is the peer answering RIGHT NOW? One PING, true on the next PONG (the heartbeat's counts too), false at the
+   *  deadline or on a dead mux. Never throws (verify-r1 B9: the duplicate-device probe). */
+  ping(ms = 1500) {
+    if (this._dead) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      let done = false;
+      const t = setTimeout(() => { if (!done) { done = true; resolve(false); } }, Math.max(1, Number(ms) || 1500));
+      if (t.unref) t.unref();
+      this._pongWaiters.push((ok) => { if (!done) { done = true; clearTimeout(t); resolve(!!ok); } });
+      if (!this._raw(T.PING, 0)) { done = true; clearTimeout(t); resolve(false); }
+    });
+  }
 
   /** byte-channel data with credit flow control; returns false when any of it
    *  had to be queued. A write larger than the window sends up to the window
@@ -121,6 +135,7 @@ class Mux {
     if (this._dead) return;
     this._dead = true;
     if (this._hb) clearInterval(this._hb);
+    for (const w of (this._pongWaiters || []).splice(0)) { try { w(false); } catch { } }
     this.onDead(reason);
   }
 
@@ -164,7 +179,7 @@ class Mux {
       }
       case T.CLOSE: this.onCloseChan(chan); break;
       case T.PING: this._raw(T.PONG, chan); break;
-      case T.PONG: this._missedPongs = 0; break;
+      case T.PONG: this._missedPongs = 0; for (const w of this._pongWaiters.splice(0)) { try { w(true); } catch { } } break;
       default: break; // unknown type: ignore (forward compat)
     }
   }

@@ -490,7 +490,7 @@ console.log('— ④ verify r6: cards fed BEFORE the first attach — bounded (s
   await p;
   ok(peerCards(sd._normalizer).filter((t) => t.includes('Re-run')).length === 1 && peerCards(sd._normalizer).includes('display only'), 'a recorded card queued mid-rebuild is answered by the record too; a display-only one lands');
   // WIRED: the ladder's card carries `recorded` = the posted text
-  ok(/emitPeerCard\?\.\(cid, \{ fromName: opts\.fromName \|\| null, text: opts\.cardText \|\| text, recorded: text(, kind)? \}\)/.test(fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf8')), 'WIRED: conversation-deliver\'s cardOk carries `recorded` (the exact text the CLI recorded)');
+  ok(/emitPeerCard\?\.\(cid, \{ fromName: opts\.fromName \|\| null, text: opts\.cardText \|\| text, recorded: text(, kind)?(?:, \.\.\.\(opts\.group \? \{ group: opts\.group \} : \{\}\))? \}\)/.test(fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf8')), 'WIRED: conversation-deliver\'s cardOk carries `recorded` (the exact text the CLI recorded)');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

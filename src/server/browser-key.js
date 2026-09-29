@@ -50,8 +50,44 @@ const BF = require('../browser-fact.js');
 const BB = require('./browser-bindings.js');
 const { restoredForkPending } = require('../claude-lock-capture.js');
 
-/** THE mint — ws-create's spawn and the late key call this one function (`bk-<8 hex>`, the caller owns no randomness). */
-function mintKey() { return B.mintBrowserKey(crypto.randomBytes(4).toString('hex')); }
+/**
+ * THE FRESH-KEY RULE's facts (identity verify r4, 2026-09-28; moved HERE at the .197 integration so the spawn AND the
+ * late key go through it — r4 had put it in a ws-create-local mint, which left `ensureBrowserKey` minting unchecked).
+ * `create()` registers the wiring's live-session map, browser-env memo and keeper; unregistered (a suite, a boot where
+ * the browser wiring failed) ⇒ the keeper singleton only. Getters, never captured objects (a late singleton).
+ */
+let mintFacts = {
+  activeSessions: null,
+  browserEnv: () => null,
+  keeper: () => { try { return require('./browser-keeper.js').keeper(); } catch { return null; } },
+  log: console,
+};
+const rawMint = () => B.mintBrowserKey(crypto.randomBytes(4).toString('hex'));
+
+/**
+ * THE mint — ws-create's spawn and the late key call this one function (`bk-<8 hex>`, the caller owns no randomness).
+ * THE FRESH-KEY RULE (r4): a key the store still names — the keeper's registry (a list row, a lease, a pin, a cap…), the
+ * env's bindings / directory / meta, a live session — is never minted again: 32 bits, no reuse. The check failing to
+ * READ is said by name and the mint proceeds unchecked (a create is never refused for it); an exhausted loop (`named`
+ * broken) is said by name too. `facts` (optional) overrides the registered ones — the ladder calls `mint()` bare.
+ */
+function mintKey(facts) {
+  const f = { ...mintFacts, ...(facts && typeof facts === 'object' ? facts : {}) };
+  const get = (fn) => { try { return typeof fn === 'function' ? fn() || null : fn || null; } catch { return null; } };
+  const be0 = get(f.browserEnv);
+  const kp0 = get(f.keeper);
+  const sessions = f.activeSessions;
+  const log = f.log || console;
+  const keyNamed = (k) => {
+    if (sessions) for (const [, es] of sessions) if (es && es._browserKey && B.parentKeyOf(String(es._browserKey)) === k) return true;
+    return !!((be0 && typeof be0.keyNamed === 'function' && be0.keyNamed(k)) || (kp0 && typeof kp0.keyNamed === 'function' && kp0.keyNamed(k)));
+  };
+  let r;
+  try { r = B.freshBrowserKey({ mint: rawMint, named: keyNamed }); }
+  catch (e) { try { log.warn?.(`[browser] the fresh-key check threw (${e && e.message}) — a key was minted unchecked`); } catch { } return rawMint(); }
+  if (r.retries) { try { log.warn?.(`[browser] ${r.retries} minted key candidate(s) were still named by a store${r.exhausted ? ' — EXHAUSTED (the named check is broken): the last candidate is used' : ''}`); } catch { } }
+  return r.key;
+}
 
 /** THE session fields a browser key brings (session-schema rows `_browserKey` … `_browserEnv`), written in one place
  *  for the spawn and the late key alike. `env` = browser-env's `envFor` answer; `pin` = the keeper's `pinForCreate`. */
@@ -88,6 +124,8 @@ function create({ browserEnv = () => null, keeper = () => null, activeSessions =
   const kp = () => { try { return keeper() || null; } catch { return null; } };
   const integrationOn = () => { try { return integrationEnabled() !== false; } catch { return true; } };
   const isolationOn = (e) => { try { return !e || typeof e.isolationOn !== 'function' || e.isolationOn() !== false; } catch { return true; } };
+  // THE mint's fresh-key rule reads the wiring's facts (the spawn's `mint: browserKeyMod.mintKey` and the late key below)
+  mintFacts = { activeSessions, browserEnv: be, keeper: kp, log };
   const saidRefusal = new Set(); // `session\0why` — one journal line per (session, reason), a CLI in a loop says nothing new
   const liveIdOf = (session) => { for (const [id, s] of activeSessions) if (s === session) return id; return null; };
   const holderOf = (session, key) => {

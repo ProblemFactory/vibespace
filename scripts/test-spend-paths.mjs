@@ -2491,6 +2491,26 @@ console.log('\n§9 fail closed: an authorizer that throws spends nothing (P8)');
   }
 }
 
+// ── §10b PLACEMENT NEVER STARTS A TURN (2026-09-28, lane-pool-pin) ─────────
+// The pool's placement acts added that day — the conversation's pin (setConversationPin,
+// behind POST /api/accounts/:poolId/pin), the removed-member evict (memberRemoved) and
+// "Move every conversation here now" (POST …/gather) — re-point links and, on a cold pool,
+// ask a client to restart; none of them may start a billed turn by itself. Read off the
+// code: none of their bodies reaches a turn producer (the real-engine legs in
+// test-pool-auto count auto-resume's fireNow at zero for the pin and the evict).
+console.log('\n§10b the pool\'s placement acts start no turn');
+{
+  const eng = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
+  const routes = fs.readFileSync(path.join(REPO, 'src/server/account-usage-routes.js'), 'utf8');
+  const bodyOf = (src, head, end = '\n}\n') => { const i = src.indexOf(head); if (i < 0) return null; const j = src.indexOf(end, i); return j < 0 ? null : src.slice(i, j); };
+  const TURN = /fireNow|sendToSession|deliverToConversation|attemptFire|chat-input|\.pty\.write\(/;
+  for (const [name, body] of [['setConversationPin', bodyOf(eng, 'function setConversationPin(')], ['memberRemoved', bodyOf(eng, 'function memberRemoved(')], ['holdRemoved (the owner\'s 全B hold: it ARMS auto-resume, the continue is auto-resume\'s own fire through the ceiling)', bodyOf(eng, 'function holdRemoved(')], ['the gather route', bodyOf(routes, "app.post('/api/accounts/pool/:id/gather'", '\n});\n')], ['the pin route', bodyOf(routes, "app.post('/api/accounts/:poolId/pin'", '\n});\n')]]) {
+    ok(`§10b ${name} exists and reaches no turn producer (fireNow / sendToSession / the delivery ladder / a pty write)`, !!body && body.length > 200 && !TURN.test(body), body ? (body.match(TURN) || [''])[0] : 'missing');
+  }
+  const ctl = 'function setConversationPin(x) {\n  getAutoResume()?.fireNow?.(x);\n' + 'x'.repeat(220) + '\n}\n';
+  ok('§10b CONTROL: a pin writer that nudged auto-resume is caught', TURN.test(bodyOf(ctl, 'function setConversationPin(')));
+}
+
 // ── §11 THE TREE IS NEVER WRITTEN (B-59b8 r1 / B-0220) ──────────────────────
 // Measured HERE, while every patched copy this run made still exists (the exit
 // handler removes them — a census taken after exit passes on the pre-fix

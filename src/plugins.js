@@ -341,6 +341,9 @@ class PluginManager {
     if (this._tsOurDaemonPid()) return { running: true };
     const daemon = this._tsBin('tailscaled');
     if (!daemon) throw new Error('tailscaled not installed — run install first');
+    // the socket-path census (src/sock-path.js, lane-pairing ④): tailscaled's socket lives under the plugin root —
+    // a path over the platform's sun_path is refused HERE by name, never a daemon that dies with `bind: invalid argument`
+    { const fit = require('./sock-path.js').socketPathFits(this._tsSock(), process.platform); if (!fit.fits) throw new Error(`tailscaled's socket path would be ${fit.bytes} bytes (${this._tsSock()}) — over this platform's ${fit.max}-byte unix-socket limit; move the VibeSpace home to a shorter path`); }
     const stateDir = path.join(this._tsDir(), 'state');
     fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
     const logFd = fs.openSync(path.join(this._tsDir(), 'tailscaled.log'), 'a');

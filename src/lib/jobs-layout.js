@@ -84,6 +84,20 @@ export function familyOf(name) {
   return s || orig;
 }
 
+/** A FAMILY'S FOLD KEY carries no words (lane-redact verify r6): the fold map is persisted in the server's user state
+ *  (`jobsPanelFolds`), broadcast to every client and exported with the config — a family is a job's NAME, and a
+ *  "Clear content…" of the job never reached a key spelled with it. The key is a digest of the family (FNV-1a, 32 bit):
+ *  stable across renders and devices, the same for every job of the family, no word in it. */
+export function familyKey(family) {
+  let h = 0x811c9dc5;
+  const s = String(family || '');
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return 'f:' + h.toString(16).padStart(8, '0');
+}
+/** A fold key this build writes: a session key (`s:<id>` / `w:<id>` / `manual`) or `<session key>|f:<8 hex>` — an older
+ *  build's `<session key>|<family>` holds a job's name and is dropped at load (verify r6). */
+export const isFoldKey = (k) => /^(?:s:[^|]*|w:[^|]*|manual)(?:\|f:[0-9a-f]{8})?$/.test(String(k));
+
 const latestAt = (j) => Number((j.run && (j.run.endedAt || j.run.startedAt)) || j.createdAt || 0);
 const shortId = (s) => String(s).slice(0, 8);
 
@@ -108,7 +122,7 @@ export function foldTasks(tasks, { expanded = {}, sessionNames = {} } = {}) {
       sessions.set(sessionKey, sess);
     }
     const family = familyOf(j.name);
-    const gkey = sessionKey + '|' + family;
+    const gkey = sessionKey + '|' + familyKey(family); // a digest, never the name (the fold map is persisted and broadcast)
     let g = sess.groups.get(gkey);
     if (!g) { g = { key: gkey, sessionKey, family, jobs: [], count: 0, running: 0, awaiting: 0, failedUnacked: 0, failedAcked: 0, latestAt: 0 }; sess.groups.set(gkey, g); }
     g.jobs.push(j); g.count++; sess.count++;

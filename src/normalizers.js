@@ -2,6 +2,7 @@ const { HARNESSES } = require('./harnesses');
 const { MessageManager } = require('./message-manager');
 const { helperParentOf: helperParentFromTaskRecords } = require('./helper-ask.js'); // PURE (lane S1)
 const { cardBlock: browserCardBlock } = require('./browser-sessions.js'); // PURE (2026-09-27): the browser-session card's block
+const GC = require('./group-card.js'); // PURE (lane group-report-card): a group message's card — its key, its ring, its place in a rebuild
 
 // REGISTRY, not a ternary (P4, design-backend-parity.md §4): the old
 // `backend === 'codex' ? Codex : Claude` shape silently handed every FUTURE
@@ -138,8 +139,13 @@ function notifyAsks(session) {
 
 /** Peer cards (Background Work notify, vibespace-msg, auto-resume notices)
  *  are the OTHER writer into a session normalizer — same gate (review-caught:
- *  a card injected mid-rebuild landed in the middle of old history). */
+ *  a card injected mid-rebuild landed in the middle of old history).
+ *  A card that carries a GROUP message (`card.group`, lane group-report-card) passes the group door first. */
 function feedPeerCard(session, card) {
+  if (GC.isGroupCard(card)) return feedGroupCard(session, card);
+  return feedPeerCardNow(session, card);
+}
+function feedPeerCardNow(session, card) {
   if (!session?._normalizer?.injectPeerCard) return false;
   if (session._rebuildQueue) { session._rebuildQueue.push({ kind: 'peer', card }); return true; }
   // verify r5 (S2): a server-injected card (no msgId — a takeover / auto-resume / jobs notice, a stash drain; never in the
@@ -159,6 +165,84 @@ function feedPeerCard(session, card) {
   return true;
 }
 const HELD_PEER_CARDS_CAP = 32;
+
+// ── THE GROUP-CARD DOOR (lane group-report-card; the owner, 2026-09-28: "怎么在那个对话里看不到你发了消息？") ──────
+// Every card that carries a group message passes here — a next-turn report's (groups-engine commitReports, emitted
+// at the injection through the ladder's `emitPeerCard`) and a wake's (the ladder's own cardOk after a successful
+// post, `group` in its opts). ONE rule each:
+//   THE KEY    (group id, record instant) — a message carded once in this conversation is never carded again: a
+//              re-report after a restart whose marker write was lost, a wake over a range a report already showed.
+//   THE RING   `session._groupCards` (src/group-card.js), persisted in the session meta through the hook the wiring
+//              sets (`setGroupCardPersist` — channels-wiring owns the meta store): a report card — the first attach's
+//              rebuild places it BY TIME between the transcript's records (`convertWithCards`, the browser cards'
+//              seam), under the message whose turn carried it; a wake's card keeps `recordedHead` — the CLI RECORDED
+//              that post, so the rebuild draws the transcript's own record AS the group card (`upgradeWakeCards`:
+//              in place, its id and position kept), never a second card beside it.
+//   THE PLACE  live: a report card is written at once with a STABLE id (`GC.cardId` — the live op and every rebuild
+//              name the same card); during a rebuild it rides the queue; before the first attach nothing is written
+//              (that attach's rebuild places it from the ring). A wake's card takes the ordinary peer path (held /
+//              queued / injected), `group` riding into `peerGroup`.
+let groupCardPersist = null;
+function setGroupCardPersist(fn) { groupCardPersist = typeof fn === 'function' ? fn : null; }
+function feedGroupCard(session, card) {
+  if (!session) return false;
+  const c = GC.normalizeCard(card, { now: Date.now() });
+  if (!c) return false;
+  const key = GC.cardKey(c.group);
+  const ring = Array.isArray(session._groupCards) ? session._groupCards : (session._groupCards = []);
+  if (GC.ringHas(ring, key)) return false;   // carded before in this conversation — never twice
+  const ladder = typeof c.recorded === 'string';
+  const stored = { fromName: c.fromName, text: c.text, group: c.group, shownAt: c.shownAt, ...(ladder ? { recordedHead: GC.recordedHeadOf(c.recorded) } : {}) };
+  GC.ringAdd(ring, { k: key, at: c.shownAt, card: stored });
+  if (groupCardPersist) { try { groupCardPersist(session); } catch (e) { console.warn('[normalizer] group card ring not persisted:', e && e.message); } }
+  if (ladder) return feedPeerCardNow(session, { ...card, fromName: c.fromName, group: c.group });
+  const mm = session._normalizer;
+  if (!mm) return true;
+  if (session._rebuildQueue) { session._rebuildQueue.push({ kind: 'gcard', card: stored }); return true; }
+  if (!session._historyLoaded) return true;   // the first attach's rebuild places it from the ring
+  return !!placeGroupCard(mm, stored, { emit: true });
+}
+/** THE ONE writer of a report card into a normalizer (any harness: every normalizer keeps `messages`, `messageIndex`,
+ *  `turnIndex`, `_emit` — the browser card's shape). The same user-role peer card `injectPeerCard` makes, with the
+ *  card's stable id and `peerGroup`; idempotent by that id. `emit` = a live op; a history conversion emits nothing. */
+function placeGroupCard(mm, card, { emit = false } = {}) {
+  if (!mm || !Array.isArray(mm.messages) || !mm.messageIndex) return null;
+  const c = GC.normalizeCard(card);
+  if (!c) return null;
+  const id = GC.cardId(mm.sessionId, c.group);
+  if (!id || mm.messageIndex.has(id)) return null;
+  mm.turnIndex = (Number(mm.turnIndex) || 0) + 1;   // a peer card is its own turn marker (injectPeerCard's rule)
+  const msg = { id, role: 'user', status: 'complete', content: [{ type: 'text', text: c.text }], ts: c.shownAt || Date.now(), srcLine: null, uuid: null, turnIndex: mm.turnIndex,
+    toolCallId: null, toolName: null, toolStatus: null, permission: null, usage: null, taskInfo: null, meta: null, noticeKind: null,
+    originKind: 'peer-message', peerFrom: c.fromName || null, peerVia: 'peer', peerGroup: c.group, ...(c.cleared ? { peerCleared: true } : {}) };   // a PEER's words — never a VibeSpace notice; a CLEARED one is worded by the renderer
+  mm.messages.push(msg);
+  mm.messageIndex.set(id, msg);
+  if (emit && typeof mm._emit === 'function') mm._emit({ op: 'create', message: msg });
+  return msg;
+}
+
+/** "CLEAR CONTENT…" REACHES A GROUP CARD (the .197 integration): the groups door's clear hands the keys of the records
+ *  it cleared; the session's ring loses their words (PURE GC.redactRing), the ring is persisted through the same hook,
+ *  and a report card already drawn is re-worded IN PLACE (an `edit` op: the renderer draws `peerCleared` in the
+ *  device's words). Returns how many entries changed. */
+function redactGroupCards(session, keys, text) {
+  if (!session || !Array.isArray(session._groupCards)) return 0;
+  const changed = GC.redactRing(session._groupCards, keys, text);
+  if (!changed.length) return 0;
+  if (groupCardPersist) { try { groupCardPersist(session); } catch (e) { console.warn('[normalizer] group card ring not persisted:', e && e.message); } }
+  const mm = session._normalizer;
+  if (mm && mm.messageIndex) {
+    for (const e of changed) {
+      const c = GC.normalizeCard(e.card);
+      const id = c ? GC.cardId(mm.sessionId, c.group) : null;
+      const msg = id ? mm.messageIndex.get(id) : null;
+      if (!msg) continue;   // a wake's card is the transcript's own record (declared) — or not drawn yet (the ring places it)
+      msg.content = [{ type: 'text', text: c.text }]; msg.peerCleared = true;
+      if (typeof mm._emit === 'function') mm._emit({ op: 'edit', id, fields: { content: msg.content, peerCleared: true, status: 'complete' } });
+    }
+  }
+  return changed.length;
+}
 
 // ── BROWSER SESSION CARDS (2026-09-27, the owner: "在聊天界面…看到 session 的开始和结束") ──
 // A VibeSpace card per session start and end, DERIVED FROM THE TRACE MARKERS (src/server/browser-trace.js — the one
@@ -194,13 +278,17 @@ function placeBrowserCard(mm, card, { emit = false } = {}) {
 function recordAt(raw) { const t = raw && typeof raw.timestamp === 'string' ? Date.parse(raw.timestamp) : NaN; return Number.isFinite(t) ? t : 0; }
 /** convertHistoryAsync with the browser cards placed BY TIME: a card goes before the first record stamped after it;
  *  the rest (after every stamped record) at the end. */
+// lane group-report-card: the list may also hold GROUP cards (the ring's report cards) — each placed at its own
+// instant (`GC.placeAt`: the injection + the slack, so the turn's user record comes first) through its own writer.
+const cardPlaceAt = (c) => (GC.isGroupCard(c) ? GC.placeAt(c) : (Number(c && c.at) || 0));
+const placeAnyCard = (mm, c) => (GC.isGroupCard(c) ? placeGroupCard(mm, c) : placeBrowserCard(mm, c));
 async function convertWithCards(mm, records, cards, opts = {}) {
-  const due = (cards || []).filter((c) => browserCardBlock(c)).slice().sort((a, b) => (Number(a.at) || 0) - (Number(b.at) || 0));
+  const due = (cards || []).filter((c) => GC.isGroupCard(c) || browserCardBlock(c)).slice().sort((a, b) => cardPlaceAt(a) - cardPlaceAt(b));
   if (!due.length) return mm.convertHistoryAsync(records, opts);
   let i = 0;
-  const beforeRecord = (raw) => { const at = recordAt(raw); if (!at) return; while (i < due.length && (Number(due[i].at) || 0) <= at) placeBrowserCard(mm, due[i++]); };
+  const beforeRecord = (raw) => { const at = recordAt(raw); if (!at) return; while (i < due.length && cardPlaceAt(due[i]) <= at) placeAnyCard(mm, due[i++]); };
   await mm.convertHistoryAsync(records, { ...opts, beforeRecord });
-  while (i < due.length) placeBrowserCard(mm, due[i++]);
+  while (i < due.length) placeAnyCard(mm, due[i++]);
   return mm.messages;
 }
 /** The live card (the recorder's `onSession`): through the same gate as every live writer — held in the rebuild's
@@ -221,6 +309,26 @@ function feedBrowserCard(session, card) {
  *  the 2.362.2 lesson). A display-only card (no `recorded`: the takeover card, an auto-resume notice, a stash drain)
  *  is always replayed — the transcript never carries it. */
 const peerTextOf = (m) => { const c = m && m.content; return Array.isArray(c) ? c.map((b) => (b && typeof b.text === 'string' ? b.text : '')).join('\n') : String(c || ''); };
+/** lane group-report-card: a WAKE's card after a restart. The CLI recorded the ladder's post (a peer user record the
+ *  rebuild just rendered as a name-less "Message from another session" card holding the whole agent-facing report);
+ *  the ring kept the card's facts and `recordedHead`. The record that holds that text is UPGRADED IN PLACE into the
+ *  group card it was live — the sender → the group, the message that woke it — keeping its id and its position; each
+ *  record answers ONE card; a card whose record is not in the transcript draws nothing (never a second card). */
+function upgradeWakeCards(mm, ring) {
+  const wakes = GC.ringWakeCards(ring);
+  if (!wakes.length || !mm || !Array.isArray(mm.messages)) return 0;
+  const pool = mm.messages.filter((m) => m && m.originKind === 'peer-message' && !m.peerGroup);
+  let n = 0;
+  for (const c of wakes) {
+    const i = pool.findIndex((m) => m && peerTextOf(m).includes(c.recordedHead));
+    if (i < 0) continue;
+    const m = pool[i];
+    pool[i] = null;
+    m.peerGroup = c.group; m.peerFrom = c.fromName || null; m.peerVia = 'peer'; m.content = [{ type: 'text', text: c.text }];
+    n++;
+  }
+  return n;
+}
 function replayContext(mm) {
   const pool = mm && Array.isArray(mm.messages) ? mm.messages.filter((m) => m && m.originKind === 'peer-message') : [];
   return { pool, used: new Set(), skipped: 0 };
@@ -298,6 +406,7 @@ function drainQueue(session, mm, ctx = null) {
     try {
       if (e.kind === 'peer') { if (mm.injectPeerCard) replayCard(mm, e.card, ctx); }
       else if (e.kind === 'bcard') placeBrowserCard(mm, e.card, { emit: true }); // a card the rebuild's markers already held is the same id — never twice
+      else if (e.kind === 'gcard') placeGroupCard(mm, e.card, { emit: true }); // lane group-report-card: the ring's card is the same id — never twice
       else if (e.kind === 'perm-stale') applyPermissionStale(mm, e.requestId, e.staleBy);
       else if (e.kind === 'helper-result') applyHelperResults(session, mm, e.msg);
       else { mm.processLive(e.msg); if (session._normalizer === mm) routeToHelperView(session, e.msg); }
@@ -351,7 +460,8 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
   const run = async () => {
     try {
       // 2026-09-27: the browser-session cards, read from the trace markers NOW and placed by time between the records
-      await convertWithCards(mm, records, browserCardsFor({ session }), { ...(budgetMs ? { budgetMs } : {}), onSlice: (done) => { session._rebuildProgress = { done, total: records?.length || 0 }; try { onProgress?.(session._rebuildProgress); } catch { } } });
+      // lane group-report-card: + the group messages this conversation was handed with a turn (the ring's report cards)
+      await convertWithCards(mm, records, [...browserCardsFor({ session }), ...GC.ringCards(session._groupCards)], { ...(budgetMs ? { budgetMs } : {}), onSlice: (done) => { session._rebuildProgress = { done, total: records?.length || 0 }; try { onProgress?.(session._rebuildProgress); } catch { } } });
       // the persisted task records (2.369.140) — silent, after the history, before the live queue
       for (const { record, at } of taskReplayRecords(replay || session._taskRecords)) { try { mm.replay(record, { at }); } catch (err) { console.error('[normalizer] task record replay skipped:', err.message); } }
       // verify r3: the helpers' tool_results (session-store helperResults — the record list skips every sidechain
@@ -364,6 +474,9 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
       session._heldPeerCards = null;
       drainQueue(session, mm, ctx);
       if (ctx.skipped) console.log(`[normalizer] ${sessionId}: ${ctx.skipped} delivered card(s) rendered from the transcript's own record, not replayed`);
+      // lane group-report-card: a group WAKE's transcript record is drawn as the group card it was live (after the held
+      // cards' replay, which matched the record by its original text)
+      try { upgradeWakeCards(mm, session._groupCards); } catch (err) { console.error('[normalizer] group wake cards skipped:', err.message); }
       session._historyLoaded = true;
       // lane S1: the rebuilt cards carry the helpers' unanswered asks — every
       // helper view that already exists is handed them, and the inbox re-syncs
@@ -387,4 +500,5 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
 }
 
 module.exports = { createMessageManager, NORMALIZERS, feedLive, feedPeerCard, rebuildHistory, taskReplayRecords, pendingPermissions, pendingHelperApprovals, notePermissionStale, routeToHelperView, seedHelperView, setAsksObserver, noteHelperResults, HELD_PEER_CARDS_CAP,
-  setBrowserCardSource, browserCardsFor, placeBrowserCard, convertWithCards, feedBrowserCard };
+  setBrowserCardSource, browserCardsFor, placeBrowserCard, convertWithCards, feedBrowserCard,
+  setGroupCardPersist, feedGroupCard, placeGroupCard, upgradeWakeCards, redactGroupCards };

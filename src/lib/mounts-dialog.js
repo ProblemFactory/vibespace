@@ -52,7 +52,7 @@ export async function api(url, opts = {}) {
   const d = await res.json().catch(() => ({}));
   // carry the server's machine-readable `code` (the key-import flow maps it to
   // localized text — a bare message string can't be translated)
-  if (!res.ok || d.error) { const e = new Error(d.error || `HTTP ${res.status}`); e.code = d.code; throw e; }
+  if (!res.ok || d.error) { const e = new Error(d.error || `HTTP ${res.status}`); e.code = d.code; e.body = d; throw e; } // verify-r5 A1: + the whole answer (a 409's facts)
   return d;
 }
 
@@ -61,6 +61,53 @@ export async function api(url, opts = {}) {
 // in THIS one with the URL never shown). Always render the auth URL as a
 // copyable row — ANY browser can complete the consent, and the paste-back
 // relay doesn't care where the 127.0.0.1 redirect failed.
+/** THE ONE NARROWING RETRY's row (owner ruling 2026-09-28). A vendor refuses a WHOLE consent that names a scope its
+ *  app has not enabled — Lark's error 20027, shown on its own page and never redirected, so VibeSpace never hears it.
+ *  `narrow` = `{scopes, run}` (the consent's optional scopes; `run()` → the SAME sign-in's consent URL without them,
+ *  once). The person presses it after seeing that page; the account then names what was dropped — never a silent
+ *  narrower consent. `onUrl(url)` opens and shows the new URL. */
+export function narrowRow({ provider, narrow, onUrl }) {
+  const row = document.createElement('div');
+  row.className = 'mounts-field-hint mounts-oauth-narrow';
+  const scopes = (narrow.scopes || []).join(' + ');
+  // lane lark-search-poll (owner decision 5): ONE optional scope per press, least valuable first — a later press says
+  // it drops this one TOO (the earlier ones stay dropped)
+  const again = Array.isArray(narrow.dropped) && narrow.dropped.length > 0;
+  row.appendChild(document.createTextNode((again ? tr('If {provider} still refuses the sign-in (error 20027):', { provider }) : tr('If {provider} refuses the sign-in because the app has not enabled {scopes} (error 20027):', { provider, scopes })) + ' '));
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'mounts-btn';
+  b.textContent = again ? tr('Sign in without {scopes} too', { scopes }) : tr('Sign in without {scopes}', { scopes });
+  b.onclick = async () => {
+    b.disabled = true;
+    try { const r = await narrow.run(); const url = typeof r === 'string' ? r : r && r.url; row.remove(); onUrl(url, r && typeof r === 'object' ? r.next || null : null); }
+    catch (e) { b.disabled = false; row.textContent = (e && e.message) || tr('Failed'); }
+  };
+  row.appendChild(b);
+  return row;
+}
+/** The link row + (when the consent has optional scopes) the narrowing row, after `status` — shared by both
+ *  sign-in blocks so a narrowed URL replaces the link the same way everywhere. */
+function drawConsentLinks(status, r, provider) {
+  const scope = status.parentElement;
+  scope?.querySelectorAll('.mounts-oauth-link, .mounts-oauth-narrow').forEach((e) => e.remove());
+  const link = oauthLinkRow(r.url);
+  status.after(link);
+  // the narrowing chain (lane lark-search-poll): each press opens the SAME sign-in without one more optional scope and
+  // offers the next press under the new link, until nothing optional is left
+  const addNarrow = (after, narrow) => {
+    if (!(narrow && Array.isArray(narrow.scopes) && narrow.scopes.length && typeof narrow.run === 'function')) return;
+    after.after(narrowRow({ provider, narrow, onUrl: (url, next) => {
+      scope?.querySelectorAll('.mounts-oauth-link, .mounts-oauth-narrow').forEach((e) => e.remove());
+      const l2 = oauthLinkRow(url);
+      status.after(l2);
+      const w = window.open(url, '_blank');
+      const all = [...(narrow.dropped || []), ...narrow.scopes];
+      status.textContent = w ? tr('A {provider} sign-in page opened without {scopes}. Approve access, then come back here.', { provider, scopes: all.join(' + ') }) : tr('Popup blocked — copy the link below and open it in a browser yourself.');
+      addNarrow(l2, next);
+    } }));
+  };
+  addNarrow(link, r.narrow);
+}
 export function oauthLinkRow(url) {
   const row = document.createElement('div');
   row.className = 'mounts-oauth-link';
@@ -266,8 +313,7 @@ export function wireOAuthConnect(ctx, { tokenKey, backend, label, clientIdKey, c
       const r = await post(endpoints.start, body);
       if (r.error) throw new Error(r.error);
       const _w = window.open(r.url, '_blank');
-      status.parentElement?.querySelectorAll('.mounts-oauth-link').forEach((e) => e.remove());
-      status.after(oauthLinkRow(r.url));
+      drawConsentLinks(status, r, provider || PROVIDER_LABELS[body.backend] || body.backend);
       status.textContent = tr('A {provider} sign-in page opened. Approve access, then come back here.', { provider: provider || PROVIDER_LABELS[body.backend] || body.backend });
       if (!_w) status.textContent = tr('Popup blocked — copy the link below and open it in a browser yourself.');
       if (r.notice) status.textContent = r.notice;
@@ -324,8 +370,7 @@ export function reauthDialog({ id = 'mount-reauth-dialog', title, hint: hintText
       const r = await start(form ? form.readValues() : {});
       if (r.error) throw new Error(r.error);
       const _w = window.open(r.url, '_blank');
-      status.parentElement?.querySelectorAll('.mounts-oauth-link').forEach((e) => e.remove());
-      status.after(oauthLinkRow(r.url));
+      drawConsentLinks(status, r, provider);
       status.textContent = tr('A {provider} sign-in page opened. Approve access, then come back here.', { provider });
       if (!_w) status.textContent = tr('Popup blocked — copy the link below and open it in a browser yourself.');
       if (r.notice) status.textContent = r.notice;

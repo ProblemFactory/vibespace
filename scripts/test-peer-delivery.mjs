@@ -188,6 +188,11 @@ ok('a claude session never rides rpc-queue (registry gate, even with a caps-bear
   ok(`…the census finds every kind:'notification' producer (${producers.join(', ')})`, JSON.stringify(producers.sort()) === JSON.stringify(files.slice().sort()), producers);
   for (const f of producers) ok(`…${f} speaks under a sender the list names`, NS.NOTIFICATION_SENDERS.some((p) => read(f).includes(p)), f);
   ok('NEGATIVE CONTROL: a producer file with an unlisted sender fails the census', !NS.NOTIFICATION_SENDERS.some((p) => "fromName: 'Somebody new · x', kind: 'notification'".includes(p)));
+  // lane-pairing ⑥: the exit's display-only card ("ran `…` on <machine> — exit 0 · 1.2 s") speaks as "Machines · <machine>"
+  // through feedPeerCard (never delivered, never billed) — its sender is a listed prefix and its producer names it
+  const exitSrc = read('src/exit-proxy.js');
+  ok("lane-pairing ⑥: 'Machines · ' is a notification sender, and src/exit-proxy.js's card producer speaks under it (kind notification)", NS.NOTIFICATION_SENDERS.includes('Machines · ') && /fromName: `Machines · \$\{machine\}`, kind: 'notification'/.test(exitSrc) && NS.isNotificationSender('Machines · Macbook') && NS.isVibespaceNotice('Machines · Macbook', 'ran `id` on Macbook — exit 0 · 0.1 s', 'notification'));
+  ok('…and the card view titles it by the machine, the words as its body', JSON.stringify(NS.noticeCardView('Machines · Macbook', 'ran `id` on Macbook — exit 0 · 0.1 s')) === JSON.stringify({ title: { text: 'Machines · Macbook' }, body: 'ran `id` on Macbook — exit 0 · 0.1 s', folded: false }));
 }
 
 // stash still works as the final rung
@@ -204,7 +209,7 @@ ok("…serves the 'peer-message' verb: busy ⇒ thread/queue/add, idle ⇒ turn/
 // codex's own copy it lands on, and the submission id the app-server knows it
 // by. The pin follows the shape; what it owns is unchanged — every lane writes
 // the SAME labelled record.
-ok('…records the peer user message itself (item notifications never carry userMessage) — with the webui_peer marker, on the steered, queued and turn paths', /const recordPeerMessage = \(afterCommit, queueCid\) => record\('response_item', \{\n\s*type: 'message', role: 'user', content: \[\{ type: 'input_text', text \}\],\n\s*webui_peer: \{ name: fromName, body: cardText, kind: peerKind \},/.test(w) && /thread\/queue\/add[\s\S]{0,400}recordPeerMessage\(false, cid\);/.test(w) && /await startTurn\(text\);\s*\n\s*recordPeerMessage\(true, ''\);/.test(w));
+ok('…records the peer user message itself (item notifications never carry userMessage) — with the webui_peer marker, on the steered, queued and turn paths', /const recordPeerMessage = \(afterCommit, queueCid\) => record\('response_item', \{\n\s*type: 'message', role: 'user', content: \[\{ type: 'input_text', text \}\],\n\s*webui_peer: \{ name: fromName, body: cardText, kind: peerKind(?:, \.\.\.\(peerGroup \? \{ group: peerGroup \} : \{\}\))? \},/.test(w) && /thread\/queue\/add[\s\S]{0,400}recordPeerMessage\(false, cid\);/.test(w) && /await startTurn\(text\);\s*\n\s*recordPeerMessage\(true, ''\);/.test(w));
 ok('…reports peer_message_result on EVERY lane, echoing text + fromName on failure so the server can re-stash with its label', /peer_message_result', \{ ok: true, mode: 'steered' \}/.test(w) && /peer_message_result', \{ ok: true, mode: 'queued', \.\.\.fell \}/.test(w) && /peer_message_result', \{ ok: true, mode: 'turn', \.\.\.fell \}/.test(w) && /peer_message_result', \{ ok: false, reason: e\.message, text, fromName, kind: peerKind \}/.test(w));
 // the NOTIFICATION rule, at the wrapper: typed frame → steer lane; unknown
 // origin → peer; the ACP wrapper has no steer verb and says so on the wire.
@@ -214,7 +219,7 @@ ok("…routes a kind:'notification' frame to turn/steer while busy, and leaves h
   ok('the ACP wrapper accepts the same typed frame and REPORTS that it cannot steer (ACP v1 has no such method) instead of silently queueing', /const peerKind = msg\.kind === 'notification' \? 'notification' : 'peer';/.test(acp) && /steer: 'unsupported'/.test(acp));
 }
 const cd = read('src/server/conversation-deliver.js');
-ok('the LADDER tags the frame and never decides the lane itself (only the wrapper knows whether a turn is running)', /const kind = opts\.kind === 'notification' \? 'notification' : 'peer';/.test(cd) && /type: 'peer-message', text, fromName: opts\.fromName \|\| null, cardText: opts\.cardText \|\| null, kind \}/.test(cd));
+ok('the LADDER tags the frame and never decides the lane itself (only the wrapper knows whether a turn is running)', /const kind = opts\.kind === 'notification' \? 'notification' : 'peer';/.test(cd) && /type: 'peer-message', text, fromName: opts\.fromName \|\| null, cardText: opts\.cardText \|\| null, kind(?:, \.\.\.\(opts\.group \? \{ group: opts\.group \} : \{\}\))? \}/.test(cd));
 const jb = read('src/jobs.js');
 // Asserted by MEMBERSHIP, not verbatim: the options object gained
 // `spendReason` with the spend ceiling (design-account-hardening §4.4c), and a

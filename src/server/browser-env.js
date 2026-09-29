@@ -356,7 +356,7 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
       // and said (`projectDropped` / `argsDropped`, journalled below)
       // lane H verify r4: the config carries the keeper's launch MARK for this browser key — its Chrome is then proven
       // VibeSpace's by its own command line (the binary scrubs the Chrome's environment; a directory proves nothing)
-      composed = B.generatedConfigParts({ userConfig: eff.user, projectConfig: eff.projectFile, pinnedDir: pin, headed: headedSetting(), mark: key });
+      composed = B.generatedConfigParts({ userConfig: eff.user, projectConfig: eff.projectFile, pinnedDir: pin, headed: headedSetting(), mark: key, holdDialogs: true }); // lane browser-stuck: a new spawn's browser holds page dialogs
       const cfg = composed.config;
       writeJson(p, cfg);
       const back = JSON.parse(fs.readFileSync(p, 'utf8'));
@@ -723,6 +723,22 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
   /** Every browser key a session-meta file on disk still names. A meta file
    *  lives exactly as long as its session does, which makes this the durable
    *  half of "live" — see the note in `sweep`. */
+  /**
+   * identity verify r4 (2026-09-28): does anything on THIS side name the conversation key `bk` (its parent key)? The
+   * durable bindings (every conversation → key row, pruned past MAX_BINDINGS — a pruned row's key is exactly the one a
+   * fresh mint must still avoid, which the meta join below covers while the meta exists), any entry of the env
+   * directory named by the key (`<key>.json` / `.profile` / `.cwd`, a child's `<key>.N.json`), the scratch profile
+   * directory, and every session-meta file naming it. Asked by the fresh-key rule at every mint; unreadable ⇒ named.
+   */
+  function keyNamed(bk) {
+    const K = B.parentKeyOf(String(bk || ''));
+    if (!B.isBrowserKey(K)) return false;
+    try { if (bindings.keys().has(K)) return true; } catch { return true; }
+    try { if (fs.readdirSync(ENV_DIR).some((n) => n === K || n.startsWith(K + '.'))) return true; } catch (e) { if (!e || e.code !== 'ENOENT') return true; }
+    try { fs.lstatSync(scratchDirFor(K)); return true; } catch (e) { if (!e || e.code !== 'ENOENT') return true; }
+    try { if (liveKeysFromMeta().has(K)) return true; } catch { return true; }
+    return false;
+  }
   function liveKeysFromMeta() {
     const out = new Set();
     let names = []; try { names = fs.readdirSync(path.join(dataDir, 'session-meta')); } catch { return out; }
@@ -782,7 +798,7 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
   }
 
   return {
-    envFor, checkFloor, floorState, repointPin, resolvedProfileDir, sweep, priorKeyFor, liveKeysFromMeta, bindings, childConfigFor,
+    envFor, checkFloor, floorState, repointPin, resolvedProfileDir, sweep, priorKeyFor, liveKeysFromMeta, keyNamed, bindings, childConfigFor,
     // B-f7ab: the late key (src/server/browser-key.js) names WHY `envFor` gave nothing — this switch off, before it asks
     isolationOn: () => enabled(),
     // paths, so the suite asserts the real ones rather than its own guess

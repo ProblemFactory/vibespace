@@ -1,6 +1,7 @@
 import { SETTINGS_SCHEMA, SETTINGS_CATEGORIES, harnessSectionFor, harnessFileRel, orderedCategories, settingsGroupOf, settingsGroups, clampToSchema } from './settings-schema.js';
 import { showConfirmDialog, fetchJson, showToast } from './utils.js';
 import { receiptLine, offLine, applyHead } from './cli-config-chips.js';
+import { machineDisplayText } from './browser-display-words.js'; // lane headless-fallback: the display fact beside the headed preference
 import { t } from './i18n.js';
 import { escHtml } from './utils.js';
 import { UI_ICONS } from './icons.js';
@@ -243,6 +244,7 @@ class SettingsUI {
     pathEl.textContent = path;
     info.append(label, desc, pathEl);
     if (schema.apply) this._renderApplyChip(info, path, schema);
+    if (schema.fact === 'browser-display') this._renderDisplayFact(info);
 
     const controlWrap = document.createElement('div');
     controlWrap.className = 'settings-row-control';
@@ -262,6 +264,17 @@ class SettingsUI {
 
     row.append(info, controlWrap);
     return row;
+  }
+
+  /** lane headless-fallback (2026-09-28): the FACT beside the headed PREFERENCE — this machine's display right now, read
+   *  only (GET /api/browser/display: a readdir + a few local socket connects, asked when the row draws, never on a timer).
+   *  A window asked of a machine with no desktop session runs headless instead of failing; the line says which it is. */
+  _renderDisplayFact(info) {
+    const line = document.createElement('div');
+    line.className = 'settings-row-fact';
+    line.textContent = t('checking…');
+    info.appendChild(line);
+    fetchJson('/api/browser/display').then((r) => { if (line.isConnected || line.parentNode) line.textContent = machineDisplayText(r); });
   }
 
   /** The apply chip under a DERIVED harness row (design §4.3): what the value

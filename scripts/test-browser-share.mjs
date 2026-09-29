@@ -24,6 +24,9 @@
 //   ⑦ B-f7ab the LATE KEY: a session created WITHOUT a key (the pre-feature spawn: key, pairs, config stripped after
 //      create) runs `vibespace-browser open <local url>` from a shell with no browser pairs ⇒ it succeeds (the first
 //      command minted the key, said once), the binding names that conversation, the live view + the fact name the browser
+//   ⑧ lane-cloak: the CloakBrowser rung — the measured build installed by the product's own Install, a profile switched to
+//      cloak launches UNDER THE EGRESS PROXY (a named site admitted, an unnamed one and loopback refused by name), a page
+//      verb, the action trace, the switch back — SKIPs with evidence where the measured build is absent (the Actions mirror)
 // SKIPs with evidence without the real binary (a VibeSpace shim first on PATH is skipped, like the runtime does) or a
 // chrome. ~60-120 s. The suite reaps only processes that name ITS scratch root.
 import fs from 'node:fs';
@@ -319,6 +322,93 @@ else await (async () => {
       ok(h4 && h4.target && h4.target.kind === 'ephemeral' && h4.target.ns === B.sessionNameFor(late), '⑦ the live view of that session answers (the real bridge): its target is the conversation\'s own browser under the late key', h4);
       R.setup({ keeper: k, activeSessions: active, browserEnv: () => be, adoptRoots: { homeDir: KH, dataDir: DATA }, notice: (sid, s, nn) => notices.push({ sid, n: nn }), persistPin: () => { }, tasksForSession: () => [] });
     }
+    // ── ⑧ lane-cloak (2026-09-28): THE CLOAKBROWSER RUNG on the real binaries — the measured build installed by the
+    //    product's own Install (the real package + the measured cache ⇒ nothing downloaded), a never-launched profile
+    //    switched to cloak by the USER, the browser launched UNDER THE EGRESS PROXY (a named site admitted — resolved to
+    //    this server, nothing leaves — an unnamed one and loopback refused), a page verb, the action trace, the switch back.
+    //    SKIPs with evidence where the measured build is absent (the Actions mirror has none): VIBESPACE_TEST_CLOAK_PREFIX
+    //    = an npm prefix holding cloakbrowser@<the record's version>, VIBESPACE_TEST_CLOAK_CACHE = a CLOAKBROWSER_CACHE_DIR
+    //    whose chromium-<v>/chrome has the record's SHA-256.
+    await (async () => {
+      const crypto = require('crypto');
+      const SWm = require('../src/browser-switch.js');
+      const P = B.CLOAK_EGRESS_PROOF;
+      const CP = process.env.VIBESPACE_TEST_CLOAK_PREFIX || '', CC = process.env.VIBESPACE_TEST_CLOAK_CACHE || '';
+      let why = null, pkgV = null, cbin = null;
+      if (!CP || !CC) why = 'VIBESPACE_TEST_CLOAK_PREFIX / VIBESPACE_TEST_CLOAK_CACHE are not set (no measured CloakBrowser build on this machine)';
+      else {
+        try { pkgV = JSON.parse(fs.readFileSync(path.join(CP, 'node_modules', 'cloakbrowser', 'package.json'), 'utf8')).version; } catch { pkgV = null; }
+        cbin = SWm.cloakBinaryPath({ cacheDir: CC, chromium: P.chromium, platform: P.platform });
+        if (pkgV !== P.version) why = `the prefix holds cloakbrowser ${pkgV}, the record describes ${P.version}`;
+        else if (!cbin || !fs.existsSync(cbin)) why = `no browser at ${cbin}`;
+        else { const h = await new Promise((res, rej) => { const hh = crypto.createHash('sha256'); fs.createReadStream(cbin).on('data', (d) => hh.update(d)).on('error', rej).on('end', () => res(hh.digest('hex'))); }); if (h !== P.binary.sha256) why = `the browser's SHA-256 ${h.slice(0, 12)}… is not the record's ${P.binary.sha256.slice(0, 12)}…`; }
+      }
+      if (why) { skip(`⑧ the CloakBrowser rung: ${why}`); return; }
+      const DATA_C = path.join(ROOT, 'data-cloak'), TOOLS = path.join(DATA_C, 'browser-tools');
+      fs.mkdirSync(path.join(TOOLS, 'node_modules'), { recursive: true, mode: 0o700 });
+      fs.symlinkSync(path.join(CP, 'node_modules', 'cloakbrowser'), path.join(TOOLS, 'node_modules', 'cloakbrowser'));
+      fs.symlinkSync(CC, path.join(TOOLS, 'cloak-cache'));
+      const SITE = 'cloak-proof.test';
+      const rt = F.createBrowserRuntime({ env: kenv });
+      const KE = 'bk-0000d005';
+      live.add(KE);
+      const kc = K.create({ ...taskDeps, dataDir: DATA_C, homeDir: KH, env: () => kenv, serverSetting: (key) => (key === 'browser.cloak.egressAllowlist' ? SITE : undefined), liveKeys: () => live, runtime: rt, facts, log: quiet, install: false, conversationFacts: (bk) => conv[bk] || { turn: null, name: null }, egressResolve: (h) => (h === SITE ? '127.0.0.1' : h) });
+      const bridgeC = require('../src/server/browser-stream.js').create({ keeper: kc, activeSessions: active, requestAuthed: () => true, log: quiet });
+      const trc = require('../src/server/browser-trace.js').create({ dataDir: DATA_C, homeDir: KH, keeper: kc, bridge: bridgeC, serverSetting: () => undefined, runtime: rt, broadcast: () => { }, log: quiet, sweepEveryMs: 0 });
+      try {
+        // the product's OWN install over the real package: the pinned build is already in the cache ⇒ the wrapper fetches nothing
+        const iv0 = kc.installVerdict();
+        ok(iv0.ok && iv0.spec === `cloakbrowser@${P.version}` && iv0.chromium === P.chromium, `⑧ Install… is offered: the verdict pins cloakbrowser@${P.version} + Chromium ${P.chromium}`, iv0);
+        await kc.installCloak();
+        for (let i = 0; i < 600 && kc.installVerdict().state.running; i++) await sleep(100);
+        const st = kc.installVerdict();
+        ok(st.state.step === 'done' && !st.state.failed && st.code === 'already_installed' && kc.installedStamp().ok && kc.cloakExecutable().ok && kc.cloakExecutable().path === SWm.cloakBinaryPath({ cacheDir: path.join(TOOLS, 'cloak-cache'), chromium: P.chromium, platform: P.platform }), '⑧ the install ran its steps (the package present at the pinned version, the real `cloakbrowser install`, the SHA-256 check) and the keeper now answers the measured browser', { state: st.state, code: st.code, exe: kc.cloakExecutable() });
+        const s5 = mkSession(KE, 'Cloak chat', 5); conv[KE] = { turn: 'idle', name: s5.name }; active.set('sess-5', s5);
+        R.setup({ keeper: kc, activeSessions: active, browserEnv: () => be, adoptRoots: { homeDir: KH, dataDir: DATA_C }, notice: (sid, s, nn) => notices.push({ sid, n: nn }), persistPin: () => { }, tasksForSession: () => [] });
+        trc.install();
+        let c5 = await run(s5, ['new', 'cloakwork']);
+        const cw = kc.profileByRef('cloakwork');
+        ok(c5.ok && cw && cw.provider === 'chromium', '⑧ conversation 5 `new cloakwork` (chromium, never launched)', c5);
+        const view = await j('GET', `/api/browser/switcher?profile=${cw.id}`);
+        const vrow = view.json && view.json.rows.find((x) => x.id === 'cloak');
+        ok(view.status === 200 && vrow && vrow.state === 'ready-confirm' && vrow.sourceLabel === 'no key needed (free tier)' && vrow.facts.sites === 1 && vrow.facts.binary && vrow.facts.binary.present, '⑧ the switch dialog\'s cloak row: installed, no key needed, one site named — one confirmation (nothing recorded which Chromium wrote the new directory)', vrow);
+        let r5 = await j('POST', '/api/browser/switch', { profile: cw.id, provider: 'cloak' });
+        ok(r5.status === 409 && r5.json.code === 'downgrade_unknown', '⑧ the switch without the confirmation ⇒ 409 downgrade_unknown (the dialog\'s one question)', r5.json);
+        r5 = await j('POST', '/api/browser/switch', { profile: cw.id, provider: 'cloak', confirmDowngrade: true });
+        ok(r5.status === 200 && r5.json.to === 'cloak' && kc.profile(cw.id).provider === 'cloak' && Number.isInteger(kc.profile(cw.id).fingerprintSeed), '⑧ the USER switches cloakwork to cloak (confirmed) — the seed minted', r5.json);
+        c5 = await run(s5, ['use', 'cloakwork']);
+        const o5 = await run(s5, ['open', `http://${SITE}:${PORT}/page/CLOAKA`]);
+        const t5 = await run(s5, ['get', 'title']);
+        const main = fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x)).map((pid) => { try { return { pid, cmd: fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' '), exe: fs.readlinkSync(`/proc/${pid}/exe`) }; } catch { return null; } }).find((x) => x && x.cmd.includes(`--user-data-dir=${cw.dir}`) && !/--type=/.test(x.cmd));
+        const eg = kc.cloakEgress();
+        const pport = eg.url && eg.url.split(':').pop();
+        ok(c5.ok && o5.ok && /CLOAKA/.test(titleOf(t5)), `⑧ a page verb runs on CloakBrowser: \`open http://${SITE}:${PORT}/page/CLOAKA\` + \`get title\` ⇒ "${titleOf(t5)}"`, { c5, o5, t5 });
+        ok(!!main && fs.realpathSync(main.exe) === fs.realpathSync(cbin) && main.cmd.includes(`--proxy-server=http://127.0.0.1:${pport}`) && main.cmd.includes('--proxy-bypass-list=<-loopback>') && main.cmd.includes('--no-sandbox') && main.cmd.includes(`--fingerprint=${kc.profile(cw.id).fingerprintSeed}`), '⑧ the browser on the directory IS the measured CloakBrowser build, launched under the keeper\'s egress proxy (loopback not bypassed), --no-sandbox, the profile\'s seed', main ? { exe: main.exe, cmd: main.cmd.slice(0, 600) } : null);
+        ok(eg.stats && eg.stats.allowed >= 1 && eg.allowlist.join() === SITE, `⑧ the page came THROUGH the proxy (${eg.stats && eg.stats.allowed} admitted; the allowlist is exactly the named site)`, eg);
+        const n5 = await run(s5, ['open', `http://not-listed.test:${PORT}/page/NO`]);
+        const nt = await run(s5, ['get', 'text', 'body']);
+        const l5 = await run(s5, ['open', PAGE('LOOP')]);
+        const lt = await run(s5, ['get', 'text', 'body']);
+        const eg2 = kc.cloakEgress();
+        console.log(`    · a refused navigation, as the agent sees it: open (ok=${n5.ok}) → ${JSON.stringify(n5.out.trim().slice(0, 240))} ${JSON.stringify(n5.err.trim().split('\n').filter((x) => !/^profile: /.test(x)).join(' | ').slice(0, 240))}; body → ${JSON.stringify(nt.out.trim().slice(0, 240))}`);
+        ok(eg2.recent.some((x) => x.host === 'not-listed.test' && /not in the egress allowlist/.test(x.why)) && eg2.recent.some((x) => x.host === '127.0.0.1' && /loopback/.test(x.why)) && !/NO|LOOP/.test(titleOf(await run(s5, ['get', 'title']))), '⑧ an unnamed site and loopback are REFUSED by the proxy — by name — and their pages never load', { n5: n5.out + n5.err, nt: nt.out.slice(0, 300), l5: l5.out + l5.err, lt: lt.out.slice(0, 300), recent: eg2.recent });
+        let es = [];
+        for (let i = 0; i < 80 && !es.some((e) => /CLOAKA/.test(JSON.stringify(e))); i++) { await sleep(100); es = trc.list({ sessionId: 'sess-5', profileId: cw.id }); }
+        ok(es.some((e) => ['open', 'navigate'].includes(e.action) && /CLOAKA/.test(JSON.stringify(e))), `⑧ the action trace recorded the page verb on the CloakBrowser browser (${es.length} entr${es.length === 1 ? 'y' : 'ies'})`, es.map((e) => ({ action: e.action, target: e.target, url: e.url })).slice(0, 6));
+        // the switch back — cloak wrote Chromium 146; chromium's own major is not known to THIS keeper yet ⇒ one confirmation
+        r5 = await j('POST', '/api/browser/switch', { profile: cw.id, provider: 'chromium', confirmDowngrade: true });
+        const b5 = await run(s5, ['open', PAGE('BACK')]);
+        const bt = await run(s5, ['get', 'title']);
+        const back = fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x)).map((pid) => { try { return { cmd: fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' '), exe: fs.readlinkSync(`/proc/${pid}/exe`) }; } catch { return null; } }).find((x) => x && x.cmd.includes(`--user-data-dir=${cw.dir}`) && !/--type=/.test(x.cmd));
+        ok(r5.status === 200 && r5.json.to === 'chromium' && kc.profile(cw.id).provider === 'chromium' && b5.ok && /BACK/.test(titleOf(bt)) && back && fs.realpathSync(back.exe) !== fs.realpathSync(cbin) && !/--proxy-server/.test(back.cmd), `⑧ the switch back to chromium works: the same directory, the plain browser again (no proxy), the loopback page loads ("${titleOf(bt)}")`, { b5: (b5.out + b5.err).slice(0, 400), bt: (bt.out + bt.err).slice(0, 300), back: back ? { exe: back.exe, cmd: back.cmd.slice(0, 300) } : null, launchEnv: (kc.browserOf(cw.id) || {}).launchEnv, reopened: r5.json && r5.json.reopened });
+        ok(kc.profile(cw.id).lastChromiumMajor >= 146 && kc.profile(cw.id).fingerprintSeed != null, '⑧ the profile keeps its seed and the highest Chromium major that wrote it', kc.profile(cw.id));
+      } catch (e) { ok(false, '⑧ the cloak rung threw', e && (e.stack || e.message)); }
+      finally {
+        try { for (const p of kc.list().profiles) await kc.stop(p.id).catch(() => { }); } catch { /* none */ }
+        try { trc.shutdown(); bridgeC.shutdown(); kc.shutdown(); } catch { /* none */ }
+        R.setup({ keeper: k, activeSessions: active, browserEnv: () => be, adoptRoots: { homeDir: KH, dataDir: DATA }, notice: (sid, s, nn) => notices.push({ sid, n: nn }), persistPin: () => { }, tasksForSession: () => [] });
+      }
+    })();
   } catch (e) { ok(false, 'the legs threw', e && (e.stack || e.message)); }
   finally {
     try { for (const p of k.list().profiles) await k.stop(p.id).catch(() => { }); } catch { /* none */ }

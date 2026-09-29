@@ -140,7 +140,7 @@ try {
   ok(e.open === 'lasting,later', 'the open listing (the badge\'s input) no longer carries them', e);
   const eCtl1 = dueLeg(mutant('src/user-todos.js', [["      if (it.status !== 'open') continue;\n      if (!(typeof it.expiresAt", "      if (!(typeof it.expiresAt"]]));
   ok(!(eCtl1.done.by === 'user' && eCtl1.done.at), 'CONTROL: without the open-only guard a resolved item is re-resolved "expired" (the leg fails on it)', eCtl1.done);
-  const eCtl2 = dueLeg(mutant('src/user-todos.js', [["      n++;\n    }\n    if (n) { this._save(); this._notify(); }\n    return n;\n  }\n\n  /** THE store's door", "      n++; this._save(); this._notify();\n    }\n    return n;\n  }\n\n  /** THE store's door"]]));
+  const eCtl2 = dueLeg(mutant('src/user-todos.js', [["      n++; went.push(it);\n    }\n    if (n) { this._save(); this._notify(); this._emitStatus(went, 'expired'); }\n    return n;\n  }\n\n  /** THE store's door", "      n++; went.push(it); this._save(); this._notify();\n    }\n    return n;\n  }\n\n  /** THE store's door"]]));
   ok(eCtl2.b1 !== 1, 'CONTROL: a broadcast per item is caught (2 broadcasts for 2 items)', eCtl2);
   const eCtl3 = dueLeg(mutant('src/user-todos.js', [["if (!(typeof it.expiresAt === 'number' && Number.isFinite(it.expiresAt)) || it.expiresAt > now) continue;", "if (Number(it.expiresAt) > now) continue;"]]));
   ok(eCtl3.lasting !== 'open', 'CONTROL: judging a missing expiresAt as 0 expires the lasting item (the leg fails on it)', eCtl3);

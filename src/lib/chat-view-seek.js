@@ -437,7 +437,7 @@ export function installChatSeek(ChatView) {
     return target;
   },
 
-    _scrollElStable(el) {
+    _scrollElStable(el, { fit = false } = {}) {
     if (!el || !el.isConnected) return;
     this._lastJumpTargetEl = el;
     this._lastJumpAt = Date.now();
@@ -451,7 +451,10 @@ export function installChatSeek(ChatView) {
       const lr = list.getBoundingClientRect();
       const rc = el.getBoundingClientRect();
       this._traceExpect?.('landStable');
-      list.scrollTop += rc.top - lr.top - lr.height / 2;
+      // `fit` (verify-r6 K1: an approval card is landed WHOLE — its request above its Allow): the element centred when it
+      // fits the viewport, its top at the viewport's top when it does not; the default keeps the element's top at the
+      // middle (every other jump — a search hit, a minimap turn — is unchanged)
+      list.scrollTop += rc.top - lr.top - (fit ? Math.max(0, (lr.height - rc.height) / 2) : lr.height / 2);
     };
     let n = 0;
     const step = () => { center(); if (++n < 12) requestAnimationFrame(step); };

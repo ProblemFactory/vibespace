@@ -277,8 +277,8 @@ try {
   C.d.resolveJobAsk = (jobId, opts) => { resolved.push({ jobId, opts }); return 1; };
   const rp1 = C.create({ kind: 'task', name: 'panel-clear', cmd: { argv: ['sh', '-c', 'sleep 30'] }, owner }, caller);
   const jp1 = C.jobs.get(rp1.job.id);
-  C.ask(jp1, { title: 't', blocks: [{ type: 'md', text: 'x' }, { type: 'buttons', options: [{ id: 's', label: 'ok' }] }] });
-  C.answerPanel(jp1, { button: 's' });
+  const ask1 = C.ask(jp1, { title: 't', blocks: [{ type: 'md', text: 'x' }, { type: 'buttons', options: [{ id: 's', label: 'ok' }] }] });
+  C.answerPanel(jp1, { button: 's', version: ask1.version }); // r6 D-F5: an answer names the panel it answers
   ok(resolved.some((r) => r.jobId === jp1.id), 'answerPanel resolves the needs-your-input inbox entry');
   C.stop(jp1, { force: true });
   const settled = await until(() => ['interrupted', 'failed'].includes(jp1.state));

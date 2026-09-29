@@ -11,7 +11,7 @@
 // each one — an unlisted kind used to count `undefined++` = NaN and vanish
 // from the label (2.369.34); countKinds() now zero-fills from this list and
 // the test asserts SUMMARY_ORDER covers it.
-export const RUN_KINDS = ['note', 'thinking', 'bash', 'read', 'search', 'image', 'write', 'memory', 'mcp', 'lookup', 'agent', 'report', 'skill', 'unknown'];
+export const RUN_KINDS = ['note', 'thinking', 'bash', 'read', 'search', 'image', 'write', 'memory', 'mcp', 'lookup', 'agent', 'report', 'group', 'skill', 'unknown'];
 
 // Counts the CALLER supplies that are not card kinds — they are never
 // produced by messageKind() and never zero-filled, so an unset one simply
@@ -44,6 +44,9 @@ const SUMMARY_ORDER = [
   ['subAgentIn', '{n} sub-agent messages'],
   ['agent', '{n} agent ops'],
   ['report', '{n} sub-agent reports'],
+  // lane group-report-card: a group message handed to this agent (a report card, a wake's card) — CONTENT the owner
+  // asked to see ("怎么在那个对话里看不到你发了消息？"), so the kind ships UNCHECKED in chat.collapseKinds
+  ['group', '{n} group messages'],
   ['skill', null],
   ['unknown', '{n} unknown events / new fields'], // 2.369.120: the fall-back card (a record VibeSpace does not know) + the §3 schema-drift card (a known record that grew); ships UNCHECKED — visible until the user folds it
 ];
@@ -112,6 +115,7 @@ export function messageKind(m, { toolCard, isMemoryPath = () => false }) {
   if (m?.role === 'assistant' && Array.isArray(m.content) && m.content.length
       && m.content.every((b) => b.type === 'thinking')) return 'thinking';
   if (assistantNoteOf(m)) return 'note'; // lane S3: text VibeSpace addressed to the ASSISTANT — its own fold kind, default on
+  if (m?.originKind === 'peer-message' && m.peerGroup && m.peerGroup.id) return 'group'; // lane group-report-card: its own fold kind, default OFF (the owner asked to see them)
   if (m?.noticeKind === 'unknown-record' || m?.noticeKind === 'unknown-fields') return 'unknown'; // 2.369.120: the fall-back card has its own toggle; the §3 drift card shares it
   return null;
 }

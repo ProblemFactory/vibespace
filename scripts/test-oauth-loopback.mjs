@@ -393,5 +393,160 @@ console.log('\n⑧ the end drops every closure; the machine\'s own ends are said
   for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(c.pass, 'tree: ' + c.name, c.pass ? undefined : c.detail);
 }
 
+// ── ⑨ OPTIONAL SCOPES — THE ONE NARROWING RETRY + THE VENDOR'S ERROR REDIRECT (owner ruling 2026-09-28) ──
+// Lark refuses a WHOLE consent that names a scope its app has not enabled (error 20027) ON ITS OWN PAGE — never
+// redirected (the vendor's docs name only `?error=access_denied&state=`) — so the machine never hears it. The person
+// presses "Sign in without …" (narrow): the SAME flow (state, listener) gets a consent URL without the optional
+// scopes, ONCE; the exchange is told what was dropped. A FAKE AUTHORIZE ENDPOINT plays the vendor's page: a scope
+// the fake app has not enabled ⇒ a 200 page reading 20027, no redirect; otherwise ⇒ 302 to redirect_uri with code.
+console.log('\n⑨ optional scopes: the one narrowing retry against a fake authorize page; the vendor\'s error redirect ends the flow');
+{
+  const ENABLED = new Set(['im:message', 'im:chat:readonly']);   // the fake APP's enabled scopes
+  const OPT = 'im:message.reactions:read';
+  const authz = [];
+  const fakeAuth = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    const scopes = String(u.searchParams.get('scope') || '').split(' ').filter(Boolean);
+    authz.push(scopes.slice());
+    const missing = scopes.filter((x) => !ENABLED.has(x));
+    if (missing.length) { res.writeHead(200, { 'Content-Type': 'text/html' }).end(`<p>20027 the scope parameter contains permissions the current application has not enabled: ${missing.join(' ')}</p>`); return; }
+    const to = new URL(u.searchParams.get('redirect_uri'));
+    to.searchParams.set('code', 'code-' + authz.length); to.searchParams.set('state', u.searchParams.get('state'));
+    res.writeHead(302, { Location: to.toString() }).end();
+  });
+  await new Promise((r) => fakeAuth.listen(0, '127.0.0.1', r));
+  const AUTH = `http://127.0.0.1:${fakeAuth.address().port}/open-apis/authen/v1/authorize`;
+  /** THE BROWSER: open the consent URL on the fake vendor page; a 302 is followed to the loopback (one hop). */
+  const browse = async (consentUrl) => {
+    const q = new URL(consentUrl).search;
+    const page = await new Promise((resolve) => { http.get(AUTH + q, (res) => { let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => resolve({ status: res.statusCode, location: res.headers.location || null, body: b })); }).on('error', (e) => resolve({ status: 0, body: e.message })); });
+    if (page.status === 302 && page.location) { const back = await get(page.location); await sleep(40); return { ...page, back }; }
+    return page;
+  };
+  const [P9, P9b, P9c] = await freePorts(3);
+  const run9 = async (OLm, port) => {
+    const ol = OLm.createOAuthLoopback({ log: quiet });
+    const ex = []; const done = [];
+    const f = await ol.begin({
+      id: 'lark', mode: 'fixed', callbackUrl: `http://127.0.0.1:${port}/lark/cb`, label: 'Lark', optionalScopes: [OPT, OPT, 7],
+      buildConsentUrl: ({ redirectUri, state, without = [] }) => `https://accounts.example/open-apis/authen/v1/authorize?` + new URLSearchParams({ redirect_uri: redirectUri, state, scope: ['im:message', 'im:chat:readonly', OPT].filter((x) => !without.includes(x)).join(' ') }),
+      exchange: async ({ code, narrowed }) => { ex.push({ code, narrowed }); return { ok: true }; },
+      onDone: (r) => { done.push(r); },
+    });
+    return { ol, f, ex, done };
+  };
+  {
+    const { ol, f, ex, done } = await run9(OL, P9);
+    ok(JSON.stringify(f.optional) === JSON.stringify([OPT]) && f.narrowed === null && new URL(f.consentUrl).searchParams.get('scope').split(' ').includes(OPT), 'the flow names its optional scopes (deduped, strings only) and the FIRST consent asks for them', JSON.stringify([f.optional, f.narrowed]));
+    const p1 = await browse(f.consentUrl);
+    ok(p1.status === 200 && /20027/.test(p1.body) && !p1.location && ex.length === 0 && ol.status(f.flowId).running === true, 'the fake vendor refuses the whole consent ON ITS PAGE (200, 20027, no redirect) — nothing reaches the loopback, the flow is still running');
+    const state0 = new URL(f.consentUrl).searchParams.get('state');
+    const n1 = ol.narrow(f.flowId);
+    const u1 = new URL(n1.consentUrl);
+    ok(JSON.stringify(n1.narrowed) === JSON.stringify([OPT]) && !u1.searchParams.get('scope').split(' ').includes(OPT) && u1.searchParams.get('scope') === 'im:message im:chat:readonly' && u1.searchParams.get('state') === state0 && n1.listening === true && n1.flowId === f.flowId, 'narrow(): the SAME flow (same state, still listening) gets a consent URL without the optional scope — the base scopes kept', n1.consentUrl);
+    let again = null; try { ol.narrow(f.flowId); } catch (e) { again = e; }
+    ok(again && again.code === 'already-narrowed' && /already dropped im:message\.reactions:read once/.test(again.message), `narrow() is ONCE — the second is refused by name (${again && again.code})`);
+    const p2 = await browse(n1.consentUrl);
+    ok(p2.status === 302 && p2.back && p2.back.status === 200 && ex.length === 1 && JSON.stringify(ex[0].narrowed) === JSON.stringify([OPT]) && ol.status(f.flowId).ok === true && done.length === 1 && done[0].ok === true, 'the narrowed consent is granted (302 → the loopback) and the exchange is TOLD what was dropped (narrowed) — the account can say it, never a silent narrower consent', JSON.stringify(ex));
+    let late = null; try { ol.narrow(f.flowId); } catch (e) { late = e; }
+    ok(late && late.code === 'no-flow', 'a narrow on a finished flow is refused (no-flow)');
+    ol.stopAll();
+  }
+  {
+    // a flow with nothing optional cannot be narrowed; a narrowed flow's `build` closure goes with the flow's end
+    const ol = OL.createOAuthLoopback({ log: quiet });
+    const f = await ol.begin({ id: 'g', mode: 'ephemeral', buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async () => ({}) });
+    let e0 = null; try { ol.narrow(f.flowId); } catch (e) { e0 = e; }
+    ok(e0 && e0.code === 'nothing-optional' && JSON.stringify(ol.status(f.flowId).optional) === '[]', 'a flow with no optional scopes answers nothing-optional (never a changed URL)');
+    ol.stopAll();
+  }
+  {
+    // THE VENDOR'S ERROR REDIRECT: `?error=access_denied&state=<ours>` (the person pressed Deny) ENDS the flow by name
+    const { ol, f, ex, done } = await run9(OL, P9b);
+    const st = new URL(f.consentUrl).searchParams.get('state');
+    const r = await get(`http://127.0.0.1:${P9b}/lark/cb?error=access_denied&state=${st}`);
+    await sleep(30);
+    const s9 = ol.status(f.flowId);
+    ok(r.status === 200 && /did not grant the sign-in \(access_denied\)/.test(r.body) && !/connected — you can close/.test(r.body) && ex.length === 0, 'the tab says the vendor did not grant it (access_denied) — never "connected"; nothing exchanged', r.body);
+    ok(s9.done === true && s9.ok === false && s9.running === false && /Lark did not grant the sign-in \(access_denied\)/.test(s9.error || '') && done.length === 1 && done[0].ok === false && (await portFree(P9b)), 'the flow ENDS by name (done, the error sentence, reported once, the port released)', JSON.stringify(s9));
+    const hostile = await (async () => { const x = await run9(OL, P9c); const st2 = new URL(x.f.consentUrl).searchParams.get('state'); const rr = await get(`http://127.0.0.1:${P9c}/lark/cb?error=${encodeURIComponent('<img src=x onerror=alert(1)>' + 'e'.repeat(5000))}&state=${st2}`); await sleep(30); const e = x.ol.status(x.f.flowId).error || ''; x.ol.stopAll(); return { body: rr.body, e }; })();
+    ok(!/<img/.test(hostile.body) && !/<img/.test(hostile.e) && hostile.e.length < 200, 'a hostile error parameter is bounded and reduced to a code\'s alphabet before it is said (no markup, < 200 chars)', hostile.e);
+    ol.stopAll();
+  }
+  // CONTROLS (patched copies, scratch only): no once-guard ⇒ a second narrow passes; no error branch ⇒ the pre-ruling
+  // handler says "connected" over a denied consent and leaves the flow running until its timeout
+  {
+    const M9 = mutantCopies('oauth-narrow', REPO);
+    const src9 = fs.readFileSync(path.join(REPO, 'src/oauth-loopback.js'), 'utf-8');
+    const ONCE = "    if (st.narrowedGroups >= st.groups.length) {";   // lane lark-search-poll: the guard is per GROUP now
+    const ERRB = "        if (verr) {";
+    ok(src9.split(ONCE).length === 2 && src9.split(ERRB).length === 2, 'CONTROL setup: the once-guard and the error branch are each present once');
+    const OLa = require(M9.write('src/oauth-loopback.js', src9.replace(ONCE, "    if (false) {"), 'narrow-twice'));
+    const [Pa, Pb] = await freePorts(2);
+    const a = await run9(OLa, Pa);
+    a.ol.narrow(a.f.flowId); let twice = null; try { twice = a.ol.narrow(a.f.flowId); } catch { twice = null; }
+    ok(!!twice, 'CONTROL: a copy without the once-guard narrows TWICE — the "ONCE" assert above would be red');
+    a.ol.stopAll();
+    const OLb = require(M9.write('src/oauth-loopback.js', src9.replace(ERRB, '        if (false) {'), 'no-error-branch'));
+    const b = await run9(OLb, Pb);
+    const rb = await get(`http://127.0.0.1:${Pb}/lark/cb?error=access_denied&state=${new URL(b.f.consentUrl).searchParams.get('state')}`);
+    await sleep(30);
+    ok(/connected — you can close this tab/.test(rb.body) && b.ol.status(b.f.flowId).running === true, 'CONTROL: a copy without the error branch answers "connected" over a DENIED consent and leaves the flow running — the two asserts above would be red');
+    b.ol.stopAll();
+    for (const c of copiesCensus(M9.files, M9.dir, REPO, { minCopies: 2, label: 'oauth-narrow: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
+  }
+  // ⑨b ORDERED GROUPS (lane lark-search-poll, owner decision 5: "one scope dropped per retry, each a click naming the
+  // scope"): three groups, least valuable first — each narrow drops the NEXT group only, the next one is named, the
+  // exchange hears everything dropped, and `already-narrowed` comes only once every group is gone
+  {
+    const RX = 'im:message.reactions:read', P2P = 'im:message.p2p_msg:get_as_user', S = 'search:message';
+    const runG = async (port) => {
+      const ol = OL.createOAuthLoopback({ log: quiet });
+      const ex = [];
+      const f = await ol.begin({
+        id: 'lark-g', mode: 'fixed', callbackUrl: `http://127.0.0.1:${port}/lark/cb`, label: 'Lark', optionalScopes: [[RX], [P2P], [S], [RX]],
+        buildConsentUrl: ({ redirectUri, state, without = [] }) => `https://accounts.example/open-apis/authen/v1/authorize?` + new URLSearchParams({ redirect_uri: redirectUri, state, scope: ['im:message', 'im:chat:readonly', RX, P2P, S].filter((x) => !without.includes(x)).join(' ') }),
+        exchange: async ({ code, narrowed }) => { ex.push({ code, narrowed }); return { ok: true }; },
+      });
+      return { ol, f, ex };
+    };
+    const [G1, G2] = await freePorts(2);
+    {
+      // the fake app enabled the search and the single-chat read, NOT reactions ⇒ ONE press, the search kept
+      ENABLED.add(P2P); ENABLED.add(S);
+      const { ol, f, ex } = await runG(G1);
+      ok(JSON.stringify(f.groups) === JSON.stringify([[RX], [P2P], [S]]) && JSON.stringify(f.nextNarrow) === JSON.stringify([RX]), 'the flow names its ORDERED groups (a repeated scope keeps its first place) and the scope the first press drops', JSON.stringify([f.groups, f.nextNarrow]));
+      const p0 = await browse(f.consentUrl);
+      const n1 = ol.narrow(f.flowId);
+      const sc1 = new URL(n1.consentUrl).searchParams.get('scope').split(' ');
+      ok(/20027/.test(p0.body) && JSON.stringify(n1.narrowed) === JSON.stringify([RX]) && !sc1.includes(RX) && sc1.includes(S) && sc1.includes(P2P) && JSON.stringify(n1.nextNarrow) === JSON.stringify([P2P]), 'the FIRST press drops the reactions read ONLY — the search and the single-chat read are still asked for; the next press would drop the single-chat read (named)', JSON.stringify(n1));
+      const p1 = await browse(n1.consentUrl);
+      ok(p1.status === 302 && ex.length === 1 && JSON.stringify(ex[0].narrowed) === JSON.stringify([RX]), 'an app that lacks only the reactions scope KEEPS the search: granted after one press, the exchange told exactly what was dropped', JSON.stringify(ex));
+      ol.stopAll();
+      ENABLED.delete(P2P); ENABLED.delete(S);
+    }
+    {
+      // the fake app enabled NONE of them ⇒ three presses, each naming its scope, then refused by name
+      const { ol, f, ex } = await runG(G2);
+      const names = [];
+      let last = f;
+      for (let i = 0; i < 3; i++) { names.push((last.nextNarrow || []).join('+')); last = ol.narrow(f.flowId); const pg = await browse(last.consentUrl); if (pg.status === 302) break; }
+      ok(JSON.stringify(names) === JSON.stringify([RX, P2P, S]) && JSON.stringify(last.narrowed) === JSON.stringify([RX, P2P, S]) && last.nextNarrow === null && ex.length === 1 && JSON.stringify(ex[0].narrowed) === JSON.stringify([RX, P2P, S]), 'three presses, least valuable first (reactions → the single-chat read → the search), each naming what it drops; the third consent is granted and the exchange hears all three', JSON.stringify({ names, last: last.narrowed, ex }));
+      let over = null; try { ol.narrow(f.flowId); } catch (e) { over = e; }
+      ok(over && (over.code === 'no-flow' || over.code === 'already-narrowed'), 'past the last group nothing narrows further', over && over.code);
+      ol.stopAll();
+    }
+    {
+      const ol = OL.createOAuthLoopback({ log: quiet });
+      const f = await ol.begin({ id: 'lark-h', mode: 'ephemeral', optionalScopes: [[RX], [S]], buildConsentUrl: ({ state, without = [] }) => `https://x/?state=${state}&w=${without.join(',')}`, exchange: async () => ({}) });
+      ol.narrow(f.flowId); ol.narrow(f.flowId);
+      let e3 = null; try { ol.narrow(f.flowId); } catch (e) { e3 = e; }
+      ok(e3 && e3.code === 'already-narrowed' && /already dropped every permission it can do without \(im:message\.reactions:read \+ search:message\)/.test(e3.message), 'after every group is gone the next press is refused by name, naming everything dropped', e3 && e3.message);
+      ol.stopAll();
+    }
+  }
+  await new Promise((r) => fakeAuth.close(r));
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

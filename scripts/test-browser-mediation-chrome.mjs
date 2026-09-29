@@ -50,7 +50,15 @@
 //      mutation refused and the page unmoved (the owner's ruling of 2026-09-27: a
 //      stale `fenceScripts` callback reading OFF changes nothing), read / session /
 //      harmless answering, an unknown method refused by name while paused and
-//      forwarded to Chrome's own -32601 after.
+//      forwarded to Chrome's own -32601 after. lane-cdp-154 (2026-09-28): the
+//      census reads more than one Chrome — the live one is compared AT its version
+//      (a censused Chrome exactly; a newer one fails on every method no row names;
+//      an older one — the fleet's Debian chromium 150 — is below the census), every
+//      method of THIS Chrome without a row is refused BY NAME on the paused lease
+//      whatever the version, and on 154+ the two new reads answer while paused and
+//      the two whole-browser setters are method_refused with the agent driving —
+//      the mock camera's effect counted from another tab, the RAW endpoint's own
+//      mock camera the positive control. Every line names the Chrome it ran on.
 // SKIPs with evidence when no chrome / no agent-browser / a launch fails.
 // cdp-protocol-under-test — every 'Page.navigate' here is a CDP message judged
 // by the proxy against a real chrome, never a navigation of VibeSpace's page.
@@ -136,7 +144,10 @@ function cdpClient(url) {
 }
 const upgradeStatus = (url) => new Promise((res) => { const w = new WebSocket(url); w.on('unexpected-response', (_, r) => { res(r.statusCode); w.terminate(); }); w.on('open', () => { res('open'); w.close(); }); w.on('error', (e) => res('err ' + e.message)); });
 
-const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
+// `--chrome <binary>` (lane-cdp-154): run ① / ⑥ against ANOTHER Chrome — an older or newer one than the census — to see
+// the version rules on a real browser (e.g. an extracted older .deb); the default is the installed one
+const chromeArg = (() => { const i = process.argv.indexOf('--chrome'); return i > 0 ? process.argv[i + 1] : null; })();
+const CHROME = chromeArg || ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 async function launchChrome() {
   const port = await freePort();
   const dir = path.join(ROOT, 'chrome'); fs.mkdirSync(dir, { recursive: true });
@@ -215,13 +226,19 @@ else {
   const C = M.CENSUS;
   const proto = await getJson(`http://127.0.0.1:${world.port}/json/protocol`);
   ok(proto.status === 200 && proto.json && Array.isArray(proto.json.domains) && proto.json.domains.length > 40, '⑥ the launched Chrome answers GET /json/protocol (its own method list)');
-  const cmp = C.compare(proto.json);
   const cv = (/Chrome\/(\d+\.\d+\.\d+\.\d+)/.exec(world.ver.Browser) || [])[1] || '?';
-  console.log(`  (census ${C.CENSUS_CHROME} vs live Chrome ${cv}: ${cmp.listed} methods listed, ${cmp.rows} rows — ${cmp.unclassified.length} unclassified, ${cmp.stale.length} stale)`);
-  if (cmp.unclassified.length) console.error('  UNCLASSIFIED — this Chrome lists methods the census has no row for (each is refused BY NAME while the user drives until it gets a row in src/cdp-census.js; re-run scripts/cdp-protocol-fetch.mjs for the fixture):\n    ' + cmp.unclassified.join('\n    '));
-  if (cmp.stale.length) console.log('  (stale — rows this Chrome lacks, an older Chrome than the census: ' + cmp.stale.slice(0, 10).join(', ') + (cmp.stale.length > 10 ? ` … +${cmp.stale.length - 10}` : '') + ')');
-  ok(cmp.unclassified.length === 0, `⑥ every method this Chrome (${cv}) lists has a census row — ${cmp.unclassified.length} unclassified (a newer Chrome's methods are PRINTED above and fail here until classified)`);
-  ok(cv !== C.CENSUS_CHROME || cmp.sameSet, `⑥ on the censused Chrome (${C.CENSUS_CHROME}) the table names exactly the protocol's methods (${cmp.stale.length} stale)`);
+  // lane-cdp-154 (2026-09-28): the census reads more than one Chrome (CENSUS_CHROMES) — compared AT the live version:
+  // a censused Chrome must match exactly; a newer (or unknown) one fails on every method no row names (PRINTED, so a
+  // lane can class them); an older one (the fleet's Debian chromium 150) is below the census — its extras are not
+  // classed, and the rule every version shares is proved live below: each is refused BY NAME on the paused lease
+  const cmp = C.compare(proto.json, { chrome: cv });
+  const rel = cmp.relation;
+  console.log(`  (census ${C.CENSUS_CHROMES.join(' + ')} vs live Chrome ${cv} [${rel}]: ${cmp.listed} methods listed, ${cmp.rows} rows — ${cmp.unclassified.length} unclassified, ${cmp.stale.length} stale, ${cmp.misdated.length} misdated)`);
+  if (cmp.unclassified.length) console.error(`  UNCLASSIFIED — Chrome ${cv} lists methods the census has no row for (each is refused BY NAME while the user drives${rel === 'older' ? '; this Chrome is OLDER than the census' : ' until it gets a row in src/cdp-census.js; re-run scripts/cdp-protocol-fetch.mjs for the fixture'}):\n    ` + cmp.unclassified.join('\n    '));
+  if (cmp.stale.length || cmp.misdated.length) console.log(`  (stale — rows Chrome ${cv} lacks${rel === 'censused' ? '' : ' (not a censused Chrome — informational)'}: ` + cmp.stale.slice(0, 10).join(', ') + (cmp.stale.length > 10 ? ` … +${cmp.stale.length - 10}` : '') + (cmp.misdated.length ? ` · misdated: ${cmp.misdated.join(', ')}` : '') + ')');
+  if (rel === 'censused') ok(cmp.sameSet, `⑥ Chrome ${cv} is a censused Chrome: the table names exactly its methods (${cmp.listed} = ${cmp.rows}; ${cmp.unclassified.length} unclassified, ${cmp.stale.length} stale, ${cmp.misdated.length} misdated)`);
+  else if (rel === 'older') ok(true, `⑥ Chrome ${cv} is OLDER than the census (first censused ${C.CENSUS_CHROMES[0]}): ${cmp.unclassified.length} of its methods have no row — not classed here, each refused BY NAME on the paused lease below`);
+  else ok(cmp.unclassified.length === 0, `⑥ Chrome ${cv} (${rel} — censused: ${C.CENSUS_CHROMES.join(' + ')}): every method it lists has a census row — ${cmp.unclassified.length} unclassified (PRINTED above; they fail here until classified)`);
   // the fence's OBSERVABLE effect: A's tab under A's grant; the ORACLE is the raw endpoint (never the lease's own fence). The retired r4 switch:
   // a stale caller still hands a `fenceScripts` callback reading OFF — the grant ignores it (the owner's ruling, 2026-09-27)
   const fence6 = { on: false };
@@ -258,6 +275,18 @@ else {
   // unknown: refused BY NAME while the user drives
   const unk = await c6.call('Page.zzzFutureMethod', {}, s6);
   ok(codeOf(unk) === 'browser_interrupted' && /Page\.zzzFutureMethod/.test(unk.error.message) && /cdp-census/.test(unk.error.message), '⑥ PAUSED · unknown: a method with no census row is browser_interrupted BY NAME (the refusal names the method and the census file)', unk.error && unk.error.message);
+  // lane-cdp-154: THIS Chrome's own methods without a row (a newer or an older Chrome than the census) — every one is
+  // refused by name while the user drives, whatever the version; none reaches the browser
+  const extraWrong = [];
+  for (const m of cmp.unclassified) { const r = await c6.call(m, {}, s6); if (!(codeOf(r) === 'browser_interrupted' && r.error.message.includes(m) && r.error.message.includes(C.CENSUS_CHROMES.join(' + ')))) extraWrong.push(`${m}: ${JSON.stringify(r).slice(0, 160)}`); }
+  ok(extraWrong.length === 0 && (await oracle('document.title')) === 'census', `⑥ PAUSED · Chrome ${cv}'s ${cmp.unclassified.length} method(s) without a row${cmp.unclassified.length ? ` (${cmp.unclassified.join(', ')})` : ''} + the synthetic one: each browser_interrupted BY NAME (the words name the censused Chromes ${C.CENSUS_CHROMES.join(' + ')}) — the page unchanged`, extraWrong.join('\n    '));
+  // lane-cdp-154: Chrome 154's two READS answer while the user drives (forwarded — the browser answers, never our refusal)
+  const lists = (m) => proto.json.domains.some((d) => d.domain === m.split('.')[0] && (d.commands || []).some((c) => c.name === m.split('.')[1]));
+  if (lists('Ads.getAdScripts') && lists('Browser.getGlobalPrivacyControl')) {
+    const ads = await c6.call('Ads.getAdScripts', {}, s6);
+    const gpc = await c6.call('Browser.getGlobalPrivacyControl', {});
+    ok(codeOf(ads) === null && ads.result && Array.isArray(ads.result.newScripts) && codeOf(gpc) === null && ((gpc.result && typeof gpc.result.gpc === 'boolean') || (gpc.error && /Global Privacy Control/.test(gpc.error.message))), `⑥ PAUSED · read (Chrome ${cv}): Ads.getAdScripts answers (${ads.result ? ads.result.newScripts.length : '?'} scripts) and Browser.getGlobalPrivacyControl is FORWARDED (Chrome's own answer: ${JSON.stringify(gpc.result || gpc.error).slice(0, 80)})`);
+  } else skip(`⑥ Chrome ${cv} lists no Ads.getAdScripts / Browser.getGlobalPrivacyControl — the Chrome 154 read legs need 154+`);
   ok(codeOf(await c6.call('Network.setCookie', { name: 'vs6', value: '1', url: 'https://example.invalid/' }, s6)) === 'browser_interrupted' && codeOf(await c6.call('DOM.setOuterHTML', { nodeId: 1, outerHTML: '<html></html>' }, s6)) === 'browser_interrupted' && (await oracle('document.title')) === 'census', '⑥ PAUSED · page-mutation: Network.setCookie and DOM.setOuterHTML are browser_interrupted too (the whole class) — the page unchanged');
   const shot2 = await c6.call('Page.captureScreenshot', { format: 'jpeg', quality: 30 }, s6);
   ok(shot2.result && typeof shot2.result.data === 'string' && (await c6.call('Runtime.getHeapUsage', {}, s6)).result !== undefined, '⑥ PAUSED · a read (Page.captureScreenshot, Runtime.getHeapUsage) still answers');
@@ -275,6 +304,37 @@ else {
   await c6.call('Emulation.clearDeviceMetricsOverride', {}, s6);
   const unk2 = await c6.call('Page.zzzFutureMethod', {}, s6);
   ok(codeOf(unk2) === null && unk2.error && unk2.error.code === -32601, `⑥ handed back: the unknown method is FORWARDED and Chrome itself answers ${unk2.error && unk2.error.code} (method not found) — the census fences only while the user drives`, JSON.stringify(unk2).slice(0, 200));
+  // lane-cdp-154: Chrome 154's two whole-browser SETTERS are method_refused on EVERY lease — handed back too (the agent
+  // drives). The camera's effect is OBSERVED from another tab: a loopback page (a secure context) counts the video
+  // inputs; the RAW endpoint adding a mock camera is the positive control (the oracle sees one when one is added)
+  if (lists('Browser.addMockCamera') && lists('Browser.setGlobalPrivacyControl')) {
+    const camSrv = http.createServer((q, s) => { s.writeHead(200, { 'content-type': 'text/html' }); s.end('<title>cam</title>'); });
+    await new Promise((r) => camSrv.listen(0, '127.0.0.1', r));
+    const camT = (await raw.call('Target.createTarget', { url: 'about:blank' })).result.targetId;
+    const camS = (await raw.call('Target.attachToTarget', { targetId: camT, flatten: true })).result.sessionId;
+    // the counting page must be LOADED: until a navigation commits the tab holds its initial opaque about:blank — not a
+    // secure context, no navigator.mediaDevices. Navigated EXPLICITLY (measured on 154 under a desktop session's env: a
+    // createTarget carrying the loopback url stayed on about:blank, the server never asked; Page.navigate loads it)
+    await raw.call('Page.navigate', { url: `http://127.0.0.1:${camSrv.address().port}/cam` }, camS);
+    const onPage = async () => { const r = await raw.call('Runtime.evaluate', { expression: 'location.protocol + "|" + document.readyState + "|" + !!navigator.mediaDevices', returnByValue: true }, camS); return r.result && r.result.result ? r.result.result.value : null; };
+    let where = null; for (let i = 0; i < 100 && (where = await onPage()) !== 'http:|complete|true'; i++) await sleep(50);
+    const cams = async () => { const r = await raw.call('Runtime.evaluate', { expression: '(async () => (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput").length)()', awaitPromise: true, returnByValue: true }, camS); return r.result && r.result.result && typeof r.result.result.value === 'number' ? r.result.result.value : `no count (${where}; ${JSON.stringify(r).slice(0, 120)})`; };
+    const n0 = await cams();
+    const mc = await c6.call('Browser.addMockCamera', { deviceId: 'vs-census-lease' });
+    await sleep(200);
+    ok(typeof n0 === 'number' && codeOf(mc) === 'method_refused' && /every browser context/.test(mc.error.message) && (await cams()) === n0, `⑥ handed back (the agent drives), Chrome ${cv}: Browser.addMockCamera is method_refused and the browser's device list is unchanged (${n0} video inputs, counted from another tab)`, mc.error && mc.error.message);
+    const rawCam = cdpClient(world.ver.webSocketDebuggerUrl); await rawCam.open;
+    const added = await rawCam.call('Browser.addMockCamera', { deviceId: 'vs-census-raw' });
+    await sleep(200);
+    const n1 = await cams();
+    rawCam.ws.close(); await rawCam.closed; await sleep(300);
+    const n2 = await cams();
+    ok(added.result !== undefined && n1 === n0 + 1 && n2 === n0, `⑥ …CONTROL: the same call on the RAW endpoint adds one (${n0} → ${n1} video inputs in another tab) and it leaves with its DevTools connection (${n2}) — the oracle sees what the lease's call did not do`, JSON.stringify(added).slice(0, 160));
+    const sg = await c6.call('Browser.setGlobalPrivacyControl', { gpc: true });
+    ok(codeOf(sg) === 'method_refused' && /Global Privacy Control/.test(sg.error.message), `⑥ handed back, Chrome ${cv}: Browser.setGlobalPrivacyControl is method_refused on the lease — the mediator's refusal, never Chrome's own answer`, sg.error && sg.error.message);
+    try { await raw.call('Target.closeTarget', { targetId: camT }); } catch { /* gone */ }
+    camSrv.close();
+  } else skip(`⑥ Chrome ${cv} lists no Browser.addMockCamera / setGlobalPrivacyControl — the Chrome 154 setter legs need 154+`);
   try { await raw.call('Target.detachFromTarget', { sessionId: rs }); } catch { /* gone */ }
   c6.ws.close();
 }

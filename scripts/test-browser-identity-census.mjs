@@ -218,6 +218,10 @@ const AGENT_ROUTES = {
   'POST /api/agent/browser/backend': null,
   'POST /api/agent/browser/blocked': null,
   'POST /api/agent/browser/site-hint': null,
+  // lane browser-stuck (2026-09-28): the page-dialog long-poll and the dialog verbs — a dialog is only ever told to the
+  // conversation whose browser it is (routes/browser.js dialogTargetFor); no record in either answer
+  'GET /api/agent/browser/dialog': null,
+  'POST /api/agent/browser/dialog': null,
 };
 function judgeAgentRoutes(src) {
   const clean = stripComments(src);
@@ -268,6 +272,35 @@ const rsrc = read('src/routes/browser.js');
   const sendRoute = rsrc.replace("router.get('/api/agent/browser/status', (req, res) => {", "router.get('/api/agent/browser/status-raw', (req, res) => { res.send(JSON.stringify(ctx.keeper.list())); });\nrouter.get('/api/agent/browser/status', (req, res) => {");
   const vg = judgeAgentRoutes(sendRoute);
   ok(sendRoute !== rsrc && vg.problems.some((p) => /status-raw.*res\.send/.test(p)) && vg.problems.some((p) => /status-raw has NO row in the walk table/.test(p)), 'CONTROL (g): a routes copy with a route answering through res.send (and no walk row) is RED twice, by name', vg.problems);
+}
+
+// ═══ ③c THE USER'S OWN SURFACES (BROWSE YOURSELF verify r2, #5) ═══════════════
+// Every COOKIE route that starts, drives, ends or reads the user's own browsing (a handler naming `/browse`, `isHumanKey`,
+// a `holder === 'user'` entry, or the row's Stop that ends his page) — derived from the two routers' text — carries the
+// agent-token guard IN ITS OWN BODY (`refuseAgentBearer(req, res)` / `isAgentBearer(req)`: `vsst_` AND `jbt_`), and the
+// live-view upgrade judges the PARSED `browse` value. The runtime walk of all of them × both tokens over his REAL recorded
+// entries is test-browser-human's human-route walk (its world has them); this is the census that names a new route.
+console.log('— ③c THE USER\'S OWN SURFACES: every cookie route serving his browsing carries the vsst_ / jbt_ guard in its body; the upgrade judges the parsed query');
+{
+  const surfaces = (src, guardRe) => { const out = []; const ms = [...src.matchAll(/router\.(get|post|patch|delete)\('([^']+)'/g)]; ms.forEach((m, i) => { const body = src.slice(m.index, i + 1 < ms.length ? ms[i + 1].index : src.length).split(/\n(?:const|function|let) /)[0]; if (/^\/api\/agent\//.test(m[2])) return; const his = /\/browse\b/.test(m[2]) || /isHumanKey|holder === 'user'|k\.humanOf\(req\.params\.id\)/.test(body); if (his) out.push({ route: m[1].toUpperCase() + ' ' + m[2], guarded: guardRe.test(body) }); }); return out; };
+  const judgeHuman = (rbSrc, rtSrc, stSrc) => {
+    const rows = [...surfaces(rbSrc, /refuseAgentBearer\(req, res(?:, [A-Z_]+)?\)/), ...surfaces(rtSrc, /isAgentBearer\(req\)/)];
+    const problems = rows.filter((r) => !r.guarded).map((r) => `${r.route} serves his browsing WITHOUT the agent-token guard`);
+    if (!/\(vsst_\|jbt_\)/.test(rbSrc.slice(rbSrc.indexOf('const isAgentBearer'), rbSrc.indexOf('const isAgentBearer') + 200))) problems.push('routes/browser.js: the guard does not name both tokens (vsst_ | jbt_)');
+    if (!/\(vsst_\|jbt_\)/.test(rtSrc.slice(rtSrc.indexOf('const isAgentBearer'), rtSrc.indexOf('const isAgentBearer') + 200))) problems.push('routes/browser-trace.js: the guard does not name both tokens (vsst_ | jbt_)');
+    if (!/\n    if \(browse && \/\^Bearer\\s\+\(vsst_\|jbt_\)\/i\.test\(/.test(stSrc)) problems.push('browser-stream.js: the ?browse= upgrade is not judged on the parsed `browse` value with both tokens');
+    return { rows, problems };
+  };
+  const rbS = read('src/routes/browser.js'), rtS = read('src/routes/browser-trace.js'), stS = read('src/server/browser-stream.js');
+  const hv = judgeHuman(rbS, rtS, stS);
+  ok(hv.rows.length >= 9 && !hv.problems.length, `every cookie route serving his browsing (${hv.rows.length}: ${hv.rows.map((r) => r.route.replace('/api/browser', '')).join(', ')}) carries the vsst_ / jbt_ guard in its own body, and the upgrade judges the parsed query`, hv.problems);
+  // CONTROLS: a new route of his without the guard; the frame route's guard removed; a guard that forgets jbt_ — each RED by name
+  const newRoute = rbS + "\nrouter.post('/api/browser/browse/:key/zoom', (req, res) => res.json({ ok: true }));\n";
+  const noFrame = rtS.replace("  if (isAgentBearer(req)) { const e = tr.entry(req.params.id);", "  if (false) { const e = tr.entry(req.params.id);");
+  const vsstOnly = rtS.replace('/^Bearer\\s+(vsst_|jbt_)/i', '/^Bearer\\s+(vsst_)/i');
+  const c1 = judgeHuman(newRoute, rtS, stS), c2 = judgeHuman(rbS, noFrame, stS), c3 = judgeHuman(rbS, vsstOnly, stS);
+  ok(c1.problems.some((p) => /browse\/:key\/zoom/.test(p)) && noFrame !== rtS && c2.problems.some((p) => /frame\/:which/.test(p)) && vsstOnly !== rtS && c3.problems.some((p) => /both tokens/.test(p)),
+    'CONTROLS: a new route of his without the guard, the frame route\'s guard removed, a trace guard that forgets jbt_ — each RED by name', { c1: c1.problems, c2: c2.problems, c3: c3.problems });
 }
 
 // ═══ ④ THE RUNTIME JSON WALK ═══════════════════════════════════════════════
@@ -379,7 +412,7 @@ function walk(v, p, hits) {
   if (v === null || v === undefined) return;
   if (typeof v === 'string' || typeof v === 'number') { const s = String(v); for (const a of AVALS) if (s === a || (typeof v === 'string' && a.length >= 6 && s.includes(a))) hits.push({ path: p, value: s.slice(0, 160), id: a }); return; }
   if (Array.isArray(v)) { v.forEach((x, i) => walk(x, p + '[' + i + ']', hits)); return; }
-  if (typeof v === 'object') for (const [kx, x] of Object.entries(v)) walk(x, p + '.' + kx, hits);
+  if (typeof v === 'object') for (const [kx, x] of Object.entries(v)) { for (const a of AVALS) if (kx === a || (a.length >= 6 && kx.includes(a))) hits.push({ path: p + '.{' + kx + '}', value: kx.slice(0, 160), id: a }); walk(x, p + '.' + kx, hits); } // r4: an object KEY is a string too
 }
 const EXCEPTION_PATH = /^\$\.drivers\.bp-[0-9a-f]{8}\.browserKey$/;
 const said = (body, p) => { const out = new Set(); const w = (v) => { if (typeof v === 'string') out.add(v); else if (v && typeof v === 'object') Object.values(v).forEach(w); }; w(body); for (const q of (p.split('?')[1] || '').split('&')) if (q) out.add(decodeURIComponent(q.split('=').slice(1).join('='))); return out; };
@@ -401,6 +434,8 @@ const WALK = (eph, helper) => [
   ['POST', '/api/agent/browser/backend', { provider: 'cloak', profile: 'p-all' }], ['POST', '/api/agent/browser/backend', { provider: 'chromium', profile: 'p-secret' }],
   ['POST', '/api/agent/browser/blocked', { url: 'https://blocked.example/y', why: 'captcha', profile: 'p-all' }], ['POST', '/api/agent/browser/blocked', { url: 'https://blocked.example/y', why: 'captcha', profile: 'p-secret' }],
   ['POST', '/api/agent/browser/site-hint', { site: 'blocked.example', tier: 2, why: 'x' }],
+  ['GET', '/api/agent/browser/dialog?profile=p-secret&wait=0'], ['GET', '/api/agent/browser/dialog?profile=p-all&wait=0'], ['GET', `/api/agent/browser/dialog?profile=${eph}&wait=0`],
+  ['POST', '/api/agent/browser/dialog', { profile: 'p-secret', action: 'status' }], ['POST', '/api/agent/browser/dialog', { profile: eph, action: 'dismiss' }],
   ['GET', '/api/agent/browser/status'], ['GET', '/api/agent/browser/profiles'],
 ];
 async function walkAs(jj, s, { eph = aEph && aEph.profileId, helper = helperKey } = {}) {
@@ -479,6 +514,22 @@ async function walkAs(jj, s, { eph = aEph && aEph.profileId, helper = helperKey 
   const viaReal = judge(B.agentAnswerView(raw, { me: Bk, foreign: { ids: new Set(['sess-a', sA.claudeSessionId]), pids: new Set([aEph.pid, hEph.pid]) } }), '/x', undefined);
   const viaTwo = judge(Bx.agentAnswerView(raw, { me: Bk, foreign: { ids: new Set(['sess-a', sA.claudeSessionId]), pids: new Set([aEph.pid, hEph.pid]) } }), '/x', undefined);
   ok(!viaReal.leaks.length && viaTwo.leaks.length >= 1 && viaTwo.leaks.every((h) => /^\$\.leases\[/.test(h.path)), 'CONTROL (i): a belt copy with a second exception (`leases`) hands A\'s key through it and the judge is RED there; the real belt is green over the same raw digest', viaTwo.leaks.slice(0, 3));
+
+  // r4: THE BELT'S OWN EDGES — a key inside a longer token, next to a word character, in upper case, as an object KEY, in a
+  // string of any length, at any depth; the asker's own family and its echoes kept. CONTROL (i″): the pre-r4 regex restored.
+  {
+    const me = Bk, A1 = A, fg = { ids: new Set(['sess-a', sA.claudeSessionId]), pids: new Set([aEph.pid]) };
+    const v = (body, echoes = []) => B.agentAnswerView(body, { me, foreign: fg, echoes: new Set(echoes) });
+    const bad = (o) => /bk-0000aaa1|BK-0000AAA1|sess-a|sessa/i.test(JSON.stringify(o).replace(/\[another conversation\]/g, '').replace(/bk-\*{8}/g, ''));
+    const edges = { under: 'trace_' + A1, before: 'x' + A1, hexAfter: A1 + 'f', digitAfter: A1 + '9', upper: A1.toUpperCase(), url: 'http://h/x/' + A1 + '/y?s=' + sA.claudeSessionId, key: { [A1]: { alias: 'x' } }, idKey: { 'sess-a': 1 }, twoKeys: { [A1]: 1, [A1 + '.1']: 2 }, long: 'z'.repeat(70000) + ' ' + A1 + ' ' + 'z'.repeat(70000), deep: (() => { let x = A1; for (let i = 0; i < 70; i++) x = { d: x }; return x; })(), idInText: 'conversation ' + sA.claudeSessionId + ' holds it', pid: aEph.pid, own: me, ownChild: me + '.2', ownUpper: me.toUpperCase() };
+    const out = v(edges);
+    ok(!bad(out), 'r4 the belt masks a key inside a longer token, beside a letter / digit / underscore, in upper case, in a url, as an object KEY (twice, told apart), in a 140 KB string and 70 levels deep (dropped), a conversation id inside a sentence, an ephemeral pid', JSON.stringify(out).slice(0, 300));
+    ok(out.own === me && out.ownChild === me + '.2' && out.ownUpper === me.toUpperCase() && Object.keys(out.twoKeys).length === 2 && !JSON.stringify(out.deep).includes(A1) && JSON.stringify(out.deep).includes('null'), 'r4 the asker\'s own key (child form, upper case) is kept; two masked keys are two entries; the too-deep subtree is dropped, never returned raw', out);
+    ok(v({ s: A1 + ' and ' + A1 + '.1' }, [A1 + '.1']).s === B.MASKED_KEY + ' and ' + A1 + '.1', 'r4 an echo of what the asker said is kept even beside a masked one');
+    const pre = M.load('src/browser-profiles.js', bsrc.replace("const KEY_IN_TEXT_RE = /bk-[0-9a-f]{8}(?:\\.\\d{1,4})?/gi;", "const KEY_IN_TEXT_RE = /\\bbk-[0-9a-f]{8}(?:\\.\\d{1,4})?\\b/g;"), 'pre-r4-belt-regex');
+    const preOut = pre.agentAnswerView({ under: 'trace_' + A1, upper: A1.toUpperCase(), hexAfter: A1 + 'f' }, { me, foreign: fg, echoes: new Set() });
+    ok(/bk-0000aaa1|BK-0000AAA1/.test(JSON.stringify(preOut)), 'CONTROL (i″): the pre-r4 word-boundary regex in a copy lets `trace_bk-…`, `BK-…` and `bk-…f` through — RED', preOut);
+  }
   // the belt fails CLOSED: a body it cannot judge is answered as belt_failed, never raw
   const Rf = M.load('src/routes/browser.js', rsrcAll.replace('out = B.agentAnswerView(body, {', 'if (body && body.profiles) throw new Error(\'fake: cannot judge\'); out = B.agentAnswerView(body, {') + rawRoute, 'belt-throws'); Rf.setup(ctxFor(k));
   const srvF = await serve([Rf.router]); const jF = jAt(`http://127.0.0.1:${srvF.address().port}`);
@@ -487,6 +538,87 @@ async function walkAs(jj, s, { eph = aEph && aEph.profileId, helper = helperKey 
   console.warn = warn0;
   ok(rf.json && rf.json.code === 'belt_failed' && !rf.json.leases && !judge(rf.json, '/x', undefined).leaks.length, 'the belt fails CLOSED: a body it cannot judge is answered `belt_failed` — never the raw body', rf.json);
   srvF.close();
+}
+
+// ═══ ④b THE USER AS A HOLDER (BROWSE YOURSELF verify r1, H1) ═══════════════
+console.log('— ④b the user browsing a profile himself: every agent READ byte-identical with and without him; no answer of the walk names him');
+{
+  const HM = require('../src/browser-human.js');
+  const GETS = WALK(aEph && aEph.profileId, helperKey).filter(([m]) => m === 'GET');
+  const reads = async (s) => { const out = []; for (const [m, p] of GETS) { const r = await j(m, p, undefined, as(s)); out.push(`${m} ${p} ${r.status} ${JSON.stringify(r.json)}`); } return out; };
+  const HUMAN_RE = /hu-[0-9a-f]{8}|"human"\s*:|"holder"\s*:\s*"user"|"recordMine"/;
+  const before = { A: await reads(sA), B: await reads(sB) };
+  clock += 60000; // his press is LATER than every agent act above — a stamp it moved (lastUsedAt) would show
+  const HALL = HM.humanKeyFor(PALL.id), HSEC = HM.humanKeyFor(P.id);
+  const b1 = await k.browse(PALL.id); k.humanAttach({ key: HALL, viewerId: 'hv1', token: b1.fresh });
+  const b2 = await k.browse(P.id); k.humanAttach({ key: HSEC, viewerId: 'hv2', token: b2.fresh }); k.humanRelease({ key: HSEC, viewerId: 'hv2' });
+  ok(k.humanOf(PALL.id) && k.humanOf(PALL.id).state === 'driving' && k.humanOf(P.id) && k.humanOf(P.id).state === 'away' && k.list().leases.filter((l) => l.human).length === 2, 'fixture: the user browses p-all himself (driving) and p-secret (away) — two human holder rows in the digest', k.list().leases.filter((l) => l.human));
+  const during = { A: await reads(sA), B: await reads(sB) };
+  const diff = [];
+  for (const who of ['A', 'B']) before[who].forEach((x, i) => { if (x !== during[who][i]) { let c = 0; const y = during[who][i]; while (c < x.length && x[c] === y[c]) c++; diff.push({ who, route: GETS[i][1], without: x.slice(Math.max(0, c - 60), c + 120), with: y.slice(Math.max(0, c - 60), c + 160) }); } });
+  ok(!diff.length, `every agent READ (${GETS.length} GET routes × A admitted + B not) is BYTE-IDENTICAL with and without the user browsing — his presence, his driving / away and his press's instant are nobody's to read`, diff.slice(0, 4));
+  const w = [];
+  for (const s of [sA, sB, sR]) for (const [m, p, body] of WALK(aEph && aEph.profileId, helperKey)) { const r = await j(m, p, body, as(s)); const t = JSON.stringify(r.json); if (HUMAN_RE.test(t)) { const i = t.search(HUMAN_RE); w.push({ who: s.name, m, p, hit: t.match(HUMAN_RE)[0], at: t.slice(Math.max(0, i - 300), i + 60) }); } }
+  ok(!w.length, 'the WHOLE walk (every agent route, A / B / R) while he browses: no answer names his key, a human row, his holder or his recording switch', w.slice(0, 4));
+  const sw = await j('POST', '/api/agent/browser/backend', { provider: 'cloak', profile: 'p-all' }, as(sA));
+  ok(!HUMAN_RE.test(JSON.stringify(sw.json)) && k.browserOf(PALL.id).state === 'ready', 'an agent\'s backend switch while he browses: never a stop under his page, and its answer names nobody (the belt masks a `hu-` key like another conversation\'s)', sw.json);
+  // CONTROLS (scripts/mutant-copy.mjs): the pre-fix agent views — a lease view that keeps his row, a switcher read with him
+  const bsrc = read('src/browser-profiles.js');
+  const lneedle = "  if (l.human === true || /^hu-[0-9a-f]{8}$/.test(String(l.browserKey || ''))) return null;";
+  ok(bsrc.includes(lneedle), 'the agent lease-view needle (the control below removes it)');
+  const Bh = M.load('src/browser-profiles.js', bsrc.replace(lneedle, '').replace("  delete rest.lastUsedAt; delete rest.recordMine; delete ex.lastUsedAt; delete ex.recordMine;\n", ''), 'agent-sees-human');
+  const facts = { browserKey: Bk, taskIds: [], groupsUnreadable: false };
+  const real = JSON.stringify(B.agentDigestView(k.list(), facts, (id) => k.profile(id)));
+  const pre = JSON.stringify(Bh.agentDigestView(k.list(), facts, (id) => k.profile(id)));
+  ok(real !== pre && (pre.match(/"other":true/g) || []).length > (real.match(/"other":true/g) || []).length, 'CONTROL: the pre-fix PURE agent view counts his rows as other holders (and carries lastUsedAt) — the byte-identical leg can go red', { real: (real.match(/"other":true/g) || []).length, pre: (pre.match(/"other":true/g) || []).length });
+  const rsrc = read('src/routes/browser.js');
+  const sneedle = 'k.switcherView(p.id, { forAgent: true })';
+  ok(rsrc.includes(sneedle), 'the agent switcher-read needle');
+  const Rh = M.load('src/routes/browser.js', rsrc.replace(sneedle, 'k.switcherView(p.id)'), 'agent-switcher-with-human'); Rh.setup(ctxFor(k));
+  const srvH = await serve([Rh.router]); const jH = jAt(`http://127.0.0.1:${srvH.address().port}`);
+  const rh = await jH('GET', '/api/agent/browser/backend?profile=p-all', undefined, as(sB));
+  const i0 = GETS.findIndex(([, p]) => p === '/api/agent/browser/backend?profile=p-all');
+  ok(`GET /api/agent/browser/backend?profile=p-all ${rh.status} ${JSON.stringify(rh.json)}` !== before.B[i0], 'CONTROL: a routes copy whose agent switcher read sees him answers B differently while he browses (the row "driven") — red', null);
+  srvH.close();
+  // verify r2 (the revert table): in THIS fixture p-all is already `driven` (the user took over A's tab) and p-secret's row
+  // shows no hold for an AWAY holder — so the byte-identical read above never saw a hold only HE makes, and the keeper's
+  // `forAgent` half (switcherView without his input and his holder rows) reverted whole stayed GREEN (the route's needle was
+  // the only pin). A profile only he drives, read the agent's way: identical with and without him; the user's own view
+  // sees him (the fixture makes a hold); each layer alone keeps him out; both gone ⇒ RED
+  {
+    const faLeg = async (Kmod, tag) => {
+      const kk = Kmod.create({ ...taskDeps, dataDir: DATA + '-fa-' + tag, homeDir: HOME, env: () => env, serverSetting: () => undefined, liveKeys: () => live, remoteKeys, runtime: F.createBrowserRuntime({ env }), facts: F.createBrowserFacts({ env }), log: { log() { }, warn() { }, error() { } }, install: false, now: () => clock, conversationFacts: (bk) => facts[bk] || { turn: null, name: null } });
+      await kk._facts.probeVersion();
+      const pp = kk.createProfile({ label: 'p-hand' }, { owner: { kind: 'instance', id: null } });
+      await kk.attach({ profileId: pp.id, browserKey: A, sessionId: 'sess-a', by: 'user' });
+      const agentRead = () => JSON.stringify(kk.switcherView(pp.id, { forAgent: true }).rows);
+      const before = agentRead(), userBefore = JSON.stringify(kk.switcherView(pp.id).rows);
+      const bb = await kk.browse(pp.id); kk.humanAttach({ key: HM.humanKeyFor(pp.id), viewerId: 'fa-' + tag, token: bb.fresh });
+      const during = agentRead(), userDuring = JSON.stringify(kk.switcherView(pp.id).rows);
+      try { await kk.stop(pp.id, { why: 'user' }); } catch { }
+      kk.shutdown();
+      return { same: before === during, userSees: userBefore !== userDuring };
+    };
+    const kr = await faLeg(K, 'real');
+    ok(kr.same && kr.userSees, 'a profile only HE drives: the agent\'s switcher read is byte-identical with and without him, while the user\'s own view shows his hold (the fixture really makes one)', kr);
+    const ksrc = read('src/server/browser-keeper.js');
+    const L1 = 'inputs: inputsView({ withHumans: !forAgent })', L2 = 'humans: forAgent ? [] : humanRowsOn(p.id)';
+    ok(ksrc.includes(L1) && ksrc.includes(L2), 'the two forAgent layers (the controls below remove them)');
+    const kIn = await faLeg(M.load('src/server/browser-keeper.js', ksrc.replace(L1, 'inputs: inputsView()'), 'fa-inputs-only-gone'), 'in');
+    const kHu = await faLeg(M.load('src/server/browser-keeper.js', ksrc.replace(L2, 'humans: humanRowsOn(p.id)'), 'fa-rows-only-gone'), 'hu');
+    const kBoth = await faLeg(M.load('src/server/browser-keeper.js', ksrc.replace(L1, 'inputs: inputsView()').replace(L2, 'humans: humanRowsOn(p.id)'), 'fa-both-gone'), 'both');
+    ok(kIn.same && kHu.same && !kBoth.same, 'CONTROLS: either forAgent layer alone keeps him out of the agent\'s read (two layers, each enough); with BOTH gone the agent reads his hold ("driven") — the leg above can go red', { inputsGone: kIn, rowsGone: kHu, bothGone: kBoth });
+    // …and the BELT's own `hu-` mask (r1: "a raw route tomorrow"): a raw answer carrying his key through the REAL PURE belt is
+    // masked; a belt copy without the mask hands it over — r1 added the mask with no control of its own
+    const rawHuman = { h: k.humanOf(PALL.id), note: `the user ${HALL} browses p-all` };
+    const viaBelt = JSON.stringify(B.agentAnswerView(rawHuman, { me: A, foreign: { ids: new Set(), pids: new Set() } }));
+    const bsrc2 = read('src/browser-profiles.js');
+    const mline = "    t = t.replace(HUMAN_KEY_IN_TEXT_RE, (m) => (said.has(m) ? m : MASKED_KEY)); // BROWSE YOURSELF verify r1: the user's key is nobody's to read (a proposal's reason, a raw route tomorrow)\n";
+    const Bm = M.load('src/browser-profiles.js', bsrc2.replace(mline, ''), 'belt-no-human-mask');
+    const viaNoMask = JSON.stringify(Bm.agentAnswerView(rawHuman, { me: A, foreign: { ids: new Set(), pids: new Set() } }));
+    ok(rawHuman.h && !/hu-[0-9a-f]{8}/.test(viaBelt) && bsrc2.includes(mline) && viaNoMask.includes(HALL), 'the BELT masks his key in a raw answer (`bk-********`); CONTROL a belt copy without the `hu-` mask hands it to the agent — red', { viaBelt: viaBelt.slice(0, 200) });
+  }
+  await k.closeHuman(HALL); await k.endHuman(P.id, 'released');
 }
 
 // ═══ ⑤ THE SWITCH (r3's finding) ═══════════════════════════════════════════
@@ -533,7 +665,142 @@ console.log('— ⑤ THE SWITCH: an agent the list keeps out never switches a pr
   ok(pre !== swsrc && direct[0][1] === 'switch' && direct[1][1] === 'switch' && direct[2][1] === 'proposal', 'CONTROL (j): the pre-fix rule (owner.kind === \'session\') in a copy: the list and the task list switch DIRECTLY, only the retired pre-list shape proposes — the table is RED on it', direct);
 }
 
-for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 9 })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+// ═══ ⑥ THE FRESH-KEY RULE (identity r4) ═════════════════════════════════════
+console.log('— ⑥ THE FRESH-KEY RULE (r4): a browser key is 32 bits and carries every authority; a key any store still names is never minted again (keeper registry + maps, env bindings / directory / meta, the live sessions); the ONE mint site goes through it');
+{
+  // the reproduction that opened this section (r4): a STOPPED conversation's key still on a list row, its pin, its `told`
+  // — a NEW conversation minted with the same 8 hex digits inherited its attachments, alias, pin and admission (the keeper
+  // judges by key). Before the rule the mint was `mintBrowserKey(randomBytes(4))` with no check (the profile id, the grant
+  // token and the blocked-claim id each loop for uniqueness; the key did not).
+  const OLD = 'bk-0000dead';
+  ok(k.keyNamed(OLD) === false && be.keyNamed(OLD) === false, '⑥ a key nothing names is fresh on both sides');
+  // the keeper: each place a key may be named — the whole serialized registry is scanned, so every field counts
+  const kn = (mut) => { let r; k.reshapeStore((reg) => { const snap = JSON.stringify(reg); mut(reg); r = k.keyNamed(OLD); Object.assign(reg, JSON.parse(snap)); for (const key of Object.keys(reg)) if (!(key in JSON.parse(snap))) delete reg[key]; }); return r; };
+  const pk = plant({ kind: 'instance', id: null }, 'p-fresh');
+  const places = [
+    ['a list row', (reg) => { reg.profiles.find((p) => p.id === pk.id).owner = { kind: 'only', who: [{ kind: 'session', id: OLD }] }; }],
+    ['createdBy', (reg) => { reg.profiles.find((p) => p.id === pk.id).createdBy = OLD; }],
+    ['an ephemeral record\'s owner', (reg) => { reg.profiles.push({ ...B.newProfileRecord({ id: 'bp-0000eeee', label: 'eph', dir: path.join(HOME, 'x'), now: clock }), owner: { kind: 'conversation', id: OLD }, ephemeral: true }); }],
+    ['a lease', (reg) => { reg.leases.push({ profileId: pk.id, browserKey: OLD, sessionId: 'sess-old', since: clock, input: 'agent', targetId: null }); }],
+    ['a pin', (reg) => { reg.pins[OLD] = { profileId: pk.id, origin: 'chosen', at: clock, by: 'agent' }; }],
+    ['a cap', (reg) => { reg.caps[OLD] = { cap: 2, group: null, at: clock }; }],
+    ['the told memory', (reg) => { reg.told[OLD] = { fingerprint: 'x', at: clock }; }],
+    ['a child handle', (reg) => { reg.children[OLD + '.1'] = { parent: OLD, since: clock }; }],
+    ['a blocked claim', (reg) => { reg.blocked.push({ id: 'bl-00000001', browserKey: OLD, sessionId: 'sess-old', profileId: pk.id, url: 'https://x', why: 'x', at: clock }); }],
+    ['a tabClosed mark', (reg) => { reg.tabClosed[pk.id + '|' + OLD] = clock; }],
+  ];
+  for (const [name, mut] of places) ok(kn(mut) === true, `⑥ the keeper: ${name} naming the key ⇒ named`);
+  ok(k.keyNamed(OLD) === false, '⑥ …and with every one of them undone the key is fresh again (the probe mutated a snapshot, not the store)');
+  ok(kn((reg) => { reg.pins[OLD + '.2'] = { profileId: pk.id }; }) === true && k.keyNamed(OLD + '.7') === false && kn((reg) => { reg.pins['bk-0000dea0'] = { profileId: pk.id }; }) === false && kn((reg) => { reg.profiles.find((p) => p.id === pk.id).label = 'not bk-0000deadbeef'; }) === false, '⑥ the keeper: a child form names its parent; a neighbouring key, a longer hex run and a child of an unnamed key do not');
+  // the env: the bindings, the directory entries, the scratch dir, the meta files
+  ok(be.keyNamed(OLD) === false, '⑥ the env: nothing names the key yet');
+  const ENV_DIR = path.join(DATA, 'browser-env'); fs.mkdirSync(ENV_DIR, { recursive: true });
+  for (const n of [OLD + '.json', OLD + '.profile', OLD + '.cwd', OLD + '.3.json']) { fs.writeFileSync(path.join(ENV_DIR, n), '{}'); ok(be.keyNamed(OLD) === true, `⑥ the env: a directory entry ${n} ⇒ named`); fs.unlinkSync(path.join(ENV_DIR, n)); }
+  ok(be.keyNamed(OLD) === false, '⑥ the env: the entries removed ⇒ fresh');
+  fs.mkdirSync(path.join(DATA, 'browser-profiles', OLD), { recursive: true }); ok(be.keyNamed(OLD) === true, '⑥ the env: the scratch profile directory ⇒ named'); fs.rmdirSync(path.join(DATA, 'browser-profiles', OLD));
+  fs.mkdirSync(path.join(DATA, 'session-meta'), { recursive: true }); fs.writeFileSync(path.join(DATA, 'session-meta', 'sess-old.json'), JSON.stringify({ browserKey: OLD })); ok(be.keyNamed(OLD) === true, '⑥ the env: a session-meta file naming the key ⇒ named'); fs.unlinkSync(path.join(DATA, 'session-meta', 'sess-old.json'));
+  ok(be.bindings.record('e2e00000-0000-4000-8000-oldconv00000', OLD) === true && be.keyNamed(OLD) === true, '⑥ the env: a binding ⇒ named');
+  ok(be.keyNamed('bk-0000dea0') === false && be.keyNamed(OLD + '.4') === true && be.keyNamed('not-a-key') === false, '⑥ the env: a neighbour is fresh, a child form names its parent, a non-key is never named');
+  // the PURE loop
+  const seq = (arr) => { let i = 0; return () => arr[i++] || 'bk-0000cafe'; };
+  const named = (x) => k.keyNamed(x) || be.keyNamed(x);
+  const r1 = B.freshBrowserKey({ mint: seq([OLD, OLD, 'bk-0000beef']), named });
+  ok(r1.key === 'bk-0000beef' && r1.retries === 2 && r1.exhausted === false, '⑥ freshBrowserKey skips the named candidates and says how many', r1);
+  const r2 = B.freshBrowserKey({ mint: () => OLD, named: () => true, tries: 5 });
+  ok(r2.key === OLD && r2.retries === 5 && r2.exhausted === true && B.FRESH_KEY_TRIES >= 16, '⑥ an exhausted loop returns the last candidate and SAYS so (a create is never refused for it)', r2);
+  ok(B.freshBrowserKey({ mint: seq(['bk-0000f00d']) }).key === 'bk-0000f00d', '⑥ with no rule given nothing is named');
+  let threw = false; try { B.freshBrowserKey({ mint: seq(['bk-0000f00d']), named: () => { throw new Error('store'); } }); } catch { threw = true; }
+  ok(threw, '⑥ a rule that throws is the caller\'s to catch (ws-create says so and mints unchecked)');
+  // the ONE mint site: src/server/browser-key.js `mintKey` (the .197 integration moved r4's ws-create-local rule there so
+  // the spawn AND the late key — `ensureBrowserKey` — both go through it) over the live sessions + both stores' rule
+  const bksrc = stripComments(read('src/server/browser-key.js'));
+  const mintSites = bksrc.split('\n').map((l, i) => [i + 1, l]).filter(([, l]) => /mintBrowserKey\(/.test(l));
+  ok(mintSites.length === 1 && /const rawMint = \(\) => B\.mintBrowserKey\(crypto\.randomBytes\(4\)/.test(mintSites[0][1]), '⑥ browser-key.js has ONE raw mint (`rawMint`) — the randomness in one place', mintSites);
+  ok(/B\.freshBrowserKey\(\{ mint: rawMint, named: keyNamed \}\)/.test(bksrc) && /be0\.keyNamed\(k\)/.test(bksrc) && /kp0\.keyNamed\(k\)/.test(bksrc) && /for \(const \[, es\] of sessions\) if \(es && es\._browserKey && B\.parentKeyOf\(String\(es\._browserKey\)\) === k\) return true;/.test(bksrc) && /mintFacts = \{ activeSessions, browserEnv: be, keeper: kp, log \};/.test(bksrc), '⑥ browser-key.js: THE mint goes through the fresh rule over the live sessions + the env\'s + the keeper\'s rule, with the facts the wiring registers at create()');
+  const wsrc = stripComments(read('src/ws-create.js'));
+  ok(/browserKeyFor\(\{\s*prior, resume: [^}]*fork: [^}]*\n\s*mint: browserKeyMod\.mintKey,[^\n]*\n\s*\}\)/.test(wsrc) && /const bk = B\.browserKeyFor\(\{ prior: v\.reuse, resume: true, fork: false, mint: mintKey \}\);/.test(bksrc), '⑥ the spawn (ws-create) and the late key (ensureBrowserKey) both hand THE mint to the ladder');
+  const otherMints = ['src/ws-create.js', 'src/routes/browser.js', 'src/server/browser-keeper.js', 'src/server/browser-env.js', 'src/server/browser-bindings.js', 'server.js', 'src/ws-handler.js'].map((f) => [f, (stripComments(read(f)).match(/mintBrowserKey\(|freshBrowserKey\(/g) || []).length]).filter(([, n]) => n > 0);
+  ok(otherMints.length === 0, '⑥ no other module mints a browser key or runs its own fresh rule (the census over the callers, ws-create included)', otherMints);
+  // the runtime: THE mint with a registered fact naming the first candidates skips them (the rule is wired, not only spelled)
+  {
+    const BKm = require('../src/server/browser-key.js');
+    const liveOld = new Map([['sess-live', { _browserKey: OLD }]]);
+    const Bprof = B; // the same module object browser-key.js reads `mintBrowserKey` off
+    const realMint = Bprof.mintBrowserKey; let n = 0;
+    Bprof.mintBrowserKey = (hex) => (n++ < 2 ? OLD : realMint(hex));
+    let got; try { got = BKm.mintKey({ activeSessions: liveOld, browserEnv: () => be, keeper: () => k, log: { warn() { } } }); } finally { Bprof.mintBrowserKey = realMint; }
+    ok(got !== OLD && B.isBrowserKey(got) && n === 3, '⑥ runtime: THE mint skips a key a live session still holds (two named candidates, the third taken)', { got, n });
+  }
+  // CONTROLS: (l) the loop without its rule mints the named key; (l′) browser-key.js with the raw mint restored fails the wiring pin
+  const bsrc = read('src/browser-profiles.js');
+  const nl = "    if (!named(key)) return { key, retries, exhausted: false };";
+  ok(bsrc.split(nl).length === 2, '⑥ control setup: the rule\'s one line is found once');
+  const Bm = M.load('src/browser-profiles.js', bsrc.replace(nl, "    if (true) return { key, retries, exhausted: false };"), 'no-fresh-rule');
+  const rl = Bm.freshBrowserKey({ mint: seq([OLD, 'bk-0000beef']), named });
+  ok(rl.key === OLD, 'CONTROL (l): the loop without its rule (a copy) hands out the key the store still names — RED', rl);
+  const bkRaw = read('src/server/browser-key.js').replace(/B\.freshBrowserKey\(\{ mint: rawMint, named: keyNamed \}\)/, '{ key: rawMint(), retries: 0, exhausted: false }');
+  const bkRawPath = M.write('src/server/browser-key.js', bkRaw, 'raw-mint');
+  ok(bkRaw !== read('src/server/browser-key.js') && !/B\.freshBrowserKey\(\{ mint: rawMint, named: keyNamed \}\)/.test(stripComments(fs.readFileSync(bkRawPath, 'utf8'))), 'CONTROL (l′): browser-key.js with the raw mint restored (a copy) fails the wiring pin — RED');
+  k.reshapeStore((reg) => { reg.profiles = reg.profiles.filter((p) => p.id !== pk.id); });
+}
+
+// ═══ ⑦ A TASK GROUP CHANGE RE-JUDGES AT ONCE (identity r4) ══════════════════
+console.log('— ⑦ A TASK GROUP CHANGE (r4): a conversation removed from the Task Group a profile is kept to loses the lease AT ONCE — its mediated grant revoked — not at its next command; a stopped member stays undecided; the task store\'s onChange calls the ONE hook');
+{
+  // the reproduction (r4, on the real keeper + mediator over a fake CDP upstream): admitted through T-G to a mediated
+  // profile, A's lease + grant + a Runtime.evaluate through a raw CDP client on the mediated url ALL STOOD after A left
+  // the group; only A's own next CLI verb (verb-time re-judge) ended them — an agent that sent no verb kept the browser
+  const KT = 'bk-0000aa77', KS = 'bk-0000aa78';
+  for (const b of Object.values(k.list().browsers)) if (B.isLiveBrowser(b)) { try { await k.stop(b.profileId, { why: 'user' }); } catch { /* fake */ } } // the earlier sections' browsers: this section needs the machine ceiling free
+  const sT = mkSession('sess-t', KT, 'Group chat', { rungD: true }); active.set('sess-t', sT); live.add(KT); facts[KT] = { turn: 'idle', name: 'Group chat' };
+  const sS = mkSession('sess-s2', KS, 'Stopped member', { rungD: true }); active.set('sess-s2', sS); live.add(KS); facts[KS] = { turn: 'idle', name: 'Stopped member' };
+  groupsOf.set(KT, ['T-G']); groupsOf.set(KS, ['T-G']);
+  const pg = plant({ kind: 'only', who: [{ kind: 'task', id: 'T-G' }] }, 'p-group-med', { sharing: 'instance' });
+  let r = await j('POST', '/api/agent/browser/use', { profile: 'p-group-med' }, as(sT)); ok(r.status === 200, '⑦ T (in T-G) uses the kept mediated profile', r.json);
+  r = await j('POST', '/api/agent/browser/resolve', { handle: 'p-group-med', argv: ['open', 'https://x'], wrapper: true }, as(sT)); ok(r.status === 200 && !!med._grant(pg.id, KT), '⑦ T resolves a command: the mediator holds its grant', r.json && r.json.code);
+  r = await j('POST', '/api/agent/browser/use', { profile: 'p-group-med' }, as(sS)); ok(r.status === 200, '⑦ S (in T-G) uses it too', r.json);
+  active.delete('sess-s2'); live.delete(KS); // S stops — its lease persists through the grace by design
+  // the change: T is removed from T-G (or T-G is deleted) — nothing else; the hook runs (what server.js's tasks onChange calls)
+  groupsOf.set(KT, []);
+  ok(k.leasesOn(pg.id).some((l) => l.browserKey === KT) && !!med._grant(pg.id, KT), '⑦ before the hook: T\'s lease and grant stand (the pre-fix state, reproduced)');
+  const rj = k.rejudgeAll('task-groups-changed');
+  ok(rj.profiles === 1 && rj.detached.length === 1 && rj.detached[0].browserKey === KT && rj.detached[0].profileId === pg.id, '⑦ the hook detaches exactly T', rj);
+  ok(!k.leasesOn(pg.id).some((l) => l.browserKey === KT) && !med._grant(pg.id, KT), '⑦ T\'s lease is gone and its mediated grant revoked (its connections closed 1008 lease_gone — test-browser-mediation ③)');
+  ok(k.leasesOn(pg.id).some((l) => l.browserKey === KS) && rj.undecided.includes(KS), '⑦ the STOPPED member\'s lease is kept, undecided (no running session carries its key — judged at its next command)');
+  r = await j('POST', '/api/agent/browser/resolve', { handle: 'p-group-med', argv: ['open', 'https://x'], wrapper: true }, as(sT));
+  ok(r.status === 409 && r.json.code === 'profile_changed', '⑦ T\'s next verb is refused profile_changed (its set changed under it), the lease never re-granted', r.json && r.json.code);
+  r = await j('POST', '/api/agent/browser/resolve', { handle: 'p-group-med', argv: ['open', 'https://x'], wrapper: true }, as(sT));
+  ok(r.status === 404 && r.json.code === 'not_attached', '⑦ …then not_attached (no lease to act through)', r.json && r.json.code);
+  // a change that KEEPS T (still in T-G) detaches nothing; a list with only session rows is never walked
+  groupsOf.set(KT, ['T-G']); r = await j('POST', '/api/agent/browser/use', { profile: 'p-group-med' }, as(sT)); ok(r.status === 200, '⑦ T re-admitted through T-G');
+  const rj2 = k.rejudgeAll('task-groups-changed'); ok(rj2.profiles === 1 && rj2.detached.length === 0 && k.leasesOn(pg.id).some((l) => l.browserKey === KT), '⑦ a change that keeps T detaches nothing', rj2);
+  const ps = plant({ kind: 'only', who: [{ kind: 'session', id: KT }] }, 'p-session-only');
+  r = await j('POST', '/api/agent/browser/use', { profile: 'p-session-only' }, as(sT)); ok(r.status === 200, '⑦ T uses a profile listed by its session row', r.json);
+  groupsOf.set(KT, []); const rj3 = k.rejudgeAll('task-groups-changed');
+  ok(rj3.profiles === 1 && rj3.detached.length === 1 && k.leasesOn(ps.id).some((l) => l.browserKey === KT), '⑦ a session-row list is not walked by a group change (T keeps p-session-only, loses p-group-med)', rj3);
+  // THE WIRING: server.js's tasks onChange calls the ONE hook on the keeper singleton
+  const ssrc = stripComments(read('server.js'));
+  const hook = /onChange: \(list\) => \{[\s\S]*?type: 'tasks-updated'[\s\S]*?const rj = require\('\.\/src\/server\/browser-keeper\.js'\)\.keeper\(\)\?\.rejudgeAll\?\.\('task-groups-changed'\);[\s\S]*?for \(const d of \(rj && rj\.detached\) \|\| \[\]\)[\s\S]*?sessionStatus\.pushNotice\(sessionStatusKey\(s, d\.sessionId\), \{ \.\.\.require\('\.\/src\/browser-profiles\.js'\)\.profileChangeNotice\(\{ was: label, now: '', by: 'user', handles: \[\] \}\), kind: 'browser-profile' \}\)[\s\S]*?\n  \},/;
+  ok(hook.test(ssrc), '⑦ server.js: the task store\'s onChange (after the tasks-updated broadcast) calls keeper().rejudgeAll(\'task-groups-changed\') and pushes each detached conversation the PATCH\'s own browser-profile notice (heard at its next message)');
+  ok((stripComments(read('src/server/browser-keeper.js')).match(/function rejudgeAll\(/g) || []).length === 1 && /rejudgeLeases\(p\.id, why, \{ quietUndecided: true \}\)/.test(read('src/server/browser-keeper.js')), '⑦ the keeper: ONE rejudgeAll over rejudgeLeases (the §3.1 ONE re-judge), quiet on the undecided');
+  // CONTROLS: (m) server.js without the hook line fails the wiring pin; (m′) a keeper copy that skips task-row lists leaves T's lease standing
+  const noHook = read('server.js').replace(/const rj = require\('\.\/src\/server\/browser-keeper\.js'\)\.keeper\(\)\?\.rejudgeAll\?\.\('task-groups-changed'\);/, 'const rj = null;');
+  const noHookPath = M.write('server.js', noHook, 'no-rejudge-hook');
+  ok(noHook !== read('server.js') && !hook.test(stripComments(fs.readFileSync(noHookPath, 'utf8'))), 'CONTROL (m): server.js with the hook line removed (a copy) fails the wiring pin — RED');
+  const ksrc = read('src/server/browser-keeper.js');
+  const nk = "      if (!U || U.mode !== 'only' || !U.who.some((w) => w.kind === 'task')) continue;";
+  ok(ksrc.split(nk).length === 2, '⑦ control setup: the walk\'s one filter line is found once');
+  const Km = M.load('src/server/browser-keeper.js', ksrc.replace(nk, "      if (true) continue;"), 'no-task-walk');
+  groupsOf.set(KT, ['T-G']); r = await j('POST', '/api/agent/browser/use', { profile: 'p-group-med' }, as(sT)); ok(r.status === 200, '⑦ T re-admitted for the control');
+  const km = Km.create({ ...taskDeps, dataDir: DATA, homeDir: HOME, env: () => env, serverSetting: () => undefined, liveKeys: () => live, remoteKeys, runtime: F.createBrowserRuntime({ env }), facts: F.createBrowserFacts({ env }), log: { log() { }, warn() { }, error() { } }, install: false, now: () => clock, conversationFacts: (bk) => facts[bk] || { turn: null, name: null } });
+  groupsOf.set(KT, []);
+  const rjm = km.rejudgeAll('task-groups-changed');
+  ok(rjm.profiles === 0 && rjm.detached.length === 0 && km.leasesOn(pg.id).some((l) => l.browserKey === KT), 'CONTROL (m′): a keeper copy that never walks a task-row list leaves T\'s lease standing after the group change — RED', rjm);
+  try { km.shutdown(); } catch { /* none */ }
+  const rjr = k.rejudgeAll('task-groups-changed'); ok(rjr.detached.length === 1 && !k.leasesOn(pg.id).some((l) => l.browserKey === KT), '⑦ …and the real keeper detaches it');
+}
+
+for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 16 })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
 
 try { for (const p of k.list().profiles) await k.stop(p.id).catch(() => { }); } catch { /* none */ }
 try { k.shutdown(); } catch { /* none */ }

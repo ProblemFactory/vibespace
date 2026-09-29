@@ -53,6 +53,14 @@ export function resolvedByText(by, t) {
   if (by === 'system') return t('automatically');
   if (by === 'expired') return t('expired');
   if (by === 'reply') return t('by your reply');
+  // lane-pairing ⑥: an exit's "ask me each time" item is resolved BY its outcome
+  if (by === 'allowed') return t('allowed');
+  if (by === 'denied') return t('denied');
+  if (by === 'revoked') return t('access removed');
+  if (by === 'ask-expired') return t('expired (no answer in 60 s)');
+  if (by === 'ask-changed') return t('not run — it changed after it was shown'); // verify-r6 W1
+  if (by === 'ask-over') return t('this request is over — the agent can ask again'); // verify-r6 W2: a reopened ask that is over
+  if (by === 'conversation-gone') return t('the conversation ended before you answered');
   return by && by !== 'user' ? by : '';
 }
 
@@ -62,6 +70,22 @@ const REPLY_SNIPPET = 80; // chars of "You replied: …" on a resolved row (the 
 // gets ONE button doing it — the client maps the TYPE to a verb it owns.
 const actionBtnHtml = (i, t) => (i && i.action && i.action.type === 'reset-credit' && i.action.accountKey
   ? `<button class="ut-act ut-action-reset" title="${escHtml(t('Use a reset credit…'))}">${UI_ICONS.refresh || ''}</button>` : '');
+/** The command an exit ask names, in mono, then its ANSWER — Allow / Deny on their own line — and the rule (open items
+ *  only). lane-pairing ⑥: answered right here (the popup, the mini inbox and the phone paint this row). naive-user
+ *  N-ask: the two buttons rode the floated `.ut-actions` bar — at 35 % opacity until the row is hovered (a 60-second
+ *  decision whose Allow read as disabled) and, on the phone, six 36-px buttons wide, crushing the question into a
+ *  one-word column ("Sessi / on 2"). */
+// verify-r4 F4: THE WHOLE COMMAND, as it runs — the item's `detail` (exit-proxy files the whole command there; the
+// store keeps 8 000 chars, a command is ≤ 4 096 bytes), line breaks kept, ALL of it above Allow (no inner scroll box —
+// a macOS overlay scrollbar is invisible until scrolled, so a clipped box reads as the whole command). Pre-fix the row showed
+// `action.cmd` — the head cut at 120 characters with every line break turned into a space — clipped to three lines
+// (overflow hidden, no mark), with the whole command in a collapsed "detail" BELOW Allow: a three-line command whose
+// last line was `curl … | sh` read "echo … curl" above an Allow button (reproduced).
+const exitCmdOf = (i) => (i && typeof i.detail === 'string' && i.detail ? i.detail : String((i && i.action && i.action.cmd) || ''));
+const exitAskHtml = (i, t) => (i && i.action && i.action.type === 'exit-run-ask'
+  ? `<pre class="ut-exit-cmd">${escHtml(exitCmdOf(i))}</pre>`
+    + (i.action.askId ? `<div class="ut-exit-answer"><button type="button" class="ut-act ut-action-exit ut-exit-allow" data-answer="allow">${escHtml(t('Allow'))}</button><button type="button" class="ut-act ut-action-exit ut-exit-deny" data-answer="deny">${escHtml(t('Deny'))}</button></div>` : '')
+    + `<div class="ut-exit-note">${escHtml(t('Nothing runs until you answer. After 60 s it is refused.'))}</div>` : '');
 
 /** The static parts of a row for `entry` + the signature patchRow compares.
  *  The LIVE half (enabled / tooltip of the reply controls) is NOT in here —
@@ -72,7 +96,8 @@ function partsOf(entry, ctx) {
   const resolved = !!entry.resolved;
   const notice = !!entry.notice && !resolved;
   const tail = !!entry.tail;
-  const cls = 'ut-item' + (notice ? ' ut-item-notice' : '') + (resolved ? ' ut-item-resolved' : '') + (resolved && !tail ? ' ut-item-inplace' : '');
+  // a CLEARED item ("Clear content…", 2026-09-28): its words are the cleared sentence (ctx.wordsOf) — dimmed, in its place
+  const cls = 'ut-item' + (notice ? ' ut-item-notice' : '') + (resolved ? ' ut-item-resolved' : '') + (resolved && !tail ? ' ut-item-inplace' : '') + (i && i.clearedAt ? ' ut-item-cleared' : '');
   const words = ctx.wordsOf(i);
   const detail = ctx.detailOf(i);
   const rs = !resolved && ctx.replyState ? ctx.replyState(i) : { show: false };
@@ -80,7 +105,8 @@ function partsOf(entry, ctx) {
     ? '<span class="ut-dot" data-urgency=""></span>'
     : `<span class="ut-dot" data-urgency="${notice ? '' : escHtml(i.urgency || 'normal')}" title="${escHtml(notice ? t('notice') : (i.urgency || 'normal'))}"></span>`;
   // Detail rides behind a collapsed expander (up to 2000 chars of agent context).
-  const detailHtml = detail ? `<details class="ut-detail-exp"><summary>${escHtml(t('detail'))}</summary><div class="ut-detail">${escHtml(detail)}</div></details>` : '';
+  // (an exit ask's detail IS its command — shown whole above its Allow / Deny, never again folded below them)
+  const detailHtml = detail && !(i.action && i.action.type === 'exit-run-ask') ? `<details class="ut-detail-exp"><summary>${escHtml(t('detail'))}</summary><div class="ut-detail">${escHtml(detail)}</div></details>` : '';
   // OPTION CHIPS (design-user-inbox-reply D3a): one click = a reply whose text
   // IS the label. Addressed by INDEX — the label never rides an attribute.
   const opts = !resolved && rs.show && Array.isArray(i.options) && i.options.length
@@ -99,7 +125,7 @@ function partsOf(entry, ctx) {
     meta = (notice ? `<span class="ut-sess">${escHtml(ctx.nameFor(i.sessionKey, [i]))}</span> · ` : '')
       + escHtml(agoText(i.createdAt, t)) + (exp ? ' · ' + escHtml(exp) : '');
   }
-  const body = `<div class="ut-text">${escHtml(words)}</div>${detailHtml}${opts}<div class="ut-meta">${meta}</div>`;
+  const body = `<div class="ut-text">${escHtml(words)}</div>${!resolved ? exitAskHtml(i, t) : ''}${detailHtml}${opts}<div class="ut-meta">${meta}</div>`;
   // ⤢ = THE For-you window ON this item (design-user-inbox-reply §9: long text at full width, reply / done there)
   const view = `<button class="ut-act ut-view" title="${escHtml(t('Open in the For-you window'))}" aria-label="${escHtml(t('Open in the For-you window'))}">⤢</button>`;
   const actions = resolved

@@ -1511,7 +1511,7 @@ console.log('— ⑫c r3 WIRING: both halves, and the placement hint that is nev
   // r3 ③: the placement hint is a FAMILY guess for the pool chooser, never a command
   ok(/data\._placementModelHint = data\.model \|\| instDefault\('defaultModel'\) \|\| null;/.test(wc),
     'r3 ③: the pooled-spawn chooser gets a placement hint when the ladder commands nothing');
-  ok(/chooseMember: \(\) => poolChooser\?\.\([^)]*\{ model: data\.model \|\| data\._placementModelHint \|\| null \}\)/.test(wc),
+  ok(/chooseMember: \((?:poolId(?:, how = \{\})?)?\) => poolChooser\?\.\([^)]*\{ model: data\.model \|\| data\._placementModelHint \|\| null(, \.\.\.\(data\._poolPin(?: && !how\.forDefault)? \? \{ pin: data\._poolPin\.memberId \} : \{\}\))? \}\)/.test(wc), // (+ the conversation's pool pin, 2026-09-28 — the chooser starts a pinned resume on its pin)
     '…at the chooser call site, and nowhere else');
   ok(!/model: data\._placementModelHint/.test(wc.replace(/chooseMember[\s\S]{0,200}?\n/, ''))
     && !/CODEX_WEBUI_MODEL = data\._placementModelHint/.test(wc)

@@ -11,10 +11,18 @@
  *     author:      { id, name, isSelf, isBot },
  *     text,                        // ALWAYS plain text — the only thing v1 renders
  *     mentions:    [{ id, name }], // RESOLVED names, never raw @_user_N placeholders
- *     attachments: [{ id, name, bytes, mime, placeholder? }],
- *     replyTo, threadKey,
+ *     attachments: [{ id, name, bytes, mime, placeholder?, cid?, role? }],
+ *     replyTo, threadKey,          // the record's PLACE: what it answers, which thread it is in
  *     raw:         { bounded, adapter-specific, NEVER rendered },
- *     blocks?:     [ the TYPED render tree — OPTIONAL, see below ] }
+ *     blocks?:     [ the TYPED render tree — OPTIONAL, see below ],
+ *     root?:       the thread's ROOT message id when the vendor names one (2026-09-28) }
+ *
+ * Reactions and a vendor's thread stats are NOT on this line: they are facts
+ * about a message that change after it was written, so they live in the
+ * conversation's append-only SIDE log and are folded at read time — their
+ * schema (`validateReactions`, `validateSide`, `sideKey`) and bounds are here,
+ * the fold in src/channel-reactions.js, the thread arithmetic in
+ * src/channel-thread.js (lane channel-threads).
  *
  * THE RENDER TREE (design §25, 2026-09-27 — the owner: "设计一个不同 connector
  * 的 raw message to HTML 的接口"): `blocks` is a CLOSED, typed tree an adapter
@@ -84,8 +92,12 @@
 
 /** Every field a ChannelRecord carries, in its declared order. */
 const RECORD_FIELDS = ['id', 'convId', 'adapterId', 'vendorId', 'at', 'author', 'text', 'mentions', 'attachments', 'replyTo', 'threadKey', 'raw'];
-/** The OPTIONAL fields, after the declared ones, present only when set (§25). */
-const OPTIONAL_FIELDS = ['blocks'];
+/** The OPTIONAL fields, after the declared ones, present only when set (§25;
+ *  `root` since lane channel-threads, 2026-09-28 — the ROOT MESSAGE of the
+ *  record's thread / reply chain when the vendor names one and it is not this
+ *  record). A record stored before either field existed carries neither, and
+ *  every reader treats absence as "not said". */
+const OPTIONAL_FIELDS = ['blocks', 'root'];
 
 /** Bounds. A vendor body is peer-controlled and is synced to every client. */
 const MAX_TEXT = 64 * 1024;
@@ -109,19 +121,37 @@ const FRAME_TAGS = ['system-reminder', 'persisted-output', 'task-notification',
 // before the `>` failed) — at INGEST and again at every READ of the page that holds it (the judge runs per page,
 // per broadcast, in every client: a page of 50 such records was ~90 s on the event loop). `[^<>]*` already
 // covers the whitespace, so the trailing `\s*` matched nothing the shorter form does not.
-const FRAME_TAG_RE = new RegExp(`<\\/?\\s*(${FRAME_TAGS.join('|')}|vibespace-[a-z0-9-]+)(\\s[^<>]*)?>`, 'gi');
+//
+// THE FOLDER (lane lark-search-poll verify r3 — r2's frame-inert TEXT gap): the characters a frame match LOOKS THROUGH.
+// A tag split by a character nobody sees — an invisible one (zero-width space / joiner / non-joiner, word joiner, BOM,
+// soft hyphen, a variation selector, a tag character, a filler: every Default_Ignorable_Code_Point, which holds the
+// bidi embeddings / overrides / isolates / marks too), a control (a NUL, an ESC, a C1 control) or a line / paragraph
+// separator — is a LIVE tag to any reader that drops or ignores it. So a run of them may sit between any two characters
+// of a tag (and around its `<`, `/` and before its `>`), and the neutered name carries none of them. The ASCII
+// whitespace controls (tab, LF, VT, FF, CR) stay whitespace. ONE folder for names and text: `peerName` removes its
+// display set and then takes `peerText` — this same check. Only a MATCHED tag changes: a body keeps its own bidi,
+// joiners and layout everywhere else. After a name the run may not also be whitespace (U+FEFF, U+2028, U+2029 are
+// both): the attribute run's `\s` takes those, so no two quantifiers share a character (linear — the lesson above).
+const FRAME_FOLD = '\\p{Default_Ignorable_Code_Point}\\x00-\\x08\\x0E-\\x1F\\x7F-\\x9F\\u{2028}\\u{2029}';
+const FOLD = `[${FRAME_FOLD}]`;
+const FOLD_G = new RegExp(FOLD, 'gu');
+const lookThrough = (name) => [...name].join(`${FOLD}*`);
+const FRAME_NAMES = `${FRAME_TAGS.map(lookThrough).join('|')}|${lookThrough('vibespace-')}${FOLD}*[a-z0-9-](?:${FOLD}*[a-z0-9-])*`;
+const FRAME_HEAD = `<(?:${FOLD}*\\/)?[\\s${FRAME_FOLD}]*`;
+const FRAME_TAIL = `(?:(?!\\s)${FOLD})*`;
+const FRAME_TAG_RE = new RegExp(`${FRAME_HEAD}(${FRAME_NAMES})${FRAME_TAIL}(\\s[^<>]*)?>`, 'giu');
 
 /** `<system-reminder>` becomes `[system-reminder]`. The words stay; the frame goes. */
 function inertFrames(text) {
   if (typeof text !== 'string' || !text) return '';
-  return text.replace(FRAME_TAG_RE, (m, name) => '[' + String(name).trim() + ']');
+  return text.replace(FRAME_TAG_RE, (m, name) => '[' + String(name).replace(FOLD_G, '').trim() + ']');
 }
 
 /** Does this text still carry a LIVE frame marker? (the suite's own predicate,
  *  so "inert" is checked by the same rule that produces it) */
 function carriesFrame(text) {
   if (typeof text !== 'string') return false;
-  return new RegExp(FRAME_TAG_RE.source, 'i').test(text);
+  return new RegExp(FRAME_TAG_RE.source, 'iu').test(text);
 }
 
 /** ONE LINE of a text that is neutered LINE BY LINE and joined again (lane
@@ -134,10 +164,10 @@ function carriesFrame(text) {
  *  module's own predicate. The complete tags go first (`inertFrames`), then a
  *  dangling opener loses its `<` (`[system-reminder`): no line can leave an
  *  opener behind, so no join can complete one. */
-const FRAME_OPEN_RE = new RegExp(`<(\\/?\\s*(?:${FRAME_TAGS.join('|')}|vibespace-[a-z0-9-]+))(?=(?:\\s[^<>]*)?$)`, 'gi');
+const FRAME_OPEN_RE = new RegExp(`<(${FRAME_HEAD.slice(1)}(?:${FRAME_NAMES}))(?=${FRAME_TAIL}(?:\\s[^<>]*)?$)`, 'giu');
 function inertFrameLine(line) {
   if (typeof line !== 'string' || !line) return '';
-  return inertFrames(line).replace(FRAME_OPEN_RE, (m, name) => '[' + name);
+  return inertFrames(line).replace(FRAME_OPEN_RE, (m, name) => '[' + name.replace(FOLD_G, ''));
 }
 
 const str = (v, max) => {
@@ -150,16 +180,47 @@ const str = (v, max) => {
  *  3). Every field a vendor or a stranger fills goes through this, not `str`. */
 const peerText = (v, max) => inertFrames(str(v, max));
 
+/**
+ * THE ONE DOOR FOR A NAME (lane lark-search-poll verify r2, item 3 — it was the channel registry's `peerName`, written
+ * by verify r1 for a described single chat's name alone). Every NAME or TITLE a vendor or a stranger chose — an author's
+ * display name, a mention, an attachment's file name, a conversation's title and its participants, a reactor, a
+ * reaction's label — reaches the agent's list / read answers and every surface the owner reads, so it takes rule 3
+ * AND the display hygiene a name needs: bound first; bidi overrides / embeddings / isolates and the invisible characters
+ * (zero-width space, word joiner, BOM, soft hyphen) REMOVED — an RLO reverses the words drawn after it
+ * (`invoice\u202Efdp.exe` reads as a PDF), an all-invisible name reads as nobody — BEFORE the frame check (an invisible
+ * character splitting a tag can never hide it from `peerText`); controls and line breaks folded to spaces (a terminal
+ * escape, a NUL, a forged log line); `peerText`; whitespace collapsed, trimmed, bounded; nothing visible left ⇒ null.
+ * ZWJ / ZWNJ (emoji sequences, Persian and Indic names) and the LRM / RLM marks stay. A number is a name too (a vendor
+ * that sends one); anything else is none. Message TEXT never goes through here (a body keeps its own bidi and layout).
+ */
+const NAME_INVISIBLE_RE = /[\u202A-\u202E\u2066-\u2069\u200B\u2060\uFEFF\u00AD]/g;
+const NAME_CONTROL_RE = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]+/g;
+function peerName(v, max) {
+  const s0 = typeof v === 'string' ? v : (typeof v === 'number' && Number.isFinite(v) ? String(v) : null);
+  if (s0 === null) return null;
+  const s = peerText(s0.slice(0, max * 4).replace(NAME_CONTROL_RE, ' ').replace(NAME_INVISIBLE_RE, ''), max * 4).replace(/\s+/g, ' ').trim().slice(0, max).trim();
+  return s || null;
+}
+
 // ── THE BLOCK SCHEMA (design §25) ─────────────────────────────────────────
 /** Block kinds — CLOSED. p = a paragraph of inline runs; quote / sig = foldable
  *  (their own inner blocks); banner = one dim system line from the sender's
  *  tool ("Please reply above this line"); code = preformatted text; img / file
  *  = an attachment BY ID (the bytes only ever through our route); card = a
  *  vendor card (title + lines); sys = a system record's sentence. */
-const BLOCK_KINDS = Object.freeze(['p', 'quote', 'sig', 'banner', 'code', 'img', 'file', 'card', 'sys']);
+const BLOCK_KINDS = Object.freeze(['p', 'quote', 'sig', 'banner', 'code', 'img', 'file', 'card', 'sys', 'hr']);
 /** Inline run kinds — CLOSED. t = text, a = a link {href, text}, at = a
- *  mention {id, name}, code = inline code, b = bold. */
-const RUN_KINDS = Object.freeze(['t', 'a', 'at', 'code', 'b']);
+ *  mention {id, name}, code = inline code, b = bold, i = italic (lane
+ *  channel-rich, 2026-09-28: a Lark `<i>` / `*x*` / an italic post style is a
+ *  run, never the literal markup). `hr` (above) is a rule between blocks — a
+ *  Lark card's / post's `hr`. A `card` may carry inner `blocks` (its elements
+ *  as paragraphs, notes and rules) beside the older `lines`. */
+const RUN_KINDS = Object.freeze(['t', 'a', 'at', 'code', 'b', 'i']);
+/** What an attachment IS to the message (lane channel-rich): `body` = the
+ *  message's own formatted body (a mail's text/html part) — the window draws
+ *  it in the sandboxed mail frame, never as a file chip, and an agent never
+ *  sees it. Absent = an ordinary attachment. CLOSED. */
+const ATTACHMENT_ROLES = Object.freeze(['body']);
 /** What a `sys` block is ABOUT — a closed vocabulary the client words in the
  *  device's language (the block's own `text` is the fallback). */
 const SYS_WHATS = Object.freeze(['system', 'sticker', 'share-chat', 'share-user', 'forward', 'deleted', 'location', 'call', 'calendar', 'todo', 'card', 'unknown']);
@@ -231,7 +292,7 @@ function validateBlocks(blocks) {
         if (href && !txt) s(href, 'a.href');
         // A link whose target is not http(s)/mailto is WORDS, never a link.
         out.push(href ? { k: 'a', href, text: txt || href } : { k: 't', text: txt || s(typeof r.href === 'string' ? r.href : '', 'a.href') });
-      } else if (r.k === 'at') out.push({ k: 'at', id: s(r.id, 'at.id').slice(0, 256), name: s(r.name, 'at.name').slice(0, 200) });
+      } else if (r.k === 'at') out.push({ k: 'at', id: s(r.id, 'at.id').slice(0, 256), name: peerName(s(r.name, 'at.name'), 200) || '' });
       else out.push({ k: r.k, text: s(r.text, `${r.k}.text`) });
     }
     return out;
@@ -260,8 +321,12 @@ function validateBlocks(blocks) {
         case 'card': {
           const lines = Array.isArray(b.lines) ? b.lines : [];
           if (lines.length > BLOCK_LIMITS.cardLines) refuse('bad-field', `a card carries at most ${BLOCK_LIMITS.cardLines} lines`);
-          out.push({ k: 'card', title: s(b.title, 'card.title').slice(0, 400), lines: lines.map((x) => s(x, 'card.line')) }); break;
+          const o = { k: 'card', title: s(b.title, 'card.title').slice(0, 400), lines: lines.map((x) => s(x, 'card.line')) };
+          // lane channel-rich: a card's ELEMENTS as inner blocks (a nested tree, bounded like a quote's)
+          if (b.blocks !== undefined && b.blocks !== null) o.blocks = walk(b.blocks, depth + 1);
+          out.push(o); break;
         }
+        case 'hr': out.push({ k: 'hr' }); break;
         case 'sys': { const o = { k: 'sys', text: s(b.text, 'sys.text').slice(0, 2000) }; if (b.what) { if (!SYS_WHATS.includes(b.what)) refuse('bad-field', `unknown sys.what ${JSON.stringify(b.what)}`); o.what = b.what; } out.push(o); break; }
         default: refuse('unknown-kind', `unknown block kind ${JSON.stringify(b.k)}`);
       }
@@ -332,19 +397,25 @@ function makeRecord(input, opts = {}) {
   // EVERY one of these is peer-controlled and every one reaches an agent
   // prompt (§7.5 renders `from <author>`), so every one takes rule 3.
   const a = r.author && typeof r.author === 'object' ? r.author : {};
-  const author = { id: peerText(a.id, 256), name: peerText(a.name, 200), isSelf: !!a.isSelf, isBot: !!a.isBot };
+  const author = { id: peerText(a.id, 256), name: peerName(a.name, 200) || '', isSelf: !!a.isSelf, isBot: !!a.isBot };
 
   const mentions = (Array.isArray(r.mentions) ? r.mentions : []).slice(0, MAX_MENTIONS)
-    .map((m) => ({ id: peerText(m && m.id, 256), name: peerText(m && m.name, 200) }));
+    .map((m) => ({ id: peerText(m && m.id, 256), name: peerName(m && m.name, 200) || '' }));
   const attachments = (Array.isArray(r.attachments) ? r.attachments : []).slice(0, MAX_ATTACHMENTS)
     .map((x) => {
-      const out = { id: peerText(x && x.id, 256), name: peerText(x && x.name, 256), bytes: Number.isFinite(Number(x && x.bytes)) ? Number(x.bytes) : null, mime: peerText(x && x.mime, 128) };
+      const out = { id: peerText(x && x.id, 256), name: peerName(x && x.name, 256) || '', bytes: Number.isFinite(Number(x && x.bytes)) ? Number(x.bytes) : null, mime: peerText(x && x.mime, 128) };
       // R3 (2026-09-26): the token the adapter wrote into `text` FOR this
       // attachment (Lark's "[image]") — the window drops one occurrence once
       // the picture is drawn; `text` itself never changes. Present only when
       // the adapter declared one (every older record keeps the 4-field shape).
       const ph = peerText(x && x.placeholder, 32);
       if (ph) out.placeholder = ph;
+      // lane channel-rich (2026-09-28): a mail part's Content-ID (a `cid:` picture
+      // the formatted body names) and its ROLE (`body` = the message's own
+      // text/html) — present only when the adapter declared them
+      const cid = peerText(x && x.cid, 256).replace(/[\s<>"']/g, '');
+      if (cid) out.cid = cid;
+      if (x && ATTACHMENT_ROLES.includes(x.role)) out.role = x.role;
       return out;
     });
 
@@ -357,12 +428,24 @@ function makeRecord(input, opts = {}) {
   const raw = boundRaw(r.raw);
   if ('synthetic' in raw && typeof raw.synthetic !== 'boolean') throw new Error('channel-record: raw.synthetic must be a boolean (declare a minted key, or omit it)');
 
+  // THE RECORD'S PLACE (lane channel-threads, 2026-09-28): `replyTo` = the
+  // message this one ANSWERS, `threadKey` = the THREAD it belongs to, `root` =
+  // the thread's root message when the vendor names one. All three are IDS
+  // (never prose — `str`, not `peerText`) and bounded like `vendorId`.
+  //  R1 a self-reference is dropped (a scraped or replayed page cannot make a
+  //     record its own parent or its own root);
+  //  R2 a `root` with neither a thread nor a parent is a contradiction — dropped.
+  let replyTo = str(r.replyTo, 512) || null;
+  if (replyTo === vendorId) replyTo = null;
+  const threadKey = str(r.threadKey, 512) || null;
+  let root = str(r.root, 512) || null;
+  if (root === vendorId || (!threadKey && !replyTo)) root = null;
   const out = {
     id: str(r.id, 256) || `${adapterId}:${convId}:${vendorId}`,
     convId, adapterId, vendorId, at,
     author, text, mentions, attachments,
-    replyTo: str(r.replyTo, 512) || null,
-    threadKey: str(r.threadKey, 512) || null,
+    replyTo,
+    threadKey,
     raw,
   };
   // THE RENDER TREE (§25) — optional, validated here; an invalid one is left
@@ -372,7 +455,184 @@ function makeRecord(input, opts = {}) {
     const v = validateBlocks(r.blocks);
     if (v.ok && v.blocks.length) out.blocks = v.blocks;
   }
+  if (root) out.root = root;
   return out;
+}
+
+// ── REACTIONS + SIDE RECORDS (lane channel-threads, 2026-09-28) ─────────────
+// A reaction is a MUTABLE fact about an IMMUTABLE message: the message line is
+// never rewritten, the facts land in the conversation's append-only SIDE log
+// (src/channel-store.js `appendSide`) and are FOLDED at read time
+// (src/channel-reactions.js `foldReactions`). Both shapes are peer-written —
+// an emoji name, a custom emoji id, an actor's display name all come from a
+// stranger — so their schema and their BOUNDS live here, beside the record,
+// and every bound is judged BEFORE anything is looked up (a 64 KiB "emoji
+// name" from a hostile event is refused by its length, never regex-searched).
+
+/** At most this many reactions (distinct keys) on one message. */
+const REACTIONS_MAX = 64;
+/** At most this many reactors kept per key (`by`); the rest is a count. */
+const REACTION_BY_MAX = 20;
+/** A reaction KEY: a vendor emoji NAME (Lark `THUMBSUP`, Slack
+ *  `thumbsup::skin-tone-6`) or our own id for a unicode glyph — an
+ *  IDENTIFIER, never prose. One character class, a bounded quantifier, anchored
+ *  (linear by construction; the verify-r3 lesson above FRAME_TAG_RE). */
+const REACTION_KEY_MAX = 64;
+const REACTION_KEY_RE = /^[A-Za-z0-9_+\-:.]{1,64}$/;
+/** A glyph is ONE emoji cluster drawn as TEXT: ≤ 16 UTF-16 units, only the
+ *  Emoji / Emoji_Component classes + ZWJ + VS16 (+ the keycap mark), and at
+ *  least one character past ASCII (a run of digits is a number, not a glyph). */
+const REACTION_GLYPH_MAX = 16;
+const REACTION_GLYPH_RE = /^[\p{Emoji}\p{Emoji_Component}\u200d️⃣]{1,16}$/u;
+const REACTION_LABEL_MAX = 40;
+const REACTION_COUNT_MAX = 1e6;
+/** A custom emoji picture is served by OUR route and named by our key — a
+ *  vendor URL is refused by the alphabet (no `/`, no scheme). */
+const CUSTOM_IMAGE_MAX = 128;
+const CUSTOM_IMAGE_RE = /^emoji:[A-Za-z0-9_+\-:.]{1,64}$/;
+/** The side log's closed schema: `rx` = a reaction fact, `th` = a vendor's
+ *  thread stats. `edit` is the NAMED next occupant (vendor-flagged edits ride
+ *  the same log later) — nobody invents a second mechanism. */
+const SIDE_KINDS = Object.freeze(['rx', 'th']);
+const SIDE_FORMS = Object.freeze(['delta', 'snapshot']);
+const SIDE_OPS = Object.freeze(['add', 'remove']);
+const SIDE_SOURCES = Object.freeze(['event', 'list', 'history', 'self', 'agent']);
+/** One side line, after JSON.stringify. A snapshot past it is TRUNCATED to
+ *  the bounds (`truncated: true`), never refused — a vendor answer is still
+ *  the truth for the counts. */
+const SIDE_LINE_MAX_BYTES = 8 * 1024;
+const SIDE_ID_MAX = 256;
+const THREAD_USERS_MAX = 8;
+
+/** Is `k` a reaction key? Length FIRST (a 64 KiB key never reaches the regex). */
+function isReactionKey(k) { return typeof k === 'string' && k.length > 0 && k.length <= REACTION_KEY_MAX && REACTION_KEY_RE.test(k); }
+/** Is `g` a drawable glyph (text, one emoji cluster)? */
+function isReactionGlyph(g) {
+  if (typeof g !== 'string' || !g || g.length > REACTION_GLYPH_MAX) return false;
+  if (!REACTION_GLYPH_RE.test(g)) return false;
+  for (let i = 0; i < g.length; i++) if (g.charCodeAt(i) > 0x7f) return true;
+  return false;
+}
+const intIn = (v, lo, hi) => { const n = Number(v); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, Math.floor(n))) : null; };
+const idOf = (v) => (v === null || v === undefined ? '' : str(v, SIDE_ID_MAX));
+
+/**
+ * VALIDATE (and clean) a message's READ-SHAPE reaction list — the list the
+ * engine attaches at read time (never stored on the message line):
+ * `[{key, glyph, label, count, mine, by:[{id, name}], byTruncated, customImage}]`.
+ * An entry that breaks a rule is REFUSED BY NAME and left out (never drawn):
+ * `bad-key` (outside the alphabet / too long), `bad-glyph` (not one emoji
+ * cluster — a glyph that is prose), `bad-image` (a custom image that is not
+ * OUR route's key), `bad-entry`, `too-many` (past REACTIONS_MAX).
+ * `byTruncated` is RECOMPUTED (`count − by.length`), never trusted.
+ * → `{ok:true, reactions, refused:[{index, code}]}` | `{ok:false, code:'not-an-array'}`.
+ */
+function validateReactions(list) {
+  if (!Array.isArray(list)) return { ok: false, code: 'not-an-array', error: 'reactions must be an array', reactions: [], refused: [] };
+  const out = [];
+  const refused = [];
+  const seen = new Set();
+  for (let i = 0; i < list.length; i++) {
+    const x = list[i];
+    if (out.length >= REACTIONS_MAX) { refused.push({ index: i, code: 'too-many' }); continue; }
+    if (!x || typeof x !== 'object') { refused.push({ index: i, code: 'bad-entry' }); continue; }
+    if (!isReactionKey(x.key)) { refused.push({ index: i, code: 'bad-key' }); continue; }
+    if (seen.has(x.key)) { refused.push({ index: i, code: 'bad-entry' }); continue; }
+    let glyph = null;
+    if (x.glyph !== null && x.glyph !== undefined && x.glyph !== '') {
+      if (!isReactionGlyph(x.glyph)) { refused.push({ index: i, code: 'bad-glyph' }); continue; }
+      glyph = x.glyph;
+    }
+    let customImage = null;
+    if (x.customImage !== null && x.customImage !== undefined && x.customImage !== '') {
+      if (typeof x.customImage !== 'string' || x.customImage.length > CUSTOM_IMAGE_MAX || !CUSTOM_IMAGE_RE.test(x.customImage)) { refused.push({ index: i, code: 'bad-image' }); continue; }
+      customImage = x.customImage;
+    }
+    // `self: true` marks the ACCOUNT OWNER's own entry (the fold knows the token's id) — the who-list says "you", never the id
+    const by = (Array.isArray(x.by) ? x.by : []).slice(0, REACTION_BY_MAX).map((b) => ({ id: peerText(b && b.id, SIDE_ID_MAX), name: peerName(b && b.name, 200) || '', ...(b && b.self === true ? { self: true } : {}) })).filter((b) => b.id || b.name);
+    const count = Math.max(by.length, intIn(x.count, 0, REACTION_COUNT_MAX) || 0);
+    seen.add(x.key);
+    out.push({ key: x.key, glyph, label: peerName(x.label === undefined || x.label === null ? x.key : x.label, REACTION_LABEL_MAX) || x.key, count, mine: x.mine === true, by, byTruncated: Math.max(0, count - by.length), customImage });
+  }
+  return { ok: true, reactions: out, refused };
+}
+
+/**
+ * VALIDATE (and bound) ONE SIDE RECORD before it is appended — every
+ * peer-written field judged by its LENGTH before anything reads it:
+ *   {k:'rx', msg, at, form:'delta', op, key, actor:{id, name}, rid?, src}
+ *   {k:'rx', msg, at, form:'snapshot', src, list:[{key, count, by:[ids], rids:[ids]}], truncated?}
+ *   {k:'th', msg, at, src, count, lastAt, replyUsers:[ids]}
+ * A snapshot past the bounds (> REACTIONS_MAX keys, > REACTION_BY_MAX ids per
+ * key, a line past SIDE_LINE_MAX_BYTES) is TRUNCATED with `truncated: true`;
+ * anything else broken is REFUSED by name (`bad-kind`, `bad-msg`, `bad-at`,
+ * `bad-form`, `bad-op`, `bad-key`, `bad-source`, `bad-actor`, `too-large`).
+ * → `{ok:true, side}` (a NEW object holding only the declared fields) | `{ok:false, code, error}`.
+ */
+function validateSide(input) {
+  const s = input && typeof input === 'object' ? input : {};
+  const no = (code, error) => ({ ok: false, code, error });
+  if (!SIDE_KINDS.includes(s.k)) return no('bad-kind', `side kind must be one of ${SIDE_KINDS.join('|')}`);
+  if (typeof s.msg !== 'string' || !s.msg || s.msg.length > 512) return no('bad-msg', 'a side record names its message (≤ 512 characters)');
+  const at = Number(s.at);
+  if (!Number.isFinite(at) || at <= 0) return no('bad-at', 'at must be an epoch ms');
+  if (!SIDE_SOURCES.includes(s.src)) return no('bad-source', `src must be one of ${SIDE_SOURCES.join('|')}`);
+  let out;
+  if (s.k === 'th') {
+    const users = (Array.isArray(s.replyUsers) ? s.replyUsers : []).slice(0, REACTION_BY_MAX).map(idOf).filter(Boolean);
+    const lastAt = Number(s.lastAt);
+    out = { k: 'th', msg: s.msg, at, src: s.src, count: intIn(s.count, 0, REACTION_COUNT_MAX) || 0, lastAt: Number.isFinite(lastAt) && lastAt > 0 ? lastAt : null, replyUsers: users };
+  } else if (s.form === 'delta') {
+    if (!SIDE_OPS.includes(s.op)) return no('bad-op', `op must be ${SIDE_OPS.join('|')}`);
+    if (!isReactionKey(s.key)) return no('bad-key', `a reaction key is at most ${REACTION_KEY_MAX} characters of [A-Za-z0-9_+-:.]`);
+    const a = s.actor && typeof s.actor === 'object' ? s.actor : null;
+    const actor = a ? { id: peerText(a.id, SIDE_ID_MAX), name: peerName(a.name, 200) || '' } : null;
+    if (!actor || !actor.id) return no('bad-actor', 'a reaction delta names its actor');
+    out = { k: 'rx', msg: s.msg, at, form: 'delta', op: s.op, key: s.key, actor, src: s.src };
+    if (s.rid !== undefined && s.rid !== null && s.rid !== '') out.rid = idOf(s.rid);
+  } else if (s.form === 'snapshot') {
+    const raw = Array.isArray(s.list) ? s.list : [];
+    let truncated = s.truncated === true || raw.length > REACTIONS_MAX;
+    const list = [];
+    const seen = new Set();
+    for (const x of raw.slice(0, REACTIONS_MAX)) {
+      if (!x || typeof x !== 'object' || !isReactionKey(x.key) || seen.has(x.key)) continue;   // a key outside the alphabet is never kept (refused, never drawn)
+      seen.add(x.key);
+      const byAll = Array.isArray(x.by) ? x.by : [];
+      if (byAll.length > REACTION_BY_MAX) truncated = true;
+      const by = byAll.slice(0, REACTION_BY_MAX).map(idOf).filter(Boolean);
+      const ridsAll = Array.isArray(x.rids) ? x.rids : [];
+      const rids = ridsAll.slice(0, REACTION_BY_MAX).map((v) => (v === null || v === undefined ? '' : idOf(v)));
+      list.push({ key: x.key, count: Math.max(by.length, intIn(x.count, 0, REACTION_COUNT_MAX) || 0), by, rids });
+    }
+    out = { k: 'rx', msg: s.msg, at, form: 'snapshot', src: s.src, list };
+    if (truncated) out.truncated = true;
+  } else return no('bad-form', `an rx side record is a ${SIDE_FORMS.join(' or a ')}`);
+  // THE LINE BOUND: a snapshot is cut (keys, then ids) until it fits; any other form past it is refused
+  let json = JSON.stringify(out);
+  if (json.length > SIDE_LINE_MAX_BYTES && out.form === 'snapshot') {
+    out.truncated = true;
+    for (const x of out.list) { x.rids = []; }
+    json = JSON.stringify(out);
+    while (json.length > SIDE_LINE_MAX_BYTES && out.list.length) { out.list.pop(); json = JSON.stringify(out); }
+  }
+  if (json.length > SIDE_LINE_MAX_BYTES) return no('too-large', `a side line is at most ${SIDE_LINE_MAX_BYTES} bytes`);
+  return { ok: true, side: out };
+}
+
+/**
+ * THE DEDUP IDENTITY of a side record (invariant 2's twin for the side log):
+ * `rx:delta:<rid>` when the vendor issued a reaction id, else
+ * `rx:delta:<msg>:<key>:<actor>:<op>:<at>`; `rx:snapshot:<msg>:<at>`;
+ * `th:<msg>:<at>`. A replayed event (the vendor's at-least-once redelivery) is
+ * a no-op by this key.
+ */
+function sideKey(s) {
+  const x = s || {};
+  if (x.k === 'th') return ['th', x.msg, x.at].join(':');
+  if (x.form === 'snapshot') return ['rx', 'snapshot', x.msg, x.at].join(':');
+  if (x.rid) return ['rx', 'delta', x.rid].join(':');
+  return ['rx', 'delta', x.msg, x.key, (x.actor && x.actor.id) || '', x.op, x.at].join(':');
 }
 
 /** The conversation shape `listConversations()` returns (design §4). Its title
@@ -384,16 +644,20 @@ function makeConversation(input) {
   return {
     id,
     vendorId: str(c.vendorId, 512) || id,
-    title: peerText(c.title, 300),
+    title: peerName(c.title, 300) || '',
     kind: ['dm', 'group', 'thread'].includes(c.kind) ? c.kind : 'group',
-    participants: peerText(c.participants, 300),
+    participants: peerName(c.participants, 300) || '',
     lastAt: Number.isFinite(Number(c.lastAt)) ? Number(c.lastAt) : null,
   };
 }
 
 module.exports = {
   RECORD_FIELDS, OPTIONAL_FIELDS, MAX_TEXT, MAX_RAW_BYTES, FRAME_TAG_RE, FRAME_TAGS,
-  BLOCK_KINDS, RUN_KINDS, SYS_WHATS, BLOCK_LIMITS, LINK_SCHEMES,
-  makeRecord, makeConversation, resolveMentions, inertFrames, inertFrameLine, peerText, carriesFrame, recordKey, isSynthetic,
+  BLOCK_KINDS, RUN_KINDS, ATTACHMENT_ROLES, SYS_WHATS, BLOCK_LIMITS, LINK_SCHEMES,
+  makeRecord, makeConversation, resolveMentions, inertFrames, inertFrameLine, peerText, peerName, carriesFrame, recordKey, isSynthetic,
   safeHref, validateBlocks,
+  // lane channel-threads (2026-09-28): reactions + the side log's schema and bounds
+  REACTIONS_MAX, REACTION_BY_MAX, REACTION_KEY_MAX, REACTION_KEY_RE, REACTION_GLYPH_MAX, REACTION_LABEL_MAX, REACTION_COUNT_MAX,
+  CUSTOM_IMAGE_MAX, SIDE_KINDS, SIDE_FORMS, SIDE_OPS, SIDE_SOURCES, SIDE_LINE_MAX_BYTES, THREAD_USERS_MAX,
+  isReactionKey, isReactionGlyph, validateReactions, validateSide, sideKey,
 };

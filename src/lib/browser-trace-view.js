@@ -44,9 +44,12 @@ import { whoChips, foldChips, CHIPS_WIDE, CHIPS_NARROW } from './browser-who-mod
 import { openWhoDialog, nameHelpers } from './browser-who-dialog.js';
 import { UI_ICONS } from './icons.js';
 import { memoryText } from '../runaway-guard.js';
+import { stuckWords } from '../browser-stuck.js'; // lane browser-stuck: a profile row whose page waits on a dialog / does not respond
 import { frameUrl, bytesText, traceSummary, timelineLabel, positionText, overlayGeometry, traceWindowFor, unionWindow, assignEntriesToWindows, armGapFor, EPHEMERAL_SCOPE, TRACE_BYTES_PER_PROFILE } from '../browser-trace.js';
 import { sessionOfEntry, sessionOrdinals } from '../browser-sessions.js'; // 2026-09-27: the live view's session dividers + Sessions list (PURE)
-import { dividerText, sessionRowText, retentionText, sizeText } from './browser-session-words.js'; // the words every session surface shares
+import { humanStateLine, humanRefusalText } from '../browser-human.js'; // BROWSE YOURSELF (B-6ae8): the row's "You are browsing it" line (PURE)
+import { dividerText, sessionRowText, sessionReplays, retentionText, sizeText } from './browser-session-words.js'; // the words every session surface shares
+import { displayFactText } from './browser-display-words.js'; // lane headless-fallback: a browser that runs headless because the machine has no desktop session says so
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const STRIP_MAX = 12;
@@ -345,7 +348,10 @@ export function createCardTraceLoader(view) {
  * of a STOPPED browser still has it (`sessionsCount`, the live window opens the
  * pane then).
  */
-export function createTraceTimeline(app, { sessionId } = {}) {
+export function createTraceTimeline(app, { sessionId, browserKey: ownKey = null } = {}) {
+  // BROWSE YOURSELF (B-6ae8): the user's own browsing window has no session — its pane reads HIS key (`hu-…`, the route's
+  // `browserKey`), the profile's scope
+  const askBy = () => (sessionId ? { sessionId } : ownKey ? { browserKey: ownKey } : null);
   const root = el('div', 'browser-live-trace');
   const sessBox = el('div', 'browser-live-sessions');
   const sessHead = el('div', 'browser-live-sessions-head', t('Sessions'));
@@ -358,7 +364,7 @@ export function createTraceTimeline(app, { sessionId } = {}) {
   const listEl = el('div', 'browser-live-trace-list');
   const empty = el('div', 'browser-live-trace-empty chat-status-dim', t('No actions yet — every agent action lands here with its before / after frames.'));
   root.append(sessBox, head, listEl, empty);
-  const st = { entries: [], ids: new Set(), scope: undefined, off: false, loading: false, error: null, sessions: [], ordinals: new Map(), browserKey: null, lastSid: undefined, sessTimer: null, rows: new Map(), sessRows: new Map() };
+  const st = { entries: [], ids: new Set(), scope: undefined, off: false, loading: false, error: null, sessions: [], ordinals: new Map(), browserKey: ownKey || null, lastSid: undefined, sessTimer: null, rows: new Map(), sessRows: new Map() };
   function scopeQuery() { if (st.scope === undefined) return ''; return st.scope === null ? EPHEMERAL_SCOPE : String(st.scope); }
   function renderHead() {
     if (st.error) count.textContent = t('trace unavailable: {why}', { why: String(st.error) });
@@ -419,6 +425,8 @@ export function createTraceTimeline(app, { sessionId } = {}) {
       const words = sessionRowText(x);
       const txt = r.firstChild;
       if (txt.textContent !== words) txt.textContent = words;
+      // BROWSE YOURSELF (B-6ae8): the user's own session offers Replay only once something of his was recorded
+      { const rb = r.lastChild; const show = x.holder !== 'user' || sessionReplays(x); if (rb && rb.style.display !== (show ? '' : 'none')) rb.style.display = show ? '' : 'none'; }
       r.classList.toggle('open', !!x.open);
       return r;
     });
@@ -428,8 +436,8 @@ export function createTraceTimeline(app, { sessionId } = {}) {
     for (const k of [...st.sessRows.keys()]) if (!list.some((x) => x.id === k)) st.sessRows.delete(k);
   }
   async function loadSessions() {
-    if (!sessionId) return;
-    const q = new URLSearchParams({ sessionId });
+    if (!askBy()) return;
+    const q = new URLSearchParams(askBy());
     const sc = scopeQuery(); if (sc) q.set('profile', sc);
     const r = await fetchJson(`/api/browser/sessions?${q}`);
     if (!r || r.error) return; // the actions still show; the list is an addition, its absence says nothing false
@@ -457,9 +465,9 @@ export function createTraceTimeline(app, { sessionId } = {}) {
   /** Seed (or re-seed after a reconnect — same scope keeps what it has, `push` dedups; a pane switch clears first). */
   async function load({ profileId = undefined } = {}) {
     if (st.scope !== profileId || st.error) { st.scope = profileId; clear(); }
-    if (!sessionId) return;
+    if (!askBy()) return;
     st.loading = true;
-    const q = new URLSearchParams({ sessionId, limit: '300' });
+    const q = new URLSearchParams({ ...askBy(), limit: '300' });
     const sc = scopeQuery(); if (sc) q.set('profile', sc);
     const [r] = await Promise.all([fetchJson(`/api/browser/actions?${q}`), loadSessions()]);
     st.loading = false;
@@ -588,7 +596,8 @@ export function whoCell(app, { onChange = null } = {}) {
     more.title = f.more ? f.more.tooltip : '';
     setText(noteText, m.nobody || '');
     note.style.display = m.nobody ? '' : 'none';
-    const tip = m.mode === 'all' ? t('Any of your conversations can use this browser and its logins — one browser, each conversation in its own tab.') : t('Only the conversations and Task Groups listed here can use it. Picking it for another conversation (New Session, Session properties) adds that conversation.');
+    // BROWSE YOURSELF (B-6ae8): the list names conversations and Task Groups — never the user, who may always browse it
+    const tip = (m.mode === 'all' ? t('Any of your conversations can use this browser and its logins — one browser, each conversation in its own tab.') : t('Only the conversations and Task Groups listed here can use it. Picking it for another conversation (New Session, Session properties) adds that conversation.')) + ' ' + t('You can always browse it yourself.');
     if (root.title !== tip) root.title = tip;
     root.dataset.mode = m.mode;
   }
@@ -615,7 +624,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
   const rowsById = new Map();   // profileId → { row, sig }
   const whoCellFor = (id) => { let c = whoCells.get(id); if (!c) { c = whoCell(app, { onChange: () => load() }); whoCells.set(id, c); } return c; };
   /** What a profile row draws OTHER than its list — equal ⇒ the row element is kept (its who cell patched). */
-  const rowSig = (r, v) => { const { use, ...rest } = r || {}; return JSON.stringify([rest, app.browserChipFor ? app.browserChipFor(r.id) : null, v?.limits?.recordingFloor || null, st.busy]); };
+  const rowSig = (r, v) => { const { use, ...rest } = r || {}; return JSON.stringify([rest, app.browserChipFor ? app.browserChipFor(r.id) : null, v?.limits?.recordingFloor || null, st.busy, pageStuckOf(r.id), autoDialogsOf(r)]); }; // lane browser-stuck: the page's state is part of what the row prints (+ verify r1 A6: its dialog mode)
   const root = el('div', 'bprof');
   const bar = el('div', 'bprof-bar');
   const summary = el('span', 'bprof-summary', t('Loading…'));
@@ -633,6 +642,8 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
   // 2026-09-25: the keeper's live resource reading (memBytes labelled by its metric — "412 MB (PSS)"), and its REPORT
   // sentence as the tooltip when over the threshold; the keeper never stops a browser for it
   const usageLine = (host, u) => { const txt = u ? memoryText(u.memBytes, u.memMetric) : ''; if (!txt) return; const s = el('span', 'bprof-usage' + (u.over ? ' bprof-usage-over' : ''), txt); if (u.over) s.title = String(u.over); host.appendChild(s); };
+  // lane headless-fallback: the launch's DISPLAY FACT under the state (no desktop session ⇒ headless; the window is back)
+  const displayLine = (host, fact) => { const txt = displayFactText(fact); if (!txt) return; const s = el('span', 'bprof-display', txt); s.title = txt; host.appendChild(s); };
 
   function renderHint(v) {
     // 2026-09-27: by SIZE only (the setting, 1 GB by default) — the recordings keep their own days / MB bound
@@ -649,6 +660,11 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     summary.textContent = t('{n} profile(s) · {size} on disk · {traces} traced action(s) · {recs} recording(s)', { n: rows.length, size: bytesText(bytes), traces, recs }) + (v?.orphans?.length ? ' · ' + t('{n} unregistered director(ies)', { n: v.orphans.length }) : '');
     summary.title = summary.textContent; // a narrow window ellipsizes the line; the whole of it is here (a phone wraps it — style.css)
   }
+  /** lane browser-stuck: the digest's `pageStuck` row fact (a dialog holds its page / it does not respond). */
+  function pageStuckOf(id) { const m = app._browserProfiles && app._browserProfiles.pageStuck; return m && typeof m === 'object' && m[id] && typeof m[id] === 'object' ? m[id] : null; }
+  /** verify r1 A6: a running local browser launched BEFORE the lane (its record carries no `holdDialogs` launch stamp) still
+   *  has 0.38.1 accept alert + leave-page dialogs by itself until its next start — the row SAYS which mode it runs in. */
+  function autoDialogsOf(r) { const b = r && app._browserProfiles && app._browserProfiles.browsers ? app._browserProfiles.browsers[r.id] : null; return !!(r && r.live && !r.host && b && b.state === 'ready' && !b.holdDialogs); }
   function profileRow(r, v) {
     const row = el('div', 'bprof-row bprof-profile'); row.dataset.profileId = r.id;
     const ident = el('div', 'bprof-ident');
@@ -661,10 +677,15 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     const chip = app.browserChipFor ? app.browserChipFor(r.id) : null;
     ident.appendChild(el('span', 'browser-chip', chip || String(r.provider || '')));
     row.appendChild(ident);
-    const why = rowWhyText(r);
+    const ps = pageStuckOf(r.id);
+    const psw = ps ? stuckWords(ps, t) : null;
+    const why = [psw ? psw.line : null, autoDialogsOf(r) ? t('Accepts leave-page dialogs by itself (typed input is lost) until its next start') : null, rowWhyText(r)].filter(Boolean).join(' · ');
     const state = cell(row, 'bprof-state state-' + String(r.state || '').replace(/[^a-z-]/g, ''), stateText(r.state), why);
     state.appendChild(el('span', 'bprof-why', why));
+    // BROWSE YOURSELF (B-6ae8): the user browses it himself — his own line on the row
+    { const hl = humanStateLine(r.human, t); if (hl) { const h = el('span', 'bprof-human' + (r.human.state === 'driving' ? ' driving' : ''), hl); h.title = r.human.state === 'driving' ? t('Your own tab in this browser — its window is open') : t('Your tab is kept for a while — Browse yourself to continue where you were'); state.appendChild(h); } }
     usageLine(state, r.usage);
+    displayLine(state, r.display);
     cell(row, 'bprof-size', r.bytes === null || r.bytes === undefined ? t('not measured') : bytesText(r.bytes), r.dir ? String(r.dir) : '');
     const tr = r.trace || { n: 0, bytes: 0 };
     // 2026-09-27: what this profile's records take against its limit (the sweep's measure: frames + action lists)
@@ -687,7 +708,26 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     // owner ruling A: the row's controls live in ONE wrapping cell (record · who can use it · stop · rename · delete)
     const actions = el('div', 'bprof-actions');
     row.appendChild(actions);
+    // BROWSE YOURSELF (B-6ae8, the owner 2026-09-28): the FIRST act of a local profile whose provider starts a browser — his
+    // own tab in its browser (started or joined; the agents on it keep working); with his browsing open, it goes to that
+    // window. No button (never a greyed one) for a paired machine's profile or a browser VibeSpace only connects to.
+    if (r.canBrowse && r.state !== 'not-ours') {
+      const open = !!r.human;
+      const bb = el('button', 'file-tool-btn bprof-btn bprof-browse' + (open ? ' open' : ''), open ? t('Open your browsing window') : t('Browse yourself'));
+      bb.title = open ? t('Your own tab in this browser — its window') : t('Open this profile\'s browser and browse it yourself — its logins are there; conversations using it keep working in their own tabs');
+      bb.onclick = () => { if (app.browseYourself) app.browseYourself(r.id, { label: String(r.label || r.id) }); };
+      actions.appendChild(bb);
+    }
     actions.appendChild(recWrap);
+    // BROWSE YOURSELF (the owner, 4): "Also record my own actions" — on by default (an opt-out); the recorder follows the switch
+    if (r.canBrowse && r.state !== 'not-ours') {
+      const mineWrap = el('label', 'bprof-record bprof-record-mine');
+      const mcb = document.createElement('input'); mcb.type = 'checkbox'; mcb.checked = r.recordMine !== false; mcb.disabled = st.busy;
+      mineWrap.title = t('When you browse this profile yourself, record what you do like an agent\'s actions (before / after frames; typed text is kept as a length only) — off keeps only when you started and stopped');
+      mcb.onchange = async () => { st.busy = true; mcb.disabled = true; const ok = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}`, jsonInit('PATCH', { recordMine: mcb.checked }), t('Could not change recording')); st.busy = false; if (!ok) mcb.checked = !mcb.checked; load(); };
+      mineWrap.append(mcb, document.createTextNode(' ' + t('Also record my own actions')));
+      actions.appendChild(mineWrap);
+    }
     // lane H verify r5: a live NAMED profile's browser can be stopped here — the remedy the "keeps closing" notice names
     // (a Stop ends the record and its restart count); its logins stay in the profile, the next command starts it again
     if (r.live && !r.host) {
@@ -696,6 +736,28 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
       stop.title = t('Stop this profile\'s browser now — its logins stay in the profile; the next command starts it again (this also resets a browser that keeps closing)');
       stop.onclick = async () => { stop.disabled = true; const res = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}/stop`, jsonInit('POST'), t('Could not stop the browser')); if (res) showToast(t('Stopped {label}', { label: String(r.label || r.id) }), { duration: 4000 }); load(); };
       actions.appendChild(stop);
+    }
+    // lane browser-stuck: a page that does not respond — the user's Restart (never automatic)
+    if (psw && psw.action && r.live && !r.host) {
+      const re = el('button', 'file-tool-btn bprof-btn bprof-restart', psw.action);
+      re.disabled = st.busy; re.title = psw.tooltip || '';
+      re.onclick = async () => { re.disabled = true; const res = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}/restart`, jsonInit('POST'), t('Could not restart the browser')); if (res) showToast(t('Restarted {label}', { label: String(r.label || r.id) }), { duration: 4000 }); load(); };
+      actions.appendChild(re);
+    } else if (autoDialogsOf(r)) {
+      // verify r2 (the builder's open question 2): a browser launched before the lane still accepts leave-page dialogs
+      // itself until its next start — ONE click starts that next start (the same human Restart; its tabs close, logins stay)
+      const hold = el('button', 'file-tool-btn bprof-btn bprof-restart-hold', t('Restart to hold dialogs'));
+      hold.disabled = st.busy;
+      hold.title = t('Restart this browser so VibeSpace holds leave-page dialogs for a decision instead of the browser accepting them — its tabs close, logins stay');
+      hold.onclick = async () => {
+        const yes = await showConfirmDialog({ title: t('Restart {label}?', { label: String(r.label || r.id) }), message: t('Its open tabs close (logins in the profile stay). From its next start VibeSpace holds leave-page dialogs for a decision, so nothing typed on a page is lost without a word.'), confirmText: t('Restart') });
+        if (!yes) return;
+        hold.disabled = true;
+        const res = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}/restart`, jsonInit('POST'), t('Could not restart the browser'));
+        if (res) showToast(t('Restarted {label}', { label: String(r.label || r.id) }), { duration: 4000 });
+        load();
+      };
+      actions.appendChild(hold);
     }
     // Rename… — validated like a new profile's name (unique, a human name, never a path)
     const rename = el('button', 'file-tool-btn bprof-btn bprof-rename', t('Rename…'));
@@ -715,6 +777,8 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     forget.disabled = notOurs || st.busy;
     forget.title = notOurs ? rowWhyText(r) : t('Stop it, take it away from every conversation that uses it, and move its directory beside itself — nothing is deleted for good until you click Delete permanently below');
     forget.onclick = async () => {
+      // verify r1 (H4): Delete… while he browses it himself is refused by name (the server too) — his Close / Quit first
+      if (r.human) { showToast(humanRefusalText('browsing_yourself', { label: String(r.label || r.id) }, t), { type: 'warn', duration: 9000 }); return; }
       const users = usersOf(r);
       const names = users.map((u) => u.name).filter(Boolean);
       const warn = users.length ? t('{n} conversation(s) use it — they go back to a temporary browser.', { n: users.length }) + (names.length ? ' (' + names.slice(0, 8).join(', ') + ')' : '') + ' ' : '';
@@ -744,6 +808,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     const st = cell(row, 'bprof-state state-' + (e.live ? 'live' : 'kept'), ephemeralStateText(e));
     if (e.lastError) st.title = String(e.lastError);
     if (e.live) usageLine(st, e.usage);
+    displayLine(st, e.display);
     cell(row, 'bprof-age', e.startedAt ? t('started {ago}', { ago: agoText(Date.now() - Number(e.startedAt)) }) : '');
     const stop = el('button', 'file-tool-btn bprof-btn bprof-stop', t('Stop'));
     stop.disabled = !e.live;

@@ -1516,6 +1516,130 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const resD = runOnly(create({ rootDir: rD, homeDir: scratchHomeDir, serverNotice: () => { }, channels: null }), rD).find((x) => x.id === ID);
     ok(resD && resD.status === 'ran', '…and an index with nothing to split is a success');
   }
+  // ── 2026-09-exit-access-lists (lane-pairing ⑥, B-7007): ONE `allowExit` boolean → two lists per machine ──
+  {
+    console.log('2026-09-exit-access-lists');
+    const ID = '2026-09-exit-access-lists';
+    const E = require('../src/exit-reach.js');
+    const { HostManager } = require('../src/hosts.js');
+    const mkInst = (name) => { const r = path.join(tmp, name); fs.mkdirSync(path.join(r, 'data'), { recursive: true }); return r; };
+    const runOnly = (mm, r) => runMigrations({ ledgerPath: path.join(r, 'data', 'migrations.json'), migrations: mm.MIGRATIONS.filter((x) => x.id === ID), log: () => { }, warn: () => { } });
+    const FIX = { hosts: [
+      { id: 'host-dial-Macbook', name: 'Macbook', transport: 'dial', deviceId: 'Macbook', allowExit: true, dialTokenHash: 'h1' },
+      { id: 'host-box', name: 'Box', user: 'u', host: '10.0.0.2', port: 22, allowExit: false },
+      { id: 'host-plain', name: 'Plain', user: 'u', host: '10.0.0.3', port: 22 },
+      { id: 'host-new', name: 'New', transport: 'dial', deviceId: 'New', exit: { use: { mode: 'only', who: [{ kind: 'group', id: 'G' }] }, run: { mode: 'nobody', ask: false } } },
+    ] };
+    // (a) the FILE path (a suite — no live manager)
+    const r1 = mkInst('ex-file');
+    const f1 = path.join(r1, 'data', 'hosts.json');
+    fs.writeFileSync(f1, JSON.stringify(FIX), { mode: 0o600 });
+    const mm1 = create({ rootDir: r1, homeDir: scratchHomeDir, serverNotice: () => { } });
+    ok(mm1.MIGRATIONS.some((x) => x.id === ID), 'registered as a ledger-keyed one-shot');
+    const res1 = runOnly(mm1, r1).find((x) => x.id === ID);
+    const d1 = JSON.parse(fs.readFileSync(f1, 'utf-8'));
+    const byId = (d, id) => d.hosts.find((h) => h.id === id);
+    ok(res1 && res1.status === 'ran' && JSON.stringify(byId(d1, 'host-dial-Macbook').exit.use) === '{"mode":"everyone"}' && JSON.stringify(byId(d1, 'host-dial-Macbook').exit.run) === '{"mode":"everyone","ask":false}', 'allowExit on ⇒ everyone / everyone (behaviour unchanged)', byId(d1, 'host-dial-Macbook'));
+    ok(byId(d1, 'host-box').exit.use.mode === 'nobody' && byId(d1, 'host-plain').exit.run.mode === 'nobody', 'off ⇒ nobody, absent ⇒ nobody');
+    ok(JSON.stringify(byId(d1, 'host-new').exit) === JSON.stringify(FIX.hosts[3].exit), 'a record that already carries `exit` is kept untouched');
+    ok(d1.hosts.every((h) => !('allowExit' in h)) && byId(d1, 'host-dial-Macbook').dialTokenHash === 'h1', 'every allowExit is stripped; nothing else on the record changes (the dial token hash kept)');
+    ok(byId(d1, 'host-dial-Macbook').exit.updatedBy === 'migration' && Number(byId(d1, 'host-dial-Macbook').exit.updatedAt) > 0, 'stamped updatedBy migration');
+    const arch = fs.readdirSync(path.join(r1, 'data', 'archive')).filter((f) => /^hosts-allow-exit-\d+\.json$/.test(f));
+    const archDoc = arch.length === 1 ? JSON.parse(fs.readFileSync(path.join(r1, 'data', 'archive', arch[0]), 'utf-8')) : null;
+    ok(archDoc && archDoc['host-dial-Macbook'] === true && archDoc['host-box'] === false && archDoc['host-plain'] === false, 'the ARCHIVE holds every record\'s old value (written before the strip)', archDoc);
+    ok(res1.report.converted.length === 1 && res1.report.converted[0] === 'host-dial-Macbook' && res1.report.defaulted === 2 && res1.report.kept === 1 && res1.report.via === 'file', 'the report: converted [ids] / defaulted n / kept n', res1.report);
+    ok((fs.statSync(f1).mode & 0o777) === 0o600 && !fs.readdirSync(path.join(r1, 'data')).some((f) => /\.tmp$/.test(f)), 'atomic tmp+rename, the file keeps its mode (it holds dial token hashes)');
+    ok(runOnly(mm1, r1).find((x) => x.id === ID).status === 'already', 'run-at-most-once (the ledger)');
+    // a second PASS of the reshape itself (the ledger aside) changes nothing
+    const before = fs.readFileSync(f1, 'utf-8');
+    const r1b = mkInst('ex-second'); fs.writeFileSync(path.join(r1b, 'data', 'hosts.json'), before);
+    const res1b = runOnly(create({ rootDir: r1b, homeDir: scratchHomeDir, serverNotice: () => { } }), r1b).find((x) => x.id === ID);
+    ok(res1b.status === 'ran' && fs.readFileSync(path.join(r1b, 'data', 'hosts.json'), 'utf-8') === before && !fs.existsSync(path.join(r1b, 'data', 'archive')), 'a second pass over migrated data changes nothing and archives nothing');
+    // (b) THROUGH THE LIVE HostManager (it holds hosts.json in memory and saves it whole)
+    const r2 = mkInst('ex-live');
+    fs.writeFileSync(path.join(r2, 'data', 'hosts.json'), JSON.stringify(FIX));
+    const HM = new HostManager({ dataDir: path.join(r2, 'data') });
+    const res2 = runOnly(create({ rootDir: r2, homeDir: scratchHomeDir, serverNotice: () => { }, hosts: HM }), r2).find((x) => x.id === ID);
+    ok(res2.status === 'ran' && res2.report.via === 'hosts' && HM.get('host-dial-Macbook').exit.use.mode === 'everyone' && !('allowExit' in HM.get('host-dial-Macbook')), 'with a live HostManager the IN-MEMORY records are reshaped', res2.report);
+    ok(JSON.parse(fs.readFileSync(path.join(r2, 'data', 'hosts.json'), 'utf-8')).hosts.every((h) => !('allowExit' in h) && h.exit), '…and its own save puts them on disk');
+    // (c) an unreadable hosts.json FAILS the run by name, the ledger stays unstamped, nothing touched
+    const r3 = mkInst('ex-bad');
+    fs.writeFileSync(path.join(r3, 'data', 'hosts.json'), '{not json');
+    const res3 = runOnly(create({ rootDir: r3, homeDir: scratchHomeDir, serverNotice: () => { } }), r3).find((x) => x.id === ID);
+    const led3 = JSON.parse(fs.readFileSync(path.join(r3, 'data', 'migrations.json'), 'utf-8'));
+    ok(res3.status === 'failed' && /hosts\.json is unreadable/.test(res3.error || '') && !(led3.applied || {})[ID] && fs.readFileSync(path.join(r3, 'data', 'hosts.json'), 'utf-8') === '{not json', 'an unparsable hosts.json fails BY NAME, the ledger unstamped (retried next boot), the file untouched', JSON.stringify(res3));
+    // (d) no store ⇒ ran, nothing created
+    const r4 = mkInst('ex-none');
+    const res4 = runOnly(create({ rootDir: r4, homeDir: scratchHomeDir, serverNotice: () => { } }), r4).find((x) => x.id === ID);
+    ok(res4.status === 'ran' && !fs.existsSync(path.join(r4, 'data', 'hosts.json')), 'no hosts.json ⇒ ran, nothing created');
+    // CONTROL (behaviour preserved): the 2.369.195 ExitProxyManager.list() filtered `h.allowExit` — every machine it
+    // listed (every agent could use AND run it) reads everyone for BOTH grants after the migration, every other none
+    const oldList = FIX.hosts.filter((h) => h && h.allowExit).map((h) => h.id);
+    ok(JSON.stringify(oldList) === '["host-dial-Macbook"]', 'CONTROL: the pre-lane list() over the pre-migration fixture lists the allowExit machine');
+    ok(d1.hosts.every((h) => { const a = E.exitAccessOf(h); const was = oldList.includes(h.id); return h.id === 'host-new' || (was ? (a.use.mode === 'everyone' && a.run.mode === 'everyone') : (a.use.mode === 'nobody' && a.run.mode === 'nobody')); }), '…and exactly those read everyone / everyone after it (on ⇒ everyone preserves what the old boolean granted)');
+    ok(E.exitAccessOf(FIX.hosts[0]).use.mode === 'everyone', '…and the reader agrees BEFORE the migration too (a boot where it failed still reads the boolean)');
+  }
+  // ── 2026-09-pool-manual-priority (2026-09-28: the whole-pool manual switch is retired — manual PRIORITY replaces it) ──
+  {
+    console.log('2026-09-pool-manual-priority');
+    const ID = '2026-09-pool-manual-priority';
+    const { AccountManager } = require('../src/accounts.js');
+    const runOnly = (mm, r) => runMigrations({ ledgerPath: path.join(r, 'data', 'migrations.json'), migrations: mm.MIGRATIONS.filter((x) => x.id === ID), log: () => { }, warn: () => { } });
+    const mkRoot = (tag) => { const r = path.join(tmp, 'pmp-' + tag); fs.mkdirSync(path.join(r, 'data'), { recursive: true }); return r; };
+    const r1 = mkRoot('live');
+    const am = new AccountManager({ dataDir: path.join(r1, 'data') });
+    if (!am.poolSupported()) { ok(true, 'SKIP — pooled accounts are unsupported on ' + process.platform); }
+    else {
+      const login = (id) => fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'x', refreshToken: 'r', expiresAt: Date.now() + 36e5 } }), { mode: 0o600 });
+      const A = am.createSubscription({ name: 'A' }).id, B = am.createSubscription({ name: 'B' }).id, C = am.createSubscription({ name: 'C' }).id;
+      [A, B, C].forEach(login);
+      const manual = am.createPool({ name: 'manual', members: [A, B, C] }).id;
+      const auto = am.createPool({ name: 'auto', members: [A, B] }).id;
+      const bare = am.createPool({ name: 'bare', members: [A, C] }).id; // verify r1: a record with NO `auto` field
+      const gone = am.createPool({ name: 'gone', members: [A, B, C] }).id; // …a manual pool whose target is no longer a member
+      const none = am.createPool({ name: 'none', members: [A, B] }).id; // …and one with no current target at all
+      am.setPoolTarget(manual, B); am.setPoolTarget(bare, C); am.setPoolTarget(gone, C);
+      // a MANUAL pool as the retired switch left it (createPool is auto now — write the old shape the way an old store holds it)
+      am.get(manual).auto = false; am.get(auto).auto = true; am.get(auto).priority = [];
+      delete am.get(bare).auto; delete am.get(bare).priority;
+      am.get(gone).auto = false; am.get(gone).members = [A, B]; delete am.get(gone).priority;
+      am.get(none).auto = false; delete am.get(none).priority; fs.unlinkSync(am.subDir(none));
+      am._save();
+      const before = am.poolCurrent(manual);
+      const res = runOnly(create({ rootDir: r1, homeDir: scratchHomeDir, serverNotice: () => { }, accounts: () => am }), r1).find((x) => x.id === ID);
+      ok(res && res.status === 'ran', 'the migration runs through the LIVE account store');
+      const m = am.get(manual);
+      ok(m.auto === true && JSON.stringify(m.priority) === JSON.stringify([B, A, C]), 'a manual pool becomes auto with priority [its current target, …the others in list order] — the owner\'s pick is #1', JSON.stringify(m));
+      ok(am.poolCurrent(manual) === before, 'nothing moves by itself: the default is still the member it sat on');
+      ok(JSON.stringify(am.get(auto).priority) === '[]' && am.get(auto).auto === true, 'a pool that was already automatic is untouched (no priority invented)');
+      // verify r1 (M5): the shapes an old store can hold
+      ok(am.get(bare).auto === true && JSON.stringify(am.get(bare).priority) === JSON.stringify([C, A]), 'a record with NO `auto` field was a manual pool to the retired switch (`!!auto`) — its hand-picked target is #1 too', JSON.stringify(am.get(bare)));
+      ok(am.get(gone).auto === true && JSON.stringify(am.get(gone).priority) === JSON.stringify([A, B]), 'a manual pool whose target is no longer a member: the order is its members, the stale target is in no place', JSON.stringify(am.get(gone)));
+      ok(am.get(none).auto === true && JSON.stringify(am.get(none).priority) === JSON.stringify([A, B]) && am.poolCurrent(none) == null, 'a manual pool with NO current target: its members in list order, and the migration points it nowhere by itself', JSON.stringify(am.get(none)));
+      const onDisk = JSON.parse(fs.readFileSync(path.join(r1, 'data', 'accounts.json'), 'utf-8')).accounts.find((x) => x.id === manual);
+      ok(onDisk.auto === true && onDisk.priority.length === 3, 'the reshape is saved by the store itself (not written beside it)');
+      const snap = fs.readFileSync(path.join(r1, 'data', 'accounts.json'), 'utf-8');
+      const again = runMigrations({ ledgerPath: path.join(r1, 'data', 'migrations.json'), migrations: create({ rootDir: r1, homeDir: scratchHomeDir, serverNotice: () => { }, accounts: () => am }).MIGRATIONS.filter((x) => x.id === ID), log: () => { }, warn: () => { } }).find((x) => x.id === ID);
+      ok(again && again.status === 'already', 'ledger-keyed: a second boot does not run it again');
+      ok(am.migrateManualPools().length === 0, '…and the reshape itself is idempotent (a reshaped pool is auto)');
+      ok(fs.readFileSync(path.join(r1, 'data', 'accounts.json'), 'utf-8') === snap, '…the second run and the second reshape left the record BYTE-identical');
+      // no store on this boot: an old manual pool FAILS by name (retried next boot); nothing manual = success
+      const r2 = mkRoot('nostore');
+      fs.writeFileSync(path.join(r2, 'data', 'accounts.json'), JSON.stringify({ version: 1, accounts: [{ id: 'pool-x', type: 'pooled', auto: false }] }));
+      const res2 = runOnly(create({ rootDir: r2, homeDir: scratchHomeDir, serverNotice: () => { } }), r2).find((x) => x.id === ID);
+      const led2 = JSON.parse(fs.readFileSync(path.join(r2, 'data', 'migrations.json'), 'utf-8'));
+      ok(res2 && res2.status === 'failed' && /no live account store to reshape 1 manual pool/.test(res2.error || '') && !(led2.applied || {})[ID], 'without the live store a manual pool FAILS the run by name (never written beside the store; retried next boot)', res2);
+      // verify r2 (census adequacy): r1's F10 fixed BOTH readings of "manual" (the reshape and this no-store count),
+      // but only the reshape had a leg — reverting the count to `auto === false` left the suite green
+      const r2b = mkRoot('nostore-bare');
+      fs.writeFileSync(path.join(r2b, 'data', 'accounts.json'), JSON.stringify({ version: 1, accounts: [{ id: 'pool-y', type: 'pooled' }, { id: 'pool-z', type: 'pooled', auto: true }] }));
+      const res2b = runOnly(create({ rootDir: r2b, homeDir: scratchHomeDir, serverNotice: () => { } }), r2b).find((x) => x.id === ID);
+      ok(res2b && res2b.status === 'failed' && /no live account store to reshape 1 manual pool/.test(res2b.error || ''), 'without the live store a record with NO `auto` field is a manual pool too (`!!auto` — the switch it retires) — counted and FAILED by name; an auto:true record is not counted', res2b);
+      const r3 = mkRoot('nothing');
+      const res3 = runOnly(create({ rootDir: r3, homeDir: scratchHomeDir, serverNotice: () => { } }), r3).find((x) => x.id === ID);
+      ok(res3 && res3.status === 'ran', '…and a boot with nothing manual is a success');
+    }
+  }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }

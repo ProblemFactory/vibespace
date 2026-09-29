@@ -63,6 +63,7 @@ import * as R from '../integration-registry.js';
 import { routeErrorText, groupErrorText, statusTagParts, viewSwitchText } from './channel-words.js';
 // g3 (design §22): the IM-first list's arithmetic and the group dialogs.
 import { groupListRows, foldsFrom, GROUP_ADAPTER_ID, firstScreen, statusTag } from './channel-groups-view.js';
+import { clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): a group row's cleared last line
 import { showGroupMembersDialog, showGroupDetail, renameGroup, archiveGroup } from './channel-group-dialogs.js';
 // R4: access and notification — two operations (Grant access… / Notify…),
 // the grain menu, and the one-line summary a row draws.
@@ -252,6 +253,35 @@ function accountLines(app, a, kinds) {
     // no countdown while the instance runs — said here, on hover, once
     if (auth.renews) hl.title = t('The sign-in renews itself while this instance runs — re-authorize only if the instance is off for more than {days} days.', { days: Math.round((Number(auth.renewWindowMs) || 7 * 86400e3) / 86400e3) });
     out.push(hl);
+    // owner ruling (2026-09-28): the HELD sign-in lacks the reactions read scope — "can be read after one Re-authorize",
+    // or (the last consent was narrowed because the vendor refused it) the vendor's refusal BY NAME; one verb.
+    // lane lark-search-poll (§5.3): ONE line for EVERY declared grant the sign-in lacks — an account predating both lanes
+    // reads "One Re-authorize adds: reading reactions · new-message search and single chats" (a server before the grant
+    // list sends only `reactionsGrant` — its own line, as before)
+    const vendorW = a.vendor ? t(a.vendor) : (a.label || a.kind);
+    const gl = Array.isArray(a.grants) ? chanCaps.grantsText(a.grants, { t, vendor: vendorW }) : { text: chanCaps.reactReadText(a.reactionsGrant, { t, vendor: vendorW }), warn: !!(a.reactionsGrant && a.reactionsGrant.refused && a.reactionsGrant.refused.length) };
+    if (gl.text) {
+      const n = noteLine('chan-sec-note', gl.text, { warn: gl.warn });
+      n.dataset.chanRxRead = a.id;
+      n.dataset.chanGrants = a.id;
+      const v = btn(t('Re-authorize'), reauth); v.classList.add('chan-sec-verb'); n.appendChild(v);
+      out.push(n);
+    }
+    // lane lark-search-poll: THE CHANGE FEED's line (its state, the measurement, a park by name) + the catch-up's count
+    if (a.feed) {
+      const fl = chanCaps.feedText(a.feed, { t, vendor: vendorW, now: Date.now() });
+      if (fl) {
+        const n = noteLine('chan-sec-note', fl, { warn: a.feed.state === 'refused' || a.feed.state === 'demoted' });
+        n.dataset.chanFeed = a.id;
+        // U3's answer, said where it is asked: which message types the search did not find (the measurement's diagnostic)
+        const mt = a.feed.counters && a.feed.counters.missedTypes ? Object.entries(a.feed.counters.missedTypes).filter(([, v]) => Number(v) > 0) : [];
+        if (mt.length) n.title = t('Not found by the search: {types}', { types: mt.map(([k, v]) => `${k} ×${v}`).join(', ') });
+        if (a.feed.state === 'refused' && a.feed.why === 'forbidden') { const v = btn(t('Re-authorize'), reauth); v.classList.add('chan-sec-verb'); n.appendChild(v); }
+        out.push(n);
+      }
+      const cl = chanCaps.feedCatchUpText(a.feed.catchUp, { t });
+      if (cl) { const n = noteLine('chan-sec-note', cl); n.dataset.chanFeedCatchup = a.id; out.push(n); }
+    }
     const left = Number(auth.expiresAt) - Date.now();
     const eta = auth.expiresAt ? reauthEta(auth.expiresAt) : null;
     // a sliding token shows its countdown only once renewals have STOPPED (<1 day left)
@@ -334,7 +364,7 @@ function showSearchDialog(app, a, { q: initial = '' } = {}) {
       it.className = 'chan-search-hit';
       const head = document.createElement('div');
       head.className = 'chan-search-head';
-      const ti = document.createElement('b'); ti.textContent = hit.title || hit.convId;
+      const ti = document.createElement('b'); ti.textContent = hit.title || chanCaps.untitledText(null, { t });
       const who = document.createElement('span'); who.className = 'chan-search-who'; who.textContent = `${(hit.record.author && (hit.record.author.name || hit.record.author.id)) || ''} · ${rowTime(hit.record.at)}`;
       head.append(ti, who);
       const tx = document.createElement('div'); tx.className = 'chan-search-text'; tx.textContent = String(hit.record.text || '').slice(0, 300);
@@ -919,7 +949,7 @@ export function renderChannelsPanel(app, c) {
     const into = { appendChild: (x) => { top.push(x); return x; } };
     const adapters = (d && d.adapters) || [];
     const convs = (d && d.conversations) || [];
-    const { rows, archived } = groupListRows({ groups: groups || [], conversations: convs, adapters });
+    const { rows, archived } = groupListRows({ groups: groups || [], conversations: convs, adapters, untitled: (kind) => chanCaps.untitledText(kind, { t }) });
     // R3 (§23): the ATTENTION list by default — what matters, one tag each (PURE firstScreen / statusTag)
     const q = findInput.value || '';
     const now = Date.now();
@@ -1064,7 +1094,7 @@ export function renderChannelsPanel(app, c) {
   function groupRow(r, now = Date.now()) {
     const st = r.kind === 'conv' ? statusTag(r, now) : null;
     const tag = statusTagParts(st, { now });
-    const sig = JSON.stringify(['g', r.kind, r.id, r.adapterId, r.title, r.lastAt, r.unread, r.archived, r.pair, r.memberCount, r.sourceLabel, r.lastText, r.conv ? r.conv.kind : '', rowTime(r.lastAt), st && st.code, tag]);
+    const sig = JSON.stringify(['g', r.kind, r.id, r.adapterId, r.title, r.lastAt, r.unread, r.archived, r.pair, r.memberCount, r.sourceLabel, r.lastText, !!(r.group && r.group.lastCleared), r.conv ? r.conv.kind : '', rowTime(r.lastAt), st && st.code, tag]);   // r.group.lastCleared: the last line drawn as the cleared sentence ("Clear content…", the merge onto master's signature census)
     return memoRow('g:' + r.key, sig, r, (cur) => groupRowBuild(r, now, cur, st, tag));
   }
   function groupRowBuild(r, now, cur, st, tag) {
@@ -1113,6 +1143,8 @@ export function renderChannelsPanel(app, c) {
     const last = document.createElement('span');
     last.className = 'chan-grow-last';
     last.textContent = r.lastText || '';
+    // "Clear content…": the newest line was cleared — the sentence in this device's words, dimmed
+    if (r.group && r.group.lastCleared) { last.textContent = clearedText(); last.classList.add('rc-cleared'); }
     sub.appendChild(last);
     if (r.unread) {
       const u = document.createElement('span');
@@ -1341,7 +1373,7 @@ export function renderChannelsPanel(app, c) {
     //  row) — a second principal granted access, or the second watcher's cadence, never reached the row until an
     //  unrelated field moved (reproduced: "Access: Alpha" after "Access: [Alpha, Beta]" was saved). The fast census
     //  (test-channels-groups-ui §3) reads every `conv.<field>` the builder and its helpers touch against this list.
-    const sig = JSON.stringify(['r', child, conv.adapterId, conv.id, conv.title, conv.unread, conv.freshness, conv.participants, conv.outbox && conv.outbox.awaiting, conv.assignment, conv.access, conv.watchers, conv.held]);
+    const sig = JSON.stringify(['r', child, conv.adapterId, conv.id, conv.title, conv.kind, conv.unread, conv.freshness, conv.participants, conv.outbox && conv.outbox.awaiting, conv.assignment, conv.access, conv.watchers, conv.held]);
     return memoRow(`${child ? 'c' : 'r'}:${conv.adapterId}/${conv.id}`, sig, conv, (cur) => rowBuild(conv, child, cur));
   }
   function rowBuild(conv, child, cur) {
@@ -1353,7 +1385,7 @@ export function renderChannelsPanel(app, c) {
     line.className = 'chan-row-line';
     const title = document.createElement('span');
     title.className = 'chan-row-title';
-    title.textContent = conv.title || conv.id;
+    title.textContent = conv.title || chanCaps.untitledText(conv.kind, { t });   // lane lark-search-poll: never the raw vendor id
     // the 172px default rail truncates a long title; the tooltip keeps it readable — and
     // carries the freshness sentence, which the ≤180px container hides as a pill
     const fresh = chanCaps.freshnessText(conv.freshness || {}, { t }) || t('unknown');
@@ -1425,13 +1457,20 @@ export function renderChannelsPanel(app, c) {
     return el;
   }
 
+  // A LIST FETCHED BEFORE A NEWER BROADCAST NEVER REPLACES IT (lane-redact verify r6 — the r5 ⑧ class, reproduced in
+  // chrome): the reconnect refresh's /api/channel-groups, answered before a "Clear content…" of a group's newest message
+  // and parsed after the clear's `channel-groups-updated`, drew the cleared words back as the group row's last line. Every
+  // group list this panel applies bumps `groupsGen`; a refresh keeps its answer only when none landed while it waited.
+  let groupsGen = 0;
   async function refresh() {
+    const g0 = groupsGen;
     const [d, g] = await Promise.all([fetchJson('/api/channels'), fetchJson('/api/channel-groups'), loadFolds(app)]);
     if (!c.isConnected) return;
     if (d && d.error) { root.textContent = ''; const e = document.createElement('div'); e.className = 'empty-hint'; e.textContent = d.error; root.appendChild(e); return; }
     digest = d;
     // a refused group list is an EMPTY list plus a toast — the channel half still draws
-    if (g && !g.error) groups = Array.isArray(g.groups) ? g.groups : [];
+    if (groupsGen !== g0) { /* a broadcast's list landed while this one was on its way — it is newer */ }
+    else if (g && !g.error) groups = Array.isArray(g.groups) ? g.groups : [];
     else { groups = []; if (g && g.code !== 'unavailable') showToast(groupErrorText(g), { type: 'error' }); }
     draw();
   }
@@ -1449,8 +1488,9 @@ export function renderChannelsPanel(app, c) {
   const onBroadcast = (msg) => {
     if (!c.isConnected) return;
     if (msg.type === 'channel-groups-updated') {
-      if (!Array.isArray(msg.groups) || digest === null) return;   // the first paint is refresh()'s
-      groups = msg.groups;
+      if (!Array.isArray(msg.groups)) return;
+      groups = msg.groups; groupsGen++;   // kept even before the first paint: the refresh on its way keeps this newer list
+      if (digest === null) return;   // the first paint is refresh()'s
       draw();
       return;
     }

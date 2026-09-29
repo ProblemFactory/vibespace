@@ -213,7 +213,8 @@ console.log('§9 WIRING PINS');
   ok(serve.includes('if (rec.browser || rec.office) {'), 'a LibreOffice relaunch stops FIRST (the document is locked by the running instance), its profile carried');
   ok(/for \(const b of \[\.\.\.bins, \.\.\.BROWSER_BINS, \.\.\.OFFICE\.OFFICE_EXECS\]\)/.test(disp) && disp.includes('const office = await officeFacts({ bins: out, now });'), 'hostFacts probes LibreOffice\'s binaries from the PURE list and reads its modules (officeFacts)');
   ok(routes.includes("const v = openWithVerdict({ row: asked, file: req.body.file, machine: { hostId: host, fileHost: LOCAL.has(fh) ? 'local' : fh, registry: null } });") && routes.includes("router.get('/api/desktop/open-with'"), 'the ROUTE runs the machine rule before any machine is asked; the verdict route answers the explorer\'s menu');
-  ok(routes.includes("return streamInstall(req, res, host, (o) => ctx.access.installXpra(host, o), xpraDone);") && routes.includes("(o) => ctx.access.installPackage(host, { ...o, what })") && access.includes("async function installXpra(hostId, opts = {}) { return installPackage(hostId, { ...opts, what: 'xpra' }); }"), 'ONE install machinery: install-xpra and the generic install stream through streamInstall; installXpra IS installPackage(xpra)');
+  ok(routes.includes("return streamInstall(req, res, host, (o) => ctx.access.installXpra(host, { ...o, expectDigest: shownDigest(req) }), xpraDone);") && routes.includes("(o) => ctx.access.installPackage(host, { ...o, what, expectDigest: shownDigest(req) })") && access.includes("async function installXpra(hostId, opts = {}) { return installPackage(hostId, { ...opts, what: 'xpra' }); }"), 'ONE install machinery: install-xpra and the generic install stream through streamInstall; installXpra IS installPackage(xpra); both name the plan the dialog SHOWED (verify-r6 I1: planDigest)');
+  ok(/planDigest: shownDigest \} : \{ host: m\.hostId, what, planDigest: shownDigest \}/.test(launcher) && /let shownDigest = r\.digest \|\| null;/.test(launcher) && /end\.code === 'plan_changed' && end\.plan && Array\.isArray\(end\.plan\.commands\)/.test(launcher), 'I1 WIRING: the install dialog sends the digest of the plan it shows, and a plan_changed answer replaces the commands above the button (nothing ran; the next press names the new plan)');
   ok(keeper.includes("broadcast?.({ type: 'file-changed', host, path: rec.file,") && /function notify\(\) \{\n[^\n]*desktop-apps-updated[^\n]*\n\s*signalFileChanges\(\);/.test(keeper), 'the hub broadcasts ONE file-changed per changed record, from every commit (notify)');
   ok(ops.includes("import { isOfficeFile } from '../office-open.js';") && ops.includes("const fullPath = this.currentPath + '/' + dataset.name;") && ops.includes('const q = this.app.officeVerdictFor(host, fullPath);') && ops.includes('items.push(...this.app.officeMenuItems(q.cached, { host, file: fullPath }));'), 'the EXPLORER row: the PURE isOfficeFile, the REAL path (currentPath + name — never the window\'s host-labelled title) and its host through the app mediator');
   ok(door.includes("body: JSON.stringify({ appId, file: fv.file, fileHost: h || 'local',") && door.includes('const fv = fileVerdict(file);') && door.includes("if (m && m.type === 'file-changed') relayFileChanged(m);") && door.includes('app.openWithDesktopApp = (opts) => openWithDesktopApp(app, opts);'), 'the DOOR: the file rule first, ONE POST carrying the file + the machine that holds it, the file-changed relay');
@@ -347,6 +348,52 @@ console.log('§12 the routes over stubs (in-process express on 127.0.0.1:0 — t
   } finally { srv.close(); }
 }
 
-for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 10 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+// ── verify-r6 I1: THE PLAN THAT RUNS IS THE PLAN THAT WAS SHOWN. The dialog shows GET install-plan's commands (run as
+// root); the POST recomputed the plan from the machine's facts at the press — facts that moved in between (the package
+// sources now offer an old xpra) ran the xpra.org key + repo + pin 1001 the owner never read. The REAL access layer over
+// a stub device whose facts change between the two reads ──
+console.log('§13 verify-r6 I1 — the install runs the plan the dialog showed, or nothing');
+{
+  const accRel = 'src/server/desktop-access.js';
+  const i1 = async (ACC) => {
+    let aptXpra = '6.1.0'; const runs = [];
+    const dm = { status: () => ({ connected: true, info: { capabilities: ['desktop-serve'], platform: 'linux' } }),
+      desktopServe: async () => ({ ok: true, facts: {}, install: { platform: 'linux', apt: '/usr/bin/apt-get', aptXpra, distro: 'ubuntu', like: ['debian'], codename: 'noble', sudo: true, xpra: null } }),
+      runStream: async (cmd, args, { onData }) => { runs.push(args.join(' ')); onData(Buffer.from('ran\n')); return { code: 0 }; } };
+    const hosts = { list: () => [{ id: 'dev', name: 'Dev', transport: 'dial', online: true }], linkState: () => 'online', connectedDevice: () => null, get: (id) => ({ id }), deviceBounded: async () => dm };
+    const a = ACC.create({ hosts, local: () => null, install: false, log: { log() {}, warn() {} } });
+    const shown = await a.installPlan('dev', 'xpra');
+    aptXpra = '3.1.5'; // the machine's package sources changed after the dialog read them: apt ⇒ xpra.org
+    const changed = await a.installXpra('dev', { expectDigest: shown.digest }).then(() => null, (e) => e);
+    const runsAfterChanged = runs.length;
+    const again = await a.installPlan('dev', 'xpra');
+    const ok2 = await a.installXpra('dev', { expectDigest: again.digest }).then((r) => r, (e) => e);
+    return { shown, changed, runsAfterChanged, again, ok2, runs: runs.length };
+  };
+  const o = await i1(require(path.join(repo, accRel)));
+  ok(o.shown.plan.source === 'apt' && typeof o.shown.digest === 'string' && o.shown.digest.length === 32 && o.again.plan.source === 'xpra.org' && o.again.digest !== o.shown.digest, 'I1: GET install-plan carries the digest of the plan it shows; a machine whose facts moved answers another plan (apt ⇒ xpra.org) with another digest', { shown: o.shown.plan.source, again: o.again.plan.source });
+  ok(o.changed && o.changed.code === 'plan_changed' && o.changed.plan && o.changed.plan.source === 'xpra.org' && o.changed.digest === o.again.digest && o.runsAfterChanged === 0 && /nothing ran/.test(o.changed.message), 'I1: Install pressed on the SHOWN apt plan while the machine now plans xpra.org ⇒ plan_changed with the NEW plan + digest, nothing ran as root (pre-fix: the xpra.org key / repo / pin ran unread)', o.changed && { code: o.changed.code, runs: o.runsAfterChanged });
+  ok(o.ok2 && o.ok2.ok === true && o.runs === 1, 'I1: pressed again on the plan now shown ⇒ it runs (once)', o.ok2 && o.ok2.code);
+  // CONTROL (i1): the access layer without the check runs the recomputed plan the dialog never showed
+  const src = read(accRel);
+  const mut = src.replace("        if (expectDigest != null && planDigest(plan) !== String(expectDigest)) {", '        if (false) {');
+  ok(mut !== src, 'CONTROL (i1): the patch applies');
+  const c = await i1(MUT.load(accRel, mut, 'i1-noshown'));
+  ok(!c.changed && c.runsAfterChanged === 1, 'CONTROL (i1): without the check the press on the shown apt plan RUNS the xpra.org plan — the I1 cell goes red', { runs: c.runsAfterChanged });
+  // the route streams the refusal with its plan + digest (the dialog redraws from them)
+  const express = require('express');
+  const RR = require(path.join(repo, 'src/routes/desktop-apps.js'));
+  const seenD = [];
+  RR.setup({ keeper: { list: async () => ({ apps: [], registry: [] }), facts: async () => {} }, access: { installBusy: () => null, installXpra: async (h, o) => { seenD.push(o.expectDigest); const e = new Error('what would run changed — nothing ran'); e.code = 'plan_changed'; e.plan = { source: 'xpra.org', commands: ['x'] }; e.digest = 'd2'; throw e; } }, vnc: {} });
+  const ax = express(); ax.use(express.json()); ax.use(RR.router);
+  const sv = await new Promise((r) => { const x = ax.listen(0, '127.0.0.1', () => r(x)); });
+  try {
+    const rr = await fetch(`http://127.0.0.1:${sv.address().port}/api/desktop/install-xpra`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: 'local', planDigest: 'd1' }) });
+    const lines = (await rr.text()).trim().split('\n').map((l) => JSON.parse(l));
+    ok(seenD[0] === 'd1' && lines.at(-1).code === 'plan_changed' && lines.at(-1).digest === 'd2' && lines.at(-1).plan.source === 'xpra.org', 'I1: the route hands the shown digest to the access layer and streams plan_changed WITH the new plan and digest', lines.at(-1));
+  } finally { sv.close(); }
+}
+
+for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 11 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}) in ${Date.now() - T0} ms`);
 process.exit(fail ? 1 : 0);

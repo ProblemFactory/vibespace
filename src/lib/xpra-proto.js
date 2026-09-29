@@ -380,6 +380,11 @@ export function displayPacket(serverPacketTypes, { width, height, dpi = 96 }) {
 export const mapWindow = (wid, { x, y, w, h }) => ['map-window', wid, x, y, w, h, {}];
 export const unmapWindow = (wid) => ['unmap-window', wid, true];
 export const configureWindow = (wid, { x, y, w, h }, state = {}, skipGeometry = false) => ['configure-window', wid, x, y, w, h, {}, 0, state, skipGeometry];
+/** Ask the server to repaint a whole window — xpra-html5's own `request_refresh` (it asks at +200 / +500 ms after a resize
+ *  stops). MEASURED on xpra 6.5.4 (the .197 integration): a window configured to a new size while iconified and then
+ *  un-iconified keeps its new region UNPAINTED until asked (the Calculator: 0 % of its bottom edge drawn, for good); one
+ *  of these repaints it at once. */
+export const bufferRefresh = (wid) => ['buffer-refresh', wid, 0, 100, { 'refresh-now': true, batch: { reset: true } }, {}];
 export const closeWindow = (wid) => ['close-window', wid];
 export const focusPacket = (wid) => ['focus', wid, []];
 export const keyAction = (wid, k, pressed) => ['key-action', wid, k.keyname, !!pressed, k.modifiers, k.keyval, k.string, k.keycode, 0];

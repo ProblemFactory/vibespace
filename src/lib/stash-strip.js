@@ -18,7 +18,7 @@
 import { fetchJson, showToast } from './utils.js';
 import { t } from './i18n.js';
 import { UI_ICONS } from './icons.js';
-import { stashSummaryWords, summaryDigest, handedOverWords } from '../stash-summary.js';
+import { stashSummaryWords, summaryDigest, previewDigest, previewWords, handedOverWords } from '../stash-summary.js';
 
 const span = (cls, text) => { const s = document.createElement('span'); s.className = cls; if (text != null) s.textContent = text; return s; };
 const setText = (el, v) => { if (el && el.textContent !== v) el.textContent = v; };
@@ -67,6 +67,38 @@ export function createStashStrip({ sessionId }) {
   const noBtn = span('chat-stash-nobutton', '');   // a harness with no live inbox: the sentence where the button would be
   noBtn.hidden = true;
   el.append(noBtn);
+  // THE DETAILS (the owner, 2026-09-28: the strip said "2 notices are waiting" and nothing could open them): a house
+  // text button toggles a list under the strip — one row per waiting entry (its kind + the first line of its text,
+  // textContent: a head is peer-written), oldest first, and a last row naming how many more are not previewed.
+  const more = document.createElement('button');
+  more.type = 'button';
+  more.className = 'chat-stash-more';
+  more.setAttribute('aria-expanded', 'false');
+  const list = document.createElement('div');
+  list.className = 'chat-stash-list';
+  list.hidden = true;
+  el.append(more, list);
+  const det = { open: false, key: '' };
+  const drawMore = () => { setText(more, det.open ? t('Hide details') : t('Details')); more.setAttribute('aria-expanded', det.open ? 'true' : 'false'); list.hidden = !det.open; };
+  more.addEventListener('click', (ev) => { ev.stopPropagation(); det.open = !det.open; drawMore(); });
+  const drawList = (summary) => {
+    const key = previewDigest(summary);
+    if (key === det.key) return;
+    det.key = key;
+    // rows are PATCHED in place (the strip's rule: a fact change writes text, it does not rebuild nodes under the
+    // pointer): existing rows take the new words, extra rows are made only when the list grows, surplus rows leave
+    const h = Number(summary && summary.previewsHeld) || 0;
+    const words = ((summary && summary.previews) || []).map((p) => ({ cls: 'chat-stash-row', text: previewWords(p, t) }));
+    if (h) words.push({ cls: 'chat-stash-row chat-stash-row-more', text: h === 1 ? t('1 more is waiting, not previewed') : t('{n} more are waiting, not previewed', { n: h }) });
+    const rows = [...list.children];
+    words.forEach((w, i) => {
+      const r = rows[i] || list.appendChild(span('chat-stash-row', ''));
+      if (r.className !== w.cls) r.className = w.cls;
+      setText(r, w.text);
+    });
+    for (const r of rows.slice(words.length)) r.remove();
+  };
+  drawMore();
   /** The session's `stash` fact + its turn. The COST is the server's word (`summary.billed`: free only where the
    *  harness folds a notification into the running turn — a claude inbox is charged mid-turn too); a fact without it
    *  (an older server) falls back to the turn. verify r2: `inFlight` (another client's click is on its way — the
@@ -76,11 +108,12 @@ export function createStashStrip({ sessionId }) {
     const inFlight = !!(summary && summary.inFlight);
     const held = Number(summary && summary.held) || 0;
     const reachable = summary && typeof summary.reachable === 'boolean' ? summary.reachable : true;
-    const key = summary && summary.count ? summaryDigest(summary) + '|' + billed + '|' + inFlight + '|' + held + '|' + reachable : '';
+    const key = summary && summary.count ? summaryDigest(summary) + '|' + billed + '|' + inFlight + '|' + held + '|' + reachable + '|' + previewDigest(summary) : '';
     if (key === st.key) return;
     st.key = key;
     st.summary = key ? summary : null;
     if (!key) { el.hidden = true; return; }
+    drawList(summary);
     const w = stashSummaryWords(summary, t, { billed, inFlight, held, reachable });
     setText(head, w.head);
     setText(parts, ': ' + w.parts.join(', '));
@@ -97,7 +130,7 @@ export function createStashStrip({ sessionId }) {
     if (el.title !== w.line) el.title = w.line;
     el.hidden = false;
   }
-  return { el, set, state: () => ({ key: st.key, hidden: el.hidden }) };
+  return { el, set, state: () => ({ key: st.key, hidden: el.hidden, detailsOpen: det.open }) };
 }
 
 /** The sidebar card's "N waiting" chip (null when nothing waits). */

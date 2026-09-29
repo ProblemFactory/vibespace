@@ -9,7 +9,7 @@
 // session token — the real agent routes, the real engine), then the tool_result — and writes the same records,
 // timestamped, into its transcript (so a rebuilt history after the restart has the cards at their real instants).
 //   ① one call reads THREE conversations and drafts a reply on one ⇒ its card shows one row per conversation,
-//      the drafted one first (with "drafted a reply"), three rows, no fold
+//      the drafted one first (with "drafted a message" — where it lands, the placement round), three rows, no fold
 //   ② a REAL click on a row opens THAT conversation's window (the one door, app.openChannel)
 //   ③ the status-bar chip names the last conversation ("Channels · Ops room"); its menu lists the three, drafted
 //      first; a menu row opens the conversation
@@ -237,7 +237,9 @@ try {
   const got3 = await waitFor(`${ROWS(1)}.length === 3 && ${ROWS(1)}.some((r) => r.classList.contains('drafted'))`, 30000);
   const r1 = await rowsOf(1);
   check('the card holds ONE row per conversation (three)', got3 && r1.length === 3, { r1, turns: fs.existsSync(path.join(stubDir, 'turns.log')) ? fs.readFileSync(path.join(stubDir, 'turns.log'), 'utf8').slice(0, 1500) : null });
-  check('the DRAFTED conversation is first ("drafted a reply · read … messages"), marked drafted; the other two follow', r1[0]?.key === 'fake-poll/fake-poll-ops' && r1[0].drafted && /^drafted a reply · read \d+ messages$/.test(r1[0].words) && r1.slice(1).every((r) => !r.drafted && /^read \d+ messages?$/.test(r.words)), r1);
+  // the .197 integration (lane channel-threads, the placement round): a drafted reply's words say WHERE it lands — the
+  // CLI's `reply <conv> "text"` answers no particular message, so it lands in the chat: "drafted a message"
+  check('the DRAFTED conversation is first ("drafted a message · read … messages" — where it lands), marked drafted; the other two follow', r1[0]?.key === 'fake-poll/fake-poll-ops' && r1[0].drafted && /^drafted a message · read \d+ messages$/.test(r1[0].words) && r1.slice(1).every((r) => !r.drafted && /^read \d+ messages?$/.test(r.words)), r1);
   check('each row names account › title and wears the vendor glyph', r1.every((r) => / › /.test(r.name) && r.glyph) && r1.some((r) => r.name === 'fake-poll › Announcements') && r1.some((r) => r.name === 'fake-scan › Ops room'), r1.map((r) => r.name));
   check('three rows need no fold ("+N more" absent)', await evalJs(`!document.querySelector('${CARD(1)} .chat-channel-touches-more')`));
   await shot('card-rows', `${CARD(1)}`);

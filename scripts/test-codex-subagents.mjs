@@ -103,7 +103,7 @@ console.log('— ② renderer + chat-view wiring');
   ok(/renderToolMsg\(msg\) \{\s*\n\s*if \(msg\.collab\) return this\._renderCollabMsg\(msg\);/.test(cr), 'renderToolMsg dispatches a collab message BEFORE the tool-card path');
   ok(/collabRowsHtml\(collab, \{ esc: escHtml, t, icons: COLLAB_ICONS, live, now: Date\.now\(\) \}\)/.test(cr), 'the renderer injects the REAL escHtml + t + the SVG icon set (+ the view\'s liveness answer)');
   ok(/chat-agent-report-head[\s\S]{0,400}collabReportHeadText|escHtml\(collab\.agentName/.test(cr) && /chat-agent-report-body[^]{0,80}this\.renderMarkdown\(stripAnsi\(body\)\)/.test(cr), 'a sub-agent report renders an attributed head + its body as MARKDOWN (same sanitizer as assistant text)');
-  ok(/renderMarkdown\(html\) \{[\s\S]{0,400}DOMPurify\.sanitize/.test(cr) || /DOMPurify\.sanitize\(marked\.parse/.test(cr), '…and renderMarkdown is the DOMPurify path (the XSS law)');
+  ok(/renderMarkdown\(text\) \{[\s\S]{0,600}sanitizeHtml\(marked\.parse/.test(cr) && /import \{ sanitizeHtml \} from '\.\/safe-html\.js';/.test(cr), '…and renderMarkdown is the sanitizeHtml path (src/lib/safe-html.js — the XSS law; verify-r6: no CSS, no product classes)');
   ok(/COLLAB_ICONS = \{[\s\S]{0,220}lock: UI_ICONS\.lock,/.test(cr) && /agentIn:/.test(read('src/lib/icons.js')), 'the direction icons come from the central SVG library');
   const cv = read('src/lib/chat-view.js');
   ok(/const collabName = e\.target\.closest\?\.\('\.chat-collab-name'\);[\s\S]{0,320}this\._openCollabAgent\(\{/.test(cv), 'chat-view delegates a click on the agent NAME to _openCollabAgent');

@@ -791,15 +791,21 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   const glyphs = await p1.evaljs(`(() => {
     const roots = [document.querySelector('.rail-panel-channels'), ...[...window.app.wm.windows.values()].filter((w) => w.type === 'channel' || w.type === 'channel-outbox').map((w) => w.content)].filter(Boolean);
     const SYM = /^[\\u2190-\\u21FF\\u2500-\\u27BF\\u2B00-\\u2BFF\\u3000-\\u303F\\uFE0F\\u{1F000}-\\u{1FAFF}·•▸▾⋯✕✎⚠✓✗]+$/u;
-    const bad = []; let ic = 0, icSvg = 0;
+    // the .197 integration (lane channel-threads): a REACTION's face is the vendor's emoji as CONTENT (reaction-picker.js
+    // faceOf — like a message's own text), never product chrome; only the chip's face is excused, by its exact place
+    // (.rx-chip:not(.rx-add) > .rx-glyph), and the excused faces are counted so the excuse is seen to be narrow
+    const bad = []; let ic = 0, icSvg = 0, rxFaces = 0;
     for (const root of roots) {
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-      let n; while ((n = walker.nextNode())) { const s = n.nodeValue.trim(); if (s && SYM.test(s)) bad.push(s + ' @ ' + (n.parentElement.className || n.parentElement.tagName)); }
+      let n; while ((n = walker.nextNode())) { const s = n.nodeValue.trim(); if (!s || !SYM.test(s)) continue; if (n.parentElement.matches('.rx-chip:not(.rx-add) > .rx-glyph')) { rxFaces++; continue; } bad.push(s + ' @ ' + (n.parentElement.className || n.parentElement.tagName)); }
       for (const el of root.querySelectorAll('.chan-ic')) { ic++; if (el.querySelector('svg')) icSvg++; }
     }
-    return { roots: roots.length, bad, ic, icSvg };
+    const rxAddAll = roots.reduce((k, r) => k + r.querySelectorAll('.rx-chip.rx-add').length, 0);
+    const rxAdd = roots.reduce((k, r) => k + [...r.querySelectorAll('.rx-chip.rx-add')].filter((b) => b.querySelector('svg') && !b.textContent.trim()).length, 0);
+    return { roots: roots.length, bad, ic, icSvg, rxFaces, rxAdd, rxAddAll };
   })()`);
-  ok(glyphs.roots >= 3 && glyphs.bad.length === 0, '(c) no text-symbol glyph on the panel, a conversation window or the Outbox — every glyph is an SVG (§17)', JSON.stringify(glyphs));
+  ok(glyphs.roots >= 3 && glyphs.bad.length === 0, '(c) no text-symbol glyph on the panel, a conversation window or the Outbox — every glyph is an SVG (§17); a reaction chip\'s emoji is the reaction itself (content), never chrome', JSON.stringify(glyphs));
+  ok(glyphs.rxAdd === glyphs.rxAddAll, `(c) …and the reaction strip's own chrome — the "+" chip — is an SVG with no text (${glyphs.rxAdd}/${glyphs.rxAddAll}; ${glyphs.rxFaces} reaction face(s) read as content)`, JSON.stringify(glyphs));
   ok(glyphs.ic > 0 && glyphs.ic === glyphs.icSvg, `(c) every icon slot holds an <svg> (${glyphs.icSvg}/${glyphs.ic})`, JSON.stringify(glyphs));
 
   // (d) one colour per meaning, read off the REAL stylesheet: the five state pills are

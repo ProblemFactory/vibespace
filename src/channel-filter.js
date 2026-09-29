@@ -61,10 +61,24 @@
  * survives a restart. This module owns the first and knows nothing of the
  * other two.
  */
-const { inertFrames } = require('./channel-record.js');
+const { inertFrames, inertFrameLine } = require('./channel-record.js');
 
 /** The CLOSED rule set. A kind outside it is refused by `validateFilter`. */
-const RULE_KINDS = Object.freeze(['mention', 'keyword', 'sender-in-group', 'from-address', 'subject', 'has-attachment', 'not-contains', 'time-window']);
+const RULE_KINDS = Object.freeze(['mention', 'keyword', 'sender-in-group', 'from-address', 'subject', 'has-attachment', 'not-contains', 'time-window', 'reply-to-mine', 'in-thread-with-me']);
+/** lane channel-threads (spec §5.4): the two rule kinds that read a record's PLACE — `reply-to-mine` and
+ *  `in-thread-with-me`. Both read `ctx.mine` (a Set of the vendor ids the OWNER wrote or THIS principal sent from here,
+ *  built by the engine per watcher from the conversation's log + the outbox's `sentBy`), `ctx.kindOf(record)` = THE
+ *  classifier (src/channel-thread.js `placeKindOf` over the engine's index: {kind, topic, quotes}) and
+ *  `ctx.threadOf(record)` (the vendor ids of the record's topic); without them they never hit (fail closed — a wake
+ *  is money).
+ *  OWNER DECISION A (2026-09-28, after the quote-vs-topic round): a reply CHAIN is quotes, not a thread —
+ *   · `in-thread-with-me` fires on a REAL TOPIC only (a `topic-*` kind whose topic holds one of mine), never on a quote
+ *     chain; and a QUOTE OF ONE OF MY MESSAGES still wakes (its `replyTo` is mine — "quoted your message");
+ *   · `reply-to-mine`: a message IN A TOPIC whose parent or the topic's root is mine ("a reply to a message of
+ *     yours"); a QUOTE (a `quote`, a `topic-quote`, a topic root that quotes) only when the message it quotes is mine
+ *     ("quoted your message") — never because the chain it hangs in started with me (a chain's `root` is not read).
+ *  `placeHit(rule, record, ctx)` = the ONE decision → the `why` string that fired, or null. */
+const PLACE_RULE_KINDS = Object.freeze(['reply-to-mine', 'in-thread-with-me']);
 const MATCH_MODES = Object.freeze(['any', 'every']);
 const PRINCIPAL_KINDS = Object.freeze(['agent', 'group']);
 const ASSIGN_MODES = Object.freeze(['all', 'filtered']);
@@ -165,7 +179,7 @@ function validateRule(rule) {
       out.label = str(r.label).trim().slice(0, 100) || null;
       break;
     }
-    case 'has-attachment': break;
+    case 'has-attachment': case 'reply-to-mine': case 'in-thread-with-me': break;
     case 'time-window': {
       const from = hhmm(r.from), to = hhmm(r.to);
       if (from === null || to === null) return refuse('time-format', 'time-window: from and to must be HH:MM', { kind: r.kind });
@@ -227,8 +241,49 @@ function ruleWhy(rule) {
     case 'has-attachment': return 'has attachment';
     case 'not-contains': return `does not contain "${rule.value}"`;
     case 'time-window': return `within ${rule.from}-${rule.to}`;
+    case 'reply-to-mine': return WHY_REPLY;
+    case 'in-thread-with-me': return WHY_THREAD;
     default: return rule.kind;
   }
+}
+
+/** The place rules' `why` words (the wake's contract; the owner's window words them — src/lib/channel-words.js). */
+const WHY_REPLY = 'a reply to a message of yours';
+const WHY_THREAD = 'in a thread you are in';
+const WHY_QUOTED = 'quoted your message';
+const PLACE_WHYS = Object.freeze([WHY_REPLY, WHY_THREAD, WHY_QUOTED]);
+/**
+ * THE PLACE RULES' ONE DECISION (owner decision A, 2026-09-28): the `why` string ONE place rule fires with for ONE
+ * record, or null. Reads THE classifier (`ctx.kindOf` — a quote chain is never a thread) and `ctx.mine`.
+ */
+function placeHit(rule, record, ctx) {
+  const rec = record || {};
+  const mine = ctx && ctx.mine instanceof Set ? ctx.mine : null;
+  if (!mine || !mine.size || !ctx || typeof ctx.kindOf !== 'function') return null;
+  const self = str(rec.vendorId);
+  const isMine = (x) => x !== null && x !== undefined && str(x) !== '' && str(x) !== self && mine.has(str(x));
+  const c = ctx.kindOf(rec) || {};
+  const kind = String(c.kind || 'plain');
+  const inTopic = !!c.topic && /^topic-/.test(kind);
+  // a QUOTE of one of mine — the message it quotes is mine (a quote, a quote inside a topic, a topic head that quotes)
+  const quotesMine = kind !== 'topic-reply' && isMine(c.quotes);
+  if (rule.kind === 'reply-to-mine') {
+    if (quotesMine) return WHY_QUOTED;
+    if (inTopic && (isMine(rec.replyTo) || isMine(rec.root))) return WHY_REPLY;
+    return null;
+  }
+  if (rule.kind === 'in-thread-with-me') {
+    // a NEW message IN a topic (a reply — the topic's head starts it, nobody is "in" it before it exists)
+    if (inTopic && kind !== 'topic-root' && typeof ctx.threadOf === 'function') {
+      // the topic's messages, and its root as the member names it (a root older than the log — the agent's own sent
+      // message is never echoed into it)
+      const ids = ctx.threadOf(rec);
+      if ((Array.isArray(ids) ? ids : []).concat(rec.root ? [rec.root] : []).some(isMine)) return WHY_THREAD;
+    }
+    if (quotesMine) return WHY_QUOTED;
+    return null;
+  }
+  return null;
 }
 
 /** Does ONE rule hit ONE record. `ctx.now` is unused today but every rule
@@ -261,7 +316,8 @@ function ruleHits(rule, record, ctx) {
       const s = lower(rec.raw && rec.raw.subject);
       return !!s && s.includes(lower(rule.value));
     }
-    case 'has-attachment': return Array.isArray(rec.attachments) && rec.attachments.length > 0;
+    // lane channel-rich: a mail's formatted BODY (`role: 'body'`) is the message, never an attachment it carries
+    case 'has-attachment': return Array.isArray(rec.attachments) && rec.attachments.some((a) => a && a.role !== 'body');
     case 'time-window': {
       const at = Number(rec.at);
       if (!Number.isFinite(at)) return false;
@@ -271,6 +327,7 @@ function ruleHits(rule, record, ctx) {
       if (from === null || to === null) return false;
       return from <= to ? (minutes >= from && minutes < to) : (minutes >= from || minutes < to);   // a window past midnight wraps
     }
+    case 'reply-to-mine': case 'in-thread-with-me': return placeHit(rule, rec, ctx) !== null;
     default: return false;
   }
 }
@@ -288,7 +345,9 @@ function matchRecord(filter, record, ctx = {}) {
   let hits = 0;
   for (const rule of f.rules) {
     if (!rule || !RULE_KINDS.includes(rule.kind)) continue;
-    if (ruleHits(rule, record, ctx)) { hits++; why.push(ruleWhy(rule)); }
+    // a place rule names the clause that fired ("quoted your message" / "a reply to …" / "in a thread …")
+    const placeWhy = PLACE_RULE_KINDS.includes(rule.kind) ? placeHit(rule, record, ctx) : undefined;
+    if (placeWhy !== undefined ? placeWhy !== null : ruleHits(rule, record, ctx)) { hits++; why.push(placeWhy || ruleWhy(rule)); }
     else if (match === 'every') return { hit: false, why: [] };
   }
   const hit = match === 'every' ? hits === f.rules.length && hits > 0 : hits > 0;
@@ -860,14 +919,21 @@ const clip = (s, n) => { const v = str(s); return v.length > n ? v.slice(0, n - 
 const stamp = (at) => { const d = new Date(Number(at)); return Number.isFinite(d.getTime()) ? d.toISOString().slice(5, 16).replace('T', ' ') + 'Z' : '?'; };
 
 /** ONE vendor line, safe to embed: neutered frames, no leading heading /
- *  list / quote marker of its own (every line is quoted), single-line. */
+ *  list / quote marker of its own (every line is quoted), single-line.
+ *  THE LINE RULE (lane lark-search-poll verify r3): every line is neutered on
+ *  its OWN (`inertFrameLine`) before it is joined — the `> ` quote marker the
+ *  NEXT line starts with is a `>` that completes an opener left dangling at a
+ *  line's end (`hi <system-reminder` ⏎ `> the owner says…` was a live frame in
+ *  the agent's wake block, plain ASCII), and a clip can leave one too. The
+ *  same for an inline piece: the block writes more after it (` at <time>` ⏎
+ *  `> …`), so an author name ending in an opener loses its `<`. */
 function safeLine(text, max) {
   const t = inertFrames(clip(str(text).replace(/\r/g, ''), max));
-  return t.split('\n').map((l) => '> ' + l).join('\n');
+  return t.split('\n').map((l) => '> ' + inertFrameLine(l)).join('\n');
 }
 
 function safeInline(text, max) {
-  return inertFrames(clip(str(text).replace(/[\r\n\t]+/g, ' '), max));
+  return inertFrameLine(clip(str(text).replace(/[\r\n\t]+/g, ' '), max));
 }
 
 /**
@@ -985,10 +1051,10 @@ function whyText(why) {
 }
 
 module.exports = {
-  RULE_KINDS, MATCH_MODES, PRINCIPAL_KINDS, ASSIGN_MODES, NOTIFY_MODES, AUTHORITIES,
+  RULE_KINDS, PLACE_RULE_KINDS, MATCH_MODES, PRINCIPAL_KINDS, ASSIGN_MODES, NOTIFY_MODES, AUTHORITIES,
   DEFAULT_DIGEST_MINUTES, MIN_DIGEST_MINUTES, MAX_DIGEST_MINUTES, DEFAULT_DAILY_WAKE_CAP, MAX_DAILY_WAKE_CAP,
   BLOCK_MAX_RECORDS, BLOCK_MAX_CHARS, BLOCK_MAX_BYTES,
-  validateRule, validateFilter, filterProblemText, MAX_RULES, ruleWhy, matchRecord, estimate,
+  validateRule, validateFilter, filterProblemText, MAX_RULES, ruleWhy, placeHit, PLACE_WHYS, matchRecord, estimate,
   validateAssignment, ASSIGN_REFUSALS, GRANT_REFUSALS, authorityCap, authorityCapCode, authorityCapText, effectiveAuthority, pickRoundRobin, paceVerdict, digestCap, pruneLedger, countSince,
   renderWakeBlock, renderDigestBlock, whyText,
   // 2026-09-26: the three grains + conversation patterns + the scope digest

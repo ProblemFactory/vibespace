@@ -117,6 +117,10 @@ console.log('§1 channel-policy (PURE)');
   ok(rej.sentAs === null && /REJECTED/.test(block) && /\[system-reminder\]/.test(block) && !/<system-reminder>/.test(block), 'a rejected receipt has no sentAs and its reason is frame-inert in the block');
   const unk = P.renderReceiptBlock(P.receiptFor({ ...base, state: 'sent', identity: { marking: 'unknown', text: null } }));
   ok(/NOT VERIFIED/.test(unk), "an 'unknown' marking says NOT VERIFIED in the agent's block — as loud as marked");
+  // lane channel-threads verify r2 (IDENTITY): a drafter whose access was removed hears the FATE only
+  const wh = P.renderReceiptBlock(P.receiptFor({ ...base, state: 'sent', reason: 'secret reason', inThread: true, threadKey: 'omt_after' }), { adapterLabel: 'Lark', title: 'Secret room', text: 'body', proposed: 'body', withheld: true });
+  const whr = P.renderReceiptBlock({ ...P.receiptFor({ ...base, state: 'rejected', kind: 'reaction', reaction: { msg: 'om_1', key: 'OK', op: 'add' } }) }, { title: 'Secret room', withheld: true });
+  ok(/^Channel receipt — proposal p1: SENT — you no longer have access to that conversation/.test(wh) && !/Secret room|v1|omt_after|secret reason|body|Lark/.test(wh) && /REJECTED by the user \(a reaction\)/.test(whr) && !/Secret room|om_1/.test(whr) && wh.split('\n').length === 1, 'the WITHHELD receipt (verify r2): one line — the proposal id, its fate, "a reaction" — never the title, the vendor / thread id, the reason, the text, the account', [wh, whr]);
 }
 
 // ── §2 THE REAL ENGINE ────────────────────────────────────────────────────
@@ -695,7 +699,7 @@ async function receiptLegs(ENGmod, name) {
   ok(rr.noWake, 'a plain Approve (no choice ⇒ next-turn) rides the next message — no billed wake by default');
   ok(rr.fate0 === 'waiting' && rr.fate1 === 'handed' && rr.drainedAt && rr.bc === 1, `THE FATE: "waiting" until the agent's next message drains the stash, then "handed" (one broadcast) — ${rr.fate0} → ${rr.fate1}`, JSON.stringify(rr));
   const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
-  const LINE = '    const text = P.renderReceiptBlock(rc, { adapterLabel: rec ? (rec.label || rec.id) : p.adapterId, title: p.title, text: p.text, proposed: p.originalText });';
+  const LINE = '    const text = P.renderReceiptBlock(rc, { adapterLabel: rec ? (rec.label || rec.id) : p.adapterId, title: p.title, text: p.text, proposed: p.originalText, withheld });';
   ok(esrc.split(LINE).length === 2, 'the receipt-block line is present once (the control patches exactly it)');
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const ME = mutantCopies('chan-outbox-receipt', REPO);
@@ -1432,11 +1436,567 @@ async function durableLeg(ladderMod, name) {
 // (h) THE PRESS DOES WHAT THE BUTTON SAYS (the client's fact; the chrome leg is test-channels-groups-e2e ⑩): the
 // primary's delivery is read off its OWN data-deliver, and a menu pick relabels every primary on the page
 {
-  const PIN1 = "    approve.onclick = () => doApprove(toAgent ? pressedDelivery(approve) : null);";
+  // r6 F6: the press is also ARMED only (`cardArmed` — a card that just appeared / moved takes no person's click)
+  const PIN1 = "    approve.onclick = (ev) => { if (cardArmed(card, ev)) doApprove(toAgent ? pressedDelivery(approve) : null); };";
   const PIN2 = "export function pressedDelivery(button) { return button && button.dataset && button.dataset.deliver === 'wake-now' ? 'wake-now' : 'next-turn'; }";
   const PIN3 = "      const pick = (v) => { rememberDelivery(v); relabelPrimaries(v); };";
   ok(csrcV3.includes(PIN1) && csrcV3.includes(PIN2) && csrcV3.includes(PIN3) && !/doApprove\(toAgent \? rememberedDelivery\(\)/.test(csrcV3) && csrcV3.includes("approveLabel(pressedDelivery(approve), { edited: true })"), 'PIN: the primary Approve posts the delivery its OWN button carries (never the remembered choice at click time); a menu pick relabels every primary; the editor\'s label follows the button');
-  ok(/doApprove\(toAgent \? rememberedDelivery\(\)/.test(csrcV3.replace(PIN1, "    approve.onclick = () => doApprove(toAgent ? rememberedDelivery() : null);")), 'CONTROL: the pre-fix line (the remembered choice at click time) fails the pin');
+  ok(/doApprove\(toAgent \? rememberedDelivery\(\)/.test(csrcV3.replace(PIN1, "    approve.onclick = (ev) => { if (cardArmed(card, ev)) doApprove(toAgent ? rememberedDelivery() : null); };")), 'CONTROL: the pre-fix line (the remembered choice at click time) fails the pin');
+}
+
+console.log('§6 r6 verify (2026-09-28, "what you approve is what runs"): the reply\'s anchor (F1), its recipients (F3), the card (F4), the digest + the arming (F6), the hidden characters (O1)');
+const { mutantCopies: mutantCopiesR6, copiesCensus: copiesCensusR6 } = await import('./mutant-copy.mjs');
+const MR6 = mutantCopiesR6('chan-outbox-r6', REPO);
+const ESRC_R6 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+const PSRC_R6 = fs.readFileSync(path.join(REPO, 'src/channel-policy.js'), 'utf-8');
+/** The fake poll adapter with a SPY on its send (and, with `envelope`, the F3 capability: a reply's recipients follow
+ *  from the message it answers — `To = <anchor>@fixture.example`; without a stored envelope the send falls back to
+ *  the vendor's newest message NOW, the pre-fix Gmail rule, so a control can see the re-targeting). */
+function spyRegistryR6({ envelope = false } = {}) {
+  const registry = CH.createChannelRegistry();
+  const base = fake.makeFakeAdapter({ kind: 'fake-poll', receive: 'poll', sendAs: ['user'] });
+  const log = { sends: [], envAsks: [], vendorNewest: null, failEnvelope: false };
+  const mod = { ...base, caps: envelope ? { ...base.caps, replyEnvelope: true } : base.caps };
+  mod.create = (rec, deps) => {
+    const impl = base.create(rec, deps);
+    const out = {
+      ...impl,
+      async send(c, args) {
+        const a = { convId: c, ...args };
+        if (envelope && !(args.envelope && args.envelope.to)) a.derivedTo = `${log.vendorNewest || 'none'}@fixture.example`;
+        log.sends.push(a);
+        return impl.send(c, args);
+      },
+    };
+    if (envelope) {
+      out.replyEnvelope = async (c, { anchorId } = {}) => {
+        log.envAsks.push({ convId: c, anchorId });
+        if (log.failEnvelope) { const { ChannelError } = CH; throw new ChannelError('transport', 'fake: the thread read failed', { retryable: true }); }
+        return { anchorId, to: `${anchorId}@fixture.example`, cc: null, subject: 'Re: Ops room', inReplyTo: `<${anchorId}@fixture>`, references: `<${anchorId}@fixture>` };
+      };
+    }
+    return out;
+  };
+  registry.register(mod);
+  return { registry, log };
+}
+const nProposals = (eng) => Object.keys(eng.store.outbox.snapshot().proposals).length;
+const newestIn = (eng, conv, n = 1) => eng.store.readTail(A, conv, { limit: n });
+
+// ── F1: a reply answers ONLY a message stored for ITS conversation ──
+{
+  ok(P.replyAnchorVerdict({ replyTo: null }).ok && P.replyAnchorVerdict({ replyTo: 'm-1', convId: 'c', record: { vendorId: 'm-1', convId: 'c' } }).ok, 'PURE: no replyTo, or a record of this conversation ⇒ ok');
+  const rv = [P.replyAnchorVerdict({ replyTo: 'm-1', convId: 'c', record: null }), P.replyAnchorVerdict({ replyTo: 'm-1', convId: 'c', record: { vendorId: 'm-2', convId: 'c' } }), P.replyAnchorVerdict({ replyTo: 'm-1', convId: 'c', record: { vendorId: 'm-1', convId: 'other' } })];
+  ok(rv.every((x) => !x.ok && x.code === 'reply-anchor'), 'PURE: no stored record / another record / a record of another conversation ⇒ refused `reply-anchor`', JSON.stringify(rv.map((x) => x.why)));
+  const { registry, log } = spyRegistryR6();
+  const W = mkEngine({ name: 'r6-f1', registry }); const { eng } = W;
+  await prime(eng);
+  await eng.refresh(A, 'fake-poll-announce'); await eng.pass(A, { force: true });
+  const inOther = newestIn(eng, 'fake-poll-announce')[0];
+  const own = newestIn(eng, C, 3)[0];
+  ok(!!inOther && !!own && inOther.convId === 'fake-poll-announce' && own.convId === C, 'FIXTURE: a stored message of this conversation and one of another conversation of the same account', JSON.stringify([own && own.vendorId, inOther && inOther.vendorId]));
+  const n0 = nProposals(eng), s0 = log.sends.length;
+  const r1 = await eng.propose(AGENT, A, C, { text: 'looks good to me', replyTo: 'om_ANOTHER_CHAT_msg_0001' });
+  const r2 = await eng.propose(AGENT, A, C, { text: 'looks good to me', replyTo: inOther.vendorId });
+  ok(!r1.ok && r1.code === 'bad-proposal' && r1.why === 'reply-anchor' && !r2.ok && r2.why === 'reply-anchor' && nProposals(eng) === n0 && log.sends.length === s0, 'F1: a replyTo that is not a stored message of THIS conversation (an unknown id; a message of ANOTHER conversation) ⇒ bad-proposal / reply-anchor, NOTHING created, nothing sent (the verifier\'s P1a)', JSON.stringify([r1.error, r2.error]));
+  // the DIRECT path (the verifier's P1b): send authority + a direct policy used to post with no card at all
+  await eng.setPolicy(A, C, 'direct');
+  await eng.setAssignment(A, C, { principal: { kind: 'agent', id: 'agent-1', name: 'Worker' }, mode: 'all', authority: 'send' });
+  const d1 = await eng.propose(AGENT, A, C, { text: 'direct one', replyTo: inOther.vendorId });
+  ok(!d1.ok && d1.why === 'reply-anchor' && nProposals(eng) === n0 && log.sends.length === s0, 'F1: on a DIRECT-policy conversation with send authority the same replyTo is refused before anything goes out (no card was the whole problem)', JSON.stringify(d1));
+  await eng.setPolicy(A, C, 'review');
+  // the positive leg: an anchor of its own conversation — stored on the proposal, handed to the adapter
+  const ok1 = await eng.propose(AGENT, A, C, { text: 'answering Ada', replyTo: own.vendorId });
+  const v1 = ok1.proposal;
+  ok(ok1.ok && v1.state === 'awaiting-approval' && v1.replyAnchor && v1.replyAnchor.vendorId === own.vendorId && v1.replyAnchor.author.name === own.author.name && v1.replyAnchor.excerpt === String(own.text).replace(/\s+/g, ' ').trim().slice(0, 200), 'F1: a replyTo of its OWN conversation waits, and the proposal carries WHAT it answers (author + excerpt) for the card', JSON.stringify(v1 && v1.replyAnchor));
+  const ap1 = await eng.approve(v1.id, { shown: P.shownDigest(v1) });
+  const sent1 = log.sends[log.sends.length - 1];
+  ok(ap1.ok && ap1.proposal.state === 'sent' && sent1.replyTo === own.vendorId && sent1.replyAnchor && sent1.replyAnchor.vendorId === own.vendorId && sent1.replyAnchor.convId === C, 'F1: approved ⇒ the adapter is handed the replyTo AND the stored anchor\'s facts (its conversation) — the Lark belt reads `raw.chat_id` off them', JSON.stringify(sent1));
+  // RE-JUDGED AT APPROVAL: the answered message is no longer stored for this conversation ⇒ refused by name
+  const ok2 = await eng.propose(AGENT, A, C, { text: 'answering again', replyTo: own.vendorId });
+  const s1 = log.sends.length;
+  fs.rmSync(eng.store.logPath(A, C), { force: true });
+  const ap2 = await eng.approve(ok2.proposal.id, { shown: P.shownDigest(ok2.proposal) });
+  const q2 = eng.store.outbox.snapshot().proposals[ok2.proposal.id];
+  ok(!ap2.ok && ap2.code === 'send-not-available' && ap2.why === 'reply-anchor-gone' && q2.state === 'failed' && log.sends.length === s1, 'F1: re-judged at APPROVAL — the answered message is no longer a stored message of the conversation ⇒ send-not-available / reply-anchor-gone, failed, NOTHING sent', JSON.stringify(ap2));
+  const words = P.outcomeText(P.outcomeOf(q2), { errorCodeText: CAPS.errorCodeText, sendWhyText: CAPS.sendWhyText });
+  ok(/no longer a stored message of this conversation/.test(words), `the card words the refusal (${words})`);
+  eng.stop();
+  // CONTROLS (patched copies in scratch, never src/)
+  const PROP = '    if (!ra.ok) return ra.answer;\n';
+  const RECHK = '  function replyRecheck(p, rec) {\n';
+  ok(ESRC_R6.split(PROP).length === 2 && ESRC_R6.split(RECHK).length === 2, 'the propose-time gate and the re-judge are each present once (the controls remove exactly them)');
+  const E1 = MR6.load('src/server/channels-engine.js', ESRC_R6.replace(PROP, '    // (control) no propose-time gate\n'), 'no-anchor-gate');
+  const c1 = spyRegistryR6(); const W1 = mkEngine({ name: 'r6-f1-ctl1', registry: c1.registry, engine: E1 }); await prime(W1.eng);
+  const cr1 = await W1.eng.propose(AGENT, A, C, { text: 'looks good to me', replyTo: 'om_ANOTHER_CHAT_msg_0001' });
+  W1.eng.stop();
+  ok(cr1.ok && cr1.proposal.state === 'awaiting-approval', 'CONTROL: the engine without the propose-time gate files the P1a proposal (a card for chat A whose reply lands in chat B) — the leg above would go red');
+  const E2 = MR6.load('src/server/channels-engine.js', ESRC_R6.replace(RECHK, RECHK + '    return null; // (control) no re-judge\n'), 'no-recheck');
+  const c2 = spyRegistryR6(); const W2 = mkEngine({ name: 'r6-f1-ctl2', registry: c2.registry, engine: E2 }); await prime(W2.eng);
+  const own2 = W2.eng.store.readTail(A, C, { limit: 3 })[0];
+  const p3 = await W2.eng.propose(AGENT, A, C, { text: 'answering again', replyTo: own2.vendorId });
+  fs.rmSync(W2.eng.store.logPath(A, C), { force: true });
+  const a3 = await W2.eng.approve(p3.proposal.id, { shown: P.shownDigest(p3.proposal) });
+  W2.eng.stop();
+  ok(a3.ok && c2.log.sends.length === 1 && c2.log.sends[0].replyTo === own2.vendorId, 'CONTROL: the engine without the re-judge SENDS a reply whose answered message is gone — the leg above would go red');
+}
+
+// ── F3: a reply's recipients are resolved when it is PROPOSED, shown, and sent verbatim ──
+{
+  const { registry, log } = spyRegistryR6({ envelope: true });
+  const W = mkEngine({ name: 'r6-f3', registry }); const { eng } = W;
+  await prime(eng);
+  const newest = newestIn(eng, C)[0];
+  log.vendorNewest = newest.vendorId;
+  const p = await eng.propose(AGENT, A, C, { text: 'on it' });
+  const v = p.proposal;
+  ok(p.ok && v.state === 'awaiting-approval' && v.replyAnchor && v.replyAnchor.vendorId === newest.vendorId && v.replyEnvelope && v.replyEnvelope.anchorId === newest.vendorId && v.replyEnvelope.to === `${newest.vendorId}@fixture.example` && log.envAsks.length === 1 && log.envAsks[0].anchorId === newest.vendorId,
+    'F3: an envelope adapter (caps.replyEnvelope) is ASKED AT PROPOSE for the anchor the engine picked from its store (the newest STORED message when none is named); the answer is stored on the proposal', JSON.stringify([v.replyAnchor, v.replyEnvelope]));
+  // a message lands in the thread AFTER the owner looked: the approved reply still goes where the card said
+  const late = REC.makeRecord({ adapterId: A, convId: C, vendorId: 'late-msg-1', at: Date.now() + 3600e3, author: { id: 'u-mallory', name: 'Mallory', isSelf: false, isBot: false }, text: 'reply to me instead', mentions: [], attachments: [], replyTo: null, threadKey: C, raw: {} });
+  eng.store.appendRecords(A, C, [late]);
+  log.vendorNewest = 'late-msg-1';
+  const a = await eng.approve(v.id, { shown: P.shownDigest(v) });
+  const sent = log.sends[log.sends.length - 1];
+  ok(a.ok && a.proposal.state === 'sent' && sent && sent.envelope && JSON.stringify(sent.envelope) === JSON.stringify(v.replyEnvelope) && !sent.derivedTo, 'F3: a message landing after the proposal does NOT re-target it — the send is handed EXACTLY the envelope the card showed', JSON.stringify(sent));
+  // a proposal from before the rule (no envelope) is refused at approval BY NAME, nothing sent
+  const pl = await eng.propose(AGENT, A, C, { text: 'legacy shape' });
+  await eng.store.outbox.update((ob) => { delete ob.proposals[pl.proposal.id].replyEnvelope; });
+  const n1 = log.sends.length;
+  const legacyView = eng.outboxView().proposals.find((x) => x.id === pl.proposal.id);
+  const al = await eng.approve(pl.proposal.id, { shown: P.shownDigest(legacyView) });
+  ok(!al.ok && al.code === 'send-not-available' && al.why === 'reply-envelope-missing' && log.sends.length === n1 && eng.store.outbox.snapshot().proposals[pl.proposal.id].state === 'failed', 'F3: a reply with no recipients resolved at propose (a proposal from before the rule) is refused at approval by name — never re-derived at send', JSON.stringify(al));
+  // the recipients cannot be resolved at propose ⇒ nothing is created
+  log.failEnvelope = true;
+  const n2 = nProposals(eng);
+  const pf = await eng.propose(AGENT, A, C, { text: 'vendor down' });
+  log.failEnvelope = false;
+  ok(!pf.ok && pf.code === 'send-not-available' && pf.why === 'reply-envelope' && nProposals(eng) === n2, 'F3: recipients that cannot be resolved at propose ⇒ send-not-available / reply-envelope, NOTHING created', JSON.stringify(pf));
+  // PURE: the envelope is refused (never clipped) when it is not the anchor's, empty, oversize or carries a line break
+  const bad = [P.envelopeVerdict(null, 'a'), P.envelopeVerdict({ anchorId: 'b', to: 'x@y.z' }, 'a'), P.envelopeVerdict({ anchorId: 'a', to: '' }, 'a'), P.envelopeVerdict({ anchorId: 'a', to: 'x@y.z', subject: 's'.repeat(P.ENVELOPE_HEADER_MAX + 1) }, 'a'), P.envelopeVerdict({ anchorId: 'a', to: 'x@y.z\r\nBcc: evil@x' }, 'a')];
+  ok(bad.every((x) => !x.ok) && P.envelopeVerdict({ anchorId: 'a', to: 'x@y.z', cc: null, subject: 'Re: s' }, 'a').ok, 'PURE envelopeVerdict: none / another anchor / no recipient / an oversize header / a CR-LF ⇒ refused; a plain one ⇒ ok', JSON.stringify(bad.map((x) => x.why)));
+  eng.stop();
+  // CONTROL: an engine that does not hand the stored envelope to the send ⇒ the adapter derives from the newest message NOW
+  const HAND = '...(p.replyEnvelope ? { envelope: p.replyEnvelope } : {}) }); }';
+  ok(ESRC_R6.split(HAND).length === 2, 'the send hands the stored envelope once (the control drops exactly it)');
+  const E3 = MR6.load('src/server/channels-engine.js', ESRC_R6.replace(HAND, '}); }'), 'no-envelope-handed');
+  const c3 = spyRegistryR6({ envelope: true }); const W3 = mkEngine({ name: 'r6-f3-ctl', registry: c3.registry, engine: E3 }); await prime(W3.eng);
+  const pc = await W3.eng.propose(AGENT, A, C, { text: 'on it' });
+  W3.eng.store.appendRecords(A, C, [late]); c3.log.vendorNewest = 'late-msg-1';
+  await W3.eng.approve(pc.proposal.id, { shown: P.shownDigest(pc.proposal) });
+  W3.eng.stop();
+  const cs = c3.log.sends[0];
+  ok(cs && cs.derivedTo === 'late-msg-1@fixture.example', 'CONTROL: without the stored envelope the reply goes to whoever wrote the NEWEST message at send time (the late stranger) — the leg above would go red', JSON.stringify(cs));
+}
+
+// ── F6: the approval names what the card SHOWED ──
+{
+  const base = { id: 'p-1', adapterId: A, convId: C, text: 'hello', replyTo: 'm-1', replyAnchor: { vendorId: 'm-1', author: { name: 'Ada' }, excerpt: 'x' }, replyEnvelope: { anchorId: 'm-1', to: 'a@x.y', cc: null, subject: 'Re: s' }, compose: null, sendAs: 'user', honestyLine: null, title: 'Ops', state: 'awaiting-approval', updatedAt: 5, history: [] };
+  const d0 = P.shownDigest(base);
+  const changes = { id: 'p-2', adapterId: 'other', convId: 'other', text: 'hello!', replyTo: 'm-2', replyAnchor: { vendorId: 'm-2' }, replyEnvelope: { ...base.replyEnvelope, to: 'b@x.y' }, compose: { to: ['a@x.y'], cc: [], subject: 's' }, sendAs: 'bot', honestyLine: '— drafted by W' };
+  const moved = Object.entries(changes).filter(([k, val]) => P.shownDigest({ ...base, [k]: val }) === d0).map(([k]) => k);
+  ok(moved.length === 0, `PURE shownDigest: every field the card shows that decides what is sent changes the digest (${Object.keys(changes).join(', ')})`, moved.join(','));
+  ok(['cc', 'subject'].every((k) => P.shownDigest({ ...base, replyEnvelope: { ...base.replyEnvelope, [k]: 'z' } }) !== d0), 'PURE shownDigest: the reply\'s Cc and Subject are inside too');
+  // the .197 integration: the PLACEMENT (read through the alias) and a REACTION's op / key / message are inside too
+  const rx0 = { ...base, kind: 'reaction', text: '', reaction: { op: 'add', key: 'OK', msg: 'm-1' } };
+  ok(P.shownDigest({ ...base, placement: 'thread' }) !== d0 && P.shownDigest({ ...base, inThread: true }) === P.shownDigest({ ...base, placement: 'thread' }) && ['op', 'key', 'msg'].every((k) => P.shownDigest({ ...rx0, reaction: { ...rx0.reaction, [k]: 'z' } }) !== P.shownDigest(rx0)), 'PURE shownDigest: the placement (a legacy `inThread` reads as `thread`) and a reaction\'s op / key / message change it');
+  const still = [{ title: 'Renamed' }, { state: 'sending' }, { updatedAt: 9 }, { history: [1] }, { receipt: { x: 1 } }].filter((ch) => P.shownDigest({ ...base, ...ch }) !== d0);
+  ok(still.length === 0 && P.shownDigest(JSON.parse(JSON.stringify(base))) === d0 && /^v1:[0-9a-f]{16}:\d+$/.test(d0), 'PURE shownDigest: what does not decide the send (title, state, clocks, history, receipt) leaves it alone; a JSON round trip (the broadcast) keeps it', JSON.stringify(still));
+  const { registry, log } = spyRegistryR6();
+  const W = mkEngine({ name: 'r6-f6', registry }); const { eng } = W;
+  await prime(eng);
+  const p = await eng.propose(AGENT, A, C, { text: 'the card said this' });
+  const shown = P.shownDigest(p.proposal);
+  const bad = await eng.approve(p.proposal.id, { shown: shown.replace(/^v1:./, 'v1:x') });
+  ok(!bad.ok && bad.code === 'changed-since-shown' && eng.store.outbox.snapshot().proposals[p.proposal.id].state === 'awaiting-approval' && log.sends.length === 0, 'F6: a `shown` that is not the proposal as it stands ⇒ changed-since-shown, still awaiting, NOTHING sent', JSON.stringify(bad));
+  // the real way a proposal changes under an unchanged id: the sender-line switch flips after the card was drawn
+  await eng.setSenderHonesty(A, true);
+  const flip = await eng.approve(p.proposal.id, { shown });
+  ok(!flip.ok && flip.code === 'changed-since-shown' && log.sends.length === 0, 'F6: the channel\'s sender line turned on AFTER the card was drawn (the card said nothing would be appended) ⇒ refused, nothing sent');
+  const now1 = eng.outboxView().proposals.find((x) => x.id === p.proposal.id);
+  const good = await eng.approve(p.proposal.id, { shown: P.shownDigest(now1) });
+  ok(good.ok && good.proposal.state === 'sent' && log.sends.length === 1 && /drafted by Worker/.test(log.sends[0].text), 'F6: the digest of the card as it stands now ⇒ sent (with the sender line it now shows)');
+  // THE ROUTE: `shown` is REQUIRED — a request without it is refused by name; a stale one is 409
+  const routes = require(path.join(REPO, 'src/routes/channels.js'));
+  routes.setup({ getEngine: () => eng, authEnabled: () => true });
+  const call = (url, params, body) => new Promise((resolve) => {
+    const req = { method: 'POST', url, params, query: {}, body: body || {} };
+    const res = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json(payload) { resolve({ status: this.statusCode, body: payload }); return this; }, setHeader() {} };
+    const layer = routes.router.stack.find((l) => l.route && l.route.path === url && l.route.methods.post);
+    Promise.resolve(layer.route.stack[0].handle(req, res, () => {})).catch((err) => resolve({ status: 500, body: { error: String(err && err.message) } }));
+  });
+  const p2 = await eng.propose(AGENT, A, C, { text: 'via the route' });
+  const r0 = await call('/api/channels/outbox/:id/approve', { id: p2.proposal.id }, {});
+  const r1 = await call('/api/channels/outbox/:id/approve', { id: p2.proposal.id }, { shown: 'v1:0000000000000000:1' });
+  const r2 = await call('/api/channels/outbox/:id/approve', { id: p2.proposal.id }, { shown: P.shownDigest(p2.proposal) });
+  ok(r0.status === 400 && r0.body.code === 'bad-request' && r0.body.why === 'shown-required' && r1.status === 409 && r1.body.code === 'changed-since-shown' && r2.status === 200 && r2.body.proposal.state === 'sent', 'F6 route: no `shown` ⇒ 400 shown-required; a stale one ⇒ 409 changed-since-shown; the card\'s own ⇒ sent', JSON.stringify([r0.status, r0.body.why, r1.status, r1.body.code, r2.status]));
+  eng.stop();
+  // CONTROL: the engine without the comparison sends the mismatched approval
+  const SHOWN = "      if (String(shown) !== now0) return { ok: false, code: 'changed-since-shown',";
+  ok(ESRC_R6.split(SHOWN).length === 2, 'the comparison is present once (the control disables exactly it)');
+  const E4 = MR6.load('src/server/channels-engine.js', ESRC_R6.replace(SHOWN, "      if (false) return { ok: false, code: 'changed-since-shown',"), 'no-shown-check');
+  const c4 = spyRegistryR6(); const W4 = mkEngine({ name: 'r6-f6-ctl', registry: c4.registry, engine: E4 }); await prime(W4.eng);
+  const pc = await W4.eng.propose(AGENT, A, C, { text: 'the card said this' });
+  const ac = await W4.eng.approve(pc.proposal.id, { shown: 'v1:0000000000000000:1' });
+  W4.eng.stop();
+  ok(ac.ok && c4.log.sends.length === 1, 'CONTROL: the engine without the comparison SENDS an approval whose card showed something else — the leg above would go red');
+  // PURE: the arming delay
+  const T = 1_000_000;
+  const cells = [
+    [{ armedAt: T + 700, now: T, trusted: true }, false], [{ armedAt: T + 700, now: T + 699, trusted: true }, false], [{ armedAt: T + 700, now: T + 700, trusted: true }, true],
+    [{ armedAt: T + 700, now: T, trusted: false }, true], [{ armedAt: 0, now: T, trusted: true }, true],
+  ];
+  const wrong = cells.filter(([inp, want]) => P.armVerdict(inp).armed !== want);
+  ok(P.ARM_MS >= 500 && P.ARM_MS <= 1000 && wrong.length === 0, `PURE armVerdict (ARM_MS ${P.ARM_MS}): a person's click inside the window is held, at its end it counts; a script's click (untrusted) is no pointer sliding onto a card`, JSON.stringify(wrong));
+  const rearm = [[{ isNew: true }, true], [{ prevTop: 100, top: 100 }, false], [{ prevTop: 100, top: 100.8 }, false], [{ prevTop: 100, top: 180 }, true], [{ prevTop: null, top: 5 }, false]];
+  ok(rearm.every(([inp, want]) => P.rearmVerdict(inp) === want), 'PURE rearmVerdict: a card new here, or whose top moved more than a pixel, is armed again');
+}
+
+// ── O1: characters that hide what a line says ──
+{
+  const ER = require(path.join(REPO, 'src/exit-reach.js'));
+  let mismatch = null;
+  for (let cp = 0; cp <= 0xffff && !mismatch; cp++) {
+    if (cp >= 0xd800 && cp <= 0xdfff) continue;
+    const c = String.fromCharCode(cp);
+    // verify-r6 Z1 broadened exit-reach to every format / control character: everything the outbox refuses in an
+    // address is refused in a command too (the outbox's set ⊆ exit-reach's), and every DIRECTION control is in both
+    const dir = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/.test(c);
+    const inOutbox = P.hiddenCharsOf(c).length > 0, inExit = ER.hiddenOrderOf(c).length > 0;
+    if ((inOutbox && !inExit) || (dir && !(inOutbox && inExit))) mismatch = cp.toString(16);
+  }
+  ok(mismatch === null, 'PARITY over every BMP code point: every character the outbox refuses is refused by exit-reach\'s hiddenOrderOf too, and every direction control by both', mismatch);
+  ok(P.hiddenCharsOf('a‍b', { joiners: true }).join() === 'U+200D' && P.hiddenCharsOf('a‍b').length === 0, 'the joiners count only where asked (an address / an id), never in a subject or a text (emoji, scripts)');
+  const base = { to: 'a@example.com', subject: 'Status', text: 'hello' };
+  const refused = [
+    ['to', P.validateCompose({ ...base, to: 'a​@example.com' })], ['to', P.validateCompose({ ...base, to: 'moc.elpmaxe@a‮' })], ['cc', P.validateCompose({ ...base, cc: 'b‍@example.com' })],
+    ['subject', P.validateCompose({ ...base, subject: 'Invoice ‮fdp.exe' })], ['subject', P.validateCompose({ ...base, subject: 'Pay​now' })],
+    ['replyTo', P.validateProposal({ text: 'x', replyTo: 'om_1⁦' })],
+  ];
+  ok(refused.every(([, r]) => !r.ok && /invisible characters/.test(r.error) && (r.why === 'address' || r.why === 'subject' || r.why === 'replyTo')), 'O1: an address (To / Cc), a subject or a replyTo carrying a direction control or a zero-width character is REFUSED by name (U+XXXX named)', JSON.stringify(refused.map(([k, r]) => [k, r.why, r.error])));
+  const kept = [P.validateCompose({ ...base, subject: 'Team 👨‍👩‍👧 update' }), P.validateProposal({ text: 'שלום ‏ok ‮reversed' })];
+  ok(kept.every((r) => r.ok) && kept[1].proposal.text === 'שלום ‏ok ‮reversed', 'O1: an emoji\'s joiners in a subject pass; a TEXT keeps its characters verbatim (RTL writing uses the marks) — the card reveals them instead');
+  const seg = P.revealSegments('pay ‮evil​!');
+  ok(JSON.stringify(seg) === JSON.stringify([{ text: 'pay ' }, { hidden: 'U+202E' }, { text: 'evil' }, { hidden: 'U+200B' }, { text: '!' }]) && P.revealSegments('👨‍👩').length === 1, 'PURE revealSegments: each hidden character is its own mark, an emoji ZWJ sequence stays whole', JSON.stringify(seg));
+  const W = mkEngine({ name: 'r6-o1' }); const { eng } = W; await prime(eng);
+  const n0 = nProposals(eng);
+  const t1 = await eng.propose(AGENT, A, C, { text: 'please pay ‮evil' });
+  ok(t1.ok && t1.proposal.text === 'please pay ‮evil' && nProposals(eng) === n0 + 1, 'O1 engine: a reply text with a direction control is kept verbatim (the card reveals it)');
+  const cm = await eng.compose({ kind: 'user' }, A, { to: 'a​@example.com', subject: 's', text: 'x' });
+  ok(!cm.ok && cm.code === 'bad-proposal' && cm.why === 'address' && nProposals(eng) === n0 + 1, 'O1 engine: a composed message to an address with a zero-width character ⇒ bad-proposal / address, nothing created', JSON.stringify(cm));
+  eng.stop();
+  const LINE = "    if (h.length) return { ok: false, error: `an address carries invisible characters (${h.join(', ')}) — it would read as another address`, why: 'address' };";
+  ok(PSRC_R6.split(LINE).length === 2, 'the address refusal is present once (the control removes exactly it)');
+  const PC = MR6.load('src/channel-policy.js', PSRC_R6.replace(LINE, '    // (control) no hidden-character refusal'), 'no-hidden-address');
+  ok(PC.validateCompose({ ...base, to: 'a​@example.com' }).ok, 'CONTROL: without the refusal `a<U+200B>@example.com` passes the address rule (the plain-address regex does not see it) — the leg above would go red');
+}
+
+// ── the REAL card (esbuild → node over a minimal DOM): F4 envelope lines, F1/F3 what it answers + who receives it,
+//    O1 the reveal, F6 the arming + the digest on the wire ──
+{
+  const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
+  const dir = fs.mkdtempSync(path.join(ROOT, 'card-'));
+  const out = path.join(dir, 'channel-outbox.mjs');
+  const stubBuildVersion = { name: 'stub-build-version', setup(b) { b.onResolve({ filter: /build-version\.js$/ }, () => ({ path: 'build-version', namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: "export const BUILD_VERSION = 'test';", loader: 'js' })); } };
+  await esbuild.build({ entryPoints: [path.join(REPO, 'src/lib/channel-outbox.js')], bundle: true, format: 'esm', platform: 'node', target: 'es2022', outfile: out, logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBuildVersion] });
+  // ── a minimal DOM: elements, text, a small selector engine (tag . [attr] [attr="v"] :scope, descendant / child) ──
+  class N {
+    constructor(tag) { this.tagName = String(tag).toUpperCase(); this.nodeType = tag === '#text' ? 3 : 1; this.childNodes = []; this.parentNode = null; this.dataset = {}; this.style = {}; this.attrs = {}; this._cls = new Set(); this._text = ''; this._html = ''; const self = this; this.classList = { add: (...c) => c.forEach((x) => self._cls.add(x)), remove: (...c) => c.forEach((x) => self._cls.delete(x)), contains: (c) => self._cls.has(c), toggle: (c, on) => { const v = on === undefined ? !self._cls.has(c) : !!on; if (v) self._cls.add(c); else self._cls.delete(c); return v; } }; }
+    get className() { return [...this._cls].join(' '); }
+    set className(v) { this._cls = new Set(String(v).split(/\s+/).filter(Boolean)); }
+    get children() { return this.childNodes.filter((n) => n.nodeType === 1); }
+    get firstChild() { return this.childNodes[0] || null; }
+    get firstElementChild() { return this.children[0] || null; }
+    get lastElementChild() { const c = this.children; return c[c.length - 1] || null; }
+    get textContent() { return this.nodeType === 3 ? this._text : this.childNodes.map((n) => n.textContent).join(''); }
+    set textContent(v) { if (this.nodeType === 3) { this._text = String(v); return; } this.childNodes.forEach((n) => { n.parentNode = null; }); this.childNodes = []; if (String(v)) this.appendChild(Object.assign(new N('#text'), { _text: String(v) })); }
+    set innerHTML(v) { this._html = String(v); this.childNodes = []; }
+    get innerHTML() { return this._html; }
+    get offsetParent() { return null; }
+    appendChild(n) { if (n.parentNode) n.remove(); n.parentNode = this; this.childNodes.push(n); return n; }
+    append(...ns) { for (const n of ns) this.appendChild(typeof n === 'string' ? Object.assign(new N('#text'), { _text: n }) : n); }
+    insertBefore(n, ref) { if (!ref) return this.appendChild(n); if (n.parentNode) n.remove(); const i = this.childNodes.indexOf(ref); n.parentNode = this; this.childNodes.splice(i < 0 ? this.childNodes.length : i, 0, n); return n; }
+    remove() { if (this.parentNode) { const p = this.parentNode; p.childNodes = p.childNodes.filter((x) => x !== this); this.parentNode = null; } }
+    replaceWith(n) { const p = this.parentNode; if (!p) return; p.insertBefore(n, this); this.remove(); }
+    after(n) { const p = this.parentNode; if (!p) return; const i = p.childNodes.indexOf(this); p.insertBefore(n, p.childNodes[i + 1] || null); }
+    setAttribute(k, v) { this.attrs[k] = String(v); }
+    getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }
+    focus() {} addEventListener() {} removeEventListener() {}
+    click() { if (typeof this.onclick === 'function' && !this.disabled) return this.onclick({ isTrusted: false, preventDefault() {}, stopPropagation() {} }); return undefined; }
+    getBoundingClientRect() { const p = this.parentNode; const i = p ? p.children.indexOf(this) : 0; const top = (p ? p.getBoundingClientRect().top : 0) + i * 100; return { top, bottom: top + 90, left: 0, right: 500, width: 500, height: 90 }; }
+    _all() { const out = []; const walk = (n) => { for (const c of n.children) { out.push(c); walk(c); } }; walk(this); return out; }
+    querySelectorAll(sel) { const scope = this; return this._all().filter((e) => String(sel).split(',').some((s) => matchSel(e, s.trim(), scope))); }
+    querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
+    closest(sel) { let e = this; while (e && e.nodeType === 1) { if (matchSel(e, sel, null)) return e; e = e.parentNode; } return null; }
+  }
+  const compound = (e, c, scope) => {
+    if (c === ':scope') return e === scope;
+    const m = /^([a-z]+)?((?:\.[\w-]+|\[[^\]]+\])*)$/i.exec(c);
+    if (!m) return false;
+    if (m[1] && e.tagName !== m[1].toUpperCase()) return false;
+    for (const part of m[2].match(/\.[\w-]+|\[[^\]]+\]/g) || []) {
+      if (part[0] === '.') { if (!e._cls.has(part.slice(1))) return false; continue; }
+      const am = /^\[([\w-]+)(?:="([^"]*)")?\]$/.exec(part);
+      const k = am[1]; const v = k.startsWith('data-') ? e.dataset[k.slice(5).replace(/-([a-z])/g, (_, x) => x.toUpperCase())] : e.getAttribute(k);
+      if (v === undefined || v === null) return false;
+      if (am[2] !== undefined && String(v) !== am[2]) return false;
+    }
+    return true;
+  };
+  function matchSel(e, sel, scope) {
+    const toks = String(sel).replace(/\s*>\s*/g, ' > ').trim().split(/\s+/);
+    const rec = (el, i) => {
+      if (!compound(el, toks[i], scope)) return false;
+      if (i === 0) return true;
+      if (toks[i - 1] === '>') return !!el.parentNode && el.parentNode.nodeType === 1 && rec(el.parentNode, i - 2);
+      for (let a = el.parentNode; a && a.nodeType === 1; a = a.parentNode) if (rec(a, i - 1)) return true;
+      return false;
+    };
+    return rec(e, toks.length - 1);
+  }
+  const body = new N('body');
+  const noop = () => {};
+  const saved = {};
+  for (const k of ['window', 'document', 'localStorage', 'fetch', 'navigator', 'addEventListener', 'removeEventListener', 'matchMedia', 'requestAnimationFrame', 'cancelAnimationFrame', 'getComputedStyle', 'innerWidth', 'innerHeight', 'location', 'MutationObserver', 'ResizeObserver', 'IntersectionObserver']) saved[k] = Object.getOwnPropertyDescriptor(globalThis, k);
+  const def = (k, v) => { try { Object.defineProperty(globalThis, k, { value: v, configurable: true, writable: true }); } catch {} };
+  for (const [k, v] of Object.entries({ addEventListener: noop, removeEventListener: noop, matchMedia: () => ({ matches: false, addEventListener: noop, addListener: noop }), requestAnimationFrame: (f) => setTimeout(f, 0), cancelAnimationFrame: noop, getComputedStyle: () => ({ getPropertyValue: () => '' }), innerWidth: 1024, innerHeight: 768, location: { origin: 'http://test', href: 'http://test/', hostname: 'test', protocol: 'http:' } })) def(k, v);
+  class NoopObserver { observe() {} unobserve() {} disconnect() {} takeRecords() { return []; } }
+  for (const k of ['MutationObserver', 'ResizeObserver', 'IntersectionObserver']) def(k, NoopObserver);
+  def('window', globalThis);
+  def('document', { createElement: (t) => new N(t), createTextNode: (s) => Object.assign(new N('#text'), { _text: String(s) }), getElementById: (id) => body._all().find((e) => e.id === id) || null, body, documentElement: new N('html'), head: new N('head'), addEventListener: noop, removeEventListener: noop, querySelector: (s) => body.querySelector(s), querySelectorAll: (s) => body.querySelectorAll(s) });
+  def('navigator', { language: 'en', userAgent: 'node' });
+  const store = new Map();
+  def('localStorage', { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) });
+  const posts = [];
+  def('fetch', async (url, opts = {}) => { posts.push({ url: String(url), body: opts.body ? JSON.parse(opts.body) : null }); return { json: async () => ({ ok: true, proposal: { state: 'sent' } }) }; });
+  let CO = null, loadErr = null;
+  try { CO = await import(out); } catch (e) { loadErr = e; }
+  ok(!!CO && typeof CO.renderProposalCard === 'function', 'the Outbox module bundles and loads over the minimal DOM', loadErr && loadErr.stack);
+  if (CO) {
+    const app = { openChannel() {}, openChannelOutbox() {} };
+    const realNow = Date.now;
+    let clock0 = realNow.call(Date);
+    Date.now = () => clock0;
+    try {
+      const find = (root, cls) => root._all().filter((e) => e._cls.has(cls));
+      const texts = (root) => { const out2 = []; const walk = (n) => { for (const c of n.childNodes) { if (c.nodeType === 3) out2.push(c._text); else walk(c); } }; walk(root); return out2; };
+      // F4: a COMPOSE card — To / Cc / Subject each its own line, whole
+      const subject = 'Quarterly reconciliation of the vendor invoices for the Northwind account';
+      const cp = { id: 'p-c1', adapterId: A, adapterLabel: 'Gmail', convId: null, state: 'awaiting-approval', text: 'Please find the numbers below.', draftedBy: { kind: 'agent', id: 'agent-1', name: 'Worker' }, compose: { to: ['ada@example.com', 'brook@example.com'], cc: ['cass@example.com', 'dee@example.com'], subject }, sendAs: 'user', policy: { mode: 'review', reasons: ['channel-policy'] }, at: 1, updatedAt: 1 };
+      const card = CO.renderProposalCard(app, cp);
+      const row = (cls) => find(card, cls)[0] || null;
+      ok(row('chan-prop-to') && row('chan-prop-cc') && row('chan-prop-subject') && row('chan-prop-to').textContent.includes('ada@example.com, brook@example.com') && row('chan-prop-cc').textContent.includes('cass@example.com, dee@example.com') && row('chan-prop-subject').textContent.includes(subject) && find(card, 'chan-prop-where').length === 1 && !find(card, 'chan-prop-where')[0].textContent.includes('cass@'),
+        'F4 (real card): a composed message\'s To, Cc and Subject are EACH their own line, every address and the 70-character subject whole (the Cc used to fall off a one-line ellipsis)', JSON.stringify(['chan-prop-to', 'chan-prop-cc', 'chan-prop-subject'].map((c) => row(c) && row(c).textContent)));
+      // F1 / F3 / O1: a REPLY card on an envelope adapter — what it answers, who receives it, the text's hidden marks
+      const rp = { id: 'p-r1', adapterId: A, adapterLabel: 'Gmail', convId: C, title: 'Ops room', state: 'awaiting-approval', text: 'please pay ‮evil', draftedBy: { kind: 'agent', id: 'agent-1', name: 'Worker' }, replyTo: null, replyAnchor: { vendorId: 'm-7', at: 1, author: { id: 'ada@example.com', name: 'Ada', isSelf: false }, excerpt: 'Can you check the nightly job?' }, replyEnvelope: { anchorId: 'm-7', to: 'Ada <ada@example.com>', cc: 'ops@example.com', subject: 'Re: Nightly job' }, sendAs: 'user', policy: { mode: 'review', reasons: ['authority'] }, at: 2, updatedAt: 2 };
+      const rc = CO.renderProposalCard(app, rp, { compact: true });
+      const r2 = (cls) => find(rc, cls)[0] || null;
+      ok(r2('chan-prop-anchor') && /Ada — Can you check the nightly job\?/.test(r2('chan-prop-anchor').textContent) && r2('chan-prop-to') && r2('chan-prop-to').textContent.includes('Ada <ada@example.com>') && r2('chan-prop-cc').textContent.includes('ops@example.com') && r2('chan-prop-subject').textContent.includes('Re: Nightly job'),
+        'F1 / F3 (real card, even the compact inline one): the card says WHAT the reply answers (author — excerpt) and WHO receives it (To / Cc / Subject resolved at propose)', JSON.stringify(['chan-prop-anchor', 'chan-prop-to', 'chan-prop-cc'].map((c) => r2(c) && r2(c).textContent)));
+      const bodyEl = find(rc, 'chan-prop-text')[0];
+      ok(bodyEl && find(bodyEl, 'chan-prop-hidden').map((m) => m.textContent).join() === 'U+202E' && !texts(bodyEl).some((s) => /[‪-‮⁦-⁩‎‏؜​⁠﻿]/.test(s)) && find(rc, 'chan-prop-hiddenwarn').length === 1,
+        'O1 (real card): the text\'s direction control is drawn as a visible mark (U+202E) — no text node of the body carries it — and the card says so once', JSON.stringify(texts(bodyEl)));
+      // F6: the arming — a PERSON's click on a card that just appeared is held (no request), a script's is not;
+      // past ARM_MS the person's click posts, carrying the digest of the record the card was drawn from
+      const approveBtn = rc._all().find((e) => e.dataset.approve === '1');
+      ok(rc._cls.has('chan-prop-arming') && Number(rc.dataset.armedAt) === clock0 + P.ARM_MS, 'F6 (real card): a fresh card is ARMING (its look) until now + ARM_MS');
+      await approveBtn.onclick({ isTrusted: true });
+      ok(posts.length === 0 && rc._cls.has('chan-prop-arming-nudge'), 'F6 (real card): a person\'s click inside the window posts NOTHING and nudges the card (the look says why — never a silent no-op)');
+      clock0 += P.ARM_MS;
+      await approveBtn.onclick({ isTrusted: true });
+      await new Promise((r) => setTimeout(r, 0));
+      const post1 = posts[0];
+      ok(post1 && /\/api\/channels\/outbox\/p-r1\/approve$/.test(post1.url) && post1.body.shown === P.shownDigest(rp), 'F6 (real card): past the window the click posts, and the request carries `shown` = the PURE digest of the record the card showed', JSON.stringify(post1 && post1.body));
+      // a card that MOVED under the pointer (a new proposal inserted above it) is armed again
+      const pA = { ...rp, id: 'p-a', text: 'first', at: 10 };
+      const sec = CO.renderInlineProposals(app, [pA], null);
+      const cardA = sec.children.find((c) => c.dataset.proposal === 'p-a');
+      clock0 += 5 * P.ARM_MS;
+      ok(P.armVerdict({ armedAt: Number(cardA.dataset.armedAt), now: clock0 }).armed, 'FIXTURE: card A has been on screen past its window (armed)');
+      const pB = { ...rp, id: 'p-b', text: 'a replacement, inserted on top', at: 20 };
+      const sec2 = CO.renderInlineProposals(app, [pA, pB], sec);
+      const cardA2 = sec2.children.find((c) => c.dataset.proposal === 'p-a');
+      const cardB = sec2.children.find((c) => c.dataset.proposal === 'p-b');
+      ok(cardA2 === cardA && sec2.children.indexOf(cardB) < sec2.children.indexOf(cardA) && !P.armVerdict({ armedAt: Number(cardA.dataset.armedAt), now: clock0 }).armed && !P.armVerdict({ armedAt: Number(cardB.dataset.armedAt), now: clock0 }).armed, 'F6 (real card): a proposal inserted ON TOP arms itself AND re-arms the card it pushed down (the same element, moved) — neither takes the click that was aimed at the old slot');
+      // a script's .click() is not a person's pointer (the heavy suites drive the card this way)
+      const n0 = posts.length;
+      const rcS = CO.renderProposalCard(app, { ...rp, id: 'p-s' }, { compact: true });
+      rcS._all().find((e) => e.dataset.approve === '1').click();
+      await new Promise((r) => setTimeout(r, 0));
+      ok(posts.length === n0 + 1 && posts[n0].body.shown === P.shownDigest({ ...rp, id: 'p-s' }), 'F6 (real card): an untrusted script click on a fresh card still posts (with its digest) — the hold is for a person\'s pointer');
+    } finally { Date.now = realNow; }
+  }
+  for (const [k, d] of Object.entries(saved)) { try { if (d) Object.defineProperty(globalThis, k, d); else delete globalThis[k]; } catch {} }
+  // F4 CSS: no envelope line clips
+  const css = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf-8');
+  const ruleOf = (sel) => { const m = new RegExp(`(^|\\n)${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`).exec(css); return m ? m[2] : null; };
+  const clips = (r) => r === null || /nowrap|ellipsis|overflow:\s*hidden/.test(r);
+  ok(!clips(ruleOf('.chan-prop-where')) && !clips(ruleOf('.chan-prop-env')) && !clips(ruleOf('.chan-prop-env-v')), 'F4 CSS: the where line and every envelope row WRAP — no nowrap / ellipsis / overflow hidden', JSON.stringify([ruleOf('.chan-prop-where'), ruleOf('.chan-prop-env-v')]));
+  ok(clips('.chan-prop-where { font-size: 11px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }'), 'CONTROL: the pre-fix one-line rule is caught by the same census');
+  // the client wiring pins (the card's press is armed; the approve body carries the digest)
+  const csrc = fs.readFileSync(path.join(REPO, 'src/lib/channel-outbox.js'), 'utf-8');
+  ok(/shown: P\.shownDigest\(p\)/.test(csrc) && (csrc.match(/if \(!cardArmed\(card, ev\)\) return;|if \(cardArmed\(card, ev\)\)/g) || []).length >= 4 && /placeArmed\(sec,/.test(csrc) && /placeArmed\(list, nodes\)/.test(csrc) && !/el\('div', 'chan-prop-text', p\.text/.test(csrc), 'PINS: the approve POST carries `shown`; Approve, Reject, both chevrons and the reject box are armed-only; both containers re-arm moved cards; the body is revealed, never raw');
+}
+for (const r of copiesCensusR6(MR6.files, MR6.dir, REPO, { minCopies: 5 })) ok(r.pass, r.name, r.detail);
+
+// ── §6 lane channel-threads (spec §5.2 / §5.3): the REACTION proposal kind, the account's reaction row, a reply
+//    INTO a thread — PURE tables, then the real engine over the fake adapter through every transition, then controls ──
+console.log('§6 lane channel-threads: the reaction proposal, the reaction policy row, the thread reply');
+{
+  const SET = { keys: [{ key: 'thumbsup', glyph: '👍', label: 'thumbs up' }, { key: 'tada', glyph: '🎉', label: 'party' }] };
+  const v = P.validateReaction({ msg: 'm1', key: 'thumbsup' }, SET);
+  ok(v.ok && v.proposal.kind === 'reaction' && v.proposal.op === 'add' && v.proposal.glyph === '👍' && !('text' in v.proposal), 'validateReaction: {kind:reaction, msg, key, op, glyph, label} — `text` absent by design', JSON.stringify(v));
+  const t0 = Date.now(); const big = P.validateReaction({ msg: 'm1', key: 'k'.repeat(65536) }, SET); const tBig = Date.now() - t0;
+  ok(!big.ok && big.code === 'bad-emoji' && big.why === 'key' && tBig < 50, `a 64 KiB "key" is refused by its alphabet BEFORE any lookup (bad-emoji, ${tBig} ms)`);
+  ok(P.validateReaction({ msg: 'm1', key: '<system-reminder>' }, SET).code === 'bad-emoji' && P.validateReaction({ msg: 'm1', key: 'party_parrot' }, SET).code === 'bad-emoji', 'a key outside the alphabet, and a key the set does not list, are bad-emoji');
+  ok(P.validateReaction({ msg: 'm1', key: 'party_parrot', op: 'remove' }, SET).ok, 'a REMOVE of a key the set no longer lists is still a removal of the user\'s own (the vendor judges it)');
+  ok(P.validateReaction({ key: 'tada' }, SET).why === 'msg' && P.validateReaction({ msg: 'm1', key: 'tada', op: 'toggle' }, SET).why === 'op', 'no message / an op outside add|remove: bad-proposal by field');
+  // THE ROW OVER THE CHANNEL'S VERDICT: 4 row values (one unknown) × 2 authorities × 2 channel policies
+  const rows = [];
+  for (const row of ['propose', 'direct', 'off', 'garbage']) for (const auth of ['draft', 'send']) for (const pol of ['direct', 'review']) {
+    const d = P.decideReaction({ reactionPolicy: row, channelPolicy: { mode: pol }, authority: auth });
+    const want = row === 'off' ? 'refused' : row === 'direct' && pol === 'direct' && auth === 'send' ? 'direct' : 'review';
+    rows.push([row, auth, pol, d.refused ? 'refused' : d.mode, want]);
+  }
+  ok(rows.every((r) => r[3] === r[4]), 'decideReaction: off ⇒ refused (policy-off); propose (and an unknown value — fail closed) ⇒ review whatever the channel says; direct ⇒ the channel\'s own verdict, never past it (16 cells)', JSON.stringify(rows.filter((r) => r[3] !== r[4])));
+  ok(P.decideReaction({ reactionPolicy: 'off' }).why === 'policy-off' && P.decideReaction({ reactionPolicy: 'propose', channelPolicy: { mode: 'direct' }, authority: 'send' }).reasons.includes('reaction-policy') && P.DECISION_REASONS.includes('reaction-policy'), 'the refusal names policy-off; a propose row names its own reason (in the closed reason set)');
+  const GZ = { linksReview: true, attachmentsReview: true, offHours: { enabled: true, tz: 'UTC', start: '00:00', end: '00:01', weekdays: [] } };
+  const dl = P.decideOutbound({ channelPolicy: { mode: 'direct' }, guards: GZ, proposal: { kind: 'reaction', text: 'see http://x.y', attachments: [{ name: 'a' }], authority: 'send' } });
+  const dt = P.decideOutbound({ channelPolicy: { mode: 'direct' }, guards: GZ, proposal: { text: 'see http://x.y', attachments: [{ name: 'a' }], authority: 'send' } });
+  ok(dl.mode === 'direct' && dl.reasons.length === 0 && dt.mode === 'review' && dt.reasons.length === 3, 'decideOutbound with kind reaction: links / attachments / off-hours cannot apply (a reaction has no text) — the same inputs as a TEXT are review ×3', JSON.stringify([dl.reasons, dt.reasons]));
+  const rx = (st, extra = {}) => P.receiptFor({ id: 'p9', kind: 'reaction', state: st, convId: 'c', adapterId: 'a', reaction: { msg: 'om_x1', key: 'thumbsup', glyph: '👍', op: 'add' }, result: st === 'sent' ? { at: 1 } : null, ...extra });
+  const bs = P.renderReceiptBlock(rx('sent'), { adapterLabel: 'Lark', title: 'Ops' }), br = P.renderReceiptBlock(rx('rejected', { reason: P.REJECTED_DEFAULT_REASON }), { adapterLabel: 'Lark', title: 'Ops' });
+  ok(/^reaction 👍 on om_x1: sent \(proposal p9\)$/m.test(bs) && bs.split('\n').length === 2 && /^reaction 👍 on om_x1: rejected \(proposal p9\)$/m.test(br), 'a reaction\'s receipt is ONE line — `reaction 👍 on om_x1: sent / rejected`', JSON.stringify([bs, br]));
+  ok(/removing reaction :tada: on/.test(P.renderReceiptBlock(P.receiptFor({ id: 'p8', kind: 'reaction', state: 'failed', reason: 'x', convId: 'c', adapterId: 'a', reaction: { msg: 'm', key: 'tada', glyph: null, op: 'remove' } }))), 'a removal says so; a key with no glyph is `:key:`');
+  ok(P.receiptDeliveryVerdict('wake-now', { kind: 'reaction', state: 'sent', draftedBy: { kind: 'agent', id: 'x' } }, { live: true }).deliver === 'next-turn', 'a reaction never earns a billed turn — wake-now reads next-turn');
+  ok(P.validateProposal({ text: 'x', inThread: true }).why === 'inThread' && P.validateProposal({ text: 'x', inThread: 'yes', replyTo: 'm' }).why === 'inThread' && P.validateProposal({ text: 'x', inThread: true, replyTo: 'm' }).proposal.inThread === true, 'a reply INTO a thread names what it answers (replyTo) and is a boolean — refused by name otherwise');
+}
+const RX_KEY = 'hourglass';   // never seeded (the seed draws from the first 12 keys) — the account's own reaction is ours to make
+{
+  const W = mkEngine({ name: 'rx' });
+  const { eng, delivered } = W;
+  await prime(eng);
+  const target = eng.store.readTail(A, C, { limit: 50 }).find((r) => r && r.vendorId);
+  const count = () => Object.keys(eng.store.outbox.snapshot().proposals).length;
+  await eng.setReactionPolicy(A, 'off');
+  const off = await eng.proposeReaction(AGENT, A, C, { msg: target.vendorId, key: RX_KEY });
+  ok(!off.ok && off.code === 'react-not-available' && off.why === 'policy-off' && count() === 0, 'attack 10: an agent\'s react on an account whose reaction policy is off ⇒ react-not-available (policy-off), NO proposal row', JSON.stringify(off));
+  await eng.setReactionPolicy(A, 'propose');
+  const pr = await eng.proposeReaction(AGENT, A, C, { msg: target.vendorId, key: RX_KEY, why: 'acknowledge' });
+  ok(pr.ok && pr.proposal.kind === 'reaction' && pr.proposal.state === 'awaiting-approval' && pr.decision.reasons.includes('reaction-policy') && pr.proposal.text === '' && pr.proposal.reaction.glyph === '⏳' && typeof pr.proposal.reaction.quote.text === 'string', 'propose (the default): proposed → awaiting-approval, the reason names the row, the card carries glyph + quote, no text', JSON.stringify(pr.proposal && pr.proposal.reaction));
+  ok(pr.proposal.wakes === 0 && pr.proposal.honestyLine === null, 'the card: approving it wakes nobody, and no sender line rides a reaction');
+  const again = await eng.proposeReaction(AGENT, A, C, { msg: target.vendorId, key: RX_KEY });
+  ok(again.ok && again.already === true && again.proposal.id === pr.proposal.id && count() === 1, 'the same reaction already awaiting answers THAT proposal (no second card)');
+  ok((await eng.proposeReaction(AGENT, A, C, { msg: target.vendorId, key: 'nope' })).code === 'bad-emoji' && (await eng.proposeReaction(AGENT, A, C, { msg: 'no-such-msg', key: RX_KEY })).code === 'not-found' && count() === 1, 'a key the set does not list ⇒ bad-emoji; a message the log does not hold ⇒ not-found; nothing created');
+  const ed = await eng.approve(pr.proposal.id, { text: 'an edit' });
+  ok(!ed.ok && ed.code === 'bad-proposal' && eng.store.outbox.snapshot().proposals[pr.proposal.id].state === 'awaiting-approval', 'a reaction has no text to edit — an edited approve is refused and it still awaits');
+  const n0 = delivered.length;
+  const ap = await eng.approve(pr.proposal.id, { deliver: 'wake-now' });
+  ok(ap.ok && ap.proposal.state === 'sent' && ap.proposal.history.map((h) => h.state).join('>') === 'proposed>awaiting-approval>sending>sent', 'approve: awaiting-approval → sending → sent (the table unchanged)', JSON.stringify(ap.proposal && ap.proposal.history));
+  const fold = eng.reactionsRead(A, C, [target.vendorId]).reactions[target.vendorId] || [];
+  const side = eng.store.readSide(A, C, { msgs: new Set([target.vendorId]) }).filter((x) => x.form === 'delta' && x.key === RX_KEY);
+  ok(fold.some((x) => x.key === RX_KEY && x.mine && x.count === 1) && side.length === 1 && side[0].src === 'agent', 'the approved reaction is the account\'s own in the fold, written as ONE delta with src agent', JSON.stringify([fold, side]));
+  const rd = delivered.slice(n0);
+  ok(rd.length === 1 && rd[0].opts.noWake === true && new RegExp(`reaction ⏳ on ${target.vendorId}: sent`).test(rd[0].text), 'its receipt: ONE line, next turn — the Approve asked wake-now and a reaction never gets one', JSON.stringify(rd.map((d) => [d.opts.noWake, d.text])));
+  ok((await eng.proposeReaction(AGENT, A, C, { msg: target.vendorId, key: RX_KEY })).code === 'already-reacted' && (await eng.proposeReaction(AGENT, A, C, { msg: target.vendorId, key: 'tea', op: 'remove' })).code === 'reaction-not-mine', 'an add the account already holds ⇒ already-reacted; a removal of a reaction that is not the account\'s ⇒ reaction-not-mine');
+  const un = await eng.proposeReaction(AGENT, A, C, { msg: target.vendorId, key: RX_KEY, op: 'remove' });
+  const rj = await eng.reject(un.proposal.id, { reason: 'keep it' });
+  ok(un.ok && un.proposal.reaction.op === 'remove' && rj.ok && rj.proposal.state === 'rejected' && /removing reaction ⏳ on .*: rejected \(keep it\)/.test(delivered[delivered.length - 1].text), 'unreact proposes a removal; reject ⇒ rejected, the receipt one line with the reason', delivered[delivered.length - 1].text);
+  const wd = await eng.proposeReaction(AGENT, A, C, { msg: target.vendorId, key: 'moon' });
+  const wr = await eng.withdrawProposal({ proposalId: wd.proposal.id, by: AGENT });
+  ok(wr.ok && wr.proposal.state === 'withdrawn', 'awaiting-approval → withdrawn by its drafter');
+  const ex = await eng.proposeReaction(AGENT, A, C, { msg: target.vendorId, key: 'star' });
+  W.advance(25 * 3600e3);
+  await eng.expireSweep();
+  ok(eng.store.outbox.snapshot().proposals[ex.proposal.id].state === 'expired', 'awaiting-approval → expired by the sweep');
+  // DIRECT row: the channel's own verdict — draft authority still reviews, send + direct sends, a review channel reviews
+  await eng.setReactionPolicy(A, 'direct');
+  await eng.setPolicy(A, C, 'direct');
+  const d1 = await eng.proposeReaction(AGENT, A, C, { msg: target.vendorId, key: 'sun' });
+  ok(d1.ok && d1.proposal.state === 'awaiting-approval' && d1.decision.reasons.join() === 'authority', 'a direct row with DRAFT authority still waits (the authority guard)', JSON.stringify(d1.decision));
+  await eng.setAssignment(A, C, { principal: { kind: 'agent', id: 'agent-1', name: 'Worker' }, mode: 'all', authority: 'send' });
+  const d2 = await eng.proposeReaction(AGENT, A, C, { msg: target.vendorId, key: 'coffee' });
+  ok(d2.ok && d2.proposal.state === 'sent' && d2.decision.mode === 'direct', 'a direct row + a direct channel + send authority ⇒ proposed → sending → sent at once');
+  await eng.setPolicy(A, C, 'review');
+  const d3 = await eng.proposeReaction(AGENT, A, C, { msg: target.vendorId, key: 'cake' });
+  ok(d3.ok && d3.proposal.state === 'awaiting-approval' && d3.decision.reasons.includes('channel-policy'), 'attack 11: a direct row on a REVIEW channel ⇒ a proposal awaiting approval (the row relaxes only to the channel\'s own verdict)', JSON.stringify(d3.decision));
+  // sending → failed: the vendor refuses (the account already reacted meanwhile, from the window)
+  const clash = await eng.react(A, C, target.vendorId, 'cake');
+  const cf = await eng.approve(d3.proposal.id);
+  ok(clash.ok && !cf.ok && cf.proposal.state === 'failed' && /already-reacted/.test(cf.proposal.reason), 'sending → failed with the vendor\'s code (the user reacted the same meanwhile); never retried', JSON.stringify(cf.proposal && cf.proposal.reason));
+  // unknown → failed / sent through ONE list read (the reconcile)
+  const u1 = await eng.proposeReaction(AGENT, A, C, { msg: target.vendorId, key: 'bell' });
+  await eng.store.outbox.update((ob) => { ob.proposals[u1.proposal.id].state = 'unknown'; });
+  const rc1 = await eng.reconcile(u1.proposal.id);
+  ok(rc1.ok && rc1.resolved && rc1.state === 'failed' && rc1.answer === 'not-landed', 'unknown → failed: the list does not show the account\'s reaction — it never landed', JSON.stringify(rc1));
+  const u2 = await eng.proposeReaction(AGENT, A, C, { msg: target.vendorId, key: 'gift' });
+  await eng.store.outbox.update((ob) => { ob.proposals[u2.proposal.id].state = 'unknown'; });
+  await eng.react(A, C, target.vendorId, 'gift');   // the lost request DID land
+  const rc2 = await eng.reconcile(u2.proposal.id);
+  ok(rc2.ok && rc2.resolved && rc2.state === 'sent' && rc2.answer === 'landed', 'unknown → sent: the list shows it — it landed (one list call, never a second POST)', JSON.stringify(rc2));
+  eng.stop();
+}
+// sending → unknown: the adapter THREW mid-react (the answer lost) — never retried; the card offers Check outcome
+{
+  const registry = CH.createChannelRegistry();
+  let reacts = 0;
+  const thr = { ...fake.makeFakeAdapter({ kind: 'fake-poll', receive: 'poll', sendAs: ['user'] }) };
+  const inner = thr.create;
+  thr.create = (rec, deps) => { const impl = inner(rec, deps); return { ...impl, async react() { reacts++; throw new Error('socket hung up mid-react'); } }; };
+  registry.register(thr);
+  const W = mkEngine({ name: 'rx-lost', registry });
+  const { eng, delivered } = W;
+  await prime(eng);
+  const target = eng.store.readTail(A, C, { limit: 50 }).find((r) => r && r.vendorId);
+  const pr = await eng.proposeReaction(AGENT, A, C, { msg: target.vendorId, key: RX_KEY });
+  const n0 = delivered.length;
+  const a = await eng.approve(pr.proposal.id);
+  const q = eng.store.outbox.snapshot().proposals[pr.proposal.id];
+  const sides = eng.store.readSide(A, C, { msgs: new Set([target.vendorId]) }).filter((x) => x.key === RX_KEY);
+  ok(!a.ok && q.state === 'unknown' && reacts === 1 && sides.length === 0 && delivered.length === n0, 'attack 6: a LOST add ⇒ unknown, no side record (the chip does not flip), no receipt, ONE attempt', JSON.stringify([q.state, reacts, sides.length]));
+  ok(eng.outboxView().proposals.find((x) => x.id === q.id).canReconcile === true, 'the card offers Check outcome (the channel lists reactions)');
+  await eng.approve(pr.proposal.id); W.advance(48 * 3600e3); await eng.expireSweep();
+  ok(reacts === 1, 'NEGATIVE CONTROL: neither a re-approve nor the sweep ever reacts again');
+  eng.stop();
+}
+// THE CONTROL (spec §7.1): an engine copy whose `off` line is gone creates the proposal the row forbids
+{
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const M = mutantCopies('chan-outbox-rx', REPO);
+  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const LINE = "    if (agent && row === 'off') return { ok: false, code: 'react-not-available', why: 'policy-off',";
+  // TWO obedience points, both removed (a layered guard's control strips every layer — the PURE verdict's refusal
+  // is obeyed by the second line, so a copy without only the first is still refused by the second)
+  const LINE2 = "    if (decision.refused) return { ok: false, code: decision.code, why: decision.why,";
+  ok(esrc.split(LINE).length === 2 && esrc.split(LINE2).length === 2, 'the policy-off line and the verdict\'s refusal line are each spelled once (the control removes exactly them)');
+  const bad = M.load('src/server/channels-engine.js', esrc.split('\n').filter((l) => !l.startsWith(LINE) && !l.startsWith(LINE2)).join('\n'), 'off-ignored');
+  const W = mkEngine({ name: 'rx-ctl', engine: bad });
+  const { eng } = W;
+  await prime(eng);
+  await eng.setReactionPolicy(A, 'off');
+  const target = eng.store.readTail(A, C, { limit: 50 }).find((r) => r && r.vendorId);
+  const r = await eng.proposeReaction(AGENT, A, C, { msg: target.vendorId, key: RX_KEY });
+  ok(r.ok && Object.keys(eng.store.outbox.snapshot().proposals).length === 1, 'CONTROL: the copy without the line CREATES a proposal on an `off` account — attack 10\'s leg above would go red', JSON.stringify(r).slice(0, 200));
+  eng.stop();
+}
+// A REPLY INTO A THREAD (spec §5.2): the proposal records it, the fake receives `inThread`, the receipt names the thread
+{
+  const W = mkEngine({ name: 'thread-reply' });
+  const { eng, delivered } = W;
+  await prime(eng);
+  const parent = eng.store.readTail(A, C, { limit: 50 }).find((r) => r && r.vendorId && r.text);
+  const bad = await eng.propose(AGENT, A, C, { text: 'no parent', inThread: true });
+  ok(!bad.ok && bad.code === 'bad-proposal' && bad.why === 'inThread', 'a thread reply without a parent ⇒ bad-proposal, why inThread');
+  const pr = await eng.propose(AGENT, A, C, { text: 'in the thread', replyTo: parent.vendorId, inThread: true });
+  ok(pr.ok && pr.proposal.inThread === true && pr.proposal.threadQuote && typeof pr.proposal.threadQuote.text === 'string', 'the proposal records inThread and the parent\'s quote (the card\'s "Reply in thread — under …")', JSON.stringify(pr.proposal && pr.proposal.threadQuote));
+  const a = await eng.approve(pr.proposal.id);
+  const sent = eng.store.outbox.snapshot().proposals[pr.proposal.id];
+  ok(a.ok && sent.state === 'sent' && /in a thread/.test(delivered[delivered.length - 1].text), 'approve ⇒ sent; the receipt says it went into a thread', delivered[delivered.length - 1].text);
+  const tf = await eng.propose(AGENT, A, C, { text: 'nope [[fake:topic-forbidden]]', replyTo: parent.vendorId, inThread: true });
+  const tfa = await eng.approve(tf.proposal.id);
+  const again = await eng.propose(AGENT, A, C, { text: 'again', replyTo: parent.vendorId, inThread: true });
+  ok(!tfa.ok && tfa.proposal.state === 'failed' && !again.ok && again.code === 'topic-forbidden', 'attack 19: a group that refuses thread replies ⇒ failed, and the conversation\'s verdict narrows at once (the next thread reply is topic-forbidden before anything is created)', JSON.stringify([tfa.proposal && tfa.proposal.reason, again.code]));
+  eng.stop();
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

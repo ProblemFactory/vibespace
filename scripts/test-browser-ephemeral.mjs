@@ -2033,9 +2033,10 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
       killAll6();
     } else ok(false, '⑥ r4 LOW 4 CONTROL: the lockHeldUnder anchor was not found in src/server/browser-keeper.js');
     // (8) r4 LOW 5: the launch back on the setting NOW — the ephemeral launches with 300000 while its pairs say 600000
-    const IL = '        const r = await rt.launch(null, { idleMs: launchIdle, headed: null, extraEnv: env0 });'; // 2.369.183: lane P's launchIdle (the same pairs' idle) — the one launch line
+    // 2.369.183: lane P's launchIdle (the same pairs' idle) — the one launch line; the .197 integration: lane headless-fallback added the display fact's env to it
+    const IL = '        const r = await rt.launch(null, { idleMs: launchIdle, headed: null, extraEnv: { ...env0, ...rec.display.env } });';
     if (k6src.includes(IL)) {
-      const ci = await idleLeg(M6.load('src/server/browser-keeper.js', k6src.replace(IL, '        const r = await rt.launch(null, { idleMs: idleMs(), headed: null, extraEnv: env0 });'), 'idle-now'), 'ctl-idle');
+      const ci = await idleLeg(M6.load('src/server/browser-keeper.js', k6src.replace(IL, '        const r = await rt.launch(null, { idleMs: idleMs(), headed: null, extraEnv: { ...env0, ...rec.display.env } });'), 'idle-now'), 'ctl-idle');
       ok(!ci.threw && ci.launchIdle === '300000', `⑥ r4 LOW 5 CONTROL: a keeper copy launching with the setting NOW launches with ${ci.launchIdle} — the LOW 5 leg can go red`, ci);
     } else ok(false, '⑥ r4 LOW 5 CONTROL: the ephemeral launch anchor was not found in src/server/browser-keeper.js');
     // (9) r5 MAJOR 1 (a): the LEDGER neutered — the storm relaunches on EVERY tick and nobody is told

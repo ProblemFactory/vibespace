@@ -161,7 +161,7 @@ try {
   check('pool resolves to a member', [poolA, poolB].includes(am.poolCurrent(pool.id)));
 
   // P2 — real spawn on the pool, current target
-  await fetch(`http://127.0.0.1:${PORT}/api/accounts/pool/${pool.id}/target`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountId: poolA }) });
+  await fetch(`http://127.0.0.1:${PORT}/api/accounts/pool/${pool.id}/gather`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ memberId: poolA }) });
   await sleep(400);
   const s2 = await spawnChat(pool.id);
   check('spawn a chat session ON the pool succeeds', !!s2.sid, s2.error);
@@ -172,7 +172,7 @@ try {
   check('a REAL turn completes on the pool (creds valid THROUGH the symlink)', t2.ok, t2.authErr ? 'AUTH FAILED' : 'no result');
 
   // P3 — switch target, spawn again
-  await fetch(`http://127.0.0.1:${PORT}/api/accounts/pool/${pool.id}/target`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountId: poolB }) });
+  await fetch(`http://127.0.0.1:${PORT}/api/accounts/pool/${pool.id}/gather`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ memberId: poolB }) });
   await sleep(400);
   check('after switch, pool symlink now resolves to member B', fs.realpathSync(poolDir) === fs.realpathSync(am.subDir(poolB)));
   const s3 = await spawnChat(pool.id);

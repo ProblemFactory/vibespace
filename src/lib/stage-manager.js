@@ -29,6 +29,7 @@
 import { getStateSync, showToast } from './utils.js';
 import { t } from './i18n.js';
 import { registerWindowType } from './window-types.js';
+import { stageWindowKind, stageMoveVerdict } from './stage-rules.js'; // inc-muly2izg-cks3: the move rule + its words (PURE)
 
 export const STAGE_ID = '__stage__';
 
@@ -454,9 +455,20 @@ export class StageManager {
    *  move to a normal desktop, and normal windows never drop onto the stage
    *  preview. Real report: a dragged placeholder escaped onto a desktop. */
   dragToDesktopBlocked(win) {
-    if (!win) return false;
-    return win.type === 'stage-placeholder' || !!win._isStagePlaceholder
-      || !!win._onStage || win._desktopId === STAGE_ID || this._boundAux.has(win.id);
+    return !!this.windowKind(win);
+  }
+
+  /** Which kind of Stage window `win` is ('placeholder' | 'session' | 'window'), or null — the facts read here, the
+   *  rule in PURE stage-rules.js (inc-muly2izg-cks3: the same membership dragToDesktopBlocked always tested). */
+  windowKind(win) {
+    if (!win) return null;
+    return stageWindowKind({ type: win.type, isPlaceholder: !!win._isStagePlaceholder, onStage: !!win._onStage, desktopId: win._desktopId, bound: this._boundAux.has(win.id) }, STAGE_ID);
+  }
+
+  /** May `win` move to `targetId` (a desktop id, or STAGE_ID)? The ONE verdict every door asks — the title-bar drag
+   *  over a preview, a taskbar item dropped on one, "Move to Desktop", the keyboard (PURE stage-rules.js). */
+  moveVerdict(win, targetId) {
+    return stageMoveVerdict({ kind: this.windowKind(win), targetId, stageId: STAGE_ID });
   }
 
   /** Re-capture a placeholder that leaked onto a normal desktop (pre-guard
@@ -610,6 +622,13 @@ export class StageManager {
     try { this.app.sessions?.get(win.id)?.setSuspended?.(false); } catch { }
     win._hiddenByDesktop = false; // stage owns it now — a stale desktop-hidden
     this._showWin(win);           // flag would exclude it from _isStageVisible
+    // the hero's FRAME is its whole group (inc-muly2izg-cks3): a guest the last leave() hid (every Stage-tagged window is
+    // hidden there, bound or not) comes back WITH the hero — enter() re-shows only the hero + ITS bound aux, so an
+    // unbound guest kept `visibility:hidden` on its own element and, pulled out of the bar, was an invisible window
+    for (const id of (win._tabChain && Array.isArray(win._tabChain.tabs) ? win._tabChain.tabs : [])) {
+      const m = id !== win.id ? this.app.wm.windows.get(id) : null;
+      if (m && m._hiddenByStage) this._showWin(m);
+    }
   }
 
   /** Return a borrowed window to the desktop system at its HOME state.
@@ -686,6 +705,38 @@ export class StageManager {
     if (!this.enabled) return;
     if (win._isStagePlaceholder || win._isStageHero) this.saveSlot(win.gridBounds);
     else if (this._active && this._boundAux.has(win.id)) this._scheduleRecord(); // aux move → live-mirror
+  }
+
+  /** A tab TORN out of a group on the Stage (inc-muly2izg-cks3, called by tab-group.js's tab drag): the window belongs
+   *  to the workspace of the FRAME it left — the hero's, or the owner of the aux group — so a leave / re-enter shows it
+   *  again with that hero. A window the stage never bound (the agent's live view is auto-opened into the chat's group
+   *  even while the Stage is not on screen) was hidden by the next leave and never re-shown by the enter; a window bound
+   *  to ANOTHER hero leaves that hero's record (else that hero's next restore would replay a second copy). Sessions
+   *  are never aux (they swap in as hero). */
+  onTornOff(win, frame) {
+    if (!this._active || !this.enabled || !win || !frame) return false;
+    if (win.type === 'chat' || win.type === 'terminal' || win.type === 'stage-placeholder' || win._isStagePlaceholder) return false;
+    const owner = frame.id === this._heroWinId ? (this._heroKey || '__pending__') : this._boundAux.get(frame.id);
+    if (owner === undefined) return false; // the frame is not part of this stage's workspace
+    const was = this._boundAux.get(win.id);
+    if (was === owner) return false;
+    this._boundAux.set(win.id, owner);
+    win._stageTransient = false;
+    if (was && was !== '__pending__' && was !== owner) this._dropFromRecord(was, win);
+    this._scheduleRecord();
+    return true;
+  }
+
+  /** Take ONE window's entry out of another hero's workspace record (the torn-off re-own's other half) — that record's
+   *  other entries stay as written (some may be LRU-closed windows that exist only there). */
+  _dropFromRecord(key, win) {
+    if (!key || key === '__pending__' || !win?._openSpec) return;
+    const recs = this._workspaceRecords(key);
+    const want = [JSON.stringify(win._openSpec), JSON.stringify(this._freshOpenSpec(win))];
+    const i = recs.findIndex((r) => want.includes(JSON.stringify(r?.openSpec || null)));
+    if (i < 0) return;
+    recs.splice(i, 1);
+    this._sync()?.set('stage', 'ws:' + key, JSON.stringify(recs));
   }
 
   // ── Phase C: workspace binding ──

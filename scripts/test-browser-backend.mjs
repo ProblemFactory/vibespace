@@ -31,11 +31,14 @@
 // fake binary's shebang is THIS node and every `sleep` it starts is reaped.
 import fs from 'node:fs';
 import http from 'node:http';
+import crypto from 'node:crypto';
+import net from 'node:net';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
-import { wiredCloak } from './fixtures/browser-switcher-views.mjs'; // THE cloak-wired override, one spelling shared with the switch dialog's fixtures
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { wiredCloak, unwired, REFUSED_PROOF } from './fixtures/browser-switcher-views.mjs'; // the cloak worlds (wired = shipped since lane-cloak; unwired = a refused record), one spelling shared with the switch dialog's fixtures
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname;
 const B = require('../src/browser-profiles.js');
@@ -85,11 +88,22 @@ for (let i = 0; i < raw.length; i++) {
   if (raw[i] === '-p') { prefix.provider = raw[i + 1]; i++; continue; }
   argv.push(raw[i]);
 }
+// lane-cloak: agent-browser's own ENV names for the same two options (0.38.1 --help: "or AGENT_BROWSER_EXECUTABLE_PATH" /
+// "or AGENT_BROWSER_ARGS") — the keeper's cloak launch rides these on EVERY call of its session
+if (!prefix.exe && process.env.AGENT_BROWSER_EXECUTABLE_PATH) prefix.exe = process.env.AGENT_BROWSER_EXECUTABLE_PATH;
+if (!prefix.args && process.env.AGENT_BROWSER_ARGS) prefix.args = process.env.AGENT_BROWSER_ARGS;
 const [a, b] = argv;
 const vendor = { cloak: process.env.CLOAKBROWSER_LICENSE_KEY || null, browserbase: process.env.BROWSERBASE_API_KEY || null };
+// MEASURED on the real 0.38.1 (lane-cloak, 2026-09-28): a later call of the session whose launch view (executable + args)
+// differs from the running browser's RELAUNCHES it — the fake does not relaunch, it LOGS the call that would have
+const viewDiffers = (s) => s && (String(s.exe || '') !== String(prefix.exe || '') || String(s.args || '') !== String(prefix.args || ''));
+const noteRelaunch = (s, verb) => { if (viewDiffers(s)) fs.appendFileSync(path.join(st, 'relaunches.log'), JSON.stringify({ ns, verb, running: { exe: s.exe, args: s.args }, call: { exe: prefix.exe, args: prefix.args } }) + '\\n'); };
 if (a === '--version') { console.log('agent-browser 0.38.0'); process.exit(0); }
 if (a === 'session' && b === 'info') { const s = read(); const act = !!(s && alive(s.pid)); out({ success: true, data: { active: act, namespace: ns, pid: act ? s.pid : null, session: process.env.AGENT_BROWSER_SESSION || null, socketDir: path.join(st, ns, 'run'), version: act ? '0.38.0' : null } }); process.exit(0); }
-if (a === 'open') {
+// 'tab new <url>' = the keeper's re-open after a switch (lane-cloak: the binary's own recovery for a pinned session) — logged like 'open'
+const tabNew = a === 'tab' && b === 'new';
+if (a === 'open' || tabNew) {
+  const url = tabNew ? argv[2] : b;
   let s = read();
   { let slow = 0; try { slow = Number(fs.readFileSync(path.join(st, 'slow-ms'), 'utf8')) || 0; } catch { } if (slow) { const t = Date.now() + slow; while (Date.now() < t) {} } }
   if (!(s && alive(s.pid))) {
@@ -103,17 +117,19 @@ if (a === 'open') {
   }
   const n = (Number((read() || {}).opens) || 0) + 1; const cur = read() || s; cur.opens = n; fs.writeFileSync(f, JSON.stringify(cur));
   const targetId = 't-' + ns + '-' + n;
-  fs.appendFileSync(path.join(st, 'opens.log'), JSON.stringify({ ns, session: process.env.AGENT_BROWSER_SESSION || null, url: b, targetId, pinTab: prefix.pinTab }) + '\\n');
-  out({ success: true, data: { url: b, targetId } }); process.exit(0);
+  fs.appendFileSync(path.join(st, 'opens.log'), JSON.stringify({ ns, session: process.env.AGENT_BROWSER_SESSION || null, url, targetId, pinTab: prefix.pinTab, verb: tabNew ? 'tab new' : 'open' }) + '\\n');
+  out({ success: true, data: { url, targetId } }); process.exit(0);
 }
-if (a === 'get' && b === 'cdp-url') { const s = read(); if (!(s && alive(s.pid))) { out({ success: false, error: 'fake: no browser' }); process.exit(1); } out({ success: true, data: { cdpUrl: 'ws://127.0.0.1:' + (process.env.FAKE_AB_CDP_PORT || '19222') + '/devtools/browser/fake-' + ns } }); process.exit(0); }
+if (a === 'get' && b === 'cdp-url') { const s = read(); if (!(s && alive(s.pid))) { out({ success: false, error: 'fake: no browser' }); process.exit(1); } if (process.env.AGENT_BROWSER_SESSION === s.session) noteRelaunch(s, 'get cdp-url'); out({ success: true, data: { cdpUrl: 'ws://127.0.0.1:' + (process.env.FAKE_AB_CDP_PORT || '19222') + '/devtools/browser/fake-' + ns } }); process.exit(0); }
 if (a === 'close' && b === '--all') { const s = read(); let closed = 0; if (s && alive(s.pid)) { try { process.kill(s.pid, 'SIGKILL'); closed = 1; } catch { } } try { fs.unlinkSync(f); } catch { } fs.appendFileSync(path.join(st, 'closes.log'), JSON.stringify({ ns, session: process.env.AGENT_BROWSER_SESSION || null, closed }) + '\\n'); out({ success: true, data: { closed, failed: [], sessions: [] } }); process.exit(0); }
 out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.slice(2).join(' ') }); process.exit(1);
 `, { mode: 0o755 });
-// a fake `cloakbrowser` binary: exists and is executable — the keeper only resolves its PATH
+// a fake CloakBrowser browser: exists and is executable — the keeper reaches it through browser.cloak.executablePath (lane-cloak:
+// PATH is never asked — measured, the `cloakbrowser` a package puts there is the vendor's management CLI, not a browser)
 const CLOAK_EXE = path.join(BIN, 'cloakbrowser'); fs.writeFileSync(CLOAK_EXE, `#!${process.execPath}\nprocess.exit(0);\n`, { mode: 0o755 });
 const readLog = (name) => { try { return fs.readFileSync(path.join(AB_STATE, name), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
 const launches = () => readLog('launches.log');
+const relaunches = () => readLog('relaunches.log');
 const opens = () => readLog('opens.log');
 const closes = () => readLog('closes.log');
 const servers = new Set();
@@ -206,7 +222,9 @@ console.log('— ① the version ladder, the seed, seats in three states, the ce
   ok(rq.ok && rq.host === 'chrome.example.net' && rq.url.startsWith('https://chrome.example.net/') && !/k{20}/.test(rq.url) && rq.headers.Authorization === 'Bearer ' + 'k'.repeat(20), 'the one request rides the derived host with the key in a HEADER, never in the URL');
   ok(SW.testRequestFor('cloak', {}) === null && SW.testRequestFor('cloud:agentcore', { region: 'us-east-1' }).unsigned === true, 'cloak has no request at all; agentcore says it is unsigned');
   ok(SW.vendorEnvFor('cloud:browserless', { apiKey: 'K', apiUrl: 'https://x.example', stealth: '' }).BROWSERLESS_API_KEY === 'K' && SW.vendorEnvFor('cloud:browserless', { apiKey: 'K', apiUrl: 'https://x.example', stealth: '' }).BROWSERLESS_API_URL === 'https://x.example' && !('BROWSERLESS_STEALTH' in SW.vendorEnvFor('cloud:browserless', { apiKey: 'K', stealth: '' })) && Object.keys(SW.vendorEnvFor('chromium', { apiKey: 'K' })).length === 0 && SW.vendorEnvFor('cloak', { licenseKey: 'cb_x' }).CLOAKBROWSER_LICENSE_KEY === 'cb_x', "vendorEnvFor: the vendor's OWN names, only the fields that carry a value, nothing for a key-less provider");
-  ok(SW.launchArgsFor('cloak', { seed: 42, executablePath: '/opt/cb' }).join(' ') === '--executable-path /opt/cb --args --fingerprint=42' && SW.launchArgsFor('cloud:kernel', {}).join(' ') === '-p kernel' && SW.launchArgsFor('chromium', {}).length === 0, 'launchArgsFor: cloak = the other binary + its seed, cloud = upstream\'s -p, chromium = nothing; the KEY is never in argv');
+  ok(SW.launchArgsFor('cloak').length === 0 && SW.launchArgsFor('cloud:kernel').join(' ') === '-p kernel' && SW.launchArgsFor('chromium').length === 0, 'launchArgsFor: cloak = NOTHING in argv since lane-cloak (its launch is the env pair below), cloud = upstream\'s -p, chromium = nothing; the KEY is never in argv');
+  const le = SW.launchEnvFor('cloak', { seed: 42, executablePath: '/opt/cb/chrome' });
+  ok(le.AGENT_BROWSER_EXECUTABLE_PATH === '/opt/cb/chrome' && le.AGENT_BROWSER_ARGS === '--no-sandbox,--fingerprint=42' && Object.keys(le).length === 2 && SW.launchEnvFor('cloak', { seed: 42, executablePath: '/x', proxy: 'http://127.0.0.1:9' }).AGENT_BROWSER_ARGS === '--no-sandbox,--fingerprint=42,--proxy-server=http://127.0.0.1:9,--proxy-bypass-list=<-loopback>' && Object.keys(SW.launchEnvFor('chromium', { seed: 1 })).length === 0 && !JSON.stringify(SW.launchEnvFor('cloak', { seed: 1, executablePath: '/x' })).includes('cb_'), 'launchEnvFor: cloak = the other binary + --no-sandbox (measured: required on Ubuntu 23.10+, and the vendor\'s own default) + its seed (+ the egress proxy when given, loopback NOT bypassed) under agent-browser\'s OWN env names; nothing for chromium; never a key');
   ok(SW.VENDOR_ENV_NAMES.every((n) => !n.startsWith('VIBESPACE_')) && SW.VENDOR_ENV_NAMES.includes('BROWSERBASE_API_KEY'), 'the vendor names are exactly the class agentEnv passes through — which is why the cluster may inject only under the store\'s own prefix');
 
   // per-site memory: a CLAIM with who made it; tier legal only while backend === null
@@ -236,10 +254,16 @@ console.log('— ① the version ladder, the seed, seats in three states, the ce
   const g1b = SW.switchVerdict({ profile: remote, target: 'cloud:browserbase', rowOf: B.providerRow, controlOf: B.providerControl, resolveKey });
   ok(!g1b.ok && g1b.code === 'provider_needs_local_key' && calls.length === 0, '…and cloud:* likewise');
   const local = { id: 'bp-2', label: 'Vendor portal', provider: 'chromium', host: null, dir: '/tmp/x', fingerprintSeed: null, lastChromiumMajor: 146, owner: { kind: 'session', id: 'bk-00000001' } };
-  const g2 = SW.switchVerdict({ profile: local, target: 'cloak', rowOf: B.providerRow, controlOf: B.providerControl, resolveKey });
-  ok(!g2.ok && g2.code === 'backend_unavailable' && /binary_absent/.test(g2.error) && calls.length === 0, 'an unwired target ⇒ backend_unavailable naming what is missing, before any key resolve');
+  const g2 = SW.switchVerdict({ profile: local, target: 'cloak', rowOf: unwired.row, controlOf: unwired.control, resolveKey });
+  ok(!g2.ok && g2.code === 'backend_unavailable' && /binary_absent/.test(g2.error) && calls.length === 0, 'an unwired target (a build whose record is refused) ⇒ backend_unavailable naming what is missing, before any key resolve');
+  // lane-cloak (MEASURED): cloak's key is OPTIONAL — the free build runs with none; a key-REQUIRED in-place row still
+  // gets backend_no_key with the way out (the machinery kept, driven here through the gate's keyRequiredOf)
   const noKey = SW.switchVerdict({ profile: local, target: 'cloak', rowOf: wiredCloak.row, controlOf: wiredCloak.control, resolveKey: () => ({ source: 'none', why: 'nothing configured' }) });
-  ok(!noKey.ok && noKey.code === 'backend_no_key' && noKey.action.openIntegration === 'cloak' && /Integrations/.test(noKey.error) && noKey.integrationId === 'cloak', 'no key ⇒ backend_no_key with the ACTIONABLE way out (app.openIntegration("cloak"))');
+  ok(noKey.ok && noKey.mode === 'switch' && noKey.source === 'none' && SW.keyRequiredFor('cloak') === false && SW.keyRequiredFor('cloud:browserbase') === true, 'no key for cloak ⇒ the gate PASSES (the free build needs none — measured); every cloud row still requires one');
+  const needKey = SW.switchVerdict({ profile: local, target: 'cloak', rowOf: wiredCloak.row, controlOf: wiredCloak.control, resolveKey: () => ({ source: 'none', why: 'nothing configured' }), keyRequiredOf: () => true });
+  ok(!needKey.ok && needKey.code === 'backend_no_key' && needKey.action.openIntegration === 'cloak' && /Integrations/.test(needKey.error) && needKey.integrationId === 'cloak', 'a key-REQUIRED row with no key ⇒ backend_no_key with the ACTIONABLE way out (app.openIntegration)');
+  const nk = SW.switcherRows({ profile: local, providerIds: B.providerIds(), rowOf: wiredCloak.row, controlOf: wiredCloak.control, capabilityRefusalOf: B.capabilityRefusal, sources: () => ({ source: 'none' }), sitesOf: (id) => (id === 'cloak' ? [] : null) }).find((r) => r.id === 'cloak');
+  ok(nk.enabled && nk.state === 'ready' && nk.sourceLabel === 'no key needed (free tier)' && nk.action === null && nk.facts.key.needed === false && nk.facts.sites === 0, 'the cloak row with no key: ready, "no key needed (free tier)", no Integrations action, facts.key.needed false, facts.sites 0 (none named)');
   const g3 = SW.switchVerdict({ profile: local, target: 'cloak', rowOf: wiredCloak.row, controlOf: wiredCloak.control, resolveKey, seats: {}, majors: {}, hex: '0000002a', leases: [], by: { kind: 'user' } });
   ok(g3.ok && g3.mode === 'switch' && g3.seed === 42 && g3.seedMinted && /no stable fingerprint before/.test(g3.fingerprint) && g3.ladder && g3.ladder.ok && g3.seats && g3.seats.ok && calls.length === 1, 'the gate passes: seed minted, fingerprint sentence, ladder ok (cloak free = 146 ≥ 146), seats unknown ⇒ no refusal, key resolved ONCE');
   const g4 = SW.switchVerdict({ profile: { ...local, lastChromiumMajor: 151 }, target: 'cloak', rowOf: wiredCloak.row, controlOf: wiredCloak.control, resolveKey, seats: { cloak: { tier: 'free', total: 1, at: 1 } } });
@@ -292,10 +316,10 @@ const store = IS.create({ dataDir: path.join(ROOT, 'integ'), env: fakeEnv, broad
   ok(t1.ok === true && t1.kind === 'shape-only' && fetches.length === before && spawns.length === 0 && /cb_ key present/.test(JSON.stringify(t1.detail)) && !/free tier/.test(JSON.stringify(t1)), "cloak's Test: ok, zero fetches, zero child processes, zero bytes (the tier is not read here)");
   store.setIntegration('cloak', { licenseKey: '' });
   delete fakeEnv.VIBESPACE_INTEGRATION_CLOAK_LICENSEKEY;
-  // 2026-09-28 (the naive-user verifier): an EMPTY key is no key — the Test says so, exactly as a switch / a start answer
-  // backend_no_key for it (it used to pass as "empty = free tier", a promise the resolver never kept)
+  // lane-cloak (MEASURED 2026-09-28): an EMPTY key is the free tier — the build VibeSpace installs runs with no key, and a
+  // switch / a start no longer refuse it; the Test says the same thing the gate does (the naive-user verifier's rule)
   const t0 = await store.test('cloak');
-  ok(t0.ok === false && /no key resolved for cloak/.test(t0.error || '') && backend.keyFor('cloak').source === 'none', `an empty key ⇒ the Test fails by name, and the resolve says none (the same fact the switch gate refuses on): ${t0.error}`);
+  ok(t0.ok === true && /none needed/.test(JSON.stringify(t0.detail)) && backend.keyFor('cloak').source === 'none' && SW.keyRequiredFor('cloak') === false, `an empty key ⇒ the Test passes saying none is needed, the resolve says none, and the gate does not require one: ${JSON.stringify(t0.detail)}`);
   fakeEnv.VIBESPACE_INTEGRATION_CLOAK_LICENSEKEY = 'notacloakkey';
   const t2 = await store.test('cloak');
   ok(t2.ok === false && /validate: licenseKey/.test(t2.error) && /cb_/.test(t2.error), 'a malformed key ⇒ a named validate complaint');
@@ -339,31 +363,33 @@ const store = IS.create({ dataDir: path.join(ROOT, 'integ'), env: fakeEnv, broad
 // ═══ ③ the REAL keeper over the fake binary ═════════════════════════════════
 console.log('— ③ the keeper: the three named refusals, the tier + major read back, a real in-place switch, browser_restarting, a proposal');
 let clock = 1_800_000_000_000;
-const settings = { 'browser.cloak.executablePath': '' };
+const settings = { 'browser.cloak.executablePath': CLOAK_EXE };
 const KEY_A = 'bk-0000000a', KEY_B = 'bk-0000000b';
 const wired = wiredCloak; // scripts/fixtures/browser-switcher-views.mjs
-function mkKeeper({ liveKeys = new Set([KEY_A, KEY_B]), providers = wired, dataDir = DATA, envPath = PATH_ENV } = {}) {
+function mkKeeper({ liveKeys = new Set([KEY_A, KEY_B]), providers = wired, dataDir = DATA, envPath = PATH_ENV, settingsOver = null, extraEnv = null, egressResolve = null } = {}) {
   const backend = BB.create({ integrations: store, log: { warn() {} } });
-  return { keeper: K.create({ dataDir, homeDir: HOME, env: () => ({ PATH: envPath, HOME, FAKE_AB_STATE: AB_STATE, FAKE_AB_CDP_PORT: process.env.FAKE_AB_CDP_PORT }), serverSetting: (k) => settings[k], liveKeys: () => liveKeys, install: false, now: () => clock, log: { log() {}, warn() {}, error() {} }, integrations: store, keys: backend, providers, hostKnown: () => false }), backend };
+  return { keeper: K.create({ dataDir, homeDir: HOME, env: () => ({ PATH: envPath, HOME, FAKE_AB_STATE: AB_STATE, FAKE_AB_CDP_PORT: process.env.FAKE_AB_CDP_PORT, ...(extraEnv || {}) }), serverSetting: (k) => (settingsOver && k in settingsOver ? settingsOver[k] : settings[k]), egressResolve, liveKeys: () => liveKeys, install: false, now: () => clock, log: { log() {}, warn() {}, error() {} }, integrations: store, keys: backend, providers, hostKnown: () => false }), backend };
 }
 {
   const { keeper: k, backend } = mkKeeper();
   const p = k.createProfile({ label: 'Vendor portal' }, { owner: { kind: 'instance', id: null } }); // instance-owned so TWO conversations may lease it (sharing 'owner' admits the owner's kind)
   ok(p.provider === 'chromium' && p.fingerprintSeed === null && p.defaultBackend === null && fs.existsSync(p.dir), 'a chromium profile: no seed, no default backend, a real directory');
-  // (1) backend_unavailable: the PURE table says cloak is unwired (binary_absent)
-  const { keeper: k0 } = mkKeeper({ providers: null, dataDir: path.join(ROOT, 'data0') });
+  // (1) backend_unavailable: a build whose record is REFUSED (binary_absent) leaves cloak unwired
+  const { keeper: k0 } = mkKeeper({ providers: unwired, dataDir: path.join(ROOT, 'data0') });
   const p0 = k0.createProfile({ label: 'Plain' }, { owner: { kind: 'instance', id: null } });
   const e0 = await threw(() => k0.switchBackend({ profileId: p0.id, target: 'cloak', by: { kind: 'user' } }));
   ok(e0 && e0.code === 'backend_unavailable' && /binary_absent/.test(e0.message) && e0.missing === 'cloakbrowser' && launches().length === 0, '(1) backend_unavailable: the unwired row is refused by name, nothing spawned');
-  // (2) backend_no_key: cloak wired, nothing configured
-  const e1 = await threw(() => k.switchBackend({ profileId: p.id, target: 'cloak', by: { kind: 'user' } }));
-  ok(e1 && e1.code === 'backend_no_key' && e1.action && e1.action.openIntegration === 'cloak' && launches().length === 0 && k.profile(p.id).provider === 'chromium', '(2) backend_no_key: named, carries the one-click way out, spawns nothing, the profile stays on chromium (never a silent fallback)');
+  // (2) backend_no_key: a key-REQUIRED row (a cloud vendor) started with no key — cloak's key is optional since lane-cloak
+  const pCloud = k.createProfile({ label: 'Cloud box', provider: 'cloud:browserbase' }, { owner: { kind: 'instance', id: null } });
+  const e1 = await threw(() => k.start(pCloud.id));
+  ok(e1 && e1.code === 'backend_no_key' && e1.action && e1.action.openIntegration === 'cloud:browserbase' && launches().length === 0, '(2) backend_no_key: a key-required row with no key is refused by name, carries the one-click way out, spawns nothing (never a silent fallback)', JSON.stringify({ code: e1 && e1.code, action: e1 && e1.action }));
+  k.removeProfile(pCloud.id);
   // with a cluster key but no binary on PATH and no setting: unavailable naming cloakbrowser
   fakeEnv.VIBESPACE_INTEGRATION_CLOAK_LICENSEKEY = 'cb_clusterkey000000';
-  const { keeper: kNoBin } = mkKeeper({ dataDir: path.join(ROOT, 'data-nobin'), envPath: `${NODE_DIR}:/usr/bin:/bin` }); // the keeper's OWN env has no cloakbrowser on PATH
+  const { keeper: kNoBin } = mkKeeper({ dataDir: path.join(ROOT, 'data-nobin'), envPath: `${NODE_DIR}:/usr/bin:/bin`, settingsOver: { 'browser.cloak.executablePath': '' } }); // no setting, nothing installed under its data dir
   const pNoBin = kNoBin.createProfile({ label: 'Cloak box', provider: 'cloak' }, { owner: { kind: 'instance', id: null } }); // through the keeper's own door (a push before ensureLoaded is replaced by the load)
   const eNoBin = await threw(() => kNoBin.start(pNoBin.id));
-  ok(eNoBin && eNoBin.code === 'backend_unavailable' && /cloakbrowser is not installed/.test(eNoBin.message), 'with the row wired and a key present but no cloakbrowser binary ⇒ backend_unavailable naming what is missing (nothing downloaded)');
+  ok(eNoBin && eNoBin.code === 'backend_unavailable' && /CloakBrowser is not installed/.test(eNoBin.message) && /Manage agents/.test(eNoBin.message), 'with the row wired and a key present but no CloakBrowser installed ⇒ backend_unavailable naming what is missing and where to install it (nothing downloaded)');
   // attach two sessions on chromium, record their URLs, then SWITCH
   const a1 = await k.attach({ profileId: p.id, browserKey: KEY_A, sessionId: 'sess-a' });
   const a2 = await k.attach({ profileId: p.id, browserKey: KEY_B, sessionId: 'sess-b' });
@@ -384,10 +410,11 @@ function mkKeeper({ liveKeys = new Set([KEY_A, KEY_B]), providers = wired, dataD
   const L = launches();
   const O = opens();
   ok(sw.ok && sw.mode === 'switch' && sw.from === 'chromium' && sw.to === 'cloak' && Number.isInteger(sw.seed) && sw.seedMinted, 'the switch completed chromium → cloak with a minted seed');
-  ok(closes().length === 1 && L.length === 2 && L[1].pid !== pidBefore && L[1].profile === p.dir && L[1].exe === CLOAK_EXE && L[1].args === `--fingerprint=${sw.seed}` && L[1].vendor.cloak === 'cb_clusterkey000000', 'step 2+3: the chromium browser was STOPPED, the new one started on the SAME directory with the cloakbrowser binary, the seed and the licence key in its env only');
+  ok(closes().length === 1 && L.length === 2 && L[1].pid !== pidBefore && L[1].profile === p.dir && L[1].exe === CLOAK_EXE && new RegExp(`^--no-sandbox,--fingerprint=${sw.seed},--proxy-server=http://127\\.0\\.0\\.1:\\d+,--proxy-bypass-list=<-loopback>$`).test(L[1].args) && L[1].vendor.cloak === 'cb_clusterkey000000', 'step 2+3: the chromium browser was STOPPED, the new one started on the SAME directory with the cloakbrowser binary, --no-sandbox, the seed, the egress proxy (loopback not bypassed) and the licence key in its env only', JSON.stringify(L[1]));
+  ok(relaunches().length === 0, 'lane-cloak: no call of the keeper\'s session carried a different launch view — the `get cdp-url` right after `open` rides the same env pair (on the real 0.38.1 a flag-less one RELAUNCHED the cloak browser without its arguments)', JSON.stringify(relaunches()));
   ok(!JSON.stringify(process.env).includes('cb_clusterkey000000') && !L[1].args.includes('cb_'), "the parent's environment never carried the vendor name and the key never rode argv (leg ii)");
   const reopened = O.filter((o) => o.url !== 'about:blank');
-  ok(reopened.length === 2 && reopened.some((o) => o.session === 'vs-' + KEY_A && o.url === 'https://portal.example/inbox2' && o.pinTab) && reopened.some((o) => o.session === 'vs-' + KEY_B && o.url === 'https://portal.example/settings' && o.pinTab), 'step 4: ONE tab re-opened per lease at its own lastUrl (the LAST one reported — the live view\'s inbox2 outranks the earlier inbox), under its own session name, re-pinned');
+  ok(reopened.length === 2 && reopened.every((o) => o.verb === 'tab new') && reopened.some((o) => o.session === 'vs-' + KEY_A && o.url === 'https://portal.example/inbox2' && o.pinTab) && reopened.some((o) => o.session === 'vs-' + KEY_B && o.url === 'https://portal.example/settings' && o.pinTab), 'step 4: ONE tab re-opened per lease at its own lastUrl (the LAST one reported — the live view\'s inbox2 outranks the earlier inbox), under its own session name, re-pinned — by `tab new` (a pinned session\'s old tab died with the switch; `open` answered tab_gone on the real binary)', JSON.stringify(reopened));
   const after = k._reg().leases.filter((l) => l.profileId === p.id);
   ok(after.length === 2 && after.every((l) => leaseRefs.includes(l)) && after.every((l) => l.targetId && /^t-/.test(l.targetId)) && sw.reopened.every((r) => r.ok && r.targetId), 'step 5: the lease OBJECTS were never destroyed — only targetId was re-minted (written back from the re-open)');
   const pp = k.profile(p.id);
@@ -441,6 +468,55 @@ function mkKeeper({ liveKeys = new Set([KEY_A, KEY_B]), providers = wired, dataD
   delete fakeEnv.VIBESPACE_INTEGRATION_CLOAK_LICENSEKEY;
 }
 
+// ═══ ③c lane-cloak: the cloak launch view rides EVERY call of the keeper's session ═══
+console.log('— ③c the cloak launch is an ENV pair on every call (the measured 0.38.1 relaunch), and its control');
+{
+  fakeEnv.VIBESPACE_INTEGRATION_CLOAK_LICENSEKEY = 'cb_clusterkey000000';
+  settings['browser.cloak.egressAllowlist'] = 'Portal.Example';
+  const MUT = mutantCopies('browser-backend', REPO);
+  const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  const needle = "{ AGENT_BROWSER_HEADED: '0' } : {}), ...providerEnv };";
+  const K2 = MUT.load('src/server/browser-keeper.js', ksrc.replace(needle, "{ AGENT_BROWSER_HEADED: '0' } : {}) };"), 'noviewenv');
+  const mk = (Kmod, dir) => Kmod.create({ dataDir: path.join(ROOT, dir), homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: AB_STATE, FAKE_AB_CDP_PORT: process.env.FAKE_AB_CDP_PORT }), serverSetting: (k2) => settings[k2], liveKeys: () => new Set([KEY_A]), install: false, now: () => clock, log: { log() {}, warn() {}, error() {} }, integrations: store, keys: BB.create({ integrations: store, log: { warn() {} } }), providers: wiredCloak, hostKnown: () => false });
+  // cloak with NO key at all starts (the free build needs none — measured); nothing under the vendor's name in its env
+  delete fakeEnv.VIBESPACE_INTEGRATION_CLOAK_LICENSEKEY;
+  const kFree = mk(K, 'data-3c-free');
+  const pFree = kFree.createProfile({ label: 'Free cloak', provider: 'cloak' }, { owner: { kind: 'instance', id: null } });
+  const eFree = await threw(() => kFree.start(pFree.id));
+  const lFree = launches().filter((l) => l.profile === kFree.profile(pFree.id).dir).pop();
+  ok(!eFree && lFree && lFree.exe === CLOAK_EXE && lFree.vendor.cloak === null, 'lane-cloak: a cloak profile with NO key configured anywhere starts (no backend_no_key), and no licence name reaches the browser', JSON.stringify({ e: eFree && eFree.code, lFree }));
+  await kFree.stop(pFree.id, { why: 'user' }).catch(() => {}); kFree.shutdown();
+  fakeEnv.VIBESPACE_INTEGRATION_CLOAK_LICENSEKEY = 'cb_clusterkey000000';
+  const r0 = relaunches().length;
+  const kReal = mk(K, 'data-3c-real');
+  const pr = kReal.createProfile({ label: 'Cloak view', provider: 'cloak' }, { owner: { kind: 'instance', id: null } });
+  await kReal.start(pr.id);
+  const r1 = relaunches().length;
+  const lr = launches().filter((l) => l.profile === kReal.profile(pr.id).dir).pop();
+  ok(ksrc.includes(needle) && r1 === r0 && lr && lr.exe === CLOAK_EXE && /^--no-sandbox,--fingerprint=\d+,--proxy-server=http:\/\/127\.0\.0\.1:\d+,--proxy-bypass-list=<-loopback>$/.test(lr.args), 'the real keeper: a cloak start + its own `get cdp-url` carry ONE launch view (no relaunch logged), the binary + --no-sandbox + the seed + the egress proxy', JSON.stringify({ r0, r1, lr }));
+  // §7.2.1 ENFORCED: the proxy the browser was pointed at is the keeper's own, its allowlist = the record's run hosts
+  // (none) + the named sites; real CONNECTs to the vendor's hosts and to loopback are refused BEFORE any upstream
+  const eg = kReal.cloakEgress();
+  const pport = Number((/--proxy-server=http:\/\/127\.0\.0\.1:(\d+)/.exec(lr.args) || [])[1]);
+  ok(eg.url === `http://127.0.0.1:${pport}` && JSON.stringify(eg.allowlist) === JSON.stringify(['portal.example']) && JSON.stringify(eg.sites) === JSON.stringify(['portal.example']), `the keeper's cloak proxy is the one in the launch args, admitting exactly the named site (${JSON.stringify(eg)})`);
+  const connectTo = (host, port = 443) => new Promise((resolve) => { const sk = net.connect({ host: '127.0.0.1', port: pport }); let buf = ''; sk.on('data', (d) => { buf += d; }); sk.on('close', () => resolve(buf)); sk.on('error', () => resolve(buf)); sk.once('connect', () => sk.write(`CONNECT ${host}:${port} HTTP/1.1\r\nHost: ${host}:${port}\r\n\r\n`)); setTimeout(() => { try { sk.destroy(); } catch { /* gone */ } }, 3000); });
+  const refusedHosts = ['cloakbrowser.dev', 'release-assets.githubusercontent.com', 'api.github.com', 'registry.npmjs.org', 'localhost', '127.0.0.1'];
+  const answers = [];
+  for (const h of refusedHosts) answers.push(await connectTo(h));
+  ok(answers.every((a) => /^HTTP\/1\.1 403/.test(a)) && refusedHosts.every((h) => kReal.cloakEgress().recent.some((r) => r.host === h)) && kReal.cloakEgress().stats.allowed === 0, `a running cloak browser cannot reach the vendor's download / update / registry hosts or loopback: each CONNECT 403 by name, remembered in the recent refusals, nothing allowed (${JSON.stringify(kReal.cloakEgress().recent.map((r) => r.host))})`);
+  await kReal.stop(pr.id, { why: 'user' }).catch(() => {});
+  const kMut = mk(K2, 'data-3c-mut');
+  const pm = kMut.createProfile({ label: 'Cloak view', provider: 'cloak' }, { owner: { kind: 'instance', id: null } });
+  await kMut.start(pm.id).catch(() => {});
+  const r2 = relaunches().length;
+  ok(r2 > r1 && relaunches().slice(r1).some((x) => x.verb === 'get cdp-url' && x.running.exe === CLOAK_EXE && !x.call.exe), 'NEGATIVE CONTROL: a keeper whose launch view lacks the env pair makes its own `get cdp-url` differ from the running browser — the call the real 0.38.1 turns into a flag-less RELAUNCH', JSON.stringify(relaunches().slice(r1)));
+  await kMut.stop(pm.id, { why: 'user' }).catch(() => {});
+  for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { label: '③c controls: ' })) ok(c.pass, c.name, c.detail);
+  kReal.shutdown(); kMut.shutdown();
+  delete settings['browser.cloak.egressAllowlist'];
+  delete fakeEnv.VIBESPACE_INTEGRATION_CLOAK_LICENSEKEY;
+}
+
 // ═══ ③b the rebuilt switch dialog's server half ════════════════════════════════
 console.log('— ③b the rebuilt dialog: ROW_STATES / rowState / switchChoices / backendFact / installFacts, the view\'s live + states, the digest backends, the start-failure ROLLBACK');
 {
@@ -448,7 +524,7 @@ console.log('— ③b the rebuilt dialog: ROW_STATES / rowState / switchChoices 
   ok(SW.ROW_STATES.length === 17 && Object.isFrozen(SW.ROW_STATES) && new Set(SW.ROW_STATES).size === 17, 'ROW_STATES is a frozen closed set of 17');
   const base = { id: 'bp-00000b01', label: 'Shop', provider: 'chromium', host: null, dir: '/tmp/x', lastChromiumMajor: 146, fingerprintSeed: null, owner: { kind: 'instance' } };
   const ids = B.providerIds();
-  ok(same(SW.switchChoices({ profile: base, providerIds: ids, rowOf: B.providerRow, controlOf: B.providerControl }), []), 'switchChoices on the SHIPPED table: [] (cloak is not wired on this build)');
+  ok(same(SW.switchChoices({ profile: base, providerIds: ids, rowOf: B.providerRow, controlOf: B.providerControl }), ['cloak']) && same(SW.switchChoices({ profile: base, providerIds: ids, rowOf: unwired.row, controlOf: unwired.control }), []), 'switchChoices on the SHIPPED table: [cloak] since the measurement; under a refused record: []');
   ok(same(SW.switchChoices({ profile: base, providerIds: ids, rowOf: wiredCloak.row, controlOf: wiredCloak.control }), ['cloak']), '…under the wired override: [cloak] (key, binary, version, seats not considered)');
   ok(same(SW.switchChoices({ profile: { ...base, host: 'dev-1' }, providerIds: ids, rowOf: wiredCloak.row, controlOf: wiredCloak.control }), []) && same(SW.switchChoices({ profile: { ...base, provider: 'cdp' }, providerIds: ids, rowOf: wiredCloak.row, controlOf: wiredCloak.control }), []), '…a profile on a paired machine, or one on cdp: []');
   ok(same(SW.backendFact({ provider: 'chromium', lastChromiumMajor: 151 }), { id: 'chromium', major: 151, plan: null }) && same(SW.backendFact({ provider: 'cloak' }, { seats: { cloak: { tier: 'free' } } }), { id: 'cloak', major: 146, plan: 'free' }) && SW.backendChip({ provider: 'cloak', major: 146, tier: 'free' }) === 'cloak 146 (free)', 'backendFact = the chip\'s facts unstringified (the agent\'s chip spelled from it)');
@@ -471,9 +547,9 @@ console.log('— ③b the rebuilt dialog: ROW_STATES / rowState / switchChoices 
   ok(v0.live === false && v0.rows.find((r) => r.id === 'cloak').state === 'ready-confirm' && typeof v0.install.npm === 'boolean' && v0.install.state.failed === false, 'switcherView: `live` (not running yet), the cloak row READY-CONFIRM (wired, cluster key, binary on PATH — but nothing has recorded which Chromium wrote the new directory), the install facts carry npm + state.failed', JSON.stringify({ live: v0.live, cloak: v0.rows.find((r) => r.id === 'cloak'), install: v0.install }).slice(0, 900));
   const dg = kb.list();
   ok(same(dg.backends[pb.id], { id: 'chromium', major: null, plan: null, choices: ['cloak'] }) && dg.chips[pb.id] === 'chromium', 'the digest carries backends[id] = {id, major, plan, choices} (choices [cloak] in the wired world)');
-  const { keeper: kShip } = mkKeeper({ providers: null, dataDir: path.join(ROOT, 'data-3b-ship') });
+  const { keeper: kShip } = mkKeeper({ providers: unwired, dataDir: path.join(ROOT, 'data-3b-ship') }); // a build whose record is REFUSED (the table before lane-cloak)
   const pShip = kShip.createProfile({ label: 'Plain' }, { owner: { kind: 'instance', id: null } });
-  ok(same(kShip.list().backends[pShip.id].choices, []) && same(kShip.choicesFor(pShip.id), []) && kShip.switcherView(pShip.id).rows.find((r) => r.id === 'cloak').state === 'not-in-this-version', '…the SHIPPED table: choices [] (no entry point offers the dialog), the cloak row not-in-this-version');
+  ok(same(kShip.list().backends[pShip.id].choices, []) && same(kShip.choicesFor(pShip.id), []) && kShip.switcherView(pShip.id).rows.find((r) => r.id === 'cloak').state === 'not-in-this-version', '…a build whose record is refused: choices [] (no entry point offers the dialog), the cloak row not-in-this-version');
   await kb.attach({ profileId: pb.id, browserKey: KEY_A, sessionId: 'sess-a' });
   v0 = kb.switcherView(pb.id);
   ok(v0.live === true && v0.leases.length === 1 && v0.rows.find((r) => r.id === 'cloak').state === 'ready', 'attached: the view says live, and the launch recorded the major ⇒ the cloak row READY');
@@ -488,7 +564,7 @@ console.log('— ③b the rebuilt dialog: ROW_STATES / rowState / switchChoices 
   ok(e2 && e2.code === 'launch_failed' && e2.restored === false && e2.from === 'chromium' && e2.to === 'cloak' && kb.profile(pb.id).provider === 'chromium', '…and when the old backend will not start again either: still back on from, restored:false');
   // a gate that passed on a STALE view: the key resolves at the gate, is gone at start() ⇒ backend_no_key — the same three facts
   let calls = 0;
-  const flaky = { keyFor: (id) => { calls++; return calls === 1 ? { integrationId: id, source: 'user', values: { licenseKey: 'cb_userkey0000000000' }, clusterKey: null, clusterLabel: null, why: null } : { integrationId: id, source: 'none', values: {}, why: 'the key was removed' }; }, sourceOf: (id) => ({ integrationId: id, source: 'user' }) };
+  const flaky = { keyRequired: () => true, keyFor: (id) => { calls++; return calls === 1 ? { integrationId: id, source: 'user', values: { licenseKey: 'cb_userkey0000000000' }, clusterKey: null, clusterLabel: null, why: null } : { integrationId: id, source: 'none', values: {}, why: 'the key was removed' }; }, sourceOf: (id) => ({ integrationId: id, source: 'user' }) };
   const kf = K.create({ dataDir: path.join(ROOT, 'data-3b-flaky'), homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: AB_STATE, FAKE_AB_CDP_PORT: process.env.FAKE_AB_CDP_PORT }), serverSetting: (k2) => settings[k2], liveKeys: () => new Set([KEY_A, KEY_B]), install: false, now: () => clock, log: { log() {}, warn() {}, error() {} }, integrations: store, keys: flaky, providers: wired, hostKnown: () => false });
   const pf = kf.createProfile({ label: 'Stale view' }, { owner: { kind: 'instance', id: null } });
   await kf.attach({ profileId: pf.id, browserKey: KEY_B, sessionId: 'sess-b' });
@@ -514,7 +590,7 @@ console.log('— ③b the rebuilt dialog: ROW_STATES / rowState / switchChoices 
   RT.setup({ keeper: kShip, activeSessions: new Map([['sess-a', { agentToken: 'vsst_' + 'c'.repeat(24), _browserKey: KEY_A, name: 'A' }]]), browserEnv: () => null, cloakPlan: () => B.cloakservePlan({ enabled: false }), forwards: () => [], propose: () => ({ id: 'ut-3b' }) });
   const bl2 = await fetch(API3 + '/api/agent/browser/blocked', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer vsst_' + 'c'.repeat(24) }, body: JSON.stringify({ url: 'https://portal.example/x', profile: pShip.id }) });
   const blj2 = await bl2.json();
-  ok(bl2.status === 200 && /THEIR act/.test(blj2.next) && /no other browser is available on this instance/.test(blj2.next), '…the shipped table: the agent is told no other browser is available, so the switch is not offered (still THEIR act to arrange one)', blj2.next);
+  ok(bl2.status === 200 && /THEIR act/.test(blj2.next) && /no other browser is available on this instance/.test(blj2.next), '…under a refused record: the agent is told no other browser is available, so the switch is not offered (still THEIR act to arrange one)', blj2.next);
   await kb.stop(pb.id, { why: 'user' }).catch(() => {});
   await kf.stop(pf.id, { why: 'user' }).catch(() => {});
   delete fakeEnv.VIBESPACE_INTEGRATION_CLOAK_LICENSEKEY;
@@ -543,9 +619,10 @@ console.log('— ④ the routes and the CLI: switcher, switch, backend, blocked,
   const bearer = (t) => ({ Authorization: 'Bearer ' + t });
   const pr = kR.createProfile({ label: 'Route portal' }, { owner: { kind: 'instance', id: null } }); // instance-owned so two conversations may lease it
   let r = await j('GET', `/api/browser/switcher?profile=${pr.id}`);
-  ok(r.status === 200 && r.json.chip === 'chromium' && r.json.rows.length === B.providerIds().length && r.json.rows.find((x) => x.id === 'cloak').enabled === false && r.json.rows.find((x) => x.id === 'cloak').code === 'backend_no_key' && r.json.rows.find((x) => x.id === 'cloak').action.openIntegration === 'cloak' && r.json.seats.cloak.state === 'unknown', 'GET /api/browser/switcher: every row with its verdict; with no key the cloak row is disabled with backend_no_key + the openIntegration action written on it');
+  const rcl = r.json.rows.find((x) => x.id === 'cloak');
+  ok(r.status === 200 && r.json.chip === 'chromium' && r.json.rows.length === B.providerIds().length && rcl.code === 'downgrade_unknown' && rcl.needsConfirm === true && rcl.sourceLabel === 'no key needed (free tier)' && rcl.action === null && rcl.facts.key.needed === false, 'GET /api/browser/switcher: every row with its verdict; with no key the cloak row says no key is needed (the free build — measured) and asks only the one confirmation a never-launched directory needs', JSON.stringify(rcl).slice(0, 500));
   r = await j('POST', '/api/browser/switch', { profile: pr.id, provider: 'cloak' });
-  ok(r.status === 409 && r.json.code === 'backend_no_key' && r.json.action.openIntegration === 'cloak' && r.json.provider === 'cloak' && r.json.integrationId === 'cloak', 'POST /api/browser/switch with no key ⇒ 409 backend_no_key carrying the actionable way out');
+  ok(r.status === 409 && r.json.code === 'downgrade_unknown' && r.json.needsConfirm === true && r.json.provider === 'cloak' && !r.json.action, 'POST /api/browser/switch with no key ⇒ not refused for the key; 409 downgrade_unknown asking the one confirmation (nothing recorded which Chromium wrote the new directory)');
   r = await j('POST', '/api/browser/switch', { profile: pr.id, provider: 'cloud:kernel' });
   ok(r.status === 400 && r.json.code === 'switch_export_only' && /vibespace-browser new/.test(r.json.error), 'a cloud target ⇒ 400 switch_export_only naming the lossy path');
   r = await j('POST', '/api/browser/switch', { profile: 'nope', provider: 'cloak' });
@@ -591,7 +668,7 @@ console.log('— ④ the routes and the CLI: switcher, switch, backend, blocked,
   ok(bk2.status === 0 && /switched cloak → chromium/.test(bk2.stdout) && /1 tab\(s\) re-opened/.test(bk2.stdout), 'vibespace-browser backend chromium switches back (alone on the profile)', bk2.stdout + bk2.stderr);
   delete fakeEnv.VIBESPACE_INTEGRATION_CLOAK_LICENSEKEY;
   const bk3 = await cli(['backend', 'cloak']);
-  ok(bk3.status === 1 && /backend_no_key/.test(bk3.stderr) && /Integrations → cloak/.test(bk3.stderr), 'with no key the CLI prints the named refusal and the way out', bk3.stdout + bk3.stderr);
+  ok(bk3.status === 0 && /switched chromium → cloak/.test(bk3.stdout) && !/backend_no_key/.test(bk3.stdout + bk3.stderr), 'with no key the CLI\'s switch to cloak goes through (lane-cloak: the free build needs no key — measured)', bk3.stdout + bk3.stderr);
   const bl = await cli(['blocked', '--url', 'https://portal.example/login', '--why', 'captcha']);
   ok(bl.status === 0 && /recorded your claim: the agent says this page is blocked \(portal.example: captcha\)/.test(bl.stdout) && /THEIR act/.test(bl.stdout), 'vibespace-browser blocked records the claim and says the switch is the user\'s act', bl.stdout + bl.stderr);
   const bl2 = await cli(['blocked']);
@@ -600,21 +677,24 @@ console.log('— ④ the routes and the CLI: switcher, switch, backend, blocked,
 }
 
 // ═══ ⑤ §7.4 failure form (1): the INSTALL action — "measure first, then install" ═══
-console.log('— ⑤ the install action: the PURE verdict over the §7.2.1 record, the keeper over a fake npm, rung 3, the routes');
+console.log('— ⑤ the install action: the PURE verdict over the §7.2.1 record, the keeper over a fake npm + the package\'s own CLI, the check, the routes');
 {
-  const refused = B.CLOAK_EGRESS_PROOF;
-  const measured = { ...refused, status: 'measured', refusal: undefined, blocks: undefined, detail: 'fixture', version: '0.5.10', runs: B.CLOAK_EGRESS_RUNS.map((what) => ({ what, inetConnects: 0 })) };
-  ok(B.proofVerdict(refused).ok && B.proofVerdict(measured).ok, 'both fixtures pass the local-oracles discipline (the refused record is the shipped one)');
+  const refused = REFUSED_PROOF; // the pre-measurement record (shipped until lane-cloak)
+  const measured = B.CLOAK_EGRESS_PROOF; // the shipped record since lane-cloak: a measurement
+  const unwiredRows = { ...B.PROVIDERS, cloak: { ...B.PROVIDERS.cloak, wired: false } };
+  ok(B.proofVerdict(refused, unwiredRows).ok && B.proofVerdict(measured).ok && measured.status === 'measured', 'both records pass the local-oracles discipline (the refused one against a table whose cloak cell is false; the measured one is the shipped record)');
   // the PURE matrix
   const u = SW.installVerdict({ proof: refused, proofOk: B.proofVerdict(refused), exe: { ok: false } });
-  ok(!u.ok && u.code === 'install_precondition_unmet' && /binary_absent/.test(u.error) && /measure first/.test(u.error) && u.proof.status === 'refused', 'the shipped record (refused: binary_absent) ⇒ install_precondition_unmet naming the record\'s own refusal and the way to measure');
-  const m = SW.installVerdict({ proof: measured, proofOk: B.proofVerdict(measured), exe: { ok: false } });
-  ok(m.ok && m.spec === 'cloakbrowser@0.5.10' && m.version === '0.5.10' && m.package === 'cloakbrowser', 'a measured record ⇒ ok with the spec PINNED to the version the measurement describes');
+  ok(!u.ok && u.code === 'install_precondition_unmet' && /binary_absent/.test(u.error) && /measure first/.test(u.error) && u.proof.status === 'refused', 'the pre-measurement record (refused: binary_absent) ⇒ install_precondition_unmet naming the record\'s own refusal and the way to measure');
+  const m = SW.installVerdict({ proof: measured, proofOk: B.proofVerdict(measured), exe: { ok: false }, platform: 'linux-x64' });
+  ok(m.ok && m.spec === 'cloakbrowser@0.5.10' && m.version === '0.5.10' && m.package === 'cloakbrowser' && m.chromium === '146.0.7680.177.5' && m.proof.downloadBytes === 216890134 && m.proof.installedBytes > m.proof.downloadBytes && m.proof.downloadHost === 'cloakbrowser.dev', 'the shipped measured record ⇒ ok, the spec PINNED to the wrapper version AND the Chromium it downloads; the sizes and the host the confirm says ride with it');
+  const mp = SW.installVerdict({ proof: measured, proofOk: { ok: true }, exe: { ok: false }, platform: 'darwin-arm64' });
+  ok(!mp.ok && mp.code === 'install_unmeasured_platform' && /linux-x64/.test(mp.error) && /darwin-arm64/.test(mp.error) && SW.INSTALL_CODES.includes('install_unmeasured_platform'), 'a machine of a kind the measurement never covered ⇒ install_unmeasured_platform by name, nothing fetched');
   ok(SW.installVerdict({ proof: { ...measured, version: null }, proofOk: { ok: true }, exe: { ok: false } }).code === 'install_precondition_unmet', 'a measured record naming no version ⇒ unmet (nothing to pin)');
   ok(SW.installVerdict({ proof: measured, proofOk: { ok: false, error: 'lacks the run "x"' }, exe: { ok: false } }).code === 'install_precondition_unmet', 'a record that fails its own discipline ⇒ unmet');
   ok(SW.installVerdict({ proof: null, exe: { ok: false } }).code === 'install_precondition_unmet', 'no record at all ⇒ unmet');
-  const ai = SW.installVerdict({ proof: measured, proofOk: { ok: true }, exe: { ok: true, path: '/usr/local/bin/cloakbrowser' } });
-  ok(!ai.ok && ai.code === 'already_installed' && ai.path === '/usr/local/bin/cloakbrowser', 'an executable that answers ⇒ already_installed naming the path (the executable rung outranks the record)');
+  const ai = SW.installVerdict({ proof: measured, proofOk: { ok: true }, exe: { ok: true, path: '/data/browser-tools/cloak-cache/chromium-146.0.7680.177.5/chrome' } });
+  ok(!ai.ok && ai.code === 'already_installed' && /chrome$/.test(ai.path), 'an executable that answers ⇒ already_installed naming the path (the executable rung outranks the record)');
   ok(SW.installVerdict({ proof: measured, proofOk: { ok: true }, exe: null, host: 'h1' }).code === 'install_local_only', 'host != null ⇒ install_local_only (a paired machine\'s binary is its own to install)');
   ok(SW.installVerdict({ proof: measured, proofOk: { ok: true }, exe: { ok: false }, running: true }).code === 'install_running', 'one install at a time');
   // the CONTROL the design names: an install that skips the measurement answers ok for the refused record — ours must not
@@ -623,42 +703,91 @@ console.log('— ⑤ the install action: the PURE verdict over the §7.2.1 recor
   ok(JSON.stringify(SW.installArgv({ spec: 'cloakbrowser@0.5.10', prefix: '/p' })) === JSON.stringify(['install', '--prefix', '/p', '--no-audit', '--no-fund', '--no-save', 'cloakbrowser@0.5.10']), 'installArgv: into OUR prefix, pinned, never -g');
   let badSpec = null; try { SW.installArgv({ spec: 'cloakbrowser@0.5.10; rm -rf /', prefix: '/p' }); } catch (e) { badSpec = e; }
   ok(badSpec && /bad spec/.test(badSpec.message), 'a spec that is not a package spec is refused before any argv exists');
-  ok(SW.binFromPackageJson({ bin: 'cli.js' }) === 'cli.js' && SW.binFromPackageJson({ bin: { other: 'a.js', cloakbrowser: 'bin/cb.js' } }) === 'bin/cb.js' && SW.binFromPackageJson({ bin: { only: 'x.js' } }) === 'x.js' && SW.binFromPackageJson({}) === null && SW.binFromPackageJson(null) === null, 'binFromPackageJson: the package\'s OWN bin — string, the preferred key, else the first — never a guessed name');
-  // the REAL keeper over a FAKE npm on PATH (it records its argv under the prefix and installs a package whose bin is what rung 3 must find).
-  // Its PATH deliberately lacks the suite's fake `cloakbrowser` (BIN carries one for the switch legs): the executable rung must answer NO first.
+  ok(SW.binFromPackageJson({ bin: 'cli.js' }) === 'cli.js' && SW.binFromPackageJson({ bin: { other: 'a.js', cloakbrowser: 'dist/cli.js' } }) === 'dist/cli.js' && SW.binFromPackageJson({ bin: { only: 'x.js' } }) === 'x.js' && SW.binFromPackageJson({}) === null && SW.binFromPackageJson(null) === null, 'binFromPackageJson: the package\'s OWN bin — string, the preferred key, else the first — never a guessed name');
+  ok(SW.cloakBinaryPath({ cacheDir: '/d/c/', chromium: '146.0.7680.177.5' }) === '/d/c/chromium-146.0.7680.177.5/chrome' && /Chromium\.app\/Contents\/MacOS\/Chromium$/.test(SW.cloakBinaryPath({ cacheDir: '/d', chromium: '1.2.3.4', platform: 'darwin-arm64' })) && SW.cloakBinaryPath({ cacheDir: '/d' }) === null && SW.platformTag('linux', 'x64') === 'linux-x64' && SW.platformTag('win32', 'x64') === 'windows-x64', 'cloakBinaryPath mirrors the wrapper\'s own layout (<cache>/chromium-<v>/chrome); platformTag its own tags');
+  const ie = SW.cloakInstallEnv({ PATH: '/b', HOME: '/h', CLOAKBROWSER_LICENSE_KEY: 'cb_x', CLOAKBROWSER_DOWNLOAD_URL: 'https://mirror.example', CLOAKBROWSER_SKIP_CHECKSUM: 'true', https_proxy: 'http://corp:3128', NO_PROXY: 'x' }, { cacheDir: '/c', chromium: '146.0.7680.177.5', proxyUrl: 'http://127.0.0.1:9' });
+  ok(ie.PATH === '/b' && ie.HOME === '/h' && ie.CLOAKBROWSER_CACHE_DIR === '/c' && ie.CLOAKBROWSER_VERSION === '146.0.7680.177.5' && ie.CLOAKBROWSER_AUTO_UPDATE === 'false' && !('CLOAKBROWSER_LICENSE_KEY' in ie) && !('CLOAKBROWSER_DOWNLOAD_URL' in ie) && !('CLOAKBROWSER_SKIP_CHECKSUM' in ie) && !('https_proxy' in ie) && !('NO_PROXY' in ie) && ie.HTTPS_PROXY === 'http://127.0.0.1:9' && ie.NODE_USE_ENV_PROXY === '1', 'cloakInstallEnv: the pins + the install proxy; every other CLOAKBROWSER_* (a key → the unmeasured build, a mirror / skip-checksum → around the signature) and every inherited proxy DROPPED');
+  ok(JSON.stringify(SW.binaryInstallArgv({ cli: '/p/node_modules/cloakbrowser/dist/cli.js' })) === JSON.stringify(['/p/node_modules/cloakbrowser/dist/cli.js', 'install']), 'binaryInstallArgv: the package\'s own CLI + install (run with node)');
+  // THE REAL KEEPER over a FAKE npm (it records its argv and installs a package whose bin is a NODE MANAGEMENT CLI — the
+  // shape measured on 0.5.10) whose `install` records its environment, tries the vendor's UPDATE host through the proxy
+  // it was handed (it must be refused — nothing leaves: the proxy refuses before any upstream), unpacks a fake browser
+  // under CLOAKBROWSER_CACHE_DIR/chromium-<v>/chrome and prints that path.
   const BIN2 = path.join(ROOT, 'bin-npm-only'); fs.mkdirSync(BIN2, { recursive: true });
   const PATH_NPM = `${BIN2}:${NODE_DIR}:${String(process.env.PATH || '').split(':').filter((d) => d && d !== BIN).join(':')}`;
+  const FAKE_BROWSER = '#!/bin/sh\necho fake-cloak-chrome\n';
+  const fakeSha = crypto.createHash('sha256').update(FAKE_BROWSER).digest('hex');
   fs.writeFileSync(path.join(BIN2, 'npm'), `#!${process.execPath}
 const fs = require('fs'), path = require('path');
 const a = process.argv.slice(2); const i = a.indexOf('--prefix'); const prefix = i >= 0 ? a[i + 1] : process.cwd();
 fs.mkdirSync(prefix, { recursive: true }); fs.writeFileSync(path.join(prefix, 'npm-argv.json'), JSON.stringify(a));
 const spec = a[a.length - 1]; const name = spec.split('@')[0]; const pkgDir = path.join(prefix, 'node_modules', name);
-fs.mkdirSync(path.join(pkgDir, 'bin'), { recursive: true });
-fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ name, version: spec.split('@')[1], bin: { [name]: 'bin/cb.js' } }));
-fs.writeFileSync(path.join(pkgDir, 'bin', 'cb.js'), '#!/bin/sh\\necho fake-cloak\\n', { mode: 0o755 });
+fs.mkdirSync(path.join(pkgDir, 'dist'), { recursive: true });
+fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ name, version: spec.split('@')[1], bin: { [name]: './dist/cli.js' } }));
+fs.writeFileSync(path.join(pkgDir, 'dist', 'cli.js'), ${JSON.stringify(`const fs = require('fs'), path = require('path');
+if (process.argv[2] !== 'install') { console.error('Unknown command: ' + process.argv[2]); process.exit(2); }
+const rec = { argv: process.argv.slice(2), env: Object.fromEntries(Object.entries(process.env).filter(([k]) => /^CLOAKBROWSER_|_PROXY$|^NODE_USE_ENV_PROXY$/i.test(k))) };
+// the requests go EXPLICITLY through the proxy it was handed (a raw CONNECT — never a direct connection, whatever this
+// Node does with NODE_USE_ENV_PROXY): the download host (admitted: the gate resolves it to a loopback target) and the
+// vendor's update host (refused before any upstream) — FAKE_SKIP_PROXY = a Node that ignored the proxy (the control)
+const net = require('net');
+const via = (host, port = 443) => new Promise((resolve) => { const u = new URL(process.env.HTTPS_PROXY || 'http://127.0.0.1:1'); const sk = net.connect({ host: u.hostname, port: Number(u.port) }); let buf = ''; sk.on('data', (d) => { buf += d; if (/\\r\\n\\r\\n/.test(buf)) { sk.destroy(); resolve(/ 200 /.test(buf) ? 'admitted' : 'refused'); } }); sk.on('error', () => resolve('error')); sk.once('connect', () => sk.write('CONNECT ' + host + ':' + port + ' HTTP/1.1\\r\\nHost: ' + host + ':' + port + '\\r\\n\\r\\n')); setTimeout(() => { try { sk.destroy(); } catch (e) {} resolve('timeout'); }, 5000).unref(); });
+(async () => {
+  if (!process.env.FAKE_SKIP_PROXY) { rec.download = await via('cloakbrowser.dev', Number(process.env.FAKE_DOWNLOAD_PORT) || 443); rec.update = await via('api.github.com'); }
+  fs.writeFileSync(path.join(process.cwd(), 'binary-step.json'), JSON.stringify(rec));
+  const d = path.join(process.env.CLOAKBROWSER_CACHE_DIR, 'chromium-' + process.env.CLOAKBROWSER_VERSION);
+  fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'chrome'), ${JSON.stringify(FAKE_BROWSER)}, { mode: 0o755 });
+  console.log(path.join(d, 'chrome'));
+})();`)});
 process.stdout.write('fake npm installed ' + spec + '\\n');
 `, { mode: 0o755 });
+  const proofFx = { ...measured, binary: { ...measured.binary, sha256: fakeSha } }; // the measured record, its binary hash = the fake browser's
+  // an ADMITTED name is resolved to this loopback listener (nothing leaves the machine); it accepts and says nothing
+  const sink = net.createServer((c) => { c.on('error', () => {}); setTimeout(() => { try { c.destroy(); } catch { /* gone */ } }, 2000); });
+  const SINK = await new Promise((r) => sink.listen(0, '127.0.0.1', () => r(sink.address().port)));
+  servers.add(sink);
+  const egressResolve = (h) => (h === 'cloakbrowser.dev' ? '127.0.0.1' : h); // the fake CONNECTs cloakbrowser.dev:<SINK> (FAKE_DOWNLOAD_PORT)
+  const fakeEnvI = { FAKE_DOWNLOAD_PORT: String(SINK), CLOAKBROWSER_LICENSE_KEY: 'cb_mustnotreachtheinstall', CLOAKBROWSER_DOWNLOAD_URL: 'https://mirror.example' };
+  const waitIdle = (kk) => new Promise((resolve, reject) => { const t0 = Date.now(); const iv = setInterval(() => { if (!kk.installVerdict().state.running) { clearInterval(iv); resolve(); } else if (Date.now() - t0 > 20000) { clearInterval(iv); reject(new Error('the install never finished')); } }, 25); });
+  const noSetting = { 'browser.cloak.executablePath': '' };
   const dataI = path.join(ROOT, 'data-install');
-  const { keeper: kI } = mkKeeper({ dataDir: dataI, providers: wired, envPath: PATH_NPM });
-  ok(!kI.cloakExecutable().ok, 'PRECONDITION: on the install keepers\' PATH no cloakbrowser answers (the executable rung says no)');
+  const { keeper: kI } = mkKeeper({ dataDir: dataI, providers: { ...wired, proof: refused }, envPath: PATH_NPM, settingsOver: noSetting }); // a keeper holding the pre-measurement record
+  ok(!kI.cloakExecutable().ok, 'PRECONDITION: no setting and nothing installed under its data dir ⇒ the executable rung says no (PATH is never asked)');
   const gv = kI.installVerdict();
-  ok(!gv.ok && gv.code === 'install_precondition_unmet' && gv.prefix === path.join(dataI, 'browser-tools') && gv.state.running === false, 'the keeper\'s verdict over the SHIPPED record: unmet, naming the prefix it would use');
+  ok(!gv.ok && gv.code === 'install_precondition_unmet' && gv.prefix === path.join(dataI, 'browser-tools') && gv.state.running === false, 'the keeper\'s verdict over a REFUSED record: unmet, naming the prefix it would use');
   const eI = await threw(() => kI.installCloak());
-  ok(eI && eI.code === 'install_precondition_unmet' && !fs.existsSync(path.join(dataI, 'browser-tools', 'npm-argv.json')) && !kI.cloakExecutable().ok, 'installCloak() on the shipped record REFUSES by name and spawns nothing (no npm argv recorded, no executable appears)');
-  const { keeper: kM } = mkKeeper({ dataDir: path.join(ROOT, 'data-install-m'), providers: { ...wired, proof: measured }, envPath: PATH_NPM });
-  ok(kM.installVerdict().ok === true && kM.installVerdict().spec === 'cloakbrowser@0.5.10' && !kM.cloakExecutable().ok, 'with a MEASURED record the verdict is ok (spec pinned) while nothing is installed yet');
+  ok(eI && eI.code === 'install_precondition_unmet' && !fs.existsSync(path.join(dataI, 'browser-tools', 'npm-argv.json')) && !kI.cloakExecutable().ok, 'installCloak() on a refused record REFUSES by name and spawns nothing (no npm argv recorded, no executable appears)');
+  const { keeper: kM } = mkKeeper({ dataDir: path.join(ROOT, 'data-install-m'), providers: { ...wired, proof: proofFx }, envPath: PATH_NPM, settingsOver: noSetting, extraEnv: fakeEnvI, egressResolve });
+  const vM = kM.installVerdict();
+  ok(vM.ok === true && vM.spec === 'cloakbrowser@0.5.10' && vM.chromium === '146.0.7680.177.5' && !kM.cloakExecutable().ok, 'with a MEASURED record the verdict is ok (wrapper + Chromium pinned) while nothing is installed yet');
   const started = await kM.installCloak();
-  ok(started.ok && started.started && started.spec === 'cloakbrowser@0.5.10' && started.prefix === kM.installDir && typeof started.pid === 'number', 'installCloak() starts ONE npm install and answers the spec, the prefix and the log');
-  await new Promise((resolve, reject) => { const t0 = Date.now(); const iv = setInterval(() => { if (!kM.installVerdict().state.running) { clearInterval(iv); resolve(); } else if (Date.now() - t0 > 10000) { clearInterval(iv); reject(new Error('fake npm never exited')); } }, 20); });
+  ok(started.ok && started.started && started.spec === 'cloakbrowser@0.5.10' && started.chromium === '146.0.7680.177.5' && started.prefix === kM.installDir && typeof started.pid === 'number', 'installCloak() starts the install and answers the spec, the Chromium, the prefix and the first step\'s pid');
+  await waitIdle(kM);
   const argvRec = JSON.parse(fs.readFileSync(path.join(kM.installDir, 'npm-argv.json'), 'utf8'));
-  ok(JSON.stringify(argvRec) === JSON.stringify(['install', '--prefix', kM.installDir, '--no-audit', '--no-fund', '--no-save', 'cloakbrowser@0.5.10']), 'the fake npm received exactly the pinned argv under the keeper\'s own prefix');
-  const st2 = kM.installVerdict();
-  ok(st2.state.exitCode === 0 && st2.state.error === null && st2.state.spec === 'cloakbrowser@0.5.10', 'the install state records the exit');
+  ok(JSON.stringify(argvRec) === JSON.stringify(['install', '--prefix', kM.installDir, '--no-audit', '--no-fund', '--no-save', 'cloakbrowser@0.5.10']), 'step 1 (package): the fake npm received exactly the pinned argv under the keeper\'s own prefix');
+  const bs = JSON.parse(fs.readFileSync(path.join(kM.installDir, 'binary-step.json'), 'utf8'));
+  ok(JSON.stringify(bs.argv) === JSON.stringify(['install']) && bs.env.CLOAKBROWSER_CACHE_DIR === kM.cloakCacheDir && bs.env.CLOAKBROWSER_VERSION === '146.0.7680.177.5' && bs.env.CLOAKBROWSER_AUTO_UPDATE === 'false' && !('CLOAKBROWSER_LICENSE_KEY' in bs.env) && !('CLOAKBROWSER_DOWNLOAD_URL' in bs.env) && /^http:\/\/127\.0\.0\.1:\d+$/.test(bs.env.HTTPS_PROXY || '') && bs.env.NODE_USE_ENV_PROXY === '1', 'step 2 (binary): the package\'s OWN CLI ran `install` with the cache dir, the pinned Chromium, auto-update off, the keeper env\'s key and mirror URL DROPPED, and an install egress proxy on loopback', JSON.stringify(bs));
+  const stM = kM.installVerdict().state;
+  ok(bs.download === 'admitted' && bs.update === 'refused' && stM.refused.some((r) => r.host === 'api.github.com') && !stM.refused.some((r) => r.host === 'cloakbrowser.dev'), 'through the install proxy the record\'s download host was ADMITTED and the vendor\'s update-check host (api.github.com) REFUSED — and the state names the refusal', JSON.stringify({ bs, refused: stM.refused }));
+  ok(stM.exitCode === 0 && stM.error === null && stM.step === 'done' && stM.running === false, 'the install state records the finish (step done, exit 0)');
   const bin = kM.installedCloakBin();
-  ok(bin === path.join(kM.installDir, 'node_modules', 'cloakbrowser', 'bin', 'cb.js') && kM.cloakExecutable().ok && kM.cloakExecutable().path === bin, 'rung 3: the executable is read from the installed package\'s OWN package.json bin and cloakExecutable() now answers it (setting empty, nothing on PATH)');
+  ok(bin === path.join(kM.cloakCacheDir, 'chromium-146.0.7680.177.5', 'chrome') && kM.installedStamp().ok && kM.installedStamp().stamp.sha256 === fakeSha && kM.cloakExecutable().ok && kM.cloakExecutable().path === bin, 'step 3 (verify): the browser\'s SHA-256 is the record\'s, the stamp is written, and cloakExecutable() now answers THE BROWSER (never the package\'s CLI)');
+  const st2 = kM.installVerdict();
   ok(!st2.ok && st2.code === 'already_installed' && st2.path === bin, '…so the verdict flips to already_installed naming that path');
   const eM = await threw(() => kM.installCloak());
   ok(eM && eM.code === 'already_installed', 'a second installCloak() is refused by name');
+  // NEGATIVE CONTROL: the same install against a record naming ANOTHER hash — the downloaded browser is not the measured one
+  const { keeper: kBad } = mkKeeper({ dataDir: path.join(ROOT, 'data-install-bad'), providers: { ...wired, proof: { ...measured, binary: { ...measured.binary, sha256: 'f'.repeat(64) } } }, envPath: PATH_NPM, settingsOver: noSetting, extraEnv: fakeEnvI, egressResolve });
+  await kBad.installCloak();
+  await waitIdle(kBad);
+  const stB = kBad.installVerdict();
+  ok(stB.state.failed === true && /^verify: /.test(stB.state.error) && /is not the measured/.test(stB.state.error) && !kBad.installedStamp().ok && !kBad.cloakExecutable().ok && fs.existsSync(kBad.installedCloakBin()), 'NEGATIVE CONTROL: a browser whose SHA-256 is not the record\'s fails at `verify` by name — no stamp, cloakExecutable() still says no (the file is there, it is NOT used)', JSON.stringify(stB.state));
+  // NEGATIVE CONTROL: a download that went AROUND the proxy (a Node ignoring NODE_USE_ENV_PROXY — the fake connects nothing
+  // through it and still unpacks the browser) ⇒ the evidence guard refuses it at `binary`, nothing stamped
+  const { keeper: kByp } = mkKeeper({ dataDir: path.join(ROOT, 'data-install-bypass'), providers: { ...wired, proof: proofFx }, envPath: PATH_NPM, settingsOver: noSetting, extraEnv: { ...fakeEnvI, FAKE_SKIP_PROXY: '1' }, egressResolve });
+  await kByp.installCloak();
+  await waitIdle(kByp);
+  const stP = kByp.installVerdict().state;
+  ok(stP.failed === true && /^binary: /.test(stP.error) && /without passing the egress proxy/.test(stP.error) && !kByp.installedStamp().ok && !kByp.cloakExecutable().ok, 'NEGATIVE CONTROL: a browser that appeared while the install proxy admitted NOTHING fails at `binary` by name — the boundary is proven by evidence, not assumed', JSON.stringify(stP));
   ok(!fs.existsSync(path.join(kI.installDir, 'node_modules')), 'CONTROL: the refused keeper\'s prefix still holds no package');
   // the routes: GET = the verdict (200 either way), POST = the act (typed 4xx on a refusal), host refused by name
   const express = require('express');
@@ -673,7 +802,7 @@ process.stdout.write('fake npm installed ' + spec + '\\n');
   let r = await j('GET', '/api/browser/install');
   ok(r.status === 200 && r.json.ok === false && r.json.code === 'install_precondition_unmet' && /binary_absent/.test(r.json.error) && r.json.state && r.json.state.running === false, 'GET /api/browser/install: 200 with the verdict (a card renders the disabled control WITH its reason)');
   r = await j('POST', '/api/browser/install');
-  ok(r.status === 409 && r.json.code === 'install_precondition_unmet' && !fs.existsSync(path.join(kI.installDir, 'npm-argv.json')), 'POST /api/browser/install on the shipped record ⇒ 409 by name, nothing spawned');
+  ok(r.status === 409 && r.json.code === 'install_precondition_unmet' && !fs.existsSync(path.join(kI.installDir, 'npm-argv.json')), 'POST /api/browser/install on a refused record ⇒ 409 by name, nothing spawned');
   r = await j('GET', '/api/browser/install?host=h1');
   ok(r.status === 400 && r.json.code === 'unsupported-host', 'host is the MACHINE parameter and a non-local one is refused by name');
   const pI = kI.createProfile({ label: 'Install portal' }, { owner: { kind: 'instance', id: null } });

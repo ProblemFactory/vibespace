@@ -279,3 +279,24 @@ doesn't yet record the active workspace (Phase C); enter() while `dm._restoring`
   editors exempt). Recording is no longer switch/leave-only: `_scheduleRecord` (500ms) fires on
   aux create/move. Which VIEW a tab shows (staged or not, which hero) stays PER-TAB by design —
   same philosophy as the per-tab active desktop.
+- 2026-09-28 (2.369.197, userW inc-muly2izg-cks3 — "在 Dynamic Desktop 里面用这个Browser，Browser 拖不出来"): the
+  report was a TAB drag-out INSIDE the Stage (the hero chat + its live view in one group; the owner's correction), and
+  the Stage was innocent — reproduced in chrome at the reporter's page: the stage's record (`_scheduleRecord`), a
+  remote `_reconcileWorkspace` and a leave → re-enter trip all keep a torn-off aux apart. The failure was the tab
+  drag's classification (split tabs v2 decided once on the first 8 px; the reporter's pull, Δ −451/+351 from the ring,
+  was a strip reorder for the whole drag) — fixed in PURE chain-layout `tabDragMode` (a reorder that leaves the bar's
+  band by > 30 px tears off). Secondary: the §4 rule "Stage↔desktop moves are blocked in BOTH directions" STAYS, but
+  it no longer refuses in silence — PURE src/lib/stage-rules.js is the one verdict (`stage.windowKind` /
+  `stage.moveVerdict`; `dragToDesktopBlocked` = `!!windowKind`) and its words: the preview is marked with the words
+  beside the pointer, a refused drop puts the window back + a toast says what to do, "Move to Desktop ▸" holds one
+  reason row, `dm.moveWindowToDesktop` returns a typed refusal and speaks on a user's act. The "Open on desktop X"
+  verb the lane first proposed was dropped by the owner (not what was asked). Gates: test-stage-rules (fast),
+  test-stage-dragout-ui (heavy).
+- 2026-09-28, owner correction #2 (same incident: "他那个拖动出标签栏了，然后窗口就消失了"): the tab DID leave the bar
+  and the pulled-out window was INVISIBLE. `leave()` hides every Stage-tagged window (a chain guest included);
+  `enter()` re-showed only the hero + its BOUND aux, so a guest the stage never bound (the agent's live view is
+  auto-opened into the chat's group even while the Stage is off screen) kept the leave-time `visibility:hidden;
+  pointer-events:none` on its own element, invisible only while its host drew it. Fixed: `_borrowHero` re-shows the
+  hero's whole group; a window leaving a chain takes its frame's visibility (tab-group `_matchFrameVisibility`); a
+  tab torn out on the Stage is bound to the frame's workspace (`onTornOff`). Reproduced RED on 2.369.196 by replaying
+  the ring (heavy test-stage-dragout-ui ⓪).

@@ -13,6 +13,8 @@ import { api, escHtml, estDisplayPair, fetchJson, hostStateChip, showConfirmDial
 import { resumeSpawnPick } from '../resume-continuity.js';
 import { forkGroupPlan } from './fork-groups.js'; // a fork lands in its source's Task Groups (2026-09-25)
 import { attachSlab } from './view-visibility.js'; // perf r1: the slab an attach asks for (floor | text)
+import { memberState, poolSubmenuModel, submenuNoteWords } from './pool-priority-model.js'; // THE CONVERSATION'S POOL PIN (2026-09-28): the pool row's submenu, as a PURE model
+import { deviceLocale } from './i18n.js';
 
 export function installSessionLifecycle(App, ctx = {}) {
   Object.assign(App.prototype, {
@@ -42,7 +44,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     });
   },
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, outputStyle, autoResume, worktree, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, extraTaskBinds, accountId, modelLock, lockModel, ephemeral = false, winBounds, recreateCwd = false, ignoreNoConvo = false, opencodePty = false, onCreateResult, browserProfileId, browserProfileOrigin }) {
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, outputStyle, autoResume, worktree, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, extraTaskBinds, accountId, modelLock, lockModel, poolPin, ephemeral = false, winBounds, recreateCwd = false, ignoreNoConvo = false, opencodePty = false, onCreateResult, browserProfileId, browserProfileOrigin }) {
     try { track('event', `session-create:${backend || 'claude'}:${mode || 'default'}`); } catch {}
     // FIRST USE of a harness whose history lives behind an opt-in background
     // service (opencode → the 'opencode-serve' plugin, default OFF since
@@ -176,6 +178,9 @@ export function installSessionLifecycle(App, ctx = {}) {
       accountId: accountId || undefined, // billing identity: undefined=server default, 'subscription', or acct-… key id
       modelLock: modelLock || undefined, // #6 lock v2: the server re-pins the target model after any fallback
       lockModel: lockModel || undefined, // explicit lock TARGET (review-caught: inferring from the spawn model re-targeted to claude.defaultModel)
+      // THE CONVERSATION'S POOL PIN (2026-09-28): a RESUME carries the conversation's own pin (the
+      // server honours it only for a member of the pool this spawn bills, and never on a fork)
+      poolPin: (!fork && poolPin && typeof poolPin.memberId === 'string') ? { memberId: poolPin.memberId, at: poolPin.at || null, ...(poolPin.poolId ? { poolId: poolPin.poolId } : {}) } : undefined,
       recreateCwd: recreateCwd || undefined, // B-7812: user danger-confirmed rebuilding a missing cwd
       ignoreNoConvo: ignoreNoConvo || undefined, // 2.227.3: user chose to retry past the no-transcript breaker
       // S9 remainder (c): this terminal is a pty the OpenCode SERVE owns, not
@@ -872,6 +877,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       accountId: accountId !== undefined ? accountId : savedCfg.account,
       modelLock: savedCfg.modelLock,  // #6 lock v2: a locked conversation stays locked across resume (re-pin re-arms)
       lockModel: savedCfg.lockModel,
+      poolPin: savedCfg.poolPin, // 2026-09-28: the conversation's pool pin rides a resume (never a fork)
       syncId,
       backend,
       keeperSid,
@@ -1277,6 +1283,49 @@ export function installSessionLifecycle(App, ctx = {}) {
         const sfx = a.currentName ? ` → ${a.currentName}` : ' ' + t('· pool');
         if (rHostId) { items.push({ label: a.name + sfx, disabled: true, title: t('Pooled accounts are local-only (the pool switches a credentials directory on THIS machine)') }); continue; }
         const estP = a.current ? (this._usageEstimates?.[a.current] || (this._usageGlobal?.accountId === a.current ? this._usageEstimates?.__global__ : null)) : null;
+        // THE CONVERSATION'S POOL PIN (2026-09-28, owner: "变成池的子菜单，直接选池本身就是自动切换，如果在
+        // 子菜单里选"自动"也是自动切换，但如果选择某个具体账号，那在这个账号耗尽之前就pin在这个账号下"): the pool
+        // this conversation bills is a SUBMENU — Automatic first, then one row per member (✓ = the
+        // member it runs on, "pinned" in words, the state in words, never greyed); clicking the pool
+        // row itself = automatic. The row names THIS conversation's member (addendum 3 — the chip's
+        // fact), the pool default only in words. A pool it does not bill stays a plain switch row.
+        if (cur) {
+          const auth = live?.auth && live.auth.source === 'pooled' ? live.auth : null;
+          const cfgKey = spec.sessionKey || `${backend}:${backendSessionId}`;
+          const isLive = !!live?.webuiId;
+          const pinId = isLive ? (live?.poolPin?.memberId || null) : (this.sidebar?.getSessionConfig?.(cfgKey)?.poolPin?.memberId || null);
+          const roster = this._accounts?.accounts || [];
+          const stateOf = (id) => { const x = roster.find((y) => y.id === id) || {}; return memberState({ loggedIn: x.loggedIn !== false, loginState: x.loginState || null, usage: (isCodex ? this._codexAccountUsage?.[id] : this._accountUsage?.[id]) || null, nowSec: Date.now() / 1000 }); };
+          const model = poolSubmenuModel({ pool: a, auth, pinId, live: isLive, applies: (a.hotSupported !== false && a.hot) ? 'now' : 'restart', stateOf });
+          const fmtTime = (ms) => { try { return new Date(ms).toLocaleString(deviceLocale(), { weekday: 'short', hour: 'numeric', minute: '2-digit' }); } catch { return new Date(ms).toISOString(); } };
+          const memUsage = (id) => (id ? usageHint((isCodex ? this._codexAccountUsage?.[id] : this._accountUsage?.[id]) || null, isCodex ? null : (this._usageEstimates?.[id] || null)) : '');
+          const pinTo = async (memberId, name) => {
+            const cfg = this.sidebar?.getSessionConfig?.(cfgKey) || {};
+            const saveCfg = (pin) => { const next = { ...cfg }; if (pin) next.poolPin = pin; else delete next.poolPin; this.sidebar?.setSessionConfig?.(cfgKey, next); };
+            if (!isLive) { // a stopped conversation: the pin rides its next resume
+              saveCfg(memberId ? { memberId, at: Date.now(), poolId: a.id } : null);
+              showToast(memberId ? t('Pinned to {name} — applies when the conversation resumes', { name }) : t('Automatic again — applies when the conversation resumes'));
+              return;
+            }
+            const r = await fetchJson(`/api/accounts/${encodeURIComponent(a.id)}/pin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: live.webuiId, memberId }) });
+            if (!r || r.error) { showToast(r?.error || t('Pin failed'), { type: 'error' }); return; }
+            saveCfg(r.pinned ? { memberId: r.pinned.memberId, at: r.pinned.at || Date.now(), poolId: a.id } : null); // the resume carrier (it names the pool the pin was made on); the server's notice says what happened
+          };
+          items.push({
+            labelHtml: rowHtml('✓ ' + a.name, model.parent.member ? ` → ${model.parent.member}` : ' ' + t('· pool'), memUsage(model.parent.memberId)),
+            title: model.parent.title ? t(model.parent.title.key, model.parent.title.params) + ' ' + t('Click for automatic placement; pick a member below to pin this conversation to it.') : undefined,
+            action: () => pinTo(null),
+            children: model.rows.map((r) => {
+              const note = submenuNoteWords(r, t, { fmtTime });
+              return {
+                labelHtml: rowHtml((r.checked ? '✓ ' : '') + (r.act === 'auto' ? t(r.name) : r.name), note ? ' · ' + note : '', r.act === 'auto' ? '' : memUsage(r.id)),
+                title: note || undefined,
+                action: () => pinTo(r.act === 'auto' ? null : r.id, r.name),
+              };
+            }),
+          });
+          continue;
+        }
         items.push({ labelHtml: rowHtml((cur ? '✓ ' : '') + a.name, sfx, usageHint(a.current ? this._accountUsage?.[a.current] : null, estP)), action: () => { if (!cur) doSwitch(a.id, a.name); } });
         continue;
       }

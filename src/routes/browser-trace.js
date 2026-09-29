@@ -25,6 +25,8 @@
  *                                                 framesRemoved, frameBytes}], entries?, entriesTotal?}`; `session=bs-…` adds that
  *                                                 session's action list (`entries`, oldest first, the NEWEST 1000 — a cut is
  *                                                 named by `entriesTotal`; an entry's frames may be gone)
+ *                                                 BROWSE YOURSELF (B-6ae8): `browserKey` may be the user's own `hu-<hex>` —
+ *                                                 his browsing sessions (`holder: 'user'`, `recorded`) and his recorded acts
  *   GET    /api/browser/actions/:id                 one entry (never the bytes)
  *   GET    /api/browser/actions/:id/frame/:which    the before|after JPEG (image/jpeg, nosniff, private cache)
  *   GET    /api/browser/housekeeping              the panel: every registry row with its state + why + size, the ephemeral
@@ -64,6 +66,12 @@ const BS = require('../browser-sessions.js'); // 2026-09-27: the session ids and
 /** How many of one session's actions `GET /api/browser/sessions?session=` carries (the newest; `entriesTotal` says how many there are). */
 const ENTRIES_MAX = 1000;
 const B = require('../browser-profiles.js');
+const HM = require('../browser-human.js'); // BROWSE YOURSELF (B-6ae8): the user's own key (`hu-<hex>`) names his recorded sessions
+/** verify r1 (H1): the user's recorded browsing (his sessions, his acts, their frames) is answered to HIS cookie only — an
+ *  agent's session / job token (an auth-off instance answers every cookie route) is refused `agent_forbidden` for his
+ *  key / entry and never sees a `holder:'user'` row in a listing. */
+const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || ''));
+const AGENT_FORBIDDEN = { error: 'the user\'s own browsing is his — an agent token may not read it', code: 'agent_forbidden' };
 const router = express.Router();
 
 let ctx = null;
@@ -82,7 +90,9 @@ const STATUS = {
   // the trace
   trace_off: 409, 'not-live': 409, ended: 409, refused: 409,
   // housekeeping (§7.1 / §8 / D8): the sweep's scope, the archive-before-remove rule
-  not_ours: 400, leased: 409, running: 409, forget_failed: 500, delete_failed: 500, adopt_failed: 409, label_required: 400, label_taken: 409,
+  not_ours: 400, leased: 409, running: 409, forget_failed: 500,
+  // BROWSE YOURSELF verify r1 (H4): Delete… while the user browses it himself — refused by name (Close / Quit first)
+  browsing_yourself: 409, delete_failed: 500, adopt_failed: 409, label_required: 400, label_taken: 409,
   // P6 (§6.2): `sharing` edits through PATCH — refused by the verdict (no proxy / paired machine / unknown value)
   sharing_refused: 400, pinned: 409, not_editable: 409,
   // "Who can use it" is a LIST (2026-09-27): the whole-list rule + the write's refusals + the resolver's
@@ -128,7 +138,9 @@ router.get('/api/browser/actions', (req, res) => {
   const conversation = req.query.conversation == null ? '' : String(req.query.conversation);
   const givenKey = req.query.browserKey == null ? '' : String(req.query.browserKey);
   if (!sessionId && !conversation && !givenKey) return res.status(400).json({ error: 'one of sessionId, conversation or browserKey is required', code: 'bad-request' });
-  if (givenKey && !B.isBrowserKey(givenKey)) return res.status(400).json({ error: `browserKey ${JSON.stringify(givenKey)} is not a browser key`, code: 'bad-request' });
+  if (givenKey && !B.isBrowserKey(givenKey) && !HM.isHumanKey(givenKey)) return res.status(400).json({ error: `browserKey ${JSON.stringify(givenKey)} is not a browser key`, code: 'bad-request' });
+  const agent = isAgentBearer(req);
+  if (agent && HM.isHumanKey(givenKey)) return res.status(403).json(AGENT_FORBIDDEN);
   const sc = scopeOf(req.query.profile);
   if (!sc.ok) return res.status(400).json({ error: sc.error, code: 'bad-request' });
   const live = sessionId ? (ctx?.activeSessions?.get?.(sessionId) || null) : null;
@@ -140,7 +152,7 @@ router.get('/api/browser/actions', (req, res) => {
   // nothing to match by (a conversation the store never bound, no live session) ⇒ an honest EMPTY answer, never "every entry"
   if (!sessionId && !browserKey) return res.json({ sessionId: null, conversation: conversation || null, browserKey: null, keyFrom: null, traceOn: tr.enabled(), entries: [] });
   try {
-    const entries = tr.list({ sessionId: sessionId || null, browserKey, anyOf: true, profileId: sc.profileId, from: Number(req.query.from) || 0, to: req.query.to != null && req.query.to !== '' ? Number(req.query.to) : Infinity, limit: Number(req.query.limit) || 200 });
+    const entries = tr.list({ sessionId: sessionId || null, browserKey, anyOf: true, profileId: sc.profileId, from: Number(req.query.from) || 0, to: req.query.to != null && req.query.to !== '' ? Number(req.query.to) : Infinity, limit: Number(req.query.limit) || 200 }).filter((e) => !(agent && e && e.holder === 'user'));
     res.json({ sessionId: sessionId || null, conversation: conversation || null, browserKey, keyFrom, traceOn: tr.enabled(), entries });
   } catch (e) { fail(res, e); }
 });
@@ -151,8 +163,10 @@ router.get('/api/browser/sessions', (req, res) => {
   const conversation = req.query.conversation == null ? '' : String(req.query.conversation);
   const givenKey = req.query.browserKey == null ? '' : String(req.query.browserKey);
   const asked = req.query.session == null ? '' : String(req.query.session);
-  if (givenKey && !B.isBrowserKey(givenKey)) return res.status(400).json({ error: `browserKey ${JSON.stringify(givenKey)} is not a browser key`, code: 'bad-request' });
+  if (givenKey && !B.isBrowserKey(givenKey) && !HM.isHumanKey(givenKey)) return res.status(400).json({ error: `browserKey ${JSON.stringify(givenKey)} is not a browser key`, code: 'bad-request' });
   if (asked && !BS.isSessionId(asked)) return res.status(400).json({ error: `session ${JSON.stringify(asked)} is not a browser session id`, code: 'bad-request' });
+  const agent = isAgentBearer(req);
+  if (agent && HM.isHumanKey(givenKey)) return res.status(403).json(AGENT_FORBIDDEN);
   const sc = scopeOf(req.query.profile);
   if (!sc.ok) return res.status(400).json({ error: sc.error, code: 'bad-request' });
   if (!sessionId && !conversation && !givenKey && sc.profileId === undefined) return res.status(400).json({ error: 'one of sessionId, conversation, browserKey or profile is required', code: 'bad-request' });
@@ -166,7 +180,7 @@ router.get('/api/browser/sessions', (req, res) => {
   const conversationAsked = !!(sessionId || conversation || givenKey);
   if (conversationAsked && !browserKey && !sessionId) return res.json({ traceOn: tr.enabled(), limit, browserKey: null, keyFrom: null, sessions: [] });
   try {
-    const list = tr.sessions({ browserKey, sessionId: conversationAsked ? sessionId || null : null, profileId: sc.profileId });
+    const list = tr.sessions({ browserKey, sessionId: conversationAsked ? sessionId || null : null, profileId: sc.profileId }).filter((x) => !(agent && x && x.holder === 'user'));
     const out = { traceOn: tr.enabled(), limit, browserKey, keyFrom, sessions: list };
     if (asked) {
       const s = list.find((x) => x.id === asked);
@@ -186,6 +200,7 @@ router.get('/api/browser/actions/:id', (req, res) => {
   if (!T.isEntryId(req.params.id)) return res.status(400).json({ error: 'bad trace id', code: 'bad-request' });
   const e = tr.entry(req.params.id);
   if (!e) return res.status(404).json({ error: `no trace entry ${req.params.id}`, code: 'not-found' });
+  if (e.holder === 'user' && isAgentBearer(req)) return res.status(403).json(AGENT_FORBIDDEN);
   res.json({ entry: e });
 });
 router.get('/api/browser/actions/:id/frame/:which', (req, res) => {
@@ -194,6 +209,7 @@ router.get('/api/browser/actions/:id/frame/:which', (req, res) => {
   if (!T.isEntryId(req.params.id)) return res.status(400).json({ error: 'bad trace id', code: 'bad-request' });
   const which = req.params.which === 'before' ? 'before' : req.params.which === 'after' ? 'after' : null;
   if (!which) return res.status(400).json({ error: 'which must be before or after', code: 'bad-request' });
+  if (isAgentBearer(req)) { const e = tr.entry(req.params.id); if (!e || e.holder === 'user') return res.status(e ? 403 : 404).json(e ? AGENT_FORBIDDEN : { error: `no trace entry ${req.params.id}`, code: 'not-found' }); }
   const fp = tr.framePath(req.params.id, which);
   if (!fp || !fs.existsSync(fp)) return res.status(404).json({ error: `no ${which} frame for ${req.params.id}`, code: 'not-found' });
   res.set('Content-Type', 'image/jpeg');

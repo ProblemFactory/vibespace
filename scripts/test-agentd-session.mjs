@@ -200,6 +200,11 @@ if (!fs.existsSync('/proc/self/environ')) {
     for (const m of fs.readFileSync(path.join(repo, 'src/agentd', f), 'utf8').matchAll(/process\.env\.(VIBESPACE_[A-Z_]+)/g)) readByDaemonTier.add(m[1]);
   }
   readByDaemonTier.delete('VIBESPACE_REMOTE_ATTEMPT');   // attach-cli's OWN respawn marker (set by pty-wrapper in the attach-cli process, never a daemon spawn base)
+  // lane pairing (verify-r3 B-inst, the .197 integration): the installer's pairing tokens reach a daemon through ITS OWN
+  // environment ONCE — agentd.js reads and deletes them at boot. They are read but NEVER kept: a server-spawned daemon
+  // must never inherit a token, so they leave the derived set here and the keep set is asserted to lack them
+  for (const n of ['VIBESPACE_DIAL_TOKEN', 'VIBESPACE_HOST_TOKEN']) readByDaemonTier.delete(n);
+  check('the pairing tokens the daemon reads ONCE from its own environment are NEVER in DAEMON_ENV_KEEP (a server-spawned daemon never inherits one)', !DAEMON_ENV_KEEP.has('VIBESPACE_DIAL_TOKEN') && !DAEMON_ENV_KEEP.has('VIBESPACE_HOST_TOKEN') && !('VIBESPACE_DIAL_TOKEN' in daemonEnv({ ...process.env, VIBESPACE_DIAL_TOKEN: 'x', VIBESPACE_HOST_TOKEN: 'y' })) && !('VIBESPACE_HOST_TOKEN' in daemonEnv({ ...process.env, VIBESPACE_DIAL_TOKEN: 'x', VIBESPACE_HOST_TOKEN: 'y' })));
   const missing = [...readByDaemonTier].filter((n) => !DAEMON_ENV_KEEP.has(n));
   const extra = [...DAEMON_ENV_KEEP].filter((n) => !AGENT_ENV_KEEP.has(n) && !readByDaemonTier.has(n));
   check(`DAEMON_ENV_KEEP = AGENT_ENV_KEEP ∪ every VIBESPACE_* the daemon tier reads (${[...readByDaemonTier].sort().join(', ')})`, !missing.length && !extra.length, `missing: ${missing.join(',') || '-'} extra: ${extra.join(',') || '-'}`);

@@ -121,7 +121,8 @@ function mkWorld({ hosts = null } = {}) {
   const SPARE = am.createSubscription({ name: 'Member B' }).id; login(SPARE);
   const P = am.createPool({ name: '全部' }).id;
   am.setPoolTarget(P, LINK);
-  am.updatePool(P, { auto: false, hot: true }); // auto OFF: this suite drives attribution, not the switcher
+  am.updatePool(P, { hot: true });
+  am.get(P).auto = false; am._save(); // auto OFF: this suite drives attribution, not the switcher — a RECORD-level seam since 2026-09-28 (updatePool ignores auto:false: the whole-pool manual switch is retired; a pre-migration record still reads auto:false and the engine leaves it alone)
   const cacheDir = path.join(dataDir, 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
   const nowS = Math.floor(Date.now() / 1000);
   const R5 = nowS + 2 * 3600, R7 = nowS + 3 * 86400;

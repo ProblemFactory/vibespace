@@ -250,6 +250,7 @@ const liveAccountIdSet = () => {
 };
 const sessionCounterRef = { value: 0 };
 const SOCKETS_DIR = path.join(__dirname, 'data', 'sockets');
+{ const f = require('./src/sock-path.js').socketPathFits(path.join(SOCKETS_DIR, 'cw-' + 'x'.repeat(36)), process.platform); if (!f.fits) console.warn(`[boot] socket paths under data/sockets would exceed ${f.max} bytes (${f.bytes}) — dtach cannot bind them; move the checkout to a shorter path`); } // the socket-path census (src/sock-path.js, lane-pairing ④): the operator's depth, said once
 const META_DIR = path.join(__dirname, 'data', 'session-meta');
 const BUFFERS_DIR = path.join(__dirname, 'data', 'session-buffers');
 
@@ -352,7 +353,7 @@ function agentdHostToken(hostId) {
   ensureDir(AGENTD_DIR);
   const f = path.join(AGENTD_DIR, 'host-' + hostId + '.token');
   try { return fs.readFileSync(f, 'utf-8').trim(); } catch { }
-  const tok = 'vsht_' + require('crypto').randomBytes(24).toString('hex');
+  const tok = require('./src/pairing-token.js').mintToken('host'); // verify-r3: THE ONE DOOR of a pairing token
   fs.writeFileSync(f, tok, { mode: 0o600 });
   return tok;
 }
@@ -362,9 +363,9 @@ function agentdHostToken(hostId) {
 // ── Dial pairing primitives (src/server/dial-pairing.js, decomposition #13) ──
 const { CHAT_WRAPPER, agentdDialDevices, agentdDials,
   agentdMintDialPair, daemonPtyShim, deviceForDial, ensureAgentdOnHost,
-  unpairDialDevice,
+  unpairDialDevice, gateDialUpgrade, admitDial, noteDialEvent, lockOutDialHolder,
 } = require('./src/server/dial-pairing.js').create({
-  rootDir: __dirname, AGENTD_DIR,
+  rootDir: __dirname, AGENTD_DIR, bcastAll: (...a) => bcastAll(...a),
   agentdHostToken: (...a) => agentdHostToken(...a),
   getHosts: () => { try { return hosts; } catch { return null; } },
   getMounts: () => { try { return mounts; } catch { return null; } },
@@ -417,8 +418,8 @@ const { broadcastToSession } = require('./src/server/session-broadcast.js').crea
 const {
   _vsuPending, usageAnchors, usageEstimator,
   armWorkflowUsageWatcher, darkSources, darkTaintedAccounts, kickPoolEval,
-  markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool, notePoolAuthFailure, noteTurnStopped,
-  maybeRepinLockedModel, maybeStopOnFallback, modelsMatch, onMemberReadingFresh, autoCliReady, lastMemberReadAt, projectionRereadFor, // …+ the new-member wake (2026-09-08)
+  markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool, notePoolAuthFailure, noteTurnStopped, memberRemoved, decideDefaultTarget, fallbackDefaultTarget, removalTargetFor, setConversationPin, gatherPlan,
+  maybeRepinLockedModel, maybeStopOnFallback, modelsMatch, onMemberReadingFresh, onMemberLoginSuccess, autoCliReady, lastMemberReadAt, projectionRereadFor, // …+ the new-member wake (2026-09-08) + its LOGIN half, handed to the account routes (2026-09-29: read there since 2026-09-08, never passed — dead until now)
   apiDerivedWindow, establishedWindows, repairIdentityAnchors, // B-855a: the two identity witnesses handed to setupUsage — the panel probe may only write the account it proves — + c2's STANDING identity repair (boot + POST /api/usage/repair-identity)
   poolChooserForModel, poolReadCache, probeUsageForAccountKey, readRawUsageCache, spendGuard, // the ONE raw usage-cache read (overage lives there — design §1.4) + THE SPEND CEILING (§4.4c): ONE authorizer in front of every turn nobody typed, per credential slot, persisted ⇒ src/server/spend-guard.js
   noteSessionProduced, noteTurnEnd, noteWallSignal, beforeAutoResumeFire, fireIdentityFor, memberLoginState, probeUsageViaSession, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane, // …+ the SERVED-MODEL pair + its FALLBACK PREDICATE (r3-r2: the parse's target-less lock latch asks it, so a classifier substitute never becomes the lock target that defines placement) + the REROUTE THIS RECORD ANNOUNCES (r4: placed BEFORE the served capture at both feeds — the incident's first announcement rides the very record the substitute answered) + the per-turn LANE settle (2026-09-13 r3): both stdout feeds destructure them from the `engine:` literals below, and neither was exported here — the whole round-1 fix was a TypeError in production
@@ -516,6 +517,7 @@ const { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta,
   getUsageHistory: () => { try { return usageHistory; } catch { return null; } },
   getTelemetry: () => { try { return telemetry; } catch { return null; } },
   getNoConvoRef: () => { try { return noConvoRef; } catch { return null; } }, getDeliver: () => { try { return deliver; } catch { return null; } }, getPages: () => { try { return publishedPages; } catch { return null; } }, getPermissionRules: () => { try { return permissionRules; } catch { return null; } }, // lazy getters; getPages = SendUserFile hands the user a private link (published-pages is created further down)
+  getExitProxy: () => { try { return exitProxy; } catch { return null; } }, // verify-r2 A3-r2 / ask-a: the exit path ends a dead conversation's pairs + asks
   getBrain: () => { try { return sessionBrain; } catch { return null; } }, // design-unknown-records: the four record→side-effect consumers the parse shares with the device feed (session-brain is created further down)
 });
 // ── Boot restore (src/server/boot-restore.js, decomposition #7) ──
@@ -557,13 +559,13 @@ const { harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigPlanB64 
 // and a telemetry event carries the key to the fleet collector. Key-deduped
 // per boot so a recurring probe can't spam. RETURNS how many clients got it (r5): a caller that latches "already said" latches on THIS — the boot probes fire into an EMPTY client set on a systemd restart.
 const _sentNotices = new Map(); // key → clients it reached
-function serverNotice(key, text, { level = 1 } = {}) {
+function serverNotice(key, text, { level = 1, i18n = null } = {}) { // i18n = {key, params}: the client words it with t(key, params); `text` stays the English (journal, older clients)
   if (_sentNotices.has(key)) return _sentNotices.get(key);
   console.warn('[notice]', text);
   global.__vsEvent?.('server-notice', key);
   let delivered = 0;
   try {
-    const payload = JSON.stringify({ type: 'server-notice', key, text, level });
+    const payload = JSON.stringify({ type: 'server-notice', key, text, level, ...(i18n && i18n.key ? { i18n } : {}) });
     for (const c of wss.clients) { try { if (c.readyState === WS_OPEN) { c.send(payload); delivered++; } } catch {} }
   } catch {}
   // No client connected (e.g. the 60s post-boot probe right after a pod
@@ -801,6 +803,20 @@ const tasks = new TaskGroupManager({
   onChange: (list) => {
     const json = JSON.stringify({ type: 'tasks-updated', tasks: list });
     wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
+    try { exitProxy.rejudgeAll('task-groups'); } catch { } // verify-r2: a group change is a revoke too — open exit connections judged NOW (exitProxy is built later: a boot-time change is a caught TDZ)
+    // identity verify r4 (2026-09-28): a Task Group change re-judges every browser lease a list admits THROUGH a Task
+    // Group — a conversation removed from the group (or whose group is deleted) loses the kept profile AT ONCE like a
+    // narrowing (its tab closes, a mediated grant is revoked), not at its next command. The keeper singleton is null before install.
+    try {
+      const rj = require('./src/server/browser-keeper.js').keeper()?.rejudgeAll?.('task-groups-changed');
+      // each detached conversation hears it at its next message (layer ②, zero billed turns) — the PATCH's own notice
+      for (const d of (rj && rj.detached) || []) {
+        const s = d.sessionId ? activeSessions.get(d.sessionId) : null;
+        if (!s) continue;
+        const label = (() => { try { return require('./src/server/browser-keeper.js').keeper()?.profile?.(d.profileId)?.label || ''; } catch { return ''; } })();
+        try { sessionStatus.pushNotice(sessionStatusKey(s, d.sessionId), { ...require('./src/browser-profiles.js').profileChangeNotice({ was: label, now: '', by: 'user', handles: [] }), kind: 'browser-profile' }); } catch { /* optional */ }
+      }
+    } catch (e) { console.warn('[browser] the Task Group change re-judge failed — ' + (e && e.message)); }
   },
 });
 // System info + memory-pressure watch (2.216.0, userL's 32Gi OOM kill —
@@ -1196,12 +1212,12 @@ app.get('/api/telemetry/summary', (req, res) => {
 require('./src/server/account-usage-routes.js').create({
   app, rootDir: __dirname, HOST, CLAUDE_CMD, NODE_CMD,
   CLAUDE_SUBSCRIPTION_LOGIN_HELPER, activeSessions, auth,
-  engine: { clearSealedOrders, resetCreditPreview, consumeResetCreditFor, claimColdRestarts }, // + claimColdRestarts (r4: the manual routes never double a restart in flight) + the manual reset-credit use (design-reset-credits p2, src/routes/reset-credit.js)
+  engine: { clearSealedOrders, resetCreditPreview, consumeResetCreditFor, claimColdRestarts, memberRemoved, decideDefaultTarget, fallbackDefaultTarget, removalTargetFor, maybePoolAutoSwitchForPool, setConversationPin, gatherPlan, onMemberLoginSuccess }, // + the login re-check (2026-09-29: a member that signs in ⇒ ONE usage read + ONE pool re-decision) + the removed-member wall (2026-09-28: the members route evicts through the engine's ONE entry point, the default re-point by decision) // + claimColdRestarts (r4: the manual routes never double a restart in flight) + the manual reset-credit use (design-reset-credits p2, src/routes/reset-credit.js)
   serverSetting: (...a) => serverSetting(...a),
   recordUsageAttribution: (...a) => recordUsageAttribution(...a),
   liveAccountIdSet: (...a) => liveAccountIdSet(...a),
   buildClaudeSubscriptionLoginCommand: (...a) => buildClaudeSubscriptionLoginCommand(...a),
-  getAccounts: () => { try { return accounts; } catch { return null; } },
+  getAccounts: () => { try { return accounts; } catch { return null; } }, broadcastActiveSessions: () => broadcastActiveSessions(), // + the pin route's session-facts broadcast (2026-09-28)
   getHosts: () => { try { return hosts; } catch { return null; } },
   getMounts: () => { try { return mounts; } catch { return null; } },
   getTelemetry: () => { try { return telemetry; } catch { return null; } },
@@ -1214,8 +1230,8 @@ require('./src/server/account-usage-routes.js').create({
 const { SessionStatusManager } = require('./src/session-status');
 const sessionStatus = new SessionStatusManager({
   dataDir: path.join(__dirname, 'data'),
-  onChange: (statuses) => {
-    const json = JSON.stringify({ type: 'session-status-updated', statuses });
+  onChange: (statuses, extra) => { // `extra.cleared` = a history clear's ids (a statuses map equal to every client's copy must still reach it)
+    const json = JSON.stringify({ type: 'session-status-updated', statuses, ...(extra && Array.isArray(extra.cleared) ? { cleared: extra.cleared } : {}) });
     wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
   },
 });
@@ -1277,9 +1293,10 @@ const jobsWiring = require('./src/server/jobs-wiring.js').create({
   onStash: () => { try { stashView.changed(); } catch { } }, // 2026-09-27: a job notification stashed / drained ⇒ the session's `stash` fact is re-published
 });
 // WHAT WAITS FOR AN AGENT (2026-09-27, the owner: "我在界面里完全看不到'有消息在 queue'这件事情"): both stashes summarized as the `stash` session fact + the user's POST /api/sessions/:id/stash/hand-over (ONE ladder turn, spend reason stash-handover) — src/server/stash-handover.js
-const stashView = require('./src/server/stash-handover.js').create({ activeSessions, getDeliver: () => deliver, getJobs: jobsWiring.getJobs, broadcastSessions: () => broadcastActiveSessions(), renderMsgStash: require('./src/agent-routes.js').renderMsgStash, renderNotifStash: require('./src/job-model.js').renderNotifStash, dataDir: path.join(__dirname, 'data') }); stashView.register(app);   // verify r4: dataDir = the delivered-hand-over memory on disk (a restart between a delivery and its echo)
-deliver.registerFrameRestorer((cid, text, meta) => stashView.restoreHandedOver(cid, text, meta)); // verify r2: a hand-over's frame that comes back from a wrapper is restored as its ORIGINAL entries (each store, each kind), never one blob; r4: `meta.kind` — a peer's frame never
+const stashView = require('./src/server/stash-handover.js').create({ activeSessions, getDeliver: () => deliver, getJobs: jobsWiring.getJobs, getGroups: () => { try { return channelsWiring.groups; } catch { return null; } } /* lane group-report-card: the group messages waiting for a member's next turn (created further down — TDZ-safe) */, broadcastSessions: () => broadcastActiveSessions(), renderMsgStash: require('./src/agent-routes.js').renderMsgStash, renderNotifStash: require('./src/job-model.js').renderNotifStash, dataDir: path.join(__dirname, 'data') }); stashView.register(app);   // verify r4: dataDir = the delivered-hand-over memory on disk (a restart between a delivery and its echo)
+deliver.registerFrameRestorer((cid, text, meta) => stashView.restoreHandedOver(cid, text, meta)); deliver.registerRedactor((match, scope) => stashView.redactDelivered(match, scope)); /* "Clear content…": the hand-over memory is a copy of held words */ // verify r2: a hand-over's frame that comes back from a wrapper is restored as its ORIGINAL entries (each store, each kind), never one blob; r4: `meta.kind` — a peer's frame never
 function stashFactOf(s) { try { return stashView.summaryFor(s); } catch { return null; } } // boot-order safe: a payload built before the view exists states nothing
+function poolPinFactOf(s) { return s._poolPin && s._poolPin.memberId ? { memberId: s._poolPin.memberId, name: accounts.get(s._poolPin.memberId)?.name || s._poolPin.memberId, at: s._poolPin.at || null } : null; } // THE CONVERSATION'S PIN (2026-09-28): one payload key per line (the active-sessions census reads the line's keys)
 // Channels v1 (2.362.0): per-session external reach override for agent
 // messaging — user-set (Session Properties), widening only; ACL reads the
 // live field, meta persists it across restarts.
@@ -1292,7 +1309,8 @@ app.post('/api/sessions/:id/msg-reachability', (req, res) => {
   try { writeSessionMeta(s.sockName, { ...readSessionMeta(s.sockName), msgReachability: s._msgReachability }); } catch { }
   res.json({ ok: true, level: lv });
 });
-setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard, scheduleCtxSync, remoteCtxBaseFor, readUserState: () => persistenceRouter.readUserState(), getJobs: jobsWiring.getJobs, deliver, getPublishedPages: () => publishedPages, getDesignKit: () => designKit, getChannels: () => channelsWiring.channels, getGroups: () => channelsWiring.groups, getTouches: () => channelsWiring.touches }); // lazy getters: all three are created further down (TDZ at boot otherwise); getChannels = the vibespace-channels routes' engine (P3)
+const recordClear = require('./src/server/record-clear.js').create({ tasks, userTodos, sessionStatus, getJobs: jobsWiring.getJobs, getGroups: () => channelsWiring.groups }); require('./src/routes/records-clear.js').registerRecordClearRoutes(app, { recordClear }); // "Clear content…" (2026-09-28): ONE entry point (PURE verdict, each store's door, the journal line); the owner's POST /api/records/clear[-many] here, an agent's own verbs through setupAgentRoutes
+setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard, scheduleCtxSync, remoteCtxBaseFor, readUserState: () => persistenceRouter.readUserState(), getJobs: jobsWiring.getJobs, deliver, getPublishedPages: () => publishedPages, getDesignKit: () => designKit, getChannels: () => channelsWiring.channels, getGroups: () => channelsWiring.groups, getTouches: () => channelsWiring.touches, getRecordClear: () => recordClear }); // lazy getters: all three are created further down (TDZ at boot otherwise); getChannels = the vibespace-channels routes' engine (P3)
 app.get('/api/agent-hooks', (req, res) => res.json({ ...agentHooksStatus(), integrationOff: !integrationEnabled(), cliConfig: harnessConfig.cliConfigStatus() })); // cliConfig = fresh per-key receipts for the managed CLI-config rows (Settings window chips + the Machines card; D2: never persisted)
 app.post('/api/agent-hooks/install', (req, res) => {
   // The master switch outranks the button: boot/toggle would strip the entries
@@ -1557,20 +1575,13 @@ app.post('/api/port-forward/:id/proto', async (req, res) => {
 app.post('/api/ports/kill-orphan', (req, res) => {
   try { res.json(portForwards.killOrphan((req.body || {}).pid)); } catch (e) { res.status(400).json({ error: e.message }); }
 });
-// On-demand EXIT (task #164): let an agent borrow a machine's network for a
-// single command. Per-machine opt-in (hosts.allowExit, default off).
+// On-demand EXIT (task #164): let an agent borrow a machine's network / run a command on it for ONE command.
+// Who may, per machine: two lists (lane-pairing ⑥, PURE src/exit-reach.js) — the routes are src/server/exit-routes.js.
 const { ExitProxyManager } = require('./src/exit-proxy');
-const exitProxy = new ExitProxyManager({ hosts, log: (m) => console.log('[exit]', m) });
-app.get('/api/exits', (req, res) => res.json({ exits: exitProxy.list() }));
-app.post('/api/hosts/:id/allow-exit', (req, res) => {
-  try {
-    const on = !!(req.body || {}).on;
-    hosts.setAllowExit(req.params.id, on);
-    if (!on) exitProxy.onMachineUnpaired(req.params.id); // tearing down the egress when disabled
-    bcastAll({ type: 'hosts-updated' }); // restored 2.343.2 — deleted as collateral of the exits-updated sweep; the toggle UI re-renders from this
-    res.json({ success: true, allowExit: on });
-  } catch (e) { res.status(400).json({ error: e.message }); }
-});
+const exitProxy = new ExitProxyManager({ hosts, log: (m) => console.log('[exit]', m), dataDir: path.join(__dirname, 'data'), userTodos, sessionsMap: () => activeSessions, bcastAll: (...a) => bcastAll(...a),
+  emitCard: (s, card) => feedPeerCard(s, card), groupsOf: (s, id) => tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId }).map((g) => g.id) });
+hosts.onReachChange = (why) => exitProxy.rejudgeAll(`hosts-${why}`); // verify-r3 A-r3a: an import / a removal / a reshape of hosts.json re-judges every lent machine (the PATCH was the only writer that did)
+setTimeout(() => { try { const n = exitProxy.reconcileAsks(); if (n) console.log(`[exit] ${n} "ask me" item(s) from before the restart resolved expired`); } catch { } }, 3000).unref?.();
 // ── Exit routes + RemoteFs singletons (src/server/exit-routes.js, decomposition #10) ──
 const { exitAgentSession, remoteFs, sshKey,
 } = require('./src/server/exit-routes.js').create({
@@ -1582,6 +1593,7 @@ const { exitAgentSession, remoteFs, sshKey,
   getExitProxy: () => { try { return exitProxy; } catch { return null; } },
   getMounts: () => { try { return mounts; } catch { return null; } },
   getPortForwards: () => { try { return portForwards; } catch { return null; } },
+  getTasks: () => tasks,
 });
 const { readLayouts, writeLayouts, flushLayouts } = persistenceRouter;
 // ── Integrations & keys (src/server/integrations-wiring.js; design §14) — the ONE resolver of the cluster integration env ──
@@ -1589,7 +1601,7 @@ const integrationsWiring = require('./src/server/integrations-wiring.js').create
   app, dataDir: path.join(__dirname, 'data'), bcastAll: (...a) => bcastAll(...a), drivePresets: () => require('./src/mounts').MountManager.drivePresets(),
 }); // created BEFORE the mounts-plugins wiring: the agent browser's key consumer (P4 §7.5) registers its Test runners with this store and the keeper resolves through it
 // ── Mounts + plugins + dial-session wiring (src/server/mounts-plugins-wiring.js, decomposition #12) ──
-const { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, browserKeeper, bootBrowserKeeper, browserStream, browserHandback, browserTrace, browserKeys, pluginLoader,
+const { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, browserKeeper, bootBrowserKeeper, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs, pluginLoader,
 } = require('./src/server/mounts-plugins-wiring.js').create({
   app, server, rootDir: __dirname, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES, integrations: integrationsWiring.store, // + agent browser P4 second half (§7.5): the key consumer's store
   auth, wss, WS_OPEN,
@@ -1599,6 +1611,7 @@ const { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, 
   agentdDials, agentdHostToken,
   agentdMintDialPair: (...a) => agentdMintDialPair(...a),
   deviceForDial: (...a) => deviceForDial(...a),
+  lockOutDialHolder: (...a) => lockOutDialHolder(...a), // verify-r2 B8-r2: a rotation's in-place push that did not land ends the holder's link
   ensureAgentdOnHost: (...a) => ensureAgentdOnHost(...a),
   readSessionMetaOf: (session) => (session?.sockName ? readSessionMeta(session.sockName) : null), integrationEnabled: () => integrationEnabled(), // B-f7ab: the late browser key extends the session's own record, under THE integration switch
   // + agent browser P3 (§4.3.1): the handback announcer forwards to THE ladder under 'browser-handback'; an idle handback files one inbox item // + agent browser P2 (§3.8 ③): a stamped last-used profile re-publishes the live facts // + agent browser P1 second half: the Task-Group default rung, the zero-billed notice queue, the pin's meta persistence — the notes used to sit MID-LINE and swallowed the two keys appended after them (2.369.134: getTelemetry never reached the wiring; the r-fix moved activeSessions after them and every browser route answered "no such live session")
@@ -1612,6 +1625,7 @@ setupSessions({ activeSessions, webuiPids, refreshWebuiPids, createSessionMessag
 const channelsWiring = require('./src/server/channels-wiring.js').create({
   app, dataDir: path.join(__dirname, 'data'), bcastAll: (...a) => bcastAll(...a), integrations: integrationsWiring.store, getMounts: () => mounts, // 2.369.195: a storage mount's own OAuth client, borrowed by an account (server-side copy)
   userTodos, // P1: a failing adapter files ONE "For you" item after 3 consecutive failed passes and the same engine retracts it on recovery (fence 8)
+  onGroupsPending: () => { try { stashView.changed(); } catch { } }, // lane group-report-card: a post / a marker / a membership change moves what waits for a member — the strip above its composer re-publishes (debounced)
   deliver, serverSetting, authEnabled: () => auth.enabled, sessions: () => activeSessions, sessionMeta: () => ({ readSessionMeta, writeSessionMeta }), // §26 (B-099e): the channel witness's ring lives on the live session + its meta · P2: THE delivery ladder (fence 2 — the one door to an unattended turn, spendReason 'channel-message', the authorizer inside it) + the coalescing window setting (fence 12) · r2: `authEnabled` — with auth OFF the owner's group routes are paced like an agent's (anyone local can reach them)
   liveSessions: () => { const out = []; for (const [id, s] of activeSessions) { const cid = addressableId(s); /* verify r5 (channel-withdraw): a BORROWED id (a pending fork) is nobody's address — listed under its parent's id it let a third session mint the pair under the parent and bill it; ONE predicate with agent-routes' _msgEndpoints */ if (!cid) continue; let groups = []; try { groups = (tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId }) || []).map((g) => g.id); } catch { } out.push({ cid, name: s.name || null, groups, webuiId: id, reachability: s._msgReachability || null }); } return out; }, groupSetting: (gid) => { try { return (tasks.get(gid) || {}).externalVisibility || 'none'; } catch { return 'none'; } }, // P2: the agent sessions an assignment can address (group = task group, round-robin over its live members); §22 agent groups: + each session's msg-acl override and the Task Groups' externalVisibility = the reach msg-acl answers
 });
@@ -1661,6 +1675,7 @@ registerWsHandler(wss, {
   NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV, cliCmds,
   adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
   accounts, scheduleCtxSync, activeSessionsPayload, serverNotice,
+  getExitProxy: () => { try { return exitProxy; } catch { return null; } }, // verify-r2 A3-r2 / ask-a: the kill path ends a dead conversation's pairs + asks
   USAGE_STATUSLINE_CMD, userStatuslineCmd, telemetry, sendUserInput, // telemetry: the ws switch's `default:` counts unknown message types (Plugin Ph1); sendUserInput = THE typing path (src/server/user-input.js), shared with the For-you reply route
 });
 
@@ -1680,7 +1695,7 @@ function sessionAuth(s) {
   const withHost = (o) => (o && hostName ? { ...o, hostName } : o);
   // POOLED pseudo-account (B-6217; codex pools 2.368.20): ONE shape for both backends — the pool + the real account it currently
   // bills, so no chip mislabels it (real reports: claude pools rendered as 'API key', codex pools as a plain 'ChatGPT account', no target).
-  const poolAuth = (a) => { let cur = null; try { const c = accounts.poolMemberOfSession(a.id, s, s._webuiId || null).id; cur = c ? (accounts.get(c)?.name || null) : null; } catch {} return withHost({ source: 'pooled', name: a.name, poolTarget: cur }); }; // plan C: THIS session's link target (claude), else the pool default — a non-hot pool process: the member it HOLDS (reset credits r3)
+  const poolAuth = (a) => { let cur = null, curId = null; try { curId = accounts.poolMemberOfSession(a.id, s, s._webuiId || null).id || null; cur = curId ? (accounts.get(curId)?.name || null) : null; } catch {} const prio = Array.isArray(a.priority) ? a.priority : []; const rank = curId ? prio.indexOf(curId) : -1; const pinId = s._poolPin && s._poolPin.memberId && s._accountId === a.id ? s._poolPin.memberId : null; return withHost({ source: 'pooled', name: a.name, poolTarget: cur, poolTargetId: curId, placement: pinId ? 'pinned' : prio.length ? 'priority' : 'automatic', priorityRank: rank >= 0 ? rank + 1 : null, pinned: pinId ? (accounts.get(pinId)?.name || pinId) : null, pinnedId: pinId, poolDefault: (() => { try { const d = accounts.poolCurrent(a.id); return d ? (accounts.get(d)?.name || d) : null; } catch { return null; } })() }); }; // 2026-09-28: WHICH rule placed it (the chip's tooltip — "(priority #1)" / "(automatic)") // plan C: THIS session's link target (claude), else the pool default — a non-hot pool process: the member it HOLDS (reset credits r3)
   if (be === 'codex') {
     // Codex billing identity: named ChatGPT account (isolated CODEX_HOME), a codex pool, or the machine's own ~/.codex login.
     if (s._accountId) {
@@ -1756,6 +1771,7 @@ function activeSessionsPayload() {
       accountName: s._accountId ? (accounts.get(s._accountId)?.name || 'API key') : null,
       accountTail: s._accountId ? (accounts.get(s._accountId)?.tail || null) : null,
       todo: s._todos || null, // {done, total, current} — the agent's own TodoWrite/plan
+      poolPin: poolPinFactOf(s), // THE CONVERSATION'S PIN (2026-09-28): the billing submenu's ✓ "pinned" row + Session Properties
       stash: stashFactOf(s), // 2026-09-27: what waits for this agent's next turn (both stashes, src/stash-summary.js) — the strip above its composer + the card's hint
       auth: sessionAuth(s), // billing identity (subscription / api-console / api-key / unknown)
       // outputStyle = the EFFECTIVE style (2.369.58; null = the agent's own config decides); worktree/worktreePath = the per-session git worktree (owner ruling 9) — the card badge + the path the CLI ITSELF announced in its init frame
@@ -1767,6 +1783,7 @@ function activeSessionsPayload() {
 }
 
 function broadcastActiveSessions() { try { channelsWiring.groups.noteRoster(); } catch {} // r3: the session list's ONE notify point — a renamed/ended member re-announces its groups (their views' names are live-roster derived; nothing moved ⇒ nothing sent)
+  try { exitProxy.rejudgeAll('sessions'); } catch { } // verify-r3 census: a session's own reach facts moved (a fork adopting its id, a codex / ACP thread change, its cwd under the folder rule) — every such writer broadcasts, so the exit re-judge rides this ONE notify point (a boot-time call before exitProxy exists is a caught TDZ)
   const msg = JSON.stringify({ type: 'active-sessions', sessions: activeSessionsPayload() });
   wss.clients.forEach(client => {
     if (client.readyState === WS_OPEN) {
@@ -1823,17 +1840,14 @@ server.on('upgrade', (req, socket, head) => {
     // Transport B: a remote device's daemon dialing IN. Gated by the per-device
     // dial token (never cookie auth — daemons have no cookies); real protocol
     // auth (vsht_ hello) happens inside the mux on this stream.
-    const q = new URL(req.url, 'http://x').searchParams;
-    const deviceId = String(q.get('device') || '').slice(0, 64);
-    const tok = String(req.headers['x-vibespace-dial-token'] || '');
-    const want = hosts.dialTokenHash(deviceId); // pairing credential lives on the host record (B-f3e8)
-    const got = tok ? require('crypto').createHash('sha256').update(tok).digest('hex') : null;
-    if (!deviceId || !want || got !== want) {
-      // observability: a silently deny()'d redial is indistinguishable from
-      // "no attempts" in the logs (bit us diagnosing the dead-Mac incident)
-      console.log(`[device] dial REJECTED for '${deviceId || '?'}' — ${!deviceId ? 'no device id' : !want ? 'no pairing on record' : 'token mismatch'}`);
-      return deny();
-    }
+    // lane-pairing ③⑤ (src/server/dial-pairing.js gateDialUpgrade): a refusal is a NAMED frame (401 + the code +
+    // its sentence), a --dial-check probe gets its 200 and registers nothing, every attempt's facts are recorded
+    const gate = gateDialUpgrade(req, socket);
+    if (!gate) return;
+    const { deviceId } = gate;
+    // verify-r1 B9: a SECOND daemon holding a copy of this pairing is refused by name while the first answers
+    // (two daemons replaced each other once a second forever); the socket waits ≤ DUP_PROBE_MS for that verdict
+    admitDial(deviceId, gate.facts, socket).then((admit) => { if (!admit) return;
     agentdDialWss.handleUpgrade(req, socket, head, (ws) => {
       // adapt the ws to the duplex shape Mux consumes
       const listeners = { data: [], close: [], error: [] };
@@ -1846,6 +1860,8 @@ server.on('upgrade', (req, socket, head) => {
         destroy: () => { try { ws.close(); } catch { } },
       };
       agentdDials.set(deviceId, stream);
+      noteDialEvent(deviceId, 'accepted', gate.facts); // the streak + previous failure the daemon reported, kept on the record
+      deviceForDial(deviceId).catch(() => { }); // the mux hello NOW: a device holding another command's host key shows `auth-fail` at once, not at the first op
       // the device re-dialed with a FRESH stream — drop any cached
       // DeviceManager bound to the previous (dead) stream so the next op
       // rebuilds over this one (stale-stream blank-session fix)
@@ -1876,10 +1892,11 @@ server.on('upgrade', (req, socket, head) => {
       })().catch(() => { });
       try { bcastAll({ type: 'hosts-updated' }); } catch { }
       ws.on('close', () => {
-        if (agentdDials.get(deviceId) === stream) agentdDials.delete(deviceId);
+        if (agentdDials.get(deviceId) === stream) { agentdDials.delete(deviceId); noteDialEvent(deviceId, 'disconnected', {}); }
         try { bcastAll({ type: 'hosts-updated' }); } catch { }
       });
     });
+    }).catch((e) => { console.warn('[device] dial admission failed:', e && e.message); try { socket.destroy(); } catch { } });
   } else {
     socket.destroy();
   }
@@ -1960,7 +1977,7 @@ server.listen(PORT, HOST, () => {
   // One-shot data migrations (src/server/migrations.js, plan B step 1): the
   // ledger-driven registry runs BEFORE any session restore touches the data
   // it may reshape. Failures notice + retry next boot, never block startup.
-  try { require('./src/server/migrations.js').create({ rootDir: __dirname, serverNotice, desktopKeeper, browserKeeper: () => browserKeeper /* 2026-09-25: the runaway-parks-void reshape goes THROUGH the live keepers */, channels: channelsWiring.channels /* 2026-09-22: adapters.json's ONE writer stamps the legacy credential keys */, userTodos /* 2.369.152: the LIVE inbox store — the spend-notices migration reshapes through it, never beside it */ }).runLocalMigrations(); usage.reloadRateLimitCache?.(); usageHistory.reloadCursors?.(); usageHistory.reloadEvents?.(); /* a repair may have unlinked data/usage-cache.json AFTER setupUsage loaded it (r6), or REWRITTEN the ledger shards in place (origin backfill) — the event cache reads only appended tails */ }
+  try { require('./src/server/migrations.js').create({ rootDir: __dirname, serverNotice, hosts /* lane-pairing ⑥: exit-access-lists reshapes THROUGH the live HostManager (it holds hosts.json and saves it whole) */, desktopKeeper, browserKeeper: () => browserKeeper /* 2026-09-25: the runaway-parks-void reshape goes THROUGH the live keepers */, channels: channelsWiring.channels /* 2026-09-22: adapters.json's ONE writer stamps the legacy credential keys */, userTodos /* 2.369.152: the LIVE inbox store — the spend-notices migration reshapes through it, never beside it */, accounts: () => accounts /* 2026-09-28: the pool manual-priority reshape goes THROUGH the live account store */ }).runLocalMigrations(); usage.reloadRateLimitCache?.(); usageHistory.reloadCursors?.(); usageHistory.reloadEvents?.(); /* a repair may have unlinked data/usage-cache.json AFTER setupUsage loaded it (r6), or REWRITTEN the ledger shards in place (origin backfill) — the event cache reads only appended tails */ }
   catch (e) { console.warn('[migrate] local registry failed to run:', e.message); }
   // B-855a c2: the STANDING identity repair — every boot, AFTER the one-shot registry (it may have reshaped the stores this reads), idempotent; then the panel memory re-reads the repaired disk
   try { repairIdentityAnchors('boot'); usage.reloadRateLimitCache?.(); } catch (e) { console.warn('[usage] boot identity repair failed:', e.message); }
@@ -2053,12 +2070,13 @@ function shutdownNow() {
   try { flushLayouts(); } catch {}
   try { sessionStatus.flush(); } catch {} // debounced session-status writes
   try { userTodos.flush(); } catch {} // debounced user-todo writes
+  try { hosts.flushThrottled(); } catch {} // lane-pairing: the throttled dial facts + exit last-run stamps
   try { telemetry.flush(); } catch {} // buffered telemetry records (2.219.0)
   try { sysinfo.persistHistory(); } catch {} // resource-history ring (2.223.0)
   try { channelsWiring.shutdown(); } catch {} // channel index + audit flush (atomic persistence law)
   try { jobsWiring.shutdown(); try { deliver.flush(); } catch { }; } catch {} // jobs store flush + engine lock release
   try { vnc.shutdown(); } catch {} try { desktopKeeper.shutdown(); desktopAccess.shutdown(); shutdownWindowLeases(); } catch {} // vnc: a THROWAWAY server stops the Xvnc it started (never an adopted one; src/vnc.js) — keeper: timers only — desktop apps SURVIVE a restart by design (adopted at boot); window leases persist, their input side is a handback by construction
-  try { browserTrace?.shutdown(); } catch {} try { browserStream?.shutdown(); } catch {} try { browserHandback?.shutdown(); } catch {} try { browserKeeper?.shutdown(); } catch {} // agent browser P5 trace + screencast writers, P2 live-view bridge, P3 handback timers, P1 keeper timers only — the profile browsers survive and are adopted next boot
+  try { browserTrace?.shutdown(); } catch {} try { browserDialogs?.shutdown(); } catch {} try { browserStream?.shutdown(); } catch {} try { browserHandback?.shutdown(); } catch {} try { browserKeeper?.shutdown(); } catch {} // agent browser P5 trace + screencast writers, P2 live-view bridge, P3 handback timers, P1 keeper timers only — the profile browsers survive and are adopted next boot
   process.exit(0);
 }
 process.on('SIGINT', () => {

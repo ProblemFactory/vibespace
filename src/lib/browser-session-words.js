@@ -38,6 +38,7 @@ export function endReasonText(reason) {
     case 'stopped': return t('the browser was stopped');
     case 'switched': return t('the browser was switched');
     case 'restart': return t('VibeSpace restarted');
+    case 'left': return t('you closed your browsing window'); // BROWSE YOURSELF (B-6ae8): the user's own session, its away clock ran out
     default: return '';
   }
 }
@@ -56,12 +57,16 @@ export function endCardReplays(b) { return (Number(b && b.count) || 0) > 0; }
 export function framesGoneText(limitBytes) { return t('Frames of this session were removed to stay under the {size} limit; the action list is kept', { size: sizeText(limitBytes) }); }
 /** The live view's divider between two sessions' actions. */
 export function dividerText(k, at) { return t('Session {k} · started {time}', { k, time: whenText(at) }); }
-/** One row of a Sessions list: when, how long, how many. */
+/** One row of a Sessions list: when, how long, how many. BROWSE YOURSELF (B-6ae8): the user's own browsing reads
+ *  "You · 14:02 · 4 min" (+ its actions when they were recorded — the owner: "你 · 14:02 · 4 分钟" and its replay). */
 export function sessionRowText(s) {
   const when = whenText(s && s.startAt);
   const dur = s && s.open ? t('running') : durationText(s && s.durationMs);
+  if (s && s.holder === 'user') { const head = t('You · {time} · {dur}', { time: when, dur }); return (Number(s.count) || 0) > 0 ? `${head} · ${actionsText(s.count)}` : head; }
   return `${when} · ${dur} · ${actionsText(s && s.count)}`;
 }
+/** Does a Sessions-list row offer Replay? Only a session with actions — the user's own too (the owner: recorded like an agent's). */
+export function sessionReplays(s) { return !!s && (Number(s.count) || 0) > 0; }
 /** A size limit as the words say it ("1 GB", "512 MB"). */
 export function sizeText(bytes) {
   const b = Number(bytes) || 0;
@@ -77,6 +82,8 @@ export function emptyText(kind, { limit = 0 } = {}) {
   if (kind === 'trace-off') return t('Action trace is off — Settings → Agent browser');
   if (kind === 'frames-removed') return framesGoneText(limit);
   if (kind === 'no-actions') return t('The agent did not act in this browser session');
+  if (kind === 'yours-not-recorded') return t('Only when you started and stopped is kept.'); // BROWSE YOURSELF (B-6ae8): "Also record my own actions" was off
+  if (kind === 'yours-no-actions') return t('You did not act on the page in this session');
   return '';
 }
 /** The replay window's title. */

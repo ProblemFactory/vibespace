@@ -65,6 +65,36 @@ async function claudeWorktreeHookConfigured(cwd) {
   return false;  // every readable settings file was silent about the event
 }
 
+/** THE PIN A RESUME CARRIES (2026-09-28; verify r1): `data.poolPin` = the conversation's own pin from
+ *  the client's session config `{memberId, at, poolId?}`. Honoured only when ALL of this holds —
+ *  never on a FORK (a fork starts unpinned), never for a remote conversation; the pool is the one
+ *  THIS SPAWN BILLS, resolved per backend exactly as resolveForSpawn resolves it (a codex
+ *  conversation on the default bills `defaultCodexAccountId` — the claude default was asked for
+ *  both, so a codex pin on the default pool was dropped at the one moment it can apply); a pin that
+ *  names its pool is a pin on THAT pool (it used to follow the conversation onto any other pool
+ *  that lists the same member — a pin nobody made there); a pin that names its pool is kept while its member is
+ *  out of the pool (as a live conversation keeps it — verify r2), a carrier without a pool needs a listed member.
+ *  → {poolId, pin: {memberId, at, by}} | null */
+function resumePoolPin(data, accounts, backend = 'claude') {
+  try {
+    if (!data || data.fork || data.hostId || !accounts) return null;
+    const p = data.poolPin;
+    if (!p || typeof p !== 'object' || typeof p.memberId !== 'string' || !p.memberId) return null;
+    if (data.accountId === 'subscription') return null; // the CLI's own login — no pool
+    const st = accounts._state || {};
+    const poolId = data.accountId || (backend === 'codex' ? st.defaultCodexAccountId : st.defaultAccountId) || null;
+    if (!poolId || accounts.get(poolId)?.type !== 'pooled') return null;
+    if (typeof p.poolId === 'string' && p.poolId && p.poolId !== poolId) return null;
+    // a pin that NAMES this pool is the owner's choice FOR it: kept while its member is out of the pool — placed
+    // automatically meanwhile (pin-member-unknown), honoured again when the member is re-added — exactly as a LIVE
+    // conversation keeps it (verify r2: a resume dropped it from the session while the client still held it). A
+    // carrier that names no pool is judged by membership, as before.
+    const named = typeof p.poolId === 'string' && p.poolId === poolId;
+    if (!named && !(accounts.poolMembership(poolId) || []).includes(p.memberId)) return null;
+    return { poolId, pin: { memberId: p.memberId, at: Number(p.at) || Date.now(), by: 'user' } };
+  } catch { return null; }
+}
+
 function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
   execFileAsync, pickCodexThreadCandidate, getSessionKey, normalizeComparablePath }) {
   const {
@@ -682,7 +712,12 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 if (serverSetting('agents.vibespaceChannel') !== true || data.hostId) return null;
                 const sockDir = path.join(__dirname, '..', 'data', 'channel-socks');
                 fs.mkdirSync(sockDir, { recursive: true, mode: 0o700 });
-                return { script: path.join(__dirname, '..', 'data', 'bin', 'vibespace-channel.js'), sock: path.join(sockDir, id + '.sock') };
+                const sock = path.join(sockDir, id + '.sock');
+                // the socket-path census (src/sock-path.js, lane-pairing ④): a checkout deep enough to put this
+                // socket over the platform's sun_path gets NO channel for this session (said by name, the session starts)
+                const fit = require('./sock-path.js').socketPathFits(sock, process.platform);
+                if (!fit.fits) { console.log(`[channel] not offered for ${id}: its socket path would be ${fit.bytes} bytes (limit ${fit.max}) — ${sock}`); return null; }
+                return { script: path.join(__dirname, '..', 'data', 'bin', 'vibespace-channel.js'), sock };
               } catch { return null; }
             })(),
           });
@@ -743,9 +778,22 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               // `familyOfModel(null)` skips the whole evaluation, so
               // `_placementModelHint` (set with the ladder above) carries the
               // instance default in as the family guess master used to get.
+              // THE CONVERSATION'S PIN (2026-09-28): a RESUME carries the conversation's own pin
+              // (the client's session config `poolPin`); a FORK starts unpinned. It is honoured only
+              // for the pool this spawn bills and a member that pool still lists — the chooser then
+              // starts the conversation on it when it can serve (a codex pool spawns straight onto
+              // the pinned member's CODEX_HOME, which is how its process HOLDS it).
+              const rp = resumePoolPin(data, accounts, backend);
+              data._poolPin = rp ? rp.pin : null;
+              data._poolPinPool = rp ? rp.poolId : null;
               spawnAccount = accounts.resolveForSpawn(data.accountId, backend, data.hostId ? {} : {
                 sessionKey: id,
-                chooseMember: () => poolChooser?.(data.accountId || accounts?._state?.defaultAccountId, { model: data.model || data._placementModelHint || null }),
+                // the store hands the chooser THE POOL IT RESOLVED for this spawn (per backend: a codex conversation on
+                // the default bills the CODEX default) — the caller never re-derives it (verify r2: a re-derivation here
+                // asked the claude default for a codex resume and nothing noticed)
+                // (…and the pool DEFAULT the store self-heals is the POOL's choice: the conversation's pin rides only its own link)
+                chooseMember: (poolId, how = {}) => poolChooser?.(poolId, { model: data.model || data._placementModelHint || null, ...(data._poolPin && !how.forDefault ? { pin: data._poolPin.memberId } : {}) }),
+                pinned: !!data._poolPin, // a codex pool spawns straight onto the chooser's answer only for a pinned conversation
               });
             }
             catch (e) {
@@ -882,7 +930,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           let heldPoolMember = null;
           try {
             const pa = spawnAccount && !data.hostId && accounts ? accounts.get(spawnAccount.id) : null;
-            if (pa && pa.type === 'pooled' && capsOf(backend).hotSwitch !== 'verified') heldPoolMember = accounts.poolCurrent(pa.id) || null;
+            if (pa && pa.type === 'pooled' && capsOf(backend).hotSwitch !== 'verified') heldPoolMember = spawnAccount.pinnedMember || accounts.poolCurrent(pa.id) || null; // a pinned codex spawn HOLDS its pin (2026-09-28)
           } catch { heldPoolMember = null; }
           const session = {
             mode: sessionMode,
@@ -903,6 +951,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // account — keep its identity (2.241.0)
             _accountId: spawnAccount?.id || linkedAccountId || null,
             _heldPoolMember: heldPoolMember, // the pool member this (non-hot) process bills for its life — src/server/usage-pool-engine.js heldPoolMemberFor
+            _poolPin: (data._poolPin && spawnAccount && spawnAccount.id === data._poolPinPool) ? data._poolPin : null, // THE CONVERSATION'S PIN (2026-09-28): carried by a resume, never by a fork — for the pool the spawn bills (resumePoolPin)
             // HOW the billing resolved (B-f531): rides the created reply so
             // the client persists/displays the POST-FACTO truth, never the
             // pre-facto intent
@@ -1060,7 +1109,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               ? be0.priorKeyFor(data.resumeId) : '';
             const bk = browserProfiles.browserKeyFor({
               prior, resume: !!(data.resume && data.resumeId), fork: !!data.fork,
-              mint: browserKeyMod.mintKey, // THE mint (src/server/browser-key.js — a live session's first use mints through it too, B-f7ab)
+              mint: browserKeyMod.mintKey, // THE mint (src/server/browser-key.js — a live session's first use mints through it too, B-f7ab; the fresh-key rule lives there, identity r4)
             });
             // `cwd` is the session's own directory — the one the CLI reads
             // `./agent-browser.json` from (finding ① r3: a project-level fence
@@ -2260,6 +2309,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             taskId: session._initialGroupId || null, // group spawned into (meta key kept for back-compat)
             accountId: session._accountId || null, // billing identity (badge restore across server restarts)
             heldPoolMember: session._heldPoolMember || undefined, // the member a non-hot pool process holds — survives a server restart with the process it describes
+            poolPin: session._poolPin || undefined, // THE CONVERSATION'S PIN (2026-09-28) — survives a server restart (boot-restore's three sites read it back)
             authAtSpawn: session._authAtSpawn || null,
             createdAt: session.createdAt,
             webuiSessionId: id,
@@ -2446,4 +2496,4 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
   }, { onClientConnected });
 }
 
-module.exports = { createWsCreateHandler };
+module.exports = { createWsCreateHandler, resumePoolPin };

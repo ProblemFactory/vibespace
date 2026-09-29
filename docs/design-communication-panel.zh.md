@@ -798,6 +798,7 @@ poll 与 scan 灌进去, 必须得到**同一批记录、同一个唤醒次数�
 | 温 | 最近 `channels.warmRecentHours` (24) 小时内有消息 | `channels.pollWarmSec` 300 |
 | 冷 | 其余 | `channels.pollColdSec` 900 (**上限就是 900**: owner "最长 15 分钟") |
 | 推送兜底 | 这个账号的推送通道 live 且携带内容 (`laneState().pollCadence === 'reconcile'`) | 全部会话降到冷档节奏 (安全网), 覆盖仍然生效 |
+| 搜索承载 (§29) | 这个账号的**新消息搜索**已被测得一条不漏 (`feedState().carrying` ⇒ `laneState().pollCadence === 'feed'`; 推送独占仍优先) | 开着的窗口保持热档 30 s; 其余每个会话至少 `channels.relaxedPollSec` 300 s (owner 定案 4: 5 分钟), 冷档仍是 900 s (永不因此**更**频繁); 覆盖与暂停仍然生效 |
 
 **发现 (listConversations)** 按冷档节奏走 (以及连上、改选项之后立刻一次), **把游标走到底**:
 旧的 `DISCOVERY_PAGES = 5` 让第 501 个会话永远不出现; 现在一趟被预算截断时游标记在内存里,
@@ -1023,7 +1024,8 @@ lark-shape ⑥c (h)–(k), r5 的 persist 恢复到副本里作对照; accounts 
 *不叫* `page_token`, 而只读第一页是一种有案可查的静默丢消息的方式。翻到已存的 anchor 为止;
 在一个爆发日里那意味着好几页, 而这正是全部要点。从运维笔记里带过来的一批已知 vendor 限制,
 adapter 一律**容忍**它们而不是假设它们不存在: 批量枚举 DM 不可靠(DM 靠搜索或靠用户自己挑
-出来加进去); `im search` 把多词查询当短语处理; 它的时间窗参数并不能可靠地过滤; 图片与文件是
+出来加进去 —— 2026-09-28 起**单聊靠新消息搜索找到** (§29): `im/v1/messages/search` 空查询 +
+时间窗, 命中里的 `is_p2p_chat` + `chat_id` 让单聊诞生); `im search` 把多词查询当短语处理; 它的时间窗参数并不能可靠地过滤; 图片与文件是
 对 `messages/:message_id/resources/:key?type=image|file` 的第二次被授权的抓取 —— 2026-09-26
 起按需做 (§6.5 附件), 表情包、合并转发与卡片 vendor 不给。
 
@@ -2724,7 +2726,8 @@ URL 里根本没有实例的地址。在集群部署里用户的浏览器与实�
 | 走协议库的 WhatsApp 发送 | 非官方客户端被平台条款禁止, 封号落在过正常使用上(围栏 13) | 永远在 `tosRisk: 'prohibited'` 后面; 合规路线是官方 Business Cloud API(bot 身份) |
 | HTML 邮件渲染 | XSS 面; 纯文本是诚实的, 而且对分诊来说够用 | published-pages 那套 sandbox iframe 模式 |
 | 附件自动抓取 | 带宽、存储, 以及每条附件多一次被授权的请求 | `caps.attachments: 'fetch'` + 一个显式的用户/agent 动作, 带大小上限 |
-| 已读回执 / 正在输入 / 表情回应 | 不在交互设计里 | `caps` 行已经预留 |
+| 已读回执 / 正在输入 | 不在交互设计里 | `caps` 行已经预留 |
+| ~~表情回应~~ **已做 (§28, lane channel-threads, 2026-09-28)** | owner: "…以及 reaction (附加在消息上的表情)" —— 连同线程回复一起建成 | §28: `caps.reactions` 行 + side log + drain 规则 20 + 窗口的表情条 / 选择器 + agent 的 `react` 提议 |
 
 ---
 
@@ -3813,3 +3816,79 @@ owner 批准 (2026-09-27): "那就按照这个做吧"。
 **没做的。** resume 之后的新 webui 会话不继承旧会话的环 (环按 webui 会话存, 旧会话的 meta 按年龄清扫); 只读的历史窗口 (`view-…`) 没有行; 终端模式的会话只有反向链接 (没有卡片也没有 chip)。
 
 门: test-channel-touch (fast: PURE 表 + 见证 + 两条 owner 路由 + 8 个 patched-copy 对照 + 接线钉) · test-architecture §63 (普查 + 3 个对照) · test-session-schema (`_channelTouches`) · heavy: test-channel-jump (真 chrome + 真 chat-wrapper 后面的 stub claude 跑真的 vibespace-channels: 三行、起草的在前、点击打开那个窗口、chip 与菜单、"由 … 起草" 与 reveal、敌意主题当文字 + innerHTML 对照、agent bearer 403、SIGKILL + 重启 + 新页面后行从持久化的 meta 重放)。
+
+## 27. 富消息: 邮件按格式显示、飞书标签被读懂、机器人有名字 (2026-09-28, lane channel-rich)
+
+owner 在打磨后的 Channels 窗口上的报告: "lark 有些消息里混入了 <p> 这种 raw tag；gmail 这种富文本 html 内容似乎完全没有按照 html 渲染；lark 里还有标记为 app 的情况，其实是个 bot 应该是有名字的。" 三条决定, 整体建成 (不分期)。
+
+### 27.1 D1 — 飞书原始标签永不上屏
+
+- **一个读者**: `src/channel-blocks.js` 的 `markupRead` (`markupTokens` → blocks / 行内 runs) + `larkMdBlocks` (飞书 markdown) + `larkCardBlocks` (交互卡片)。`<p>`/`<div>`/`<br>` = 段落与换行, `<b>`/`<strong>` = 粗体 run, `<i>`/`<em>` = 斜体 run (新 run 类型 `i`), `<a href>` 经 `safeHref` 成链接 (否则只剩文字), `<at …>` 成提及 chip (名册/本条 mentions 的名字优先), `<pre>` = 代码块, 标题加粗, 列表项 "• "/"N. ", `<hr>` = 新块类型 `hr`; script/style/iframe/svg/math 等**连同内容**丢弃; 其它标签剥成文字。自家帧标记先经 `inertFrames` (仍是 `[system-reminder]` 这样的字)。
+- **一堵墙** `sealTags`: 读完之后文本里若还有形似标签的 `<…>` (普查谓词 `TAG_LIKE_RE`) —— 一个人手打的 `<country>` 占位符、`Vec<String>` —— 变成 `‹…›`, 字保留、尖括号换成排版用的那对。代码 (行内/代码块) 是唯一点名的例外: 代码照原样显示。
+- `rec.text` 同一个读者展平 (`larkPlainText`, 无标签的正文原样返回), 结尾过墙; 交互卡片的 text = "[card] 标题" + 各元素文字。**已存记录**在读取时走同一读者 (`larkStoredBlocks` + 引擎唯一读钩子 `recordView`): 窗口、agent 的 read、搜索都一样; 存储永不改写。
+- 交互卡片渲染它的元素: 标题 (含 `i18n_title`)、div 文本与 fields、markdown/lark_md、hr、note (暗色一行)、按钮只作**标签** (绝不是可点的厂商 url)、分栏、折叠面板、图片的 alt; `elements` / 卡片 2.0 的 `body.elements` / 按语言的 `i18n_elements` 都读。卡片块新增可选的内层 `blocks`。
+- 普查 (生产存储, 只取形状): 1 607 条飞书记录中 `<p>` 出现在一个会话里一位用户的 85 条 `text` 消息, 孤立的 `<country>` 2 条; 存储里没有交互卡片和 post 的 md 元素 (它们的元素标签不在 `raw` 里) —— 所以普查腿覆盖存储里见过的形状 + 适配器读的每种元素标签 + 敌意标记。闸门: test-channel-record ⑦ (含对照)。
+
+### 27.2 D2 — Gmail 富文本默认按格式显示, 且安全
+
+- MIME 树里有 text/html 部分的邮件, 在**完全沙箱**的 iframe 里显示: `sandbox="allow-scripts"` 且仅此一项 (不透明源, 无同源、无表单、无弹窗、无导航; **永不** `allow-same-origin`)。srcdoc 依次为: ① 我们自己的白名单重写器 `sanitizeMailHtml` (PURE `src/mail-frame.js`: 分词后从词重新写出, 不透传; 实体解码后再判 URL; CSS 去掉一切能"够到"外面的写法) ② DOMPurify (同一套名单; `ADD_URI_SAFE_ATTR` = 所有非 URL 属性 —— 否则 DOMPurify 用严格 URI 正则把 width/colspan 都删了, chrome 实测) ③ `composeSrcdoc`: CSP `<meta>` 放**最前** (`default-src 'none'; img-src data: [https:]; style-src 'unsafe-inline'; font-src data:; script-src 'nonce-…'; …`), 然后正文, 最后我们带 nonce 的 resizer (唯一的脚本)。
+- 父页面只信**一个数**: 来自**那个** frame 的 window、带**那个** frame 随机 token 的高度, 夹在 [24, 20000]; 帧里点的链接由父页面按 http(s)/mailto 重判后新标签页打开 (noopener)。
+- `cid:` 图片是邮件自己的部分: 父页面 (有 cookie; 不透明源的 frame 没有) 经我们的附件路由取回, 以 data: 交给 frame; 已画进邮件里的不再在下方附件条重复。
+- **远程图片默认拦截** (邮件客户端的规矩 —— 追踪像素就是已读回执), 直到在**那封**邮件上按"显示图片": 该发件人在本页会话内记住, 绝不全局、绝不落盘; CSP 只对那个 frame 加 `https:`; http 图片永不加载。
+- 每封 HTML 邮件有"格式化 | 纯文本"切换 (默认格式化; 按消息记在窗口里, 整体重绘也保留)。**懒加载**: 只有视口 ±1200px 内的行才有活 frame, 最近优先, 最多 6 个; 离开保留区即释放 (留下测得高度的占位)。取不到正文 / 超过 2 MiB ⇒ 显示纯文本并用一句话说明原因 (+ 重试), 不静默。
+- 字节来源: Gmail 适配器把 text/html 部分作为记录的 `role: 'body'` 附件 (排在最前, 64 附件上限切不到它; 单部分邮件为 `part:root`), 字节在入库时就握在手里 (线程读取本来就是 `format=full`), 记录落盘即写入附件缓存 —— 零额外厂商单位; 没握住的按需经 R3 判定梯子取。`Content-ID` 作为 `attachments[].cid`。路由把 text/html 按 `application/octet-stream` + attachment + nosniff + 沙箱 CSP 回答 (永不在我们的源里渲染)。
+- **agent 永远收不到 HTML**: read/search、预览行、注意力列表、搜索都用 `text`; 正文附件对 agent 不可见。eml 文件查看器 (`sandbox=""` + 原始 srcdoc) 未改动 —— 它没有清洗器, 不是可复用的路径。
+- 频道界面上**唯一**的 srcdoc 在 `src/lib/channel-mail-frame.js`, test-channel-record ⑧ 按名字钉住 (第二处 srcdoc / allow-same-origin / 其它 innerHTML 都会变红)。闸门: test-mail-frame (快: 58 封敌意邮件语料 + 不动点 + 边界 + CSP + 表格 + 三个削弱清洗器的对照) + test-channels-aggregate-ui ⑩ (重: chrome 里的真 frame, 本地信标永不被访问, 另有原样渲染会访问信标的对照)。
+
+### 27.3 D3 — 机器人有名字
+
+- `sender_type === 'app'` 的发送者用应用名命名: 租户 token (`/auth/v3/tenant_access_token/internal`) + `GET /open-apis/application/v6/applications/:app_id?lang=zh_cn|en_us` (权限 `admin:app.info:readonly`; 自有应用也可 `application:application:self_manage`), 都经限速与计量; 按 app id 缓存 6 小时 (与成员名同), **拒绝也缓存** (权限未开时每条消息不再重问, 日志只说一次并点名权限); 本条消息 mentions 里 `id_type: app_id` 的名字免费拿来。
+- 拒绝或失败: 显示 "Bot" + app id 末四位 —— **绝不**显示字面的 "app"; `author.isBot` 仍为真, 行上名字旁有一个小机器人标记 (icons.js 的 SVG, 不是 emoji)。已存的 "app" 记录在读取时由 `recordView` 命名。注意力列表本身不显示作者; agent 的 read 输出和唤醒文字读的都是 `author.name`, 同一个解析器。
+- 闸门: test-channels-lark-shape ⑤b (解析、拒绝 → "Bot ····"、mention、缓存、计量、读时视图、改回旧行为的对照) + test-channels-aggregate-ui ⑩ (机器人标记)。
+
+## 28. 话题回复与表情回应 (2026-09-28, lane channel-threads, backlog B-7a73; 中文统一叫"话题", 不叫"线程" —— owner 2026-09-28)
+
+owner (2026-09-28): "我发现你似乎不支持 lark 的内嵌回复 (thread) 功能 … 以及 reaction (附加在消息上的表情)"; Lark 先做, 模型按 Slack / Telegram 也能接入来设计。三个默认值 (owner 拍板时可改): agent 的表情回应默认 `propose` (每个账号可改 direct / off); 话题在桌面是侧栏、手机是整页推入, 从不就地展开; 回复了 agent 发出的消息**默认不叫醒它** (免费的 next-turn stash; 要叫醒就在 Notify… 里加 `reply-to-mine` 规则)。完整规格 (十二节) 在 lane 的 spec 里; 这里记已建成的形状与偏离。
+
+**模型 (PURE)。** 记录的"位置" = `replyTo` + `threadKey` + 新增可选 `root` (R1 自指丢弃, R2 `root` 须有 thread 或 parent)。`src/channel-thread.js`: 话题索引由日志**推导**, 从不存 (T1–T8: `chainKeyOf` 64 跳上限 + 环检测按最小 id 定键; `rootOf`; kind vendor | chain | conversation; `mergeThreadStats` 取 max; `placeOf` = 引用行 + 话题事实; `paneMode` < 620 px 堆叠)。`src/channel-reactions.js`: 表情是 append-only 的 **side 记录** (快照 + 增量, `validateSide` 先限长再解析: key 字母表 `[A-Za-z0-9_+\-:.]{1,64}`、glyph ≤ 16 个单位、一行 ≤ 8 KiB), 读时折叠 (F1–F6: 快照之前的增量忽略、之后的应用、`mine` 按当前 `selfId` 现算、计数不为负、顺序稳定 —— 最新快照的键在前, 其后新增的按出现顺序); `by` ≤ 20 个名字只给 owner 的路由。
+
+**能力行。** `caps.threads {read, replyInto, listing}` 与 `caps.reactions {read, add, remove, vocabulary, custom, perMessageMax}`, 由注册表 `validateCaps` 校验 (声明了却没实现 = 合同套件红), `convCaps` 两行只收窄; `offers()` 学会 `thread-reply / react / unreact / read-reactions` 四个控件。Lark: `threads {vendor, replyInto, separate}` (话题里的回复不随群消息列表返回), `reactions {list, add, own, names, none}`; 读表情需要 `im:message.reactions:read`, 而 Lark 对应用没开的权限会拒绝整个授权 (20027) —— **偏离**: 这个权限不进默认授权, 由账号选项 `reactions: 'read'` 加进去 (窗口的一行字 + 重新授权按钮说明怎么开)。
+
+**存储与花费。** side log 在 `msgs/<adapterId>/~side/<convId>.ndjson` (**偏离**: 不是 `<convId>.side.ndjson` —— 一个叫 `x.side` 的会话会和 x 的 side log 撞名; `~` 永远不在 safeSeg 的输出里), 按 `sideKey` 去重, trim 时保留每条消息最新的快照 + 其后的增量。drain **规则 20** (纯函数, 在规则 9 / 18 之内先判定): 20a 话题 walk —— 每话题 60 s 底线、同一话题并发只一次、从不由定时器触发、从不由 agent 的 `read` 触发; 20b 表情列表 —— 只读打开窗口**可见的行**, 每消息 5 分钟底线、10 分钟 TTL、每账号每分钟 ≤ 20 次 (**滑动**窗口)、一批 ≤ 20、超了按名拒绝。推送事件 `im.message.reaction.created_v1 / deleted_v1` (不带会话 id —— 由消息 → 会话映射找到) 落 side log, 在 ack 之前持久。
+
+**窗口。** 回复行上方一行引用 (点击跳到原消息: 已画出就闪一下, 没画出就向上翻页 ≤ 5 页, 更早的说出来); 根消息头上 "N 条回复 · 最近 5m" 芯片 (分开列出却没 walk 过的话题说 "在话题中 · 打开以加载", 从不写 vendor 没确认的数字); 主列表里的话题回复带淡色 "在话题中" 标签; 表情条按 key 原地打补丁 (芯片的计数重写、新键插在 `+` 前、没了的键删掉), 自己的高亮, 长按 / 右键看是谁, `+` 打开选择器 (快捷行 + 搜索 + 键盘), `+` 永远不会单独换到一行; 另一个客户端的表情经 `channels-updated` 的 `patches` 原地到达 (> 50 条改为 `rereadReactions` 一次本地重读), 话题统计经 `threads`。话题窗格: 每窗口一个, 按话题保存草稿与滚动, 从不写进布局; 窗格里的向上翻页走窗口同一个 `pageUpVerdict` (滚动事件是位移, 人的输入才是意图)。
+
+**Agent。** `read` 以文字给出位置与表情数 (`↳ replying to …` / `[thread …]` / `reactions: 👍 3 (the account owner)` —— 永远没有名单); `read --thread` 只读本地折叠, 从不 walk (`walked:false` 说明); `refresh --thread` 是 agent 唯一能触发 walk 的门 (agent 份额 + 每话题底线); `reply --in-thread` 是带 `inThread` 的提议 (群不允许话题回复 ⇒ `topic-forbidden`, 会话的判定当场收窄); `react` / `unreact` 是 kind `reaction` 的提议 —— 账号的 `reactionPolicy` 在频道判定之上: off ⇒ 按名拒绝、不建记录, propose ⇒ 不管频道怎么说都要审批, direct ⇒ 频道自己的判定 (从不越过); 批准后以用户身份一次 vendor 调用、从不重试, 结果丢失 ⇒ `unknown`, 由一次列表读取 reconcile; 回执一行, 下一轮, **从不叫醒**。两条新过滤规则 `reply-to-mine` / `in-thread-with-me` 读 `sentBy` (outbox 记下的每个 agent 发出的 vendor id, 每会话每人 ≤ 200) 与 owner 自己的消息; 话题回复就是消息, 走原来的漏斗与唯一的计费唤醒门。**表情永不开一个 turn**: agent 发出的消息上的表情, 以一行摘要进它的免费 stash (每消息每小时 ≤ 1 行、每会话同时 ≤ 5 行、stash 满就丢弃不挤掉别人) —— test-architecture §64 从 side 记录的写入点出发 grep 出调用图, 断言到不了 `billedWake` / `onFresh` / 投递梯 / `wake`。
+
+**回复落点 (placement, 2026-09-28 —— owner 在 verify r2 之后的问题: "这个布尔值是按 Lark 的形状做的")。** 一个回复落在哪里是四选一: `chat` (会话里的普通消息, 不回答任何一条) · `quote` (回答某条消息, 显示在主列表里 —— Lark 的回复 / Telegram 的 reply_to; Slack 没有) · `thread` (落在那条消息的话题里 —— Lark reply_in_thread / 话题群, Slack thread_ts; Telegram 的论坛话题本身就是会话, 故 thread ≡ chat) · `thread+chat` (落在话题里, 同时显示在会话里 —— 只有 Slack 的 reply_broadcast)。**由 adapter 在 `threads` 能力行里声明** `placements` 与 `rootReply` (对"话题之外的消息"的厂商习惯: Lark quote、Slack thread、Telegram quote); 注册表 `validateCaps` 拒绝不自洽的声明 (只读 adapter 不能声明、`thread` ⇔ `replyInto`、`thread+chat` 须有 `thread`、`rootReply` 须在已声明的 quote/thread 里), 注册表的 `send` 只把声明过的落点交给 adapter (其余在请求之前 `not-supported`), 话题类落点同时带上 `inThread: true` 这个别名。**PURE 的判定在 src/channel-policy.js (`placementVerdict`), 在提议存在之前**: 没声明的落点 = `placement-not-offered`, 带原话和"这里提供: chat, quote, thread", 什么都不建; 只给了 `--to` 时按厂商习惯 —— 被回答的消息已经在一个**厂商话题**里 (引擎本地的话题索引, kind `vendor`; 回复链不算) ⇒ `thread` (它没法从主列表里被引用: Lark 自己也会把对话题消息的回复放进话题, L6), 否则 = 该行的 `rootReply`; 引用一条话题里的消息同样被拒 (`parent-in-thread`, 否则卡片说"引用"而厂商放进了话题)。CLI: `reply <conv> "…" [--to <id> [--in-thread] [--also-in-chat]]` (`--reply-to` 是 `--to` 的旧名, `--in-thread <id>` 不带 `--to` 仍然指名那条消息), 打印落点及原因。审批卡 (会话内与 Outbox 同一个渲染器)、agent 工具卡上的触达行、回执都用文字说出落点 (zh / ja / en); 普通消息不多说一句。**已存储的提议把 `inThread` 当作读取别名** (没有 `placement` 且 `inThread: true` = `thread`, 只有 `replyTo` = `quote`), 照此发送。声明: Lark `chat/quote/thread` (习惯 quote)、Gmail `chat/quote`、内建 Agents 只有 `chat`、fake 四种都声明 (fake-push 只读: 无); Slack / Telegram 是门里的**夹具行**。门: test-channel-placement (fast: 每厂商的判定表 + 能力行普查 + send 契约 + 真引擎 + 三种语言的文字 + 五个 patched-copy 对照)、test-channels-agent-cli、test-channels-lark-shape。
+
+**门。** fast: test-channel-thread · test-channel-reactions (PURE 表 + patched-copy 对照 + 线性时间钉) · test-channel-record / -caps / -adapter-contract / -store / -drain (规则 20 的 seeded walk + 每条子句一个 mutant) / -lark-shape / -outbox (reaction 这个 kind 走遍每个转移 + 行 × 权限 × 频道策略 16 格 + 一个 off 仍建记录的对照) / -filter / -touch / channels-engine (⑰⑱) / channels-agent-cli · test-architecture §64 + §64b (新词都有 zh + ja)。heavy: test-channel-threads-ui (真 chrome + fake adapter: 引用跳转、侧栏 / 推入、话题内回复、选择器键盘、另一客户端的表情原地到达、滚动风暴 ≤ 20 次、手机长按 / 轻点 / `+` 不落单、zh + ja 360 px 整字)。
+
+
+**引用 ≠ 话题 (2026-09-28 21:55 PDT, owner 对新用户走查的两条裁定, 都是"是")。** 飞书里有两种东西: **话题** (话题群的消息、用 reply_in_thread 做的回复 —— 厂商的 `thread_id`) 与 **引用回复** (群里一条普通消息, 只是指着另一条 —— 只有 `parent_id` + `root_id`)。之前窗口把两种都标"在线程中"、都开窗格, 于是审批卡上说"引用回复 (留在群里)"的消息发出去后被标成"在线程中": 落点规则按索引的 `vendor` kind 判定"是否在话题里", 渲染却给每个索引条目 (连回复链) 都画了话题事实 —— 一个问题两条规则。现在只有**一个 PURE 分类器** `placeKindOf` (src/channel-thread.js): `plain` / `quote` / `topic-root` / `topic-reply` / `topic-quote`; 话题 = kind `vendor` 的索引条目, 回复链永远不是。读它的有: `placeOf` (只有话题才带话题事实, read shape 带 `kind`)、窗口 (芯片 / 标签只给话题 —— `isTopicPlace`; 引用在主列表里上方一小条被引用的原文, 点击跳到原文, 不挂标签不开窗格)、agent 的文字 (`↳ quotes <author>: "…" (id …)`, 引用永远不说 "in thread")、引擎的落点父消息事实 (PL3 / PL5)、话题读取与 walk (`not-a-thread`, walk 零 vendor 调用)。一条后来被 reply_in_thread 回复的引用成为话题根 (厂商在它身上铸出话题), 窗口从 `threads` 广播的 `root` 原地长出芯片。fake-poll 的房间同时有两种形状, fake 的话题回复在话题外的消息上铸新话题。中文: 话题, 从不"线程" (ja 保持スレッド; 窗格标题 `tc('channel', 'Thread')`, collab-row 的 Codex "Thread" 保留原词)。门: test-channel-quote-topic (fast: 分类表 × 新用户走查的真实形状 + fake-poll 房间 + 渲染 + 真引擎 + zh 普查 + 五个 patched-copy 对照) + test-channel-threads-ui 的引用腿 (chrome)。
+
+**owner 裁定 A (2026-09-28, 引用 ≠ 话题之后): 只有真正的话题里的新消息会叫醒 agent；别人引用你的消息仍会。** Notify… 的"在我参与的话题中"规则只对**真正的话题**里的新回复生效 (分类器 `placeKindOf` 说 `topic-reply` / `topic-quote`, 话题里有我的消息 —— 话题头本身不算), 引用链永远不算"话题"; 另加一条明确的子句: 别人**引用了我的消息** (被引用的那条是 owner 的或该 agent 发的) 仍然叫醒, 理由写作 "quoted your message" (引用了你的消息)。"回复或引用了我的消息"规则: 引用我的消息, 或话题里回复我的消息 / 我的话题; 引用链的 `root` 不再读 (引用链里我开的头不等于引用了我)。唯一判定在 PURE `placeHit` (src/channel-filter.js), 引擎把分类器 `kindOf` 与"只答话题"的 `threadOf` 交给它; 每日叫醒上限不变 (30 条话题回复、上限 5 ⇒ 叫醒 5 次, 其余保留)。门: test-channel-filter ⑬ (表 + 三个 patched-copy 对照) + test-channels-engine ⑱ (b)。
+
+## 29. 新消息搜索: 一次搜索找到每条新消息 (2026-09-28, lane lark-search-poll, backlog B-5aab)
+
+owner (2026-09-28): "从 lark pull 消息可以通过搜索空格+时间范围来搜索最近所有新消息吧，这样也顺便能解决私聊问题"。已验证: `POST /open-apis/im/v1/messages/search`, user token, scope `search:message`, `query` 可空, `time_range` ISO 8601, `chat_type group|p2p`, 每页 ≤ 30 + `page_token`, 每条带 `meta_data {chat_id, from_id, thread_id, thread_position, is_p2p_chat, create_time}` + 一段 `display_info` 摘要, 100 次/分 (**按租户**计)。owner 定案 (2026-09-28, ut-f7c5a32d17): ① 首屏给未读单聊挂 "单聊 · N 条新消息" ② **整个账号交给 agent 时, 私聊也让它看、也唤醒它** (与推荐相反; 与 2026-09-26 "不要 opt-in 跟踪" 一致) ③ 首次开启把最近 7 天的单聊列进"全部" (已读, 不唤醒) ④ 测得一条不漏后, 每个会话的检查放慢到 **5 分钟** (`channels.relaxedPollSec` 300), 开着的窗口仍 30 秒; 搜索本身每 30 秒 (`channels.feedEverySec`) ⑤ 登录被拒时一次只去掉一个权限, 每步一个写明去掉什么的按钮。
+
+**它是什么 —— 到达轴上的第二个声明, 不是 `receive` 的新取值。** `caps.changeFeed {via:'search', scope, option, pageSize, pagesPerPass, perMin, maxWindowSec, catchUp, describes, timeUnit}` 与 `receive:'push'` 并存 (`'scan'` 已是桌面客户端的契约; 改 `receive` 会让 Lark 丢掉推送)。注册表校验这一行 (未知 via / 非正整数 / 没声明时间单位 / 不能列会话的 adapter 上声明 feed = 按名拒绝), `METHOD_GATES` 加 `changes` / `describe`; `changes()` 的包装器拒绝超过一页的命中, 并把每条命中过一个**封闭字段表** (`HIT_FIELDS`, 没有任何文本字段) —— 摘要在适配器里就被丢掉, 从不存、不记日志、不广播 (多出来的字段被剥掉并计数 `stripped`)。
+
+**算术 (PURE `src/channel-feed.js`)。** 窗口 = [游标 − 重叠, 现在] (整秒; 重叠 `channels.feedOverlapSec` 60, 下限 30 —— 晚进索引的消息仍在下一窗里; 一个滞后索引的模拟证明一条不丢, 对照: 去掉重叠丢 300+/400); 窗口最远只回溯 1 小时, 更早的一段停机变成**单聊补读** (群由各自的轮询覆盖); 时钟倒退 ⇒ 不调用。每一页先过 `pageVerdict`: 多于一页 ⇒ 合同违约; **任何**命中的创建**和**修改时刻**都**落在窗口 ± 120 s 之外 (verify r1: 按 max(创建, 修改) 判时, 窗口里创建、窗口结束后才被改过一个字的消息就让 feed 停放 24 小时), 或 `total` 超过窗口长度 × 50/s ⇒ `time-range-ignored` —— 一页之后按名停放 24 小时 (旧的 `im search` 就忽略过时间窗; 信任它会把"自游标以来"变成"全部历史"); 续页若回的正是发出去的那个 token、或与本窗口上一页同一批消息 ⇒ vendor 不读 page token (U9: 分页放在哪里未验证), 同样按名停放 (verify r1: 否则窗口永远读不完, 每分钟 10 页, 卡片一直写"第一次搜索"); 时间按**声明的一个单位**读 (ms), 超出 [2010, 现在 + 1 天] 即为畸形, 从不按数值大小猜单位。`foldHits`: 按消息 id 去重 (重叠会读到 2–3 次), 仓库已有的记录不标记, 已知会话 ⇒ 欠账 (owed), 带 thread 的命中**同时**标会话和线程 (U6), 未知单聊 ⇒ 诞生, 未知群 ⇒ 发现提示 (群的成员关系以 `im/v1/chats` 为准; 一次**完整**列举都没列出的会话记住一个冷档周期, 它的命中只计数、不再触发发现 —— verify r1: 否则它每有一页命中就跑一次列举), 取消列出的 ⇒ 计数。
+
+**调度 (drain 规则 21)。** 一次 `feed` 动作 = 一页 vendor 调用; 只做计时器的活; 不在退避里; 不抢在等待中的人之前; 在发现 (规则 12) 与普通到期行之前; 受分钟预算 (规则 9)、按秒节奏 (规则 18, 成本 `feed`)、**它自己的滑动一分钟** (`perMin` 10 = 租户 100/分的 10 %) 与每趟上限 (`pagesPerPass` 5) 约束。结果行排到普通到期行**前面** (已在等的键前移); 本趟已抓过的键只因**更新**的命中再到期 (规则 13)。搜索自己的拒绝 (`{skip}`: 它的限速档、它的权限、它的形状) 只结束这一趟的 feed, 从不让整趟失败; 账号级失败 (令牌) 仍是规则 3; 搜索**不应答** (5xx、超时) 是 feed 自己的失败 —— 走它自己的失败阶梯, 卡片写"搜索没有应答" (verify r1: 当成账号失败时, feed 排在每趟最前, 搜索一宕机就一个会话都不再轮询)。seeded walk (一半的 mixed 种子与三分之一的 paced 种子带上 feed —— 不加种子, 守住 fast 档的 10 s) + 表 + 每条子句一个 mutant。
+
+**引擎只驱动 (`feedPage`)。** 顺序即不变量: 判页 → 折叠 → **欠账标记与诞生写进索引并 flush** → 游标才动 (一次崩在中间只花一次重读, 从不丢一条; 对照: 游标先动 ⇒ 同样的崩溃丢掉命中)。欠账时刻 = **feed 看到它的时刻** (我们的时钟): 在那之后开始的一次完整遍历必然含有它, 两边时钟怎么差都一样 (vendor 的 `create_time` 只用来定诞生会话的已读线)。新诞生单聊的已读线是**窗口的起点** (窗口里的每条消息都是新消息; verify r1: 按该会话最新一条命中定线时, 一个人在同一窗口里发的三条只剩最后一条未读、唤醒只带最后一条)。欠账行是 `dueList` 里的具名行 (暂停的会话等到取消暂停; vendor 拒绝的会话其欠账随之清掉 —— 不会每个 tick 为它跑一趟); 线程欠账 = 一次线程遍历, **记在计时器账上** (规则 20a 唯一的例外: 这个线程是 vendor 在这个会话里亲口点名的); 这样一次遍历若是该线程的**第一次**, 读到的旧回复是积压、不是新消息 —— 新消息线 = 欠账时刻 − 最宽窗口 (verify r1: 否则老线程里一条新回复会把几周前的回复都当新消息, 两周前一条命中过滤器的旧回复会计费唤醒 agent)。429 = feed 自己的等待 (vendor 的 `x-ogw-ratelimit-reset`, 否则 5 s → 60 s), 账号的退避 / 失败计数 / 节奏桶都不动; 权限拒绝 = 停放, 直到凭据变化 (一次重新授权) 才解除, 卡片按 vendor 自己的原话说出缺的 scope (有界读取: 4 KiB, ≤ 8 个名字)。
+
+**诞生、标题、首屏。** 单聊由 feed 诞生: `kind:'dm'`, `bornBy:'feed'`, 补读诞生的已读线 = 首次运行时刻 (backlog, 不唤醒、不上首屏), 稳态诞生的已读线 = 那条消息之前 (它是未读也是新闻)。名字: 聊天查询的 `name`, 否则对方 (非本账号作者) 经 `contact/v3/users` 的名字, 否则由客户端说 "单聊" —— **永远不是原始 id** (推送诞生的行也一样改了)。`describe` 每个 feed tick ≤ 5 个, 只在分钟预算内。首屏新标签 `direct` (owner 定案 1): 单聊、未读 > 0、最新消息在 24 h 内, 排在 held 之后、replied 之前。访问: 整个账号的授予**覆盖**单聊 (owner 定案 2) —— channel-filter 没有任何单聊例外, 由 test-channel-filter 钉住。
+
+**测量, 从不断言 (推送通道 §6.4 的规则, 一字不差)。** 样本 = 一次**抓取** (ingest、线程遍历; 推送来的不算) 追加的记录, 等一个完整窗口覆盖了它的时刻 (游标 − 重叠) 再判 —— 在覆盖之前被热档轮询先抓到的记录排队等着 (有界 2000), 不然只有冷行能出样本; 没被 feed 看到 = 漏。`measuring → carrying` 在 ≥ 200 条、≤ 2 % 漏, **且测量已跨过一整个冷档周期** (冷档 + 重叠 + 两个间隔, 从本进程第一个窗口算起 —— verify r1: feed 自己触发的欠账抓取只读它**找到**的会话, 它整片漏掉的会话停在冷档 15 分钟才被读一次; 一个对 20 个忙群里 2 个完全失明的搜索, 6.7 分钟、216 条、零漏就被升格了); `carrying → demoted` 在 > 2 %、≥ 20 条; `demoted → carrying` 同升格条件。承载只在 `carrying` 且新鲜 (最后一次好页 ≤ max(180 s, 3 × 间隔 + 重叠)) 时成立 —— 落后、退避、测量中、降级都不放慢任何东西。每次翻转在日志和卡片上带着数字说出来; 漏掉的消息类型留作诊断。
+
+**授权 (§5 的一次重新授权)。** 默认同意书 = 基础 5 个 + `im:message.reactions:read` + `im:message.p2p_msg:get_as_user` + `search:message`; 可选的三个按**有序组**排列, 最不值钱的在前 (表情 → 单聊读取 → 搜索): Lark 在自己页面上拒绝时 (20027, 从不重定向), 每按一次只去掉下一组, 按钮写着去掉什么 ("不带 X 登录" / "也不带 Y 登录"), 全部去掉之后才 `already-narrowed`。账号选项 `search` (默认开; 关 = 两个 scope 都不申请, feed 关)。卡片只说**一行**: "重新授权一次即可开启：查看表情回应 · 新消息搜索和单聊"; vendor 拒绝过的 scope 另说它的开通步骤。门是**持有的 scope**, 从不试探调用 —— 没有 `search:message` 的登录发 0 次搜索。
+
+**偏离设计稿 (/var/tmp/vibespace-lanes/lark-search-poll/design.md) 的地方, 各有理由:** 欠账时刻用观察时刻而非 `create_time + 5 s` (vendor 时钟慢于我们 5 s 以上时, 一次在消息存在之前开始的遍历会清掉它的标记); `cadenceFor('feed')` = max(档位, relaxed) (冷行不会因为搜索承载反而被更频繁地轮询); 声明里多了 `timeUnit`; fake 只在被要求时声明 feed (`feed:true` / `VIBESPACE_CHANNELS_FAKE_FEED=1`), 否则每个用 fake-poll 驱动引擎的套件的算术都会变; 测量有 pending 队列 (见上)。
+
+**门。** fast: test-channel-feed (新; 窗口 / 判页 / 折叠 / 欠账 / 诞生 / 摘要普查 (模块 + 注册表 + 引擎的 `feedPage`) / 测量 / 滑动一分钟 + 4 个 patched-copy 对照) · test-channel-drain (规则 21: 搭在 mixed / paced 的种子上、表、5 个 mutant) · test-channel-caps ⑧b · test-channel-adapter-contract ⑫ · test-channels-lark-shape ⑬ · test-oauth-loopback ⑨b · test-channels-engine ㉒ (流程、账号授予唤醒私聊、线程遍历记在计时器上、429、重启、欠账先于游标 + 对照、scope 门、忽略时间窗、承载 → 降级、摘要) · test-channels-focus (`direct`) · test-channel-filter (定案 2)。heavy: test-channels-aggregate ⑫ (873 个会话: 测量中 = ② + 一页; 承载 = 只抓开着的窗口与欠账行, 5 分钟网; 突发 600 条 ⇒ 任意 60 s ≤ 10 页, 窗口跨趟与重启完成; 5 % 漏 ⇒ 降级, ② 自己回来) + ⑤ (推送独占仍胜) + ⑪ (c) 忽略打开窗口的承载 (d) 只在内存里的欠账。
+
+**待验证 (U)。** U1 消息 id 的字段名 (读 `meta_data.message_id`, 否则条目的 `message_id` / `id`; 第一页的字段**名**每个进程说一次) · U2 `time_range` 是否被尊重 (第一页即探针) · U3 空查询是否返回所有消息类型 (测量回答) · U4 索引延迟 (重叠 + 测量) · U5 时间单位 (声明 ms) · U6 根消息的 `thread_position` (未钉住前两个都标) · U7 p2p id 的聊天查询 (describe 阶梯 + 最后一次读取的回退) · U8 page_token 寿命 (5 分钟, 拒绝 ⇒ 从第 1 页重来) · U9 分页参数放在 query string (Lark 的 POST 搜索惯例; 形状被拒 ⇒ 按名停放)。

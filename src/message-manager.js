@@ -17,6 +17,7 @@ const { rewoundByRecord, applyRewound, rewoundOp } = require('./rewind-ops.js');
 const { workflowNameFromAck, shortWorkflowName } = require('./workflow-name.js');
 const { VIBESPACE_NOTICE_HEAD } = require('./notification-senders.js'); // PURE: the head our notifications open with (S3 verify F3: a peer record's PATH, peerOriginOf)
 const { offerOf } = require('./reset-credit.js'); // PURE: the reset-credit offer a peer card may carry (design-reset-credits §5)
+const { groupOf: groupCardOf } = require('./group-card.js'); // PURE (lane group-report-card): a group message's card facts — `peerGroup`
 const { sliceTextWindow } = require('./text-window.js'); // PURE: the attach slab counted in text cards (perf lane A)
 const { staleFromDenyMessage } = require('./browser-stale.js'); // PURE (lane J r2): a deny naming browser_paused = the takeover's stale answer
 const { unknownFields: shapeUnknownFields, carrierOf: shapeCarrierOf, unknownFieldsSample } = require('./record-shape.js'); // §3 schema drift (2026-09-21)
@@ -299,7 +300,7 @@ class MessageManager {
   // record never crosses stdout, and its body-less result.origin is skipped).
   // No containment dedup: the delivery site posts once per fire (same-body
   // repeats are legitimate — the 2.362.2 review lesson).
-  injectPeerCard({ fromName, text, msgId = null, resetCredit = null, kind = null }) {
+  injectPeerCard({ fromName, text, msgId = null, resetCredit = null, kind = null, group = null }) {
     const body = String(text || '').trim();
     if (!body) return null;
     // A harness-delivered message carries the CLI's msg_id (the turn-start
@@ -319,6 +320,9 @@ class MessageManager {
     // card / the auto-resume arm card — two numbers-and-a-mode, never markup
     const rc = offerOf(resetCredit);
     if (rc) msg.resetCredit = rc;
+    // a GROUP message (lane group-report-card): a wake's card names the sender → the group — a peer's words, always
+    const gc = groupCardOf(group);
+    if (gc) { msg.peerGroup = gc; msg.peerVia = 'peer'; msg.peerFrom = gc.self ? null : (gc.from || msg.peerFrom); }
     this._emit({ op: 'create', message: msg });
     return msg;
   }

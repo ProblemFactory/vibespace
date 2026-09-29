@@ -59,6 +59,7 @@ export const CHANNEL_OAUTH_ENDPOINTS = Object.freeze({
   start: '/api/channels/oauth/start',
   status: '/api/channels/oauth/status',
   callback: '/api/channels/oauth/callback',
+  narrow: '/api/channels/oauth/narrow',   // owner ruling 2026-09-28: the one retry without the optional scopes
 });
 const enc = encodeURIComponent;
 const PASTE_PLACEHOLDER = 'http://127.0.0.1:…/?state=…&code=…';
@@ -254,6 +255,21 @@ function pushClaimSpec(value) {
   ] };
 }
 /** A consent flow's refusal as the block's status sentence (a busy fixed port). */
+/** THE NARROWING RETRIES (owner ruling 2026-09-28; lane lark-search-poll, owner decision 5 — "one scope dropped per
+ *  retry, each a click naming the scope"): a flow whose consent names OPTIONAL scopes offers the person a retry without
+ *  the NEXT group (the vendor refused the consent on its own page — Lark 20027) — `scopes` = what THIS press drops,
+ *  `dropped` = what earlier presses dropped; `run()` → `{url, next}` (the new consent URL and the following retry, or
+ *  null once every optional scope is gone). A server predating the groups (no `nextNarrow`) offers the one retry. */
+function narrowOf(flow, run) {
+  if (!flow) return null;
+  const legacy = !Array.isArray(flow.groups) || !flow.groups.length;
+  const scopes = legacy ? (flow.narrowed ? [] : (Array.isArray(flow.optional) ? flow.optional : [])) : (Array.isArray(flow.nextNarrow) ? flow.nextNarrow : []);
+  if (!scopes.length) return null;
+  return {
+    scopes: scopes.slice(), dropped: Array.isArray(flow.narrowed) ? flow.narrowed.slice() : [],
+    run: async () => { const x = await run(); const url = x && x.flow && x.flow.consentUrl; if (!url) throw new Error(tr('Failed')); return { url, next: narrowOf(x.flow, run) }; },
+  };
+}
 function flowNotice(flow) {
   if (!flow || !flow.refusal) return null;
   return flow.refusal.code === 'port-busy'
@@ -317,7 +333,7 @@ export async function showConnectAccountDialog(app, kinds) {
       // a storage mount's client is named by its id ALONE — a stale hidden custom id/secret never rides beside it
       extra: () => ({ ...(mountOf(ctx.inputs[`client${sfx}`].value) ? { fromMount: mountOf(ctx.inputs[`client${sfx}`].value), clientId: undefined, clientSecret: undefined } : { clientPreset: ctx.inputs[`client${sfx}`].value }), options: optionValues(Object.fromEntries(Object.entries(ctx.inputs).map(([key, e]) => [key, e.value])), k.optionsSchema, sfx, 1) }),
       endpoints: {
-        start: async (body) => { const r = await post(CHANNEL_OAUTH_ENDPOINTS.start, body); flowId = r.flowId; return { url: r.url, notice: flowNotice(r.flow) }; },
+        start: async (body) => { const r = await post(CHANNEL_OAUTH_ENDPOINTS.start, body); flowId = r.flowId; return { url: r.url, notice: flowNotice(r.flow), narrow: narrowOf(r.flow, () => post(CHANNEL_OAUTH_ENDPOINTS.narrow, { flowId })) }; },
         status: () => capi(`${CHANNEL_OAUTH_ENDPOINTS.status}?flowId=${enc(flowId || '')}`),
         callback: (b) => post(CHANNEL_OAUTH_ENDPOINTS.callback, { url: b.url, flowId }),
       },
@@ -357,7 +373,7 @@ export async function showReauthAccountDialog(app, a, { kinds = null, preselect 
       const r = await post(`/api/channels/adapters/${enc(a.id)}/reauthorize`, choiceBody(vals));
       if (watcher) watcher.off();
       watcher = authWatcher(app, a.id, (r.adapter && r.adapter.lastAuthAt) || null);
-      return { url: r.flow && r.flow.consentUrl, notice: flowNotice(r.flow) };
+      return { url: r.flow && r.flow.consentUrl, notice: flowNotice(r.flow), narrow: narrowOf(r.flow, () => post(`/api/channels/adapters/${enc(a.id)}/auth/narrow`, {})) };
     },
     status: async () => (watcher ? watcher.state() : {}),
     callback: async (url) => { await post(`/api/channels/adapters/${enc(a.id)}/auth/finish`, { url }); return { token: a.id }; },
@@ -392,6 +408,7 @@ export async function showEditAccountDialog(app, a, { kinds = null } = {}) {
   const cur = clientValueOf(a, cfg.presets || spec.presets);
   const custom = cfg.client ? { appId: cfg.client.appId || '', appSecret: cfg.client.appSecret || '' } : null;
   const honesty = cfg.senderHonestyLine === true ? 'on' : cfg.senderHonestyLine === false ? 'off' : 'default';
+  const rxPolicy = ['propose', 'direct', 'off'].includes(a.reactionPolicy) ? a.reactionPolicy : 'propose';
   const fields = [
     { key: 'name', label: tr('Name'), value: cfg.label || a.label || '' },
     ...clientFieldSpecs({ ...spec, presets: cfg.presets || spec.presets }, { value: cur, custom, secretType: 'text',
@@ -402,6 +419,9 @@ export async function showEditAccountDialog(app, a, { kinds = null } = {}) {
     ...(cfg.push ? [pushClaimSpec(cfg.push.claimedExclusive)] : []),
     ...(a.senderHonestyLine ? [{ key: 'honesty', label: tr('Sender line'), type: 'select', value: honesty, options: [['default', tr('Instance default')], ['on', tr('on')], ['off', tr('off')]],
       hint: tr('When on, a message an AGENT drafted goes out with one trailing line naming the agent. Your own drafts never get one. The approval card says who the recipient will see either way.') }] : []),
+    // lane channel-threads (spec §2.6): what an AGENT's reaction does on this account — only where the channel can react
+    ...(a.reactions && a.reactions.add ? [{ key: 'reactionPolicy', label: tr('Agent reactions'), type: 'select', value: rxPolicy, options: [['propose', tr('You approve each one')], ['direct', tr('As the channel policy allows')], ['off', tr('Off')]],
+      hint: tr('An agent can propose an emoji reaction on a message; it shows in your name. "As the channel policy allows" sends it directly only where the channel sends replies directly and the agent may send.') }] : []),
   ];
   const ctx = mountsDialog(`${tr('Edit')} "${name}"`, fields, tr('Save'), async (v, { close }) => {
     const patch = {};
@@ -410,6 +430,7 @@ export async function showEditAccountDialog(app, a, { kinds = null } = {}) {
     if (Object.keys(opts).length) patch.options = opts;
     if (cfg.push && v.push !== (cfg.push.claimedExclusive || 'unknown')) patch.push = { claimedExclusive: v.push };
     if (a.senderHonestyLine && v.honesty !== honesty) patch.senderHonestyLine = v.honesty === 'on' ? true : v.honesty === 'off' ? false : null;
+    if (a.reactions && a.reactions.add && v.reactionPolicy && v.reactionPolicy !== rxPolicy) patch.reactionPolicy = v.reactionPolicy;
     const switching = switchesClient({ ...a, credentialKey: cfg.credentialKey, customClient: custom ? { appId: custom.appId } : null }, v, '', cfg.presets || spec.presets);
     if (!switching && v.client === 'custom' && v.csec !== ((custom && custom.appSecret) || '')) patch.credential = { appId: v.cid, appSecret: v.csec };
     if (Object.keys(patch).length) await capi(`/api/channels/adapters/${enc(a.id)}`, { method: 'PUT', body: JSON.stringify(patch) });
@@ -500,7 +521,7 @@ export async function showDuplicateAccountDialog(app, a, { kinds = null } = {}) 
         const rr = await post(`/api/channels/adapters/${enc(id)}/reauthorize`, body);
         if (watcher) watcher.off();
         watcher = authWatcher(app, id, (rr.adapter && rr.adapter.lastAuthAt) || null);
-        return { url: rr.flow && rr.flow.consentUrl, notice: flowNotice(rr.flow) };
+        return { url: rr.flow && rr.flow.consentUrl, notice: flowNotice(rr.flow), narrow: narrowOf(rr.flow, () => post(`/api/channels/adapters/${enc(id)}/auth/narrow`, {})) };
       },
       status: async () => {
         const st = watcher ? watcher.state() : {};

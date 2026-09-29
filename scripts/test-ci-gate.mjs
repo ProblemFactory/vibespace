@@ -1335,6 +1335,11 @@ console.log('\n§8 lanes, the serial table, the impact scope, the full-tier cloc
 // suite boots spawns a DETACHED device daemon the suite's teardown never sees.
 // The rule is evidence-based (a scratch root under /tmp/vs-* AND either the dir
 // is gone or every member is unowned and stale); each branch has a row here.
+// THE OWNER'S HOME in the reaper fixtures (§9–§9c) is a literal outside /tmp, never `os.homedir()` ("Clear content…"
+// verify r3, 2026-09-28): a gate run under a SCRATCH HOME of the product's own /tmp/vs-* shape (the round's rule for
+// zero vendor calls) made every "production" process in these fixtures rooted in an EXISTING scratch dir — spared,
+// and the reaper leg red on a machine-dependent fact (the runner's HOME), never on the product
+const HOME_OF_OWNER = '/home/cigate-owner';
 console.log('\n§9 the scratch-orphan reaper');
 {
   const root = mktmp('procroot');
@@ -1361,8 +1366,8 @@ console.log('\n§9 the scratch-orphan reaper');
   mk(300, { name: 'node', argv: ['node', 'server.js'], ppid: 1, cwd: sOld, born: OLD });                          // dir exists, reparented, 30 min ⇒ reap
   mk(310, { name: 'node', argv: ['node', 'wrapper.js'], ppid: 300, cwd: sOld, born: OLD });                       // child of an orphan (depth 2) ⇒ reap with it
   mk(301, { name: 'node', argv: ['node', 'server.js'], ppid: 1, cwd: sYoung });                                   // reparented but YOUNG ⇒ may be a run in flight ⇒ keep
-  const prodCwd = path.join(os.homedir(), 'workspace', 'vibespace');   // a checkout under the home dir — NOT `REPO`, which is itself a /tmp/vs-* scratch worktree when this suite runs inside one (an integration worktree, the isolated heavy tier)
-  mk(400, { name: 'node', argv: ['node', 'server.js'], ppid: 1, cwd: prodCwd, env: { HOME: os.homedir() }, born: OLD });   // PRODUCTION shape: no scratch root ⇒ never a candidate
+  const prodCwd = path.join(HOME_OF_OWNER, 'workspace', 'vibespace');   // a checkout under the home dir — NOT `REPO`, which is itself a /tmp/vs-* scratch worktree when this suite runs inside one (an integration worktree, the isolated heavy tier)
+  mk(400, { name: 'node', argv: ['node', 'server.js'], ppid: 1, cwd: prodCwd, env: { HOME: HOME_OF_OWNER }, born: OLD });   // PRODUCTION shape: no scratch root ⇒ never a candidate
   mk(500, { name: 'dtach', argv: ['dtach', '-a', sGone + '/data/sockets/cw-1'], ppid: 1, cwd: '/', env: { HOME: sGone }, born: OLD });   // orphan attach client, root via HOME ⇒ reap
   // LANE H VERIFY r1 (2026-09-25): CANDIDACY IS EVIDENCE, NEVER A NAME. The field: two leaked
   // `agent-browser-linux-x64` daemons (ppid systemd --user, cwd a checkout, AGENT_BROWSER_SOCKET_DIR
@@ -1372,13 +1377,13 @@ console.log('\n§9 the scratch-orphan reaper');
   mk(601, { name: 'sleep', argv: ['sleep', '3600'], ppid: 1, cwd: sGone, born: OLD });                            // an unlisted name, orphaned under a GONE root ⇒ reap (evidence, whatever the name)
   mk(700, { name: 'agent-browser-linux-x64', argv: ['/opt/ab/bin/agent-browser-linux-x64'], ppid: 1, cwd: sGone });   // the leaked daemon, rooted by its cwd ⇒ reap
   mk(701, { name: 'headless_shell', argv: ['/opt/chrome/headless_shell', '--headless', `--user-data-dir=${sGone2}/prof`, '--no-sandbox'], ppid: 1, cwd: '/' });   // a Chrome: cwd `/`, its ONLY root the --user-data-dir ⇒ reap
-  mk(702, { name: 'agent-browser-linux-x64', argv: ['/opt/ab/bin/agent-browser-linux-x64'], ppid: 1, cwd: prodCwd, env: { HOME: os.homedir(), AGENT_BROWSER_SOCKET_DIR: sGone3 + '/sock', AGENT_BROWSER_PROFILE: sGone3 + '/prof', AGENT_BROWSER_CONFIG: sGone3 + '/cfg.json' } });   // the FIELD shape: cwd a checkout, only the env roots ⇒ reap
+  mk(702, { name: 'agent-browser-linux-x64', argv: ['/opt/ab/bin/agent-browser-linux-x64'], ppid: 1, cwd: prodCwd, env: { HOME: HOME_OF_OWNER, AGENT_BROWSER_SOCKET_DIR: sGone3 + '/sock', AGENT_BROWSER_PROFILE: sGone3 + '/prof', AGENT_BROWSER_CONFIG: sGone3 + '/cfg.json' } });   // the FIELD shape: cwd a checkout, only the env roots ⇒ reap
   mk(703, { name: 'chrome', argv: ['/opt/chrome/chrome', '--type=renderer'], ppid: 701, cwd: '/', env: { AGENT_BROWSER_SOCKET_DIR: sGone2 + '/sock' } });   // a Chrome child: walks up through its fellow member to init ⇒ reap
   // THE OWNED-SHELL CONTROL (the pin that used to say "an unlisted executable is never a candidate
   // even under a gone scratch root", flipped): a user's shell whose cwd is a deleted scratch dir,
   // parented by a LIVE terminal outside the group, is owned by somebody alive ⇒ never listed.
-  mk(610, { name: 'gnome-terminal-server', argv: ['/usr/libexec/gnome-terminal-server'], ppid: 1, cwd: os.homedir(), env: { HOME: os.homedir() } });
-  mk(600, { name: 'zsh', argv: ['zsh'], ppid: 610, cwd: sGone4, env: { HOME: os.homedir() }, born: OLD });
+  mk(610, { name: 'gnome-terminal-server', argv: ['/usr/libexec/gnome-terminal-server'], ppid: 1, cwd: HOME_OF_OWNER, env: { HOME: HOME_OF_OWNER } });
+  mk(600, { name: 'zsh', argv: ['zsh'], ppid: 610, cwd: sGone4, env: { HOME: HOME_OF_OWNER }, born: OLD });
   // a suite IN FLIGHT whose own scratch dir is already gone: its server is owned by the live runner ⇒ spared
   mk(110, { name: 'node', argv: ['node', 'server.js'], ppid: 201, cwd: sGone4, born: OLD });
   // the dir EXISTS and the group is stale + unowned: only the executables a suite starts (the name allowlist
@@ -1483,8 +1488,8 @@ console.log('\n§9 the scratch-orphan reaper');
     const sOld3 = scratch('old3');
     mk3(1, { name: 'systemd', argv: ['/usr/lib/systemd/systemd', '--user'], ppid: 0, cwd: '/' });
     // M2: a production daemon + its Chrome whose ONLY root is the product's socket-dir fallback (cwd a checkout, 20 min old, ppid systemd)
-    mk3(801, { name: 'agent-browser-linux-x64', argv: ['/opt/ab/bin/agent-browser-linux-x64'], ppid: 1, cwd: prodCwd, env: { HOME: os.homedir(), AGENT_BROWSER_SOCKET_DIR: PROD_AB } });
-    mk3(802, { name: 'chrome', argv: ['/opt/google/chrome/chrome', '--headless=new', '--user-data-dir=/tmp/agent-browser-chrome-0000'], ppid: 801, cwd: prodCwd, env: { HOME: os.homedir(), AGENT_BROWSER_SOCKET_DIR: PROD_AB } });
+    mk3(801, { name: 'agent-browser-linux-x64', argv: ['/opt/ab/bin/agent-browser-linux-x64'], ppid: 1, cwd: prodCwd, env: { HOME: HOME_OF_OWNER, AGENT_BROWSER_SOCKET_DIR: PROD_AB } });
+    mk3(802, { name: 'chrome', argv: ['/opt/google/chrome/chrome', '--headless=new', '--user-data-dir=/tmp/agent-browser-chrome-0000'], ppid: 801, cwd: prodCwd, env: { HOME: HOME_OF_OWNER, AGENT_BROWSER_SOCKET_DIR: PROD_AB } });
     mk3(803, { name: 'chrome', argv: ['/opt/google/chrome/chrome'], ppid: 1, cwd: prodCwd, env: { AGENT_BROWSER_SOCKET_DIR: '/tmp/vs-ab-u' } });
     // L3: a CfT Chrome's title-rewritten cmdline (no NUL) rooted ONLY by its --user-data-dir under a gone root, both spellings
     mk3(811, { name: 'chrome', raw: `/home/u/.agent-browser/browsers/chrome-151.0.7922.34/chrome --headless=new --no-first-run --user-data-dir=${sGone5}/prof --window-size=1280,720`, ppid: 1, cwd: prodCwd });
@@ -1595,7 +1600,7 @@ console.log('\n§9b the reaper judges the singleton Desktop\'s X server (Xtigerv
   mk(731, { name: 'node', argv: ['node', 'scripts/test-desktop-app-window.mjs'], ppid: 1, cwd: '/home/u/checkout', born: OLD }); // a live suite …
   mk(730, { name: 'node', argv: ['node', 'server.js'], ppid: 731, cwd: sLive, born: OLD });                                     // … its server …
   mk(732, { name: 'Xtigervnc', argv: XARGV(':15022', 34022), ppid: 1, cwd: sLive, env: { HOME: sLive }, born: OLD });           // … and the Xvnc that server started (detached): the group has a live member ⇒ keep
-  mk(740, { name: 'Xtigervnc', argv: XARGV(':7', 5901), ppid: 1, cwd: path.join(os.homedir(), 'workspace', 'vibespace'), env: { HOME: os.homedir() }, born: OLD }); // PRODUCTION's singleton: no scratch root ⇒ never
+  mk(740, { name: 'Xtigervnc', argv: XARGV(':7', 5901), ppid: 1, cwd: path.join(HOME_OF_OWNER, 'workspace', 'vibespace'), env: { HOME: HOME_OF_OWNER }, born: OLD }); // PRODUCTION's singleton: no scratch root ⇒ never
   const pids = scratchOrphans({ procRoot: root, now: NOW, self: 999999 }).map((o) => o.pid).sort((a, b) => a - b);
   ok(REAP_NAMES.has('Xtigervnc') && REAP_NAMES.has('Xvnc') && REAP_NAMES.has('Xvfb') && REAP_NAMES.has('x11vnc'), 'every X/picture server a suite can start is a judged name (Xtigervnc, Xvnc, Xvfb, x11vnc)');
   ok(JSON.stringify(pids) === JSON.stringify([700, 710]), `reaped exactly the incident's leaked singleton (gone dir) and the stale reparented one (got ${JSON.stringify(pids)})`);
@@ -1635,7 +1640,7 @@ console.log('\n§9c the reaper reads a scratch root off the arguments (dtach / p
   const root = mktmp('procroot9c');
   const sGone = `/tmp/vs-cigate9c-gone-${process.pid}-nowhere`;
   const sLive = fs.mkdtempSync(`/tmp/vs-cigate9c-live-${process.pid}-`); tmpDirs.push(sLive);
-  const NOW = Date.now(), OLD = NOW - 30 * 60 * 1000, REALHOME = os.homedir();
+  const NOW = Date.now(), OLD = NOW - 30 * 60 * 1000, REALHOME = HOME_OF_OWNER;
   const mk = (pid, { name, argv, ppid, cwd, env = {}, born = NOW }) => {
     const d = path.join(root, String(pid)); fs.mkdirSync(d);
     fs.writeFileSync(path.join(d, 'stat'), `${pid} (${name.slice(0, 15)}) S ${ppid} ${pid} ${pid} 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 12345 0 0`);

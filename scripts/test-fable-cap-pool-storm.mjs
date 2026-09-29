@@ -836,8 +836,12 @@ const MASTER_SERVED_PATCH = [
     const unruled = sites.filter((x) => !x.viaRule && !x.spawnChooser);
     console.log('    [census] projectCacheForFamily sites: ' + JSON.stringify(sites));
     ok('§5b CENSUS: every projection site asks the rule (the spawn chooser is the ONE allowed exception — it is handed a model and has no session)',
-      // 4 since B-f69c ③: projectionRereadFor projects each LIVE conversation's family through the rule too
-      sites.length === 4 && unruled.length === 0 && sites.filter((x) => x.spawnChooser).length === 1,
+      // 4 since B-f69c ③: projectionRereadFor projects each LIVE conversation's family through the rule too;
+      // 5 since 2026-09-28: the removed-member verdict (removalVerdict) projects the moved conversation's family through it;
+      // 6 since the pin (same day): setConversationPin judges the pin on the conversation's family through it too;
+      // 7 since verify r1: memberVerdictFor — the ONE site "Move every conversation here now" (gatherPlan) and the
+      //   held branch of memberRemoved judge a member on the conversation's family through
+      sites.length === 7 && unruled.length === 0 && sites.filter((x) => x.spawnChooser).length === 1,
       JSON.stringify(sites));
   }
   ok('§5b …while `laneByEvidence` deliberately still asks the REQUEST-model family',

@@ -136,6 +136,11 @@ batch, read <path>".
 - `poll <id> [--wait 100] [--tail 40]` — state + context echo + log tail;
   `--wait` long-polls (cap 100s)
 - `logs <id> [--tail 200]` · `progress "text"` (in-job status line)
+- a job the user CLEARED ("Clear content…") keeps its id, schedule and command;
+  its name reads "[cleared at the user's request]" and the log of every run from
+  before the clear is withheld (`logs` says so) — runs after it log normally;
+  a panel it was waiting on is withdrawn with the clear (`answers --wait`
+  returns nothing for it — ask again if you still need the answer)
 - `stop <id> [--force]` · `start <id>` (revive parked) · `rm <id> [--stop]`
 - `access <id> --view session|group|all --control session|group|all` —
   owner-only; the user can lock access against agent edits

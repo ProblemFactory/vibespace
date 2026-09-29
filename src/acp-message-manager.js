@@ -41,6 +41,7 @@ const { peerOriginOf } = require('./message-manager'); // peerOriginOf = peerDis
 const fs = require('fs');
 const path = require('path');
 const { sliceTextWindow } = require('./text-window.js'); // PURE: the attach slab (the claude normalizer's twin)
+const { groupOf: groupCardOf } = require('./group-card.js'); // PURE (lane group-report-card): a group message's card facts — `peerGroup`
 
 function asArray(v) { return Array.isArray(v) ? v : []; }
 function toTs(value) {
@@ -226,7 +227,7 @@ class AcpMessageManager {
   }
 
   /** Server-side peer card (same shape as the claude/codex twins). */
-  injectPeerCard({ fromName, text, kind = null }) {
+  injectPeerCard({ fromName, text, kind = null, group = null }) {
     const body = String(text || '').trim();
     if (!body) return null;
     this._currentRk = null;
@@ -237,6 +238,8 @@ class AcpMessageManager {
     msg.originKind = 'peer-message';
     msg.peerFrom = fromName && String(fromName).trim() ? String(fromName).trim() : null; // a name is its words, never surrounding whitespace (lane S3)
     if (kind === 'notification' || kind === 'peer') msg.peerVia = kind; // the PATH the card's words took (S3 verify F3)
+    const gc = groupCardOf(group);   // lane group-report-card: sender → group, a peer's words
+    if (gc) { msg.peerGroup = gc; msg.peerVia = 'peer'; msg.peerFrom = gc.self ? null : (gc.from || msg.peerFrom); }
     this._emit({ op: 'create', message: msg });
     return msg;
   }

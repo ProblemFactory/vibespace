@@ -117,10 +117,15 @@ function capChip({ rows = [], cap = 3, machine = null } = {}) {
 
 /** The chip's list: THIS conversation's own browsers that can be stopped —
  *  running (live) and not driven by the user right now; a shared attachment
- *  says it is shared instead (another conversation holds it too). */
-function stoppableRows(rows) {
+ *  says it is shared instead (another conversation holds it too). BROWSE
+ *  YOURSELF verify r2 (KILL CLASS): a profile the USER browses himself
+ *  (`browsing` = the profile ids of the digest's human rows) says so instead
+ *  of a Stop — his page ends only from his own window (Quit) or the panel
+ *  row's Stop, both naming him. */
+function stoppableRows(rows, { browsing = null } = {}) {
+  const his = browsing instanceof Set ? browsing : new Set(Array.isArray(browsing) ? browsing : []);
   return (rows || []).filter((r) => r && (r.state === 'running' || r.state === 'idle') && r.driver !== 'you')
-    .map((r) => ({ ref: r.ref, kind: r.kind, label: r.label, helper: r.helper || null, shared: r.kind === 'attachment' && (Number(r.owners) || 0) > 0, owners: Number(r.owners) || 0 }));
+    .map((r) => ({ ref: r.ref, kind: r.kind, label: r.label, helper: r.helper || null, shared: r.kind === 'attachment' && (Number(r.owners) || 0) > 0, owners: Number(r.owners) || 0, yours: r.kind === 'attachment' && !!r.profileId && his.has(r.profileId) }));
 }
 
 /**

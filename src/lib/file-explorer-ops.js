@@ -10,9 +10,10 @@ import { isOfficeFile } from '../office-open.js'; // §7.9: which files offer "O
 export function installExplorerOps(FileExplorer) {
   Object.assign(FileExplorer.prototype, {
     async createFile() {
+    const here = this._here(); // verify-r6 E1: the folder shown when the dialog opened
     const n = await showInputDialog({ title: t('New File'), label: t('File name'), confirmText: t('Create') });
     if (!n || !n.trim()) return;
-    const r = await fetch('/api/file/write', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._hb({ path: this.currentPath + '/' + n.trim(), content: '' })) }).catch(() => null);
+    const r = await fetch('/api/file/write', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(here.hb({ path: here.path(n.trim()), content: '' })) }).catch(() => null);
     if (!r?.ok) {
       // Show WHY (the server appends e.g. a read-only-mount hint) — the bare
       // "failed" toast hid the actual cause (real report).
@@ -23,9 +24,10 @@ export function installExplorerOps(FileExplorer) {
   },
 
     async createDir() {
+    const here = this._here(); // verify-r6 E1
     const n = await showInputDialog({ title: t('New Folder'), label: t('Folder name'), confirmText: t('Create') });
     if (!n || !n.trim()) return;
-    const r = await fetch('/api/mkdir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._hb({ path: this.currentPath + '/' + n.trim() })) }).catch(() => null);
+    const r = await fetch('/api/mkdir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(here.hb({ path: here.path(n.trim()) })) }).catch(() => null);
     if (!r?.ok) {
       const d = await r?.json().catch(() => null);
       showToast(t('Create folder failed') + (d?.error ? `: ${d.error}` : ''), { type: 'error' });
@@ -267,14 +269,14 @@ export function installExplorerOps(FileExplorer) {
     this._applySelectionClasses();
   },
 
-    _uniqueName(base) {
+    _uniqueName(base, here = null) {
     const dot = base.startsWith('.') ? -1 : base.lastIndexOf('.');
     const stem = dot > 0 ? base.slice(0, dot) : base;
     const ext = dot > 0 ? base.slice(dot) : '';
     let cand = `${stem} (copy)${ext}`, n = 2;
     const names = new Set(this.items.map(i => i.name));
     while (names.has(cand)) cand = `${stem} (copy ${n++})${ext}`;
-    return this.currentPath + '/' + cand;
+    return (here ? here.dir : this.currentPath) + '/' + cand;
   },
 
     async _paste() {
@@ -284,7 +286,8 @@ export function installExplorerOps(FileExplorer) {
     // Cross-host aware: clipboard remembers its SOURCE host; posting with
     // srcHost/destHost routes same-host ops to cp/mv and cross-host (or
     // host↔local) ops through the server relay.
-    const srcHost = clip.host || '', destHost = this._host || '';
+    const here = this._here(); // verify-r6 E1: the folder and machine the paste lands in, frozen before any await (an Overwrite? confirm)
+    const srcHost = clip.host || '', destHost = here.host;
     const sameHost = srcHost === destHost;
     let overwriteAll = null, done = 0, failed = 0;
     // progress:1 → the server answers with an opId immediately and the copy
@@ -292,15 +295,15 @@ export function installExplorerOps(FileExplorer) {
     // the request with ZERO feedback). The progress row only renders if the
     // op outlives 400ms, so small pastes look exactly like before.
     const post = (src, dest, overwrite) => {
-      const body = sameHost ? this._hb({ src, dest, overwrite, progress: 1 }) : { src, dest, overwrite, srcHost, destHost, progress: 1 };
+      const body = sameHost ? here.hb({ src, dest, overwrite, progress: 1 }) : { src, dest, overwrite, srcHost, destHost, progress: 1 };
       return fetch(api, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(() => null);
     };
     for (const src of clip.paths) {
       const base = src.split('/').pop();
-      let dest = this.currentPath + '/' + base;
+      let dest = here.path(base);
       if (dest === src && sameHost) {             // same path only counts on the same host
         if (clip.op === 'cut') continue;          // move onto itself: no-op
-        dest = this._uniqueName(base);            // copy into same dir: duplicate
+        dest = this._uniqueName(base, here);      // copy into same dir: duplicate
       }
       const label = clip.op === 'cut' ? t('Moving {name}…', { name: base }) : t('Copying {name}…', { name: base });
       const attempt = async (overwrite) => {
@@ -394,12 +397,13 @@ export function installExplorerOps(FileExplorer) {
 
     async _compressSelection(names) {
     if (!names.length) return;
-    const def = (names.length === 1 ? names[0] : (this.currentPath.split('/').pop() || 'archive')) + '.zip';
+    const here = this._here(); // verify-r6 E1: the folder and machine of the selection, frozen before the dialogs
+    const def = (names.length === 1 ? names[0] : (here.dir.split('/').pop() || 'archive')) + '.zip';
     const out = await showInputDialog({ title: t('Compress {n} items', { n: names.length }), label: t('Archive name (.zip / .tar.gz / .tar / .tar.xz)'), value: def, confirmText: t('Compress') });
     if (!out || !out.trim()) return;
-    const dest = this.currentPath + '/' + out.trim();
-    const paths = names.map(n => this.currentPath + '/' + n);
-    const post = (overwrite) => fetch('/api/archive', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._hb({ paths, dest, overwrite })) }).catch(() => null);
+    const dest = here.path(out.trim());
+    const paths = names.map(n => here.path(n));
+    const post = (overwrite) => fetch('/api/archive', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(here.hb({ paths, dest, overwrite })) }).catch(() => null);
     showToast(t('Compressing\u2026'));
     let r = await post(false);
     if (r && r.status === 409) {
@@ -417,13 +421,14 @@ export function installExplorerOps(FileExplorer) {
   },
 
     async _extractArchive(name, here) {
-    const src = this.currentPath + '/' + name;
-    let dest = this.currentPath;
+    const at = this._here(); // verify-r6 E1: the archive's folder and machine, frozen before the dialog
+    const src = at.path(name);
+    let dest = at.dir;
     if (!here) {
       const defFolder = name.replace(/\.(zip|tar\.gz|tar\.bz2|tar\.xz|tar|tgz|tbz2|txz|gz|bz2|xz)$/i, '');
       const d = await showInputDialog({ title: t('Extract to Folder'), label: t('Destination folder (under current directory)'), value: defFolder, confirmText: t('Extract') });
       if (!d || !d.trim()) return;
-      dest = this.currentPath + '/' + d.trim();
+      dest = at.path(d.trim());
     }
     // overwrite:false = skip files that already exist (never destructive).
     // Extraction runs as a server-side op with a PERSISTENT progress row
@@ -431,7 +436,7 @@ export function installExplorerOps(FileExplorer) {
     // for minutes). REMOTE hosts used to be excluded from this and fell back to
     // the plain 5-minute synchronous call with zero feedback — the exact
     // pre-2.111.18 bug, surviving remote-only.
-    const r = await fetch('/api/archive/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._hb({ path: src, dest, overwrite: false, progress: 1 })) }).catch(() => null);
+    const r = await fetch('/api/archive/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(at.hb({ path: src, dest, overwrite: false, progress: 1 })) }).catch(() => null);
     const dd = await r?.json().catch(() => ({}));
     if (!r?.ok) { showToast(t('Extract failed: {msg}', { msg: dd?.error || t('unknown error') }), { type: 'error' }); return; }
     if (dd.opId) { this._trackExtractOp(dd.opId, name, dest); return; }
@@ -491,11 +496,12 @@ export function installExplorerOps(FileExplorer) {
     async _deleteSelection() {
     const names = [...this._selection];
     if (!names.length) return;
+    const here = this._here(); // verify-r6 E1: what the confirm names is what is deleted — the folder and machine shown NOW
     const ok = await showConfirmDialog({ title: t('Delete'), message: names.length === 1 ? t('Delete "{name}"?', { name: names[0] }) : t('Delete {n} items? Folders are removed with all contents.', { n: names.length }), confirmText: t('Delete'), danger: true });
     if (!ok) return;
     let failed = 0;
     for (const n of names) {
-      const r = await fetch(`/api/file?path=${encodeURIComponent(this.currentPath + '/' + n)}${this._hp()}`, { method: 'DELETE' }).catch(() => null);
+      const r = await fetch(`/api/file?path=${encodeURIComponent(here.path(n))}${here.hp}`, { method: 'DELETE' }).catch(() => null);
       if (!r?.ok) failed++;
     }
     if (failed) showToast(t('Delete failed for {n} item(s)', { n: failed }), { type: 'error' });
@@ -548,17 +554,19 @@ export function installExplorerOps(FileExplorer) {
   },
 
     async _rename(oldName) {
+    const here = this._here(); // verify-r6 E1
     const n = await showInputDialog({ title: t('Rename'), label: t('New name'), value: oldName, confirmText: t('Rename') });
     if (!n || n === oldName) return;
-    const r = await fetch('/api/rename', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._hb({ oldPath: this.currentPath + '/' + oldName, newPath: this.currentPath + '/' + n })) }).catch(() => null);
+    const r = await fetch('/api/rename', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(here.hb({ oldPath: here.path(oldName), newPath: here.path(n) })) }).catch(() => null);
     if (!r?.ok) showToast(t('Rename failed'), { type: 'error' });
     this.refresh();
   },
 
     async _delete(name, isDir) {
+    const here = this._here(); // verify-r6 E1: what the confirm names is what is deleted — the folder and machine shown NOW
     const ok = await showConfirmDialog({ title: isDir ? t('Delete Folder') : t('Delete File'), message: t('Delete "{name}"?', { name }) + (isDir ? t(' All contents will be removed.') : ''), confirmText: t('Delete'), danger: true });
     if (!ok) return;
-    const r = await fetch(`/api/file?path=${encodeURIComponent(this.currentPath + '/' + name)}${this._hp()}`, { method: 'DELETE' }).catch(() => null);
+    const r = await fetch(`/api/file?path=${encodeURIComponent(here.path(name))}${here.hp}`, { method: 'DELETE' }).catch(() => null);
     if (!r?.ok) showToast(t('Delete failed'), { type: 'error' });
     this.refresh();
   },

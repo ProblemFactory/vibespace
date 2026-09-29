@@ -1704,7 +1704,18 @@ console.log('§14 r6 — a REFUSED viewer never ends the session (round 2 of the
         ok(srcS.split(fromR).length === 2, 'the replay is spelled once (the control patches exactly it)');
         const rfile = MUTK.write('src/server/desktop-stream.js', srcS.replace(fromR, '    if (false && allowInput) { /* pre-fix: fenced and never replayed */'), 'xreplay15');
         const typedC = await typeAfterTakeover(require(rfile), 'noreplay');
-        ok(typedC !== 'abc', `CONTROL: fenced without the replay, the same takeover types ${JSON.stringify(typedC)} instead of "abc"`);
+        // the .197 integration: WHAT A KEYMAP-LESS PANE TYPES IS A FACT OF THE xpra VERSION — a MEASURED census, never a
+        // guess. 6.5.3 read the pane's JS keycodes as X keycodes (garbage — the lane's measurement); 6.5.4 (the runner box
+        // since 2026-09-28) types plain "abc" right without the pane's keymap (measured by this leg, 2026-09-29). Where
+        // the premise holds the control must bite; where the version types right it must say so; an unmeasured version
+        // is RED, naming the measurement to take. The replay itself stays gated on every version by the keymap leg above
+        // (ydiaeresis reaches X only through the replay) and the size replay's control below.
+        const XPRA_TYPES_WITHOUT_KEYMAP = { '6.5.3': false, '6.5.4': true };
+        let xv = null; try { xv = (/v?(\d+\.\d+\.\d+)/.exec(execFileSync(XPRA_BIN, ['--version'], { encoding: 'utf8', timeout: 10000 })) || [])[1] || null; } catch { xv = null; }
+        const typesRight = Object.prototype.hasOwnProperty.call(XPRA_TYPES_WITHOUT_KEYMAP, xv) ? XPRA_TYPES_WITHOUT_KEYMAP[xv] : null;
+        ok(typesRight !== null, `xpra ${xv}: what a keymap-less pane types is a MEASURED row (${typesRight === null ? 'none — run this leg and record whether the no-replay copy types "abc"' : typesRight ? 'types right' : 'garbles'})`);
+        if (typesRight === false) ok(typedC !== 'abc', `CONTROL (xpra ${xv}): fenced without the replay, the same takeover types ${JSON.stringify(typedC)} instead of "abc"`);
+        else if (typesRight === true) ok(typedC === 'abc', `MEASURED (xpra ${xv}): a keymap-less pane's plain keys arrive right here (${JSON.stringify(typedC)}) — the typing premise is version-bound; the replay stays gated by the keymap leg and the size control`);
       }
       // CONTROL: the r6 allowlist (keyboard-config / keymap-changed as watch types) — the same Watch viewer reprograms X
       const fromW = "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', ";

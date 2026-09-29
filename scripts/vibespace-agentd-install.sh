@@ -9,8 +9,9 @@
 #   NAT'd / firewalled machine (laptop, home Mac): use DIAL-OUT — this daemon
 #   dials your VibeSpace instance. Mint the pairing via POST /api/agentd/dial-pair
 #   (see docs/device-agent.md) — it returns the URL + token; paste them into:
-#       curl -fsSL <vibespace>/agentd-install.sh | bash -s -- \
-#         --dial wss://<vibespace-host>/api/agentd-dial?device=<id> --dial-token <t>
+#       curl -fsSL <vibespace>/agentd-install.sh | VIBESPACE_DIAL_TOKEN=<t> VIBESPACE_HOST_TOKEN=<h> bash -s -- \
+#         --dial wss://<vibespace-host>/api/agentd-dial?device=<id>
+#   (the tokens in the environment, never on a command line other users can read; --dial-token / --host-token still work)
 #
 # Requires: curl (or wget) + tar. Node is provisioned automatically (into the
 # install root, verified against nodejs.org's SHASUMS256.txt) if the machine
@@ -18,10 +19,18 @@
 set -euo pipefail
 
 BUNDLE_URL="${VIBESPACE_AGENTD_URL:-}"   # where to fetch agentd.js (a VibeSpace serves it at /agentd.js)
-DIAL_URL=""; DIAL_TOKEN=""; HOST_TOKEN=""
-NODE_BIN_OVERRIDE="${VIBESPACE_NODE_BIN:-}"; NODE_ONLY=""
+DIAL_URL=""
+# verify-r3 B-inst: the pasted command hands the two tokens in the ENVIRONMENT of this shell (`… | VIBESPACE_DIAL_TOKEN=…
+# VIBESPACE_HOST_TOKEN=… bash -s -- …`), never in an argv every local user reads through /proc/<pid>/cmdline; the
+# --dial-token / --host-token flags still work for commands generated before. Read once and UNSET: nothing this
+# installer starts (the daemon's detached fallback inherits our environment, and every session it runs inherits the
+# daemon's) ever sees them — the one child that needs the dial token gets it in ITS environment only.
+DIAL_TOKEN="${VIBESPACE_DIAL_TOKEN:-}"; HOST_TOKEN="${VIBESPACE_HOST_TOKEN:-}"
+unset VIBESPACE_DIAL_TOKEN VIBESPACE_HOST_TOKEN
+NODE_BIN_OVERRIDE="${VIBESPACE_NODE_BIN:-}"; NODE_ONLY=""; NO_CHECK=""
 while [ $# -gt 0 ]; do case "$1" in
   --dial) DIAL_URL="$2"; shift 2;;
+  --no-check) NO_CHECK=1; shift;;             # skip the dial check below (lane-pairing ⑤ — ON by default)
   --dial-token) DIAL_TOKEN="$2"; shift 2;;
   --host-token) HOST_TOKEN="$2"; shift 2;;
   --bundle-url) BUNDLE_URL="$2"; shift 2;;
@@ -29,6 +38,14 @@ while [ $# -gt 0 ]; do case "$1" in
   --node-only) NODE_ONLY=1; shift;;           # resolve/provision node, print it, exit (support + tests)
   *) echo "unknown arg: $1"; exit 2;;
 esac; done
+
+# THE DIAL ADDRESS IS CHECKED BEFORE ANYTHING IS WRITTEN (lane-pairing ⑤, the owner's Mac 2026-09-27: a hand-typed
+# address the Mac could not reach was installed anyway and the row said only "offline"). First its scheme, here,
+# before anything is fetched; then — once the bundle is on disk — the daemon's OWN dial, once (--dial-check below).
+case "$DIAL_URL" in
+  ws://*|wss://*|"") ;;
+  *) echo "✗ the dial address must start with ws:// or wss:// — got: $DIAL_URL"; exit 2;;
+esac
 
 # ROOT: one machine can pair to SEVERAL VibeSpace instances — a dial-out
 # install keys its root (daemon + tokens + bundle, each self-upgrading from
@@ -219,13 +236,31 @@ if [ "$NODE_ONLY" = 1 ]; then exit 0; fi
 
 if [ -n "$BUNDLE_URL" ]; then
   echo "→ fetching agentd bundle from $BUNDLE_URL"
-  fetch_quiet "$BUNDLE_URL" "$ROOT/$VER/vibespace-device.js"
+  fetch_quiet "$BUNDLE_URL" "$ROOT/$VER/vibespace-device.js" || { echo "✗ could not fetch $BUNDLE_URL — this device cannot reach that address. → pick an address this device can reach, in the pairing dialog"; exit 12; }
 elif [ -f "./data/bin/vibespace-agentd.js" ]; then
   cp ./data/bin/vibespace-agentd.js "$ROOT/$VER/vibespace-device.js"
 else
   echo "no --bundle-url and no local bundle; pass --bundle-url <vibespace>/agentd.js"; exit 1
 fi
 ln -sfn "$ROOT/$VER" "$ROOT/current"
+
+# THE DIAL CHECK (lane-pairing ⑤): the daemon's own dial, ONE attempt carrying a probe header — the server checks
+# the token and answers 200 WITHOUT registering the device. A failure prints its class by name + the remedy and
+# exits BEFORE the host token, dial.json or the launchd / systemd unit are written (exit 10 dns · 11 tls · 12
+# unreachable · 13 not a VibeSpace dial endpoint · 14 refused by the server · 15 other). --no-check skips it.
+if [ -n "$DIAL_URL" ] && [ -z "$NO_CHECK" ]; then
+  DHOST=$(printf '%s' "$DIAL_URL" | sed -E 's|^[a-z]+://([^/?]+).*|\1|')
+  echo "→ checking that this device can dial $DHOST…"
+  set +e
+  CHECK_OUT=$(VIBESPACE_DIAL_TOKEN="$DIAL_TOKEN" VIBESPACE_DEVICE_ROOT="$ROOT" VIBESPACE_AGENTD_ROOT="$ROOT" "$NODE_BIN" "$ROOT/current/vibespace-device.js" --dial-check "$DIAL_URL" 2>&1)
+  CHECK_RC=$?
+  set -e
+  printf '%s\n' "$CHECK_OUT" | sed 's/^/  /'
+  if [ "$CHECK_RC" -ne 0 ]; then
+    echo "✗ nothing was installed — the device cannot dial $DHOST: $(printf '%s' "$CHECK_OUT" | head -1)"
+    exit "$CHECK_RC"
+  fi
+fi
 
 # node-pty for TERMINAL sessions (B-0d70): the daemon bundle is zero-dep, but a
 # terminal-on-dial session opens a real device-side pty via node-pty. Best-
@@ -263,7 +298,7 @@ if ! pty_ok; then
 fi
 
 # host token: provided (from pairing) or minted locally
-if [ -n "$HOST_TOKEN" ]; then printf '%s' "$HOST_TOKEN" > "$ROOT/state/token"
+if [ -n "$HOST_TOKEN" ]; then ( umask 077; printf '%s' "$HOST_TOKEN" > "$ROOT/state/token" )
 elif [ ! -f "$ROOT/state/token" ]; then
   "$NODE_BIN" -e 'process.stdout.write("vsht_"+require("crypto").randomBytes(24).toString("hex"))' > "$ROOT/state/token"
 fi
@@ -275,8 +310,9 @@ echo "→ host token at $ROOT/state/token"
 export VIBESPACE_DEVICE_ROOT="$ROOT"
 export VIBESPACE_AGENTD_ROOT="$ROOT" # legacy bundle compat
 if [ -n "$DIAL_URL" ]; then
-  "$NODE_BIN" -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({url:process.argv[2],token:process.argv[3]}), {mode:0o600})' \
-    "$ROOT/state/dial.json" "$DIAL_URL" "$DIAL_TOKEN"
+  # the token in the writer's ENVIRONMENT (verify-r3 B-inst — it rode this node's argv); atomic at 0600
+  VIBESPACE_DIAL_TOKEN="$DIAL_TOKEN" "$NODE_BIN" -e 'const fs=require("fs"),f=process.argv[1],t=f+".tmp-"+process.pid;try{fs.unlinkSync(t)}catch{};fs.writeFileSync(t,JSON.stringify({url:process.argv[2],token:process.env.VIBESPACE_DIAL_TOKEN||""}),{mode:0o600});fs.renameSync(t,f)' \
+    "$ROOT/state/dial.json" "$DIAL_URL"
   echo "→ dial config persisted ($ROOT/state/dial.json)"
 fi
 

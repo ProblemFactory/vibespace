@@ -364,6 +364,38 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
     ];
   };
   for (const [name, pass] of verdictTable(require(path.join(REPO, 'src/channel-attachments.js')))) ok(pass, `§7 verdict: ${name}`);
+  // lane channel-threads (spec §6.1): a CUSTOM EMOJI's picture is the second picture a window can cause a vendor to
+  // serve — the same three gates, read off the engine's `emojiImage()`: ON-DEMAND (`.emojiImage(` called from exactly
+  // that function; the engine's function called only by the GET emoji route), CACHE-FIRST (the account's picture
+  // cache before anything else), BUDGET-CHARGED (the back-off and the minute's budget before the one metered call)
+  const emojiCensus = (engineSrc2, routesSrc2, texts) => {
+    const rows = [];
+    const E = strip(engineSrc2);
+    const at = E.indexOf('async function emojiImage(');
+    const end = at < 0 ? -1 : E.indexOf('\n  }\n', at);
+    const body = at < 0 || end < 0 ? '' : E.slice(at, end);
+    // verify r2 (MONEY): the emoji route follows the attachment's ONE order (PURE Att.fetchVerdict) — the cache, the
+    // REMEMBERED refusal, then the verdict asked the back-off (the account's and a picture rate limit) and the budget,
+    // the fetch only on its `fetch`
+    const cache = body.indexOf('store.attachmentGet('), v1 = body.indexOf('Att.fetchVerdict({ cached: !!hit, remembered })'), v2 = v1 < 0 ? -1 : body.indexOf('Att.fetchVerdict(', v1 + 1), gate = body.indexOf("case 'fetch': break;"), call = body.indexOf('vendor(rec, e, () => e.adapter.emojiImage(');
+    const facts = v2 > 0 ? body.slice(v2, body.indexOf('});', v2)) : '';
+    rows.push(['EMOJI CACHE-FIRST + BUDGET-CHARGED: emojiImage() asks the cache and the remembered refusal, then ONE verdict with the back-off and the budget, then ONE metered call on its `fetch`', !!body && cache > 0 && v1 > cache && v2 > v1 && gate > v2 && call > gate && /backoff: inBackoff\(e\)/.test(facts) && /affordable: affordable\(rec, e\)/.test(facts) && /inflight: emojiFlights\.has\(fk\)/.test(facts) && /return budgetRefusal\(rec, e\);\s*\n\s*\}/.test(body.slice(v2, call)) && body.split('.emojiImage(').length === 2, JSON.stringify({ cache, v1, v2, gate, call })]);
+    const callers = [];
+    for (const [rel, text] of Object.entries(texts)) { const n = (strip(text).match(/\.emojiImage\(/g) || []).length; if (n) callers.push(`${rel}:${n}`); }
+    const R = strip(routesSrc2);
+    const rAt = R.indexOf("router.get('/api/channels/:adapterId/emoji/:key'");
+    const rBody = rAt < 0 ? '' : R.slice(rAt, R.indexOf('\n});', rAt));
+    rows.push(['EMOJI ON-DEMAND: `.emojiImage(` is called by the engine once (its vendor call) and by the GET emoji route once — nowhere else in the server tree', callers.sort().join() === 'src/routes/channels.js:1,src/server/channels-engine.js:1' && /engine\(\)\.emojiImage\(/.test(rBody), callers.join(', ')]);
+    return rows;
+  };
+  for (const [name, pass, detail] of emojiCensus(engineSrc, routesSrc, serverTexts)) ok(pass, `§7 ${name}`, detail);
+  {
+    const from = 'inflight: emojiFlights.has(fk), backoff: inBackoff(e) || (Number(e.attBackoffUntil) || 0) > t, affordable: affordable(rec, e) });';
+    ok(engineSrc.split(from).length === 2, '§7 CONTROL emoji: the budget fact of emojiImage()\'s verdict is spelled once');
+    const mut = engineSrc.replace(from, 'inflight: emojiFlights.has(fk), backoff: inBackoff(e) || (Number(e.attBackoffUntil) || 0) > t });');
+    const r = emojiCensus(mut, routesSrc, { ...serverTexts, [engineRel]: mut }).filter(([, p]) => !p).map(([n]) => n);
+    ok(r.some((n) => /EMOJI CACHE-FIRST \+ BUDGET-CHARGED/.test(n)), `§7 CONTROL: an emojiImage() that skips the budget is RED (${r.join(' | ')})`);
+  }
   // THE CONTROLS: ungated copies, written by scripts/mutant-copy.mjs into this run's scratch dir
   const MUT = mutantCopies('vendor-whitelist-att', REPO);
   const reds = (rows) => rows.filter(([, p]) => !p).map(([n]) => n);

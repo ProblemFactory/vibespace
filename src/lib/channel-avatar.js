@@ -27,7 +27,7 @@
 
 export const AVATAR_HUES = 8;
 
-const INVISIBLE = /[­͏؜ᅟᅠ឴឵᠋-᠏​-‏‪-‮⁠-⁯ㅤ︀-️﻿]/g;
+const INVISIBLE = /[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u202a-\u202e\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff]/g;
 const CJK = /^[⺀-⿟々-〇〡-〩぀-ヿ㄀-ㄯㄱ-ㆎㆠ-ㆿㇰ-ㇿ㐀-䶿一-鿿ꥠ-꥿가-힯豈-﫿]|^[\uD840-\uD87F][\uDC00-\uDFFF]/;
 const PICTO = /\p{Extended_Pictographic}/u;
 const LETTER = /[\p{L}\p{N}\p{Extended_Pictographic}]/u;

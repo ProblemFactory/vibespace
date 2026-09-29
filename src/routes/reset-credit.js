@@ -9,7 +9,8 @@
  *          creditsLeft, resetsAtSec, periodSec, remainingPct, sessionId,
  *          cooldownUntilSec, code?, error?} — `code` names the refusal the POST
  *          would answer (always 200: a refusal is a fact the dialog shows)
- *   POST /api/accounts/:id/reset-credit   {sessionId?}
+ *   POST /api/accounts/:id/reset-credit   {sessionId?, expect?: {resetsAtSec}} (verify-r6 R1: the window the dialog showed —
+ *          one that reset or moved since ⇒ 409 preview_changed, nothing spent)
  *        → {ok:true, sessionId}  — ONE `codex-reset-credit` verb written on that
  *          session's own wrapper (through the spend ceiling, the 10-min floor)
  *        | {error, code} by NAME: not_supported 400 · no_live_session 409 ·
@@ -24,7 +25,7 @@
  * `reset_credit_result` → the engine (a server notice either way) and the
  * fresh counts ride the usage poll the roster already repaints from.
  */
-const STATUS = Object.freeze({ not_supported: 400, no_live_session: 409, no_credits: 409, restart_pending: 409, cooldown: 429, spend_refused: 429, agent_forbidden: 403 });
+const STATUS = Object.freeze({ not_supported: 400, no_live_session: 409, no_credits: 409, restart_pending: 409, preview_changed: 409, cooldown: 429, spend_refused: 429, agent_forbidden: 403 });
 const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || ''));
 const sid = (v) => (typeof v === 'string' && /^[\w.:-]{1,120}$/.test(v) ? v : null);
 
@@ -39,7 +40,9 @@ function registerResetCreditRoutes(app, { engine }) {
     try {
       if (isAgentBearer(req)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });
       if (typeof engine.consumeResetCreditFor !== 'function') return res.status(503).json({ error: 'reset credits unavailable', code: 'no_engine' });
-      const r = engine.consumeResetCreditFor(String(req.params.id), { preferSessionId: sid(req.body && req.body.sessionId) });
+      // verify-r6 R1: the window the dialog SHOWED (its reset instant) — a window that reset or moved since ⇒ preview_changed
+      const ex = req.body && req.body.expect && typeof req.body.expect === 'object' && req.body.expect.resetsAtSec != null && Number.isFinite(Number(req.body.expect.resetsAtSec)) ? { resetsAtSec: Number(req.body.expect.resetsAtSec) } : null;
+      const r = engine.consumeResetCreditFor(String(req.params.id), { preferSessionId: sid(req.body && req.body.sessionId), expect: ex });
       if (!r || !r.ok) return res.status(STATUS[r && r.code] || 400).json({ error: (r && r.error) || 'refused', code: (r && r.code) || 'refused', cooldownUntilSec: r && r.preview ? r.preview.cooldownUntilSec : null, restartPending: r && r.preview ? r.preview.restartPending || null : null });
       res.json({ ok: true, sessionId: r.sessionId });
     } catch (e) { res.status(500).json({ error: e.message }); }

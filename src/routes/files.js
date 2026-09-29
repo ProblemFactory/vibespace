@@ -30,6 +30,19 @@ function rfs(req) {
 // remote paths are used verbatim (no local path.resolve — they live on the
 // remote); '~' expands remotely inside RemoteFs
 const remotePath = (p) => String(p || '~');
+// A remote STREAM helper that throws synchronously inside an async route is a
+// request NEVER ANSWERED: express 4 does not see a rejected handler and
+// server.js's unhandledRejection only logs. It happened twice — the dial
+// `_spawn` (B-0d70 review) and a CJK name in the attachment header (lane
+// raw-filename r2: remote Download of `截图.png` hung). Every remote streaming
+// dispatch goes through here, so such a throw is an answer (502, no name).
+function remoteStream(res, fn) {
+  try { return fn(); }
+  catch (e) {
+    if (!res.headersSent) { res.removeHeader('Content-Disposition'); res.status(502).json({ error: String((e && e.message) || e) }); }
+    else { try { res.end(); } catch { } }
+  }
+}
 
 // ── SafeFs facade (2.109.0) ──
 // LOCAL (non-?host=) filesystem calls run in a dedicated worker_threads pool
@@ -43,6 +56,7 @@ const remotePath = (p) => String(p || '~');
 // err.status===503 → the routes map that to a "storage not responding" reply.
 const { runOp: _runOpInline } = require('../safe-fs-worker');
 const { parseArchiveListing } = require('../remote-fs');
+const { contentDisposition, fileNameOf } = require('../file-disposition');
 function sfs(req) {
   return req.app.locals.safeFs || {
     call: async (op, payload) => (await _runOpInline(op, payload)).result,
@@ -231,18 +245,30 @@ router.get('/api/file/binary', async (req, res) => {
   } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
 });
 
-// Serve raw files (PDF, images, etc.)
+// Serve raw files (PDF, images, etc.) — NAMED (lane raw-filename, userW 2026-09-28
+// "我从vibespace预览里下载文件，文件名都叫raw"): every preview element (<img>, <video>,
+// <audio>, the PDF <iframe>, the chat's thumbs + overlay, the jobs panel's pictures)
+// streams from this URL, and a response without a Content-Disposition is saved under
+// the URL's last path segment — `raw`. `inline` keeps the preview a preview; the name
+// rides only a SUCCESSFUL transfer (sendFile's `headers` are set on its 'headers'
+// event, as res.download does), so a 404 / 403 answers byte-for-byte as before.
+// The remote branch names the file inside RemoteFs.downloadTo (inline unless
+// attachment). Census of every byte-serving route: scripts/test-raw-filename.mjs.
 router.get('/api/file/raw', async (req, res) => {
   const R = rfs(req);
-  if (R) return R.fs.downloadTo(R.host, remotePath(req.query.path), res);
+  if (R) return remoteStream(res, () => R.fs.downloadTo(R.host, remotePath(req.query.path), res));
   const filePath = safePath(req.query.path);
   // Fail-fast on a wedged mount (sendFile itself streams via main-thread fs and
   // can't be pooled without a rewrite); a missing file (non-503) falls through
   // to sendFile's own 404 so behaviour is unchanged for the normal cases.
   try { await sfs(req).call('stat', { path: filePath }, { timeoutMs: 8000 }); }
   catch (e) { if (e.status === 503) return res.status(503).json({ error: 'Storage not responding — try again in a moment.' }); }
+  const named = contentDisposition(fileNameOf(filePath), 'inline');
+  // dotfiles 'allow' (r2): without it send's LEGACY rule answered 404 for any basename starting
+  // with '.', so `.env.png` could not be previewed — this route serves the paths the user opens
+  // (the content route reads dotfiles too); the web-root protection that rule exists for is moot
   try {
-    res.sendFile(filePath);
+    res.sendFile(filePath, { dotfiles: 'allow', ...(named ? { headers: { 'Content-Disposition': named } } : {}) });
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
@@ -260,12 +286,12 @@ router.get('/api/file/serve/*', async (req, res) => {
 // Download file
 router.get('/api/download', async (req, res) => {
   const R = rfs(req);
-  if (R) return R.fs.downloadTo(R.host, remotePath(req.query.path), res, { attachment: true });
+  if (R) return remoteStream(res, () => R.fs.downloadTo(R.host, remotePath(req.query.path), res, { attachment: true }));
   const filePath = safePath(req.query.path);
   try { await sfs(req).call('stat', { path: filePath }, { timeoutMs: 8000 }); }
   catch (e) { if (e.status === 503) return res.status(503).json({ error: 'Storage not responding — try again in a moment.' }); }
   try {
-    res.download(filePath);
+    res.download(filePath, { dotfiles: 'allow' }); // r2: a `.env` Download was send's legacy-dotfile 404
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
@@ -1168,7 +1194,7 @@ router.post('/api/file/move', async (req, res) => {
 // Stream a folder (or file) as a zip download — no temp archive on disk
 router.get('/api/download-zip', async (req, res) => {
   const R = rfs(req);
-  if (R) return R.fs.downloadZipTo(R.host, remotePath(req.query.path), res);
+  if (R) return remoteStream(res, () => R.fs.downloadZipTo(R.host, remotePath(req.query.path), res));
   const fp = safePath(req.query.path || '');
   try { if (!(await sfs(req).call('exists', { path: fp })).exists) return res.status(404).json({ error: 'not found' }); }
   catch (e) { return res.status(e.status || 400).json({ error: e.message }); }

@@ -5,19 +5,26 @@
 #   & ([scriptblock]::Create((iwr -UseBasicParsing <vibespace>/agentd-install.ps1).Content)) `
 #     -BundleUrl <vibespace>/agentd.js -Dial wss://<host>/api/agentd-dial?device=<id> `
 #     -DialToken <vsdt_…> -HostToken <vsht_…>
+# (a scriptblock's parameters live inside this PowerShell — no process's command line carries the tokens; the
+#  dial check gets the token in its environment and the daemon starts argless — verify-r3 B-inst)
 # -NodeExe <path> forces a specific node.exe and skips discovery/provisioning.
 param(
   [Parameter(Mandatory=$true)][string]$BundleUrl,
   [Parameter(Mandatory=$true)][string]$Dial,
   [Parameter(Mandatory=$true)][string]$DialToken,
   [Parameter(Mandatory=$true)][string]$HostToken,
-  [string]$NodeExe
+  [string]$NodeExe,
+  [switch]$NoCheck
 )
 $ErrorActionPreference = 'Stop'
 # PS 5.1 defaults to TLS 1.0 — nodejs.org (and most CDNs) refuse it
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 # IWR's progress bar makes a 30MB download take minutes on PS 5.1
 $ProgressPreference = 'SilentlyContinue'
+
+# THE DIAL ADDRESS IS CHECKED BEFORE ANYTHING IS WRITTEN (lane-pairing ⑤, the bash installer's twin): the scheme
+# here, before anything is fetched; the daemon's own dial (--dial-check) once the bundle is on disk.
+if ($Dial -notmatch '^wss?://') { Write-Host "x the dial address must start with ws:// or wss:// - got: $Dial"; exit 2 }
 
 $NodeVersion = if ($env:VIBESPACE_NODE_VERSION) { $env:VIBESPACE_NODE_VERSION } else { 'v22.22.0' }
 $NodeMirror  = if ($env:VIBESPACE_NODE_MIRROR)  { $env:VIBESPACE_NODE_MIRROR }  else { 'https://nodejs.org/dist' }
@@ -94,11 +101,31 @@ Set-Content -NoNewline -Path (Join-Path $root 'state\node-path') -Value $nodeExe
 Write-Host "-> node: $nodeExe ($(& $nodeExe -v))"
 
 Write-Host "-> fetching agentd bundle from $BundleUrl"
-Invoke-WebRequest -UseBasicParsing -Uri $BundleUrl -OutFile (Join-Path $root "$ver\vibespace-device.js")
+try { Invoke-WebRequest -UseBasicParsing -Uri $BundleUrl -OutFile (Join-Path $root "$ver\vibespace-device.js") }
+catch { Write-Host "x could not fetch $BundleUrl - this device cannot reach that address. -> pick an address this device can reach, in the pairing dialog"; exit 12 }
 # 'current' as a junction (no admin needed, unlike symlinks)
 $current = Join-Path $root 'current'
 if (Test-Path $current) { Remove-Item $current -Force -Recurse -ErrorAction SilentlyContinue }
 cmd /c mklink /J "$current" (Join-Path $root $ver) | Out-Null
+
+# THE DIAL CHECK (lane-pairing ⑤): the daemon's own dial, once, with a probe header — the server answers 200 and
+# registers nothing. A failure prints its class + the remedy and exits BEFORE the host token, dial.json or the
+# scheduled task are written (the same exit codes as the bash installer). -NoCheck skips it.
+if (-not $NoCheck) {
+  $dhost = ([uri]($Dial -replace '^ws','http')).Authority
+  Write-Host "-> checking that this device can dial $dhost..."
+  $env:VIBESPACE_DEVICE_ROOT = $root; $env:VIBESPACE_AGENTD_ROOT = $root
+  # verify-r3 B-inst: the token in the check's ENVIRONMENT, never its command line (another process can read a
+  # command line); removed at once so nothing started later inherits it
+  $env:VIBESPACE_DIAL_TOKEN = $DialToken
+  try { $checkOut = & $nodeExe "$current\vibespace-device.js" --dial-check $Dial 2>&1; $checkRc = $LASTEXITCODE }
+  finally { Remove-Item Env:VIBESPACE_DIAL_TOKEN -ErrorAction SilentlyContinue }
+  $checkOut | ForEach-Object { Write-Host "  $_" }
+  if ($checkRc -ne 0) {
+    Write-Host "x nothing was installed - the device cannot dial ${dhost}: $(@($checkOut)[0])"
+    exit $checkRc
+  }
+}
 
 Set-Content -NoNewline -Path (Join-Path $root 'state\token') -Value $HostToken
 Write-Host "-> host token at $root\state\token"
@@ -132,7 +159,9 @@ $out = Join-Path $root 'state\agentd.out'
 # child inherits process env (Start-Process -Environment needs PS 7.3+; this
 # way works on the Windows-default 5.1 too)
 $env:VIBESPACE_DEVICE_ROOT = $root; $env:VIBESPACE_AGENTD_ROOT = $root
-$p = Start-Process -PassThru -WindowStyle Hidden $nodeExe -ArgumentList @("$current\vibespace-device.js", '--dial', $Dial, '--dial-token', $DialToken) `
+# ARGLESS (verify-r3 B-inst): the daemon reads state\dial.json written above — the token never rides its command line
+# (a self-upgrade re-exec carries every original flag, so it stayed there for the daemon's whole life)
+$p = Start-Process -PassThru -WindowStyle Hidden $nodeExe -ArgumentList @("$current\vibespace-device.js") `
   -RedirectStandardOutput $out -RedirectStandardError (Join-Path $root 'state\agentd.err')
 Start-Sleep -Seconds 2
 if ($p.HasExited) {

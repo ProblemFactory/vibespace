@@ -57,6 +57,10 @@
 //   ⑥ WIRING PINS: the payload's `stash` fact, the two stores' hooks, LIVE_SESSION_FACTS carried-only, the strip above
 //      the queue strip, ChatView feeding it, the sidebar patch + the card's hint, SPEND_REASONS + the census row +
 //      the sender list, zh + ja
+//   ②k (lane group-report-card) GROUP MESSAGES WAITING: the fact reads the groups engine's preview (commits nothing,
+//      memoised), the strip names them with no hand-over button ("they ride your next message"), beside a stash entry
+//      the button stays and names what rides the next message, the report's commit clears them, a pending fork shows
+//      none; control: a fact without the preview ⇒ the strip never appears
 //
 // Zero vendor calls; per-pid scratch dirs. Run: node scripts/test-stash-strip.mjs
 import fs from 'node:fs';
@@ -114,6 +118,32 @@ console.log('① PURE src/stash-summary.js');
   ok(all.every((k) => S.partWords({ kind: k, n: 1, label: 'X' }, tEn).startsWith('a ') && /^3 /.test(S.partWords({ kind: k, n: 3, label: 'X' }, tEn))) && S.partWords({ kind: 'peer', n: 1, label: null }, tEn) === 'a message from another agent',
     'every kind has a singular and a plural; a nameless peer is "another agent"');
   ok(S.stashSummaryWords(null, tEn) === null, 'no fact ⇒ no words');
+  // ①d THE DETAILS (the owner, 2026-09-28: "现在是完全看不了这个细节了嘛? 包括在聊天框里 queue 的时候也没法展开看细节"): the fact
+  // carries one preview per waiting entry (oldest first, the first non-empty line, cut at 140, at most 12) and the
+  // hand-over card opens with its own head so the notices sit behind an expander
+  const pv = S.summarize({ msg: [{ source: 'agent', kind: 'peer', fromName: 'Bo', ts: 50, text: '\n  second line first?\nno — the first non-empty line\n' }, { source: 'channel-receipt', kind: 'notification', fromName: 'Channels · Outbox', ts: 30, text: 'VibeSpace (this workspace, not another agent) reports:\nyour draft to Ops was approved' }], jobs: [{ jobName: 'nightly', ts: 40, text: 'x'.repeat(200) }] });
+  ok(pv.previews.length === 3 && pv.previewsHeld === 0 && pv.previews.map((x) => x.at).join() === '30,40,50'
+    && pv.previews[0].kind === 'channel-receipt' && pv.previews[0].head === 'your draft to Ops was approved'
+    && pv.previews[1].kind === 'job' && pv.previews[1].label === 'nightly' && pv.previews[1].head.length === 140 && pv.previews[1].head.endsWith('…')
+    && pv.previews[2].kind === 'peer' && pv.previews[2].label === 'Bo' && pv.previews[2].head === 'second line first?',
+    'previews: oldest first, the first non-empty line (the ladder\'s own head skipped), cut at 140 with an ellipsis, a job named by its job, a peer by its name', pv.previews);
+  ok(S.previewWords(pv.previews[0], tEn) === 'a channel receipt · your draft to Ops was approved' && S.previewWords(pv.previews[1], tEn).startsWith('Background Work · nightly · xxx') && S.previewWords(pv.previews[2], tEn) === 'a message from Bo · second line first?'
+    && S.previewWords({ kind: 'notice', head: '' }, tEn) === 'a VibeSpace notice',
+    'previewWords: the kind (or the job / the peer by name) · the head; no head ⇒ the kind alone');
+  const many = S.summarize({ msg: Array.from({ length: 15 }, (_, i) => ({ source: 'agent', kind: 'peer', fromName: 'P' + i, ts: 100 + i, text: 'm' + i })) });
+  ok(many.previews.length === 12 && many.previewsHeld === 3 && many.previews[0].head === 'm0' && many.previews[11].head === 'm11', 'at most 12 previews; the rest is COUNTED (previewsHeld), never silently dropped');
+  ok(S.previewDigest(pv) !== S.previewDigest(S.summarize({ msg: [{ source: 'agent', kind: 'peer', fromName: 'Bo', ts: 50, text: 'other words' }] })) && S.previewDigest(null) === '' && S.summaryDigest(pv) === '3|channel-receipt::1,job::1,peer:Bo:1',
+    'previewDigest moves with a head; summaryDigest keeps its shape (the card hint prints no preview)');
+  ok(S.summarize({ msg: [{ source: 'agent', kind: 'peer', fromName: 'Bo' }] }).previews[0].head === '' , 'an entry without text previews as its kind alone (no throw)');
+  const hf = S.handoverFacts(S.handoverCardText(2, 'from "Ada": hi\n\nfrom "Bo": there'));
+  ok(hf && hf.title.key === '{n} waiting notice(s) handed over' && hf.title.params.n === 2 && hf.body === 'from "Ada": hi\n\nfrom "Bo": there' && hf.foldLabel.key === 'Show the {n} notice(s)' && hf.foldLabel.params.n === 2,
+    'handoverFacts reads the card text handoverCardText wrote: the title = the head in the device\'s words, the body = the notices, the expander names how many', hf);
+  ok(S.handoverFacts('2 waiting notices handed over') === null && S.handoverFacts('') === null && S.handoverFacts('from "Ada": 2 waiting notice(s) handed over') === null, 'any other text ⇒ null (the generic card rules apply)');
+  const NS = require(path.join(REPO, 'src/notification-senders.js'));
+  const view = NS.noticeCardView('VibeSpace notices', S.handoverCardText(3, 'a\n\nb\n\nc'), { facts: (b) => S.handoverFacts(b) });
+  ok(view.folded === true && view.title.key === '{n} waiting notice(s) handed over' && view.body === 'a\n\nb\n\nc' && view.foldLabel.params.n === 3, 'noticeCardView with the hand-over facts: folded, the body is the notices, the expander label rides');
+  const plain = NS.noticeCardView('VibeSpace notices', S.handoverCardText(3, 'a\n\nb\n\nc'), { facts: () => null });
+  ok(plain.folded === false && plain.title.text === 'VibeSpace notices', 'CONTROL: without the facts the card is the old one — the sender as its title, nothing folded (the 2026-09-28 report)');
 }
 
 // ═══ ② THE ENGINE ═══
@@ -317,6 +347,26 @@ globalThis.document = { createElement: (t) => new El(t) };   // what the strip b
   const sets = q('chat-stash-head').sets;
   strip.set(S.summarize({ msg: [{ source: 'channel-receipt', kind: 'notification' }], jobs: [{}] }), { turn: 'running' });
   ok(q('chat-stash-head').sets === sets, 'the same fact twice writes nothing (the digest gate)');
+  // the DETAILS toggle (2026-09-28): a house text button opens a list under the strip — one row per waiting entry
+  const fd = S.summarize({ msg: [{ source: 'channel-receipt', kind: 'notification', ts: 1, text: 'VibeSpace (this workspace, not another agent) reports:\nyour draft was approved' }, { source: 'agent', kind: 'peer', fromName: 'Ada', ts: 2, text: 'ping <b>bold</b>' }], jobs: [{ jobName: 'nightly', ts: 3, text: 'done' }] });
+  strip.set(fd, { turn: 'idle' });
+  const more = q('chat-stash-more'), dl = q('chat-stash-list');
+  ok(more && more.textContent === 'Details' && more.attrs['aria-expanded'] === 'false' && dl && dl.hidden === true && strip.state().detailsOpen === false, 'the strip offers "Details", the list is closed');
+  const rows0 = dl.querySelectorAll('chat-stash-row');
+  ok(rows0.length === 3 && rows0[0].textContent === 'a channel receipt · your draft was approved' && rows0[1].textContent === 'a message from Ada · ping <b>bold</b>' && rows0[2].textContent === 'Background Work · nightly · done' && rows0.every((r) => r._html === undefined),
+    'one row per waiting entry, oldest first, each written as TEXT (a peer\'s markup stays words)', rows0.map((r) => r.textContent));
+  more.listeners.click[0]({ stopPropagation() { } });
+  ok(more.textContent === 'Hide details' && more.attrs['aria-expanded'] === 'true' && dl.hidden === false && strip.state().detailsOpen === true, 'a click opens the list and the button says "Hide details"');
+  const c1 = created;
+  strip.set({ ...fd, billed: false }, { turn: 'idle' });
+  ok(created === c1 && dl.hidden === false && dl.querySelectorAll('chat-stash-row').length === 3, 'a fact change that keeps the previews leaves the open list as it is (no node created, still open)');
+  strip.set(S.summarize({ msg: [{ source: 'agent', kind: 'peer', fromName: 'Ada', ts: 2, text: 'ping' }], jobs: [] }), { turn: 'idle' });
+  ok(dl.querySelectorAll('chat-stash-row').length === 1 && dl.querySelector('chat-stash-row').textContent === 'a message from Ada · ping' && dl.hidden === false, 'the list follows the fact (one entry left) and stays open');
+  strip.set(S.summarize({ msg: Array.from({ length: 14 }, (_, i) => ({ source: 'agent', kind: 'peer', fromName: 'P', ts: i, text: 'm' + i })) }), { turn: 'idle' });
+  const rowsM = dl.querySelectorAll('chat-stash-row');
+  ok(rowsM.length === 13 && rowsM[12].textContent === '2 more are waiting, not previewed' && rowsM[12].classList.contains('chat-stash-row-more'), '14 waiting ⇒ 12 rows + a last row naming the 2 not previewed');
+  more.listeners.click[0]({ stopPropagation() { } });
+  ok(dl.hidden === true && more.textContent === 'Details', 'a second click closes the list');
   strip.set(null);
   ok(strip.el.hidden === true, 'the fact clears ⇒ the strip is hidden');
   ok(/^Not handed over — the limit for turns nobody typed/.test(SS.handOverRefusalText({ code: 'spend_refused' })) && /could not be reached/.test(SS.handOverRefusalText({ code: 'unreachable' })) && SS.handOverRefusalText({ error: 'boom' }) === 'Hand-over failed: boom'
@@ -979,8 +1029,8 @@ function tailSweep(routesMod, Ps = [3000, 3600]) {
     for (let i = 0; i < 33; i++) H.deliver.stashFor(H.cid, { source: 'channel', kind: 'notification', fromName: 'Channels · Lark', text: `lark-${i}`, ts: 1000 + i });
     for (let i = 0; i < 32; i++) H.jm._stashNotif(H.cid, { id: 'j' + i, name: 'n', state: 'done' }, { what: 'r' }, 'x');
     const ev = H.dlogs.filter((l) => /oldest waiting entr(y|ies) fell off the 30-entry cap/.test(l)), jv = H.dlogs.filter((l) => /oldest waiting notification\(s\) fell off the 30-entry cap/.test(l));
-    ok(H.deliver.stashCount(H.cid) === 30 && ev.length === 3 && /channel "Channels · Lark" 1970-01-01T00:00:01\.000Z\) — never delivered/.test(ev[0]) && H.jm.peekNotifs(H.cid).length === 30 && jv.length === 2 && /\(j0 /.test(jv[0]),
-      'the cap: 33 arrivals into the ladder\'s store and 32 into the jobs store — each eviction is one log line naming the conversation, the entry (source, sender, instant / job id) and "never delivered" (was: silent, the strip\'s count at the cap)', { ev, jv });
+    ok(H.deliver.stashCount(H.cid) === 30 && ev.length === 3 && /channel:channel 1970-01-01T00:00:01\.000Z\) — never delivered/.test(ev[0]) && !ev.some((l) => l.includes('Channels · Lark')) && H.jm.peekNotifs(H.cid).length === 30 && jv.length === 2 && /\(j0 /.test(jv[0]),
+      'the cap: 33 arrivals into the ladder\'s store and 32 into the jobs store — each eviction is one log line naming the conversation, the entry (source + KIND — a peer by its sender, never a label VibeSpace composed from a record: lane-redact verify r8 — instant / job id) and "never delivered" (was: silent, the strip\'s count at the cap)', { ev, jv });
   } finally { H.done(); }
 }
 {
@@ -1456,14 +1506,102 @@ console.log('②j verify r8: a seeded walk over both routes — every stash entr
   for (const c of copiesCensus(MUT8b.files, MUT8b.dir, REPO, { minCopies: 1, label: '②j ' })) ok(c.pass, c.name, c.detail);
 }
 
+// ═══ ②k GROUP MESSAGES WAITING (lane group-report-card; the owner, 2026-09-28: "怎么在那个对话里看不到你发了消息？") ═══
+console.log('②k group messages waiting for the next turn: the fact reads the engine\'s PREVIEW (commits nothing), the strip names them with no hand-over button, beside a stash entry the button stays and says what rides the next message; the report\'s commit clears them; a pending fork shows none');
+{
+  const GE = require(path.join(REPO, 'src/server/groups-engine.js'));
+  const GC = require(path.join(REPO, 'src/group-card.js'));
+  const { createChannelStore } = require(path.join(REPO, 'src/channel-store.js'));
+  const dir = scratch('stash-strip-grp-' + Math.random().toString(36).slice(2, 7));
+  fs.mkdirSync(dir, { recursive: true });
+  const A = 'aaaaaaaa-1111-4000-8000-00000000057a', B = CID2;
+  const sB = { name: 'Agent One', backend: 'claude', backendSessionId: B, claudeSessionId: B, mode: 'chat' };
+  const sessions = new Map([['w1', sB], ['w2', { name: 'alpha', backend: 'claude', backendSessionId: A, claudeSessionId: A, mode: 'chat' }]]);
+  const roster = [{ cid: A, name: 'alpha', groups: ['tg'] }, { cid: B, name: 'Agent One', groups: ['tg'] }];
+  const store = createChannelStore({ dir: path.join(dir, 'channels') });
+  let reads = 0;
+  const readTail0 = store.readTail.bind(store);
+  store.readTail = (...a) => { reads++; return readTail0(...a); };
+  const published = [], cards = [];
+  let view = null, pendingHits = 0;
+  const deliver = CD.create({ dataDir: dir, activeSessions: sessions, serverSetting: () => undefined, peerMsg: { findPeer: () => null, postToPeer: async () => ({ ok: false }), postChannelEvent: async () => ({ ok: false }) },
+    onStashChange: () => { view && view.changed(); }, emitPeerCard: (c, card) => cards.push(card), log: () => {} });
+  const ge = GE.create({ store, deliver, roster: () => roster, groupSetting: () => 'none', log: { info() {}, warn() {}, log() {} }, onPending: () => { pendingHits++; view && view.changed(); } });
+  view = SH.create({ activeSessions: sessions, getDeliver: () => deliver, getJobs: () => null, getGroups: () => ge, broadcastSessions: () => published.push(Date.now()), renderMsgStash, renderNotifStash, debounceMs: 20 });
+  const made = await ge.create({ by: A, name: 'api lane', members: [B], quiet: true });
+  const hits0 = pendingHits;
+  await ge.post({ group: made.group.id, from: A, text: 'the deploy is blocked — can you look?\nsecond line' });
+  await sleep(60);
+  ok(pendingHits > hits0 && published.length >= 1, `a post into a member's group tells the strip (onPending → ONE debounced re-publish of the session list: ${published.length})`, { pendingHits, published: published.length });
+  const f = view.summaryFor(sB);
+  ok(f && f.count === 1 && f.items.length === 1 && f.items[0].kind === 'group' && f.items[0].label === 'alpha' && f.reachable === false,
+    'the fact counts the waiting GROUP message (kind group, by its sender) — and `reachable: false`: a hand-over carries the stash, never a group report', f);
+  const w = S.stashSummaryWords(f, tEn, { reachable: f.reachable });
+  ok(w.line === '1 notice is waiting for this agent’s next turn: a group message from alpha' && w.noButton === 'they ride your next message' && /^Group messages reach this agent with your next message — or at once when a member @mentions it$/.test(w.title) && w.cost === null,
+    'the words: "a group message from alpha", no button — "they ride your next message", the title says how it arrives', w);
+  const pv = ge.reportsForTurn(B, { preview: true });
+  const pv2 = ge.reportsForTurn(B, { preview: true });
+  const reads0 = reads;
+  view.summaryFor(sB); view.summaryFor(sB);
+  ok(pv.marks.length === 0 && pv.preview === true && pv.pending.length === 1 && pv2 === pv && reads === reads0,
+    'PREVIEW commits nothing (no marks handed out) and is memoised: the session list\'s re-publish reads no log twice', { marks: pv.marks.length, same: pv2 === pv, reads: reads - reads0 });
+  const e = GC.pendingEntry(pv.pending[0]);
+  ok(e.source === 'group' && e.fromName === 'alpha' && e.text === 'alpha · the deploy is blocked — can you look?' && e.ts === pv.pending[0].at,
+    'a waiting message as a summary entry: its sender + its first line ("alpha · the deploy is blocked — can you look?" — the Details row after lane-stash-detail\'s previews)', e);
+  if (Array.isArray(f.previews)) {   // lane-stash-detail merged: the Details list rows
+    const row = f.previews.find((x) => x.kind === 'group');
+    ok(!!row && S.previewWords(row, tEn) === 'a group message · alpha · the deploy is blocked — can you look?', 'MERGED WITH lane-stash-detail: the Details list has the group row "a group message · alpha · <first line>"', f.previews);
+  }
+  // the REAL strip: no button, the sentence where it would be
+  const strip = SS.createStashStrip({ sessionId: 'w1' });
+  strip.set(f, { turn: 'idle' });
+  const q = (c) => strip.el.querySelector('.' + c);
+  ok(!strip.el.hidden && q('chat-stash-parts').textContent === ': a group message from alpha' && q('chat-stash-go').hidden === true && q('chat-stash-nobutton').hidden === false && q('chat-stash-nobutton').textContent === 'they ride your next message',
+    'the REAL strip: "a group message from alpha", NO Hand over button (it would refuse "nothing_waiting"), "they ride your next message" where it would be', strip.el.textContent);
+  // beside a stash entry the button stays, and says what it will NOT carry
+  deliver.stashFor(B, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'a peer note' });
+  const f2 = view.summaryFor(sB);
+  ok(f2.count === 2 && f2.reachable === true && f2.items.map((i) => i.kind).join() === 'group,peer', 'beside a stash entry: two waiting, the hand-over exists again', f2);
+  strip.set(f2, { turn: 'idle' });
+  ok(q('chat-stash-go').hidden === false && q('chat-stash-held').hidden === false && q('chat-stash-held').textContent === '1 group message rides your next message',
+    '…the button stays, and the strip says the group message rides the next message (a hand-over carries only the stash)', strip.el.textContent);
+  const r = await view.handOver('w1');
+  ok(r.ok === false && r.code === 'unreachable' && view.summaryFor(sB).items.some((i) => i.kind === 'group'), 'a hand-over never touches the group report (it stays waiting)', r);
+  // the report is handed to B's turn ⇒ it leaves the fact, its card is drawn
+  const rep = ge.reportsForTurn(B);
+  await ge.commitReports(B, rep.marks);
+  await sleep(40);
+  const f3 = view.summaryFor(sB);
+  ok(f3 && f3.count === 1 && f3.items[0].kind === 'peer' && cards.filter((c) => c.kind === 'group').length === 1, 'the report committed into B\'s turn: the group message leaves the fact (its card went through the ladder\'s door)', { f3, cards });
+  // a pending fork carries B's id — its strip is not B's
+  const fork = { name: 'fork of One', backend: 'claude', backendSessionId: B, claudeSessionId: B, mode: 'chat', _forkRequested: true, _forkSourceId: B };
+  await ge.post({ group: made.group.id, from: A, text: 'one more' });
+  const ff = view.summaryFor(fork), fb = view.summaryFor(sB);
+  ok(!(ff && ff.items.some((i) => i.kind === 'group')) && fb.items.some((i) => i.kind === 'group'), 'a PENDING FORK (it carries its parent\'s id) shows none of the parent\'s group messages; the parent does', { ff, fb });
+  // CONTROL: a hand-over module whose fact leaves the groups out — the strip never names them
+  const MUTG = mutantCopies('stash-strip-grp', REPO);
+  const src = read('src/server/stash-handover.js');
+  const ga = "      const groups = groupEntriesOf(s);\n";
+  if (!src.includes(ga)) throw new Error('mutation anchor missing: group entries');
+  const NoGroups = MUTG.load('src/server/stash-handover.js', src.replace(ga, "      const groups = [];\n"), 'no-groups');
+  const view2 = NoGroups.create({ activeSessions: sessions, getDeliver: () => deliver, getJobs: () => null, getGroups: () => ge, broadcastSessions: () => {}, renderMsgStash, renderNotifStash, debounceMs: 20 });
+  deliver.drainStash(B);
+  const strip2 = SS.createStashStrip({ sessionId: 'w1' });
+  strip2.set(view2.summaryFor(sB), { turn: 'idle' });
+  ok(strip2.el.hidden === true && view.summaryFor(sB).items.some((i) => i.kind === 'group'), 'CONTROL a fact without the group preview: a group message waits and the strip NEVER appears (②k can go red)');
+  for (const c of copiesCensus(MUTG.files, MUTG.dir, REPO, { minCopies: 1, label: '②k ' })) ok(c.pass, c.name, c.detail);
+  try { deliver.flush(); } catch { }
+  store.close();
+}
+
 // ═══ ⑤ NEGATIVE CONTROLS ═══
 console.log('⑤ negative controls (patched scratch copies)');
 {
   const MUT = mutantCopies('stash-strip', REPO);
   const src = read('src/server/stash-handover.js');
-  const anchor1 = "      const sum = S.summarize(both);\n";
+  const anchor1 = "      const sum = S.summarize({ msg: [...both.msg, ...groups], jobs: both.jobs });\n";
   if (!src.includes(anchor1)) throw new Error('mutation anchor missing: hide');
-  const Hide = MUT.load('src/server/stash-handover.js', src.replace(anchor1, "      const sum = null && S.summarize(both);\n"), 'hide');
+  const Hide = MUT.load('src/server/stash-handover.js', src.replace(anchor1, "      const sum = null && S.summarize({ msg: [...both.msg, ...groups], jobs: both.jobs });\n"), 'hide');
   const R = rig({ handoverModule: Hide });
   R.deliver.stashFor(R.CID, { source: 'channel-receipt', kind: 'notification', fromName: 'Channels · Outbox', text: 'sent' });
   const strip = SS.createStashStrip({ sessionId: 'w1' });
@@ -1582,7 +1720,7 @@ console.log('⑤ negative controls (patched scratch copies)');
   }
   // ── r3 controls ──
   // the text equality dropped: a peer's quoted tag resurrects a delivered hand-over and loses the peer's message
-  const anchor12 = "    if (typeof rec.text !== 'string' || echoed.trim() !== rec.text.trim()) {";
+  const anchor12 = "    if (!sameFrame(rec, echoed)) {";   // the lane-redact merge: the equality lives in sameFrame (a cleared record keeps its frame's digest)
   if (!src.includes(anchor12)) throw new Error('mutation anchor missing: tag-only');
   const TagOnly = MUT.load('src/server/stash-handover.js', src.replace(anchor12, "    if (false) {"), 'tag-only');
   {
@@ -1714,7 +1852,7 @@ console.log('⑥ wiring pins');
     'verify r2: the claim is the entry\'s own `ho` stamp written to disk at once in BOTH stores, and every drain persists at once (the ladder\'s store and the jobs store)');
   ok(/deliver\.registerFrameRestorer\(\(cid, text, meta\) => stashView\.restoreHandedOver\(cid, text, meta\)\)/.test(sv) && /stashView\.settle\(5000\)/.test(sv) && /function shutdown\(\)[\s\S]{0,700}stashView\.inFlightCount\(\)/.test(sv) && /renderNotifStash: require\('\.\/src\/job-model\.js'\)\.renderNotifStash, dataDir: path\.join\(__dirname, 'data'\) \}\); stashView\.register\(app\);/.test(sv),
     'verify r2: server.js registers the hand-over restorer on the ladder (r4: with the echo\'s kind) and the shutdown waits for a hand-over in flight before it exits; r4: the view gets the data dir (the delivered memory on disk)');
-  ok(/function shutdown\(\)[\s\S]{0,700}stashView\.close\(\); n = stashView\.inFlightCount\(\)/.test(sv) && /text: vibespaceNoticeText\(frame\) \}\);/.test(sh) && /echoed\.trim\(\) !== rec\.text\.trim\(\)/.test(sh),
+  ok(/function shutdown\(\)[\s\S]{0,700}stashView\.close\(\); n = stashView\.inFlightCount\(\)/.test(sv) && /text: vibespaceNoticeText\(frame\) \}\);/.test(sh) && /if \(typeof rec\.text === 'string'\) return echoed\.trim\(\) === rec\.text\.trim\(\);/.test(sh) && /if \(!sameFrame\(rec, echoed\)\) \{/.test(sh),   // the lane-redact merge: the exact-text rule lives in sameFrame (a cleared record keeps its frame's digest)
     'verify r3: the shutdown shuts the door BEFORE it counts and waits; the delivered record keeps the exact frame text and the restore requires it');
   const ce = read('src/server/stdout/codex-events.js'), ae = read('src/server/stdout/acp-events.js');
   ok(/restored = deliverRef\?\.restoreFrame\?\.\(cid, String\(msg\.payload\.text\), \{ kind: msg\.payload\.kind \|\| null \}\)[\s\S]{0,320}if \(!restored\) \{\n\s+try \{ if \(cid\) deliverRef\?\.stashFor\?\.\(cid, \{ source: 'agent', kind: msg\.payload\.kind \|\| null/.test(ce) && /restored = deliverRef\?\.restoreFrame\?\.\(cid, String\(msg\.text\), \{ kind: msg\.peerKind \|\| null \}\)[\s\S]{0,320}if \(!restored\) \{\n\s+try \{ if \(cid\) deliverRef\?\.stashFor\?\.\(cid, \{ source: 'agent', kind: msg\.peerKind \|\| null/.test(ae) && !/deliverRef\s*\(/.test(ce.replace(/\/\/.*$/gm, '')),

@@ -105,6 +105,53 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   ck('pool removal clears links dir, member dirs intact',
     !fs.existsSync(am.poolLinksDir(P2X)) && fs.existsSync(am.subDir(A)) && fs.existsSync(am.subDir(B)));
 }
+// ── the removed-member wall (2026-09-28): membership is the CONFIGURED list, and
+// the default re-point is the ENGINE's decision (list[0] only without one) ──
+{
+  const D2 = am.createSubscription({ name: 'Acct D' }).id; login(D2);
+  const P3 = am.createPool({ name: 'P3' }).id;
+  ck('poolMembership: an implicit pool lists EVERY same-backend subscription, signed in or not (C never finished its login)',
+    [A, B, C, D2].every((x) => am.poolMembership(P3).includes(x)));
+  am.updatePool(P3, { members: [A, B, C] });
+  ck('poolMembership: an explicit pool lists exactly its members — a signed-out one included (its wall is the login, not the membership)',
+    JSON.stringify(am.poolMembership(P3).sort()) === JSON.stringify([A, B, C].sort()));
+  ck('…while poolMembers (the CANDIDATE list) stays logged-in only', !am.poolMembers(P3).some((m) => m.id === C));
+  am.setPoolTarget(P3, A);
+  let asked = null;
+  am.updatePool(P3, { members: [B, D2] }, { chooseMember: (from, list) => { asked = { from, list: list.map((m) => m.id) }; return D2; } });
+  ck('updatePool: dropping the default asks the chooser FROM the removed member, over the new candidates', asked && asked.from === A && JSON.stringify(asked.list) === JSON.stringify([B, D2]));
+  ck('updatePool: …and re-points to the chooser\'s decision (D), not list[0] (B)', am.poolCurrent(P3) === D2);
+  ck('updatePool: …recorded on the slot ledger as removed-from-pool', am.slotTransitions.all().some((r) => !r.sessionId && r.poolId === P3 && r.from === A && r.to === D2 && r.why === 'removed-from-pool'));
+  am.setPoolTarget(P3, B);
+  am.updatePool(P3, { members: [A, D2] }, { chooseMember: () => 'sub-not-a-member' });
+  ck('updatePool: a chooser answer outside the list is refused — the no-engine fallback (list[0]) stands', am.poolCurrent(P3) === A);
+  am.setPoolTarget(P3, A);
+  am.updatePool(P3, { members: [D2, A] });
+  ck('updatePool: a save that keeps the default re-points nothing (the chooser is not even asked)', am.poolCurrent(P3) === A);
+  // ── manual priority (2026-09-28): validated, deduped, capped, pruned; auto is always true ──
+  am.updatePool(P3, { members: [A, B, C, D2] });
+  const P4 = am.createPool({ name: 'P4' }).id;
+  ck('createPool: a new pool is AUTOMATIC (the whole-pool manual switch is retired) with an empty priority', am.get(P4).auto === true && JSON.stringify(am.get(P4).priority) === '[]');
+  am.updatePool(P3, { priority: [B, A, B, C] });
+  ck('priority: saved in order, deduped (a signed-out member may be listed — it is a member)', JSON.stringify(am.get(P3).priority) === JSON.stringify([B, A, C]));
+  let bad = null; try { am.updatePool(P3, { priority: [A, 'sub-stranger'] }); } catch (e) { bad = e.message; }
+  ck('priority: a non-member id is refused by name — and nothing is saved', /not a member of this pool: sub-stranger/.test(bad || '') && JSON.stringify(am.get(P3).priority) === JSON.stringify([B, A, C]));
+  let bad2 = null; try { am.updatePool(P3, { priority: 'A' }); } catch (e) { bad2 = e.message; }
+  ck('priority: a non-list is refused', /priority must be a list/.test(bad2 || ''));
+  am.updatePool(P3, { members: [A, C, D2] });
+  ck('priority: narrowing the membership prunes the order (B is gone from it)', JSON.stringify(am.get(P3).priority) === JSON.stringify([A, C]));
+  am.updatePool(P3, { auto: false });
+  ck('auto:false is IGNORED — the pool stays automatic-or-priority', am.get(P3).auto === true);
+  const row = am.list().accounts.find((x) => x.id === P3);
+  ck('list(): the pool row carries priority + placement (and auto:true for old clients)', row.placement === 'priority' && JSON.stringify(row.priority) === JSON.stringify([A, C]) && row.auto === true);
+  am.updatePool(P3, { priority: [] });
+  ck('priority: [] clears it — Placement = automatic', am.list().accounts.find((x) => x.id === P3).placement === 'automatic');
+  am.get(P4).auto = false; am.get(P4).priority = undefined; am.setPoolTarget(P4, B);
+  const mig = am.migrateManualPools();
+  ck('migrateManualPools: a manual pool gets [its current target, …the rest in list order] and becomes auto', mig.length === 1 && mig[0].id === P4 && am.get(P4).priority[0] === B && am.get(P4).auto === true && am.poolCurrent(P4) === B);
+  am.remove(P4);
+  am.remove(P3); am.remove(D2);
+}
 // family projection (model-family.js)
 {
   const { familyOfModel, projectCacheForFamily } = require(path.resolve('src/model-family.js'));

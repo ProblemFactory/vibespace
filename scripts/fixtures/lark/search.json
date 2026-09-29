@@ -1,0 +1,26 @@
+{
+  "_note": "SHAPE of POST /open-apis/im/v1/messages/search (Lark docs im-v1/message/search, read 2026-09-28 — lane lark-search-poll, design §0 V1/V2): an EMPTY query + a time_range answers items of {meta_data, display_info}. NEUTRAL ids; `atOffsetMs` = an instant RELATIVE to the suite's clock (the suite writes `create_time` in MILLISECONDS — the im/v1 unit the adapter DECLARES, U5). U1: the message id is read from `meta_data.message_id` (the doc sample's field) else the item's own `message_id` / `id` — unverified against a live answer; the adapter logs the field NAMES of its first page once. `display_info` is the snippet: never read, kept or logged.",
+  "page1": {
+    "code": 0, "msg": "success",
+    "data": {
+      "has_more": true, "page_token": "pt-search-2", "total": 5,
+      "items": [
+        { "meta_data": { "message_id": "om_srch_group_01", "type": "text", "atOffsetMs": -20000, "updOffsetMs": -20000, "chat_id": "oc_ops_room_0001", "from_id": "ou_member_b", "thread_id": "", "thread_position": 0, "is_p2p_chat": false }, "display_info": "the <b>deploy</b> finished — SNIPPET-MUST-NOT-LEAK" },
+        { "meta_data": { "message_id": "om_srch_dm_01", "type": "text", "atOffsetMs": -15000, "chat_id": "oc_dm_peer_0001", "from_id": "ou_peer_c", "thread_id": "", "thread_position": 0, "is_p2p_chat": true }, "display_info": "hey, are you around? SNIPPET-MUST-NOT-LEAK" },
+        { "meta_data": { "message_id": "om_srch_reply_01", "type": "post", "atOffsetMs": -10000, "chat_id": "oc_ops_room_0001", "from_id": "ou_member_a", "thread_id": "omt_thread_0001", "thread_position": 2, "is_p2p_chat": false }, "display_info": "a reply in a thread SNIPPET-MUST-NOT-LEAK" },
+        { "meta_data": { "message_id": "om_srch_seconds", "type": "text", "createSeconds": true, "atOffsetMs": -5000, "chat_id": "oc_ops_room_0001", "from_id": "ou_member_b", "is_p2p_chat": false }, "display_info": "a create_time in SECONDS under the ms declaration" },
+        { "display_info": "an item with no meta_data at all" }
+      ]
+    }
+  },
+  "page2": {
+    "code": 0, "msg": "success",
+    "data": { "has_more": false, "page_token": "", "total": 5, "items": [
+      { "meta_data": { "message_id": "om_srch_group_02", "type": "image", "atOffsetMs": -2000, "chat_id": "oc_new_group_0002", "from_id": "ou_member_b", "thread_id": "", "is_p2p_chat": false }, "display_info": "[image]" }
+    ] }
+  },
+  "forbiddenScope": { "status": 400, "body": { "code": 99991679, "msg": "Unauthorized. You do not have permission to perform the requested operation on the resource. Please request user re-authorization and try again. required one of these privileges under the user identity: [search:message]" } },
+  "chatP2pRefused": { "status": 400, "body": { "code": 230002, "msg": "The bot or user is not in the chat" } },
+  "userPeer": { "code": 0, "msg": "success", "data": { "user": { "open_id": "ou_peer_c", "name": "Peer C" } } },
+  "chatNamed": { "code": 0, "msg": "success", "data": { "name": "Release crew", "chat_mode": "group" } }
+}

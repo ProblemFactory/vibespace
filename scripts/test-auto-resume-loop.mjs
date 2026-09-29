@@ -90,7 +90,7 @@ ok('PAIR: a run of test-new-member-wake is holding, every patched copy it made s
  *  the engine a wrapper that drops `noteRecovered`'s third argument is exactly
  *  the pre-round-4 call (`noteRecovered(id, why)` — no classification) with
  *  everything else, including both real producers, unchanged. */
-function mkWorld({ dir = null, healthy = true, ignoreWorkedFlag = false, arModule = null } = {}) {
+function mkWorld({ dir = null, healthy = true, ignoreWorkedFlag = false, arModule = null, engModule = null } = {}) {
   const root = dir || fs.mkdtempSync(path.join(os.tmpdir(), 'vs-arloop-'));
   if (!dir) cleanup.push(root);
   const dataDir = path.join(root, 'data');
@@ -132,7 +132,7 @@ function mkWorld({ dir = null, healthy = true, ignoreWorkedFlag = false, arModul
   const arSeenByEngine = ignoreWorkedFlag
     ? new Proxy(ar, { get: (t, p) => (p === 'noteRecovered' ? ((id, why) => t.noteRecovered(id, why)) : t[p]) })
     : ar;
-  const eng = engMod.create({
+  const eng = (engModule || engMod).create({
     app, rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: sessions,
     wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice: (k, t) => notices.push(t),
     serverSetting: () => undefined, getAccounts: () => am, getHosts: () => null, getUsageHistory: () => null,
@@ -1370,6 +1370,85 @@ if (!probe) {
   ok('…an unpooled (single-account) wall names its bucket and keeps the reset sentence', arMod.armNoticeFor('5h 0% < 10%', st.resetsAt, Date.now(), w.eng.armCauseFor({ usable: false, until: { label: '5h', resetsAt: RL } }, null, null, 0)) === `用量已达上限（5h）。已安排在 ${new Date(RL * 1000).toLocaleString()} 重置约 1 分钟后自动继续（状态栏可取消）。`); // the STATED instant (the cause's until), the arm itself is a minute later
   ok('…armCauseFor is null for a usable verdict and for a blocked pool verdict with no soonest (the arm then inherits or stays cause-less)', w.eng.armCauseFor({ usable: true }, null, null, 0) === null && w.eng.armCauseFor({ usable: false, soonest: null, rejector: null }, null, null, 0) === null);
   ok('…the chip payload carries the same structure (statusFor().cause === the arm\'s cause)', JSON.stringify(w.ar.statusFor(w.SID).cause) === JSON.stringify(st.cause));
+}
+
+// ── §7 THE OWNER'S 全B (2026-09-28): A REMOVED MEMBER WITH NOBODY TO TAKE OVER — STOP AND WAIT ──
+// The owner, on "a member taken out of the pool while no other member can take its conversations": NOT kept
+// running on it. The conversation finishes its current turn (never cut), is parked off the removed member (on the
+// listed member usable soonest — the removed member serves nothing after that turn) and waits at a WALL: auto-
+// resume's own arm, with the removal as its cause. A member becoming usable delivers the ONE continue (the wake →
+// the pool pass → fireNow, through the pre-fire gate and the breaker) — never two. Real engine, real auto-resume.
+{
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const M7 = mutantCopies('arl-hold', REPO);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const cacheOf = (u5, r5, u7, r7) => ({ fetchedAt: Date.now(), source: 'cli-usage', fiveHour: { utilization: u5, resetsAt: r5 }, sevenDay: { utilization: u7, resetsAt: r7 } });
+  const setup = (engModule = null) => {
+    const w = mkWorld({ engModule });
+    // every OTHER member is spent: Fish Max already limited (R5); B-Stack Max's 5h resets in 10 min (it parks there)
+    w.writeCache(w.SPARE, cacheOf(0.99, Math.floor(Date.now() / 1000) + 600, 0.35, w.R7));
+    w.session._isStreaming = true; w.session._turnState = 'running'; // mid-turn when the owner takes its member out
+    const cap = capture();
+    w.am.updatePool(w.P, { members: [w.FISH, w.SPARE] }, { chooseMember: (from) => w.eng.decideDefaultTarget(w.P, from) || w.eng.fallbackDefaultTarget(w.P, from) });
+    w.ev = w.eng.memberRemoved(w.P, [w.LINK]);
+    w.lines1 = cap.done();
+    return w;
+  };
+  const stop = (w) => { w.session._isStreaming = false; w.session._turnState = 'idle'; const cap = capture(); w.eng.noteTurnEnd(w.session); w.eng.noteTurnStopped(w.session); return cap.done(); };
+  const w = setup();
+  ok('§7 全B: taken out MID-TURN with nobody to take over ⇒ never cut — the link still names the removed member until its turn ends, nothing armed yet', w.linkNow() === w.LINK && !w.ar._armed.get(w.SID) && w.ev.held.length === 1 && w.ev.held[0].deferred === true, JSON.stringify({ on: w.nameOf(w.linkNow()), ev: w.ev.held }));
+  stop(w);
+  const a = w.ar._armed.get(w.SID);
+  ok('§7 全B: at its stop it is PARKED off the removed member (on the member usable soonest, B-Stack Max) — the removed member serves nothing after that turn', w.linkNow() === w.SPARE, w.nameOf(w.linkNow()));
+  ok('§7 全B: …ARMED with the removal as its cause — the turn it let finish did not disarm it (the result boundary\'s "turn completed normally")', !!a && !a.fired && !!a.cause && a.cause.kind === 'removed-member' && a.cause.member.id === w.LINK, JSON.stringify(a));
+  ok('§7 全B: …the hold itself fires nothing (fired 0)', w.fired.length === 0);
+  const card = a ? arMod.armNoticeFor(a.reason, a.resetsAt, Date.now(), a.cause) : '';
+  ok('§7 全B: the card names the removal and the member it waits on — never "usage limit"', /PandyMax 已被移出账号池/.test(card) && /B-Stack Max/.test(card) && !/用量已达上限/.test(card), card);
+  ok('§7 全B: …the conversation is told it stopped and continues by itself', w.notices.some((t) => /PandyMax was removed from the pool and no other member can take over — conversation "work" stopped after its turn and continues automatically when a member can serve it\.$/.test(t)), JSON.stringify(w.notices));
+  // the member wake: Fish Max is usable again ⇒ the conversation moves onto it and gets ONE continue
+  w.writeCache(w.FISH, cacheOf(0.1, w.R5, 0.3, w.R7));
+  const capW = capture(); w.eng.onMemberReadingFresh(w.FISH, 'test'); await sleep(80); const lw = capW.done();
+  ok('§7 全B: a member becomes usable ⇒ the conversation moves onto it and gets ONE continue', w.linkNow() === w.FISH && w.fired.length === 1, JSON.stringify({ on: w.nameOf(w.linkNow()), fired: w.fired.length, lines: lw.slice(-5) }));
+  w.eng._memberWakeAt.clear();
+  w.writeCache(w.SPARE, cacheOf(0.1, w.R5, 0.3, w.R7));
+  w.eng.onMemberReadingFresh(w.SPARE, 'test 2'); w.eng.onMemberReadingFresh(w.FISH, 'test 3'); await sleep(80);
+  ok('§7 全B: …further wakes never deliver a second continue (fired stays 1)', w.fired.length === 1, String(w.fired.length));
+  // an IDLE conversation on the removed member: parked at once, NOT armed (nothing was running — nothing to continue)
+  const wi = mkWorld();
+  wi.writeCache(wi.SPARE, cacheOf(0.99, Math.floor(Date.now() / 1000) + 600, 0.35, wi.R7));
+  const capI = capture(); wi.am.updatePool(wi.P, { members: [wi.FISH, wi.SPARE] }); wi.eng.memberRemoved(wi.P, [wi.LINK]); capI.done();
+  ok('§7 全B: an IDLE conversation is parked off the removed member at once and NOT armed (its next message meets the wall like any quota wall)', wi.linkNow() === wi.SPARE && !wi.ar._armed.get(wi.SID) && wi.fired.length === 0, JSON.stringify({ on: wi.nameOf(wi.linkNow()), armed: !!wi.ar._armed.get(wi.SID) }));
+  // WHO CAN UN-ARM IT: the disarm seams (noteRecovered / setEnabled) are called only by the engine, the human ws
+  // toggle and the ONE typing sender — whose HTTP door (the For-you reply) refuses an agent token before it sends
+  const files = [];
+  const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = d + '/' + e.name; if (e.isDirectory()) walk(r); else if (/\.js$/.test(e.name)) files.push(r); } };
+  walk('src'); files.push('server.js');
+  const callers = files.filter((f) => f !== 'src/server/auto-resume.js' && /(?:autoResume|getAutoResume\(\)|\bar)\?*\.(?:noteRecovered|setEnabled)\?*\.?\(/.test(read(f).split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '')).join('\n'))).sort();
+  ok('§7 全B: …the only callers of the disarm seams are the engine, the ws toggle and the typing sender (' + files.length + ' files read)', JSON.stringify(callers) === JSON.stringify(['src/server/usage-pool-engine.js', 'src/server/user-input.js', 'src/ws-handler.js']), JSON.stringify(callers));
+  ok('§7 全B: …and the typing sender\'s HTTP door refuses an agent token first (the reply route)', /if \(isAgentBearer\(req\)\) return fail\(res, 'agent_forbidden'/.test(read('src/routes/user-todos-reply.js')) && !/noteRecovered|setEnabled|autoResume/.test(read('src/agent-routes.js')));
+  // CONTROL: the engine without the hold (the r1 behaviour — "keeps serving") — the conversation stays on the removed member
+  const esrc = read('src/server/usage-pool-engine.js');
+  const h1 = "        if (ds && ds.reason === 'removed-hold') { holdRemoved(poolId, sid, s2, curFor, ds, now); continue; }\n";
+  const h2 = "if (d && d.reason === 'removed-hold') { const h = holdRemoved(poolId, sid, s, on, d, now); if (h.held || h.deferred) out.held.push({ sid, on, to: h.to, deferred: h.deferred }); else out.stayed.push({ sid, on }); continue; } // 全B: stop and wait (a mid-turn one at its stop)";
+  ok('§7 CONTROL: the patch (the hold removed from the pass and from memberRemoved) hits', esrc.split(h1).length === 2 && esrc.split(h2).length === 2);
+  const wc = setup(M7.load('src/server/usage-pool-engine.js', esrc.replace(h1, '').replace(h2, ''), 'nohold'));
+  stop(wc);
+  ok('§7 CONTROL: without it the conversation KEEPS BILLING the removed member after its turn, and nothing is armed', wc.linkNow() === wc.LINK && !wc.ar._armed.get(wc.SID), JSON.stringify({ on: wc.nameOf(wc.linkNow()) }));
+  // CONTROL 2: auto-resume without the hold's exception — the result boundary's "turn completed normally" (a CLI that
+  // announces no turn state stops right there) disarms the hold it just made
+  const asrc = read('src/server/auto-resume.js');
+  const x1 = "    if (a.cause && a.cause.kind === 'removed-member' && why === 'turn completed normally') return;\n";
+  ok('§7 CONTROL 2: the patch (auto-resume without the hold\'s exception) hits', asrc.split(x1).length === 2);
+  const arNo = M7.load('src/server/auto-resume.js', asrc.replace(x1, ''), 'noexception');
+  const wx = mkWorld({ arModule: arNo });
+  wx.writeCache(wx.SPARE, cacheOf(0.99, Math.floor(Date.now() / 1000) + 600, 0.35, wx.R7));
+  wx.session._isStreaming = true; wx.session._turnState = 'running'; wx.session._turnStateSeen = false;
+  { const c = capture(); wx.am.updatePool(wx.P, { members: [wx.FISH, wx.SPARE] }); wx.eng.memberRemoved(wx.P, [wx.LINK]); c.done(); }
+  { wx.session._isStreaming = false; wx.session._turnState = undefined; const c = capture(); wx.eng.noteTurnEnd(wx.session); c.done(); } // the result boundary IS the stop
+  ok('§7 CONTROL 2: …then a CLI without turn state loses the hold at its result boundary (parked, but nothing armed)', wx.linkNow() === wx.SPARE && !wx.ar._armed.get(wx.SID), JSON.stringify({ on: wx.nameOf(wx.linkNow()), armed: !!wx.ar._armed.get(wx.SID) }));
+  const wy = setup(); wy.session._turnState = undefined;
+  { wy.session._isStreaming = false; const c = capture(); wy.eng.noteTurnEnd(wy.session); c.done(); }
+  ok('§7 全B: …with the exception the same CLI keeps it (armed at the result boundary)', wy.linkNow() === wy.SPARE && !!wy.ar._armed.get(wy.SID), JSON.stringify({ on: wy.nameOf(wy.linkNow()), armed: !!wy.ar._armed.get(wy.SID) }));
 }
 
 // ── THE PAIR'S VERDICT (B-0220) ─────────────────────────────────────────────

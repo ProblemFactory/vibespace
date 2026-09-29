@@ -3,6 +3,7 @@ import { t as tr } from './i18n.js';
 import { registerCommand, registerMenuItem, menuItems } from './contributions.js';
 import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
 import { UI_ICONS } from './icons.js';
+import { shownText } from './record-clear-ui.js'; // "Clear content…": a cleared status reason is worded in this device's language
 import { browserFactWords } from '../browser-fact.js'; // lane S2: THE browser fact's words (the card's chip prints them)
 import { stashHintChip } from './stash-strip.js'; // 2026-09-27: "N waiting" — what waits for this agent's next turn (the stash fact)
 import { createBackendIcon, createAgentKindIcon, createModeBackendIcon, getBackendMeta, getAgentKindMeta, getAgentRoleLabel, getAgentRoleShortLabel, getSessionKey, backendFeatureCaps, settingsPrefixFor } from './agent-meta.js';
@@ -362,7 +363,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       stateChip.classList.toggle('sess-state-derived', derived || staleResult);
       stateChip.dataset.tip = derived
         ? tr('{state} — {activity} (observed by VibeSpace; the agent can set its own state with vibespace-status). Click to set manually.', { state: meta.label, activity: waiting ? tr('finished, waiting for you') : tr('active') })
-        : `${tr('state: {state}', { state: meta.label })}${st.urgency ? tr(' · urgency: {urgency}', { urgency: st.urgency }) : ''}${st.reason ? ' — ' + st.reason : ''}${staleResult ? tr(' (set before the session stopped)') : ''}${tr(' (set by {who}; click to change)', { who: st.setBy === 'agent' ? tr('the agent') : tr('you') })}`;
+        : `${tr('state: {state}', { state: meta.label })}${st.urgency ? tr(' · urgency: {urgency}', { urgency: st.urgency }) : ''}${st.reason ? ' — ' + shownText(st, st.reason) : ''}${staleResult ? tr(' (set before the session stopped)') : ''}${tr(' (set by {who}; click to change)', { who: st.setBy === 'agent' ? tr('the agent') : tr('you') })}`;
       stateChip.classList.toggle('sess-state-urgent', st?.urgency === 'urgent');
       stateChip.onclick = (e) => { e.stopPropagation(); state._showSessionStatusPopover?.(stateChip, s); };
     }
@@ -670,9 +671,9 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     val.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
     const st = state.getSessionStatus?.(s);
     val.textContent = st && (st.state || st.urgency)
-      ? `${st.state || ''}${st.urgency ? (st.state ? ' / ' : '') + st.urgency : ''}${st.reason ? ' — ' + st.reason : ''} (${st.setBy === 'agent' ? tr('agent') : tr('you')})`
+      ? `${st.state || ''}${st.urgency ? (st.state ? ' / ' : '') + st.urgency : ''}${st.reason ? ' — ' + shownText(st, st.reason) : ''} (${st.setBy === 'agent' ? tr('agent') : tr('you')})`
       : tr('None');
-    if (st?.reason) val.title = st.reason;
+    if (st?.reason) val.title = shownText(st, st.reason);
     const btn = document.createElement('button');
     btn.className = 'session-detail-btn';
     btn.textContent = '\u25be';
@@ -716,7 +717,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
           li.innerHTML = `<span class="session-history-time">${escHtml(t)}</span>`
             + `<span class="session-history-dot" style="--h-color:${meta ? meta.color : 'var(--text-dim)'}"></span>`
             + `<span class="session-history-state">${escHtml(h.cleared ? tr('cleared') : (meta?.label || ''))}${h.urgency && h.urgency !== 'normal' ? ' !' + (h.urgency === 'urgent' ? '!' : '') : ''}</span>`
-            + (h.reason ? `<span class="session-history-reason" title="${escHtml(h.reason)}">${escHtml(h.reason)}</span>` : '')
+            + (h.reason ? `<span class="session-history-reason${h.clearedAt ? ' rc-cleared' : ''}" title="${escHtml(shownText(h, h.reason))}">${escHtml(shownText(h, h.reason))}</span>` : '')
             + `<span class="session-history-by">${h.setBy === 'user' ? tr('you') : tr('agent')}</span>`;
           list.appendChild(li);
         }
@@ -809,7 +810,10 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     const savedCfg = state.getSessionConfig?.(s) || {};
     const overrides = { model: savedCfg.model || '', effort: savedCfg.effort || '', permission: savedCfg.permission || '', account: savedCfg.account || '' };
     const persistOverrides = () => {
-      state.setSessionConfig?.(s, overrides);
+      // the popover edits FOUR keys of the conversation's config — everything else it holds (the
+      // pool pin, the model lock, the response style…) rides along untouched (verify r1: a fresh
+      // four-key object erased the rest at every pick here)
+      state.setSessionConfig?.(s, { ...(state.getSessionConfig?.(s) || {}), ...overrides });
       updateCfgBadge();
     };
 

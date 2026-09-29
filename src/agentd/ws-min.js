@@ -9,12 +9,19 @@
 
 const crypto = require('crypto');
 
-function connect(url, { headers = {} } = {}) {
+// lane-pairing ③ (B-7007): every failure SAYS what it was — the owner's Mac logged only "dial-out failed" while
+// the server had refused it by name. A non-101 answer surfaces its status, the server's named refusal
+// (`X-VibeSpace-Dial-Refusal`) and ≤ 1 KiB of its body (code UPGRADE_REFUSED); a 200 + `X-VibeSpace-Dial-Probe: ok`
+// is the `--dial-check` probe's success (`probe-ok`); a bad accept key is BAD_ACCEPT; request errors keep node's own
+// `e.code` (ENOTFOUND, ECONNREFUSED, EPROTO, CERT_*…); a black-holed address times out (`timeoutMs`, ETIMEDOUT)
+// instead of hanging until the OS gives up. The classifier is PURE src/dial-facts.js `dialFailureOf`.
+const BODY_MAX = 1024;
+function connect(url, { headers = {}, timeoutMs = 15000 } = {}) {
   const u = new URL(url);
   const isTls = u.protocol === 'wss:' || u.protocol === 'https:';
   const lib = isTls ? require('https') : require('http');
   const key = crypto.randomBytes(16).toString('base64');
-  const listeners = { data: [], close: [], error: [], open: [] };
+  const listeners = { data: [], close: [], error: [], open: [], 'probe-ok': [] };
   const emit = (ev, ...a) => listeners[ev].forEach((f) => { try { f(...a); } catch { } });
 
   let sock = null;
@@ -34,9 +41,17 @@ function connect(url, { headers = {} } = {}) {
       ...headers,
     },
   });
+  let upgraded = false;
+  if (Number(timeoutMs) > 0) req.setTimeout(Number(timeoutMs), () => {
+    if (upgraded || dead) return;
+    const e = new Error(`no answer within ${Number(timeoutMs)} ms`); e.code = 'ETIMEDOUT';
+    dead = true; emit('error', e); emit('close'); try { req.destroy(); } catch { }
+  });
   req.on('upgrade', (res, socket, head) => {
+    upgraded = true;
+    try { socket.setTimeout(0); } catch { }
     const expect = crypto.createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
-    if (res.headers['sec-websocket-accept'] !== expect) { socket.destroy(); emit('error', new Error('bad accept key')); return; }
+    if (res.headers['sec-websocket-accept'] !== expect) { socket.destroy(); if (!dead) { dead = true; emit('error', Object.assign(new Error('bad accept key'), { code: 'BAD_ACCEPT' })); emit('close'); } return; }
     sock = socket;
     socket.on('data', (d) => { acc = acc.length ? Buffer.concat([acc, d]) : d; parse(); });
     socket.on('close', () => { if (!dead) { dead = true; emit('close'); } });
@@ -48,7 +63,31 @@ function connect(url, { headers = {} } = {}) {
     if (head && head.length) { acc = acc.length ? Buffer.concat([acc, head]) : Buffer.from(head); parse(); }
   });
   req.on('error', (e) => { if (!dead) { dead = true; emit('error', e); emit('close'); } });
-  req.on('response', () => { if (!dead) { dead = true; emit('error', new Error('upgrade refused')); emit('close'); } });
+  req.on('response', (res) => {
+    if (dead) { try { res.destroy(); } catch { } return; }
+    let body = Buffer.alloc(0), settled = false;
+    const done = () => {
+      if (settled || dead) return;
+      settled = true; dead = true;
+      try { res.destroy(); } catch { }
+      const text = body.subarray(0, BODY_MAX).toString('utf8');
+      if (res.statusCode === 200 && String(res.headers['x-vibespace-dial-probe'] || '') === 'ok') {
+        let parsed = null; try { parsed = JSON.parse(text); } catch { parsed = { ok: true }; }
+        emit('probe-ok', parsed); emit('close'); return;
+      }
+      emit('error', Object.assign(new Error(`upgrade refused (HTTP ${res.statusCode})`), {
+        code: 'UPGRADE_REFUSED', status: res.statusCode,
+        refusal: String(res.headers['x-vibespace-dial-refusal'] || '').slice(0, 40) || null,
+        probe: String(res.headers['x-vibespace-dial-probe'] || '').slice(0, 40) || null,
+        body: text,
+      }));
+      emit('close');
+    };
+    res.on('data', (d) => { if (body.length < BODY_MAX) body = Buffer.concat([body, d]); if (body.length >= BODY_MAX) done(); });
+    res.on('end', done);
+    res.on('error', done);
+    res.on('close', done);
+  });
   req.end();
 
   function sendFrame(opcode, payload) {

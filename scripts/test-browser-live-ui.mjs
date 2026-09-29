@@ -403,7 +403,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   // the rebuilt switch dialog (2026-09-27, test-live-bar-layout §4b): Take over / Hand back carry their SIZE on their OWN
   // classes too (a worded button's width may not come from another file's parent rule) — a control that removes the bar
   // rules must remove these as well, or control (b) could no longer turn red (a new guard layer peeled out of the old one)
-  const OWN = ['.file-tool-btn.browser-live-mode-btn { color: var(--text); border-color: var(--border); width: auto; height: 22px; padding: 0 8px; font-size: 10px; }', '.file-tool-btn.browser-live-handback { color: var(--yellow, #e5c07b); border-color: var(--yellow, #e5c07b); width: auto; height: 22px; padding: 0 8px; font-size: 10px; }'];
+  const OWN = ['.file-tool-btn.browser-live-mode-btn { color: var(--text); border-color: var(--border); width: auto; height: 22px; padding: 0 8px; font-size: 10px; }', '.file-tool-btn.browser-live-handback { color: var(--text); border-color: var(--yellow, #e5c07b); background: color-mix(in srgb, var(--yellow, #e5c07b) 14%, transparent); width: auto; height: 22px; padding: 0 8px; font-size: 10px; }'];
   ok(RULES.every((r) => real.includes(r)) && DRULES.every((r) => real.includes(r)) && OWN.every((r) => real.includes(r)), 'the bar rules the controls remove are in public/style.css verbatim (the anchors exist — the two own-class size rules too)');
   const writeCss = (tag, text) => { const f = path.join(MUT.dir, `style-${tag}-${process.pid}.css`); fs.writeFileSync(f, text); MUT.files.push(f); return f; };
   const fNeutral = writeCss('neutral', real), fPre = writeCss('prefix', [...RULES, ...OWN].reduce((x, r) => x.replace(r, ''), real)), fNo = writeCss('nowrap', real.replace(RULES[0], '')), fDeskPre = writeCss('desk-prefix', [...DRULES, ...OWN].reduce((x, r) => x.replace(r, ''), real));
@@ -484,13 +484,15 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
         }
         ok(tally.profile.n === LANGS.length * 2 * WIDTHS.length && tally.profile.bad.length === 0, `② ${tally.profile.n} profile states (the backend chip shown): the same census holds (${tally.profile.bad.length} bad)`, tally.profile.bad.slice(0, 6).join('\n    '));
 
-        // ②b THE SWITCH DIALOG'S ENTRY POINTS (the rebuilt dialog, 2026-09-27): the bar's browser name and the blocked
-        // banner offer the switch ONLY when the digest names another browser for this profile. W1 (this build, the REAL
-        // digest: choices []) ⇒ a plain label and a banner with Dismiss alone; W2 = the same digest with choices ['cloak']
-        // delivered as a BROADCAST (every global handler, as a real one arrives — never a fetch wrapper, and the live view
-        // listens to the socket itself) ⇒ the name is a button opening the dialog, the banner gains "Switch to CloakBrowser…"
-        // which opens it on the not-in-this-version notice (the real route's view); Dismiss removes the row for real.
-        console.log('— ②b the switch dialog\'s entry points: the bar\'s browser name and the blocked banner (W1 real, then W2 by a broadcast)');
+        // ②b THE SWITCH DIALOG'S ENTRY POINTS (the rebuilt dialog, 2026-09-27; lane-cloak 2026-09-28): the bar's browser
+        // name and the blocked banner offer the switch ONLY when the digest names another browser for this profile. Since
+        // lane-cloak THIS build's digest names cloak (its §7.2.1 record is a measurement) ⇒ the REAL digest is W2: the name
+        // is a button, the banner offers "Switch to CloakBrowser…", and both open the dialog on the REAL view — the cloak
+        // card saying the program is not installed on this scratch server. W1 (nothing to switch to) = the same digest with
+        // choices [] delivered as a BROADCAST (every global handler, as a real one arrives — never a fetch wrapper, and the
+        // live view listens to the socket itself) ⇒ a plain label and a banner with Details + Dismiss; Dismiss removes the
+        // row for real, and the server's own broadcast brings the real digest (the button) back.
+        console.log('— ②b the switch dialog\'s entry points: the bar\'s browser name and the blocked banner (W2 real, then W1 by a broadcast)');
         {
           await load('en', 'dark');
           await openChat(S1, SESSION_NAME);
@@ -499,41 +501,42 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
           await placeFree(1400);
           const pid = await until(() => evaluate(`(() => { const s = (${LIVE})._browserLive.state(); return s.target && s.target.profileId ? s.target.profileId : null; })()`), 8000);
           const look = () => evaluate(`(() => { const Lv = (${LIVE})._browserLive; Lv.layoutBar(); const e = Lv.el(); const vis = (x) => !!x && getComputedStyle(x).display !== 'none'; const b = e.querySelector('.browser-live-bar .browser-live-backend'), l = e.querySelector('.browser-live-bar .browser-live-backend-label'); const rows = [...e.querySelectorAll('.browser-live-blocked-row')].filter(vis).map((r) => ({ text: r.querySelector('.browser-live-blocked-text').textContent, btns: [...r.querySelectorAll('button')].map((x) => x.textContent) })); const s = Lv.state(); return { button: vis(b), label: vis(l), tag: l ? l.tagName : null, labelFocusable: l ? l.tabIndex >= 0 : null, words: s.backend, isButton: s.backendIsButton, banner: s.blockedShown && vis(e.querySelector('.browser-live-blocked')), rows }; })()`);
-          const w1 = await look();
-          ok(!!pid && w1.label && !w1.button && w1.tag === 'SPAN' && !w1.labelFocusable && w1.words === 'Chromium' && w1.isButton === false, `②b W1 (this build): the bar names the browser "${w1.words}" as a plain label — no button, not focusable`, JSON.stringify({ pid, w1 }));
+          const x2 = await until(async () => { const x = await look(); return x.button ? x : null; }, 8000);
+          ok(!!pid && !!x2 && x2.button && !x2.label && x2.words === 'Chromium' && x2.isButton === true, `②b W2 (this build — CloakBrowser is wired since its measurement): the bar names the browser "${x2 && x2.words}" as a BUTTON`, JSON.stringify({ pid, x2 }));
           const claimed = await j('POST', '/api/agent/browser/blocked', { url: 'https://shop.example/checkout', why: 'captcha', evidence: 'a press-and-hold check', profile: pid }, { Authorization: 'Bearer ' + token });
-          ok(claimed.status === 200 && /no other browser is available/.test(String(claimed.json && claimed.json.next)), `②b the agent's claim is recorded and its \`next\` says no other browser is offered here (${claimed.status})`, JSON.stringify(claimed.json).slice(0, 400));
-          const b1 = await until(async () => { const x = await look(); return x.banner && x.rows.length ? x : null; }, 8000);
-          // 2026-09-28 (the naive-user verifier): with nothing to switch to, the banner says the way out (take over) and the
-          // agent's evidence is behind Details — every button the house text button, never a 24 px icon box
-          ok(!!b1 && b1.rows.length === 1 && b1.rows[0].text === 'Your agent reports shop.example blocked it: “captcha”. Take over to get past the check yourself.' && JSON.stringify(b1.rows[0].btns) === JSON.stringify(['Details', 'Dismiss']), `②b W1: the banner says who claimed it and what you can do (take over), Details + Dismiss (${JSON.stringify(b1 && b1.rows)})`);
+          const nxt = String(claimed.json && claimed.json.next);
+          ok(claimed.status === 200 && /THEIR act/.test(nxt) && /Switch to CloakBrowser/.test(nxt), `②b the agent's claim is recorded and its \`next\` says the user may switch here — their act (${claimed.status})`, JSON.stringify(claimed.json).slice(0, 400));
+          const b2 = await until(async () => { const x = await look(); return x.banner && x.rows.length ? x : null; }, 8000);
+          ok(!!b2 && b2.rows.length === 1 && b2.rows[0].text === 'Your agent reports shop.example blocked it: “captcha”.' && JSON.stringify(b2.rows[0].btns) === JSON.stringify(['Switch to CloakBrowser…', 'Details', 'Dismiss']), `②b W2: the banner says who claimed it and offers "Switch to CloakBrowser…" beside Details and Dismiss (${JSON.stringify(b2 && b2.rows)})`);
           const cls1 = await evaluate(`[...(${LIVE})._browserLive.el().querySelectorAll('.browser-live-blocked-row button')].map((b) => b.className)`);
-          ok(cls1.length === 2 && cls1.every((c) => /\bmounts-btn\b/.test(c) && !/file-tool-btn/.test(c)), `②b the banner's buttons are the house text button (${JSON.stringify(cls1)})`);
+          ok(cls1.length === 3 && cls1.every((c) => /\bmounts-btn\b/.test(c) && !/file-tool-btn/.test(c)), `②b the banner's buttons are the house text button (${JSON.stringify(cls1)})`);
           const fold = (open) => evaluate(`(async () => { const e = (${LIVE})._browserLive.el(); const b = [...e.querySelectorAll('.browser-live-blocked-row button')].find((x) => x.textContent === ${JSON.stringify(open ? 'Details' : 'Hide details')}); if (!b) return null; b.click(); await new Promise((r) => requestAnimationFrame(() => r())); const d = e.querySelector('.browser-live-blocked-detail'); return { shown: !!d && !d.hidden && d.getBoundingClientRect().height > 0, text: d ? d.textContent : null, label: b.textContent }; })()`);
           const f1 = await fold(true);
           ok(!!f1 && f1.shown && f1.text === 'a press-and-hold check' && f1.label === 'Hide details', `②b Details opens the agent's evidence under the banner (${JSON.stringify(f1)})`);
           // the cap popover (the verifier's MAJOR 3): its background is a real colour, never transparent over the bar
           const pop = await evaluate(`(async () => { const e = (${LIVE})._browserLive.el(); const c = e.querySelector('.browser-live-strip-cap'); if (!c) return null; c.click(); await new Promise((r) => setTimeout(r, 80)); const p = document.querySelector('.browser-live-cap-pop'); if (!p) return { none: true }; const bg = getComputedStyle(p).backgroundColor; const probe = document.createElement('div'); probe.style.background = 'var(--bg-dialog)'; document.body.appendChild(probe); const want = getComputedStyle(probe).backgroundColor; probe.remove(); p.remove(); return { bg, want }; })()`);
           ok(!!pop && !pop.none && pop.bg === pop.want && !/rgba\(0, 0, 0, 0\)|transparent/.test(pop.bg), `②b the browser-cap popover is painted with the dialog colour, never transparent (${JSON.stringify(pop)})`);
-          const w2 = () => evaluate(`(() => { const d = window.app._browserProfiles; const msg = { type: 'browser-profiles-updated', ...d, backends: { ...(d.backends || {}), [${JSON.stringify(pid)}]: { id: 'chromium', major: 151, plan: null, choices: ['cloak'] } } }; [...window.app.ws.globalHandlers].forEach((h) => { try { h(msg); } catch { } }); return true; })()`);
-          await w2();
-          const x2 = await until(async () => { const x = await look(); return x.button ? x : null; }, 4000);
-          ok(!!x2 && x2.button && !x2.label && x2.words === 'Chromium' && x2.isButton && x2.rows.length === 1 && x2.rows[0].text === 'Your agent reports shop.example blocked it: “captcha”.' && JSON.stringify(x2.rows[0].btns) === JSON.stringify(['Switch to CloakBrowser…', 'Hide details', 'Dismiss']), `②b W2 (another browser available): the name is a BUTTON and the banner offers "Switch to CloakBrowser…" beside Details (still open across the rebuild) and Dismiss (${JSON.stringify(x2 && x2.rows)})`);
-          const dialogOf = () => until(() => evaluate(`(() => { const d = document.getElementById('browser-switcher-dialog'); if (!d || !d.querySelector('.brsw-now')) return null; const q = (c) => { const el = d.querySelector(c); return el ? el.textContent : null; }; return { now: q('.brsw-now-text'), notice: q('.brsw-notice'), empty: q('.brsw-empty'), cards: d.querySelectorAll('.brsw-target').length, iconBtn: !!d.querySelector('.file-tool-btn') }; })()`), 8000);
+          const dialogOf = () => until(() => evaluate(`(() => { const d = document.getElementById('browser-switcher-dialog'); if (!d || !d.querySelector('.brsw-now')) return null; const q = (c) => { const el = d.querySelector(c); return el ? el.textContent : null; }; const t = d.querySelector('.brsw-target'); return { now: q('.brsw-now-text'), notice: q('.brsw-notice'), empty: q('.brsw-empty'), cards: d.querySelectorAll('.brsw-target').length, state: t ? t.dataset.state : null, key: t ? t.dataset.key : null, iconBtn: !!d.querySelector('.file-tool-btn') }; })()`), 8000);
           const closeD = () => evaluate(`(() => { const d = document.getElementById('browser-switcher-dialog'); if (d) d.querySelector('.dialog-footer .btn-cancel').click(); return !document.getElementById('browser-switcher-dialog'); })()`);
           await evaluate(`(${LIVE})._browserLive.el().querySelector('.browser-live-bar .browser-live-backend').click()`);
           const d1 = await dialogOf();
-          ok(!!d1 && d1.now === "Your agent's browser: Chromium" && d1.notice === null && /^There's no other browser for “/.test(d1.empty || '') && d1.cards === 0 && !d1.iconBtn, '②b the name button opens the switch dialog on the REAL view: the now line + the empty line, no notice, no card', JSON.stringify(d1));
+          ok(!!d1 && d1.now === "Your agent's browser: Chromium" && d1.notice === null && d1.empty === null && d1.cards === 1 && d1.key === 'target:cloak' && ['not-installed', 'not-installed-here'].includes(d1.state) && !d1.iconBtn, '②b the name button opens the switch dialog on the REAL view: the now line + ONE card (CloakBrowser, not installed on this scratch server), no notice, no empty line', JSON.stringify(d1));
           ok(await closeD(), '②b the dialog\'s Close closes it');
-          await w2();
           await until(async () => { const x = await look(); return x.rows.length && x.rows[0].btns.length === 3 ? x : null; }, 4000);
           await evaluate(`[...(${LIVE})._browserLive.el().querySelectorAll('.browser-live-blocked-row button')].find((b) => b.textContent === 'Switch to CloakBrowser…').click()`);
           const d2 = await dialogOf();
-          ok(!!d2 && d2.notice === "CloakBrowser isn't part of this version of VibeSpace." && d2.cards === 0, '②b the banner\'s "Switch to CloakBrowser…" opens the dialog on the not-in-this-version notice (the real route: nothing to switch to on this build)', JSON.stringify(d2));
+          ok(!!d2 && d2.notice === null && d2.cards === 1 && d2.key === 'target:cloak' && ['not-installed', 'not-installed-here'].includes(d2.state), '②b the banner\'s "Switch to CloakBrowser…" opens the dialog on the cloak card (the real route: its next step is the install)', JSON.stringify(d2));
           await closeD();
+          // W1 by a broadcast: nothing to switch to
+          const w1 = () => evaluate(`(() => { const d = window.app._browserProfiles; const msg = { type: 'browser-profiles-updated', ...d, backends: { ...(d.backends || {}), [${JSON.stringify(pid)}]: { id: 'chromium', major: 151, plan: null, choices: [] } } }; [...window.app.ws.globalHandlers].forEach((h) => { try { h(msg); } catch { } }); return true; })()`);
+          await w1();
+          const x1 = await until(async () => { const x = await look(); return x.label && !x.button ? x : null; }, 4000);
+          ok(!!x1 && x1.tag === 'SPAN' && !x1.labelFocusable && x1.words === 'Chromium' && x1.isButton === false && x1.rows.length === 1 && x1.rows[0].text === 'Your agent reports shop.example blocked it: “captcha”. Take over to get past the check yourself.' && JSON.stringify(x1.rows[0].btns) === JSON.stringify(['Hide details', 'Dismiss']), `②b W1 (nothing to switch to, by a broadcast): the name is a plain label, not focusable; the banner says the way out (take over), Details still open across the rebuild, Dismiss (${JSON.stringify(x1 && x1.rows)})`);
+          const cls0 = await evaluate(`[...(${LIVE})._browserLive.el().querySelectorAll('.browser-live-blocked-row button')].map((b) => b.className)`);
+          ok(cls0.length === 2 && cls0.every((c) => /\bmounts-btn\b/.test(c) && !/file-tool-btn/.test(c)), `②b W1: every banner button the house text button, never a 24 px icon box (${JSON.stringify(cls0)})`);
           await evaluate(`[...(${LIVE})._browserLive.el().querySelectorAll('.browser-live-blocked-row button')].find((b) => b.textContent === 'Dismiss').click()`);
-          const gone = await until(async () => { const x = await look(); return !x.banner && !x.rows.length ? x : null; }, 8000);
-          ok(!!gone && gone.label && !gone.button, '②b Dismiss removes the claim for real (the broadcast drops the row) — and the real digest puts the plain label back', JSON.stringify(gone));
+          const gone = await until(async () => { const x = await look(); return !x.banner && !x.rows.length && x.button ? x : null; }, 8000);
+          ok(!!gone && gone.button && !gone.label, '②b Dismiss removes the claim for real (the broadcast drops the row) — and the real digest puts the button back', JSON.stringify(gone));
           await evaluate(`(() => { for (const id of [...window.app.wm.windows.keys()]) { try { window.app.wm.closeWindow(id); } catch {} } return 1; })()`);
         }
       }

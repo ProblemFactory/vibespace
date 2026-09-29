@@ -5,14 +5,14 @@
  */
 
 import { marked } from 'marked';
-import DOMPurify from 'dompurify';
+import { sanitizeHtml } from './safe-html.js'; // THE one sanitizer for agent / peer / file HTML (no CSS, no product classes, no forms)
 import { escHtml, copyText, showContextMenu, showToast, absUrl, onOutsidePress } from './utils.js';
 import { track } from './telemetry-client.js';
 import { renderCodeBlock, rehighlightCodeBlock, stripAnsi, getHljsLanguages } from './highlight.js';
 import { UI_ICONS } from './icons.js';
 import { commandDrivesBrowser, toolCommandText } from '../browser-trace.js'; // agent browser P5 (§4.5 / D35): which shell calls carry an action trace
 import { commandTouchesChannels } from '../channel-touch.js'; // §26 (B-099e): a shell call running vibespace-channels carries the witness's box
-import { describeAgentCommand, agentCommandText, alwaysAllowFor, rulesText } from '../agent-tool-rules.js'; // lane L: VibeSpace's own tools in plain words + the widened (or narrowed / withheld) Always Allow
+import { describeAgentCommand, agentCommandText, alwaysOfferFor, updatesText, rulesText } from '../agent-tool-rules.js'; // lane L: VibeSpace's own tools in plain words + the widened (or narrowed / withheld) Always Allow; r6: the ONE offer the server also sends (F6) + every update in words (F5)
 import { isAgentMemoryPath, backendFeatureCaps, initHealthIssues, initHealthLabel, initFrameOf } from './agent-meta.js';
 import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
 import { t } from './i18n.js';
@@ -23,6 +23,8 @@ import { mcpParts } from './chat-run-summary.js';
 import { assistantNoteOf, noteSentence, toolResultSentence } from './chat-run-summary.js'; // lane S3: text addressed to the ASSISTANT is a note, harness bookkeeping in a tool result is a sentence
 import { isVibespaceNotice, noticeCardView, impersonatesVibespace } from '../notification-senders.js'; // lane S3: a VibeSpace notice is titled "VibeSpace · …", never `Message from "…"`; S3 verify F3: decided by the record's PATH (`peerVia`), never its sender's name or first sentence
 import { handbackFacts } from '../browser-takeover.js'; // lane S3: the handback card's title, read back by the module that wrote the words
+import { handoverFacts } from '../stash-summary.js'; // 2026-09-28: the hand-over card's title + the notices behind its expander, read back by the module that wrote the words
+const noticeFacts = (body) => handbackFacts(body) || handoverFacts(body);   // ONE facts hook per producer, tried in order; null = the generic rules
 // PURE builder (CJS pulled into the bundle, like ssh-key-format.js) — the
 // codex multi-agent collab rows (B-7473). Escaper/translator/icons are
 // injected so the whole surface is unit-testable outside a browser.
@@ -32,7 +34,9 @@ import { collabRowsHtml, collabReportHeadText, collabRowTitle } from '../collab-
 // escaping is provable in a unit test rather than reviewed by eye.
 import { userChannelKind, userChannelRecord, userMessageCardHtml, userFileCardHtml } from '../user-channel.js';
 import { stallWords } from '../workflow-disk.js'; // PURE: a stalled Workflow run's words — the View Workflow window reads the same function
-import { askTarget, askState, isWaiting, helperAskHead, helperAskSettledWords, mainAskSettledWords, helperLabelOf, agentStatusWords, isStopRejection } from '../helper-ask.js'; // PURE (lane S1): a helper's permission ask — its card's words, a stopped helper's chip
+import { clearedText } from './record-clear-ui.js'; // the .197 integration: a CLEARED group card's words (the device's language)
+import { GROUP_ADAPTER_ID } from '../channel-groups.js'; // lane group-report-card: a group card's group opens its window (the group namespace, never a registry adapter id)
+import { askTarget, askSubject, askState, isWaiting, helperAskHead, helperAskSettledWords, mainAskSettledWords, helperLabelOf, agentStatusWords, isStopRejection, hiddenCharsOf, revealParts, revealHidden, secondPressVerdict } from '../helper-ask.js'; // PURE (lane S1): a helper's permission ask; r6: the whole subject (F3) + the hidden-character screen and the second press (F7) — its card's words, a stopped helper's chip
 /** The css class of a settled permission's words (verify r5): green for allowed, red for a refusal, grey for unknown. */
 const permissionClassOf = (w) => (w && w.cls === 'allowed' ? 'chat-permission-allowed' : w && w.cls === 'unknown' ? 'chat-permission-unknown' : 'chat-permission-denied');
 // THE one reset-credit confirm dialog (design-reset-credits p2): the wall card /
@@ -120,9 +124,27 @@ export function agentCommandOf(input) {
   const cmd = agentCommandText(input);
   return cmd ? describeAgentCommand(cmd) : null;
 }
-/** The steps as one line in the reader's language ("Click @e1 · Read the page"). */
+/** The steps as one line in the reader's language ("Click @e1 · Read the page"). r6 F7: every model-written param
+ *  is revealed (a hidden character spelled ⟦U+XXXX⟧), so a url / a target cannot read as something else. */
 export function agentStepsText(desc) {
-  return (desc && desc.steps || []).map((s) => t(s.key, s.params)).join(' · ');
+  const rp = (p) => Object.fromEntries(Object.entries(p || {}).map(([k, v]) => [k, typeof v === 'string' ? revealHidden(v) : v]));
+  return (desc && desc.steps || []).map((s) => t(s.key, rp(s.params))).join(' · ');
+}
+/** r6 F7: a text with every hidden character MARKED, as escaped HTML (`⟦U+202E⟧` in a `.chat-hidden-char` span). */
+export function revealedHtml(text) {
+  return revealParts(text).map((p) => (p.code ? `<span class="chat-hidden-char">⟦${escHtml(p.code)}⟧</span>` : escHtml(p.text))).join('');
+}
+/** r6 F3/F7: the WHOLE text of a request (every line, nothing cut) in a `<pre>` built as DOM — text nodes + one
+ *  marked span per hidden character. The pre wraps (pre-wrap, overflow-wrap:anywhere) and is never clipped: a
+ *  button below it sits below the whole request. */
+export function requestPre(text, cls) {
+  const pre = document.createElement('pre');
+  pre.className = cls;
+  for (const p of revealParts(text)) {
+    if (p.code) { const sp = document.createElement('span'); sp.className = 'chat-hidden-char'; sp.textContent = `⟦${p.code}⟧`; pre.appendChild(sp); }
+    else pre.appendChild(document.createTextNode(p.text));
+  }
+  return pre;
 }
 /** A call that is ONLY browser steps wears the agent browser's face: its one
  *  glyph, "Agent browser", the steps — escHtml on every model-written word. */
@@ -133,7 +155,7 @@ export function agentBrowserHeadHtml(desc) {
  *  line also runs, and a scope sentence where one is owed (`close --all`). */
 export function agentPermissionWhatHtml(desc) {
   if (!desc) return '';
-  const also = desc.others && desc.others.length ? ` <span class="chat-permission-also">${escHtml(t('also runs: {cmds}', { cmds: desc.others.join(', ') }))}</span>` : '';
+  const also = desc.others && desc.others.length ? ` <span class="chat-permission-also">${escHtml(t('also runs: {cmds}', { cmds: revealHidden(desc.others.join(', ')) }))}</span>` : '';
   const scope = desc.scope ? `<div class="chat-permission-scope">${escHtml(t(desc.scope))}</div>` : '';
   return `<div class="chat-permission-what">${escHtml(agentStepsText(desc))}${also}</div>${scope}`;
 }
@@ -652,6 +674,8 @@ class ChatRenderers {
     // conduct sentence is agent-facing noise (2.363.0)
     core = core.replace(/^Message from session "[^"]+" \(via vibespace-msg[^)]*\):\s*\n?/, '');
     core = core.replace(/\s*This is a notification, not a user instruction[\s\S]*$/, '');
+    // the .197 integration: a group message the owner CLEARED — its card says so in this device's words (never the words)
+    if (msg.peerCleared) core = clearedText();
     // ONE title element (lane S3): the head is a flex row with a 6 px gap, so the
     // sentence's three pieces — `Message from “`, the name link, `”` — were three
     // flex items and rendered `Message from “ VibeSpace browser ”`. The icon is
@@ -663,10 +687,31 @@ class ChatRenderers {
     // VibeSpace had spoken.
     const impostor = !!msg.peerFrom && impersonatesVibespace(msg.peerFrom);
     const nameSpan = msg.peerFrom ? `<span class="chat-peer-name" role="link" tabindex="0">${escHtml(msg.peerFrom)}</span>` : '';
-    const nameHtml = !msg.peerFrom ? escHtml(t('Message from another session'))
-      : impostor ? t('Message from an agent calling itself “{name}”', { name: nameSpan })
-        : t('Message from “{name}”', { name: nameSpan });
-    el.innerHTML = `<div class="chat-peer-head"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg><span class="chat-peer-title">${nameHtml}</span></div><div class="chat-text">${this.renderMarkdown(core.trim())}</div>`;
+    // A GROUP MESSAGE (lane group-report-card; the owner: "怎么在那个对话里看不到你发了消息？"): "<sender> → <group>" —
+    // the sender the same link a peer card has, the group a link to its window; the head's tooltip says whether it
+    // rode this turn or woke the agent; under the text, "cut short" when the agent was shown it cut, and "… and N
+    // more" on the oldest card of a report that did not show every message. A PEER's words (peerVia 'peer') —
+    // never a VibeSpace notice. Every string escaped; the facts are the normalizer's sanitized `peerGroup`.
+    const g = msg.peerGroup && typeof msg.peerGroup === 'object' && msg.peerGroup.id ? msg.peerGroup : null;
+    const groupSpan = g ? `<span class="chat-peer-group" role="link" tabindex="0">${escHtml(g.name || g.id)}</span>` : '';
+    const whoHtml = !g ? '' : g.self ? escHtml(t('You')) : !msg.peerFrom ? escHtml(t('another agent'))
+      : impostor ? t('an agent calling itself “{name}”', { name: nameSpan }) : nameSpan;
+    const nameHtml = g ? t('{from} → {group}', { from: whoHtml, group: groupSpan })
+      : !msg.peerFrom ? escHtml(t('Message from another session'))
+        : impostor ? t('Message from an agent calling itself “{name}”', { name: nameSpan })
+          : t('Message from “{name}”', { name: nameSpan });
+    const headTip = !g ? '' : g.via === 'wake' ? t('A group message — it woke this agent (its own turn)') : t('A group message — delivered with this turn; nobody was woken for it');
+    const groupNotes = !g ? [] : [
+      g.cut ? t('Cut short in the agent’s report — the whole message: vibespace-msg read {group}', { group: g.id }) : null,
+      g.more > 0 ? t('… and {n} more (vibespace-msg read {group})', { n: g.more, group: g.id }) : null,
+    ].filter(Boolean);
+    if (g) { el.classList.add('chat-group-message'); el.dataset.groupId = g.id; }
+    el.innerHTML = `<div class="chat-peer-head"${headTip ? ` title="${escHtml(headTip)}"` : ''}><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg><span class="chat-peer-title">${nameHtml}</span></div><div class="chat-text">${this.renderMarkdown(core.trim())}</div>${groupNotes.map((n) => `<div class="chat-group-note">${escHtml(n)}</div>`).join('')}`;
+    if (g) {
+      const open = (e) => { e.stopPropagation(); this.app?.openChannel?.(GROUP_ADAPTER_ID, g.id); };
+      const gEl = el.querySelector('.chat-peer-group');
+      if (gEl) { gEl.onclick = open; gEl.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(e); } }; }
+    }
     // A STORED RESET CREDIT this card offers (the wall card / the auto-resume
     // arm card — design-reset-credits §5, p2): ONE button opening THE confirm
     // dialog on the account the offer names; the click alone spends nothing.
@@ -723,14 +768,14 @@ class ChatRenderers {
     const el = document.createElement('div');
     el.className = 'chat-msg chat-msg-system chat-vs-notice';
     el._rawMsg = msg;
-    const view = noticeCardView(msg.peerFrom, rawText, { facts: handbackFacts });
+    const view = noticeCardView(msg.peerFrom, rawText, { facts: noticeFacts });
     const what = view.title.key ? t(view.title.key, view.title.params || {}) : String(view.title.text || '');
     const head = what ? t('VibeSpace · {what}', { what }) : t('VibeSpace');
     // `folded`: the title already says what happened FOR THE USER (a producer's
     // own parser read it), so the words the ASSISTANT was given ("Re-orient
     // before continuing …") sit behind an expander — never as conversation
     const body = !view.body ? ''
-      : view.folded ? `<details class="chat-vs-notice-told"><summary>${escHtml(t('What the assistant was told'))}</summary><div class="chat-text">${this.renderMarkdown(view.body)}</div></details>`
+      : view.folded ? `<details class="chat-vs-notice-told"><summary>${escHtml(view.foldLabel && view.foldLabel.key ? t(view.foldLabel.key, view.foldLabel.params || {}) : t('What the assistant was told'))}</summary><div class="chat-text">${this.renderMarkdown(view.body)}</div></details>`
         : `<div class="chat-text">${this.renderMarkdown(view.body)}</div>`;
     el.innerHTML = `<div class="chat-vs-notice-head">${UI_ICONS.info || ''}<span class="chat-vs-notice-title">${escHtml(head)}</span></div>${body}`;
     this._appendResetCreditBtn(el, msg); // VibeSpace's usage-limit card offers a stored reset credit (design-reset-credits §5)
@@ -954,7 +999,7 @@ class ChatRenderers {
     if (rec.kind === 'message') {
       if (!rec.message && !rec.files.length) return null;
       // markdown per the tool's own describe ("Supports markdown formatting").
-      // renderMarkdown is DOMPurify(marked(...)) — the ONE sanitizer; the PURE
+      // renderMarkdown is sanitizeHtml(marked(...)) — the ONE sanitizer; the PURE
       // builder never carries one (it escapes instead).
       const body = rec.message ? `<div class="chat-text">${this.renderMarkdown(rec.message)}</div>` : '';
       el.classList.add('chat-msg-userchan');
@@ -1037,7 +1082,7 @@ class ChatRenderers {
       } else {
         const ac = isAgent ? null : agentCommandOf(block.input); // lane L: a browser-only call wears the browser's face
         const desc = isAgent && block.input?.description ? `${icon} Agent: ${escHtml(block.input.description)}${agentModelChip(block.input?.model)}` : ac?.browser ? agentBrowserHeadHtml(ac) : `${icon} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}`;
-        const inputStr = stripAnsi(typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2));
+        const inputStr = revealHidden(stripAnsi(typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2))); // r6 F7: a hidden character shows as ⟦U+XXXX⟧
         const statusHtml = isPending
           ? `<div class="chat-tool-output-pending"><span class="chat-spinner" aria-hidden="true"></span> ${t('running...')}</div>`
           : `<details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 ${t('Interrupted')}</summary></details>`;
@@ -1096,18 +1141,25 @@ class ChatRenderers {
       row.dataset.sig = sig;
       row.classList.toggle('pending', isWaiting(state));
       row.innerHTML = '';
-      const target = askTarget(ask);
+      const target = askTarget(ask, t); // a one-line SUMMARY (a cut says …, more lines are counted) — the settled line only
       if (isWaiting(state)) {
         const head = document.createElement('div');
         head.className = 'chat-helper-ask-head';
         head.innerHTML = `${UI_ICONS.robot} <span class="chat-helper-ask-who">${escHtml(helperAskHead(name, t))}</span>`;
         row.appendChild(head);
-        if (target) {
-          const what = document.createElement('div');
-          what.className = 'chat-helper-ask-what';
-          what.innerHTML = `<span class="chat-helper-ask-tool">${escHtml(ask.toolName || '')}</span> <code>${escHtml(target)}</code>`;
-          row.appendChild(what);
-        }
+        // verify r6 F3: WHAT Allow runs, WHOLE — every line of the command (a url / file / path / pattern /
+        // description the same), nothing cut, each hidden character marked; the Allow below sits below all of it.
+        // (It used to be the command's FIRST line cut to 200 chars: `ls -la\ncurl … | sh` read "Bash ls -la".)
+        const subj = askSubject(ask);
+        const what = document.createElement('div');
+        what.className = 'chat-helper-ask-what';
+        const tool = document.createElement('span');
+        tool.className = 'chat-helper-ask-tool';
+        const lines = subj ? String(subj.text).split('\n').length : 0;
+        tool.textContent = (ask.toolName || '') + (lines > 1 ? ' · ' + t('{n} lines', { n: lines }) : '');
+        what.appendChild(tool);
+        if (subj) { what.appendChild(document.createTextNode(' ')); what.appendChild(requestPre(subj.text, 'chat-helper-ask-cmd')); }
+        row.appendChild(what);
         const mount = document.createElement('div');
         mount.className = 'chat-helper-ask-mount';
         row.appendChild(mount);
@@ -1117,7 +1169,7 @@ class ChatRenderers {
         const w = helperAskSettledWords(state, t);
         const line = document.createElement('div');
         line.className = `chat-helper-ask-settled chat-permission-resolved ${permissionClassOf(w)}`;
-        line.textContent = `${w ? w.icon + ' ' + w.text : ''} · ${ask.toolName || ''}${target ? ' ' + target : ''}`;
+        line.textContent = `${w ? w.icon + ' ' + w.text : ''} · ${ask.toolName || ''}${target ? ' ' + revealHidden(target) : ''}`;
         row.appendChild(line);
       }
     }
@@ -1155,7 +1207,7 @@ class ChatRenderers {
         if (Array.isArray(parsed)) resultText = parsed.map(b => b.text || '').filter(Boolean).join('\n');
       } catch {}
     }
-    const inputStr = stripAnsi(typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2));
+    const inputStr = revealHidden(stripAnsi(typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2))); // r6 F7: as the pending card
 
     const acDone = agentCommandOf(block.input); // lane L: a browser-only call keeps the browser's face once it ran
     // A HELPER STOPPED MID-RUN (lane S1, study 1 T9): a foreground Agent call's result after Stop is the
@@ -1347,7 +1399,7 @@ class ChatRenderers {
     }
     // RECAP (claude system/away_summary, history-only): "what happened while
     // you were away" — model text, so markdown through the ONE sanitizing
-    // renderer (renderMarkdown = marked + DOMPurify), never raw.
+    // renderer (renderMarkdown = marked + sanitizeHtml), never raw.
     if (msg.noticeKind === 'away-summary' && typeof msg.content?.[0]?.text === 'string') {
       const el = document.createElement('div');
       el.className = 'chat-msg chat-msg-system chat-system-notification chat-away-summary';
@@ -1766,22 +1818,46 @@ class ChatRenderers {
       // shell command through that verb) is narrowed to THIS exact line, and
       // an ask verb's (`vibespace-page publish`) is withheld — then the card
       // says why in the button's place, never a silent missing button.
+      // r6: WHAT YOU APPROVE IS WHAT RUNS — (F4) the plain words are a SUMMARY above the raw command line, never
+      // instead of it (a helper's card shows its whole request above the mount); (F7) a hidden character in the
+      // request is marked everywhere, said above Allow, and Allow takes a second, deliberate press; (F5) Always
+      // Allow names on the card EVERY update it sends (a mode change, a directory — not only the rules, not only
+      // in a tooltip); (F6) the press says only allow / always — the server answers from its own record.
       const ac = agentCommandOf(msg.permission.input);
       const toolName = ac?.browser ? t('Agent browser') : msg.permission.toolName;
-      const aa = alwaysAllowFor(msg.permission.suggestions || [], agentCommandText(msg.permission.input));
-      const always = aa.updates || [];
-      const alwaysRules = rulesText(always).join(', ');
-      const alwaysTitle = alwaysRules ? ` title="${escHtml(t('Always allow: {rules}', { rules: alwaysRules }))}"` : '';
-      const withheldHtml = aa.withheld && !always.length ? `<div class="chat-permission-withheld">${escHtml(t(aa.withheld))}</div>` : '';
-      section.innerHTML = `<div class="chat-permission-prompt"><span class="chat-permission-label">${UI_ICONS.lock} ${t('Permission: {tool}', { tool: escHtml(toolName) })}</span>${agentPermissionWhatHtml(ac)}${withheldHtml}<div class="chat-permission-actions"><button class="chat-perm-btn chat-perm-allow">${t('Allow')}</button>${always.length ? `<button class="chat-perm-btn chat-perm-always"${alwaysTitle}>${t('Always Allow')}</button>` : ''}<button class="chat-perm-btn chat-perm-deny">${t('Deny')}</button></div></div>`;
-      section.querySelector('.chat-perm-allow')?.addEventListener('click', () => {
-        this.ws.send({ type: 'permission-response', sessionId: this.sessionId, requestId: msg.permission.requestId, approved: true, toolInput: msg.permission.input });
+      const cmdText = opts.mount ? '' : agentCommandText(msg.permission.input);
+      const hidden = hiddenCharsOf(msg.permission.input);
+      const offer = alwaysOfferFor(msg.permission); // the SAME offer the server sends on Always Allow (answerFromRecord)
+      const always = offer.updates;
+      const lineOf = (u) => t(u.key, u.params) + (u.where ? ` — ${t(u.where)}` : '');
+      const alwaysLines = updatesText(always).map(lineOf); // EVERY update, shown ON the card (below)
+      // the tooltip keeps its lane-L summary of the allow rules, then every OTHER update's line (a mode change, a directory)
+      const allowRules = rulesText(always.filter((u) => u && u.type === 'addRules' && u.behavior !== 'deny' && u.behavior !== 'ask')).join(', ');
+      const titleText = [allowRules ? t('Always allow: {rules}', { rules: allowRules }) : '', ...updatesText(always).filter((u) => !(u.type === 'addRules' && u.key === 'Always allow {rules}')).map(lineOf)].filter(Boolean).join('\n');
+      const alwaysTitle = titleText ? ` title="${escHtml(titleText)}"` : '';
+      const alwaysWhatHtml = alwaysLines.length ? `<div class="chat-permission-always-what"><span class="chat-permission-always-head">${escHtml(t('Always Allow also sends:'))}</span>${alwaysLines.map((l) => `<div class="chat-permission-always-line">${revealedHtml(l)}</div>`).join('')}</div>` : '';
+      const withheldHtml = offer.withheld && !always.length ? `<div class="chat-permission-withheld">${escHtml(t(offer.withheld))}</div>` : '';
+      const hiddenHtml = hidden.length ? `<div class="chat-permission-hidden" role="alert">${UI_ICONS.alert} ${escHtml(t('This request holds {n} hidden character(s) that can make text read differently from what runs: {codes}. Each is shown as ⟦U+…⟧. Allow needs a second press.', { n: hidden.length, codes: hidden.join(', ') }))}</div>` : '';
+      const cmdHtml = cmdText ? `<pre class="chat-permission-cmd">${revealedHtml(cmdText)}</pre>` : '';
+      // …and the WHOLE request with each one marked, open on the card — a pending Write / Edit card has no Input block,
+      // and a hidden character may sit in a field the command line does not show
+      const hiddenInputHtml = hidden.length ? `<details class="chat-diff chat-permission-hidden-input" open><summary class="chat-diff-summary">${escHtml(t('The whole request, each hidden character marked'))}</summary><pre class="chat-permission-cmd">${revealedHtml(JSON.stringify(msg.permission.input || {}, null, 2))}</pre></details>` : '';
+      section.innerHTML = `<div class="chat-permission-prompt"><span class="chat-permission-label">${UI_ICONS.lock} ${t('Permission: {tool}', { tool: revealedHtml(toolName) })}</span>${agentPermissionWhatHtml(ac)}${cmdHtml}${alwaysWhatHtml}${withheldHtml}${hiddenHtml}${hiddenInputHtml}<div class="chat-permission-actions"><button class="chat-perm-btn chat-perm-allow">${hidden.length ? escHtml(t('Allow…')) : t('Allow')}</button>${always.length ? `<button class="chat-perm-btn chat-perm-always"${alwaysTitle}>${t('Always Allow')}</button>` : ''}<button class="chat-perm-btn chat-perm-deny">${t('Deny')}</button></div></div>`;
+      let armedAt = 0;
+      section.querySelector('.chat-perm-allow')?.addEventListener('click', (ev) => {
+        if (hidden.length) {
+          const v = secondPressVerdict(armedAt, Date.now());
+          if (v === 'arm') { armedAt = Date.now(); ev.currentTarget.textContent = t('Press again to allow'); ev.currentTarget.classList.add('armed'); return; }
+          if (v === 'early') return; // the same gesture (a double click) — never the deliberate second press
+        }
+        // r6 F6: the press names the answer only — the server runs ITS record of the request (answerFromRecord)
+        this.ws.send({ type: 'permission-response', sessionId: this.sessionId, requestId: msg.permission.requestId, approved: true });
         msg.permission.resolved = 'allowed';
         this.renderPermissionOverlay(el, msg, opts);
         this._onPermissionResolve('allowed');
       });
       section.querySelector('.chat-perm-always')?.addEventListener('click', () => {
-        this.ws.send({ type: 'permission-response', sessionId: this.sessionId, requestId: msg.permission.requestId, approved: true, toolInput: msg.permission.input, permissionUpdates: always });
+        this.ws.send({ type: 'permission-response', sessionId: this.sessionId, requestId: msg.permission.requestId, approved: true, always: true });
         msg.permission.resolved = 'allowed';
         this.renderPermissionOverlay(el, msg, opts);
         this._onPermissionResolve('allowed');
@@ -1898,8 +1974,10 @@ class ChatRenderers {
       // marked passes raw HTML through — sanitize before injecting into the
       // DOM (message content is model/tool-controlled and may echo hostile
       // markup from files or web pages). Sanitize BEFORE linkify so our own
-      // chat-link spans aren't subject to filtering.
-      let html = DOMPurify.sanitize(marked.parse(text || ''));
+      // chat-link spans aren't subject to filtering. src/lib/safe-html.js: no
+      // CSS, no product classes, no forms — an agent's text can never restyle
+      // or cover an approval card (verify-r6).
+      let html = sanitizeHtml(marked.parse(text || ''));
       html = this._wrapTables(html);
       return this.linkify(html);
     } catch {

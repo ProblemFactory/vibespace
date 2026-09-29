@@ -49,6 +49,9 @@ const USAGE = [
   '  vibespace-task progress "one-line summary" [--detail "full context"]',
   '      append to the Activity log. The SUMMARY is what everyone sees inline — keep it one tight line;',
   '      put specifics (numbers, paths, caveats other agents may need) in --detail.',
+  '  vibespace-task progress-redact <P-id>          CLEAR an Activity-log entry THIS session wrote: it keeps its time and',
+  '      place, its text becomes "[cleared at the user\'s request]" (the id is printed after `progress` and by `show`;',
+  '      the time in ms works too). Only your own entries — the user clears anything from the Task Group log window.',
   '  vibespace-task backlog [<id|#|text>] [--full]   list open backlog items — highest priority first, newest first within',
   '      a priority (`!` high · `↓` low; (you) / (unclaimed) / (claimed by N)) — or show ONE in full (by its B-xxxx id,',
   '      list number, or unique text; works for resolved items too — if the user hands you an id, start here)',
@@ -137,7 +140,9 @@ async function printShow() {
   if (task.progress && task.progress.length) {
     console.log('\nActivity log (recent):');
     for (const pr of task.progress) {
-      console.log('  - ' + new Date(pr.at).toISOString().slice(0, 16).replace('T', ' ') + ' ' + pr.note + (pr.detail && !full ? '  †' : ''));
+      // an entry THIS session wrote shows its id — the handle `progress-redact <id>` takes
+      const own = !!you && pr.session === you && !!pr.id;
+      console.log('  - ' + new Date(pr.at).toISOString().slice(0, 16).replace('T', ' ') + (own ? ' [' + pr.id + ']' : '') + ' ' + pr.note + (pr.detail && !full ? '  †' : ''));
       if (full && pr.detail) for (const dl of pr.detail.split('\n')) console.log('      ' + dl);
     }
     if (!full && task.progress.some((pr) => pr.detail)) console.log('  († = has detail — rerun with --full)');
@@ -151,13 +156,25 @@ async function main() {
     await printShow();
   } else if (cmd === 'progress') {
     if (!arg) { console.error('vibespace-task: progress needs a summary, e.g. vibespace-task progress "fixed the parser" --detail "root cause was ..."'); process.exit(1); }
-    await call('POST', '/api/agent/task-progress', { note: arg, ...(detail ? { detail } : {}) });
-    console.log('progress recorded' + (detail ? ' (with detail)' : ''));
+    const r = await call('POST', '/api/agent/task-progress', { note: arg, ...(detail ? { detail } : {}) });
+    const pid = r && r.entry && r.entry.id ? ' as [' + r.entry.id + ']' : ''; // (an older server answers without the entry)
+    console.log('progress recorded' + pid + (detail ? ' (with detail)' : ''));
     // Same class as vibespace-ask's mirror reminder (2.111.21): real agents
     // logged a deliverable (URL, path, result) here and ended the turn with a
     // reply that never contained it — the activity log is invisible to the
     // user in the chat flow.
     console.log('REMINDER: the activity log is for OTHER AGENTS — anything the USER needs from this work (URLs, file paths, results, conclusions) must ALSO appear in your CHAT REPLY. Do not end the turn with this log as the only copy.');
+  } else if (cmd === 'progress-redact') {
+    if (!arg) { console.error('vibespace-task: progress-redact needs the entry\'s id, e.g. vibespace-task progress-redact P-1a2b3c (vibespace-task show prints the ids of your own entries)'); process.exit(1); }
+    const res = await fetch(api + '/api/agent/task/progress-redact', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ ref: arg.split(' ')[0], ...(group ? { group } : {}) }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 404 && !data.code) { console.error('vibespace-task: this VibeSpace server predates progress-redact — ask the user to update, or to clear the entry from the Task Group log window (right-click → Clear content…)'); process.exit(1); }
+    if (!res.ok) { console.error('vibespace-task:', data.error || res.status); process.exit(1); }
+    console.log(data.cleared ? 'cleared ' + arg.split(' ')[0] + ' — the entry keeps its time and place; its text now reads "[cleared at the user\'s request]"' : 'already cleared: ' + arg.split(' ')[0]);
   } else if (cmd === 'backlog') {
     if (arg) {
       // show ONE item in full (any status) — the "user handed me an id" path
@@ -258,7 +275,7 @@ async function main() {
     process.exit(1);
   } else {
     console.error('vibespace-task: unknown command "' + cmd + '"'
-      + '\n  valid: show, progress, backlog, backlog-add, backlog-edit, backlog-claim, backlog-unclaim, backlog-done, backlog-drop, group-list, group-create, group-update, group-bind, group-unbind\n' + USAGE);
+      + '\n  valid: show, progress, progress-redact, backlog, backlog-add, backlog-edit, backlog-claim, backlog-unclaim, backlog-done, backlog-drop, group-list, group-create, group-update, group-bind, group-unbind\n' + USAGE);
     process.exit(1);
   }
 }

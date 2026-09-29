@@ -5103,7 +5103,8 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
     this._pinned = false;
     const host = el.closest('.chat-msg');
     if (host) host.style.contentVisibility = 'visible';
-    this._scrollElStable ? this._scrollElStable(el) : el.scrollIntoView({ block: 'center' });
+    // verify-r6 K1: the card is landed WHOLE (its whole request above its Allow — taller since r6), never its top at mid-screen
+    this._scrollElStable ? this._scrollElStable(el, { fit: true }) : el.scrollIntoView({ block: 'center' });
     el.classList.remove('chat-ask-flash'); void el.offsetWidth; el.classList.add('chat-ask-flash');
     setTimeout(() => el.classList.remove('chat-ask-flash'), 1800);
     return true;

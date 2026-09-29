@@ -11,8 +11,10 @@ const path = require('path');
 const net = require('net');
 const http = require('http');
 const crypto = require('crypto');
+const textDigest = (t) => crypto.createHash('sha256').update(String(t)).digest('hex'); // a flood floor's memory of a text (verify r9)
 const { spawn, execFile } = require('child_process');
 const M = require('./job-model.js');
+const { applyClear, CLEARED_TEXT } = require('./record-clear.js'); // PURE: "Clear content…" (2026-09-28) — this engine holds the door (clearJobs)
 
 function writeJsonAtomic(file, obj) {
   const tmp = file + '.tmp-' + process.pid;
@@ -102,7 +104,7 @@ class JobManager {
     this.ansWaiters = new Map(); // jobId → [{resolve, timer}]
     this._timers = [];
     this._dirty = false;
-    this._notifyRate = new Map(); // conversationId → {ts, text} — engine-side floor under the CLI's own throttles
+    this._notifyRate = new Map(); // conversationId → {ts, h} — engine-side floor under the CLI's own throttles; `h` = the text's DIGEST (lane-redact verify r9: the TEXT — a job's name + words — sat here per conversation, pruned only past 500, out of every clear's reach)
   }
 
   // ── lifecycle ───────────────────────────────────────────────────────────
@@ -302,6 +304,201 @@ class JobManager {
   snapshotArchived(rec, opts) {
     return { ...this.snapshot(rec, opts), archived: true, archivedAt: rec.archivedAt || null, archivedWhy: rec.archivedWhy || null };
   }
+  /**
+   * "CLEAR CONTENT…" — THE door for Background Work records (2026-09-28). A job
+   * is a family: clearing a cron parent clears the runs it spawned too (each
+   * child is named `<parent name> run` and ran the same command). Each record —
+   * in the registry AND in the archive — is asked `allow(job)` (the caller's
+   * PURE clearVerdict) and cleared IN PLACE through src/record-clear.js
+   * applyClear: the name becomes the ONE sentence; note, context brief,
+   * progress, the notify action's text, every run's last log line, every
+   * delivery's reason and the user's panel answers go. id, kind, state, owner,
+   * access, times, runs, schedule and the COMMAND stay (the program is not a
+   * record's words; ✕ removes it). THE DERIVED COPIES go with it: the viewers'
+   * event ring (`announced: …` lines + the name), a conversation's held
+   * notification stash, and the drained-notification spill files under
+   * data/job-notifications-read/ (a line per notification, rewritten); a
+   * snapshot of a cleared job serves no log tail (the run's log file itself is
+   * the process's output, like a transcript — kept until the 14-day GC).
+   * ORDER (the archive law, 2026-09-16): the ARCHIVE is written first through
+   * `_writeArchive`; a failed write changes nothing anywhere and answers
+   * {error}. Then the registry records, one `_save()`, ONE broadcast.
+   * Returns {cleared: [ids], already: [ids], unknown: [ids], refused: [{id, code, why, status}]} | {error}.
+   */
+  clearJobs(ids, { by = 'owner', at = now(), allow = null } = {}) {
+    if (this.readOnly) return { error: 'registry is read-only in this process' };
+    const out = { cleared: [], already: [], unknown: [], refused: [] };
+    const want = new Set((Array.isArray(ids) ? ids : [ids]).map(String));
+    const arch = this._loadArchive();
+    const family = (j) => want.has(j.id) || (j.cronParent && want.has(j.cronParent));
+    const seen = new Set();
+    // 1) decide every record first (nothing written yet)
+    const liveHits = [...this.jobs.values()].filter(family);
+    const archHits = arch.filter(family);
+    // the names every derived copy is FILED UNDER (the ladder's stash heads a job's message
+    // 'Background Work · <name>') — read before the record loses them
+    const namesBefore = new Set([...liveHits, ...archHits].map((j) => j.name).filter(Boolean));
+    const nameBefore = new Map([...liveHits, ...archHits].map((j) => [j.id, j.name]));
+    for (const id of want) if (!this.jobs.has(id) && !arch.some((r) => r.id === id)) out.unknown.push(id);
+    const verdictOf = (j) => { const v = allow ? allow(j) : { ok: true }; return v && v.ok ? null : (v || { code: 'not_yours' }); };
+    const refusedIds = new Set();
+    for (const j of [...liveHits, ...archHits]) {
+      if (!want.has(j.id)) continue; // a child rides its parent's verdict
+      const v = verdictOf(j);
+      if (v) { refusedIds.add(j.id); out.refused.push({ id: j.id, code: v.code || 'not_yours', why: v.why || '', status: v.status || 403 }); }
+    }
+    const go = (j) => !refusedIds.has(j.id) && !(j.cronParent && refusedIds.has(j.cronParent) && !want.has(j.id));
+    // 2) the archive — a COPY, written durably before anything else changes
+    let archChanged = false;
+    // A RECORD CLEARED AGAIN is stamped `reclearedAt` (lane-redact verify r4, reproduced): a job keeps running after its
+    // first clear (a recurring digest announces more), so what it said BETWEEN two clears reads the sentence as its name
+    // yet carries words the second clear takes everywhere it can reach — `clearedAt` keeps the FIRST stamp on an
+    // `already` record, so the two judges of a late copy (judgeHeldEntry, _stashNotif's `stale`) read this stamp too
+    const next = arch.map((r) => {
+      if (!family(r) || !go(r)) return r;
+      const c = JSON.parse(JSON.stringify(r));
+      const again = !!r.clearedAt;
+      const changed = applyClear(c, { kind: 'job', by, at }).changed;
+      if (changed) seen.add(r.id);
+      if (again) c.reclearedAt = at;
+      if (changed || again) { archChanged = true; return c; }
+      return r;
+    });
+    if (archChanged) {
+      const w = this._writeArchive(next);
+      if (!w.ok) return { error: 'archive write failed: ' + w.error };
+    }
+    // 3) the registry, in place (a live record keeps its runtime-only fields)
+    let liveChanged = false;
+    for (const j of liveHits) {
+      if (!go(j)) continue;
+      if (j.clearedAt) { j.reclearedAt = at; liveChanged = true; }   // cleared before this call (see step 2)
+      if (applyClear(j, { kind: 'job', by, at }).changed) {
+        liveChanged = true; seen.add(j.id);
+        // the ASK went with the words (verify r3): a job parked on a question the owner cleared is
+        // no longer waiting on it — back to `up`, and the question's For-you item is resolved (the
+        // cascade in src/server/record-clear.js then clears that item's words like every other)
+        if (j.state === 'awaiting-user' && !(j.interaction && j.interaction.pending)) { j.state = 'up'; this._resolveAns(j); try { this.d.resolveJobAsk && this.d.resolveJobAsk(j.id); } catch { } }
+      }
+    }
+    for (const j of [...liveHits, ...archHits]) {
+      if (!go(j) || out.cleared.includes(j.id) || out.already.includes(j.id)) continue;
+      (seen.has(j.id) ? out.cleared : out.already).push(j.id);
+    }
+    if (!out.cleared.length && !out.already.length) return out;
+    // 4) the derived copies: the event ring, the held stash, the spill files, the ladder's stash —
+    // for an ALREADY-cleared job too (verify r3): an announce after the first clear puts new words in
+    // the ring / the stash / a spill (never in the record), so a second clear of that job returns
+    // `already` for the record and still takes those words
+    const gone = new Set([...out.cleared, ...out.already]);
+    for (const e of this.events) {
+      if (!gone.has(e.jobId)) continue;
+      e.name = CLEARED_TEXT;
+      if (typeof e.what === 'string' && e.what.startsWith('announced:')) e.what = 'announced: ' + CLEARED_TEXT;
+    }
+    // a HELD notification of a cleared job loses ALL its words (verify r1): its `text` is
+    // whatever `what` the delivery carried — an `announced:` output line, but also the
+    // notify action's OWN text (`a.text || job.name`, one of the fields the clear
+    // replaced) — and it is injected verbatim into the owner conversation's next turn
+    // (renderNotifStash) and spilled to a file. Only the announced prefix was rewritten
+    // before, so a `--notify` reminder's words survived the clear. Fail closed: the sentence.
+    for (const q of this.pendingNotifs.values()) {
+      for (const n of q) {
+        if (!n || !gone.has(n.jobId)) continue;
+        n.jobName = CLEARED_TEXT;
+        n.text = CLEARED_TEXT;
+      }
+    }
+    this._rewriteSpills(gone);
+    // the delivery ladder's own stash (data/msg-stash.json): a codex owner conversation's wrapper hands a
+    // notification it could not queue back to the ladder, which stashes it WHOLE under the job's name
+    // (verify r3) — every such entry filed under a cleared job's name loses its words
+    // …never ANOTHER job's (lane-redact verify r9): names are not unique — an entry naming (by id, `… (jb-…): …`) only jobs
+    // this clear did not take is a same-name job's undelivered notification, kept; one naming a cleared job or no job goes
+    const otherJobsOnly = (e) => { const ids = typeof e.text === 'string' ? e.text.match(/\bjb-[0-9a-f]{8}\b/g) : null; return !!ids && ids.every((id) => !gone.has(id)); };
+    try { if (this.d.redactStash) this.d.redactStash((e) => (e && typeof e.fromName === 'string' && namesBefore.has(e.fromName.replace(/^Background Work · /, '')) && !otherJobsOnly(e) ? { text: CLEARED_TEXT, fromName: 'Background Work · ' + CLEARED_TEXT } : null), { jobIds: [...gone] }); } catch (e) { this.d.log('[jobs] ladder stash rewrite failed:', e.message); }
+    // a PUBLISHED service's forward is labelled with the service's name (the Ports panel, data/port-forwards.json):
+    // relabelled through the same door that labelled it (verify r3) — a running service cleared mid-flight keeps its forward.
+    // Found BY ITS LABEL, never by the runtime-only `_pfId` (lane-redact verify r8, reproduced): the forward is persisted and
+    // restored at boot while `_pfId` is set again only by the next publish (an adopted service's +8 s re-publish, a respawn,
+    // the await inside _ensurePublish) — a clear in that window kept `service: <name>` on the Ports panel and on disk
+    const svcLabels = new Set([...gone].map((id) => nameBefore.get(id)).filter((n) => n && n !== CLEARED_TEXT).map((n) => 'service: ' + n));
+    // …and never ANOTHER job's (lane-redact verify r9): names are not unique — a live service NOT cleared that bears the same
+    // name and publishes that forward's port owns it (its Ports row read the sentence until its next publish); an orphan
+    // forward with the cleared name (no live owner) still goes — fail closed
+    const sameNameLive = (rec) => [...this.jobs.values()].some((o) => !gone.has(o.id) && o.kind === 'service' && o.publish && 'service: ' + o.name === rec.label && (o.ports || []).map(Number).includes(Number(rec.remotePort)));
+    if (svcLabels.size && this.d.getPorts) {
+      try {
+        const pf = this.d.getPorts();
+        for (const rec of (pf && pf.list && pf.list()) || []) {
+          if (!svcLabels.has(rec.label)) continue;
+          if (sameNameLive(rec)) continue;
+          Promise.resolve(pf.forward(rec.hostId, rec.remotePort, { label: 'service: ' + CLEARED_TEXT, targetHost: rec.targetHost || '' })).catch(() => { });
+        }
+      } catch { }
+    }
+    if (liveChanged) this._dirty = true;
+    this._save();
+    if (out.cleared.length) { try { this.d.broadcast('jobs-updated', { cleared: out.cleared }); } catch { } }
+    return out;
+  }
+  /**
+   * "CLEAR CONTENT…" — THE LADDER'S JUDGE (lane-redact verify r4, 2026-09-28, reproduced): the delivery ladder asks this of
+   * EVERY entry it stashes (`registerStashJudge`, src/server/jobs-wiring.js). The clear's own rewrite (`redactStash`
+   * above) takes what is queued at that instant — but a notification the codex wrapper hands BACK later (a queued
+   * message dropped by Stop / removed from the queue: `peer_message_result ok:false`, an unbounded window, past a
+   * restart too) re-enters the queue WHOLE with the pre-clear words. A frame names its job by id (renderOwnerNotify:
+   * `task "name" (jb-…): … poll jb-…`); a job cleared at any time whose frame does not already read the sentence — a
+   * notification rendered AFTER the clear names the job BY the sentence (its name now) and is new output of a job
+   * cleared once — is held as the sentence, its Background Work label too. Store-backed (`clearedAt` in the registry
+   * and the archive), never a memory of past clears. null = not a cleared job's words.
+   */
+  judgeHeldEntry(e) {
+    const text = e && typeof e.text === 'string' ? e.text : '';
+    if (!text) return null;
+    const ids = text.match(/\bjb-[0-9a-f]{8}\b/g);
+    if (!ids) return null;
+    // a frame that already reads the sentence was rendered after the job's clear (its name IS the sentence) — new output,
+    // kept — unless the job was cleared AGAIN (verify r4, reproduced): a frame rendered BETWEEN two clears reads the
+    // sentence too and carries the words the second clear took; the frame has no time, so that case fails closed
+    const reads = text.includes(CLEARED_TEXT);
+    let cleared = false;
+    for (const id of new Set(ids)) {
+      const j = this.jobs.get(id) || (this._loadArchive() || []).find((r) => r && r.id === id) || null;
+      if (j && j.clearedAt && (!reads || j.reclearedAt)) { cleared = true; break; }
+    }
+    if (!cleared) return null;
+    const label = typeof e.fromName === 'string' && /^Background Work · /.test(e.fromName);
+    return { text: CLEARED_TEXT, ...(label ? { fromName: 'Background Work · ' + CLEARED_TEXT } : {}) };
+  }
+  /** The drained-notification spill files (spillNotifs): every line naming a
+   *  cleared job keeps its time and id, loses its words. */
+  _rewriteSpills(gone) {
+    const dir = path.join(this.d.dataDir, 'job-notifications-read');
+    let names = [];
+    try { names = fs.readdirSync(dir).filter((f) => f.endsWith('.md')); } catch { return; }
+    const lineRe = /^- (\S+) (jb-[0-9a-f]+) .*$/;
+    for (const f of names) {
+      const file = path.join(dir, f);
+      let text;
+      try { text = fs.readFileSync(file, 'utf-8'); } catch { continue; }
+      let changed = false, dropping = false;
+      const out = text.split('\n').map((l) => {
+        const m = lineRe.exec(l);
+        // a spill written before verify r3 kept a multi-line text's CONTINUATION lines under its entry: after
+        // a cleared entry, every line up to the next entry / section head goes with it (over-clearing a
+        // neighbour's continuation is the safe side; keeping a cleared job's words is the leak)
+        if (!m) { if (dropping && l.trim() && !l.startsWith('## ')) { changed = true; return null; } dropping = false; return l; }
+        dropping = gone.has(m[2]);
+        if (!dropping) return l;
+        changed = true;
+        return `- ${m[1]} ${m[2]} ${CLEARED_TEXT}`;
+      }).filter((l) => l !== null).join('\n');
+      if (!changed) continue;
+      try { const tmp = file + '.tmp-' + process.pid; fs.writeFileSync(tmp, out); fs.renameSync(tmp, file); }
+      catch (e) { this.d.log('[jobs] spill rewrite failed for', f, '—', e.message); }
+    }
+  }
   /** ✕ on an archived row: gone for good (record + its log dir). */
   rmArchived(id) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
@@ -325,6 +522,7 @@ class JobManager {
   // global agents.jobNotify (default ON).
   _notifyOwner(job, ev) {
     try {
+      if (ev && typeof ev === 'object' && !ev.at) ev.at = now(); // when the event was BORN (a stash after a clear judges by it)
       const cid = job.owner && job.owner.conversation && job.owner.conversation.id;
       // SUBSCRIBERS (2.345.0, owner request): sessions that explicitly opted
       // in to a visible job's events get the same message. A subscription is
@@ -362,7 +560,7 @@ class JobManager {
     // DISTINCT event is STASHED, not dropped (2.344.1 review catch); only an
     // identical repeat is dropped outright.
     const rate = this._notifyRate.get(cid) || {};
-    if (rate.text === text && rate.ts && now() - rate.ts < 600_000) {
+    if (rate.h === textDigest(text) && rate.ts && now() - rate.ts < 600_000) {
       if (!subscriber) { job.lastNotify = { ts: now(), lane: 'suppressed', ok: false, reason: 'duplicate within 10min' }; this._notifyLogPush(job, { lane: 'suppressed', ok: false, reason: 'duplicate within 10min' }); }
       return;
     }
@@ -371,7 +569,7 @@ class JobManager {
       this._dirty = true;
       return;
     }
-    this._notifyRate.set(cid, { ts: now(), text });
+    this._notifyRate.set(cid, { ts: now(), h: textDigest(text) });
     if (this._notifyRate.size > 500) { // prune: keep the map bounded
       const cut = now() - 600_000;
       for (const [k, v] of this._notifyRate) if (!v.ts || v.ts < cut) this._notifyRate.delete(k);
@@ -415,7 +613,10 @@ class JobManager {
    *  conversation's status-bar chip render it in the device's own words. */
   _stashNotif(cid, job, ev, reason, { stampLast = true, held = null } = {}) {
     const q = this.pendingNotifs.get(cid) || [];
-    q.push({ jobId: job.id, jobName: job.name, text: (ev && ev.what) || job.state, ts: now(), urgency: job.state === 'failed' ? 'normal' : 'low', held: held || heldOf(null, reason) });
+    // a delivery that was IN FLIGHT when the owner cleared the job stashes here afterwards with the words it
+    // captured before the clear (verify r3): an event born before the clear is held as the sentence
+    const stale = job.clearedAt && !((ev && ev.at) > Math.max(job.clearedAt, job.reclearedAt || 0));   // …born before the LATEST clear (verify r4: a second clear of an `already` record keeps the first clearedAt)
+    q.push({ jobId: job.id, jobName: stale ? CLEARED_TEXT : job.name, text: stale ? CLEARED_TEXT : ((ev && ev.what) || job.state), ts: now(), urgency: job.state === 'failed' ? 'normal' : 'low', held: held || heldOf(null, reason) });
     const unclaimed = q.filter((e) => !(e && e.ho));
     const dropped = unclaimed.slice(0, Math.max(0, unclaimed.length - NOTIF_STASH_CAP));
     const n = capUnclaimedNotifs(q); // per-conversation cap; the oldest UNCLAIMED fall off (a claimed one is being handed over — verify r4)
@@ -476,7 +677,10 @@ class JobManager {
       const dir = path.join(this.d.dataDir, 'job-notifications-read');
       fs.mkdirSync(dir, { recursive: true });
       const file = path.join(dir, String(cid).replace(/[^\w-]/g, '_') + '.md');
-      const block = `\n## drained ${new Date().toISOString()}\n` + items.map((n) => `- ${new Date(n.ts).toISOString()} ${n.jobId} ${n.jobName}: ${n.text}`).join('\n') + '\n';
+      // ONE LINE per notification (verify r3): a multi-line text (an announce with newlines) is folded onto its
+      // line, so a later clear — which rewrites the spill LINE BY LINE — takes all of it
+      const oneLine = (t) => String(t == null ? '' : t).replace(/\s*\r?\n\s*/g, ' ⏎ ');
+      const block = `\n## drained ${new Date().toISOString()}\n` + items.map((n) => `- ${new Date(n.ts).toISOString()} ${n.jobId} ${oneLine(n.jobName)}: ${oneLine(n.text)}`).join('\n') + '\n';
       let prev = '';
       try { prev = fs.readFileSync(file, 'utf-8'); } catch { }
       let out = prev + block;
@@ -641,6 +845,9 @@ class JobManager {
   /** service⇄ports sync (2.343.0): a published service gets a forward + (when
    *  the frp plugin is configured) a public URL; teardown on stop/park. All
    *  best-effort — publish failure never breaks the service itself. */
+  // THE JOURNAL NAMES A JOB BY ITS ID (lane-redact verify r8, reproduced in chrome): every console line rides the server's
+  // in-memory ring (src/server/incident-wiring.js) into each incident captured later — an automatic freeze capture too —
+  // so `publish unavailable for <name>` put a job's name in data/incidents/<id>/bundle.json after the job was cleared
   async _ensurePublish(job) {
     try {
       const pf = this.d.getPorts && this.d.getPorts();
@@ -650,9 +857,9 @@ class JobManager {
       try {
         const r = await pf.publish(job._pfId);
         job.publishedUrl = r && r.publicUrl || null;
-      } catch (e) { this.d.log('[jobs] publish unavailable for', job.name, '—', e.message); job.publishedUrl = null; }
+      } catch (e) { this.d.log('[jobs] publish unavailable for', job.id, '—', e.message); job.publishedUrl = null; }
       this._touch(job);
-    } catch (e) { this.d.log('[jobs] forward failed for', job.name, '—', e.message); }
+    } catch (e) { this.d.log('[jobs] forward failed for', job.id, '—', e.message); }
   }
   async _teardownPublish(job) {
     try {
@@ -691,7 +898,7 @@ class JobManager {
         if (!['up', 'starting', 'awaiting-user'].includes(job.state)) continue;
         const stamp = this._readStamp(job);
         if (this._verifyAlive(stamp)) {
-          this.d.log(`[jobs] adopted ${job.id} (${job.name}) pid=${stamp.pid}`);
+          this.d.log(`[jobs] adopted ${job.id} pid=${stamp.pid}`);
           if (job.kind === 'service' && job.publish && (job.ports || []).length) setTimeout(() => this._ensurePublish(job), 8000); // ports manager restores at +5.5s
           continue;
         }
@@ -753,8 +960,12 @@ class JobManager {
     } else {
       job.state = run.cause === 'interrupted' ? 'interrupted' : run.cause.startsWith('ok') ? 'done' : 'failed';
       // the LAST NON-EMPTY log line, computed ONCE here (triage §13 rule 4):
-      // the one actionable fact a failed row can show without a detail fetch
-      run.lastLine = this._lastLogLine(job, run);
+      // the one actionable fact a failed row can show without a detail fetch —
+      // unless the clear COVERED this run (it started before the clear; verify
+      // r3): its log is withheld from every snapshot, and its last line is that
+      // log's own output (under a forced stop / OOM the process's last words —
+      // the wrapper's exit marker only when the wrapper outlived the group)
+      run.lastLine = job.clearedAt && !((run.startedAt || 0) > job.clearedAt) ? null : this._lastLogLine(job, run);
       // quiet-success is the DEFAULT, not a law (2.346.0, owner decision): the
       // creating agent opts scheduled successes into events+notify with
       // --notify-ok (job.notifyOk, inherited by the cron child via the
@@ -986,16 +1197,18 @@ class JobManager {
     job.desiredUp = true;
     job.supervise = { consecutiveFails: 0, parkedAt: null };
     if (job.kind === 'cron') { job.state = 'scheduled'; job.nextFireAt = M.nextFire(job.schedule, now()); this._touch(job); this._save(); return { ok: true }; }
-    if (['up', 'starting'].includes(job.state)) return { error: `${job.name} is already running` };
+    // a refusal names the job by ID (lane-redact verify r7): the panel toasts it and the device's toast history (the For-you
+    // Notifications tab) keeps every toast — `<name> is already running` outlived the job's "Clear content…" there
+    if (['up', 'starting'].includes(job.state)) return { error: `${job.id} is already running` };
     this._spawn(job, 'manual'); this._save();
     return { ok: true };
   }
   rm(job, { stop, orphan } = {}) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
     const alive = this._verifyAlive(this._readStamp(job));
-    if (alive && !stop && !orphan) return { error: `${job.name} is still running — vibespace-job rm ${job.id} --stop (kill then remove), or --orphan to abandon the live process (tracked nowhere after that)` };
+    if (alive && !stop && !orphan) return { error: `${job.id} is still running — vibespace-job rm ${job.id} --stop (kill then remove), or --orphan to abandon the live process (tracked nowhere after that)` };
     if (alive && stop) this.stop(job, { force: false });
-    if (alive && orphan) this.d.log(`[jobs] ${job.id} (${job.name}) ORPHANED by request — live pid abandoned`);
+    if (alive && orphan) this.d.log(`[jobs] ${job.id} ORPHANED by request — live pid abandoned`);
     this.jobs.delete(job.id); this._dirty = true; this._save();
     try { this.d.resolveJobAsk && this.d.resolveJobAsk(job.id, { onlyAsk: false }); } catch { } // removed job leaves no orphan inbox items
     try { this.d.broadcast('jobs-updated', { id: job.id, removed: true }); } catch { }
@@ -1005,8 +1218,10 @@ class JobManager {
   ask(job, panel) {
     const v = M.validatePanel(panel);
     if (!v.ok) return { error: v.error };
-    const version = ((job.interaction && job.interaction.pending && job.interaction.pending.version) || 0) + 1;
-    job.interaction = job.interaction || { answers: [] };
+    // r6 D-F5: the panel's identity only grows (persisted `interaction.seq`) — never 1 again after an answer or an expiry
+    job.interaction = job.interaction || { pending: null, answers: [] };
+    const version = M.nextInteractionSeq(job.interaction);
+    job.interaction.seq = version;
     job.interaction.pending = { panel, version, postedAt: now(), timeoutS: panel.timeoutS || 1800 };
     if (job.kind === 'task' && ['up', 'starting'].includes(job.state)) job.state = 'awaiting-user';
     this._touch(job, { what: 'needs your input — open its panel', verb: 'answers' });
@@ -1017,12 +1232,13 @@ class JobManager {
   }
   answerPanel(job, answers) { // user-side (routes verify user auth)
     const p = job.interaction && job.interaction.pending;
-    if (!p) return { error: 'no pending panel' };
-    if (answers.version && answers.version !== p.version) return { error: 'stale panel version — reopen the panel' };
+    // r6 D-F5: the answer names its panel — missing or another panel's ⇒ refused by name, nothing recorded
+    const vv = M.answerVersionVerdict(p, answers);
+    if (!vv.ok) return { error: vv.error, code: vv.code, ...(p ? { version: p.version } : {}) };
     const v = M.validateAnswers(p.panel, answers);
     if (!v.ok) return { error: v.error };
     job.interaction.answers = job.interaction.answers || [];
-    const rec = { ...answers, version: p.version, ts: now() };
+    const rec = { ...answers, version: p.version, ts: now() }; // `version` = the panel's own (never the request's spelling)
     job.interaction.answers.push(rec);
     if (job.interaction.answers.length > 50) job.interaction.answers.splice(0, job.interaction.answers.length - 50);
     job.interaction.pending = null;
@@ -1077,8 +1293,15 @@ class JobManager {
       ack: M.ackState(job),
       pendingPanel: !!(job.interaction && job.interaction.pending),
       answers: (job.interaction && job.interaction.answers || []).slice(-5),
+      // "Clear content…" (2026-09-28): the clear's stamp — every surface words the name from it
+      clearedAt: job.clearedAt || null, clearedBy: job.clearedBy || null,
     };
-    if (tail && run) {
+    // a CLEARED job serves no log tail for a run the clear covered: that run's log file is the process's
+    // own output (kept like a transcript until the 14-day GC), but no surface shows the words the owner
+    // cleared — and it SAYS it withheld them (`logWithheld`: "(no log)" read as "there is none", verify r2).
+    // A run that STARTED after the clear is new output and is served (a cron cleared once keeps its logs).
+    if (tail && run && job.clearedAt && !((run.startedAt || 0) > job.clearedAt)) { out.logTail = ''; out.logWithheld = true; }
+    else if (tail && run) {
       try {
         const logPath = path.join(this._ctlDir(job, run.startedAt), 'current.log');
         const st = fs.statSync(logPath);

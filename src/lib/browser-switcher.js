@@ -38,6 +38,7 @@ import { reconcileKeyed } from './user-todos-row.js';
 import { track } from './telemetry-client.js';
 import * as R from '../integration-registry.js';
 import { switcherModel, switchOutcomeWords, installOutcomeWords, dismissOutcomeWords, viewErrorWords, chipWords, choicesOf, backendFactOf } from './browser-switcher-model.js';
+import { displayFactOf, displayFactText } from './browser-display-words.js'; // lane headless-fallback: the browser runs headless (no desktop session) — said under the now line
 
 const json = (method, body) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
 const TOAST_TYPE = { ok: 'info', warn: 'warn', error: 'error' };
@@ -143,6 +144,13 @@ export function openBrowserSwitcher(app, { profileId, sessionId = null, preselec
       row.dataset.actionSig = e.action ? e.action.kind + '|' + e.action.label : '';
       return row;
     }
+    // BROWSE YOURSELF (B-6ae8): the empty line may carry ONE button ("Open it yourself") — its sentence + that act
+    if (e.kind === 'empty' && e.action) {
+      row.appendChild(el('div', 'brsw-empty-text', e.text));
+      const acts = el('div', 'brsw-actions'); row.appendChild(acts); targetActions(acts, e.key, e.action);
+      row.dataset.actionSig = e.action.kind + '|' + e.action.label;
+      return row;
+    }
     row.textContent = e.text; // notice / empty / error: one sentence
     return row;
   }
@@ -166,6 +174,14 @@ export function openBrowserSwitcher(app, { profileId, sessionId = null, preselec
       row.dataset.state = e.state;
       return;
     }
+    // the empty line gains / loses its button: re-drawn IN PLACE (the reconciler keeps the node it holds)
+    if (e.kind === 'empty' && (!!e.action) !== !!row.querySelector(':scope > .brsw-actions')) { const n = create(e); row.replaceChildren(...n.childNodes); row.dataset.actionSig = n.dataset.actionSig || ''; return; }
+    if (e.kind === 'empty' && e.action) {
+      setText(row.querySelector(':scope > .brsw-empty-text'), e.text);
+      const sig = e.action.kind + '|' + e.action.label;
+      if (row.dataset.actionSig !== sig) { targetActions(row.querySelector(':scope > .brsw-actions'), e.key, e.action); row.dataset.actionSig = sig; }
+      return;
+    }
     setText(row, e.text);
   }
   function render() {
@@ -181,6 +197,7 @@ export function openBrowserSwitcher(app, { profileId, sessionId = null, preselec
       setText(h3, m.title);
       if (m.claims.length) entries.push({ key: 'claims', kind: 'claims', claims: m.claims });
       entries.push({ kind: 'now', ...m.now });
+      { const dt = displayFactText(displayFactOf(app._browserProfiles, profileId)); if (dt) entries.push({ key: 'display', kind: 'display', text: dt }); } // one sentence (the default create/patch)
       if (m.notice) entries.push({ kind: 'notice', ...m.notice });
       for (const tg of m.targets) {
         entries.push({ kind: 'target', ...tg });
@@ -200,14 +217,28 @@ export function openBrowserSwitcher(app, { profileId, sessionId = null, preselec
     const a = e && e.action;
     if (!a || st.pending) return;
     if (a.kind === 'switch') return doSwitch(e, false);
-    if (a.kind === 'switch-confirm') { if (await showConfirmDialog(a.confirm)) return doSwitch(e, true); return; }
-    if (a.kind === 'install') { if (await showConfirmDialog(a.confirm)) return doInstall(e); return; }
+    if (a.kind === 'switch-confirm') { if (await showConfirmDialog({ ...a.confirm })) return doSwitch(e, true); return; }   // ONE options object (the approval census §1b)
+    if (a.kind === 'install') { if (await showConfirmDialog({ ...a.confirm })) return doInstall(e); return; }
     if (a.kind === 'handback') return doHandback(a);
     // an act that SENDS the user somewhere closes the dialog first: the modal overlay would sit over the very window it
     // opened (the button says where it goes — Settings, the key's card, the Agent browser panel)
     if (a.kind === 'integration') { close(); app.openIntegration?.(a.integrationId || e.integrationId); return; }
     if (a.kind === 'settings') { close(); app._settingsUI?.open({ search: 'CloakBrowser' }); return; }
     if (a.kind === 'profiles') { close(); app.openBrowserProfiles?.(); return; }
+    // BROWSE YOURSELF (B-6ae8): open the profile's browser for the user (his own window — the dialog closes first), or close
+    // his browsing so the switch can go ahead (the dialog stays: the broadcast re-draws the card as a switch)
+    if (a.kind === 'browse-yourself') { close(); app.browseYourself?.(a.profileId || profileId, { label: st.view?.profile?.label || '' }); return; }
+    if (a.kind === 'close-browsing') return doCloseBrowsing(a);
+  }
+  async function doCloseBrowsing(a) {
+    st.pending = { state: 'closing-browsing' };
+    const r = await fetchJson(`/api/browser/browse/${encodeURIComponent(a.key || '')}/close`, { method: 'POST' });
+    st.pending = null;
+    if (!r || r.error) {
+      if (r && r.error) console.warn('[browser-switcher] close browsing answered', r.code, r.error);
+      toast({ tone: 'error', text: r ? t("Couldn't close your browsing.") : t('Could not reach the server') });
+    } else toast({ tone: 'ok', text: t('Your browsing is closed — the browser stays for your agents') });
+    if (!st.closed) refresh();
   }
   async function doSwitch(e, confirmDowngrade) {
     const from = st.view?.profile?.provider || 'chromium';

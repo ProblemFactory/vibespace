@@ -149,6 +149,9 @@ function browserFactFor(session, view) {
   // and two tabs named "work" would be the study's confusion again)
   const own = managed ? { label: pinned && PIN_RUNGS.includes(variant) && !atts.some((a) => str(a.profileId) === pinned.id) ? pinned.label : null, state: stateOf(v.own).state } : null;
   const fact = { v: 1, key: bk, pinned, pinGone, pinCleared, using, own, lastUsed, differs, input, live: !!liveRef, liveRef: liveRef || null };
+  // lane browser-stuck (2026-09-28): the page is held by a dialog / not responding — the dialog watch's fact, carried as
+  // the view gives it (`{state: dialog|unresponsive, dialog?, why?, count?, since, profileId}`); null when all is well
+  if (v.stuck && typeof v.stuck === 'object' && (v.stuck.state === 'dialog' || v.stuck.state === 'unresponsive')) fact.stuck = v.stuck;
   fact.digest = factDigest(fact);
   return fact;
 }
@@ -175,7 +178,8 @@ function factDigest(f) {
   return [f.key, f.pinned ? `${f.pinned.id}:${f.pinned.label}:${f.pinned.origin}` : '-', f.pinGone ? f.pinGone.id : '-', f.pinCleared ? f.pinCleared.label : '-',
     `${u.kind}:${u.id || ''}:${u.label || ''}:${u.state}:${u.locked ? 'L' : ''}:${u.count || ''}:${u.error ? u.error.length : 0}`,
     f.own ? `${f.own.label || ''}:${f.own.state}` : '-',
-    f.lastUsed ? `${f.lastUsed.kind}:${f.lastUsed.id || ''}:${f.lastUsed.label || ''}` : '-', f.differs || '-', f.input || '-', f.liveRef || '-'].join('|');
+    f.lastUsed ? `${f.lastUsed.kind}:${f.lastUsed.id || ''}:${f.lastUsed.label || ''}` : '-', f.differs || '-', f.input || '-', f.liveRef || '-',
+    f.stuck ? `${f.stuck.state}:${f.stuck.dialog ? f.stuck.dialog.id || '' : ''}:${f.stuck.why || ''}:${f.stuck.count || 0}` : '-'].join('|'); // lane browser-stuck
 }
 
 /** `{name}` placeholders, for a `t` that is not given (the server's journal, a test). */
@@ -240,7 +244,10 @@ function browserFactWords(fact, tIn) {
   // the conversation's own browser, named the same way everywhere (the live view's pane, its tab, its title)
   const ownName = fact.own && fact.own.label ? fact.own.label : TEMP;
   const ownShort = fact.own && fact.own.label ? fact.own.label : t('Temp browser');
-  return { name, line, state, pinned: pinnedName, why, running: runningName, amber: !!fact.differs, tooltip: lines.join('\n'), show, temporary: !!u.temporary, ownName, ownShort };
+  // lane browser-stuck: a page held by a dialog / not responding is said on every surface that prints the fact (the chip, the title)
+  const stuck = fact.stuck && fact.stuck.state === 'dialog' ? t('page dialog open') : fact.stuck && fact.stuck.state === 'unresponsive' ? t('page not responding') : '';
+  if (stuck) { lines.unshift(fact.stuck.state === 'dialog' ? t('The page is waiting on a dialog — answer it in the live view') : t('The page is not responding — Restart')); line = t('{line} · {stuck}', { line, stuck }); }
+  return { name, line, state, pinned: pinnedName, why, running: runningName, amber: !!fact.differs || !!stuck, tooltip: lines.join('\n'), show: show || !!stuck, temporary: !!u.temporary, ownName, ownShort, stuck };
 }
 
 /** The ref a live view shows for the browser in use (a profile id, the conversation's own, else none). */

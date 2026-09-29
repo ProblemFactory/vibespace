@@ -1537,8 +1537,10 @@ const NOTIF_TEXT = '[VibeSpace Background Work] task "nightly" (job-1): done.';
     ok(bad && bad.peerFrom === `Background Work · ${evil}` && bad.content[0].text.includes(evil) && !JSON.stringify(bad).includes('<span'),
       'the normalizer carries text and label as DATA — no markup is ever built here', JSON.stringify(bad && [bad.peerFrom, bad.content[0].text]).slice(0, 200));
     const cr = fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf8');
-    ok(/const nameSpan = msg\.peerFrom \? `<span class="chat-peer-name" role="link" tabindex="0">\$\{escHtml\(msg\.peerFrom\)\}<\/span>` : '';\s*\n\s*const nameHtml = !msg\.peerFrom[\s\S]{0,300}\{ name: nameSpan \}[\s\S]{0,120}\{ name: nameSpan \}/.test(cr), 'renderer pin: the peer/notification LABEL goes through escHtml before it enters innerHTML (both titles — S3 verify F3 added "an agent calling itself …" — take the one escaped span)');
-    ok(/<div class="chat-text">\$\{this\.renderMarkdown\(core\.trim\(\)\)\}<\/div>/.test(cr) && /renderMarkdown\(text\) \{[\s\S]{0,400}DOMPurify\.sanitize\(marked\.parse/.test(cr), 'renderer pin: the BODY goes through renderMarkdown, i.e. DOMPurify (the XSS law)');
+    // (the .197 integration: lane group-report-card put the GROUP head between the two lines — its sender is the same
+    // escaped span, its group name escaped too — so the pin reads the block, bounded, and the group span's escaping)
+    ok(/const nameSpan = msg\.peerFrom \? `<span class="chat-peer-name" role="link" tabindex="0">\$\{escHtml\(msg\.peerFrom\)\}<\/span>` : '';[\s\S]{0,1400}const groupSpan = g \? `<span class="chat-peer-group" role="link" tabindex="0">\$\{escHtml\(g\.name \|\| g\.id\)\}<\/span>` : '';[\s\S]{0,300}\{ name: nameSpan \}\) : nameSpan;\s*\n\s*const nameHtml = g \? [\s\S]{0,300}\{ name: nameSpan \}[\s\S]{0,120}\{ name: nameSpan \}/.test(cr), 'renderer pin: the peer/notification LABEL goes through escHtml before it enters innerHTML (both titles — S3 verify F3 added "an agent calling itself …" — take the one escaped span)');
+    ok(/<div class="chat-text">\$\{this\.renderMarkdown\(core\.trim\(\)\)\}<\/div>/.test(cr) && /renderMarkdown\(text\) \{[\s\S]{0,600}sanitizeHtml\(marked\.parse/.test(cr), 'renderer pin: the BODY goes through renderMarkdown, i.e. sanitizeHtml (src/lib/safe-html.js — the XSS law)');
   }
   await N.stop();
 }

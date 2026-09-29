@@ -6,7 +6,8 @@
 //
 //   ① every VIEW × en / zh / ja × 1280×800 (the dialog 420 px) and 360×740 (the phone rule: 95vw, ≤ 360) under
 //      'DejaVu Sans' (the Actions runner's face — proven drawn on the dialog's h3 by CSS.getPlatformFontsForNode):
-//      the REAL W1 view of a real profile (with and without `preselect: 'cloak'`), and every card state as a FIXTURE
+//      the REAL view of a real profile (since lane-cloak: the "not installed" card of this build), W1 (a refused
+//      record, with and without `preselect: 'cloak'`) and every card state as a FIXTURE
 //      view the REAL src/browser-switch.js builds (scripts/fixtures/browser-switcher-views.mjs — the one producer the
 //      fast suite shares), served to the page by a fetch wrapper so a broadcast's refresh re-serves the same view;
 //      per leg: every button / target name / chip on ONE text line; no leaf text box narrower than its longest word
@@ -162,7 +163,7 @@ const FONT_SOURCE = "document.addEventListener('DOMContentLoaded', () => { const
 const DEV = /§|src\/|\.mjs|`|\btier\b|cloud:|binary_absent|\bprovider\b|\begress\b|\blease\b|\bseeded\b|\bbackend\b|\bnpm\b|\bcloak\b|\d{3}/i;
 const BAD = /\bundefined\b|\bnull\b|\bNaN\b|\[object/;
 const ALLOWED_LATIN = ['Amazon Bedrock AgentCore', 'Browser Use', 'CloakBrowser', 'Browserbase', 'Browserless', 'Chromium', 'Chrome', 'VibeSpace', 'Cookie', 'Kernel', 'Agent', 'agent', 'MB']; // product + browser names (the default browser's blurb names Chrome)
-const DATA_LATIN = ['Vendor portal', 'shop.example', 'shopping', 'captcha', 'dev-1']; // the fixtures' own data (a label, a host, the agent's words)
+const DATA_LATIN = ['Vendor portal', 'shop.example', 'shopping', 'captcha', 'dev-1', 'cloakbrowser.dev']; // the fixtures' own data (a label, a host, the agent's words) + the §7.2.1 record's download host (lane-cloak)
 function wordsProblems(lang, texts, { allowDigits = false } = {}) {
   const out = [];
   for (const x of texts) {
@@ -216,7 +217,11 @@ else await (async () => {
   if (!ok(!!REAL, 'a real profile “shopping” was created (the W1 legs read its REAL switcher view)', J(made).slice(0, 300))) return;
   const w1real = await api('GET', `/api/browser/switcher?profile=${encodeURIComponent(REAL)}`);
   const cloakReal = w1real.json && (w1real.json.rows || []).find((r) => r.id === 'cloak');
-  ok(w1real.status === 200 && cloakReal && cloakReal.state === 'not-in-this-version' && cloakReal.switchKind === 'in-place' && typeof w1real.json.live === 'boolean', `the REAL view on this build: the CloakBrowser row is not-in-this-version (${cloakReal && cloakReal.state}), live is a fact`, J(w1real.json).slice(0, 400));
+  // lane-cloak (2026-09-28): this build's §7.2.1 record is a MEASUREMENT, so cloak is wired — on a scratch server
+  // (its own data/, nothing installed there) the REAL row says the program is not installed yet: one card, whose one
+  // control is the install (with npm on PATH) or the Settings location (without); `w1*` = a refused record, a fixture
+  const REAL_STATE = cloakReal ? cloakReal.state : null;
+  ok(w1real.status === 200 && cloakReal && ['not-installed', 'not-installed-here'].includes(REAL_STATE) && cloakReal.switchKind === 'in-place' && typeof w1real.json.live === 'boolean' && w1real.json.install && w1real.json.install.ok === true, `the REAL view on this build: the CloakBrowser row is ${REAL_STATE} (wired since the measurement; nothing installed on a scratch server), the install verdict ok, live is a fact`, J(w1real.json).slice(0, 400));
 
   // ── the fixture views, from the ONE producer ──
   const V = FX.views();
@@ -289,15 +294,16 @@ else await (async () => {
   const click = (sel) => evaluate(`(() => { const el = document.querySelector(${J(sel)}); if (!el) return false; el.click(); return true; })()`);
   const calls = (kind) => evaluate(`window.__brsw.calls.filter((c) => c.kind === ${J(kind)}).length`);
 
-  // the views: the REAL W1 (twice), then every card state as a fixture
+  // the views: the REAL one, W1 (a refused record) twice, then every card state as a fixture
   const VIEWS = [
-    { name: 'w1', pid: REAL }, { name: 'w1-pre', pid: REAL, preselect: 'cloak' },
+    { name: 'real', pid: REAL },
+    { name: 'w1', pid: 'fx-w1' }, { name: 'w1-pre', pid: 'fx-w1', preselect: 'cloak' },
     ...['w1-claim', 'ready', 'not-live', 'ready-confirm', 'needs-key', 'needs-key-no-preset', 'not-installed', 'not-installed-here', 'installing', 'install-failed', 'path-not-runnable', 'older-browser', 'all-in-use-own', 'all-in-use-shared', 'driven', 'switching', 'current-cdp', 'host-profile'].map((n) => ({ name: n, pid: 'fx-' + n })),
     // the driven card when THIS client lists the driver's session (2026-09-28): the button does the handback itself
     { name: 'driven-listed', pid: 'fx-driven', listDriver: true },
   ];
-  const STATE_OF = { ready: 'ready', 'not-live': 'ready', 'ready-confirm': 'ready-confirm', 'needs-key': 'needs-key', 'needs-key-no-preset': 'needs-key', 'not-installed': 'not-installed', 'not-installed-here': 'not-installed-here', installing: 'installing', 'install-failed': 'install-failed', 'path-not-runnable': 'path-not-runnable', 'older-browser': 'older-browser', 'all-in-use-own': 'all-in-use-own', 'all-in-use-shared': 'all-in-use-shared', driven: 'in-use-by-hand', 'driven-listed': 'in-use-by-hand' };
-  const ACTION_OF = { ready: ['Switch to {name}', true], 'not-live': ['Switch to {name}', true], 'ready-confirm': ['Switch to {name}', true], 'needs-key': ['Enter license key…'], 'needs-key-no-preset': ['Enter license key…'], 'not-installed': ['Download and install…'], 'not-installed-here': ['Set location in Settings…'], 'install-failed': ['Install again…'], 'path-not-runnable': ['Set location in Settings…'], 'all-in-use-own': ['Open Agent browser…'], 'all-in-use-shared': ['Use my own license key…'], 'driven-listed': ['Hand it back to your agent'] };
+  const STATE_OF = { real: REAL_STATE, ready: 'ready', 'not-live': 'ready', 'ready-confirm': 'ready-confirm', 'needs-key': 'needs-key', 'needs-key-no-preset': 'needs-key', 'not-installed': 'not-installed', 'not-installed-here': 'not-installed-here', installing: 'installing', 'install-failed': 'install-failed', 'path-not-runnable': 'path-not-runnable', 'older-browser': 'older-browser', 'all-in-use-own': 'all-in-use-own', 'all-in-use-shared': 'all-in-use-shared', driven: 'in-use-by-hand', 'driven-listed': 'in-use-by-hand' };
+  const ACTION_OF = { real: REAL_STATE === 'not-installed' ? ['Download and install…'] : ['Set location in Settings…'], ready: ['Switch to {name}', true], 'not-live': ['Switch to {name}', true], 'ready-confirm': ['Switch to {name}', true], 'needs-key': ['Enter license key…'], 'needs-key-no-preset': ['Enter license key…'], 'not-installed': ['Download and install…'], 'not-installed-here': ['Set location in Settings…'], 'install-failed': ['Install again…'], 'path-not-runnable': ['Set location in Settings…'], 'all-in-use-own': ['Open Agent browser…'], 'all-in-use-shared': ['Use my own license key…'], 'driven-listed': ['Hand it back to your agent'] };
   /** The driver's session listed in THIS client (a sidebar row carrying the fixture's driver key), held across the
    *  sidebar's own re-merges by an accessor pair — or taken away again. */
   const listDriver = (on) => evaluate(`(() => { const sb = window.app.sidebar; const stub = { webuiId: 'w-drv', id: 'w-drv', browserKey: 'bk-0000a001', name: 'Driver', status: 'live' };
@@ -413,7 +419,7 @@ else await (async () => {
             const cf = await until(() => evaluate(`(() => { const o = [...document.querySelectorAll('.dialog-overlay')].find((x) => x.id !== 'browser-switcher-dialog'); if (!o) return null; o.id = 'vs-brsw-confirm'; return { title: o.querySelector('h3').textContent, msg: o.querySelector('.dialog-hint').textContent, ok: o.querySelector('.dialog-footer button:last-child').textContent }; })()`), 3000, 40);
             const before = await calls('install');
             if (cf) { await record(`${leg}-confirm`, lang, vp, { sel: '#vs-brsw-confirm .dialog', dialogBox: false, allowDigits: true }); await click('#vs-brsw-confirm .btn-cancel'); }
-            ok(cf && cf.title === tr(lang, 'Install {name}?', P) && cf.msg === tr(lang, "About 200 MB is downloaded from {name}'s maker and kept in VibeSpace's data folder.", P) && cf.ok === tr(lang, 'Download and install') && before === n0 && (await calls('install')) === n0,
+            ok(cf && cf.title === tr(lang, 'Install {name}?', P) && cf.msg === tr(lang, "About {down} MB is downloaded once from {host}, its maker, and unpacked to about {size} MB in VibeSpace's data folder. VibeSpace checks it is the exact copy it tested; in that test the browser itself connected to nothing on the internet. No account or key is needed.", { down: Math.round(FX.MEASURED_PROOF.download.bytes / 1e6), host: 'cloakbrowser.dev', size: Math.round(FX.MEASURED_PROOF.binary.dirBytes / 1e6) }) && cf.ok === tr(lang, 'Download and install') && before === n0 && (await calls('install')) === n0,
               `${leg}: the download is behind the house confirm and NOTHING is requested before it (install POSTs: ${before - n0})`, J(cf));
             await clearToasts();
             await click('#browser-switcher-dialog .brsw-target .brsw-actions button');

@@ -38,7 +38,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import net from 'node:net';
-import { spawn, execFile } from 'node:child_process';
+import { spawn, execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, freePort } from './scratch.mjs';
 import { windowLiveMode, windowModeBadge, leaseTransition, newViewerId } from '../src/lib/window-live-mode.js';
@@ -698,7 +698,14 @@ async function laneE() {
       let cj = null;
       await sleep(3000);
       const sn = ctl.ready ? await cli('vsst_bbbb', 'snapshot', ctl.id) : { code: -1, err: '' };
-      ok(ctl.ready && !ctl.rec.args.includes('--force-renderer-accessibility') && /mode: auto → pixels — its accessibility tree is closed/.test(acl.out) && sn.code === 1 && /mode_pixels/.test(sn.err), `NEGATIVE CONTROL: Chrome launched WITHOUT the switch exposes no page — auto resolves to pixels "closed" and a snapshot is refused (${(acl.out.match(/mode: .*/) || [''])[0]})`, acl.err + sn.err);
+      // WHY auto says pixels without the switch is a fact of the Chrome major (the .197 integration, MEASURED): ≤ 153 put
+      // its application on the bus with a CLOSED tree; 154 (2026-09-29, 154.0.8037.57) is not on the bus at all without
+      // an accessibility env (the product's switch is the flag + ACCESSIBILITY_ENABLED=1 — desktop-apps CHROMIUM_A11Y_ENV).
+      // An unmeasured major is RED, naming the measurement to take.
+      const CTL_WHY = { 153: /mode: auto → pixels — its accessibility tree is closed/, 154: /mode: auto → pixels — no accessibility tree/ };
+      let chromeMajor = null; try { chromeMajor = Number((/(\d+)\./.exec(execFileSync(chromeBin, ['--version'], { encoding: 'utf8', timeout: 10000 })) || [])[1]) || null; } catch { chromeMajor = null; }
+      ok(!!CTL_WHY[chromeMajor], `Chrome ${chromeMajor}: why a switch-less launch reads as pixels is a MEASURED row (${CTL_WHY[chromeMajor] ? 'yes' : 'none — launch it without the switch and record the mode line'})`);
+      ok(ctl.ready && !ctl.rec.args.includes('--force-renderer-accessibility') && !(ctl.rec.env && ctl.rec.env.ACCESSIBILITY_ENABLED) && !!CTL_WHY[chromeMajor] && CTL_WHY[chromeMajor].test(acl.out) && sn.code === 1 && /mode_pixels/.test(sn.err), `NEGATIVE CONTROL: Chrome launched WITHOUT the switch exposes no page — auto resolves to pixels (Chrome ${chromeMajor}'s measured reason) and a snapshot is refused (${(acl.out.match(/mode: .*/) || [''])[0]})`, acl.err + sn.err);
       void cj;
       pageSrv.close();
     }

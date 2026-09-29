@@ -114,6 +114,7 @@ export const UI_ICONS = {
   // that turns back toward its sender. SVG only.
   reply:     _s('<path d="M6.5 3.5L2.5 7.5l4 4"/><path d="M2.5 7.5h6.5a4.5 4.5 0 014.5 4.5v1"/>'),
   copy:      _s('<rect x="5.5" y="5.5" width="8" height="8" rx="1.2"/><path d="M10.5 5.5V3.5a1 1 0 00-1-1h-6a1 1 0 00-1 1v6a1 1 0 001 1h2"/>'),
+  eraser:    _s('<path d="M9.4 2.9l3.9 3.9-6.1 6.1H4.1L2.3 11.1a1 1 0 010-1.4z"/><path d="M5.9 6.4l3.9 3.9"/><path d="M8.4 12.9h5.3"/>'),
   globe:     _s('<circle cx="8" cy="8" r="6.5"/><path d="M1.5 8h13M8 1.5c2 2.2 2 10.8 0 13M8 1.5c-2 2.2-2 10.8 0 13"/>'),
   monitor:   _s('<rect x="1.5" y="2.5" width="13" height="9" rx="1.5"/><path d="M5.5 14h5M8 11.5V14"/>'),
   // THE AGENT BROWSER'S GLYPH (design-browser-faces direction B, 2.369.168): a
@@ -142,6 +143,9 @@ export const UI_ICONS = {
   reach:     _s('<path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/>'),
   connect:   _s('<path d="M6.5 9.5l3-3M9 4.5l1-1a2.5 2.5 0 013.5 3.5l-1 1M7 11.5l-1 1A2.5 2.5 0 012.5 9l1-1"/>'),
   plus:      _s('<path d="M8 3v10M3 8h10"/>'),
+  // lane channel-threads (2026-09-28): a THREAD — a message and the replies hanging under it (the chip on a
+  // root, the "in thread" tag on a reply, the pane's bar)
+  thread:    _s('<path d="M2.5 3.5h8v5h-4l-2 2v-2h-2z"/><path d="M12.5 6.5h1v5h-1.5v1.5l-1.8-1.5H7.5V10"/>'),
   // the Word viewer's zoom out / in (a magnifier with − / +)
   zoomOut:   _s('<circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14M5 7h4"/>'),
   zoomIn:    _s('<circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14M5 7h4M7 5v4"/>'),

@@ -143,7 +143,11 @@ function makeWorld(t0, { n = 873, hot = 50, warm = 200, perConv = 3, deep = [] }
 }
 /** A scripted adapter MODULE. `worlds` = one world, or `{<adapterId>: world}`
  *  so two ACCOUNTS of the same kind read two different mailboxes. */
-function worldModule(kind, worlds, { receive = 'poll', unitsPerHistory = 1, budgetDefault = 100000, budgetSettingKey = null, live = null, pace = null, vendorName = null } = {}) {
+/** lane lark-search-poll: the CHANGE FEED a scripted module may declare (scope null — the held-scope gate is test-channels-engine's) */
+const FEED_DECL = Object.freeze({ via: 'search', scope: null, option: null, pageSize: 30, pagesPerPass: 5, perMin: 10, maxWindowSec: 3600, catchUp: Object.freeze({ chatType: 'p2p', pagesMax: 20 }), describes: false, timeUnit: 'ms' });
+/** A message the scripted SEARCH hides (the `dropRate` share, by a stable hash of its id — never random). */
+const hiddenBySearch = (vid, rate) => { if (!(rate > 0)) return false; let h = 0x811c9dc5; for (let i = 0; i < vid.length; i++) { h ^= vid.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return (h % 10000) / 10000 < rate; };
+function worldModule(kind, worlds, { receive = 'poll', unitsPerHistory = 1, budgetDefault = 100000, budgetSettingKey = null, live = null, pace = null, vendorName = null, feed = false } = {}) {
   const worldOf = (id) => (worlds && worlds.convs ? worlds : (worlds[id] || Object.values(worlds)[0]));
   const c = {
     ...fake.fakePoll.caps,
@@ -155,6 +159,7 @@ function worldModule(kind, worlds, { receive = 'poll', unitsPerHistory = 1, budg
     budget: { unit: unitsPerHistory > 1 ? 'quota-unit' : 'request', default: budgetDefault, settingKey: budgetSettingKey, metered: true },
     // lane R5: a scripted module may declare the per-second pace (drain rule 18) and the vendor's name
     ...(pace ? { pace } : {}), ...(vendorName ? { vendorName } : {}),
+    ...(feed ? { changeFeed: FEED_DECL } : {}),
   };
   return {
     kind, caps: c,
@@ -176,7 +181,8 @@ function worldModule(kind, worlds, { receive = 'poll', unitsPerHistory = 1, budg
           const from = cursor ? Number(cursor) : 0;
           const page = all.slice(from, from + limit);
           const next = from + limit < all.length ? String(from + limit) : null;
-          return { conversations: page.map((x) => makeConversation({ id: x.id, vendorId: x.id, title: x.title, kind: x.kind, participants: x.participants, lastAt: x.recs.length ? x.recs[x.recs.length - 1].at : null })), cursor: next, complete: !next };
+          // `noListingLastAt` (lane lark-search-poll ⑪ d): a listing that names no last-message instant — Lark's chat list does not
+          return { conversations: page.map((x) => makeConversation({ id: x.id, vendorId: x.id, title: x.title, kind: x.kind, participants: x.participants, lastAt: !world.noListingLastAt && x.recs.length ? x.recs[x.recs.length - 1].at : null })), cursor: next, complete: !next };
         },
         async convCaps() { meter(1); return { read: 'yes', sendAs: [], why: 'read-only-mailbox', at: Date.now() }; },
         async history(id, { anchor = null, limit = 50, initialMax = null } = {}) {
@@ -217,6 +223,26 @@ function worldModule(kind, worlds, { receive = 'poll', unitsPerHistory = 1, budg
           return { data: Buffer.from(`notes of ${messageId}\n`), mime: 'text/plain', name: a.name };
         },
         live: receive === 'push' ? live : undefined,
+        // lane lark-search-poll: THE SCRIPTED SEARCH over the world's own records — a message is searchable `lagMs` after
+        // its instant, `dropRate` of them never (a stable hash), newest first, 30 a page, an offset token
+        changes: feed ? async ({ from, to, pageToken = null, chatType = null, pageSize = 30 } = {}) => {
+          meter(1); world.calls.changes = (world.calls.changes || 0) + 1; (world.calls.feedAt = world.calls.feedAt || []).push(world.clock ? world.clock() : 0);
+          const f = world.feed || {};
+          const nowT = world.clock ? world.clock() : Date.now();
+          const hits = [];
+          for (const x of world.convs.values()) {
+            if (chatType === 'p2p' && x.kind !== 'dm') continue;
+            for (const m of x.recs) {
+              if (m.at < from || m.at > to || nowT < m.at + (Number(f.lagMs) || 0) || hiddenBySearch(m.vendorId, Number(f.dropRate) || 0)) continue;
+              hits.push({ convId: x.id, vendorId: m.vendorId, at: m.at, updatedAt: null, threadKey: null, isP2p: x.kind === 'dm', fromId: m.author.id });
+            }
+          }
+          hits.sort((a, b) => b.at - a.at || (a.vendorId < b.vendorId ? 1 : -1));
+          const off = pageToken ? Number(pageToken) : 0;
+          const pg = hits.slice(off, off + pageSize);
+          const next = off + pageSize < hits.length ? String(off + pageSize) : null;
+          return { hits: pg, more: !!next, pageToken: next, total: hits.length };
+        } : undefined,
       };
     },
   };
@@ -984,6 +1010,30 @@ console.log('⑤ push first: the safety net, pushed records of unknown conversat
   h.stop();
   const un = states.find((s) => s.state === 'unavailable');
   ok(un && un.code === 'sdk-not-installed', 'without @larksuiteoapi/node-sdk the Lark lane parks unavailable with code sdk-not-installed', JSON.stringify(un));
+  // lane lark-search-poll: a live EXCLUSIVE push lane still wins over a carrying change feed (reconcile); in kick mode
+  // the carrying feed is the lane (the relaxed net) — the precedence of design §2.8, on the real engine
+  {
+    const Wpf = makeWorld(clock, { n: 6, hot: 3, warm: 1 });
+    let onState2 = null;
+    const live2 = { start(h) { onState2 = h.onState; onState2({ state: 'live', at: clock, heard: true }); return { stop() {} }; } };
+    const kpf = worldModule('pushfeed', Wpf, { receive: 'push', live: live2, feed: true });
+    const dirPF = path.join(ROOT, 'push-feed');
+    seedAccounts(dirPF, [['pushfeed', 'pushfeed']]);
+    const { eng: epf } = mkEngine('push-feed', { kinds: [kpf], now, dataDir: dirPF });
+    await epf.pass('pushfeed', { force: true });
+    await epf.syncPushLanes();
+    const rpf = epf.adapterRecords().adapters.find((x) => x.id === 'pushfeed');
+    rpf.feed = { ...(rpf.feed || {}), mode: 'carrying', lastOkAt: clock, samples: rpf.feed ? rpf.feed.samples : [] };
+    await epf.setPush('pushfeed', { claimedExclusive: 'exclusive' });
+    onState2({ state: 'live', at: clock, heard: true });
+    const cEx = epf.cadenceOf('pushfeed', 'c0000');
+    await epf.setPush('pushfeed', { claimedExclusive: 'shared' });
+    onState2({ state: 'live', at: clock, heard: true });
+    rpf.feed.lastOkAt = clock;
+    const cSh = epf.cadenceOf('pushfeed', 'c0000');
+    ok(cEx.source === 'push-safety' && cEx.seconds === 900 && cSh.source === 'feed-safety' && cSh.seconds === 300, 'push EXCLUSIVE + a carrying feed ⇒ the push safety net (push wins); push in KICK mode + a carrying feed ⇒ the feed\'s relaxed net', JSON.stringify([cEx, cSh]));
+    epf.stop();
+  }
   const words = caps.pushLaneText({ enabled: true, state: 'unavailable', lastStateCode: un && un.code, lastStateWhy: un && un.why }, { via: 'poll' });
   ok(/npm install @larksuiteoapi\/node-sdk/.test(words) && /restart/.test(words) && /polled/.test(words), 'the card\'s sentence is the exact remedy + "polled meanwhile"', words);
 }
@@ -2352,6 +2402,97 @@ console.log('⑩ a restart keeps everything; the migration turns tracked into ho
   em.stop();
 }
 
+// ═══ ⑫ THE CHANGE FEED AT THE OWNER'S SCALE (lane lark-search-poll, B-5aab — design §6.2) ═══════
+console.log('⑫ the change feed at the owner\'s scale: measuring = ② + the feed pages; carrying = the watched + owed rows, the 5-min net; a 5 % miss demotes it');
+{
+  const Wf = makeWorld(clock, { n: 873 });
+  Wf.clock = () => clock;
+  Wf.feed = { lagMs: 20e3, dropRate: 0 };
+  const kf = worldModule('feedy', Wf, { feed: true });
+  const dirF = path.join(ROOT, 'feed');
+  seedAccounts(dirF, [['feedy', 'feedy']]);
+  let { eng: ef } = mkEngine('feed', { kinds: [kf], now, dataDir: dirF });
+  const diffOf = (b) => { const m = new Map(); for (const [k, v] of Wf.calls.history) { const d0 = v - (b.get(k) || 0); if (d0) m.set(k, d0); } return m; };
+  const tierOf = (id) => { const i = Number(id.slice(1)); return i < 50 ? 'hot' : i < 250 ? 'warm' : 'cold'; };
+  ok(await ingestAll(ef, 'feedy', 8), 'the owner\'s 873 conversations are discovered and read with the feed declared');
+  for (let i = 0; i < 6; i++) { clock += 31e3; await ef.pass('feedy'); }   // the single-chat catch-up pages out (the world's 97 single chats, 3 days old — known, no births needed)
+  const recF = () => ef.adapterRecords().adapters.find((r) => r.id === 'feedy');
+  ok(recF().feed && recF().feed.catchUp && recF().feed.catchUp.done && recF().feed.mode === 'measuring', 'the first run\'s catch-up is done; the feed is MEASURING', JSON.stringify(recF().feed && { cu: recF().feed.catchUp, mode: recF().feed.mode }));
+  // MEASURING: the call count is ②'s arithmetic + the feed's own pages — nothing relaxed
+  {
+    clock += 900e3; await ef.pass('feedy');   // every row polled once: a clean slate
+    const b = new Map(Wf.calls.history); const c0 = Wf.calls.changes;
+    const bud0 = ef.budgetOf('feedy');
+    clock += 31e3; await ef.pass('feedy');
+    const d = diffOf(b);
+    const bud1 = ef.budgetOf('feedy');
+    ok(d.size === 50 && [...d.keys()].every((k) => tierOf(k) === 'hot') && Wf.calls.changes - c0 === 1, `measuring at +31 s: EXACTLY the 50 hot rows (②) + ONE feed page (${d.size} + ${Wf.calls.changes - c0})`, JSON.stringify({ d: d.size, pages: Wf.calls.changes - c0 }));
+    ok(bud1.spent - bud0.spent === 51 && bud1.spentBy.timer - bud0.spentBy.timer === 51 && bud1.spentBy.owner === bud0.spentBy.owner, 'the feed page is counted in the minute\'s budget and charged to the TIMER (50 fetches + 1 page)', JSON.stringify([bud0, bud1]));
+  }
+  // TRAFFIC: the owner's day on the hot rows — the feed finds every message (after its lag) ⇒ CARRYING, measured
+  let mid = 0;
+  const traffic = (n, lagAgo = 25e3) => { for (let i = 0; i < n; i++) { const x = Wf.convs.get(`c${String((mid * 7 + i) % 50).padStart(4, '0')}`); x.recs.push({ vendorId: `${x.id}-live${++mid}`, at: clock - lagAgo - i * 10, author: { id: 'u-1', name: 'Brook' }, text: `live ${mid}`, attachments: [] }); } };
+  for (let round = 0; round < 14; round++) { clock += 31e3; if (round < 10) traffic(30); await ef.pass('feedy'); }
+  const vf = ef.adapterView(recF()).feed;
+  ok(vf.state === 'carrying' && vf.measured.total >= 200 && vf.measured.missed === 0, `the feed found every one of ${vf.measured.total} fetched messages ⇒ CARRYING (≥ 200 samples, ≤ 2 % missed)`, JSON.stringify(vf.measured));
+  // CARRYING: at +31 s ONLY the watched + owed rows; the net at 5 min (owner decision 4); the cold ones at 15 min
+  {
+    clock += 900e3; await ef.pass('feedy');   // a clean slate again
+    await ef.watch('feedy', 'c0003');
+    const b = new Map(Wf.calls.history);
+    clock += 31e3; await ef.watch('feedy', 'c0003'); await ef.pass('feedy');
+    let d = diffOf(b);
+    ok(d.size <= 1 && [...d.keys()].every((k) => k === 'c0003'), `carrying at +31 s: the 50 hot rows are NOT polled — only the open window (${[...d.keys()].join(',') || 'none'})`, JSON.stringify([...d.keys()]));
+    const traffic2 = () => { const x = Wf.convs.get('c0120'); x.recs.push({ vendorId: `c0120-owed${++mid}`, at: clock - 25e3, author: { id: 'u-2', name: 'Cass' }, text: 'owed', attachments: [] }); };
+    const b2 = new Map(Wf.calls.history);
+    clock += 31e3; traffic2(); await ef.watch('feedy', 'c0003'); await ef.pass('feedy');
+    d = diffOf(b2);
+    ok(d.has('c0120') && [...d.keys()].every((k) => k === 'c0120' || k === 'c0003'), 'a WARM row the search named is fetched at once (its owed mark) — nothing else but the open window', JSON.stringify([...d.keys()]));
+    const b3 = new Map(Wf.calls.history);
+    clock += 240e3; await ef.pass('feedy');
+    d = diffOf(b3);
+    ok(d.size >= 245 && [...d.keys()].every((k) => tierOf(k) !== 'cold'), `the 5-minute net: ${d.size} hot + warm rows polled together, no cold one`, JSON.stringify(d.size));
+    ok(ef.cadenceOf('feedy', 'c0500').seconds === 900 && ef.cadenceOf('feedy', 'c0001').seconds === 300 && ef.cadenceOf('feedy', 'c0001').source === 'feed-safety', 'carrying: a hot row relaxes to 300 s, a cold row stays at 900 (never polled MORE)');
+    const perMin = 2 + 250 / 5 + 623 / 15;
+    ok(Math.round(perMin) === 94, `the carrying arithmetic: 2 feed pages + 250 rows ÷ 5 min + 623 ÷ 15 min ≈ ${perMin.toFixed(1)} requests/min (② was ≈ 182) — plus the owed fetches real traffic causes`);
+  }
+  // A BURST: 600 new messages in one window ⇒ ≤ 10 feed pages in any 60 s, the window continues across passes, a
+  // restart keeps the feed's window and every owed mark
+  {
+    clock += 60e3;
+    const p0 = (Wf.calls.feedAt || []).length;
+    for (let i = 0; i < 600; i++) { const x = Wf.convs.get(`c${String(300 + (i % 400)).padStart(4, '0')}`); x.recs.push({ vendorId: `${x.id}-burst${i}`, at: clock - 25e3 - (i % 5) * 1000, author: { id: 'u-3', name: 'Dee' }, text: `burst ${i}`, attachments: [] }); }
+    clock += 1000;
+    // the process "dies" at the first fetch after the feed's pages (the owed marks written, nothing fetched yet)
+    const dying = ef;
+    Wf.onHistory = () => { Wf.onHistory = null; dying.stop(); };
+    await ef.pass('feedy');
+    const win1 = recF().feed.window;
+    const owed1 = Object.values(ef.store.index.live()).filter((e) => e.adapterId === 'feedy' && e.feedOwedAt).length;
+    ok(win1 && (Wf.calls.feedAt || []).length - p0 === 5 && owed1 > 0, `one pass reads ${(Wf.calls.feedAt || []).length - p0} pages (the per-pass bound), leaves the window IN FLIGHT and ${owed1} owed marks — then the process dies at its first fetch`, JSON.stringify(win1));
+    // restart mid-window: the window and the owed marks are on disk
+    ({ eng: ef } = mkEngine('feed', { kinds: [kf], now, dataDir: dirF }));
+    const win2 = recF().feed.window;
+    const owed2 = Object.values(ef.store.index.live()).filter((e) => e.adapterId === 'feedy' && e.feedOwedAt).length;
+    ok(win2 && win2.from === win1.from && win2.to === win1.to && owed2 === owed1, `a RESTART keeps the feed's window (${win2 && win2.from}…${win2 && win2.to}) and every owed mark (${owed2} of ${owed1})`);
+    for (let i = 0; i < 6 && recF().feed.window; i++) { clock += 31e3; await ef.pass('feedy'); }
+    const at = (Wf.calls.feedAt || []).slice(p0).sort((a, b) => a - b);
+    let worst = 0; for (let i = 0, j = 0; j < at.length; j++) { while (at[j] - at[i] >= 60e3) i++; worst = Math.max(worst, j - i + 1); }
+    const burstIn = [...Wf.convs.values()].filter((x) => x.recs.some((m) => /-burst/.test(m.vendorId)));
+    const fetched = burstIn.filter((x) => ef.store.readTail('feedy', x.id, { limit: 100 }).some((r) => /-burst/.test(r.vendorId))).length;
+    ok(!recF().feed.window && worst <= 10 && fetched === burstIn.length, `the burst: ${at.length} pages, never more than 10 in any 60 s (worst ${worst}); the window completed across passes (and a restart); every one of ${burstIn.length} conversations fetched`, JSON.stringify({ pages: at.length, worst, fetched }));
+  }
+  // A SEARCH THAT MISSES 5 % ⇒ DEMOTED, and ②'s arithmetic returns by itself
+  {
+    Wf.feed.dropRate = 0.05;
+    for (let round = 0; round < 24; round++) { clock += 31e3; traffic(40); await ef.pass('feedy'); }
+    const v2 = ef.adapterView(recF()).feed;
+    ok(v2.state === 'demoted' && v2.measured.rate > 0.02 && recF().feed.lastFlip && recF().feed.lastFlip.to === 'demoted', `the search hid 5 % of new messages; the 5-minute net found them ⇒ DEMOTED (${v2.measured.missed} of ${v2.measured.total})`, JSON.stringify(v2.measured));
+    ok(ef.cadenceOf('feedy', 'c0001').seconds === 30 && ef.cadenceOf('feedy', 'c0001').source === 'tier', 'demoted: a hot row is back at 30 s (② returns — the fallback needs no code of its own)');
+  }
+  ef.stop();
+}
+
 // ═══ ⑪ negative controls ═══════════════════════════════════════════════════
 console.log('⑪ controls: the old discovery bound, a scheduler that polls everything');
 {
@@ -2386,6 +2527,62 @@ console.log('⑪ controls: the old discovery bound, a scheduler that polls every
   const polled = historyCalls(Wd) - b0;
   ok(polled === 300, `CONTROL: a poll-everything scheduler sends ${polled} requests at +31 s where the real one sends 20 — the arithmetic leg would go red`);
   ed.stop();
+  // lane lark-search-poll (c): a carrying feed that ignores `watched` — an OPEN window polled at the relaxed net
+  {
+    const CAPS_SRC = fs.readFileSync(path.join(REPO, 'src/channel-caps.js'), 'utf-8');
+    const WLINE = "    if (watched) return { seconds: clamp(T.hotSec), tier, source: 'tier', paused: false };";
+    ok(CAPS_SRC.split(WLINE).length === 2, 'CONTROL setup: the carrying feed\'s open-window line is spelled once');
+    const capsCopy = M.write('src/channel-caps.js', CAPS_SRC.replace(WLINE, ''), null, { esm: false, name: `caps-nowatch-${process.pid}` });
+    const E3 = M.load('src/server/channels-engine.js', esrc.replace("const caps = require('../channel-caps.js');", `const caps = require(${JSON.stringify(capsCopy)});`), 'feed-nowatch');
+    const Wn = makeWorld(clock, { n: 4, hot: 4, warm: 0 });
+    Wn.clock = () => clock;
+    const dirN = path.join(ROOT, 'ctl-nowatch');
+    seedAccounts(dirN, [['feedy', 'feedy']]);
+    const regN = CH.createChannelRegistry(); regN.register(worldModule('feedy', Wn, { feed: true }));
+    const en3 = E3.create({ dataDir: dirN, registry: regN, env: {}, now, broadcast: () => {}, log: quiet });
+    await en3.pass('feedy', { force: true });
+    const r3 = en3.adapterRecords().adapters[0];
+    r3.feed = { ...(r3.feed || {}), mode: 'carrying', lastOkAt: clock };
+    await en3.watch('feedy', 'c0001');
+    const cw = en3.cadenceOf('feedy', 'c0001');
+    ok(cw.seconds === 300, `CONTROL: a copy whose carrying feed ignores the open window polls it at the relaxed ${cw.seconds} s — the "open window keeps 30 s" legs (⑫, test-channel-caps, test-channels-engine) would go red`, JSON.stringify(cw));
+    en3.stop();
+  }
+  // lane lark-search-poll (d): owed marks kept in MEMORY only (the pre-design shape: `e.dueNow`) — a restart between the
+  // feed and the fetch loses the hit
+  {
+    const OWED = '          if (en) en.feedOwedAt = Math.max(Number(en.feedOwedAt) || 0, observed);';
+    ok(esrc.split(OWED).length === 2, 'CONTROL setup: the durable owed write is spelled once');
+    const runOwed = async (EM, tag) => {
+      const Wo = makeWorld(clock, { n: 3, hot: 0, warm: 0 });
+      Wo.clock = () => clock;
+      Wo.noListingLastAt = true;   // like Lark's: the restart's discovery cannot make the row hot by itself
+      const dirO = path.join(ROOT, `ctl-owed-${tag}`);
+      seedAccounts(dirO, [['feedy', 'feedy']]);
+      const mkO = () => { const reg = CH.createChannelRegistry(); reg.register(worldModule('feedy', Wo, { feed: true })); return EM.create({ dataDir: dirO, registry: reg, env: {}, now, broadcast: () => {}, log: quiet }); };
+      let eo = mkO();
+      await eo.pass('feedy', { force: true });
+      clock += 31e3; await eo.pass('feedy');
+      const x = Wo.convs.get('c0002');
+      // inside the NEXT pass's window [cursor − 60 s, now + 31 s] but older than the window AFTER it (which starts 60 s
+      // before that pass's end): once the cursor has moved past it, only a durable owed mark can still find it
+      x.recs.push({ vendorId: 'c0002-hit', at: clock - 41e3, author: { id: 'u-1', name: 'A' }, text: 'the hit', attachments: [] });
+      Wo.failNext = null;
+      Wo.onHistory = () => { Wo.onHistory = null; Wo.failNext = 'transport'; };   // the fetch after the feed page dies (a crash stand-in)
+      clock += 31e3; await eo.pass('feedy');
+      eo.stop();
+      Wo.failNext = null;
+      clock += 31e3;
+      eo = mkO();
+      await eo.pass('feedy');
+      const got = eo.store.readTail('feedy', 'c0002', { limit: 50 }).some((r) => r.vendorId === 'c0002-hit');
+      eo.stop();
+      return got;
+    };
+    const realOwed = await runOwed(ENG, 'real');
+    const memOwed = await runOwed(M.load('src/server/channels-engine.js', esrc.replace(OWED, '          if (en) e.dueNow.add(en.key);'), 'owed-in-memory'), 'mem');
+    ok(realOwed && !memOwed, `CONTROL: owed marks kept in memory only — the restart loses the hit (real ${realOwed}, in-memory copy ${memOwed}); the durable mark is what finds it`);
+  }
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(r.pass, r.name, r.detail);
 }
 

@@ -2,6 +2,9 @@
 
 The user has connected external channels (Lark/Feishu chats, Gmail threads,
 other agent sessions through the built-in Agents adapter) to this VibeSpace.
+Lark SINGLE chats appear in `list` once the account's new-message search finds
+them (they are hidden from you unless the user granted you the whole account
+or that chat).
 This tool lets you READ the conversations the user let you see and PROPOSE
 replies. It never sends by itself: every reply is a proposal that the
 channel's policy either sends directly or hands to the user to approve,
@@ -12,9 +15,14 @@ a message to another agent session now — one verb per authority semantics.
 
 ```
 vibespace-channels list                          # conversations visible to you
-vibespace-channels read <conv> [--limit N] [--since <ms>] [--fresh]
-vibespace-channels refresh <conv>                # fetch the newest messages NOW (a floor applies)
-vibespace-channels reply <conv> "text" [--why "…"] [--reply-to <vendor msg id>] [--replaces <proposalId>]
+vibespace-channels read <conv> [--limit N] [--since <ms>] [--fresh] [--thread <msg id>]
+vibespace-channels refresh <conv> [--thread <msg id>]
+                                                 # fetch the newest messages NOW (a floor applies); --thread loads that thread
+vibespace-channels reply <conv> "text" [--why "…"] [--to <vendor msg id> [--in-thread] [--also-in-chat]] [--replaces <proposalId>]
+                                                 # PROPOSE a reply; --to = the message it answers (WHERE it lands: see "Where a reply lands")
+vibespace-channels react <conv> <msg id> <emoji key> [--why "…"]
+vibespace-channels unreact <conv> <msg id> <emoji key> [--why "…"]
+                                                 # PROPOSE a reaction (the user approves it unless the account's policy is direct)
 vibespace-channels compose <account> --to <addr>[,<addr>] [--cc <addr>] --subject "…" "text" [--why "…"] [--replaces <proposalId>]
                                                  # PROPOSE a NEW message (needs access to the whole account)
 vibespace-channels withdraw <proposalId> [--why "…"]
@@ -60,6 +68,60 @@ Everything you read or draft here is shown to the user as a clickable card in th
   about the conversation (you are woken when they arrive).
 - Attachments are listed under each message (name, type, size). Images and
   files are fetched only when the user opens them in the panel.
+
+## Threads and reactions (what `read` shows)
+
+`read` prints each message's PLACE and its REACTIONS:
+
+```
+lark-1/oc_x — Weekly sync · fetched 2 min ago · 7 message(s)
+[10:02] A: When is the weekly now?  (id om_x1)  [thread omt_t1 · 3 replies · last 5 min ago]
+    reactions: 👍 3 · 🎉 1
+[10:05] B: At three  (id om_x2)
+    ↳ replying to A: "When is the weekly now?" (id om_x1) · in thread omt_t1
+[10:07] C: Three works  (id om_x3)
+    ↳ quotes B: "At three" (id om_x2) · in thread omt_t1
+[10:09] me: Three it is  (id om_x4)
+    ↳ replying to A: "When is the weekly now?" (id om_x1) · in thread omt_t1
+    reactions: 👍 1 (the account owner)
+[10:12] D: Agreed with the old plan  (id om_x5)
+    ↳ quotes C: "Ship on Friday" (id om_x0)
+```
+
+- A message sits in one of two places. Inside a THREAD (a Lark topic — a
+  topic group's message, or a reply made in the thread; a Slack thread): its
+  line ends `· in thread <key>`, and the thread's ROOT carries `[thread <key> ·
+  N replies · last …]` on its own line. Or in the conversation itself — and a
+  message there that answers another is a QUOTE (a Lark reply made without
+  "reply in thread", a Telegram reply): `↳ quotes <author>: "<quote>" (id …)`,
+  never "in thread". A quote has no thread to read or load.
+- `↳ replying to <author>: "<quote>" (id …) · in thread <key>` = a reply
+  inside a thread (to its root); `↳ quotes … · in thread <key>` = a reply
+  inside a thread that answers another of its replies. `… a message not
+  loaded (id …)` when the answered message is older than what is stored.
+- `read <conv> --thread <msg id>` = that thread only: its root and replies,
+  from what is stored. It NEVER asks the channel: a thread whose replies are
+  not listed with the conversation (a Lark topic) and was never loaded here
+  answers `walked: false` and the line `(thread not loaded here — the user's
+  window loads it; ask again after)`. `refresh <conv> --thread <msg id>` is
+  the ONLY way you load one — its per-thread floor (60 s), the agents' share
+  of the account's budget and the vendor back-off refuse by name (exit 4).
+  Asked about a QUOTE, both answer `not-a-thread` ("that message is not in a
+  thread — a quoted reply and the message it quotes are both shown in the
+  conversation itself"): `read <conv>` shows it, and nothing is fetched.
+- **You never see WHO reacted** — only how many, per emoji, and whether one
+  of them is the user's own (`(the account owner)`). An emoji the channel's
+  vocabulary has no picture for is written `:key:`.
+- A reply to a message YOU sent, or a message in a thread you are in, reaches
+  you like any other message: on your next read, or — only if the user added a
+  `replies to or quotes a message of mine` / `is in a thread I am in, or quotes
+  a message of mine` rule to a Notify… of yours — as a wake. A "thread" there
+  is a real thread (a Lark topic): a chain of quotes never wakes you as a
+  thread, but a QUOTE of your message (or the user's) does — the wake says
+  `quoted your message`; a reply inside a thread says `in a thread you are in`
+  or `a reply to a message of yours`. Reactions NEVER wake you: reactions on a message you sent
+  arrive as ONE line in your next turn (`👍 ×3 · 🎉 ×1 on your reply in
+  <conversation>`, at most one per message per hour).
 
 ## Access and notification (what can I see, and what wakes me?)
 
@@ -130,6 +192,72 @@ The user gives you two DIFFERENT things, in this order:
 - The `--why` reference (an alert, a task, a message id) is shown on the
   approval card so the user knows what prompted the reply. Keep the text
   final: the recipient reads exactly what the user approves.
+- `--reply-to <id>` must be a message OF THAT conversation, as `read <conv>`
+  lists it — an id of any other conversation (or one not stored yet) is
+  refused (`bad-proposal`, `why: reply-anchor`) and nothing is created. The
+  card shows the user which message the reply answers.
+- Mail: who a reply goes to (To / Cc / Subject) is fixed WHEN YOU PROPOSE —
+  from the message it answers (`--reply-to`, else the thread's newest stored
+  message) — shown on the card and sent to exactly those; a message arriving
+  later never re-targets it.
+- Invisible direction / zero-width characters (U+202A–E, U+2066–9, U+200E/F,
+  U+061C, U+200B, U+2060, U+FEFF) are refused in a recipient, a subject and
+  `--reply-to` (`bad-proposal`, named); in the text they are shown to the
+  user as visible marks.
+
+## Where a reply lands (`--to` / `--in-thread` / `--also-in-chat`)
+
+A reply's PLACEMENT is one of four, and each channel offers only some:
+
+| placement | what the other side sees | flags |
+|---|---|---|
+| chat | a plain message in the conversation | (no `--to`) |
+| quote | an answer to that message, shown in the main list | `--to <id>` where it is the channel's norm |
+| thread | an answer inside that message's thread (a message in no thread yet — a plain one, a quote — gets a new thread started on it) | `--to <id> --in-thread` |
+| thread+chat | inside the thread AND shown in the conversation | `--to <id> --also-in-chat` |
+
+- `--to <id>` ALONE follows the channel's own habit: a message that is
+  already inside a thread is answered in that thread (it cannot be quoted
+  from the main list); a message outside any thread is answered the channel's
+  usual way — Lark, Telegram and Gmail QUOTE it, Slack puts it in a thread.
+  The CLI prints where it landed and why: `(lands in a thread, answering om_x2
+  — thread omt_t1 — the default: that message is already in a thread)`.
+- Lark offers chat, quote and thread (no thread+chat); Gmail chat and quote
+  (the mail thread IS the conversation); the built-in agents conversations
+  chat only (no `--to`).
+- A placement the channel does not offer is REFUSED before anything is drafted
+  — `placement-not-offered`, with what the channel does offer ("…is not offered
+  on this channel — offered here: chat, quote, thread") and, on the next line, the
+  flags that ask for each ("ask for what is offered with: chat: leave out --to ·
+  quote: --to <msg id> · thread: --to <msg id> --in-thread"); quoting a message
+  that sits inside a thread is refused the same way (`why: parent-in-thread`).
+  Nothing waits for the user: pick an offered placement and reply again.
+- The approval card says the placement ("Quoted reply — to <author>: …",
+  "Reply in thread — under <author>: …"), and the receipt in your next turn
+  names it ("placed in a thread (thread omt_…)").
+- A group that forbids replies in threads answers `topic-forbidden` — reply
+  in the conversation instead. `--reply-to <id>` is the old name of `--to`,
+  and `--in-thread <id>` without `--to` still names the message.
+
+## Reacting (`react` / `unreact`)
+
+- A reaction is proposed like a reply — the user approves it, unless the
+  account's reaction policy is direct (then the channel's own verdict
+  applies: direct only where the channel's policy is direct AND you hold
+  `send` authority). It speaks in the USER's name on someone else's message.
+- `react <conv> <msg id> <emoji key>` — the key is the channel's own name for
+  the emoji (Lark: `THUMBSUP`, `OK`, `DONE`, …; the ones `read` shows as
+  `:key:` are keys too). `unreact` removes the USER's reaction with that key.
+- Refusals (exit 4, nothing is created): `react-not-available` with a why —
+  `policy-off` (the user turned agent reactions off for this account),
+  `not-a-member`, `read-only-adapter`, `no-reactions`; `bad-emoji` (a key the
+  channel does not allow); `already-reacted` (the user already reacted with
+  it); `reaction-not-mine` (there is no reaction of the user's with that key to
+  remove). The same reaction already awaiting the user answers that proposal
+  again (`already proposed`).
+- No text, no edit, never a wake: the receipt is ONE line in your next turn —
+  `reaction 👍 on om_x1: sent` / `rejected`. Never propose the same reaction
+  twice.
 
 ## Composing a NEW message (`compose`)
 
@@ -174,6 +302,12 @@ The user gives you two DIFFERENT things, in this order:
 - Receipts arrive in your NEXT turn as a "Channel receipt" block — unless
   the user chose "wake the agent now" on that Approve / Reject (a turn
   started for you). Poll with `status` only when you need the answer now.
+- If the user removes your access to a conversation, a proposal you made there
+  still ends with a receipt — but it says only its fate (`SENT`, `REJECTED`, …)
+  and that you no longer have access; `status` shows those proposals the same
+  way. Nothing else from that conversation reaches you after the removal —
+  a request of yours that was still waiting (a refresh, a thread load, a draft)
+  gets the same "not found" as a conversation you cannot see.
 - An `unknown` outcome (the adapter lost the result) is NEVER retried
   automatically; the user is asked to check the platform. Do not re-propose
   the same text — a duplicate in someone else's room is worse than waiting.

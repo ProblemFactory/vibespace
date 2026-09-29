@@ -27,6 +27,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { normalizeOptions, REPLY_MAX } = require('./inbox-reply.js'); // PURE: the option-chip rule the route, the CLI and the panel share (design-user-inbox-reply D3a)
 const { normalizeOrigin } = require('./inbox-origin.js'); // PURE: the closed set of PRODUCERS an item names (B-328d) — the Notices area groups by it; a filing that names none is REFUSED (r2)
+const { applyClear } = require('./record-clear.js'); // PURE: "Clear content…" (2026-09-28) — what a clear replaces; this store holds the door (clearItems)
 
 /** `{text:{key,params}, detail?:[{key,params}…], source?:{key}}` → the same,
  *  clamped, or null; a shape that is not that throws by name. Params are
@@ -77,6 +78,12 @@ function normalizeAction(x) {
   return out;
 }
 
+// verify-r5 X1 (lane-pairing): the field that makes each of a producer's QUESTIONS its own item — a re-file matches an
+// item carrying an `action` only when it carries the same action type AND the same identity (an agent's filing, which
+// never carries an action, never merges into one). exit-proxy's asks: one item per ask (each is a different command;
+// a reopened item answered the NEXT ask under the user's pointer). helper-ask is NOT here on purpose: a helper's
+// parallel asks of one text SHARE one item by design (helper-asks.js re-points it — test-helper-ask ⑩)
+const ACTION_IDENTITY = Object.freeze({ 'exit-run-ask': 'askId' });
 const URGENCIES = ['low', 'normal', 'high', 'urgent'];
 const KINDS = ['action', 'notice']; // 2.369.118: action = needs the user (default); notice = for their information (own section, grey count)
 const STATUSES = ['open', 'done', 'dismissed'];
@@ -121,6 +128,7 @@ class UserTodoManager {
   constructor({ dataDir, onChange, expirySweepMs = EXPIRY_SWEEP_MS }) {
     this._file = path.join(dataDir, 'user-todos.json');
     this._onChange = onChange || (() => {});
+    this._statusListeners = []; // onStatus(fn): an item LEAVING 'open' by any door (verify-r2 ask-b), and (verify-r6 W2) a reopen
     this._state = { items: [] };
     this._writeTimer = null; this._dirty = false; this._lastWritten = null;
     try {
@@ -152,6 +160,18 @@ class UserTodoManager {
     this.flush();
   }
 
+  /** THE ITEM'S END IS ONE EVENT (verify-r2 ask-b, lane-pairing): a producer whose item STANDS FOR a pending
+   *  question of its own (the exit's "ask me each time") subscribes here and settles its side the moment the item
+   *  leaves 'open' by ANY door — the ✓ on the row, "Mark all seen", a reply, the agent's own `vibespace-ask done`,
+   *  the expiry sweep. Before: the item was done while the ask kept waiting its 60 s, and the ask id could still be
+   *  ALLOWED afterwards — two states for one question. `fn(item, {status, by})`, called after the save + broadcast;
+   *  a throwing listener is contained. Returns an unsubscribe. */
+  onStatus(fn) { if (typeof fn === 'function') this._statusListeners.push(fn); return () => { this._statusListeners = this._statusListeners.filter((f) => f !== fn); }; }
+  _emitStatus(items, by) {
+    if (!this._statusListeners.length) return;
+    for (const it of items) for (const fn of this._statusListeners) { try { fn(it, { status: it.status, by }); } catch { } }
+  }
+
   /** Resolve every OPEN item whose `expiresAt` has passed — `resolvedBy:
    *  'expired'`, status 'done', the record kept (the ledger is history). An
    *  item WITHOUT `expiresAt` is never touched: expiry is a producer's
@@ -159,13 +179,14 @@ class UserTodoManager {
    *  per sweep however many items went. @returns the count resolved */
   expireDue(now = Date.now()) {
     let n = 0;
+    const went = [];
     for (const it of this._state.items) {
       if (it.status !== 'open') continue;
       if (!(typeof it.expiresAt === 'number' && Number.isFinite(it.expiresAt)) || it.expiresAt > now) continue;
       it.status = 'done'; it.resolvedAt = now; it.resolvedBy = 'expired';
-      n++;
+      n++; went.push(it);
     }
-    if (n) { this._save(); this._notify(); }
+    if (n) { this._save(); this._notify(); this._emitStatus(went, 'expired'); }
     return n;
   }
 
@@ -283,7 +304,23 @@ class UserTodoManager {
     // (or re-asserting a text the user dismissed) spam every client with
     // "new item" toasts despite the open cap — a stable id keeps re-assertion
     // possible while making it quiet.
-    const existing = this._state.items.find((i) => i.sessionKey === sessionKey && i.text === text);
+    // (a CLEARED item's text is the one sentence every cleared item shares — never a re-file's match)
+    // verify-r5 X1: A PRODUCER'S QUESTION IS NOBODY ELSE'S ITEM. The match was (sessionKey, text) alone, so an agent's
+    // `vibespace-ask "<the exit ask's own text>" --detail "echo hello"` MERGED into exit-proxy's "run this command on
+    // <machine>?" item and replaced its detail — the command the row and the For-you window show above Allow (r4 F4) —
+    // while Allow ran the stored one (reproduced with a real click: the user read `echo hello`, the device ran the
+    // payload); and exit-proxy's next ask of the same (conversation, machine) REOPENED the same item with a new askId
+    // under the user's pointer (a press aimed at the first command answered the second). An item carrying an `action`
+    // is matched only by a re-file of the same action type and the same identity (ACTION_IDENTITY); a filing with no
+    // action never merges into one (it is filed beside it, without the producer's buttons)
+    const sameFiling = (i) => {
+      if (!i.action !== !action) return false;
+      if (!action) return true;
+      if (i.action.type !== action.type) return false;
+      const idKey = ACTION_IDENTITY[action.type];
+      return !idKey || i.action[idKey] === action[idKey];
+    };
+    const existing = this._state.items.find((i) => i.sessionKey === sessionKey && i.text === text && sameFiling(i) && !i.clearedAt);
     const openCount = this._state.items.filter((i) => i.sessionKey === sessionKey && i.status === 'open').length;
     if (existing) {
       let changed = false;
@@ -342,13 +379,16 @@ class UserTodoManager {
   resolveByJob(jobId, { onlyAsk = true } = {}) {
     if (!jobId) return 0;
     let n = 0;
+    const went = [];
     for (const it of this._state.items) {
       if (it.status !== 'open' || it.jobId !== jobId) continue;
-      if (onlyAsk && !/needs your input/.test(it.text)) continue;
+      // the ask is told apart by its words — a CLEARED item has none (verify r3: an answered / expired /
+      // withdrawn panel must still close the job's cleared ask item, else it stays open with the sentence)
+      if (onlyAsk && !it.clearedAt && !/needs your input/.test(it.text)) continue;
       it.status = 'done'; it.resolvedAt = Date.now(); it.resolvedBy = 'agent';
-      n++;
+      n++; went.push(it);
     }
-    if (n) { this._save(); this._notify(); }
+    if (n) { this._save(); this._notify(); this._emitStatus(went, 'agent'); }
     return n;
   }
 
@@ -357,11 +397,16 @@ class UserTodoManager {
     if (!STATUSES.includes(status)) throw new Error(`status must be one of ${STATUSES.join('/')}`);
     const item = this._state.items.find((i) => i.id === id);
     if (!item) throw new Error('item not found');
+    const wasOpen = item.status === 'open';
     item.status = status;
     // a reopen is the user saying it still matters: it no longer expires
     if (status === 'open') { item.resolvedAt = null; item.resolvedBy = null; item.expiresAt = null; }
     else { item.resolvedAt = Date.now(); item.resolvedBy = by; }
     this._save(); this._notify();
+    if (wasOpen && status !== 'open') this._emitStatus([item], by);
+    // verify-r6 W2: a REOPEN is said too — a producer whose question is over (an exit ask answered / expired) closes it
+    // again at once instead of leaving dead buttons open until the next boot
+    else if (!wasOpen && status === 'open') this._emitStatus([item], by);
     return item;
   }
 
@@ -375,17 +420,19 @@ class UserTodoManager {
    *  @returns {{changed: string[], unknown: string[]}} */
   setStatusMany(ids, status, by = 'user') {
     if (!STATUSES.includes(status)) throw new Error(`status must be one of ${STATUSES.join('/')}`);
-    const changed = [], unknown = [];
+    const changed = [], unknown = [], went = [];
     const now = Date.now();
     for (const id of new Set(Array.isArray(ids) ? ids : [])) {
       const item = this._state.items.find((i) => i.id === id);
       if (!item) { unknown.push(id); continue; }
+      const wasOpen = item.status === 'open';
       item.status = status;
       if (status === 'open') { item.resolvedAt = null; item.resolvedBy = null; item.expiresAt = null; }
       else { item.resolvedAt = now; item.resolvedBy = by; }
       changed.push(id);
+      if (wasOpen && status !== 'open') went.push(item);
     }
-    if (changed.length) { this._save(); this._notify(); }
+    if (changed.length) { this._save(); this._notify(); this._emitStatus(went, by); }
     return { changed, unknown };
   }
 
@@ -399,8 +446,10 @@ class UserTodoManager {
     const item = this._state.items.find((i) => i.id === id);
     if (!item) throw new Error('item not found');
     item.reply = { text: String(text == null ? '' : text).slice(0, REPLY_MAX), at: now };
-    if (item.status === 'open') { item.status = 'done'; item.resolvedAt = now; item.resolvedBy = 'reply'; }
+    const wasOpen = item.status === 'open';
+    if (wasOpen) { item.status = 'done'; item.resolvedAt = now; item.resolvedBy = 'reply'; }
     this._save(); this._notify();
+    if (wasOpen) this._emitStatus([item], 'reply');
     return item;
   }
 
@@ -424,14 +473,54 @@ class UserTodoManager {
     if (done) return done;
     const mine = this._state.items.filter((i) => i.sessionKey === sessionKey && i.status === 'open');
     let hit = mine.find((i) => i.id === ref);
+    // verify-r5 X4 (lane-pairing): an item carrying a producer's `action` is a question VibeSpace put to the USER on the
+    // agent's behalf (an exit ask's Allow / Deny) — the agent resolving it settled the ask "denied", and the chat card
+    // told the user "you denied it" while the CLI told the agent "the user did not allow" (reproduced). Not the agent's
+    // to resolve: by id it is refused by name; a text fragment never matches one
+    if (hit && hit.action) throw Object.assign(new Error(`${hit.id} is a question VibeSpace asked the user for you — the user answers it with its own buttons; an agent cannot resolve it (to withdraw it, stop the command that is waiting for the answer)`), { code: 'not_agents' });
     if (!hit) {
-      const matches = mine.filter((i) => i.text.toLowerCase().includes(ref.toLowerCase()));
+      const matches = mine.filter((i) => !i.clearedAt && !i.action && i.text.toLowerCase().includes(ref.toLowerCase())); // a cleared item answers to its id only
       if (matches.length > 1) throw new Error(`"${ref}" matches ${matches.length} open items — be more specific or use the id`);
       hit = matches[0];
     }
     if (!hit) throw new Error(`no open item matching "${ref}" in this session`);
     return this.setStatus(hit.id, 'done', 'agent');
   }
+
+  /**
+   * "CLEAR CONTENT…" — THE door for For-you items (2026-09-28). Each id is asked
+   * `allow(item)` (the caller's PURE clearVerdict) and cleared IN PLACE through
+   * src/record-clear.js applyClear: the title becomes the ONE sentence; the
+   * detail, the structured words (`i18n` — a client prefers them over `text`, so
+   * keeping them would keep the old words on screen), the option chips and the
+   * reply go; a Background-Work item's label (the job's name in `sessionName`)
+   * goes too. Status, identity, times, session, origin and a producer's action
+   * stay. The resolved PREVIEW is derived per snapshot (previewOf), so the ONE
+   * save + ONE broadcast rewrites every client's copy — including a whole
+   * detail a client kept (restoreDetails restores only into an item still
+   * `detailTruncated`, which a cleared item never is). Returns
+   * {cleared: [ids], already: [ids], unknown: [ids], refused: [{id, code, why, status}]}.
+   */
+  clearItems(ids, { by = 'owner', at = Date.now(), allow = null } = {}) {
+    const out = { cleared: [], already: [], unknown: [], refused: [] };
+    for (const id of new Set(Array.isArray(ids) ? ids : [ids])) {
+      const item = this._state.items.find((i) => i.id === id);
+      if (!item) { out.unknown.push(String(id)); continue; }
+      const v = allow ? allow(item) : { ok: true };
+      if (!v || !v.ok) { out.refused.push({ id: item.id, code: (v && v.code) || 'not_yours', why: (v && v.why) || '', status: (v && v.status) || 403 }); continue; }
+      const r = applyClear(item, { kind: 'todo', by, at });
+      (r.changed ? out.cleared : out.already).push(item.id);
+    }
+    // ON DISK BEFORE THE OWNER IS TOLD (lane-redact verify r4, reproduced): this store's `_save` is a 500 ms debounce
+    // and the exit flush runs on SIGTERM only — a SIGKILL / OOM inside that window brought the words back at the next
+    // boot after the route had answered "cleared" and the dialog had said "cannot be undone". A clear is one owner
+    // decision, rare, and small: ONE synchronous write (the stash's own rule, 2026-09-27 verify r3/r5).
+    if (out.cleared.length) { this._save(); this.flush(); this._notify(); }
+    return out;
+  }
+
+  /** The ids of every item `pred` selects (a cleared JOB's items: `jobId` in the set). */
+  idsWhere(pred) { return this._state.items.filter((i) => { try { return !!pred(i); } catch { return false; } }).map((i) => i.id); }
 
   // Move webui:<id> placeholder items onto the real sessionKey once known.
   rekey(fromKey, toKey) {

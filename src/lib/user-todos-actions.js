@@ -21,6 +21,7 @@ import { t } from './i18n.js';
 import { fetchJson, showToast } from './utils.js';
 import { replyButtonState, liveDotState, LIVE_DOT_WHY, restoreDetails } from './user-todos-layout.js'; // PURE: the reply verdict + the running dot (design-user-inbox-reply D1.5/D1.7); restoreDetails = the whole detail this client already saw survives a snapshot that previews it
 import { openResetCreditDialog } from './reset-credit-dialog.js'; // THE one reset-credit confirm dialog (design-reset-credits p2): the ask-mode item's button
+import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): THE confirm dialog + request path; a cleared item's words
 
 /** The badge's tiers — ONE spelling shared by the taskbar / nav button, the
  *  popup's Inbox tab and the window's Actions tab (B-328d: "same words as the badge"). */
@@ -61,8 +62,10 @@ export function inboxModel(app) {
   // sentences as STRUCTURE (`i18n.text/detail/source` = `{key, params}`) is
   // worded HERE with the device's t(); an item without it is its own words
   // (an agent's ask). The English `text` stays the store's dedupe key.
-  const wordsOf = (i) => (i && i.i18n && i.i18n.text ? t(i.i18n.text.key, i.i18n.text.params || {}) : (i && i.text) || '');
-  const detailOf = (i) => (i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? i.i18n.detail.map((l) => t(l.key, l.params || {})).join('\n') : (i && i.detail) || '');
+  // A CLEARED item (clearedAt — "Clear content…", 2026-09-28) reads the cleared sentence in this
+  // device's language and has no detail: the store dropped its words, its i18n and its detail
+  const wordsOf = (i) => (isCleared(i) ? clearedText() : i && i.i18n && i.i18n.text ? t(i.i18n.text.key, i.i18n.text.params || {}) : (i && i.text) || '');
+  const detailOf = (i) => (isCleared(i) ? '' : i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? i.i18n.detail.map((l) => t(l.key, l.params || {})).join('\n') : (i && i.detail) || '');
   const nameFor = (key, items) => {
     const s = sessionFor(key);
     const spoken = items.find((i) => i.i18n && i.i18n.source && i.i18n.source.key);
@@ -128,9 +131,31 @@ export function inboxModel(app) {
     showToast(t('Could not reply: {why}', { why: r && r.error ? t(r.error) : t('server unreachable') }), { type: 'error' });
     return false;
   };
+  /** "CLEAR CONTENT…" (2026-09-28): THE verb both surfaces offer on an item's menu —
+   *  the ONE confirm dialog (its time + first words), then POST /api/records/clear;
+   *  the store's broadcast repaints every client. Resolves true when it cleared. */
+  const clearContent = async (id) => {
+    const it = byId(id);
+    if (!it || isCleared(it)) return false;
+    const r = await clearRecords([{ kind: 'todo', id: it.id, at: it.createdAt, words: wordsOf(it) }]);
+    return !!(r && r.ok && r.cleared);
+  };
+  /** The item's context-menu rows (the popup's and the window's): today only Clear content…. */
+  const menuFor = (id) => { const it = byId(id); return it && !isCleared(it) ? [{ label: t('Clear content…'), action: () => { clearContent(id); } }] : []; };
   /** A PRODUCER'S ACTION (design-reset-credits p2): the client maps the item's
    *  `action.type` to a verb it owns. Today: the reset-credit confirm dialog. */
-  const runAction = (rec) => {
+  const runAction = async (rec, answer = null) => {
+    if (rec && rec.action && rec.action.type === 'exit-run-ask') {
+      // lane-pairing ⑥: THE person's answer to an agent's command on a machine (cookie route; an agent's bearer is
+      // refused human_only). The server resolves the item; a failure is said, never swallowed.
+      const r = await fetchJson(`/api/exits/asks/${encodeURIComponent(rec.action.askId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answer }) });
+      if (r && r.ok) { showToast(r.state === 'allowed' ? t('allowed') : t('denied')); return true; }
+      const code = r && r.code;
+      const w = code === 'ask_settled' ? t('Already answered') : code === 'ask_expired' ? t('Too late — it was refused after 60 s') : code === 'ask_unknown' ? t('That request is gone')
+        : code === 'ask_changed' ? t('The request changed after it was shown — nothing ran') : (r && r.error) || t('server unreachable'); // verify-r5 X1
+      showToast(w, { type: 'error' });
+      return false;
+    }
     if (!rec || !rec.action || rec.action.type !== 'reset-credit') return false;
     openResetCreditDialog(app, { accountKey: rec.action.accountKey, sessionId: rec.action.sessionId || null, todoId: rec.id });
     return true;
@@ -197,8 +222,10 @@ export function inboxModel(app) {
     for (const wid of webuiIdsFor(key)) if (st[`webui:${wid}`]) return st[`webui:${wid}`];
     return null;
   };
-  /** {rec, word} of a session's board state ('' word = nothing the chip shows), or null. */
-  const boardOf = (key) => { const rec = statusFor(key); return rec ? { rec, word: boardWord(rec.state) } : null; };
+  /** {rec, word, why} of a session's board state ('' word = nothing the chip shows), or null. `why` = the chip's
+   *  tooltip: the agent's reason, or — once the owner cleared it — the cleared sentence in THIS device's words (lane-redact
+   *  verify r4: both chips printed the stored English key on a zh / ja device). */
+  const boardOf = (key) => { const rec = statusFor(key); return rec ? { rec, word: boardWord(rec.state), why: typeof rec.reason === 'string' ? (isCleared(rec) ? clearedText() : rec.reason) : '' } : null; };
   const byId = (id) => todos.open.find((i) => i.id === id) || todos.resolved.find((i) => i.id === id) || null;
   const drafts = new Map(); // item id → the text of a FOLDED / unsent reply box (the popup's, the mini inbox's and the window's — one draft per item)
 
@@ -209,7 +236,10 @@ export function inboxModel(app) {
   // (PURE restoreDetails); a previewed item this client never saw whole is fetched on
   // demand (ensureDetail → GET /api/user-todos/:id, single-flight, patched in place).
   let fullById = new Map();
-  const setTodos = (next) => { const r = restoreDetails(next || { open: [], resolved: [] }, fullById); todos = r.todos; fullById = r.fullById; loaded = true; emit('todos', todos); };
+  // every snapshot applied bumps `gen`: a list FETCHED before a newer snapshot landed never replaces it (lane-redact verify
+  // r5 — the reconnect resync's answer could arrive after a clear's broadcast and bring the item's words back on screen)
+  let gen = 0;
+  const setTodos = (next) => { gen++; const r = restoreDetails(next || { open: [], resolved: [] }, fullById); todos = r.todos; fullById = r.fullById; loaded = true; emit('todos', todos); };
   const detailLoads = new Map(); // id → the in-flight load (single-flight)
   /** Resolves to `{detail, error}`: the item's whole detail (the item patched in place and
    *  a `todos` emit when the rest arrives), or the reason it could not be loaded — the
@@ -222,6 +252,8 @@ export function inboxModel(app) {
     const p = fetchJson(`/api/user-todos/${encodeURIComponent(id)}`).then((r) => {
       detailLoads.delete(id);
       const whole = r && r.item && typeof r.item.detail === 'string' ? r.item.detail : null;
+      // cleared while the GET was in flight ("Clear content…"): the words it fetched are gone — never hand them to Copy
+      if (isCleared(byId(id)) || (r && r.item && isCleared(r.item))) return { detail: '', error: null };
       if (whole == null) return { detail: null, error: r && r.error ? t(r.error) : t('server unreachable') }; // fetchJson never throws: null = unreachable, {error} = the route's word
       fullById.set(id, whole);
       const r2 = restoreDetails(todos, fullById); todos = r2.todos; fullById = r2.fullById;
@@ -243,14 +275,14 @@ export function inboxModel(app) {
   // Resync on reconnect — items filed while offline would otherwise stay
   // invisible until the next unrelated change re-broadcasts.
   app.ws.onStateChange?.((connected) => {
-    if (connected) fetchJson('/api/user-todos').then((d) => { if (d?.todos) setTodos(d.todos); });
+    if (connected) { const g0 = gen; fetchJson('/api/user-todos').then((d) => { if (d?.todos && gen === g0) setTodos(d.todos); }); }
   });
   fetchJson('/api/user-todos').then((d) => { if (d?.todos && !liveSeen) setTodos(d.todos); });
 
   const model = {
     get todos() { return todos; },
     get loaded() { return loaded; },
-    byId, sessionFor, displayName, wordsOf, detailOf, nameFor, jump, setStatus, postReply, runAction, ensureDetail,
+    byId, sessionFor, displayName, wordsOf, detailOf, nameFor, jump, setStatus, postReply, runAction, ensureDetail, clearContent, menuFor, isCleared,
     ingestLive, factFor, keyForWebui, webuiIdsFor, keysFor, replyState, patchDot, boardOf, drafts,
     /** THE row renderer's context (src/lib/user-todos-row.js) — the words,
      *  names and the live verdict; a surface passes it (or a copy with its flags) */

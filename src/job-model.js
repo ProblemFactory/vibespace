@@ -221,6 +221,29 @@ function validatePanel(p) {
     return { ok: true };
   } catch (e) { return { ok: false, error: 'panel validation failed: ' + e.message }; }
 }
+/** r6 D-F5 ("what you approve is what runs"): a job's interaction IDENTITY is monotonic per job and never reused. The
+ *  version used to be `pending.version + 1` — and `pending` is nulled by every answer and every expiry, so EVERY panel
+ *  after one was answered or expired was version 1 again: a stale click on panel #1 ("Run the unit tests?", expired) was
+ *  recorded as the answer to panel #2 ("Delete the production backup bucket?"). The persisted `interaction.seq` only
+ *  grows (it survives a restart with the store); a record from before it starts above the highest version it still
+ *  remembers (pending or answered). */
+function nextInteractionSeq(interaction) {
+  const it = interaction && typeof interaction === 'object' ? interaction : {};
+  let hi = Number.isInteger(it.seq) && it.seq > 0 ? it.seq : 0;
+  if (it.pending && Number.isInteger(it.pending.version)) hi = Math.max(hi, it.pending.version);
+  for (const a of Array.isArray(it.answers) ? it.answers : []) if (a && Number.isInteger(a.version)) hi = Math.max(hi, a.version);
+  return hi + 1;
+}
+/** The answer must NAME the panel it answers (its `version`): missing ⇒ refused by name, another panel's ⇒ refused by
+ *  name — nothing is recorded, nothing reaches the job. → {ok:true} | {ok:false, code, error}. */
+function answerVersionVerdict(pending, ans) {
+  if (!pending) return { ok: false, code: 'no-pending-panel', error: 'no pending panel' };
+  const raw = ans && typeof ans === 'object' ? ans.version : undefined;
+  if (raw === undefined || raw === null || raw === '') return { ok: false, code: 'version-required', error: 'the answer does not name the panel it answers (version) — nothing was recorded; reopen the panel and answer again' };
+  const v = typeof raw === 'string' && /^\d{1,12}$/.test(raw) ? Number(raw) : raw;
+  if (!Number.isInteger(v) || v !== pending.version) return { ok: false, code: 'stale-panel', error: `this answer is for panel #${String(raw).slice(0, 20)}, but the job now waits on panel #${pending.version} — nothing was recorded; reopen the panel and answer the one it shows` };
+  return { ok: true };
+}
 /** validate a user's answer object against the panel (server-side mirror of client checks). */
 function validateAnswers(panel, ans) {
   if (!ans || typeof ans !== 'object') return { ok: false, error: 'answers must be an object' };
@@ -453,6 +476,6 @@ module.exports = {
   parseCron, nextFire, validateSchedule, AGENT_MIN_EVERY_MS,
   SUPERVISE, onServiceExit, resolveName,
   renderJobsDigest, renderJobsUpdate, fitDigest, jobLine,
-  validatePanel, validateAnswers, CONTEXT_PAYLOAD_CAP, clip,
+  validatePanel, validateAnswers, nextInteractionSeq, answerVersionVerdict, CONTEXT_PAYLOAD_CAP, clip,
   notifyEffective, renderOwnerNotify, renderNotifStash,
 };

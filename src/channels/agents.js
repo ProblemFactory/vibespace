@@ -50,6 +50,10 @@ const caps = {
   threading: 'none',
   editSent: false, readReceipts: false,
   attachments: 'none',
+  // lane channel-threads: an agent conversation is flat and carries no reactions — declared, so no control appears
+  // 2026-09-28 (reply PLACEMENTS): the ladder delivers a message; it cannot answer a specific one — `chat` only
+  threads: Object.freeze({ read: 'none', replyInto: false, listing: 'none', placements: Object.freeze(['chat']) }),
+  reactions: Object.freeze({ read: 'none', add: false, remove: 'none', vocabulary: 'names', custom: 'none', perMessageMax: null }),
 };
 
 function create(record = {}, deps = {}) {

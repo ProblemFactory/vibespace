@@ -42,6 +42,7 @@
 const net = require('net');
 const path = require('path');
 const { spawn } = require('child_process');
+const crypto = require('crypto');
 const S = require('../desktop-serve.js');
 const M = require('../desktop-apps.js');
 
@@ -198,7 +199,15 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     if (!M.INSTALL_WHATS.includes(w)) throw named('bad-request', `unknown install ${JSON.stringify(String(w).slice(0, 40))} — one of ${M.INSTALL_WHATS.join(', ')}`);
     const r = await call(hostId, 'facts', { install: true });
     const plan = M.installPlanFor(w, r.install);
-    return { hostId: isLocal(hostId) ? 'local' : hostId, facts: r.install || null, plan };
+    return { hostId: isLocal(hostId) ? 'local' : hostId, facts: r.install || null, plan, digest: planDigest(plan) };
+  }
+  /** verify-r6 I1: WHAT THE DIALOG SHOWED, as one value — the commands (and where they come from) the owner reads above
+   *  Install. The run recomputes the plan from the machine's facts at the press; a digest that differs (the machine's
+   *  package sources, its xpra, its sudo changed in between — apt steps shown, the xpra.org key + repo + pin 1001 run
+   *  as root) is refused `plan_changed` with the new plan, nothing run. null for a refused plan. */
+  function planDigest(plan) {
+    if (!plan || !plan.ok) return null;
+    return crypto.createHash('sha256').update(JSON.stringify({ commands: plan.commands || [], source: plan.source || null, packages: plan.packages || [] })).digest('hex').slice(0, 32);
   }
   const machineKey = (hostId) => (isLocal(hostId) ? 'local' : String(hostId));
   const machineName = (hostId) => (isLocal(hostId) ? 'this machine' : String(hostId));
@@ -294,7 +303,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
    *  install. The machine has ONE slot for every package (dpkg runs one install at a time anyway): an install of
    *  another package already running there is FOLLOWED like any live install (the dialog is told `reattached`), and
    *  the caller re-checks what it wanted afterwards (the route: `still-absent` by name). */
-  async function installPackage(hostId, { what = 'xpra', onData = () => { }, onReattach = () => { } } = {}) {
+  async function installPackage(hostId, { what = 'xpra', onData = () => { }, onReattach = () => { }, expectDigest = null } = {}) {
     const key = machineKey(hostId);
     const cur = installs.get(key);
     if (cur) throw named('busy', `an install is already running on ${machineName(hostId)} (started ${new Date(cur.since).toISOString()}) — wait for it to finish, then check again`);
@@ -307,6 +316,9 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
       if (!running) {
         if (!plan.ok) { const e = named(plan.code, plan.error); e.plan = plan; throw e; }
         if (!plan.canRun) { const e = named('no_sudo', plan.error); e.plan = plan; throw e; }
+        // verify-r6 I1: the plan that runs is the plan that was SHOWN (a caller that names none — an older client, the
+        // API — keeps the pre-r6 behaviour)
+        if (expectDigest != null && planDigest(plan) !== String(expectDigest)) { const e = named('plan_changed', `what would run on ${machineName(hostId)} changed after it was shown (${plan.source}: ${(plan.packages || []).join(' ')}) — nothing ran; read the new commands, then press Install again`); e.plan = plan; e.digest = planDigest(plan); throw e; }
         log.log?.(`[desktop] installing ${plan.label || 'xpra'} on ${hostId || 'this machine'} from ${plan.source} (${plan.packages.join(' ')}), detached`);
       } else {
         if (running.since) slot.since = running.since;

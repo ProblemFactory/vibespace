@@ -742,7 +742,7 @@ function rebuildUnderFault(PS, name, code) {
   // to have, so prose is blanked before asking whether one survives.
   const noComments = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   const reqs = [...src.matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]);
-  ok(reqs.every((r) => ['fs', 'path', 'crypto'].includes(r)), 'the store is SHARED: node builtins only — fs, path, and crypto for the attachment cache\'s file names (2026-09-26)', reqs.join(','));
+  ok(reqs.every((r) => ['fs', 'path', 'crypto', './channel-record.js', './channel-reactions.js'].includes(r)), 'the store is SHARED: node builtins only — fs, path, and crypto for the attachment cache\'s file names (2026-09-26) — plus, since lane channel-threads, the two PURE modules the side log\'s dedup key and compaction fold are theirs (SHARED may import PURE)', reqs.join(','));
   ok(!/module\.exports[\s\S]*writeIndex|exports\.writeIndex/.test(src), 'there is deliberately NO "write the whole index back" export — the serialized owner is the index\'s only writer (§5.1)');
   ok(!/writeAdapters/.test(noComments), '…and none for adapters.json either (r2): every caller used to re-parse and write its own private copy back, which is the read-modify-write lost update this invariant exists to eliminate');
   ok(/appendLines\(fp[\s\S]{0,300}?for \(const r of fresh\) rememberVendorId/.test(src) && !/if \(set\.has\(r\.vendorId\)[\s\S]{0,120}?rememberVendorId/.test(src), 'the dedup set is written AFTER the bytes are durable, never inside the selection loop');
@@ -806,6 +806,369 @@ console.log('§r3 a BLOCKED family refuses the ACTION, not only the write (r3 fi
   ok(!/_said/.test(src), 'PIN: no once-only flag silences a refused index flush after its first line');
 }
 
+
+// ── ⑪ THE SIDE LOG (lane channel-threads, invariant 8 — spec §3.2 / §7.1 "test-channel-side-store") ──
+// A reaction added or removed, a vendor's thread count: facts that change AFTER a message was written, appended to
+// the conversation's side log and folded at read time. The same discipline as the message log: dedup by `sideKey`
+// (a replayed event is a no-op), remember only after the bytes, drop the set on a throw, a strict rebuild; and the
+// side log is invisible to every message reader.
+{
+  const R = require(path.join(REPO, 'src/channel-record.js'));
+  const side = (x) => R.validateSide(x).side;
+  const d = (msg, at, op, key, actor, rid) => side({ k: 'rx', msg, at, form: 'delta', op, key, actor: { id: actor }, src: 'event', ...(rid ? { rid } : {}) });
+  const st = mk('side');
+  st.appendRecords('a', 'c', [rec('c', 1), rec('c', 2), rec('c', 3)]);
+  // a replayed Lark event (no reaction id — L10) and a Slack (msg, name, user) twin: one line each
+  const w1 = st.appendSide('a', 'c', [d('v1', NOW, 'add', 'THUMBSUP', 'ou_a'), d('v1', NOW, 'add', 'THUMBSUP', 'ou_a')]);
+  const w2 = st.appendSide('a', 'c', [d('v1', NOW, 'add', 'THUMBSUP', 'ou_a')]);
+  const w3 = st.appendSide('a', 'c', [d('v2', NOW + 1, 'add', 'thumbsup', 'U1', null), d('v2', NOW + 1, 'add', 'thumbsup', 'U1', null)]);
+  ok(w1.appended === 1 && w1.duplicates === 1 && w2.appended === 0 && w2.duplicates === 1 && w3.appended === 1, 'attack 3: a replayed reaction event is ONE side line (dedup by sideKey, within a batch and across batches)', JSON.stringify([w1, w2, w3]));
+  const w4 = st.appendSide('a', 'c', [d('v1', NOW + 5, 'add', 'OK', 'ou_b', 'rid-1'), d('v1', NOW + 6, 'add', 'OK', 'ou_b', 'rid-1')]);
+  ok(w4.appended === 1, 'a vendor reaction id IS the dedup key when it is issued');
+  const re = S.createChannelStore({ dir: st.dir });
+  ok(re.appendSide('a', 'c', [d('v1', NOW, 'add', 'THUMBSUP', 'ou_a')]).duplicates === 1, 'after a restart the side dedup set is rebuilt from the side log (a boundary replay is still a no-op)');
+  // readSide by needle: a line naming another message is not parsed
+  const onlyV1 = re.readSide('a', 'c', { msgs: new Set(['v1']) });
+  ok(onlyV1.length === 2 && onlyV1.every((x) => x.msg === 'v1'), 'readSide returns only the lines naming the asked messages');
+  fs.appendFileSync(re.sidePath('a', 'c'), '{"k":"rx","msg":"v3","at":1,"form":"delta" THIS LINE IS NOT JSON\n');
+  ok(re.readSide('a', 'c', { msgs: new Set(['v1']) }).length === 2 && re.readSide('a', 'c', { msgs: new Set(['v3']) }).length === 0, '…a line naming another message is skipped without parsing its body; a broken one contributes nothing');
+  // invariant 8: the message readers never see a side line
+  ok(re.readTail('a', 'c', { limit: 99 }).length === 3 && re.countSince('a', 'c', 0) === 3, 'invariant 8: readTail and countSince (unread) see the three messages only — never a side line');
+  const found = await re.search('a', 'THUMBSUP');
+  ok(found.results.length === 0 && found.files === 1, 'invariant 8: search reads the message log only (the side log lives in a `~side/` subdirectory it never opens)', JSON.stringify(found));
+  ok(re.sidePath('a', 'c').includes(`${path.sep}~side${path.sep}`) && !S.safeSeg('x~side').includes('~'), 'the side log sits in `~side/` — a name no vendor id can spell (safeSeg escapes `~`), so a conversation `c.side` never collides with `c`\'s side log');
+  // the r2 / r4 discipline: a throw INSIDE the write drops the cached set; the rebuild is strict
+  const sp = re.sidePath('a', 'c');
+  const saved = fs.readFileSync(sp);
+  fs.unlinkSync(sp); fs.mkdirSync(sp);                                  // EISDIR inside the write
+  let threw = null; try { re.appendSide('a', 'c', [d('v2', NOW + 9, 'add', 'OK', 'ou_z')]); } catch (e) { threw = e.code; }
+  fs.rmdirSync(sp); fs.writeFileSync(sp, saved);
+  const again = re.appendSide('a', 'c', [d('v2', NOW + 9, 'add', 'OK', 'ou_z')]);
+  ok(threw && again.appended === 1, 'a throw INSIDE the side write drops the cached set — the retry re-derives it from the log and writes the line (never a phantom duplicate)', `${threw} ${JSON.stringify(again)}`);
+  const re2 = S.createChannelStore({ dir: st.dir });
+  fs.chmodSync(sp, 0o000);
+  let strict = null; try { re2.appendSide('a', 'c', [d('v2', NOW + 10, 'add', 'OK', 'ou_q')]); } catch (e) { strict = e.code; }
+  fs.chmodSync(sp, 0o644);
+  const after = re2.appendSide('a', 'c', [d('v2', NOW + 10, 'add', 'OK', 'ou_q')]);
+  ok((strict === 'EACCES' || process.getuid && process.getuid() === 0) && after.appended === 1, 'a side log that cannot be READ at rebuild THROWS (EACCES) — nothing is cached as "empty"; the next append re-reads it', `${strict} ${JSON.stringify(after)}`);
+  st.close(); re.close(); re2.close();
+}
+// the trim: a message dropped by retention drops its side lines; a kept one is COMPACTED (attack 17: 5 000
+// messages, 40 000 side lines ⇒ ≤ 2 × the message count; the newest snapshot survives, newer deltas fold into it)
+{
+  const R = require(path.join(REPO, 'src/channel-record.js'));
+  const Rx = require(path.join(REPO, 'src/channel-reactions.js'));
+  const st = mk('side-trim');
+  const OLD = NOW - 120 * 86400e3;
+  st.appendRecords('a', 'c', [{ ...rec('c', 0), at: OLD }]);
+  const recs = []; for (let i = 1; i <= 5000; i++) recs.push({ ...rec('c', i), at: NOW - (5001 - i) * 1000 });
+  st.appendRecords('a', 'c', recs);
+  const sides = [];
+  sides.push(R.validateSide({ k: 'rx', msg: 'v0', at: OLD + 1, form: 'delta', op: 'add', key: 'OK', actor: { id: 'u0' }, src: 'event' }).side);
+  for (let i = 0; i < 40000; i++) { const m = 'v' + (1 + (i % 5000)); sides.push(R.validateSide({ k: 'rx', msg: m, at: NOW + i, form: 'delta', op: i % 7 === 0 ? 'remove' : 'add', key: ['OK', 'PARTY', 'SOB'][i % 3], actor: { id: 'u' + (i % 37) }, src: 'event' }).side); }
+  sides.push(R.validateSide({ k: 'th', msg: 'v1', at: NOW, src: 'history', count: 3 }).side, R.validateSide({ k: 'th', msg: 'v1', at: NOW + 5, src: 'history', count: 4 }).side);
+  const w = st.appendSide('a', 'c', sides);
+  const before = st.readSide('a', 'c', { msgs: new Set(['v1']), limit: 1e9 });
+  const foldBefore = Rx.foldReactions(before.filter((x) => x.k === 'rx'), {});
+  const tr = st.trim('a', 'c');
+  const lines = fs.readFileSync(st.sidePath('a', 'c'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  ok(w.appended === 40003 && lines.length <= 2 * 5000, `attack 17: 40 003 side lines over 5 000 kept messages trim to ${lines.length} (≤ 2 × the message count)`, JSON.stringify(tr));
+  ok(!lines.some((x) => x.msg === 'v0'), 'a message dropped by retention (120 days old) drops its side lines with it');
+  const after = st.readSide('a', 'c', { msgs: new Set(['v1']) });
+  const foldAfter = Rx.foldReactions(after.filter((x) => x.k === 'rx'), {});
+  ok(JSON.stringify(foldAfter.map((x) => [x.key, x.count])) === JSON.stringify(foldBefore.map((x) => [x.key, x.count])) && after.filter((x) => x.k === 'th').length === 1 && after.find((x) => x.k === 'th').count === 4, 'the compacted message folds to the SAME counts, and only its NEWEST thread stat is kept', JSON.stringify([foldBefore.map((x) => [x.key, x.count]), foldAfter.map((x) => [x.key, x.count])]));
+  // attack 13: side lines for a conversation that never got a message log are "message gone" at the next trim
+  st.appendSide('a', 'orphan', [R.validateSide({ k: 'rx', msg: 'm', at: NOW, form: 'delta', op: 'add', key: 'OK', actor: { id: 'u' }, src: 'event' }).side]);
+  st.trim('a', 'orphan');
+  ok(fs.readFileSync(st.sidePath('a', 'orphan'), 'utf-8') === '', 'attack 13: a side line for a conversation with no message log is trimmed as "message gone" — never orphaned for ever');
+  st.close();
+}
+// verify r1 (MONEY / the event loop): the side log's GROWTH is bounded where it happens and a READ is a bounded tail.
+// Before: a 20 000-event storm on ONE message (no message append ⇒ no trim ⇒ no compaction) made every page read
+// two synchronous whole-file reads of 2.8 MiB on the event loop, for ever.
+{
+  const R = require(path.join(REPO, 'src/channel-record.js'));
+  const Rx = require(path.join(REPO, 'src/channel-reactions.js'));
+  const st = mk('side-growth');
+  st.appendRecords('a', 'c', [rec('c', 1)]);
+  const all = [];
+  const mkD = (i) => R.validateSide({ k: 'rx', msg: 'v1', at: 1e12 + i, form: 'delta', op: Math.floor(i / 300) % 2 ? 'remove' : 'add', key: 'OK', actor: { id: 'u' + (i % 300) }, src: 'event' }).side;
+  let compactions = 0;
+  for (let i = 0; i < 20000; i += 100) { const batch = []; for (let j = i; j < i + 100; j++) { const d = mkD(j); batch.push(d); all.push(d); } const w = st.appendSide('a', 'c', batch); if (w.compacted) compactions++; }
+  const size = fs.statSync(st.sidePath('a', 'c')).size;
+  const oracle = Rx.foldReactions(all, {});
+  const folded = Rx.foldReactions(st.readSide('a', 'c', { msgs: new Set(['v1']) }).filter((x) => x.k === 'rx'), {});
+  ok(size <= S.SIDE_COMPACT_BYTES + 200 * 1024 && compactions >= 1, `20 000 events on ONE message with no message append: the side log compacts as it grows (${compactions}×) and stays under ${(S.SIDE_COMPACT_BYTES / 1048576).toFixed(0)} MiB + one batch (${(size / 1024).toFixed(0)} KiB)`, JSON.stringify([size, compactions]));
+  ok(JSON.stringify(folded.map((x) => [x.key, x.count])) === JSON.stringify(oracle.map((x) => [x.key, x.count])) && oracle[0] && oracle[0].count === 200, 'the compacted log folds to the SAME counts as the whole stream (200 of 300 members reacted at the end)', JSON.stringify([folded.map((x) => [x.key, x.count]), oracle.map((x) => [x.key, x.count])]));
+  // the READ is the newest window: a line beyond SIDE_READ_BYTES from the end is not read at all
+  const st2 = mk('side-window');
+  st2.appendRecords('a', 'c', [rec('c', 1), rec('c', 2)]);
+  const sp = st2.sidePath('a', 'c');
+  fs.mkdirSync(path.dirname(sp), { recursive: true });
+  const filler = JSON.stringify(R.validateSide({ k: 'rx', msg: 'v2', at: 5, form: 'delta', op: 'add', key: 'OK', actor: { id: 'filler-' + 'x'.repeat(200) }, src: 'event' }).side);
+  const headLine = JSON.stringify(R.validateSide({ k: 'rx', msg: 'v1', at: 1, form: 'delta', op: 'add', key: 'SOB', actor: { id: 'head' }, src: 'event' }).side);
+  const tailLine = JSON.stringify(R.validateSide({ k: 'rx', msg: 'v1', at: 9, form: 'delta', op: 'add', key: 'OK', actor: { id: 'tail' }, src: 'event' }).side);
+  const nFill = Math.ceil((S.SIDE_READ_BYTES + 512 * 1024) / (filler.length + 1));
+  fs.writeFileSync(sp, headLine + '\n' + Array.from({ length: nFill }, () => filler).join('\n') + '\n' + tailLine + '\n');
+  const got = st2.readSide('a', 'c', { msgs: new Set(['v1']) });
+  ok(fs.statSync(sp).size > S.SIDE_READ_BYTES && got.length === 1 && got[0].actor.id === 'tail', `readSide reads the newest ${(S.SIDE_READ_BYTES / 1048576).toFixed(0)} MiB only (a ${(fs.statSync(sp).size / 1048576).toFixed(1)} MiB file: the line at its head is beyond the window; the one at its tail is read)`, JSON.stringify(got.map((x) => x.actor.id)));
+  st.close(); st2.close();
+  // CONTROLS: a copy that never compacts on growth keeps every line; a copy that reads the whole file finds the head line
+  const src = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
+  const G = "      try { compacted = trimSide(adapterId, convId, { liveIds: null }); sideCompactFailedAt.delete(ck); }";
+  const W = "    const tail = sideTail(sidePath(adapterId, convId), Math.max(64 * 1024, Number(maxBytes) || SIDE_READ_BYTES));";
+  ok(src.split(G).length === 2 && src.split(W).length === 2, 'CONTROL setup: the growth compaction and the tail window are each present once');
+  const PG = require(MUTCS.write('src/channel-store.js', src.replace(G, '      try { }'), 'side-nocompact'));
+  const sg = PG.createChannelStore({ dir: path.join(ROOT, 'side-nocompact') });
+  sg.appendRecords('a', 'c', [rec('c', 1)]);
+  for (let i = 0; i < 20000; i += 100) { const batch = []; for (let j = i; j < i + 100; j++) batch.push(mkD(j)); sg.appendSide('a', 'c', batch); }
+  const gSize = fs.statSync(sg.sidePath('a', 'c')).size;
+  ok(gSize > 2 * S.SIDE_COMPACT_BYTES && fs.readFileSync(sg.sidePath('a', 'c'), 'utf-8').split('\n').filter(Boolean).length === 20000, `CONTROL: the copy without the growth compaction keeps all 20 000 lines (${(gSize / 1048576).toFixed(1)} MiB) — the growth leg would be red`);
+  sg.close();
+  const PW = require(MUTCS.write('src/channel-store.js', src.replace(W, "    const tail = { text: fs.readFileSync(sidePath(adapterId, convId), 'utf-8'), cut: false };"), 'side-wholeread'));
+  const sw = PW.createChannelStore({ dir: path.join(ROOT, 'side-wholeread') });
+  sw.appendRecords('a', 'c', [rec('c', 1), rec('c', 2)]);
+  const swp = sw.sidePath('a', 'c'); fs.mkdirSync(path.dirname(swp), { recursive: true }); fs.copyFileSync(sp, swp);
+  const gotW = sw.readSide('a', 'c', { msgs: new Set(['v1']) });
+  ok(gotW.length === 2, 'CONTROL: the copy that reads the whole file finds the head line too (2 lines) — the window leg would be red');
+  sw.close();
+}
+// verify r1 (continued, MONEY / the event loop): a COMPACTED log past the trigger. Before: 5 000 messages each holding a
+// list snapshot = a 5.4 MiB log that is already one line per message — every append re-read, re-parsed and re-wrote the
+// whole file (43 ms per reaction event, 10.8 MiB read + 5.4 MiB written each), and every message whose snapshot sat
+// before the newest SIDE_READ_BYTES was invisible to every read (a new reaction on an old message folded into its line
+// at the file's head, outside the window). Now a compaction keeps the most recently changed messages, last, within
+// SIDE_KEEP_BYTES.
+{
+  const R = require(path.join(REPO, 'src/channel-record.js'));
+  const Rx = require(path.join(REPO, 'src/channel-reactions.js'));
+  const N = 5000;
+  const id32 = (p, i) => p + String(i).padStart(32, '0');
+  const snapOf = (i) => R.validateSide({ k: 'rx', msg: `v${i}`, at: 1e12 + i * 1000 + 5, form: 'snapshot', src: 'list', list: ['THUMBSUP', 'OK', 'DONE'].map((k, j) => ({ key: k, count: 4, by: [0, 1, 2, 3].map((x) => id32('ou_', x + j)), rids: [0, 1, 2, 3].map((x) => id32('rid_', i * 10 + x + j)) })) }).side;
+  const deltaOf = (i, n) => R.validateSide({ k: 'rx', msg: `v${i}`, at: 2e12 + n, form: 'delta', op: 'add', key: 'PARTY', actor: { id: id32('ou_z', n) }, src: 'event' }).side;
+  const run = (SM, name, EV = 300) => {
+    const st = SM.createChannelStore({ dir: path.join(ROOT, name), log: { log() {}, warn() {}, error() {} } });
+    const recs = []; for (let i = 0; i < N; i++) recs.push(rec('c', i, 1e12 + i * 1000));
+    st.appendRecords('a', 'c', recs);
+    for (let i = 0; i < N; i += 500) st.appendSide('a', 'c', Array.from({ length: 500 }, (_, j) => snapOf(i + j)));
+    const fp = st.sidePath('a', 'c');
+    const size0 = fs.statSync(fp).size;
+    const rf = fs.readFileSync, rn = fs.renameSync, ro = fs.openSync;
+    let reads = 0, rewrites = 0;
+    // a whole-log read = the log opened for reading (the window read, verify r2) or read whole (the pre-r2 reader)
+    fs.readFileSync = function (q, ...a) { if (String(q) === fp) reads++; return rf.call(this, q, ...a); };
+    fs.openSync = function (q, fl, ...a) { if (String(q) === fp && (fl === 'r' || fl === undefined)) reads++; return ro.call(this, q, fl, ...a); };
+    fs.renameSync = function (a, b, ...r) { if (String(b) === fp) rewrites++; return rn.call(this, a, b, ...r); };
+    const t0 = process.hrtime.bigint();
+    try { for (let n = 0; n < EV; n++) st.appendSide('a', 'c', [deltaOf(N - 1 - (n % 50), n)]); }
+    finally { fs.readFileSync = rf; fs.renameSync = rn; fs.openSync = ro; }
+    const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+    // a new reaction on the OLDEST message after the storm: is it visible to a read?
+    st.appendSide('a', 'c', [deltaOf(0, 99999)]);
+    const got = st.readSide('a', 'c', { msgs: new Set(['v0']) });
+    const f0 = Rx.foldReactions(got.filter((x) => x.k === 'rx'), {});
+    const tailIds = new Set(st.readSide('a', 'c', { msgs: new Set(Array.from({ length: 50 }, (_, j) => `v${N - 1 - j}`)) }).map((x) => x.msg));
+    const out = { size0, size: fs.statSync(fp).size, reads, rewrites, ms, oldestSeen: f0.some((x) => x.key === 'PARTY'), recentAll: tailIds.size === 50 };
+    st.close();
+    return out;
+  };
+  const real = run(S, 'side-thrash');
+  ok(real.size0 <= S.SIDE_COMPACT_BYTES + 600 * 1024 && real.size <= S.SIDE_COMPACT_BYTES + 64 * 1024, `5 000 messages' snapshots: the compacted log stays bounded (${(real.size0 / 1024).toFixed(0)} KiB after the snapshots, ${(real.size / 1024).toFixed(0)} KiB after the storm; the trigger is ${S.SIDE_COMPACT_BYTES / 1024} KiB, a compaction keeps ≤ ${S.SIDE_KEEP_BYTES / 1024} KiB)`, JSON.stringify(real));
+  ok(real.reads <= 3 && real.rewrites <= 1, `300 reaction events on a log past the trigger: ${real.reads} whole-file read(s), ${real.rewrites} rewrite(s) (${real.ms.toFixed(0)} ms) — a compaction is SIDE_KEEP_BYTES of appends away, never one per event`, JSON.stringify(real));
+  ok(real.oldestSeen && real.recentAll, 'a new reaction on the OLDEST message is visible to a read, and so is every recently changed message (the compacted log never outgrows the read window; the most recently changed sit last)', JSON.stringify(real));
+  // CONTROL: the pre-fix compaction (every message kept, first-appearance order) — re-read + re-written per event, and
+  // the oldest message's new reaction folded into a line outside the window
+  const src = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
+  const BOUND = '      if (from < groups.length && bytes + b > SIDE_KEEP_BYTES) break;';
+  const ORDER = '    const order = [...byMsg.keys()].sort((a, b) => last.get(a) - last.get(b));';
+  ok(src.split(BOUND).length === 2 && src.split(ORDER).length === 2, 'CONTROL setup: the output bound and the recency order are each present once');
+  const PT = require(MUTCS.write('src/channel-store.js', src.replace(BOUND, '      if (false) break;').replace(ORDER, '    const order = [...byMsg.keys()];'), 'side-unbounded-compaction'));
+  const pre = run(PT, 'side-thrash-pre', 20);
+  // (verify r2: the compaction's INPUT is the read window now, so even the pre-fix compaction can no longer fold a new
+  // reaction into a line outside the window — the visibility half has a second belt; the THRASH half is still this
+  // control's to show)
+  ok(pre.size > S.SIDE_COMPACT_BYTES && pre.reads >= 20 && pre.rewrites >= 20, `CONTROL: the pre-fix compaction (no output bound) re-reads the ${(pre.size / 1048576).toFixed(1)} MiB log ${pre.reads}× and re-writes it ${pre.rewrites}× for 20 events (${pre.ms.toFixed(0)} ms) — the thrash assert above would be red`, JSON.stringify(pre));
+}
+// NEGATIVE CONTROL — a copy that REMEMBERS the side keys BEFORE the bytes: one failed write makes the line a phantom duplicate
+{
+  const src = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
+  const PRE = src.replace("      inBatch.add(k);\n      fresh.push(x);\n    }\n    if (!fresh.length) return { appended: 0, duplicates, msgs: [] };", "      inBatch.add(k); set.add(k);\n      fresh.push(x);\n    }\n    if (!fresh.length) return { appended: 0, duplicates, msgs: [] };").replace("    catch (e) { sideDedup.delete(`${adapterId}/${convId}`); throw e; }", '    catch (e) { throw e; }');
+  ok(PRE !== src, 'NEGATIVE CONTROL setup: the remember-before-the-bytes side writer was reconstructed from the shipped bytes');
+  const PS = require(MUTCS.write('src/channel-store.js', PRE, 'side-prefix'));
+  const R = require(path.join(REPO, 'src/channel-record.js'));
+  const st = PS.createChannelStore({ dir: path.join(ROOT, 'side-pre') });
+  st.appendRecords('a', 'c', [rec('c', 1)]);
+  const x = R.validateSide({ k: 'rx', msg: 'v1', at: NOW, form: 'delta', op: 'add', key: 'OK', actor: { id: 'u' }, src: 'event' }).side;
+  st.appendSide('a', 'c', [R.validateSide({ k: 'rx', msg: 'v1', at: NOW - 1, form: 'delta', op: 'add', key: 'SOB', actor: { id: 'w' }, src: 'event' }).side]);   // the set is cached now
+  const sp = st.sidePath('a', 'c');
+  const saved = fs.readFileSync(sp);
+  fs.unlinkSync(sp); fs.mkdirSync(sp);                                  // EISDIR inside the write
+  try { st.appendSide('a', 'c', [x]); } catch {}
+  fs.rmdirSync(sp); fs.writeFileSync(sp, saved);
+  const again = st.appendSide('a', 'c', [x]);
+  ok(again.appended === 0 && again.duplicates === 1 && st.readSide('a', 'c', { msgs: new Set(['v1']) }).length === 1, 'NEGATIVE CONTROL: the remember-before copy calls the never-written reaction a DUPLICATE for ever (the real store appends it — above)', JSON.stringify(again));
+  st.close();
+}
+
+// ── ⑫ THE SIDE-LOG COST CENSUS (lane channel-threads verify r2, MONEY / the event loop) ──
+// Round 1 found three instances of one class (a storm grew the side log without bound; a compact-but-large log was
+// re-read + re-written per event; a reaction event scanned the store). This is the census of the class:
+//  (a) STATIC, grep-derived (comments stripped): nothing outside the store names the side log's place; every store
+//      function that touches a side file is on a CLOSED table with its bound; none reads a file whole
+//      (`fs.readFileSync`) — every read is `sideTail`'s bounded `readSync` (the newest SIDE_READ_BYTES); a write is
+//      `appendLines` (append-only) or the compaction's temp + rename; the engine never widens a side read.
+//  (b) BYTES, deterministic: 100 reaction events (the append + the broadcast fold's read) on a 1 / 2 / 4 MiB log read
+//      at most one window per event after the first, the SAME bytes whatever the log's size — with a working
+//      compaction and with one that FAILS (its temp path refused: verify r2 — it used to be retried per event, each
+//      attempt reading the whole growing file).
+//  (c) TIME: the same 100 events, 2× the log ⇒ ≤ 2.5× the time (n / 2n interleaved, median, ≤ 3 attempts), on the
+//      compaction's worst case (one message's distinct keys).
+//  CONTROLS: the pre-r2 store (whole-file reads, a failed compaction retried per event) reads MORE per event as the
+//  log grows (b red); a store bound to the pre-r1 quadratic compactSide reads ×4 per doubling (c red).
+console.log('\n⑫ the side-log cost census — bounded reads, append-only writes, O(1) amortised per event');
+{
+  const R = require(path.join(REPO, 'src/channel-record.js'));
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
+  const STORE = 'src/channel-store.js';
+  const srcS = fs.readFileSync(path.join(REPO, STORE), 'utf-8');
+  // (a) THE STATIC CENSUS
+  const SIDE_FNS = {
+    sidePath: 'the path — `msgs/<a>/~side/<conv>.ndjson`',
+    sideTail: 'THE READ PRIMITIVE: one readSync of at most `maxBytes` from the end (a partial first line dropped)',
+    sideWindow: 'the lines of the read window — sideTail(…, SIDE_READ_BYTES)',
+    sideLines: 'sideWindow',
+    sideDedupSet: 'the dedup rebuild — sideLines (the window)',
+    appendSide: 'appendLines (append-only) + the growth compaction past SIDE_COMPACT_BYTES, backed off SIDE_KEEP_BYTES after a failure',
+    readSide: 'sideTail (the window, ≥ 64 KiB, default SIDE_READ_BYTES)',
+    trimSide: 'sideWindow + a temp write ≤ SIDE_KEEP_BYTES + rename',
+    trim: 'trimSide (inside the message trim — its own reads and writes are the MESSAGE log\'s, bounded by retention)',
+  };
+  const VIA_ONLY = new Set(['trim']);   // touches a side file only through a listed function
+  const code = strip(srcS);
+  // each function's body = its declaration to its own closing brace at the factory's indent (a one-line arrow: its line)
+  const bodies = new Map();
+  for (const m of code.matchAll(/\n  (?:async\s+)?function\s+(\w+)\s*\(|\n  const (\w+) = \(/g)) {
+    const end = m[1] ? code.indexOf('\n  }\n', m.index + 1) + 4 : code.indexOf('\n', m.index + 1);
+    bodies.set(m[1] || m[2], code.slice(m.index, end > m.index ? end : code.length));
+  }
+  const touches = [...bodies].filter(([n, b]) => /\b(?:sidePath|sideTail|sideWindow|sideLines|sideDedupSet|trimSide)\(|SIDE_DIR\b/.test(b) && n !== 'sidePath').map(([n]) => n);
+  const unlisted = touches.filter((n) => !SIDE_FNS[n]);
+  const dead = Object.keys(SIDE_FNS).filter((n) => !bodies.has(n));
+  const wholeReads = Object.keys(SIDE_FNS).filter((n) => !VIA_ONLY.has(n) && bodies.has(n) && /\bfs\.(?:readFileSync|promises\.readFile)\(/.test(bodies.get(n)));
+  const tailRead = /const n = fs\.readSync\(fd, b, 0, maxBytes, size - maxBytes\);/.test(bodies.get('sideTail') || '') && /if \(size <= maxBytes\)/.test(bodies.get('sideTail') || '');
+  const windowRead = /sideTail\(sidePath\(adapterId, convId\), SIDE_READ_BYTES/.test(bodies.get('sideWindow') || '') && /sideTail\(sidePath\(adapterId, convId\), Math\.max\(64 \* 1024, Number\(maxBytes\) \|\| SIDE_READ_BYTES\)\)/.test(bodies.get('readSide') || '');
+  const writes = Object.keys(SIDE_FNS).filter((n) => !VIA_ONLY.has(n) && bodies.has(n) && /\bfs\.(?:writeFileSync|appendFileSync|renameSync)\(|\bappendLines\(/.test(bodies.get(n)));
+  ok(touches.length >= 6 && !unlisted.length && !dead.length, `(a) every store function that touches a side file is on the closed table (${touches.join(', ')})${unlisted.length ? ' — UNLISTED: ' + unlisted.join(', ') : ''}${dead.length ? ' — dead rows: ' + dead.join(', ') : ''}`);
+  ok(!wholeReads.length && tailRead && windowRead, `(a) no side function reads a file whole — every read is sideTail's bounded readSync, the window SIDE_READ_BYTES (${(S.SIDE_READ_BYTES / 1048576).toFixed(0)} MiB)${wholeReads.length ? ' — whole reads in: ' + wholeReads.join(', ') : ''}`);
+  ok(writes.sort().join() === 'appendSide,trimSide' && /appendLines\(fp, /.test(bodies.get('appendSide')) && /const tmp = `\$\{fp\}\.tmp-\$\{process\.pid\}`;[\s\S]*fs\.renameSync\(tmp, fp\)/.test(bodies.get('trimSide')), `(a) the side writes are appendSide's append (append-only) and trimSide's temp + rename (${writes.join(', ')})`);
+  const walkJs = (d, out = []) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const f = `${d}/${e.name}`; if (e.isDirectory()) walkJs(f, out); else if (/\.(c|m)?js$/.test(e.name)) out.push(f); } return out; };
+  const namers = walkJs('src').filter((f) => f !== STORE && /\bsidePath\(|\bSIDE_DIR\b|['"`]~side\b|\bsideTail\(|\bsideLines\(/.test(strip(fs.readFileSync(path.join(REPO, f), 'utf-8'))));
+  const eng = strip(fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8'));
+  const widened = [...eng.matchAll(/store\.readSide\([^)]*\)/g)].map((m) => m[0]).filter((c) => /maxBytes|limit/.test(c));
+  ok(!namers.length && !widened.length && [...eng.matchAll(/store\.readSide\(/g)].length >= 2, `(a) nothing outside the store names the side log's place (${namers.length ? namers.join(', ') : 'none'}) and no engine read widens the window (${widened.length ? widened.join(' | ') : 'none'})`);
+  // (b) + (c) the per-event cost at 1 / 2 / 4 MiB
+  const id24 = (p, i) => p + String(i).padStart(24, '0');
+  const snapOf = (i) => R.validateSide({ k: 'rx', msg: `v${i}`, at: 1e12 + i * 1000 + 5, form: 'snapshot', src: 'list', list: ['THUMBSUP', 'OK'].map((k, j) => ({ key: k, count: 3, by: [0, 1, 2].map((x) => id24('ou_', x + j)), rids: [0, 1, 2].map((x) => id24('rid_', i * 10 + x + j)) })) }).side;
+  const keyDelta = (i) => R.validateSide({ k: 'rx', msg: 'hot', at: 1e12 + i, form: 'delta', op: 'add', key: 'K_' + 'x'.repeat(48) + i, actor: { id: 'u' + (i % 300) }, src: 'event' }).side;   // long distinct keys (a common prefix): each comparison of a per-key scan costs its length
+  const evDelta = (msg, n) => R.validateSide({ k: 'rx', msg, at: 2e12 + n, form: 'delta', op: 'add', key: 'PARTY', actor: { id: id24('ou_z', n) }, src: 'event' }).side;
+  let runSeq = 0;
+  /** ONE run: a fresh store, a preloaded side log of `mib` MiB (`shape` 'rooms' = distinct messages' snapshots, 'hot' = one
+   *  message's distinct keys — the compaction's worst case), then 100 events = the append + the broadcast fold's read. */
+  const costRun = (SM, mib, { shape = 'rooms', failing = false } = {}) => {
+    const st = SM.createChannelStore({ dir: path.join(ROOT, `cost-${++runSeq}`), log: { log() {}, warn() {}, error() {} } });
+    const fp = st.sidePath('a', 'c');
+    fs.mkdirSync(path.dirname(fp), { recursive: true });
+    const lines = []; let bytes = 0, i = 0;
+    while (bytes < mib * 1048576) { const l = JSON.stringify(shape === 'hot' ? keyDelta(i) : snapOf(i)); i++; lines.push(l); bytes += l.length + 1; }
+    fs.writeFileSync(fp, lines.join('\n') + '\n');
+    const msgOf = (n) => (shape === 'hot' ? 'hot' : `v${i - 1 - (n % 20)}`);
+    if (failing) fs.mkdirSync(`${fp}.tmp-${process.pid}`, { recursive: true });   // every compaction attempt: EISDIR on its temp write
+    let read = 0, first = 0;
+    const rf = fs.readFileSync, rs = fs.readSync;
+    fs.readFileSync = function (q, ...a) { const o = rf.call(this, q, ...a); if (String(q) === fp) read += Buffer.byteLength(o); return o; };
+    fs.readSync = function (...a) { const n = rs.apply(this, a); read += n; return n; };
+    const t0 = process.hrtime.bigint();
+    try {
+      for (let n = 0; n < 100; n++) {
+        st.appendSide('a', 'c', [evDelta(msgOf(n), n)]);
+        st.readSide('a', 'c', { msgs: new Set([msgOf(n)]) });
+        if (n === 0) first = read;
+      }
+    } finally { fs.readFileSync = rf; fs.readSync = rs; }
+    const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+    if (failing) { try { fs.rmdirSync(`${fp}.tmp-${process.pid}`); } catch { } }
+    st.close && st.close();
+    return { ms, perEvent: (read - first) / 99, read };
+  };
+  const bytesLeg = (SM, failing) => [1, 2, 4].map((mib) => ({ mib, ...costRun(SM, mib, { failing }) }));
+  const W = S.SIDE_READ_BYTES;
+  const inWindow = (rows) => rows.every((r) => r.perEvent <= W + 64 * 1024);
+  const flat = (rows) => inWindow(rows) && rows[2].perEvent <= 1.25 * rows[0].perEvent;
+  const good = bytesLeg(S, false), bad = bytesLeg(S, true);
+  const fmt = (rows) => rows.map((r) => `${r.mib} MiB: ${(r.perEvent / 1024).toFixed(0)} KiB/event`).join(', ');
+  ok(flat(good), `(b) 100 events with a working compaction read ≤ one window per event, the same whatever the log's size (${fmt(good)})`);
+  ok(inWindow(bad), `(b) …and with a compaction that FAILS every attempt (the log grows): never more than ONE WINDOW per event whatever its size — a failed compaction is retried SIDE_KEEP_BYTES later, never per event (${fmt(bad)})`);
+  // (c) time, interleaved n / 2n, median of 5 pairs, ≤ 3 attempts, on the compaction's worst case
+  const timeLeg = (SM) => {
+    const out = [];
+    for (const [a, b] of [[1, 2], [2, 4]]) {
+      const tries = [];
+      for (let t = 0; t < 3; t++) {
+        const rs = [];
+        for (let k = 0; k < 5; k++) { const x = costRun(SM, a, { shape: 'hot' }).ms, y = costRun(SM, b, { shape: 'hot' }).ms; rs.push(y / x); }
+        rs.sort((p, q) => p - q);
+        tries.push(rs[2]);
+        if (rs[2] <= 2.5) break;
+      }
+      out.push({ from: a, to: b, r: tries[tries.length - 1], tries });
+    }
+    return out;
+  };
+  const tl = timeLeg(S);
+  ok(tl.every((x) => x.r <= 2.5), `(c) 100 events on the compaction's worst case (one message's distinct keys): 2× the log ⇒ ≤ 2.5× the time — ${tl.map((x) => `${x.from}→${x.to} MiB ×${x.r.toFixed(2)}${x.tries.length > 1 ? ` (attempts ${x.tries.map((r) => '×' + r.toFixed(2)).join(', ')})` : ''}`).join(', ')}`);
+  // CONTROL (i): the pre-r2 store — the whole-file window reader and the per-event retry of a failed compaction
+  const PRE_WIN = "    try { tail = sideTail(sidePath(adapterId, convId), SIDE_READ_BYTES, { strict }); } catch (e) { if (strict) throw e; return { lines: [], cut: false }; }";
+  const PRE_GATE = '    if (size > SIDE_COMPACT_BYTES && !(failedAt !== undefined && size < failedAt + SIDE_KEEP_BYTES)) {';
+  ok(srcS.split(PRE_WIN).length === 2 && srcS.split(PRE_GATE).length === 2, 'CONTROL (i) setup: the window read and the compaction back-off are each present once');
+  const preSrc = srcS.replace(PRE_WIN, "    try { tail = { text: fs.readFileSync(sidePath(adapterId, convId), 'utf-8'), cut: false }; } catch (e) { if (strict && e.code !== 'ENOENT') throw e; return { lines: [], cut: false }; }").replace(PRE_GATE, '    if (size > SIDE_COMPACT_BYTES) {');
+  const PS = require(MUTCS.write(STORE, preSrc, 'side-pre-r2'));
+  const preBad = bytesLeg(PS, true);
+  ok(!inWindow(preBad) && preBad[2].perEvent >= 2 * preBad[0].perEvent, `CONTROL (i): the pre-r2 store under a failing compaction reads the WHOLE growing log per event — more than a window, more as it grows (${fmt(preBad)}) — (b) would be red`);
+  // CONTROL (ii): a store bound to the pre-r1 QUADRATIC compactSide (a closed world: the store copy requires the copy)
+  const rxSrc = fs.readFileSync(path.join(REPO, 'src/channel-reactions.js'), 'utf-8');
+  const qSrc = rxSrc
+    .replace('    const order = new Set();   // first appearance, never removed (a key that fell to 0 and came back keeps its place)', '    const order = [];')
+    .replace('      if (count > 0) { state.set(e.key, { count, by }); order.add(e.key); }', '      if (count > 0) { state.set(e.key, { count, by }); order.push(e.key); }')
+    .replace('        if (!s) { s = { count: 0, by: [] }; state.set(x.key, s); order.add(x.key); }', '        if (!s) { s = { count: 0, by: [] }; state.set(x.key, s); if (!order.includes(x.key)) order.push(x.key); }');
+  ok((qSrc.match(/order\.push/g) || []).length === 2 && qSrc.includes('order.includes(x.key)'), 'CONTROL (ii) setup: the pre-r1 quadratic compactSide was reconstructed (3 edits)');
+  const qPath = MUTCS.write('src/channel-reactions.js', qSrc, 'compact-quadratic');
+  const IMP = "const { compactSide } = require('./channel-reactions.js');";
+  ok(srcS.split(IMP).length === 2, 'CONTROL (ii) setup: the store imports compactSide once');
+  const QS = require(MUTCS.write(STORE, srcS.replace(IMP, `const { compactSide } = require(${JSON.stringify(qPath)});`), 'side-quadratic'));
+  const qt = timeLeg(QS);
+  ok(qt[0].tries.length === 3 && qt[0].tries.every((r) => r > 2.5), `CONTROL (ii): bound to the pre-r1 quadratic compaction the same leg reads ${qt[0].tries.map((r) => '×' + r.toFixed(2)).join(', ')} per doubling (1→2 MiB) on every attempt — (c) would be red`);
+}
+
+// ⑫b verify r2 (MONEY): the custom-emoji picture cache's BOUND — the pictures live in the account's attachment LRU
+// (`~emoji` — a name no conversation id spells), counted in its usage and evicted least-recently-used with the
+// attachments at the account's budget; a picture used since outlives an older one
+console.log('⑫b the custom-emoji picture cache: the account\'s attachment budget, LRU');
+{
+  const st = mk('emoji-lru');
+  const MB = 1024 * 1024;
+  const budget = 2 * MB;
+  const e1 = await st.attachmentPut('a', '~emoji', 'party_parrot', { data: Buffer.alloc(300 * 1024, 1), name: 'party_parrot.png', mime: 'image/png' }, { budgetBytes: budget });
+  const e2 = await st.attachmentPut('a', '~emoji', 'shipit', { data: Buffer.alloc(300 * 1024, 2), name: 'shipit.png', mime: 'image/png' }, { budgetBytes: budget });
+  ok(st.attachmentUsage('a').bytes === 600 * 1024 && st.attachmentUsage('a').files === 2 && !String(e1.file).includes('party_parrot'), 'two custom-emoji pictures count in the ACCOUNT\'s attachment usage (their file names are hashes, never the key)', JSON.stringify(st.attachmentUsage('a')));
+  await new Promise((r) => setTimeout(r, 5));
+  st.attachmentGet('a', '~emoji', 'shipit');   // drawn since: the LRU keeps it
+  await new Promise((r) => setTimeout(r, 5));
+  const a1 = await st.attachmentPut('a', 'c', 'att-1', { data: Buffer.alloc(700 * 1024, 3), name: 'a.bin', mime: 'application/octet-stream' }, { budgetBytes: budget });
+  const a2 = await st.attachmentPut('a', 'c', 'att-2', { data: Buffer.alloc(800 * 1024, 4), name: 'b.bin', mime: 'application/octet-stream' }, { budgetBytes: budget });
+  const u = st.attachmentUsage('a');
+  ok(u.bytes <= budget && [...(a1.evicted || []), ...(a2.evicted || [])].length === 1 && !st.attachmentGet('a', '~emoji', 'party_parrot') && !!st.attachmentGet('a', '~emoji', 'shipit') && !!st.attachmentGet('a', 'c', 'att-2'), `past the budget the least-recently-used picture goes first — the untouched emoji evicted, the one drawn since kept, the newest attachment kept (${Math.round(u.bytes / 1024)} KiB ≤ ${budget / 1024} KiB; evicted ${[...(a1.evicted || []), ...(a2.evicted || [])].length})`, JSON.stringify(u));
+  st.close && st.close();
+}
 
 // ── ⑩ THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
 // Measured HERE, while every patched copy this run made still exists (the exit

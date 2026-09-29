@@ -76,6 +76,10 @@ const LIVE_SESSION_FACTS = Object.freeze({
   accountId: { digest: null }, accountName: { digest: null }, accountTail: { digest: null },
   auth: { digest: null },                             // object (source/name/poolTarget)
   todo: { digest: null },                             // object, changes per TodoWrite
+  // THE CONVERSATION'S POOL PIN (2026-09-28): {memberId, name, at} | null — CARRIED-ONLY: the billing
+  // submenu (✓ + "pinned") and Session Properties read the merged row when they open; the chip's
+  // tooltip rides `auth.pinned`, so no card re-render is bought here
+  poolPin: { digest: null },
   // design-user-inbox-reply D1.7: 'running'|'idle'|'waiting' — the For-you
   // inbox's running dot. CARRIED-ONLY: it flips twice per turn and no card
   // draws it, so gating on it would re-render the list every turn (the

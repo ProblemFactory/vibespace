@@ -223,6 +223,25 @@ console.log('— legacy checklist → backlog seed (one-time migration) —');
   fs.rmSync(tmp2, { recursive: true, force: true });
 }
 
+console.log('— "Clear content…" (2026-09-28): a cleared entry — the injection shows the sentence, the diff says nothing —');
+{
+  const tmp3 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ctxclear-'));
+  const m = new TaskGroupManager({ dataDir: tmp3, onChange: () => {} });
+  const g = m.create({ title: 'clear me', objective: 'obj' });
+  m.addProgress(g.id, { note: 'MAILBOX-WORDS in the note', detail: 'and MAILBOX-WORDS in the detail', session: 'claude:s1' });
+  m.addProgress(g.id, { note: 'kept entry', session: 'claude:s1' });
+  const snap = m.snapshotForDiff(g.id);
+  const before = m.renderContext(g.id, { sessionKey: 'claude:s1' });
+  const id = m.get(g.id).progress[0].id;
+  const r = m.clearProgress(g.id, [id], { by: 'owner' });
+  const after = m.renderContext(g.id, { sessionKey: 'claude:s1' });
+  check('the full injection before the clear carries the words, after it the sentence and not the words', before.includes('MAILBOX-WORDS') && !after.includes('MAILBOX-WORDS') && after.includes("[cleared at the user's request]") && r.cleared.length === 1, after.slice(-300));
+  check('…no "† = has detail" for the cleared entry (its detail went with it)', !/cleared at the user's request\] †/.test(after), '');
+  const d = m.diffChanges(g.id, snap, { sessionKey: 'claude:s1' });
+  check('a diff from the pre-clear snapshot produces NO update block (a clear is not news to a member agent)', d && d.lines.length === 0 && m.renderContextDiff(g.id, snap, {}) === '', JSON.stringify(d));
+  fs.rmSync(tmp3, { recursive: true, force: true });
+}
+
 fs.rmSync(tmp, { recursive: true, force: true });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nall context-diff tests passed');

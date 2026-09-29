@@ -26,6 +26,31 @@ function writeJsonAtomic(file, data) {
   fs.renameSync(tmp, file);
 }
 
+// A LAYOUT RECORD KEEPS NO RECORD'S WORDS (lane-redact verify r5, reproduced in chrome). A window's title is DISPLAY —
+// every client rebuilds it from its own store when the window replays from its openSpec — yet the record carries it to
+// data/layouts.json, to every rollback point, to every other client (the relayed layout-sync frame, cached per desktop in
+// DesktopManager._savedStates) and back out through GET /api/layouts. The Job input window's title names its job
+// (`<job name> — needs your input`), and a job's name is a record's words ("Clear content…" clears it): a desktop record
+// nobody re-saved after the clear (another desktop, a named layout) kept it on disk and served it. So a window whose
+// title carries a record's words is kept in a layout record under its GENERIC title — at the ONE write choke point
+// (writeLayouts: a layout-sync, a preset, a rollback restore, a config import) and at the first read of the file (what
+// an older build wrote). `WORDLESS_TITLES` = openSpec action → the title a record keeps; the client census
+// (test-record-clear-census §H) fails a window whose title reads a record's words without a row here. The table lives in
+// PURE src/record-clear.js since verify r7 — the client's capture (layout.js captureState) reads the same one.
+const { WORDLESS_TITLES } = require('../record-clear.js');
+/** In place: every window record (an object with an `openSpec`) whose action is in WORDLESS_TITLES keeps that title.
+ *  → how many titles it changed. Bounded depth; anything that is not a plain JSON tree is left alone. */
+function wordlessTitles(node, depth = 0) {
+  if (!node || typeof node !== 'object' || depth > 16) return 0;
+  let n = 0;
+  if (Array.isArray(node)) { for (const x of node) n += wordlessTitles(x, depth + 1); return n; }
+  const spec = node.openSpec;
+  if (spec && typeof spec === 'object' && typeof spec.action === 'string' && Object.prototype.hasOwnProperty.call(WORDLESS_TITLES, spec.action)
+    && typeof node.title === 'string' && node.title !== WORDLESS_TITLES[spec.action]) { node.title = WORDLESS_TITLES[spec.action]; n++; }
+  for (const k of Object.keys(node)) if (k !== 'openSpec' && node[k] && typeof node[k] === 'object') n += wordlessTitles(node[k], depth + 1);
+  return n;
+}
+
 /** Setup persistence routes. Requires { dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth } context. */
 function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getHosts, getMounts, getTasks, getAccounts, getUsageHistory, onSettingsWrite }) {
   const broadcast = (msg) => {
@@ -44,6 +69,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     ensureDir(dataDir);
     try { _layoutsCache = JSON.parse(fs.readFileSync(LAYOUTS_FILE, 'utf-8')); }
     catch { _layoutsCache = { current: null, autoSave: null, saved: {}, customGrids: [] }; }
+    // what an older build wrote: a Job input window's title naming its job (the next flush writes the generic title)
+    if (wordlessTitles(_layoutsCache)) { if (_layoutsSaveTimer) clearTimeout(_layoutsSaveTimer); _layoutsSaveTimer = setTimeout(flushLayouts, 500); }
     return _layoutsCache;
   }
 
@@ -142,6 +169,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       // the snapshot either.
       const snap = detach(prev);
       if (!snap) return;
+      wordlessTitles(snap); // a rollback point is a layout record too (the disk belt above may read what an older build wrote)
       setImmediate(() => {
         try {
           fs.mkdirSync(HISTORY_DIR, { recursive: true });
@@ -186,6 +214,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   }
   const detach = (o) => { try { return structuredClone(o); } catch { try { return JSON.parse(JSON.stringify(o)); } catch { return null; } } };
   function writeLayouts(data) {
+    // THE CHOKE POINT keeps no record's words in a window title (above) — IN PLACE: the ws layout-sync handler relays
+    // the SAME window objects it hands here, so the frame other clients receive carries the generic title too
+    wordlessTitles(data);
     try {
       const nextShape = layoutShape(data);
       snapshotLayout(_lastGood, nextShape);   // the DETACHED previous state, never the live cache
@@ -829,4 +860,4 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   return router;
 }
 
-module.exports = { router, setup };
+module.exports = { router, setup, wordlessTitles, WORDLESS_TITLES };

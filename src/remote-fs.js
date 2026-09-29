@@ -13,6 +13,7 @@
 const { spawn, execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const { contentDisposition, fileNameOf } = require('./file-disposition');
 
 // ONE archive-listing parser for local AND remote (B-b87b: RemoteFs used to
 // return bare-string entries while /api/archive/list returned
@@ -306,47 +307,93 @@ class RemoteFs {
   async copy(id, from, to) { await this._run(id, `cp -rn ${shqp(from)} ${shqp(to)}`, { timeoutMs: 120000 }); return { success: true }; }
   async move(id, from, to) { await this._run(id, `mv -n ${shqp(from)} ${shqp(to)}`, { timeoutMs: 120000 }); return { success: true }; }
 
-  // Stream a remote file to an HTTP response (download / raw viewer)
+  // Stream a remote file to an HTTP response (download / raw viewer). ALWAYS
+  // NAMED (lane raw-filename): `attachment` for /api/download (that header is
+  // unchanged), otherwise `inline` + the file's own name in both RFC 6266 forms —
+  // /api/file/raw feeds every preview element, and a nameless response is saved
+  // by the browser as "raw". The inline name is set just before the FIRST BYTE
+  // goes out (or at a successful empty end); a file that cannot be read answers
+  // 404 with no name on BOTH transports (r2: over ssh it was an empty 200 — the
+  // pipe ended the response before cat's exit code arrived — and a Download
+  // saved an empty file under the name).
   downloadTo(id, filePath, res, { attachment = false } = {}) {
-    if (attachment) res.setHeader('Content-Disposition', `attachment; filename="${path.basename(filePath).replace(/"/g, '')}"`);
+    // the attachment name in BOTH forms, printable ASCII by construction: the raw name used to go into
+    // `filename="…"` and any character above U+00FF (every CJK name) made setHeader THROW inside the async
+    // route — swallowed, so a remote Download of `截图.png` was never answered (lane raw-filename r2)
+    const attachName = attachment ? contentDisposition(fileNameOf(filePath), 'attachment') : null;
+    if (attachName) res.setHeader('Content-Disposition', attachName);
+    const inlineName = attachment ? null : contentDisposition(fileNameOf(filePath), 'inline');
+    const nameIt = () => { if (inlineName && !res.headersSent) res.setHeader('Content-Disposition', inlineName); };
     // dial devices have no ssh — _spawn threw SYNC inside the async route and
     // the request was never answered (viewer/download hung forever, review
     // finding). Stream over the device link instead.
     if (this._host(id)?.transport === 'dial') {
-      this._devStreamTo(id, 'cat', [filePath], res, { notFoundOnFail: true });
+      this._devStreamTo(id, 'cat', [filePath], res, { notFoundOnFail: true, beforeBody: nameIt });
       return;
     }
-    const child = this._spawn(id, `cat ${shq(filePath)}`);
-    child.stdout.pipe(res);
-    child.stderr.on('data', () => {});
-    child.on('close', (code) => { if (code !== 0 && !res.headersSent) res.status(404).end(); });
+    this._streamChild(this._spawn(id, `cat ${shq(filePath)}`), res, { beforeBody: nameIt });
   }
 
   // Stream a folder as a zip (download-zip)
   downloadZipTo(id, dirPath, res) {
     const parent = path.posix.dirname(dirPath), base = path.posix.basename(dirPath);
     res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', `attachment; filename="${base.replace(/"/g, '')}.zip"`);
+    const zipName = contentDisposition((base || 'archive') + '.zip', 'attachment'); // both forms, ASCII (a CJK folder name threw here)
+    if (zipName) res.setHeader('Content-Disposition', zipName);
     if (this._host(id)?.transport === 'dial') {
-      this._devStreamTo(id, 'sh', ['-c', `cd ${shq(parent)} && zip -r - ${shq(base)}`], res, {});
+      this._devStreamTo(id, 'sh', ['-c', `cd ${shq(parent)} && zip -r - ${shq(base)}`], res, { notFoundOnFail: true });
       return;
     }
-    const child = this._spawn(id, `cd ${shq(parent)} && zip -r - ${shq(base)}`);
-    child.stdout.pipe(res);
+    this._streamChild(this._spawn(id, `cd ${shq(parent)} && zip -r - ${shq(base)}`), res);
+  }
+
+  // A spawned command's stdout → an HTTP response (the ssh downloads). The
+  // response ENDS ON THE CHILD'S EXIT, not on stdout's end (lane raw-filename
+  // r2): with pipe's default end, a missing file was already an empty 200 by
+  // the time cat's exit code arrived — the `404` below it was dead code. Now a
+  // command that fails before its first byte answers 404 with no name and no
+  // type (the caller's attachment headers are withdrawn), a spawn that fails
+  // (no ssh binary) answers 502 — an unhandled child 'error' used to end the
+  // whole server — and a viewer that goes away ends the child (an unpiped
+  // stdout blocks the remote `cat` forever: every aborted <video> seek on a
+  // remote file left one behind). `beforeBody` names the response just before
+  // the first byte, or at a successful empty end.
+  _streamChild(child, res, { beforeBody = null } = {}) {
+    let wrote = false, done = false;
+    const name = () => { if (beforeBody && !res.headersSent) { try { beforeBody(); } catch { } } };
+    child.stdout.once('data', () => { wrote = true; name(); }); // registered BEFORE the pipe: runs ahead of its first write
+    child.stdout.pipe(res, { end: false });
     child.stderr.on('data', () => {});
+    child.on('error', (e) => {
+      if (done) return; done = true;
+      if (!res.headersSent) { res.removeHeader('Content-Disposition'); res.removeHeader('Content-Type'); res.status(502).json({ error: String((e && e.message) || e) }); }
+      else { try { res.end(); } catch { } }
+    });
+    child.on('close', (code) => {
+      if (done) return; done = true;
+      if (code !== 0 && !wrote && !res.headersSent) { res.removeHeader('Content-Disposition'); res.removeHeader('Content-Type'); res.status(404).end(); return; }
+      name(); res.end();
+    });
+    res.on('close', () => { if (!done) { try { child.kill('SIGTERM'); } catch { } } });
   }
 
   // Stream a device command's stdout into an HTTP response (dial downloads).
-  async _devStreamTo(id, cmd, args, res, { notFoundOnFail = false } = {}) {
+  // Same contract as _streamChild: `beforeBody` before the first byte (or at a
+  // successful empty end); a failure before any byte withdraws the caller's
+  // name + type (404 when notFoundOnFail, else 502) — never a named empty file.
+  async _devStreamTo(id, cmd, args, res, { notFoundOnFail = false, beforeBody = null } = {}) {
+    const name = () => { if (beforeBody && !res.headersSent) { try { beforeBody(); } catch { } } };
+    const unname = () => { res.removeHeader('Content-Disposition'); res.removeHeader('Content-Type'); };
     try {
       const dm = await this._dev(id);
       if (!dm) throw new Error('device offline');
       let wrote = false;
-      const r = await dm.runStream(cmd, args, { onData: (b) => { wrote = true; try { res.write(b); } catch {} } });
-      if (r.code !== 0 && !wrote && notFoundOnFail && !res.headersSent) return res.status(404).end();
+      const r = await dm.runStream(cmd, args, { onData: (b) => { if (!wrote) name(); wrote = true; try { res.write(b); } catch {} } });
+      if (r.code !== 0 && !wrote && notFoundOnFail && !res.headersSent) { unname(); return res.status(404).end(); }
+      if (!wrote) name();
       res.end();
     } catch (e) {
-      if (!res.headersSent) res.status(502).json({ error: e.message });
+      if (!res.headersSent) { unname(); res.status(502).json({ error: e.message }); }
       else try { res.end(); } catch {}
     }
   }

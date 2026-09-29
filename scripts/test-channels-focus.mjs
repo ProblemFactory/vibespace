@@ -121,6 +121,14 @@ const FIXTURE = [
   [row('replied-edge-out', { touch: { selfAt: NOW - D } }), null],
   [row('untouched'), null],
   [row('unread-only', { unread: 7 }), null],
+  // lane lark-search-poll (owner decision 1): a SINGLE chat with unread messages, its newest inside 24 h — "单聊 · N 条新消息";
+  // a catch-up birth (read, unread 0) or an old one stays off the first screen; a GROUP with unread stays off it too
+  [row('direct', { kind: 'dm', unread: 2, lastAt: NOW - H }), 'direct'],
+  [row('direct-read', { kind: 'dm', unread: 0, lastAt: NOW - H }), null],
+  [row('direct-old', { kind: 'dm', unread: 3, lastAt: NOW - D }), null],
+  [row('group-unread', { kind: 'group', unread: 3, lastAt: NOW - H }), null],
+  [row('direct-but-held', { kind: 'dm', unread: 1, lastAt: NOW - H, touch: { pending: 1 } }), 'held'],
+  [row('direct-over-replied', { kind: 'dm', unread: 1, lastAt: NOW - H, touch: { selfAt: NOW - 2 * H } }), 'direct'],
 ];
 {
   for (const [r, want] of FIXTURE) {
@@ -136,7 +144,9 @@ const FIXTURE = [
   for (const p of peel) { p(cur); const t2 = Fo.statusTag(cur, NOW); steps.push(t2 ? t2.code : null); }
   const WANT = ['awaiting', 'unknown', 'assigned', 'new-since-read', 'read', 'held', 'replied', null];
   ok(JSON.stringify(steps) === JSON.stringify(WANT), `THE ONE TAG, by priority: ${WANT.map(String).join(' › ')}`, JSON.stringify(steps));
-  ok(JSON.stringify(Fo.TAG_ORDER) === JSON.stringify(['awaiting', 'unknown', 'assigned', 'read', 'new-since-read', 'held', 'replied']), 'TAG_ORDER is the documented table (read / new-since-read are ONE fact split by what arrived after it)');
+  ok(JSON.stringify(Fo.TAG_ORDER) === JSON.stringify(['awaiting', 'unknown', 'assigned', 'read', 'new-since-read', 'held', 'direct', 'replied']), 'TAG_ORDER is the documented table (read / new-since-read are ONE fact split by what arrived after it; `direct` — a single chat with unread messages — after held, before replied)');
+  const dTag = Wd.statusTagParts({ code: 'direct', n: 3 }, { now: NOW });
+  ok(dTag && dTag.before === 'DM · 3 new' && dTag.tone === 'attn' && /single chat/.test(dTag.title), 'the direct tag\'s words: "DM · 3 new" (zh 单聊 · 3 条新消息, ja 個別 · 新着 3 件 — the tag\'s width budget lives in its words)', JSON.stringify(dTag));
   const heldAssigned = Fo.statusTag(row('x', { assignment: principal('Alpha'), touch: { pending: 1 } }), NOW);
   ok(heldAssigned.code === 'assigned' && heldAssigned.held === true && heldAssigned.name === 'Alpha', 'an ASSIGNED row whose wake is held keeps its "→ Alpha" tag, flagged held (amber) — so the held fact is never hidden by the higher tag');
   const woke = (g) => Fo.statusTag(row('x', { assignment: principal('Ops desk', g), touch: { wake: { at: NOW - H, ok: true, lane: 'message', n: 1 } } }), NOW);

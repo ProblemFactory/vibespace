@@ -614,6 +614,33 @@ function pressTab(chain, paneId = null) {
   return String(c.tabs[c.active]);
 }
 
+// ── THE TAB DRAG'S CLASSIFICATION (split tabs v2 + inc-muly2izg-cks3, 2026-09-28) ──
+// Split tabs v2 decided a tab drag ONCE, on its first 8 px: mostly horizontal = a strip REORDER for the whole drag
+// ("never a detach later" — the §8 honest boundary), else the pre-v2 DETACH (|dy| > 30). A person pulling a tab OUT
+// of the bar toward the workspace pulls it diagonally — userW's gesture on the Stage was Δ (−451, +351), more
+// horizontal than vertical from its first pixel — so the whole pull was a reorder and the tab never left ("Browser
+// 拖不出来"), on the Stage and on every desktop alike. The rule now is the browsers': a REORDER lives while the
+// pointer stays near the strip; leaving the strip's band by more than TAB_TEAR_PX vertically TEARS THE TAB OFF (the
+// same 30 px the vertical pull always used). A sideways reorder that wobbles within the margin stays a reorder.
+const TAB_DRAG_DECIDE_PX = 8;
+const TAB_TEAR_PX = 30;
+/** The tab drag's mode after a pointer move: `mode` = the mode so far (null until decided), `dx`/`dy` = the pointer's
+ *  travel from the press, `y` = its viewport y, `band` = the strip's band `{top, bottom}` in the same (viewport) px
+ *  (the host's title bar), `reorderable` = the strip reorders here (false on the ≤ 768 px phone layout).
+ *  → null (not decided yet) | 'reorder' | 'detach'. A decided 'detach' never goes back; a 'reorder' becomes 'detach'
+ *  once the pointer is more than TAB_TEAR_PX above or below the band (no band known ⇒ it stays a reorder). */
+function tabDragMode({ mode = null, dx = 0, dy = 0, y = null, band = null, reorderable = true } = {}) {
+  if (mode === 'detach') return 'detach';
+  if (mode === 'reorder') {
+    const top = band && Number(band.top), bottom = band && Number(band.bottom), py = Number(y);
+    if (!band || !Number.isFinite(top) || !Number.isFinite(bottom) || !Number.isFinite(py)) return 'reorder';
+    return py < top - TAB_TEAR_PX || py > bottom + TAB_TEAR_PX ? 'detach' : 'reorder';
+  }
+  const ax = Math.abs(Number(dx) || 0), ay = Math.abs(Number(dy) || 0);
+  if (Math.max(ax, ay) < TAB_DRAG_DECIDE_PX) return null;
+  return ax > ay && reorderable ? 'reorder' : 'detach';
+}
+
 // ── the ownership badge (§4.6) ──
 // The colour is derived PER SESSION and deliberately NOT the task-group colour
 // (a session in no group has none to draw; two sessions in one group share
@@ -667,5 +694,7 @@ module.exports = {
   PANE_KINDS, partnerFor, isPartnered, followFor, livePlacement, foldBackTarget,
   // inc-muiq348r-jwb5: a NAMED window shows its own tab (the host included); a PRESS keeps the tab on show
   revealTab, pressTab,
+  // inc-muly2izg-cks3: a reorder that leaves the strip's band tears the tab off (the tab drag's one classification)
+  TAB_DRAG_DECIDE_PX, TAB_TEAR_PX, tabDragMode,
   ownerSeq, ownerColor, ownerBadge, ownerDots,
 };

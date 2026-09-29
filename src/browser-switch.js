@@ -74,7 +74,11 @@ const CLOAK_PRO_TOTALS = Object.freeze([5, 20, 200, 2000]);
  * refusal, never "let us try the default".
  */
 const KEY_ROWS = Object.freeze({
-  cloak: Object.freeze({ env: Object.freeze({ licenseKey: 'CLOAKBROWSER_LICENSE_KEY' }), host: null, provider: 'cloak' }),
+  // lane-cloak (MEASURED 2026-09-28): `keyRequired: false` — the free CloakBrowser build runs with no key and no sign-in,
+  // and a key in its environment was sent nowhere (the §7.2.1 record's run 3). A key only matters for the vendor's
+  // NEWER build, which the wrapper downloads with the key (unmeasured — VibeSpace installs only the measured one).
+  // Every other key row needs its key (the vendor's API refuses without one).
+  cloak: Object.freeze({ env: Object.freeze({ licenseKey: 'CLOAKBROWSER_LICENSE_KEY' }), host: null, provider: 'cloak', keyRequired: false }),
   'cloud:browserbase': Object.freeze({ env: Object.freeze({ apiKey: 'BROWSERBASE_API_KEY' }), host: Object.freeze({ constant: 'api.browserbase.com' }), provider: 'cloud:browserbase' }),
   'cloud:browserless': Object.freeze({ env: Object.freeze({ apiKey: 'BROWSERLESS_API_KEY', apiUrl: 'BROWSERLESS_API_URL', stealth: 'BROWSERLESS_STEALTH' }), host: Object.freeze({ field: 'apiUrl' }), provider: 'cloud:browserless' }),
   'cloud:kernel': Object.freeze({ env: Object.freeze({ apiKey: 'KERNEL_API_KEY', endpoint: 'KERNEL_ENDPOINT', stealth: 'KERNEL_STEALTH' }), host: Object.freeze({ field: 'endpoint' }), provider: 'cloud:kernel' }),
@@ -87,6 +91,8 @@ const KEY_IDS = Object.freeze(Object.keys(KEY_ROWS));
  *  is exactly why the cluster may inject ONLY under the integration store's own prefixed names. */
 const VENDOR_ENV_NAMES = Object.freeze([...new Set(KEY_IDS.flatMap((id) => Object.values(KEY_ROWS[id].env)))]);
 
+/** Does this key row REFUSE to run without a key? (cloak: no — measured; everything else: yes) */
+function keyRequiredFor(integrationId) { const r = KEY_ROWS[String(integrationId || '')]; return !!r && r.keyRequired !== false; }
 /** The integration-registry row a provider's key lives in; null = needs none. */
 function integrationIdFor(provider) {
   const p = String(provider == null ? '' : provider);
@@ -112,18 +118,43 @@ function vendorEnvFor(provider, values) {
  *  supported shapes: a custom executable path since agent-browser 0.8.7, and
  *  `--fingerprint=seed`, the launch parameter the durable half of the
  *  fingerprint lives in); cloud = upstream's own `-p <provider>`. The seed is
- *  not a secret and the path is not a secret; the KEY never rides argv. */
-function launchArgsFor(provider, { seed = null, executablePath = '' } = {}) {
+ *  not a secret and the path is not a secret; the KEY never rides argv.
+ *  lane-cloak (measured on agent-browser 0.38.1, 2026-09-28): cloak's launch
+ *  is NO LONGER argv — see `launchEnvFor`. A later call of the same session
+ *  whose launch view differs relaunches Chrome, and the keeper's own
+ *  `get cdp-url` right after `open` carried no flags: measured, it relaunched
+ *  the CloakBrowser binary without its arguments (and without `--no-sandbox`
+ *  it died on the sandbox). The env pairs ride EVERY call of the keeper's
+ *  session (`rec.launchEnv`), so the view never differs. */
+function launchArgsFor(provider) {
   const p = String(provider == null ? '' : provider);
-  if (p === 'cloak') {
-    const a = [];
-    if (executablePath) a.push('--executable-path', String(executablePath));
-    if (Number.isInteger(seed)) a.push('--args', `--fingerprint=${seed}`);
-    return a;
-  }
   const m = /^cloud:([a-z0-9-]+)$/.exec(p);
   if (m) return ['-p', m[1]];
   return [];
+}
+/** THE LAUNCH ENVIRONMENT of a provider that opens the same directory with
+ *  ANOTHER binary (cloak): agent-browser's own env names for
+ *  `--executable-path` / `--args` (0.38.1 `--help`: "or
+ *  AGENT_BROWSER_EXECUTABLE_PATH" / "or AGENT_BROWSER_ARGS", comma separated).
+ *  `--no-sandbox` rides every cloak launch — the vendor's own default
+ *  arguments carry it, and a Chromium unpacked under a data directory has no
+ *  AppArmor profile, so on Ubuntu 23.10+ its namespace sandbox is refused ("No
+ *  usable sandbox!", measured) and the browser never starts. `--proxy-server`
+ *  points the browser at the hub's allowlisting egress proxy when one is given
+ *  (§7.2.1: the boundary ENFORCED, not observed), loopback included. What the
+ *  proxy cannot see is a connection that is not HTTP(S) (the measured build
+ *  made none). No secret here: the path,
+ *  the seed and the proxy's loopback url; the KEY rides `vendorEnvFor`. */
+function launchEnvFor(provider, { seed = null, executablePath = '', proxy = '' } = {}) {
+  if (String(provider == null ? '' : provider) !== 'cloak') return {};
+  const chrome = ['--no-sandbox'];
+  if (Number.isInteger(seed)) chrome.push(`--fingerprint=${seed}`);
+  // Chromium bypasses the proxy for loopback by default; `<-loopback>` removes that implicit rule, so the proxy — which
+  // never admits loopback — is also the answer for 127.0.0.1 / localhost (the hub's own services stay out of reach)
+  if (proxy) chrome.push(`--proxy-server=${String(proxy)}`, '--proxy-bypass-list=<-loopback>');
+  const e = { AGENT_BROWSER_ARGS: chrome.join(',') };
+  if (executablePath) e.AGENT_BROWSER_EXECUTABLE_PATH = String(executablePath);
+  return e;
 }
 /** Does this provider carry a fingerprint seed at all (§7.4)? */
 function providerNeedsSeed(provider) { return String(provider || '') === 'cloak'; }
@@ -462,7 +493,7 @@ function restartingRefusal(profile) {
 }
 const SWITCH_CODES = Object.freeze(['provider_unknown', 'switch_noop', 'backend_unavailable', 'provider_needs_local_key', 'provider_local_only', 'switch_refused', 'switch_export_only', 'backend_no_key', 'downgrade_refused', 'downgrade_unknown', 'backend_seat_ceiling', 'backend_seat_taken', 'browser_restarting', 'not_owner']);
 /** §7.4 failure form (1)'s INSTALL action: its typed refusals, a closed set the routes' STATUS table mirrors. */
-const INSTALL_CODES = Object.freeze(['install_local_only', 'already_installed', 'install_running', 'install_precondition_unmet', 'install_unavailable']);
+const INSTALL_CODES = Object.freeze(['install_local_only', 'already_installed', 'install_running', 'install_precondition_unmet', 'install_unmeasured_platform', 'install_unavailable']);
 /**
  * THE GATE, in this order and no other (each rung closes a place that would
  * otherwise fail silently, and the ORDER is what leg (viii) asserts — a
@@ -478,7 +509,7 @@ const INSTALL_CODES = Object.freeze(['install_local_only', 'already_installed', 
  *   interrupted by an agent's proposal; another session's lease turns an
  *   agent's switch into a "For you" item for the owner).
  */
-function switchVerdict({ profile, target, rowOf, controlOf, capabilityRefusalOf = null, resolveKey = null, seats = {}, majors = {}, dirMajor = null, confirmed = false, leases = [], inputs = {}, by = { kind: 'user' }, byKey = null, admitted = null, now = 0, hex = '00000001', runningOf = () => [] } = {}) {
+function switchVerdict({ profile, target, rowOf, controlOf, capabilityRefusalOf = null, resolveKey = null, seats = {}, majors = {}, dirMajor = null, confirmed = false, leases = [], inputs = {}, by = { kind: 'user' }, byKey = null, admitted = null, now = 0, hex = '00000001', runningOf = () => [], keyRequiredOf = keyRequiredFor, humans = [] } = {}) {
   if (!profile) return { ok: false, code: 'not-found', error: 'no such profile' };
   const to = String(target == null ? '' : target);
   const row = rowOf(to);
@@ -507,7 +538,7 @@ function switchVerdict({ profile, target, rowOf, controlOf, capabilityRefusalOf 
   let key = null;
   if (integrationId) {
     key = typeof resolveKey === 'function' ? resolveKey(integrationId) : null;
-    if (!key || key.source === 'none') {
+    if ((!key || key.source === 'none') && keyRequiredOf(integrationId)) {
       return { ok: false, code: 'backend_no_key', provider: to, integrationId, error: `${to} needs a key and none is configured for ${integrationId}${key && key.why ? ' (' + key.why + ')' : ''} — open ⚙ → Integrations → ${integrationId} and paste yours, or use the cluster default there`, action: { openIntegration: integrationId, label: 'open Integrations' } };
     }
   }
@@ -529,7 +560,9 @@ function switchVerdict({ profile, target, rowOf, controlOf, capabilityRefusalOf 
   const note = fingerprintNote({ from, to, hadSeed: Number.isInteger(profile.fingerprintSeed), seed: sd.seed });
   const mine = leases.filter((l) => byKey && l.browserKey === byKey);
   const others = leases.filter((l) => !(byKey && l.browserKey === byKey));
-  const driving = leases.filter((l) => { const k = `${l.browserKey}|${l.profileId}`; const s = inputs && inputs[k]; return s && s.input === 'user'; });
+  // BROWSE YOURSELF (B-6ae8): the user's OWN browsing (a human holder row) drives the browser too — a switch while the
+  // user browses it is a proposal, never a stop of the Chrome under them (`humans` never reopen: they are not leases)
+  const driving = [...leases, ...(Array.isArray(humans) ? humans : [])].filter((l) => { const k = `${l.browserKey}|${l.profileId}`; const s = inputs && inputs[k]; return s && s.input === 'user'; });
   let mode = 'switch';
   let reason = null;
   if (driving.length) { mode = 'proposal'; reason = `somebody is driving this browser (${driving.map((l) => l.browserKey).join(', ')}) — a profile being driven is never interrupted by a proposal`; }
@@ -586,6 +619,8 @@ function rowState({ verdict = {}, row = null, current = false, currentRow = null
     if (binary.configured) return 'path-not-runnable';
     if (install && install.state && install.state.failed) return 'install-failed';
     if (install && install.ok) return install.npm === false ? 'not-installed-here' : 'not-installed';
+    // lane-cloak: a machine of a kind the measurement never covered — VibeSpace will not install it here, the user may
+    if (install && install.code === 'install_unmeasured_platform') return 'not-installed-here';
     return 'unavailable';
   }
   if (v.code === 'backend_no_key') return 'needs-key';
@@ -598,8 +633,9 @@ function rowState({ verdict = {}, row = null, current = false, currentRow = null
 }
 /** Is any lease on this profile being DRIVEN by hand right now? `{hold, driver}` —
  *  the same key the gate's proposal rule reads (`<browserKey>|<profileId>`). */
-function holdOf(leases = [], inputs = {}) {
-  for (const l of leases || []) {
+function holdOf(leases = [], inputs = {}, humans = []) {
+  // BROWSE YOURSELF (B-6ae8): the user's own browsing holder is read too — `driver` is then its `hu-` key
+  for (const l of [...(leases || []), ...(Array.isArray(humans) ? humans : [])]) {
     const s = inputs && inputs[`${l.browserKey}|${l.profileId}`];
     if (s && s.input === 'user') return { hold: 'driven', driver: String(l.browserKey) };
   }
@@ -618,24 +654,28 @@ function holdOf(leases = [], inputs = {}) {
  *  `leases`/`inputs` (the same two the switch passes, so a driven profile's
  *  state is real), `binaryOf(id)` (the keeper's executable probe re-shaped,
  *  null = nothing the user installs) and `install` (`installFacts`). */
-function switcherRows({ profile, providerIds, rowOf, controlOf, capabilityRefusalOf = null, sources = () => null, seats = {}, majors = {}, dirMajor = null, now = 0, runningOf = () => [], leases = [], inputs = {}, binaryOf = () => null, install = null } = {}) {
+function switcherRows({ profile, providerIds, rowOf, controlOf, capabilityRefusalOf = null, sources = () => null, seats = {}, majors = {}, dirMajor = null, now = 0, runningOf = () => [], leases = [], inputs = {}, binaryOf = () => null, install = null, keyRequiredOf = keyRequiredFor, sitesOf = () => null, humans = [] } = {}) {
   const from = String(profile.provider || 'chromium');
   const currentRow = rowOf(from) || null;
-  const held = holdOf(leases, inputs);
+  const held = holdOf(leases, inputs, humans);
   return (providerIds || []).map((id) => {
     const row = rowOf(id) || {};
     const integrationId = integrationIdFor(id);
     const src = integrationId ? (sources(integrationId) || { source: 'none' }) : null;
-    const v = switchVerdict({ profile, target: id, rowOf, controlOf, capabilityRefusalOf, resolveKey: () => src, seats, majors, dirMajor, now, runningOf, leases, inputs, by: { kind: 'user' } });
+    const v = switchVerdict({ profile, target: id, rowOf, controlOf, capabilityRefusalOf, resolveKey: () => src, seats, majors, dirMajor, now, runningOf, leases, inputs, by: { kind: 'user' }, keyRequiredOf, humans });
     const current = from === id;
-    const sourceLabel = !integrationId ? null : (src && src.source === 'user' ? 'your own key' : src && src.source === 'cluster' ? `cluster default${src.clusterLabel ? ' · ' + src.clusterLabel : ''} (seats shared with other users)` : 'not configured');
+    const needsKey = integrationId ? keyRequiredOf(integrationId) : false;
+    const sourceLabel = !integrationId ? null : (src && src.source === 'user' ? 'your own key' : src && src.source === 'cluster' ? `cluster default${src.clusterLabel ? ' · ' + src.clusterLabel : ''} (seats shared with other users)` : needsKey ? 'not configured' : 'no key needed (free tier)');
+    const sites = sitesOf(id);
     const seatRec = integrationId && seats && seats[integrationId] ? seats[integrationId] : null;
     const binary = binaryOf(id) || null;
     const sv = v.seats && v.seats.state ? v.seats : null;
     const facts = {
       host: profile.host || null,
       binary: binary ? { needed: binary.needed || null, present: binary.present !== false, configured: !!binary.configured } : null,
-      key: integrationId ? { needed: true, source: src ? src.source || 'none' : 'none', whyCode: src && src.whyCode ? src.whyCode : null, whyParams: src && src.whyParams ? src.whyParams : null } : null,
+      key: integrationId ? { needed: needsKey, source: src ? src.source || 'none' : 'none', whyCode: src && src.whyCode ? src.whyCode : null, whyParams: src && src.whyParams ? src.whyParams : null } : null,
+      // lane-cloak: the sites a row's browser may open behind the egress proxy (null = the row has no such list)
+      sites: Array.isArray(sites) ? sites.length : null,
       wrote: v.ladder && Number.isInteger(v.ladder.wrote) ? v.ladder.wrote : null,
       targetMajor: chromiumMajorFor(id, { tier: seatRec ? seatRec.tier : null, majors }),
       majorAssumed: id === 'cloak' && !(seatRec && seatRec.tier && CLOAK_TIERS[seatRec.tier]),
@@ -647,7 +687,7 @@ function switcherRows({ profile, providerIds, rowOf, controlOf, capabilityRefusa
     return {
       id, label: row.label || id, tier: row.tier || null, current,
       enabled: v.ok, code: v.ok ? null : v.code, reason: v.ok ? null : v.error, needsConfirm: !!v.needsConfirm,
-      integrationId, source: src ? src.source : null, sourceLabel, action: v.ok ? null : (v.action || (integrationId && src && src.source === 'none' ? { openIntegration: integrationId, label: 'open Integrations' } : null)),
+      integrationId, source: src ? src.source : null, sourceLabel, action: v.ok ? null : (v.action || (integrationId && needsKey && src && src.source === 'none' ? { openIntegration: integrationId, label: 'open Integrations' } : null)),
       seats: integrationId ? seatState({ tier: seatRec ? seatRec.tier : null, total: seatRec ? seatRec.total : null, at: seatRec ? seatRec.at : 0, now }) : null,
       fingerprint: v.ok ? v.fingerprint : null, fingerprintChange: fingerprintChange({ from, to: id }), chip: backendChip({ provider: id, major: chromiumMajorFor(id, { tier: seatRec ? seatRec.tier : null, majors }), tier: seatRec ? seatRec.tier : null }),
       switchKind: row.canSwitchTo || null,
@@ -715,16 +755,63 @@ const CLOAK_PACKAGE = 'cloakbrowser';
  * answer. The CONTROL the design names — an install that skips the measurement — is a verdict answering ok for a
  * refused record; test-browser-backend drives that shape and it must be red.
  */
-function installVerdict({ proof = null, proofOk = null, exe = null, host = null, running = false } = {}) {
+function installVerdict({ proof = null, proofOk = null, exe = null, host = null, running = false, platform = null } = {}) {
   if (host) return { ok: false, code: 'install_local_only', error: `cloakbrowser is installed on this machine only — host ${JSON.stringify(String(host))} refused (a paired machine's provider binary is its own to install)` };
   if (exe && exe.ok) return { ok: false, code: 'already_installed', error: `cloakbrowser is already installed at ${exe.path}`, path: exe.path };
   if (running) return { ok: false, code: 'install_running', error: 'a cloakbrowser install is already running — wait for it to finish' };
-  const rec = proof && typeof proof === 'object' ? { status: proof.status || null, refusal: proof.refusal || null, date: proof.date || null, version: proof.version || null } : null;
+  // the facts the download confirm says in plain words (sizes, where from) ride with the record — never a hard-coded number
+  const rec = proof && typeof proof === 'object' ? {
+    status: proof.status || null, refusal: proof.refusal || null, date: proof.date || null, version: proof.version || null, chromium: proof.chromium || null, platform: proof.platform || null,
+    downloadBytes: proof.download && Number.isInteger(proof.download.bytes) ? proof.download.bytes : null,
+    installedBytes: proof.binary && Number.isInteger(proof.binary.dirBytes) ? proof.binary.dirBytes : null,
+    downloadHost: proof.download && proof.download.url ? hostOfUrl(proof.download.url) : null,
+  } : null;
   if (!rec) return { ok: false, code: 'install_precondition_unmet', error: 'no §7.2.1 egress proof record — nothing may be installed before the measurement (scripts/measure-cloak-egress.mjs)', proof: null };
   if (rec.status !== 'measured') return { ok: false, code: 'install_precondition_unmet', error: `the §7.2.1 egress measurement has not been taken (the record says ${rec.refusal || rec.status || 'unknown'}${rec.date ? ', dated ' + rec.date : ''}) — measure first with scripts/measure-cloak-egress.mjs and paste its record into src/browser-profiles.js, then install; nothing is downloaded before then`, proof: rec };
   if (proofOk && proofOk.ok === false) return { ok: false, code: 'install_precondition_unmet', error: `the §7.2.1 proof record fails its own discipline: ${proofOk.error || 'invalid'} — a record that cannot be trusted permits nothing`, proof: rec };
   if (!rec.version) return { ok: false, code: 'install_precondition_unmet', error: 'a measured record names the version it describes — the install pins that version, and this record names none', proof: rec };
-  return { ok: true, spec: `${CLOAK_PACKAGE}@${String(rec.version)}`, version: String(rec.version), package: CLOAK_PACKAGE, proof: rec };
+  // lane-cloak: the measurement describes ONE build for ONE platform — a machine of another kind would download another
+  // (unmeasured) build, so it is refused by name before anything is fetched
+  if (rec.platform && platform && String(platform) !== String(rec.platform)) return { ok: false, code: 'install_unmeasured_platform', error: `the §7.2.1 measurement describes the ${rec.platform} build (Chromium ${rec.chromium || '?'}); this machine is ${platform}, whose build was never measured — nothing is downloaded`, proof: rec, platform: String(platform) };
+  return { ok: true, spec: `${CLOAK_PACKAGE}@${String(rec.version)}`, version: String(rec.version), package: CLOAK_PACKAGE, chromium: rec.chromium || null, proof: rec };
+}
+/** The vendor's own platform tag for this machine (the wrapper's getPlatformTag, mirrored — the record names one). */
+function platformTag(platform, arch) {
+  const k = `${platform}-${arch}`;
+  return { 'linux-x64': 'linux-x64', 'linux-arm64': 'linux-arm64', 'darwin-arm64': 'darwin-arm64', 'darwin-x64': 'darwin-x64', 'win32-x64': 'windows-x64' }[k] || k;
+}
+/** WHERE the wrapper unpacks the pinned Chromium (its getBinaryPath, mirrored): `<cache>/chromium-<v>/chrome` on Linux. */
+function cloakBinaryPath({ cacheDir, chromium, platform = 'linux-x64' } = {}) {
+  if (!cacheDir || !chromium) return null;
+  const dir = `${String(cacheDir).replace(/\/+$/, '')}/chromium-${String(chromium)}`;
+  if (/^darwin/.test(String(platform))) return `${dir}/Chromium.app/Contents/MacOS/Chromium`;
+  if (/^windows/.test(String(platform))) return `${dir}/chrome.exe`;
+  return `${dir}/chrome`;
+}
+/** Every CLOAKBROWSER_* name the wrapper reads (dist/config.js + license.js + download.js, 0.5.10) — the install env
+ *  sets the three it needs and DROPS the rest: a key there would route the wrapper to the vendor's other, unmeasured
+ *  build; a download URL / binary path / skip-checksum would bypass the pinned, signature-checked download. */
+const CLOAK_ENV_NAMES = Object.freeze(['CLOAKBROWSER_CACHE_DIR', 'CLOAKBROWSER_VERSION', 'CLOAKBROWSER_AUTO_UPDATE', 'CLOAKBROWSER_LICENSE_KEY', 'CLOAKBROWSER_DOWNLOAD_URL', 'CLOAKBROWSER_BINARY_PATH', 'CLOAKBROWSER_SKIP_CHECKSUM', 'CLOAKBROWSER_RELEASE_CHANNEL', 'CLOAKBROWSER_LICENSE_STATUS_FILE']);
+/** THE ENVIRONMENT of the binary step (`cloakbrowser install`): the caller's env minus every CLOAKBROWSER_* and proxy
+ *  name, plus the cache dir, the PINNED Chromium, auto-update off and — when given — the install egress proxy (Node's
+ *  fetch honours it under NODE_USE_ENV_PROXY=1, measured on Node 24). */
+function cloakInstallEnv(base = {}, { cacheDir, chromium, proxyUrl = null } = {}) {
+  const out = {};
+  for (const [k, v] of Object.entries(base || {})) {
+    if (v == null || /^CLOAKBROWSER_/.test(k) || /^(https?|no|all)_proxy$/i.test(k) || k === 'NODE_USE_ENV_PROXY') continue;
+    out[k] = String(v);
+  }
+  out.CLOAKBROWSER_CACHE_DIR = String(cacheDir);
+  out.CLOAKBROWSER_VERSION = String(chromium);
+  out.CLOAKBROWSER_AUTO_UPDATE = 'false';
+  if (proxyUrl) { out.HTTPS_PROXY = String(proxyUrl); out.HTTP_PROXY = String(proxyUrl); out.NODE_USE_ENV_PROXY = '1'; }
+  return out;
+}
+/** The binary step's argv (run with node): the package's OWN CLI + `install` (it downloads, checks the Ed25519-signed
+ *  SHA256SUMS, unpacks, and prints the executable's path as its last line). */
+function binaryInstallArgv({ cli }) {
+  if (!cli) throw new Error('binaryInstallArgv: the package CLI path is required');
+  return [String(cli), 'install'];
 }
 /** The one npm argv the install runs: into a prefix of OUR choosing (never
  *  `-g`, never the checkout), pinned, no audit/fund chatter, no package.json
@@ -751,9 +838,9 @@ function binFromPackageJson(pkg, prefer = CLOAK_PACKAGE) {
 }
 
 module.exports = {
-  CLOAK_PACKAGE, INSTALL_CODES, installVerdict, installArgv, binFromPackageJson,
+  CLOAK_PACKAGE, INSTALL_CODES, installVerdict, installArgv, binFromPackageJson, platformTag, cloakBinaryPath, CLOAK_ENV_NAMES, cloakInstallEnv, binaryInstallArgv, keyRequiredFor,
   SEAT_TIER_STALE_MS, CLOAK_TIERS, CLOAK_PRO_TOTALS,
-  KEY_ROWS, KEY_IDS, VENDOR_ENV_NAMES, integrationIdFor, vendorEnvFor, launchArgsFor, providerNeedsSeed, mintSeed, seedForSwitch,
+  KEY_ROWS, KEY_IDS, VENDOR_ENV_NAMES, integrationIdFor, vendorEnvFor, launchArgsFor, launchEnvFor, providerNeedsSeed, mintSeed, seedForSwitch,
   majorOf, parseLastVersion, majorOfBrowserString, chromiumMajorFor, cloakTargetName, versionLadder, fingerprintNote, fingerprintChange,
   seatState, ageText, seatVerdict, SEAT_TAKEN_RE, classifyLaunchFailure, tierFromLaunch,
   testHostFor, hostOfUrl, testRequestFor,

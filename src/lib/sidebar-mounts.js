@@ -3,9 +3,12 @@
 // mount list with live status, share-a-folder minting, import-a-link.
 import { createModalShell, showToast, showConfirmDialog, showContextMenu, copyText, escHtml, hostStateChip, getInstanceUrl } from './utils.js';
 import { protoChip } from './sidebar-rail.js'; // http/https/tcp chip (override menu = this._portProtoMenu, same prototype)
-import { t as tr } from './i18n.js'; // sidebar cluster convention: local `t` is pervasively a task var
+import { t as tr, deviceLocale } from './i18n.js'; // sidebar cluster convention: local `t` is pervasively a task var (verify-r5 A1: + the device's locale for a time)
 import { api, oauthLinkRow, mountsDialog, wireOAuthConnect, reauthDialog } from './mounts-dialog.js'; // D1: the ONE dialog component (storage + channel accounts)
 import { classifyPrivateKey } from '../ssh-key-format.js'; // shared with the server (CJS pulled into the bundle, like task-color-seq.js)
+import { dialRowState, pairNameVerdict, pairNameShown, deviceIdOf, commandOsOf } from '../dial-facts.js'; // lane-pairing ③: THE one dial state of a machine row (PURE, bundled); verify-r4 F6: the name rule + its collision verdict
+import { dialAddressPicker, dialStateText, generateConsequenceText } from './dial-address-picker.js'; // lane-pairing ①③: the address choice + the state's words
+import { openExitAccessDialog, exitSummaryText, lastRunText } from './exit-access-dialog.js'; // lane-pairing ⑥: "Who can use it" 
 
 
 // 16x16 stroke icons (project convention — no emoji in chrome)
@@ -662,16 +665,20 @@ export function installSidebarMounts(Sidebar) {
       row._hostId = h.id; // in-place replacement key (_autoTestHosts)
       const st = this._hostStatus?.[h.id]; // {ok, latencyMs, tools} | {error} | undefined
       const testing = !isDial && this._hostTesting?.has(h.id);
-      const dot = isDial ? (h.online ? 'ok' : 'off') : (st ? (st.ok ? 'ok' : 'err') : 'off');
+      // lane-pairing ③: a dial row's dot, badge, sub-line and tooltip all read THE one state (PURE dialRowState) —
+      // never `online` alone (a refused dial read "offline" while the server had refused it by name)
+      const rs = isDial ? dialRowState(h) : null;
+      const dialWords = rs ? dialStateText(rs) : '';
+      const dot = isDial ? (rs.state === 'connected' ? 'ok' : (rs.state === 'auth-fail' || rs.state === 'refused') ? 'err' : 'off') : (st ? (st.ok ? 'ok' : 'err') : 'off');
       const dotTip = isDial
-        ? (h.online ? tr('Dialed in — reachable now') : tr('Offline — the device’s daemon is not dialed in (start it with the install command)'))
+        ? dialWords + (rs.state === 'refused' && h.dial?.lastRefusal?.from ? ` · ${tr('from {addr}', { addr: h.dial.lastRefusal.from })}` : '')
         : (testing ? tr('Checking the connection…') : (st ? (st.ok ? `${st.latencyMs}ms` : (st.error || 'unreachable')) : 'Not tested yet'));
       const nameTip = isDial ? tr('Dial-out device — it connects TO this instance over a websocket (no ssh)') : `${h.user}@${h.host}:${h.port}`;
       const badge = isDial
-        ? `<span class="mounts-badge${h.online ? '' : ' mounts-badge-red'}" title="${escHtml(tr('Dial-out device — it connects TO this instance over a websocket (no ssh)'))}">${h.online ? escHtml(tr('DEVICE')) : escHtml(tr('OFFLINE'))}</span>`
+        ? `<span class="mounts-badge${rs.state === 'connected' ? '' : ' mounts-badge-red'}" title="${escHtml(tr('Dial-out device — it connects TO this instance over a websocket (no ssh)'))}">${escHtml(rs.state === 'connected' ? tr('DEVICE') : rs.state === 'auth-fail' ? tr('KEY REFUSED') : rs.state === 'refused' ? tr('REFUSED') : tr('OFFLINE'))}</span>`
         : (st?.ok && st.tools ? `<span class="mounts-badge${st.tools.claude && st.tools.dtach ? '' : ' mounts-badge-red'}" title="Ready to run sessions — dtach ${st.tools.dtach ? '✓' : '✗ (missing)'}, Node ${st.tools.node ? '✓' : '✗ (missing)'}, Claude ${st.tools.claude ? '✓' : '✗ (missing)'}. Click Set up to install what’s missing.">${st.tools.claude && st.tools.dtach ? 'READY' : 'NEEDS SETUP'}</span>` : '');
       const top = document.createElement('div');
-      top.className = 'mounts-row-top';
+      top.className = 'mounts-row-top mounts-host-top'; // naive-user N-row: wraps its 8 actions under the name (style.css)
       top.innerHTML = `
         <span class="mounts-dot mounts-dot-${dot}" title="${escHtml(dotTip)}"></span>
         <b class="mounts-name" title="${escHtml(nameTip)}">${escHtml(h.name)}</b>
@@ -719,32 +726,30 @@ export function installSidebarMounts(Sidebar) {
         ? tr('Dial-out: {state} — click to manage (ssh stays as rescue)', { state: h.dialLive ? tr('LIVE') : tr('installed, not dialed in') })
         : tr('Upgrade "{name}" to dial-out (faster + self-healing over a flaky link; ssh kept as rescue)', { name: h.name }),
         () => { this._showGraduateDialog(h); }, h.graduated ? (h.dialLive ? 'mounts-icon-accent' : '') : ''));
-      if (isDial) actions.append(ibtn(MI.retry, tr('Re-pair (fresh command — keeps the row, no unpair needed)'), async () => {
-        const { body, close } = createModalShell({ id: 'device-repair-dialog', title: tr('Re-pair "{name}"', { name: h.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true });
-        body.textContent = tr('Rotating the pairing credentials…');
-        try {
-          const r = await api('/api/device/dial-pair', { method: 'POST', body: JSON.stringify({ deviceId: h.deviceId, serverUrl: location.origin }) });
-          this._fillPairCommandBody(body, close, r);
-        } catch (e) { close(); throw e; }
+      // lane-pairing ②: the pairing SHEET — opening it mints nothing; its head says whether the old command ever
+      // worked, and only "Generate a new command" rotates the token (saying the old one stops working)
+      if (isDial) actions.append(ibtn(MI.retry, tr('Pairing command — see the dial state, pick an address, generate a new command (keeps the row)'), async () => {
+        this._showDevicePairDialog(h);
       }));
       actions.append(
         ibtn(MI.folderPush, tr('Mount a folder from this VibeSpace onto "{name}"', { name: h.name }), () => { this._showHostMountDialog(h); }),
         ibtn(MI.folderPull, tr('Mount a folder from "{name}" into this VibeSpace', { name: h.name }), () => { this._showMachinePullDialog(h); }),
         ibtn(MI.ports, tr('Forward a port from "{name}" (open its dev servers here)', { name: h.name }), () => { this._showPortsDialog(h); }),
-        ibtn(MI.exit, h.allowExit
-          ? tr('Exit node: ON — agents may borrow "{name}"\'s network for a command (click to disable)', { name: h.name })
-          : tr('Exit node: OFF — let agents borrow "{name}"\'s network on demand (click to enable)', { name: h.name }),
-          async () => {
-            const r = await api(`/api/hosts/${h.id}/allow-exit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on: !h.allowExit }) });
-            if (r?.error) showToast(r.error, { type: 'error' });
-            else showToast(h.allowExit ? tr('Exit node disabled for "{name}"', { name: h.name }) : tr('Exit node enabled — agents can use "{name}" via vibespace-exit', { name: h.name }));
-          }, h.allowExit ? 'mounts-icon-accent' : ''),
+        // lane-pairing ⑥: the exit icon OPENS "Who can use it" (two lists — borrow the network / run commands);
+        // accent while either grant is not nobody
+        ibtn(MI.exit, tr('Who can use "{name}" as an exit…', { name: h.name }),
+          async () => { openExitAccessDialog(this.app, { hostId: h.id, name: h.name }); },
+          (h.exit && ((h.exit.use && h.exit.use.mode && h.exit.use.mode !== 'nobody') || (h.exit.run && h.exit.run.mode && h.exit.run.mode !== 'nobody'))) ? 'mounts-icon-accent' : ''),
         ibtn(MI.termNew, isDial ? tr('New session on this device') : 'New session on this host', () => { this.app.showNewSessionDialog?.({ hostId: h.id, hostName: h.name }); }),
         ibtn(MI.cross, isDial ? tr('Unpair (the device can no longer dial in)') : 'Remove host', async () => {
           const ok = await showConfirmDialog(isDial
             ? { title: tr('Unpair "{id}"?', { id: h.name }), message: tr('Its dial token is revoked; re-pairing mints a new one. Its mounted folders here are unmounted.'), confirmText: tr('Unpair'), danger: true }
             : { title: `Remove "${h.name}"?`, message: 'Only the registry entry goes away — nothing on the remote machine is touched.', confirmText: 'Remove', danger: true });
-          if (ok) { await api(`/api/hosts/${h.id}`, { method: 'DELETE' }); if (isDial) showToast(tr('Unpaired')); }
+          // verify-r6 U1: a refused / failed removal is SAID (the api() throw was unguarded — the click did nothing, silently)
+          if (ok) {
+            try { await api(`/api/hosts/${h.id}`, { method: 'DELETE' }); if (isDial) showToast(tr('Unpaired')); }
+            catch (e) { showToast(tr('Could not remove "{name}" — {why}', { name: h.name, why: (e && e.message) || tr('server unreachable') }), { type: 'error' }); }
+          }
         }, 'mounts-icon-danger'),
       );
       top.appendChild(actions);
@@ -752,7 +757,10 @@ export function installSidebarMounts(Sidebar) {
       sub.className = 'mounts-path';
       sub.style.direction = 'ltr';
       if (isDial) {
-        sub.textContent = h.online ? tr('dial-out device · connected') : tr('dial-out device · offline — run the install command on it');
+        sub.textContent = rs.state === 'connected' ? `${tr('dial-out device')} · ${dialWords}` : dialWords;
+        sub.title = dotTip;
+        sub.classList.add('mounts-dial-state');
+        sub.dataset.dialState = rs.state;
       } else {
         const keyLabel = h.keySource === 'imported' ? tr('using imported key')
           : h.keySource === 'app' ? tr('using VibeSpace key')
@@ -761,6 +769,21 @@ export function installSidebarMounts(Sidebar) {
         sub.textContent = `${h.user}@${h.host}${h.port !== 22 ? ':' + h.port : ''}${keyLabel ? ' · ' + keyLabel : ''}`;
       }
       row.append(top, sub);
+      // lane-pairing ⑥: the exit lists' summary (every machine — a record with no `exit` reads nobody / nobody through
+      // the ONE reader) + the last command run on the machine (who / when / exit code)
+      {
+        const ex = document.createElement('div');
+        ex.className = 'mounts-path mounts-exit-line';
+        ex.textContent = exitSummaryText(h.exit);
+        row.appendChild(ex);
+        if (h.exit && h.exit.lastRun) {
+          const lr = document.createElement('div');
+          lr.className = 'mounts-path mounts-exit-line mounts-exit-last';
+          lr.textContent = lastRunText(h.exit.lastRun);
+          lr.title = h.exit.lastRun.cmd || '';
+          row.appendChild(lr);
+        }
+      }
       // Surface a FAILED probe in the row itself (real report: red dot with
       // no visible reason — the error lived only in the dot's hover tooltip,
       // invisible on touch and undiscoverable on a 6px target). Same errline
@@ -1295,26 +1318,21 @@ export function installSidebarMounts(Sidebar) {
     },
 
 
-    // Shared by "Pair a device" and the machine row's Re-pair action: fill a
-    // modal body with the per-OS installer command for a mint/rotate result.
-    _fillPairCommandBody(body, close, r) {
-      // Double-NAT (B-5c1e): when the server published itself to the relay, the
-      // device must fetch the bundle AND dial through the PUBLIC relay URL —
-      // location.origin is unreachable from its network.
-      const httpBase = (r.relayUrl || getInstanceUrl() || location.origin).replace(/\/$/, ''); // a mapped instance is reachable from the device's network; this box's hostname is not (2.367.3 sweep)
-      const wsBase = httpBase.replace(/^http/, 'ws');
-      const dialUrl = `${wsBase}/api/device-dial?device=${r.deviceId}`;
-      // The full installer line: bundle + dial URL + BOTH tokens — the
-      // hostToken is what the daemon verifies OUR mux hello against; an
-      // install without it can dial in but rejects every server command.
-      // Per-OS commands (user request): macOS/Linux share the bash
-      // installer; Windows gets the PowerShell one (EXPERIMENTAL).
-      // Every URL in the command must be httpBase, NEVER location.origin: for a
-      // relay-paired device the origin is unreachable from its network, so an
-      // origin-built installer/bundle URL fails before it can even start.
+    // Shared by "Pair a device" and the machine row's pairing sheet: fill a modal body with the per-OS installer
+    // command for a mint result. lane-pairing ①: BOTH urls of every command are the address the user CHOSE
+    // (`r.httpBase` + the bundle / installer paths, and `r.dialUrl`) — never location.origin, never a guess.
+    _fillPairCommandBody(body, close, r, { regenerated = false, deviceOs = null } = {}) {
+      const httpBase = String(r.httpBase || '').replace(/\/$/, '');
+      const dialUrl = String(r.dialUrl || '');
+      // The full installer line: bundle + dial URL + BOTH tokens — the hostToken is what the daemon verifies OUR
+      // mux hello against; an install without it can dial in but rejects every server command. Per-OS commands:
+      // macOS/Linux share the bash installer; Windows gets the PowerShell one (EXPERIMENTAL). The installer
+      // CHECKS the dial address before it writes anything (--dial-check) and stops with the reason.
       const CMDS = {
-        mac: `curl -fsSL ${httpBase}/vibespace-device-install.sh | bash -s -- \\\n  --bundle-url ${httpBase}/vibespace-device.js \\\n  --dial '${dialUrl}' \\\n  --dial-token ${r.dialToken} \\\n  --host-token ${r.hostToken}`,
-        linux: `curl -fsSL ${httpBase}/vibespace-device-install.sh | bash -s -- \\\n  --bundle-url ${httpBase}/vibespace-device.js \\\n  --dial '${dialUrl}' \\\n  --dial-token ${r.dialToken} \\\n  --host-token ${r.hostToken}`,
+        // verify-r3 B-inst: the tokens in the ENVIRONMENT of the installer's shell — a flag sat in `bash`'s command line,
+        // readable by every user of the device (ps / /proc) for the whole install
+        mac: `curl -fsSL ${httpBase}/vibespace-device-install.sh | \\\n  VIBESPACE_DIAL_TOKEN=${r.dialToken} \\\n  VIBESPACE_HOST_TOKEN=${r.hostToken} \\\n  bash -s -- \\\n  --bundle-url ${httpBase}/vibespace-device.js \\\n  --dial '${dialUrl}'`,
+        linux: `curl -fsSL ${httpBase}/vibespace-device-install.sh | \\\n  VIBESPACE_DIAL_TOKEN=${r.dialToken} \\\n  VIBESPACE_HOST_TOKEN=${r.hostToken} \\\n  bash -s -- \\\n  --bundle-url ${httpBase}/vibespace-device.js \\\n  --dial '${dialUrl}'`,
         win: `& ([scriptblock]::Create((iwr -UseBasicParsing ${httpBase}/vibespace-device-install.ps1).Content)) \`\n  -BundleUrl ${httpBase}/vibespace-device.js \`\n  -Dial '${dialUrl}' \`\n  -DialToken ${r.dialToken} -HostToken ${r.hostToken}`,
       };
       const NOTES = {
@@ -1324,23 +1342,31 @@ export function installSidebarMounts(Sidebar) {
       };
       body.innerHTML = '';
       const done = document.createElement('p');
-      done.className = 'agents-note';
-      done.textContent = r.repair
-        ? (r.updatedInPlace
-          ? tr('Re-paired "{id}" — the connected device was updated in place; the new pairing takes effect within ~30s. Run the command below only if the dot doesn’t come back:', { id: r.deviceId })
-          : tr('Re-paired "{id}" (machine row, mounts and forwards kept — credentials rotated). Run this on the device to apply the new pairing:', { id: r.deviceId }))
-        : tr('Paired as "{id}". Pick the device’s OS and run the command on it — it starts the agent and dials in; the device then appears as a machine row above (green dot = connected):', { id: r.deviceId });
+      done.className = 'agents-note device-pair-head';
+      done.textContent = r.updatedInPlace
+        ? tr('Re-paired "{id}" — the connected device was updated in place; the new pairing takes effect within ~30s. Run the command below only if the dot doesn’t come back:', { id: r.deviceId })
+        : (regenerated || r.repair)
+          ? (r.holderConnected
+            // verify-r2 B8-r2: the holder is DISCONNECTED at the mint (its link was what the retired command kept), never left connected "until its next dial"
+            ? tr('A new command for "{id}" — the device that was connected has been disconnected; it holds the previous command, which no longer works. Run this on the device:', { id: r.deviceId })
+            : regenerated
+              ? tr('A new command for "{id}" — the one you generated before stops working now. Run this on the device:', { id: r.deviceId })
+              // verify-r5 A1: "Replace its pairing" from "Pair a device" — the command it replaced was made elsewhere
+              : tr('Replaced the pairing of "{id}" — the command it held stops working now. Run this on the device:', { id: r.deviceId }))
+          : tr('Paired as "{id}". Pick the device’s OS and run the command on it — it starts the agent and dials in; the device then appears as a machine row above (green dot = connected):', { id: r.deviceId });
       const seg = document.createElement('div');
-      seg.style.cssText = 'display:flex;gap:6px;margin:6px 0;';
+      seg.className = 'device-pair-os';
       const ta = document.createElement('textarea');
-      ta.readOnly = true; ta.style.minHeight = '110px'; ta.style.fontSize = '11px'; ta.spellcheck = false;
+      ta.readOnly = true; ta.className = 'device-pair-cmd'; ta.spellcheck = false;
       const note = document.createElement('p');
       note.className = 'agents-note';
-      const guessOs = /Mac/i.test(navigator.platform || '') ? 'mac' : /Win/i.test(navigator.platform || '') ? 'win' : 'linux';
-      let osSel = guessOs;
+      // verify-r4 F7: a paired device's command in ITS OS's form (the OS its daemon states on every dial — the receiver's
+      // fact); only a device nobody has heard from yet gets the browser's OS as a guess (the tabs are the choice). The owner
+      // opens VibeSpace on Windows: a paired Mac's "new command" was the PowerShell form
+      const guessOs = deviceOs || (/Mac/i.test(navigator.platform || '') ? 'mac' : /Win/i.test(navigator.platform || '') ? 'win' : 'linux');
       const chips = {};
       const setOs = (k) => {
-        osSel = k; ta.value = CMDS[k]; note.textContent = NOTES[k];
+        ta.value = CMDS[k]; note.textContent = NOTES[k];
         for (const [ck, el] of Object.entries(chips)) el.className = ck === k ? 'btn-create' : 'btn-cancel';
       };
       for (const [k, label] of [['mac', 'macOS'], ['linux', 'Linux'], ['win', 'Windows']]) {
@@ -1352,72 +1378,200 @@ export function installSidebarMounts(Sidebar) {
       tail.className = 'agents-note';
       tail.textContent = tr('The installer registers the daemon with launchd (macOS) / systemd (Linux): it starts on boot and auto-restarts if it crashes. One machine can pair to several VibeSpace instances — each install keeps its own state, keyed by this instance’s address. Pairing the same name again replaces its token. Everything it installs — including a private Node if the machine had none — lives under ~/.vibespace on the device; removing that folder removes it all.');
       const act2 = document.createElement('div');
-      act2.className = 'dialog-actions';
+      act2.className = 'dialog-actions device-pair-actions';
       const copy = document.createElement('button');
-      copy.className = 'btn-create'; copy.textContent = tr('Copy command');
+      copy.className = 'btn-create device-pair-copy'; copy.textContent = tr('Copy command');
       copy.onclick = () => { copyText(ta.value); showToast(tr('Command copied')); };
       const closeBtn = document.createElement('button');
       closeBtn.className = 'btn-cancel'; closeBtn.textContent = tr('Close'); closeBtn.onclick = () => close();
       act2.append(closeBtn, copy);
       body.append(done, seg, ta, note, tail, act2);
+      // verify-r5 A1: THIS command can be replaced while it is on screen (another window pressed Generate / Replace, or
+      // another user) — the device row's generation moves past the one minted here: said on this sheet, once
+      const gen = Number(r.generation) || 0;
+      if (gen && r.deviceId) {
+        const gone = document.createElement('p');
+        gone.className = 'agents-note device-pair-replaced'; gone.style.display = 'none';
+        body.insertBefore(gone, seg);
+        const genTick = setInterval(() => {
+          if (!body.isConnected) { clearInterval(genTick); return; }
+          const h2 = (this._hostsData?.hosts || []).find((x) => x && x.deviceId === r.deviceId);
+          const d2 = h2 && h2.dial;
+          if (d2 && Number(d2.generation) > gen) {
+            gone.textContent = tr('This command no longer works — a newer one was generated for "{id}" at {time} (another window, or another user). Use the newest command.', { id: r.deviceId, time: new Date(Number(d2.tokenMintedAt) || Date.now()).toLocaleTimeString(deviceLocale(), { hour: '2-digit', minute: '2-digit' }) });
+            gone.style.display = ''; clearInterval(genTick);
+          }
+        }, 1000);
+      }
       setOs(guessOs);
       ta.onclick = () => ta.select();
     },
 
-    // Pair a NAT'd machine as a dial-out DEVICE (B-e5e7, docs/device-agent.md):
-    // mint a device id + dial token (POST /api/device/dial-pair) and hand the
-    // user the exact one-line installer command. Machines you can ssh into
-    // never need this — Add machine installs the agent over ssh at first use.
-    _showDevicePairDialog() {
-      const { body, close } = createModalShell({ id: 'device-pair-dialog', title: tr('Pair a device'), escapeToClose: true });
-      const note = document.createElement('p');
-      note.className = 'agents-note';
-      note.textContent = tr('For machines you can’t ssh into (a laptop, a Mac at home): the device dials OUT to this instance over a websocket, so it works behind NAT with nothing to expose. Nothing to install first — the installer brings its own Node when the machine has none.');
-      const note2 = document.createElement('p');
-      note2.className = 'agents-note';
-      note2.textContent = tr('Re-running the command on the device REPLACES its pairing with this instance. Pairing the same device with several VibeSpace instances is fine — each instance gets its own daemon on the device.');
-      const label = document.createElement('label');
-      label.textContent = tr('Device name');
-      const inp = document.createElement('input');
-      inp.type = 'text'; inp.placeholder = 'my-mac'; inp.maxLength = 32;
-      // Double-NAT option (B-5c1e): if THIS instance isn't publicly reachable
-      // (a laptop/home machine behind NAT), the device can't dial location.origin.
-      // Publishing the instance through the frp relay gives the device a public
-      // subdomain to dial — the relay bridges both NATs. Shown only when the frp
-      // plugin is configured.
-      const relayWrap = document.createElement('label');
-      relayWrap.className = 'device-pair-relay'; relayWrap.style.cssText = 'display:none;align-items:flex-start;gap:6px;font-size:12px;margin-top:6px';
-      const relayCb = document.createElement('input'); relayCb.type = 'checkbox';
-      const relayTxt = document.createElement('span');
-      relayTxt.innerHTML = escHtml(tr('This instance is behind NAT — reach it through the public relay')) + `<br><span class="agents-note" style="margin:2px 0 0">${escHtml(tr('Publishes this instance to the frp relay so the device can dial in from anywhere. Both sides can be behind NAT.'))}</span>`;
-      relayWrap.append(relayCb, relayTxt);
-      api('/api/plugins').then((pl) => {
-        const frp = (pl?.plugins || []).find((p) => p.id === 'frp');
-        if (frp?.configured && frp?.subDomainHost) relayWrap.style.display = 'flex';
-      }).catch(() => {});
+    // Pair a NAT'd machine as a dial-out DEVICE (B-e5e7, docs/device-agent.md) — and, with `h`, the machine row's
+    // PAIRING SHEET for an existing device (lane-pairing ①②): the ADDRESS the device dials is CHOSEN from what the
+    // server can name for itself (GET /api/device/dial-addresses), and the token is minted ONLY by the button
+    // ("Create pairing" / "Generate a new command") — opening this never rotates anything (the owner's Mac: every
+    // re-open minted a new token and the device kept dialing with the old one). Machines you can ssh into never
+    // need this — Add machine installs the agent over ssh at first use.
+    async _showDevicePairDialog(h = null) {
+      const existing = !!(h && h.deviceId);
+      const { body, close } = createModalShell({ id: 'device-pair-dialog', title: existing ? tr('Pairing command — "{name}"', { name: h.name }) : tr('Pair a device'), bodyClass: 'device-pair-body', escapeToClose: true });
+      if (existing) {
+        // the sheet's head: the device's dial state, so the user sees whether the OLD command ever worked
+        const stp = document.createElement('p');
+        const rs = dialRowState(h);
+        stp.className = 'agents-note device-pair-state';
+        stp.dataset.dialState = rs.state;
+        stp.textContent = dialStateText(rs);
+        body.appendChild(stp);
+      } else {
+        const note = document.createElement('p');
+        note.className = 'agents-note';
+        note.textContent = tr('For machines you can’t ssh into (a laptop, a Mac at home): the device dials OUT to this instance over a websocket, so it works behind NAT with nothing to expose. Nothing to install first — the installer brings its own Node when the machine has none.');
+        const note2 = document.createElement('p');
+        note2.className = 'agents-note';
+        note2.textContent = tr('Re-running the command on the device REPLACES its pairing with this instance. Pairing the same device with several VibeSpace instances is fine — each instance gets its own daemon on the device.');
+        body.append(note, note2);
+      }
+      // verify-r1 B8: while a device is dialed in, the user CHOOSES whether the new command is handed to it over its
+      // link (a device they trust: a new address) or whether whoever holds the previous command is locked out (the
+      // default — a rotation is also how a leaked command is retired)
+      let keepBox = null, keepLbl = null, keepNote = null;
+      const keepSince = existing && h.dial ? (h.dial.lastConnectAt ?? null) : null; // verify-r6 P1: the link this sheet shows
+      if (existing && (h.online || h.dialLive)) {
+        keepLbl = document.createElement('label');
+        keepLbl.className = 'device-pair-keep';
+        keepBox = document.createElement('input'); keepBox.type = 'checkbox'; keepBox.checked = false;
+        const keepTxt = document.createElement('span');
+        keepTxt.textContent = tr('Send the new command to the connected device over its link (it keeps working without running anything)');
+        keepLbl.append(keepBox, keepTxt);
+        keepNote = document.createElement('p');
+        keepNote.className = 'agents-note';
+        keepNote.textContent = tr('Unchecked: the connected device is disconnected now and its command stops working — run the new command on the device yourself.');
+        body.append(keepLbl, keepNote);
+      } else if (existing) {
+        // verify-r4 F8: a device NOT dialed in hears what Generate does to it before the button, not after
+        const cons = generateConsequenceText(h);
+        if (cons) { const cn = document.createElement('p'); cn.className = 'agents-note device-pair-consequence'; cn.textContent = cons; body.append(cn); }
+      }
+      let inp = null, nameNote = null, willBe = null;
+      if (!existing) {
+        const label = document.createElement('label');
+        label.textContent = tr('Device name');
+        inp = document.createElement('input');
+        inp.type = 'text'; inp.placeholder = 'my-mac'; inp.maxLength = 32; inp.className = 'device-pair-name';
+        // verify-r4 F6: a name that is ALREADY paired is a replacement, said BEFORE the button (the route re-pairs it: the
+        // token rotates, the device on the old command is disconnected, its record + lists go to whatever runs the new one)
+        nameNote = document.createElement('p');
+        nameNote.className = 'agents-note device-pair-exists';
+        nameNote.style.display = 'none';
+        // verify-r5 A2: what the typed name BECOMES (the rule keeps letters, digits, - and _): "办公室Mac" is paired as "Mac"
+        willBe = document.createElement('p');
+        willBe.className = 'agents-note device-pair-willbe';
+        willBe.style.display = 'none';
+        body.append(label, inp, willBe, nameNote);
+      }
+      const pickHost = document.createElement('div');
+      pickHost.className = 'device-pair-addr';
+      pickHost.textContent = tr('Loading addresses…');
+      const hint = document.createElement('p');
+      hint.className = 'agents-note device-pair-hint';
+      hint.textContent = tr('The device checks the chosen address before it installs anything and stops with the reason if it cannot reach it — pick the one its network can see.');
+      const err = document.createElement('div');
+      err.className = 'device-pair-err';
       const actions = document.createElement('div');
       actions.className = 'dialog-actions';
       const cancel = document.createElement('button');
       cancel.className = 'btn-cancel'; cancel.textContent = tr('Cancel'); cancel.onclick = () => close();
       const go = document.createElement('button');
-      go.className = 'btn-create'; go.textContent = tr('Create pairing');
+      go.className = 'btn-create device-pair-go';
+      const goWord = existing ? tr('Generate a new command') : tr('Create pairing');
+      go.textContent = goWord; go.disabled = true;
       actions.append(cancel, go);
-      body.append(note, note2, label, inp, relayWrap, actions);
-      setTimeout(() => inp.focus(), 50);
+      // verify-r5 A1: what the ROUTE said about this name (a 409 already_paired: the list here lagged — another window or
+      // user paired it a moment ago) counts until the name is edited
+      let raced = null;
+      // verify-r6 P3: what the USER was shown when they last acted — the label their own typing (or the route's own
+      // answer) produced. The 1 s tick below also re-labels the button (another window paired this name meanwhile),
+      // and a press landing right after that flip read "Replace its pairing" off the live label — a click aimed at
+      // "Create pairing" replaced another window's fresh pairing. The tick never upgrades a press to a replace: a
+      // press it has not been shown is sent as `new`, and the route's 409 already_paired then says so
+      let seenReplace = false;
+      const syncName = (source = 'input') => {
+        if (!inp || !nameNote) return;
+        const shown = pairNameShown(inp.value);
+        if (willBe) {
+          willBe.textContent = shown.empty ? tr('This name has no letters, digits, - or _ — it will be paired under a random name (dev-…).')
+            : shown.reduced ? tr('It will be paired as "{id}" — a device name keeps only letters, digits, - and _.', { id: shown.id }) : '';
+          willBe.style.display = willBe.textContent ? '' : 'none';
+        }
+        const v0 = pairNameVerdict(inp.value, this._hostsData?.hosts || []);
+        const v = !v0.exists && raced && raced.deviceId === v0.deviceId ? { ...v0, exists: true, online: raced.online, name: raced.deviceId } : v0;
+        // verify-r5 A3: a name that differs from a paired one only by case is refused by the route — said here first
+        nameNote.style.display = v.exists || v.caseTwin ? '' : 'none';
+        nameNote.textContent = v.caseTwin && !v.exists ? tr('"{name}" differs from the paired device "{twin}" only in upper / lower case — VibeSpace treats them as one name. Pick another name, or give "{twin}" a new command from the pairing icon on its row.', { name: v.deviceId, twin: v.caseTwin })
+          : !v.exists ? '' : v.online
+          ? tr('"{name}" is already paired and connected. Creating replaces its pairing: that device is disconnected now and its command stops working. To give it a new command instead, use the pairing icon on its row.', { name: v.name })
+          : tr('"{name}" is already paired. Creating replaces its pairing: the command it holds stops working. To give it a new command instead, use the pairing icon on its row.', { name: v.name });
+        if (go.textContent === goWord || go.textContent === tr('Replace its pairing')) go.textContent = v.exists ? tr('Replace its pairing') : goWord;
+        if (source !== 'tick') seenReplace = go.textContent === tr('Replace its pairing');
+      };
+      if (inp) inp.addEventListener('input', syncName);
+      // verify-r5 A1: the note follows the machine list while the dialog is open — a second window pairing this name, or
+      // the device coming online, changes what Create does (the note was judged once, at the keystroke)
+      const nameTick = inp ? setInterval(() => { if (!body.isConnected || !inp.isConnected) { clearInterval(nameTick); return; } syncName('tick'); }, 1000) : null;
+      body.append(pickHost, hint, err, actions);
+      if (inp) setTimeout(() => inp.focus(), 50);
+      let picker = null;
+      try {
+        const a = await api(`/api/device/dial-addresses?device=${encodeURIComponent(existing ? h.deviceId : 'DEVICE')}`);
+        picker = dialAddressPicker({ candidates: a.candidates || [], relayPublishable: !!a.relayPublishable, listen: a.listen || null, deviceId: existing ? h.deviceId : 'DEVICE', dial: existing ? (h.dial || {}) : null, online: !!(existing && (h.online || h.dialLive)), onChange: () => { err.textContent = ''; } }); // naive-user N-sheet: the device's own address checked (verify-r4 F1: as the device states it; the tense = the link's)
+        pickHost.textContent = '';
+        pickHost.appendChild(picker.el);
+        go.disabled = false;
+      } catch (e) {
+        pickHost.textContent = tr('Could not list this server’s addresses: {why}', { why: e.message || '' });
+        showToast(tr('Could not list this server’s addresses: {why}', { why: e.message || '' }), { type: 'error' });
+      }
       const pair = async () => {
-        const name = (inp.value || '').trim().replace(/[^\w-]/g, '') || undefined;
-        go.disabled = true; go.textContent = relayCb.checked ? tr('Publishing to relay…') : tr('Pairing…');
+        if (!picker || go.disabled) return;
+        const v = picker.value();
+        if (v.error) { err.textContent = v.error; return; }
+        const name = existing ? h.deviceId : (deviceIdOf(inp.value) || undefined); // THE one name rule (the route's)
+        // verify-r5 A1: the dialog says what it EXPECTS (read before the button's label changes) — the route refuses a
+        // "new" pairing under a name that is paired NOW (409 already_paired) instead of silently replacing it
+        const expect = existing || seenReplace ? 'existing' : 'new'; // verify-r6 P3: what the user was SHOWN, never the tick's flip
+        go.disabled = true; go.textContent = v.viaRelay ? tr('Publishing to relay…') : tr('Pairing…');
         try {
-          const r = await api('/api/device/dial-pair', { method: 'POST', body: JSON.stringify({ deviceId: name, serverUrl: location.origin, viaRelay: relayCb.checked }) });
-          if (r?.error) throw new Error(r.error);
-          this._fillPairCommandBody(body, close, r);
+          // verify-r6 P1: a requested push names the link this sheet showed (its lastConnectAt) — a link that is gone or is
+          // another one is refused by name, nothing minted
+          const keep = !!(keepBox && keepBox.checked);
+          const r = await api('/api/device/dial-pair', { method: 'POST', body: JSON.stringify({ deviceId: name, base: v.base, viaRelay: !!v.viaRelay, updateInPlace: keep, ...(keep ? { keepLinkSince: keepSince } : {}), expect }) });
+          if (nameTick) clearInterval(nameTick);
+          this._fillPairCommandBody(body, close, r, { regenerated: existing, deviceOs: existing ? commandOsOf(h.dial && h.dial.lastAccept && h.dial.lastAccept.platform) : null });
         } catch (e) {
-          go.disabled = false; go.textContent = tr('Create pairing');
-          showToast((e && e.message) || 'pairing failed', { type: 'error' });
+          go.disabled = false; go.textContent = goWord;
+          if (e && e.code === 'already_paired') raced = { deviceId: name, online: !!(e.body && e.body.online) };
+          if (e && e.code === 'not_paired') raced = null;
+          // verify-r6 P1: the device is gone — the keep-its-link choice no longer exists on this sheet (the next press is
+          // the plain rotation the message just described)
+          if (e && e.code === 'link_gone' && keepLbl) { keepBox.checked = false; keepLbl.style.display = 'none'; if (keepNote) keepNote.style.display = 'none'; }
+          syncName('route'); // the route's answer is SHOWN to the user (the message below) — it counts as seen
+          const msg = e && e.code === 'bad_base' ? tr('That is not an address VibeSpace can dial')
+            : e && e.code === 'already_paired' ? tr('"{name}" was paired a moment ago — in another window, or by another user. Nothing was created. To replace that pairing, press "Replace its pairing".', { name })
+            : e && e.code === 'name_case_taken' ? tr('"{name}" differs from the paired device "{twin}" only in upper / lower case — VibeSpace treats them as one name. Pick another name, or give "{twin}" a new command from the pairing icon on its row.', { name, twin: (e.body && e.body.twin) || '' })
+            // verify-r6 P1: the link the owner asked to keep is gone / is another one — nothing was minted
+            // verify-r6 P2: the device this sheet was for was removed while it was open — nothing re-created
+            : e && e.code === 'not_paired' ? tr('"{name}" is no longer paired (it was removed — in another window, or by another user). Nothing was created. To pair a device under this name, use "Pair a device".', { name })
+            : e && e.code === 'link_gone' ? tr('"{name}" is no longer connected, so its new command cannot be sent over its link — nothing was changed. Press the button again to make a new command you run on the device yourself (the one it holds stops working).', { name })
+            : e && e.code === 'link_changed' ? tr('"{name}" reconnected after this sheet opened (or another device dialed in under its name) — nothing was changed. Close this sheet and open it again to see what is connected now.', { name })
+            : ((e && e.message) || tr('pairing failed'));
+          err.textContent = msg;
+          showToast(msg, { type: 'error' });
         }
       };
       go.onclick = pair;
-      inp.onkeydown = (e) => { if (e.key === 'Enter') pair(); };
+      if (inp) inp.onkeydown = (e) => { if (e.key === 'Enter') pair(); };
     },
 
     // B-6640: upgrade an ssh machine to a dial-out device (or roll it back).
@@ -1443,16 +1597,24 @@ export function installSidebarMounts(Sidebar) {
       const info = document.createElement('div'); info.className = 'tiny'; info.style.marginBottom = '10px';
       info.innerHTML = tr('Installs the VibeSpace daemon as a persistent service on the machine so it <b>dials back to this instance over a WebSocket</b>. Every file/discovery/transcript op then uses that link — no ssh banner-hang, ControlMaster staleness, or per-op child processes. <b>ssh is kept</b> as the bootstrap + rescue channel, and you can remove this anytime.');
       body.appendChild(info);
-      const relayRow = document.createElement('label'); relayRow.className = 'tiny'; relayRow.style.display = 'block'; relayRow.style.margin = '8px 0';
-      relayRow.innerHTML = '<input type="checkbox" id="grad-relay" style="vertical-align:middle"> ' + tr('This instance is behind NAT — publish it through the relay so the machine can dial in (needs the frp plugin)');
-      body.appendChild(relayRow);
-      const err = document.createElement('div'); err.className = 'tiny'; err.style.color = 'var(--red)'; err.style.margin = '6px 0'; body.appendChild(err);
+      // lane-pairing ①: the SAME address list as the pairing dialog (the machine dials the address chosen here; the
+      // server's ssh-side curl precheck stays — it is this path's twin of the device's --dial-check)
+      const pickHost = document.createElement('div'); pickHost.className = 'device-pair-addr'; pickHost.textContent = tr('Loading addresses…');
+      body.appendChild(pickHost);
+      let picker = null;
+      api(`/api/device/dial-addresses?device=${encodeURIComponent(h.deviceId || ('grad-' + h.id))}`).then((a) => {
+        picker = dialAddressPicker({ candidates: a.candidates || [], relayPublishable: !!a.relayPublishable, listen: a.listen || null, deviceId: h.deviceId || ('grad-' + h.id), dial: h.dial || null, online: !!h.dialLive });
+        pickHost.textContent = ''; pickHost.appendChild(picker.el);
+      }).catch((e) => { pickHost.textContent = tr('Could not list this server’s addresses: {why}', { why: e.message || '' }); });
+      const err = document.createElement('div'); err.className = 'tiny device-pair-err'; err.style.margin = '6px 0'; body.appendChild(err);
       const go = document.createElement('button'); go.className = 'btn-create'; go.textContent = tr('Upgrade to dial-out');
       go.onclick = async () => {
+        const v = picker ? picker.value() : { error: tr('Loading addresses…') };
+        if (v.error) { err.textContent = v.error; return; }
         err.textContent = ''; go.disabled = true; go.textContent = tr('Installing on the machine…');
         try {
-          const viaRelay = body.querySelector('#grad-relay')?.checked || false;
-          const r = await api(`/api/hosts/${h.id}/graduate-dial`, { method: 'POST', body: JSON.stringify({ serverUrl: viaRelay ? '' : location.origin, viaRelay }) });
+          const viaRelay = !!v.viaRelay;
+          const r = await api(`/api/hosts/${h.id}/graduate-dial`, { method: 'POST', body: JSON.stringify({ base: v.base, viaRelay }) });
           if (r?.error) throw new Error(r.error);
           showToast(r.dialedIn ? tr('"{name}" upgraded — dial link is live', { name: h.name }) : tr('"{name}" installed — waiting for it to dial in', { name: h.name })); close(); this._refresh?.();
         } catch (e) { go.disabled = false; go.textContent = tr('Upgrade to dial-out'); if (!err.isConnected) showToast(e.message, { type: 'error' }); else err.textContent = e.message; }

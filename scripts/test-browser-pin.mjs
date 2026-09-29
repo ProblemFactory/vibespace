@@ -166,7 +166,7 @@ console.log('— ② the registry record, the lease and the keeper\'s verdicts (
   ok(B.validateProfileInput({}).code === 'label_required', 'no label ⇒ label_required');
   ok(B.validateProfileInput({ label: 'work' }, { existing: [{ id: 'bp-00000001', label: 'Work' }] }).code === 'label_taken', 'a label is unique case-insensitively ⇒ label_taken');
   ok(B.validateProfileInput({ label: 'x', provider: 'nope' }).code === 'provider_unknown', 'an unknown provider is refused by name');
-  ok(B.validateProfileInput({ label: 'x', provider: 'cloak' }).code === 'provider_unavailable', 'a known but unwired provider is refused with its reason (§7.1 capability law)');
+  ok(B.validateProfileInput({ label: 'x', provider: 'cloud:agentcore' }).code === 'provider_unavailable', 'a known but unwired provider (agentcore) is refused with its reason (§7.1 capability law; cloak is wired since its measurement)');
   // P4 (§7.3 / D5 (b)): the ROW admits a paired machine for chromium/cdp — whether
   // the id names one is the keeper's question (test-browser-providers); a key-bearing
   // row is refused there by name (D34), and a non-machine id never reaches the keeper

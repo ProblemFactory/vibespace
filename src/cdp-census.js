@@ -4,7 +4,8 @@
  * docs/design-agent-browser-v2.md §6.2.1 (verify S2 r4, 2026-09-26).
  *
  * Every method the installed Chrome's own protocol lists (scripts/fixtures/cdp-protocol-<version>/ — the pinned
- * GET /json/protocol; 58 domains, 664 methods on 153.0.8010.47) has ONE row here, classed by what it can do to the
+ * GET /json/protocol; 58 domains, 664 methods on 153.0.8010.47, 661 on 154.0.8037.57 — 4 added, 7 removed, see
+ * CENSUS_CHROMES below) has ONE row here, classed by what it can do to the
  * tab the user is driving through the live view. Three verify rounds (r1 CRITICAL, r2 MAJOR, r3 MEDIUM ×2) each found
  * the takeover fence ONE METHOD SHORT because the fence was a hand-written LIST (Input.* + a navigation family, then
  * + setIgnoreInputEvents, then + DOM.focus): a list names what somebody thought of; a census names what the vendor
@@ -35,8 +36,9 @@
  *   harmless       domain enable / disable, event toggles, acks, releases — never refused
  *   refused        whole-browser or whole-machine acts and the escape hatches out of the mediation (Browser.close /
  *                  crash*, exposeDevToolsProtocol, setRemoteLocations, sendMessageToTarget, Tethering, an unpacked
- *                  extension, desktop mirroring, a renderer crash, the deaf-page arm) — refused on every lease, paused
- *                  or not (method_refused)
+ *                  extension, desktop mirroring, a renderer crash, the deaf-page arm, and — Chrome 154 — a whole-browser
+ *                  setting no lease can scope to its own tabs: a mock camera in the SHARED device list, the browser-wide
+ *                  Global Privacy Control signal) — refused on every lease, paused or not (method_refused)
  *
  * TAB SCOPING — the rule per class is LEASE-WIDE for every class (decided r4, said here so it is not re-litigated one
  * method at a time): (1) the mediator cannot tell a tab from a frame under the driven tab — an out-of-process iframe's
@@ -49,14 +51,33 @@
  * anchor instead (refusing it at the mediator leaves the switched-to tab hidden and the stream dead).
  *
  * A row is `'<cls>'` (since = SINCE, this census), `['<cls>', '<since>']` (an entry older than the census — the P6
- * list of 2026-09-21, the r3 doors), or `{ cls, since, fence?, why? }`. The gate: test-browser-mediation ⑥ (every
- * method of the pinned protocol has a row and every row names a method of it; the class rules; three patched-copy
- * controls) + test-browser-mediation-chrome ⑥ (the live protocol of the launched Chrome — extras are PRINTED and fail
- * until classified; the four classes' representative methods against a real paused lease, effects observed).
+ * list of 2026-09-21, the r3 doors), or `{ cls, since, fence?, why?, chrome?, until? }`.
+ *
+ * MORE THAN ONE CHROME (lane-cdp-154, 2026-09-28 — Chrome 154 reached this box and the heavy leg went red on its 4
+ * new methods). CENSUS_CHROMES are the Chromes whose own protocol this table was censused against, oldest first; each
+ * has its fixture. A row's `chrome` = the first censused Chrome that lists the method (default: the first), its
+ * `until` = the first censused Chrome that NO LONGER lists it (a removed method keeps its row — an older Chrome still
+ * ships it, and the fence on that Chrome still needs its class). On every censused Chrome the rows listed there are
+ * EXACTLY that Chrome's methods (`compare(protocol, {chrome})`). The JUDGE IS VERSION-INDEPENDENT: a row is judged by
+ * its class whatever Chrome is installed (a row outliving its method costs nothing — the browser answers -32601), and
+ * a method with no row is refused by name while the user drives on EVERY version — an older Chrome than the census
+ * (the fleet's Debian chromium 150: measured 149–152 list 6–12 methods no row names, none a whole-browser act) and a
+ * newer one alike.
+ *
+ * The gates: test-cdp-census (fast — every censused fixture ⇔ the table, the version marks ⇔ the fixtures' diff, the
+ * rows' own words; patched-copy controls) + test-browser-mediation ⑥ (every row's verdicts; the unknown rule; controls)
+ * + test-browser-mediation-chrome ⑥ (the live protocol of the launched Chrome — a newer Chrome's extras are PRINTED
+ * and fail until classified, every extra is refused BY NAME on the real paused lease whatever the version; the classes'
+ * representative methods against a real paused lease, effects observed).
  */
 const SINCE = '2026-09-26';
-/** The Chrome whose protocol this table was censused against (the fixture directory carries the same version). */
-const CENSUS_CHROME = '153.0.8010.47';
+/** The Chromes whose protocols this table was censused against, OLDEST FIRST — each has its names-only fixture
+ *  scripts/fixtures/cdp-protocol-<version>/protocol.json (scripts/cdp-protocol-fetch.mjs writes it). */
+const CENSUS_CHROMES = Object.freeze(['153.0.8010.47', '154.0.8037.57']);
+/** The NEWEST censused Chrome (the refusal words name every censused one). */
+const CENSUS_CHROME = CENSUS_CHROMES[CENSUS_CHROMES.length - 1];
+/** The Chrome of the 2026-09-28 census step (the rows it added carry `chrome`, the rows it removed `until`). */
+const C154 = '154.0.8037.57';
 const CLASSES = Object.freeze(['input', 'view', 'page-mutation', 'read', 'session', 'harmless', 'refused']);
 /** What the paused fence does with a class: 'refuse' (input / view / page-mutation — the owner's ruling of 2026-09-27;
  *  the r4 'switch' rule and its setting are retired), 'allow' (read / session / harmless); 'refused' rows never reach the fence. */
@@ -68,6 +89,7 @@ const ROWS = Object.freeze({
   },
   Ads: {
     getAdMetrics: 'read',
+    getAdScripts: { cls: 'read', since: '2026-09-28', chrome: C154, why: "retrieves the page's ad scripts (the delta since the last call — a cursor in DevTools' own tracking; nothing on the page moves)" },
   },
   Animation: {
     disable: 'harmless', enable: 'harmless', getCurrentTime: 'read', getPlaybackRate: 'read', releaseAnimations: 'harmless', resolveAnimation: 'read',
@@ -95,6 +117,14 @@ const ROWS = Object.freeze({
     getVersion: 'read', getBrowserCommandLine: 'read', getHistograms: 'read', getHistogram: 'read', getWindowBounds: 'read', getWindowForTarget: 'read',
     setWindowBounds: 'view', setContentsSize: 'view', setDockTile: 'harmless', executeBrowserCommand: 'refused',
     addPrivacySandboxEnrollmentOverride: 'page-mutation',
+    // Chrome 154 (lane-cdp-154, 2026-09-28). The two setters MEASURED on 154.0.8037.57 (a scratch headless Chrome, two
+    // browser contexts = two leases' worth of tabs, a loopback page server): neither takes a browserContextId, both reach
+    // EVERY context, both last only while the setting DevTools connection is open, neither is written to the profile.
+    // A lease owns its tabs, never the whole browser ⇒ `refused` (the stricter class; an agent that needs either uses a
+    // browser of its own — only an instance-shared browser is mediated).
+    addMockCamera: { cls: 'refused', since: '2026-09-28', chrome: C154, why: "adds a camera to the WHOLE browser's shared device list — measured on Chrome 154.0.8037.57: every tab of every browser context (another lease's, the user's own) lists it and getUserMedia there receives its frames — so it is refused on every lease" },
+    getGlobalPrivacyControl: { cls: 'read', since: '2026-09-28', chrome: C154, why: "reads the browser's Global Privacy Control flag (a stock 154.0.8037.57 answers -32000 'Global Privacy Control is disabled.')" },
+    setGlobalPrivacyControl: { cls: 'refused', since: '2026-09-28', chrome: C154, why: "changes the Global Privacy Control signal of the WHOLE browser — measured on Chrome 154.0.8037.57 (the feature on): every tab of every browser context (another lease's, the user's own) then reports navigator.globalPrivacyControl and sends Sec-GPC with it — so it is refused on every lease" },
   },
   CSS: {
     addRule: 'page-mutation', collectClassNames: 'read', createStyleSheet: 'page-mutation', disable: 'harmless', enable: 'harmless',
@@ -297,10 +327,14 @@ const ROWS = Object.freeze({
     trackCacheStorageForOrigin: 'harmless', trackCacheStorageForStorageKey: 'harmless', trackIndexedDBForOrigin: 'harmless',
     trackIndexedDBForStorageKey: 'harmless', untrackCacheStorageForOrigin: 'harmless', untrackCacheStorageForStorageKey: 'harmless',
     untrackIndexedDBForOrigin: 'harmless', untrackIndexedDBForStorageKey: 'harmless', getTrustTokens: 'read', clearTrustTokens: 'page-mutation',
-    getSharedStorageMetadata: 'read', getSharedStorageEntries: 'read', setSharedStorageEntry: 'page-mutation',
-    deleteSharedStorageEntry: 'page-mutation', clearSharedStorageEntries: 'page-mutation', resetSharedStorageBudget: 'page-mutation',
-    setSharedStorageTracking: 'harmless', setStorageBucketTracking: 'harmless', deleteStorageBucket: 'page-mutation',
+    setStorageBucketTracking: 'harmless', deleteStorageBucket: 'page-mutation',
     runBounceTrackingMitigations: 'page-mutation', getRelatedWebsiteSets: 'read',
+    // Shared Storage left the protocol in Chrome 154 (with its two events and eight types); the rows stay for a 153
+    // that still ships them, marked `until` the first censused Chrome without them
+    getSharedStorageMetadata: { cls: 'read', until: C154 }, getSharedStorageEntries: { cls: 'read', until: C154 },
+    setSharedStorageEntry: { cls: 'page-mutation', until: C154 }, deleteSharedStorageEntry: { cls: 'page-mutation', until: C154 },
+    clearSharedStorageEntries: { cls: 'page-mutation', until: C154 }, resetSharedStorageBudget: { cls: 'page-mutation', until: C154 },
+    setSharedStorageTracking: { cls: 'harmless', until: C154 },
   },
   SystemInfo: {
     getInfo: 'read', getFeatureState: 'read', getProcessInfo: 'read',
@@ -364,7 +398,24 @@ const ROWS = Object.freeze({
   },
 });
 
-/** ONE row: `{domain, method, cls, since, fence, why}` — or null for a method the census does not list. */
+/** A Chrome version as four numbers, or null (`chromeParts('154.0.8037.57')` → [154, 0, 8037, 57]). */
+function chromeParts(v) { const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(String(v || '')); return m ? m.slice(1).map(Number) : null; }
+/** -1 / 0 / 1 comparing two Chrome versions part by part; null when either is not a four-part version. */
+function cmpChrome(a, b) {
+  const x = chromeParts(a), y = chromeParts(b);
+  if (!x || !y) return null;
+  for (let i = 0; i < 4; i++) if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1;
+  return 0;
+}
+/** Where a Chrome stands against the census: 'censused' (one of CENSUS_CHROMES — its method set is known exactly),
+ *  'older' / 'newer' (outside the censused span), 'between' (inside it, not censused), 'unknown' (not a version). */
+function chromeRelation(v) {
+  if (CENSUS_CHROMES.includes(String(v || ''))) return 'censused';
+  const lo = cmpChrome(v, CENSUS_CHROMES[0]), hi = cmpChrome(v, CENSUS_CHROME);
+  if (lo === null || hi === null) return 'unknown';
+  return lo < 0 ? 'older' : hi > 0 ? 'newer' : 'between';
+}
+/** ONE row: `{domain, method, cls, since, fence, why, chrome, until}` — or null for a method the census does not list. */
 function rowOf(method) {
   const m = String(method || '');
   const dot = m.indexOf('.');
@@ -373,8 +424,15 @@ function rowOf(method) {
   if (!dom || !Object.prototype.hasOwnProperty.call(dom, m.slice(dot + 1))) return null;
   const v = dom[m.slice(dot + 1)];
   const o = typeof v === 'string' ? { cls: v } : Array.isArray(v) ? { cls: v[0], since: v[1] } : { ...v };
-  return { domain: m.slice(0, dot), method: m.slice(dot + 1), cls: o.cls, since: o.since || SINCE, fence: o.fence || 'mediator', why: o.why || null };
+  return { domain: m.slice(0, dot), method: m.slice(dot + 1), cls: o.cls, since: o.since || SINCE, fence: o.fence || 'mediator', why: o.why || null, chrome: o.chrome || CENSUS_CHROMES[0], until: o.until || null };
 }
+/** Does a CENSUSED Chrome list this row's method? (`chrome` ≤ v < `until`). null for a version the census never saw. */
+function listedOn(row, v) {
+  if (!row || !CENSUS_CHROMES.includes(v)) return null;
+  return cmpChrome(row.chrome, v) <= 0 && (!row.until || cmpChrome(v, row.until) < 0);
+}
+/** The rows a CENSUSED Chrome lists (null for any other version — the census knows only the Chromes it read). */
+function rowsOn(v) { return CENSUS_CHROMES.includes(v) ? rows().filter((r) => listedOn(r, v)) : null; }
 /** The class of a method, or null (unclassified — a newer Chrome's method). */
 function classOf(method) { const r = rowOf(method); return r ? r.cls : null; }
 /** Every row, flat (the census leg and the docs). */
@@ -385,31 +443,46 @@ function rows() {
 }
 /** The methods of one class (a Set of 'Domain.method'). */
 function methodsOf(cls) { return new Set(rows().filter((r) => r.cls === cls).map((r) => r.domain + '.' + r.method)); }
-/** Counts per class (the report). */
-function census() { const c = {}; for (const r of rows()) c[r.cls] = (c[r.cls] || 0) + 1; return { chrome: CENSUS_CHROME, since: SINCE, total: rows().length, byClass: c }; }
+/** Counts per class (the report) + how many rows each censused Chrome lists. */
+function census() {
+  const c = {}; for (const r of rows()) c[r.cls] = (c[r.cls] || 0) + 1;
+  return { chrome: CENSUS_CHROME, chromes: [...CENSUS_CHROMES], since: SINCE, total: rows().length, byClass: c, byChrome: Object.fromEntries(CENSUS_CHROMES.map((v) => [v, rowsOn(v).length])) };
+}
 /**
  * Compare the table against a protocol listing (`{domains:[{domain, commands:[{name}]}]}` — /json/protocol's shape,
- * the fixture's or a live one): `{unclassified: ['Domain.method'…], stale: [...], sameSet}`. A method the protocol
- * lists with no row is UNCLASSIFIED (the leg prints it and fails until a row is written); a row naming a method the
- * protocol lacks is STALE (dead data, or a Chrome older than the census).
+ * the fixture's or a live one) of the Chrome `chrome`: `{chrome, relation, unclassified, stale, misdated, sameSet,
+ * listed, rows}`. A method the protocol lists with NO row at all is UNCLASSIFIED (refused by name while the user
+ * drives; the legs print it). On a CENSUSED Chrome the table must name EXACTLY its methods: a row listed there that
+ * the protocol lacks is STALE, a method it lists whose row's `chrome` / `until` says it is not there is MISDATED —
+ * `sameSet` = none of the three. On any other Chrome (or none given) `stale` is every row the protocol lacks
+ * (informational — an older / newer Chrome) and nothing is misdated.
  */
-function compare(protocol) {
+function compare(protocol, { chrome = null } = {}) {
   const listed = new Set();
   for (const d of (protocol && Array.isArray(protocol.domains) ? protocol.domains : [])) for (const c of (d.commands || [])) if (d.domain && c && c.name) listed.add(d.domain + '.' + c.name);
-  const have = new Set(rows().map((r) => r.domain + '.' + r.method));
+  const all = rows(); const name = (r) => r.domain + '.' + r.method;
+  const have = new Set(all.map(name));
+  const at = CENSUS_CHROMES.includes(chrome) ? chrome : null;
+  const live = at ? new Set(all.filter((r) => listedOn(r, at)).map(name)) : have;
   const unclassified = [...listed].filter((m) => !have.has(m)).sort();
-  const stale = [...have].filter((m) => !listed.has(m)).sort();
-  return { unclassified, stale, sameSet: !unclassified.length && !stale.length, listed: listed.size, rows: have.size };
+  const stale = [...live].filter((m) => !listed.has(m)).sort();
+  const misdated = at ? [...listed].filter((m) => have.has(m) && !live.has(m)).sort() : [];
+  return { chrome: at, relation: chromeRelation(chrome), unclassified, stale, misdated, sameSet: !unclassified.length && !stale.length && !misdated.length, listed: listed.size, rows: live.size };
 }
-/** Validate the table itself (a closed class vocabulary, dates, the one anchor row) — the suite's first assert. */
+/** Validate the table itself (a closed class vocabulary, dates, the one anchor row, the censused Chromes and each
+ *  row's version marks) — the suites' first assert. */
 function validate() {
   const bad = [];
+  if (!CENSUS_CHROMES.length || CENSUS_CHROMES.some((v, i) => !chromeParts(v) || (i && cmpChrome(CENSUS_CHROMES[i - 1], v) >= 0))) bad.push(`CENSUS_CHROMES must be four-part versions, oldest first, no repeats: ${CENSUS_CHROMES.join(', ')}`);
+  if (CENSUS_CHROME !== CENSUS_CHROMES[CENSUS_CHROMES.length - 1]) bad.push(`CENSUS_CHROME '${CENSUS_CHROME}' is not the newest censused Chrome`);
   for (const r of rows()) {
     if (!CLASSES.includes(r.cls)) bad.push(`${r.domain}.${r.method}: class '${r.cls}' is not one of ${CLASSES.join('/')}`);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(r.since)) bad.push(`${r.domain}.${r.method}: since '${r.since}'`);
     if (r.fence !== 'mediator' && r.fence !== 'anchor') bad.push(`${r.domain}.${r.method}: fence '${r.fence}'`);
     if (r.fence === 'anchor' && !(r.cls === 'view' || r.cls === 'input')) bad.push(`${r.domain}.${r.method}: an anchor-fenced row must be a paused class`);
+    if (!CENSUS_CHROMES.includes(r.chrome)) bad.push(`${r.domain}.${r.method}: chrome '${r.chrome}' is not a censused Chrome`);
+    if (r.until !== null && (!CENSUS_CHROMES.includes(r.until) || cmpChrome(r.chrome, r.until) >= 0)) bad.push(`${r.domain}.${r.method}: until '${r.until}' must be a censused Chrome newer than its chrome '${r.chrome}'`);
   }
   return bad;
 }
-module.exports = { SINCE, CENSUS_CHROME, CLASSES, PAUSED_RULE, ROWS, rowOf, classOf, rows, methodsOf, census, compare, validate };
+module.exports = { SINCE, CENSUS_CHROME, CENSUS_CHROMES, CLASSES, PAUSED_RULE, ROWS, rowOf, classOf, rows, rowsOn, listedOn, methodsOf, census, compare, validate, chromeParts, cmpChrome, chromeRelation };

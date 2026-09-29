@@ -344,11 +344,17 @@ ok(await p1.load(), 'page 1 loaded the app at 375×667');
   ok((await p1.evaljs(`${CARD('cloak')}.querySelector('.integ-test').textContent`)) === 'Check format (no network)', 'cloak (shape-only): the button says "Check format (no network)"');
   ok((await p1.evaljs(`${CARD(BL)}.querySelector('.integ-test').textContent`)) === 'Test connection', 'Browserless (credential-exchange): the button says "Test connection" (never clicked — it would reach a vendor)');
   // Test the cloak row, waiting for THE verdict asked (a card keeps its last result drawn until the next one lands)
-  const cloakTestUntil = (want) => p1.evaljs(`(async () => { ${CARD('cloak')}.querySelector('.integ-test').click(); for (let i = 0; i < 60; i++) { const r = ${CARD('cloak')}.querySelector('.integ-test-result'); const v = r && r.querySelector('.integ-verdict'); if (v && v.textContent === ${JSON.stringify(want)}) return { verdict: v.textContent, caveat: !!r.querySelector('.integ-caveat'), err: (r.querySelector('.integ-test-error') || {}).textContent || '', text: r.textContent }; await new Promise((r) => setTimeout(r, 100)); } const r = ${CARD('cloak')}.querySelector('.integ-test-result'); return { verdict: null, text: r ? r.textContent : null }; })()`);
-  // lane browser-dialog (the naive-user verifier, 2026-09-28): an EMPTY cloak key is NOT "the free tier" — the resolver
-  // resolves no key and every switch / start answers backend_no_key — so the shape check FAILS with the words, never passes
-  const t0 = await cloakTestUntil('Failed');
-  ok(t0 && t0.verdict === 'Failed' && /no key resolved for cloak/.test(t0.err) && t0.caveat, `a cloak Test with NO key resolved draws Failed with the words on the card, beside the caveat — never "empty = the free tier" (${JSON.stringify(t0 && (t0.err || t0.text)).slice(0, 160)})`);
+  // (the .197 integration) the drawn verdict is marked stale BEFORE the click, so two Passed in a row are two answers
+  const cloakTestUntil = (want) => p1.evaljs(`(async () => { for (const o of ${CARD('cloak')}.querySelectorAll('.integ-test-result .integ-verdict')) o.dataset.stale = '1'; ${CARD('cloak')}.querySelector('.integ-test').click(); for (let i = 0; i < 60; i++) { const r = ${CARD('cloak')}.querySelector('.integ-test-result'); const v = r && r.querySelector('.integ-verdict'); if (v && !v.dataset.stale && v.textContent === ${JSON.stringify(want)}) return { verdict: v.textContent, caveat: !!r.querySelector('.integ-caveat'), err: (r.querySelector('.integ-test-error') || {}).textContent || '', text: r.textContent }; await new Promise((r) => setTimeout(r, 100)); } const r = ${CARD('cloak')}.querySelector('.integ-test-result'); return { verdict: null, text: r ? r.textContent : null }; })()`);
+  // lane browser-dialog (the naive-user verifier, 2026-09-28) required the card and the switch dialog to say ONE thing about
+  // an empty cloak key. lane-cloak (MEASURED 2026-09-28, the .197 integration) made that one thing "no key needed": the
+  // free CloakBrowser build VibeSpace installs runs with no key and no sign-in, so a switch / a start no longer answers
+  // backend_no_key for cloak (keyRequiredFor('cloak') === false; every cloud row still requires its key) — and the
+  // shape check PASSES with no key, beside its caveat
+  const SW = require(path.join(wt, 'src/browser-switch.js'));
+  ok(SW.keyRequiredFor('cloak') === false && SW.keyRequiredFor('cloud:browseruse') === true, 'the switch rule (the dialog\'s side): cloak needs NO key, a cloud row still does');
+  const t0 = await cloakTestUntil('Passed');
+  ok(t0 && t0.verdict === 'Passed' && !t0.err && t0.caveat, `a cloak Test with NO key resolved draws Passed beside the caveat — the card agrees with the switch, which no longer refuses a keyless cloak (${JSON.stringify(t0 && (t0.err || t0.text)).slice(0, 160)})`);
   // a well-formed cb_ key saved the user's way (Set → password input → Save), then the shape check passes
   const saved = await p1.evaljs(`(async () => {
     const row = ${CARD('cloak')}.querySelector('.integ-field[data-field="licenseKey"]');

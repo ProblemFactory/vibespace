@@ -571,6 +571,15 @@ class FileExplorer {
   // cross-host). Empty string / no field when browsing the local machine.
   _hp() { return this._host ? `&host=${encodeURIComponent(this._host)}` : ''; }
   _hb(obj = {}) { return this._host ? { ...obj, host: this._host } : obj; }
+  // verify-r6 E1: WHERE an operation acts, frozen when the user starts it — the folder and the machine this explorer
+  // shows NOW. Every op that awaits a dialog (a confirm, a name) builds its paths and its host from this snapshot, never
+  // from the live `currentPath` / `_host` after the await: a layout sync from another client (layout.js setHost +
+  // navigate) moves this window while the dialog is open, and "Delete "build"?" deleted a "build" in ANOTHER folder or
+  // on another machine (the approval census — test-approval-census CAPTURE rule).
+  _here() {
+    const dir = this.currentPath, host = this._host || '';
+    return Object.freeze({ dir, host, hp: host ? `&host=${encodeURIComponent(host)}` : '', hb: (obj = {}) => (host ? { ...obj, host } : obj), path: (n) => dir + '/' + n });
+  }
 
   async _refreshHostOptions() {
     try {

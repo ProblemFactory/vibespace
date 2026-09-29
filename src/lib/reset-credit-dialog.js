@@ -75,7 +75,8 @@ export async function openResetCreditDialog(app, { accountKey, sessionId = null,
     if (m.refusal) ok.title = words(m.refusal);
     ok.onclick = async () => {
       ok.disabled = true;
-      const r = await fetchJson(`/api/accounts/${encodeURIComponent(p.key)}/reset-credit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: p.sessionId || sessionId || null }) });
+      // verify-r6 R1: the POST names the window this dialog SHOWED — one that reset while it stayed open is refused, nothing spent
+      const r = await fetchJson(`/api/accounts/${encodeURIComponent(p.key)}/reset-credit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: p.sessionId || sessionId || null, expect: { resetsAtSec: p.resetsAtSec ?? null } }) });
       if (r && r.ok) {
         showToast(t('Reset credit requested on {account} — the result arrives as a notice and in the usage panel', { account: p.name || p.key }));
         await resolveTodo('done');

@@ -26,8 +26,9 @@ function create({ rootDir, BUFFERS_DIR, META_DIR, DTACH_CMD, USAGE_SCANNER_PATH,
   checkClaudeGoalStatus, broadcastToSession, broadcastActiveSessions,
   noteModelSeen, noteHarnessModels, recordUsageAttribution, daemonPtyShim, sbSeenFirst, getDeviceMgr,
   agentEnv, // the SANITIZED spawn env (spawn-hygiene law) — the ONE local re-attach uses it, as ws-handler's detector always did
-  getHosts, getUsageHistory, getTelemetry, getNoConvoRef, getDeliver, getPages, getPermissionRules, getBrain = () => null }) {
+  getHosts, getUsageHistory, getTelemetry, getNoConvoRef, getDeliver, getPages, getPermissionRules, getBrain = () => null, getExitProxy = () => null }) {
   const hosts = mk(getHosts);
+  const exitProxyRef = mk(getExitProxy);                // verify-r2 A3-r2 / ask-a: a dead conversation's exit pairs + waiting asks end with it
   const usageHistory = mk(getUsageHistory);
   const telemetry = mk(getTelemetry);
   const noConvoRef = mk(getNoConvoRef);
@@ -276,6 +277,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
     global.__vsEvent?.('session-exited', `${session.mode}/${session.backend || 'claude'}${childCode != null ? '/code=' + childCode : ''}${exitReason ? '/' + exitReason : ''}${facts.eventSuffix}`);
     broadcastToSession(session, id, { type: 'exited', sessionId: id, reason: exitReason, detail: death?.detail, ...(facts.signal ? { signal: facts.signal } : {}) });
     try { require('./helper-asks').forget(session); } catch { } // lane S1 verify r1: a dead parent's helper asks wait for nobody — timers cleared, For-you items resolved
+    try { exitProxyRef.onSessionEnd?.(session, id); } catch { } // verify-r2: its exit pairs are dropped with their connections, its waiting asks settled
     activeSessions.delete(id);
     if (cleanupOnExit && session.sockName) deleteSessionMeta(session.sockName);
     // Buffer + wrapper-meta files are only meaningful while the dtach session

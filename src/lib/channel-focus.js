@@ -29,6 +29,11 @@
 //              its window closes: those are the digest, never "held" (the R3 ×
 //              R4 seam, 2.369.191 — `heldPending` reads the row's R4 `watchers`
 //              beside the engine's per-principal `touch.pendingFor`)
+//   direct     a SINGLE chat (`kind: 'dm'`) with unread messages whose newest is
+//              inside the 24 h window (lane lark-search-poll, owner decision 1,
+//              2026-09-28: "首屏'要紧'列表里, 别人私聊你、你还没看的消息, 挂'单聊 · N
+//              条新消息'标签") — a person wrote to the owner; the feed's catch-up
+//              births are READ (unread 0), so day one never floods the list
 //   replied    the owner wrote in it in the last 24 h (a message the vendor
 //              records as the owner's own, or the owner's send from here)
 // and a non-archived AGENT GROUP always does (the owner's explicit act, D1).
@@ -36,7 +41,7 @@
 // ONE TAG PER ROW, first match wins (§23.3):
 //   awaiting › unknown › assigned (→ Agent X; amber when its wake is held)
 //   › read (Agent X read N min ago) | new-since-read (new since Agent X read)
-//   › held › replied
+//   › held › direct › replied
 // `read` and `new-since-read` are the SAME fact split by whether anything
 // arrived after the read (`lastAt > upTo`), so they never compete.
 //
@@ -47,7 +52,7 @@
 export const FOCUS_WINDOW_MS = 24 * 3600e3;
 export const HELD_WINDOW_MS = 7 * 86400e3;
 /** The tag codes, in priority order (the table the suite pins). */
-export const TAG_ORDER = Object.freeze(['awaiting', 'unknown', 'assigned', 'read', 'new-since-read', 'held', 'replied']);
+export const TAG_ORDER = Object.freeze(['awaiting', 'unknown', 'assigned', 'read', 'new-since-read', 'held', 'direct', 'replied']);
 
 const num = (x) => (Number.isFinite(Number(x)) ? Number(x) : 0);
 const within = (at, now, win) => { const a = num(at); return a > 0 && now - a < win; };
@@ -130,6 +135,8 @@ export function statusTag(row, now = Date.now()) {
     return num(c.lastAt) > num(rd.upTo) ? { code: 'new-since-read', name, kind, at: num(rd.at) } : { code: 'read', name, kind, at: num(rd.at) };
   }
   if (held) return { code: 'held', n: heldPending(touch, now, c.watchers) };
+  // lane lark-search-poll (owner decision 1): a single chat somebody wrote in and the owner has not read
+  if (c.kind === 'dm' && num(c.unread) > 0 && within(c.lastAt, now, FOCUS_WINDOW_MS)) return { code: 'direct', n: num(c.unread) };
   if (touch && within(touch.selfAt, now, FOCUS_WINDOW_MS)) return { code: 'replied', at: num(touch.selfAt) };
   return null;
 }

@@ -1,6 +1,7 @@
 import { track } from './telemetry-client.js';
 import { cssVarDefault } from './utils.js';
 import { isTransientWindowType } from './window-types.js';
+import { wordlessTitleOf } from '../record-clear.js'; // PURE: the title a layout RECORD keeps for a window drawn from a record's words (lane-redact verify r7)
 import { chainSyncKey, ratioDiffers, heldRatio, releaseRatio, withoutMembers } from './chain-layout.js'; // agent browser P7 (§4.6): the sync key carries the layout; the ratio applies in place (unless a local divider drag holds it — v2 verify r1 ①)
 
 // The MEMBERS of a chain (host first) — NOT a sync key (chainSyncKey is): two
@@ -466,9 +467,13 @@ class LayoutManager {
       const termSession = this.app.sessions.get(id);
       // Ensure gridBounds is up to date
       if (!win.gridBounds) this.app.wm._captureGridBounds(win);
+      // THE ONE CLIENT CAPTURE keeps no record's words (lane-redact verify r7): every copy this page keeps of its own layout
+      // — the autosave it last sent, a named preset, the record of a desktop it switched away from, the stage's — is made
+      // here, and a window titled by a record's words (the Job input window names its job) is recorded under its generic
+      // title, as the server's choke point keeps it; the live window re-titles itself from the store when it replays
       const winState = {
         winId: id,
-        title: win.title, type: win.type,
+        title: wordlessTitleOf(win._openSpec, win.title), type: win.type,
         isMinimized: win.isMinimized, isMaximized: win.isMaximized,
         gridBounds: win.gridBounds,
         zIndex: parseInt(el.style.zIndex) || 0,

@@ -25,10 +25,17 @@ class DeviceManager {
    *  version      release version (= daemonVersion expected)
    *  log          logger fn
    */
-  constructor({ dataDir, bundlePath, version, nodeModules, transport, log = console.log } = {}) {
+  constructor({ dataDir, bundlePath, version, nodeModules, transport, log = console.log, upgradeLedger = null } = {}) {
     this._tokFile = path.join(dataDir, 'agentd-tokens.json');
     this._bundlePath = bundlePath;
     this._version = version;
+    // THE UPGRADE LEDGER (verify-r1 C1, 2026-09-28): the 2.330.0 loop breaker counted attempts ON THIS INSTANCE —
+    // and the dial path builds a NEW DeviceManager for every fresh stream (the stale-stream guard), so a device
+    // whose upgrade never moves its reported version re-dialed after every re-exec into a counter at 0: measured
+    // 180 upgrades in 45 s (4 pushes of 1.6 MB a second, the daemon re-exec'ing each time) once the handshake ran
+    // on every dial-in. A ledger OUTLIVES the instance (dial-pairing.js keeps one per device); `get(expected)` →
+    // `{tries, gaveUp}` for THIS bundle version, `set(expected, {tries, gaveUp})` after every change.
+    this._upgradeLedger = upgradeLedger;
     // The version a freshly-upgraded daemon will REPORT is the one baked into
     // the bundle we ship — not this server's package version. They diverge
     // whenever the repo is rebuilt without restarting the server (or vice
@@ -41,7 +48,10 @@ class DeviceManager {
     this._log = log;
     this._root = process.env.VIBESPACE_AGENTD_ROOT || path.join(os.homedir(), '.vibespace', 'agentd');
     this._state = path.join(this._root, 'state');
-    this._sock = path.join(this._state, 'agentd.sock');
+    // the local daemon's socket (lane-pairing ④): its WITNESS (<root>/state/socket-path, what the daemon really
+    // listens on) when it names a live socket, else THE rule (src/sock-path.js) — never the bare natural path,
+    // which a long root puts over the platform's sun_path (the daemon then listens on a short rung)
+    this._sockOverride = null;
     // Transport (M2): { kind:'local' } = unix socket on this machine; or
     // { kind:'ssh', host, remoteAgentd, sshArgs } = dial the STANDING remote
     // daemon over `ssh … -- node <remoteAgentd> --stdio` (the bridge). Default
@@ -55,6 +65,15 @@ class DeviceManager {
     this._reverseForwards = new Map();
     try { this._tokens = JSON.parse(fs.readFileSync(this._tokFile, 'utf-8')); } catch { this._tokens = {}; }
   }
+
+  get _sock() {
+    if (this._sockOverride) return this._sockOverride;
+    if (process.platform === 'win32') return '\\\\.\\pipe\\vibespace-agentd-' + require('crypto').createHash('sha1').update(this._root).digest('hex').slice(0, 12);
+    const SP = require('../sock-path.js');
+    return SP.witnessOrRule({ root: this._root, platform: process.platform, tmpdir: os.tmpdir(), xdgRuntimeDir: process.env.XDG_RUNTIME_DIR || '', uid: typeof process.getuid === 'function' ? process.getuid() : null }).path
+      || path.join(this._state, 'agentd.sock');
+  }
+  set _sock(v) { this._sockOverride = v || null; }
 
   status() {
     return {
@@ -72,11 +91,13 @@ class DeviceManager {
     const devTok = path.join(this._state, 'token');
     let raw = null;
     try { raw = fs.readFileSync(devTok, 'utf-8').trim(); } catch { }
+    // verify-r3: THE ONE DOOR of a pairing token (src/pairing-token.js) — the mint and the hash
+    const PT = require('../pairing-token.js');
     if (!raw) {
-      raw = 'vsht_' + crypto.randomBytes(24).toString('hex');
+      raw = PT.mintToken('host');
       fs.writeFileSync(devTok, raw, { mode: 0o600 });
     }
-    const sha = crypto.createHash('sha256').update(raw).digest('hex');
+    const sha = PT.tokenHash(raw);
     if (this._tokens.local !== sha) {
       this._tokens.local = sha;
       try { fs.writeFileSync(this._tokFile, JSON.stringify(this._tokens, null, 2), { mode: 0o600 }); } catch { }
@@ -91,12 +112,25 @@ class DeviceManager {
       const st = fs.statSync(this._bundlePath);
       const key = st.mtimeMs + ':' + st.size;
       if (this._bundleVerCache?.key === key) return this._bundleVerCache.v;
-      const head = fs.readFileSync(this._bundlePath, 'utf-8').slice(0, 400000);
-      const m = /VERSION\s*:\s*"([\d.]+)"/.exec(head);
+      // the WHOLE file: the marker (src/agentd/version.js, bundled) sits wherever esbuild puts that module —
+      // measured at byte 1 076 247 of the 1.6 MB bundle, past the first 400 000 this once read (verify-r1 C1)
+      const text = fs.readFileSync(this._bundlePath, 'utf-8');
+      const m = /\bVERSION\s*:\s*"(\d+\.\d+\.\d+)"/.exec(text);
       const v = m ? m[1] : this._version;
       this._bundleVerCache = { key, v };
       return v;
     } catch { return this._version; }
+  }
+
+  /** The loop breaker's count for THIS bundle version: the ledger's when one is wired (survives a rebuilt instance),
+   *  else this instance's own fields (the pre-ledger shape every other transport keeps). */
+  _ledgerRead(expected) {
+    if (this._upgradeLedger) { const r = this._upgradeLedger.get(expected); return { tries: Number(r && r.tries) || 0, gaveUp: !!(r && r.gaveUp) }; }
+    return { tries: Number(this._upgradeTries) || 0, gaveUp: !!this._upgradeGaveUp };
+  }
+  _ledgerWrite(expected, { tries, gaveUp }) {
+    this._upgradeTries = tries; this._upgradeGaveUp = gaveUp;
+    if (this._upgradeLedger) { try { this._upgradeLedger.set(expected, { tries, gaveUp }); } catch { } }
   }
 
   // ── install: land the built bundle into <root>/<version>/ + repoint current ──
@@ -147,8 +181,12 @@ class DeviceManager {
     const token = this._transport.kind === 'local' ? this._ensureLocalToken() : this._transport.hostToken;
     const backoffs = [500, 1000, 2000, 5000];
     for (let attempt = 0; !this._stopped; attempt++) {
-      const conn = await this._tryOnce(token).catch(() => null);
+      let lastErr = null;
+      const conn = await this._tryOnce(token).catch((e) => { lastErr = e; return null; });
       if (conn) return conn;
+      // lane-pairing ③: a DIALED device that refused OUR host key (its state/token came from another command) is not
+      // helped by retrying the same key for a minute — say it now, so the machine row reads `auth-fail`
+      if (this._transport.kind === 'stream' && lastErr && /auth failed/.test(String(lastErr.message))) throw lastErr;
       if (attempt === 0 && this._transport.kind === 'local') this._spawnLocal(); // local: bring the daemon up (ssh bridge self-spawns the remote one)
       const delay = backoffs[Math.min(attempt, backoffs.length - 1)];
       await new Promise((r) => setTimeout(r, delay));
@@ -199,8 +237,8 @@ class DeviceManager {
   _tryOnce(token) {
     return new Promise((resolve, reject) => {
       const sock = this._openTransport();
-      let settled = false;
-      const fail = (e) => { if (!settled) { settled = true; try { sock.destroy(); } catch { } reject(e || new Error('connect failed')); } };
+      let settled = false, keepStream = false;
+      const fail = (e) => { if (!settled) { settled = true; if (!keepStream) { try { sock.destroy(); } catch { } } reject(e || new Error('connect failed')); } };
       sock.on('error', fail);
       const timer = setTimeout(() => fail(new Error('handshake timeout')), 8000);
       const mux = new Mux(sock, {
@@ -215,17 +253,18 @@ class DeviceManager {
             // say so loudly. Capability gating already makes an older daemon
             // safe to talk to; spinning forever is not (it re-installed every
             // ~10s for 8h, drove RSS to 20GB and produced no error anywhere).
-            if (msg.daemonVersion !== expected && this._upgradeTries > 2) {
-              if (!this._upgradeGaveUp) {
-                this._upgradeGaveUp = true;
+            const led = this._ledgerRead(expected);
+            if (msg.daemonVersion !== expected && led.tries > 2) {
+              if (!led.gaveUp) {
+                led.gaveUp = true; this._ledgerWrite(expected, led);
                 this._log(`[agentd] daemon stays at ${msg.daemonVersion} after ${this._upgradeTries} upgrade attempts to ${expected} — GIVING UP and using it as-is (capability-gated). Fix the device install manually; no further attempts this connection.`);
                 try { global.__vsEvent?.('agentd-upgrade-stuck', { detail: `${msg.daemonVersion}→${expected}` }); } catch { }
                 try { this._onUpgradeStuck?.(msg.daemonVersion, expected); } catch { }
               }
             } else if (msg.daemonVersion !== expected && fs.existsSync(this._bundlePath)) {
-              this._upgradeTries = (this._upgradeTries || 0) + 1;
+              led.tries += 1; this._ledgerWrite(expected, led);
               // version drift → stream the new bundle (self-upgrade), then reconnect
-              this._log(`[agentd] daemon ${msg.daemonVersion} ≠ ${expected} — upgrading (attempt ${this._upgradeTries}/3)`);
+              this._log(`[agentd] daemon ${msg.daemonVersion} ≠ ${expected} — upgrading (attempt ${led.tries}/3)`);
               this._upgrade(mux).then(() => {
                 settled = true;
                 try { sock.destroy(); } catch { }
@@ -233,7 +272,7 @@ class DeviceManager {
               }).catch(fail);
               return;
             }
-            if (msg.daemonVersion === expected) { this._upgradeTries = 0; this._upgradeGaveUp = false; }
+            if (msg.daemonVersion === expected) this._ledgerWrite(expected, { tries: 0, gaveUp: false });
             mux.control({ op: 'ok' });
             settled = true;
             const sessions = new Map(); // chan → { onData, onExit }
@@ -250,7 +289,7 @@ class DeviceManager {
             mux.onWritable = (chan) => { sessions.get(chan)?.onWritable?.(); };
             const prevControl = mux.onControl;
             mux.onControl = (m) => {
-              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
                 const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
@@ -316,7 +355,16 @@ class DeviceManager {
             if (this._onSessionEvents) this._request({ op: 'session-events-watch' }).catch(() => { }); // session-brain step 2 re-arm
             return;
           }
-          if (msg.op === 'auth-fail') fail(new Error('agentd auth failed — token mismatch'));
+          if (msg.op === 'auth-fail') {
+            // A DIALED device that refused our host key KEEPS ITS LINK (verify-r1 C2, 2026-09-28): destroying the
+            // stream made the device re-dial every second forever (accept → hello → auth-fail → close → re-dial:
+            // hosts.json rewritten and every client repainted each second, the row reading "offline — no dial
+            // attempt has reached this server" 99 % of the time). The link stays up and unauthenticated — the
+            // machine row reads `auth-fail`, every op on it is refused fast (dial-pairing.js remembers the
+            // refused stream), and this mux stays alive only to answer the daemon's heartbeat.
+            if (this._transport.kind === 'stream') { keepStream = true; mux.onControl = () => { }; }
+            fail(Object.assign(new Error('agentd auth failed — token mismatch'), { code: 'auth_failed' }));
+          }
           if (msg.op === 'proto-mismatch') fail(new Error('agentd protocol mismatch'));
         },
         onDead: () => fail(new Error('connection died during handshake')),
@@ -338,7 +386,10 @@ class DeviceManager {
         if (msg.op === 'upgrade-done') { clearTimeout(timer); mux.onControl = origOnControl; resolve(); }
         else origOnControl(msg);
       };
-      mux.control({ op: 'upgrade', version: this._version, size: bundle.length });
+      // the version the daemon lands under and REPORTS after its re-exec (VIBESPACE_AGENTD_VERSION) is the
+      // BUNDLE's own — the one `_expectedVersion()` compares against. Naming the package version here made a
+      // rebuilt-without-restart server upgrade the same device on every natural restart (verify-r1 C1).
+      mux.control({ op: 'upgrade', version: this._expectedVersion(), size: bundle.length });
       // stream on chan 1 in credit-sized slices (the mux queues past the window)
       for (let off = 0; off < bundle.length; off += 65536) {
         mux.data(1, bundle.subarray(off, Math.min(off + 65536, bundle.length)));
@@ -418,7 +469,7 @@ class DeviceManager {
     return new Promise((resolve, reject) => {
       conn.pending.set(id, (m) => (m.error ? reject(Object.assign(new Error(m.error), m.linkLost ? { code: 'link_lost' } : {})) : resolve(m)));
       conn.mux.control({ ...payload, id });
-      setTimeout(() => { if (conn.pending.delete(id)) reject(new Error(payload.op + ' timeout')); }, payload.timeoutMs || 30000);
+      setTimeout(() => { if (conn.pending.delete(id)) reject(new Error(payload.op + ' timeout')); }, payload.waitMs || payload.timeoutMs || 30000);
     });
   }
 
@@ -558,8 +609,10 @@ class DeviceManager {
     await donePromise;
     return JSON.parse(Buffer.concat(chunks).toString('utf-8'));
   }
-  runCmd(cmd, args = [], { stdin, env, timeoutMs } = {}) {
-    return this._request({ op: 'run-cmd', cmd, args, env, timeoutMs, stdin64: stdin ? Buffer.from(stdin).toString('base64') : undefined });
+  /** `waitMs` (lane-pairing ⑥): how long THIS side waits for the reply — the daemon kills the child at `timeoutMs`
+   *  (capped at 30 s there) and still has to send the result, so a caller that uses the cap itself waits past it. */
+  runCmd(cmd, args = [], { stdin, env, timeoutMs, waitMs } = {}) {
+    return this._request({ op: 'run-cmd', cmd, args, env, timeoutMs, ...(waitMs ? { waitMs } : {}), stdin64: stdin ? Buffer.from(stdin).toString('base64') : undefined });
   }
   /** streaming argv exec: stdout arrives via onData (byte channel); resolves
    *  {code} at exit. For outputs too large for runCmd (usage-scan NDJSON).
@@ -636,6 +689,16 @@ class DeviceManager {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('session-events')) throw new Error('daemon lacks session-events (capabilities gate)');
     await this._request({ op: 'session-events-watch' });
+  }
+
+  /** lane-pairing ③ (THREE-TOUCH): the device's own record of its dial outcomes (state/dial-status.json).
+   *  Capability-gated — an old daemon does not know the op and would HANG the request (the 2.300.0 rule). */
+  async dialStatus() {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('dial-status')) { const e = new Error('daemon lacks dial-status (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw e; }
+    const r = await this._request({ op: 'dial-status', timeoutMs: 10000 });
+    if (r.error) throw new Error(r.error);
+    return r.status || null;
   }
 
   async sysinfo() {
@@ -799,6 +862,8 @@ class DeviceManager {
     sock.on('error', () => { });
   }
 
+  /** Is the device answering on THIS link right now? (a bounded mux ping; false when not connected) */
+  ping(ms = 1500) { const mux = this._conn?.mux; return mux ? mux.ping(ms) : Promise.resolve(false); }
   stop() { this._stopped = true; this._conn?.mux?.destroy(); this._conn = null; }
 }
 

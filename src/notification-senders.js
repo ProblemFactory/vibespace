@@ -17,6 +17,7 @@ const NOTIFICATION_SENDERS = Object.freeze([
   'VibeSpace browser',    // src/server/browser-handback.js FROM_NAME
   'Channels · ',          // src/server/channels-engine.js (wakes + Outbox receipts)
   'VibeSpace notices',    // src/server/stash-handover.js FROM_NAME (the user's "Hand over now" — the waiting stash as ONE message)
+  'Machines · ',          // src/exit-proxy.js (lane-pairing ⑥: "ran `…` on <machine> — exit 0 · 1.2 s", a display-only card in the calling chat)
 ]);
 
 /** Is this queued row (the wrapper's queue_changed item: {kind, from, …}) a
@@ -169,7 +170,7 @@ function stashKindOf(e) {
 function noticeCardView(from, text, { facts = null } = {}) {
   const body = noticeBody(text);
   const f = typeof facts === 'function' ? facts(body) : null;
-  if (f && f.title) return { title: f.title, body, folded: true };
+  if (f && f.title) return { title: f.title, body: f.body != null ? String(f.body) : body, folded: true, foldLabel: f.foldLabel || null };   // 2026-09-28: a fact may name the body it leaves under the expander and the expander's own label (the hand-over card)
   const name = typeof from === 'string' ? from.trim() : '';
   if (name && isNotificationSender(name) && name !== 'VibeSpace browser') return { title: { text: name }, body, folded: false };
   // nothing names it: the first sentence of what happened is the title, the

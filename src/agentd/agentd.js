@@ -249,6 +249,9 @@ const { Mux, PROTO_VERSION } = require('./mux.js');
 const { daemonEnv } = require('../agent-env.js');
 
 const VERSION = process.env.VIBESPACE_AGENTD_VERSION || require('./version.js').VERSION;
+// verify-r1 B9: THIS process's boot id rides every dial attempt (x-vibespace-daemon-boot) so the server can tell our
+// own re-dial from a second daemon holding a copy of this pairing (refused by name: duplicate-device)
+const BOOT_ID = require('crypto').randomBytes(8).toString('hex');
 // VIBESPACE_DEVICE_ROOT is the current name; VIBESPACE_AGENTD_ROOT stays
 // honored forever — in-field daemons were installed with it (launchd plists /
 // systemd units on user devices reference it)
@@ -383,12 +386,31 @@ let loopLagMax = 0;
 const STATE = path.join(ROOT, 'state');
 // Windows has no unix sockets for node's net.listen — use a named pipe keyed
 // by the root path so several per-instance daemons coexist (EXPERIMENTAL).
+// Everywhere else THE socket-path ladder (src/sock-path.js, lane-pairing ④): the
+// natural `<root>/state/agentd.sock` when it fits the platform's sun_path
+// (macOS 103 usable bytes — the owner's frp-named root made it 106 and every
+// listen failed EINVAL), else a short per-user rung keyed by sha1(ROOT). The
+// daemon writes the path it listens on to `state/socket-path` (the WITNESS the
+// --stdio bridge and the hub read first).
+const SOCKP = require('../sock-path.js');
+const SOCK_PICK = process.platform === 'win32' ? null : SOCKP.daemonSocketPath({
+  root: ROOT, platform: process.platform, tmpdir: os.tmpdir(), xdgRuntimeDir: process.env.XDG_RUNTIME_DIR || '',
+  uid: typeof process.getuid === 'function' ? process.getuid() : null,
+});
 const SOCK = process.platform === 'win32'
   ? '\\\\.\\pipe\\vibespace-agentd-' + require('crypto').createHash('sha1').update(ROOT).digest('hex').slice(0, 12)
-  : path.join(STATE, 'agentd.sock');
+  : (SOCK_PICK.path || SOCK_PICK.natural); // no rung fits ⇒ the daemon refuses at listen (below) by name
 const LOCK = path.join(STATE, 'agentd.lock');
 const LOG = path.join(STATE, 'agentd.log');
 const TOKEN_FILE = path.join(STATE, 'token');
+// lane-pairing ③: the device's record of its dial outcomes (PURE reducer src/dial-facts.js nextDialStatus) — read by
+// the `dial-status` op, written by the dial loop at every outcome (atomic tmp+rename, 0600; never the token)
+const DIAL_STATUS_FILE = path.join(STATE, 'dial-status.json');
+function readDialStatus() { try { return JSON.parse(fs.readFileSync(DIAL_STATUS_FILE, 'utf-8')); } catch { return null; } }
+function writeDialStatus(st) {
+  try { const tmp = DIAL_STATUS_FILE + '.' + process.pid + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(st), { mode: 0o600 }); fs.renameSync(tmp, DIAL_STATUS_FILE); }
+  catch (e) { try { log('dial-status not written: ' + e.message); } catch { } }
+}
 
 // Recognizable in process listings (user directive: "看进程列表分不清是干啥的").
 // Full rename to vibespace-device (bundle/roots/routes) = graduation slice A.
@@ -404,8 +426,12 @@ fs.mkdirSync(STATE, { recursive: true, mode: 0o700 });
 if (process.argv.includes('--stdio')) {
   const netB = require('net');
   const cpB = require('child_process');
+  // witness-or-rule PER ATTEMPT (src/sock-path.js): the daemon's launchd/systemd
+  // environment and this shell's may not agree on TMPDIR / XDG_RUNTIME_DIR, and a
+  // daemon this bridge just spawned writes its witness before the retries end
+  const bridgeSock = () => (process.platform === 'win32' ? SOCK : (SOCKP.witnessOrRule({ root: ROOT, platform: process.platform, tmpdir: os.tmpdir(), xdgRuntimeDir: process.env.XDG_RUNTIME_DIR || '', uid: typeof process.getuid === 'function' ? process.getuid() : null }).path || SOCK));
   const connect = (tries = 0) => {
-    const c = netB.connect(SOCK);
+    const c = netB.connect(bridgeSock());
     c.on('connect', () => {
       process.stdin.pipe(c);
       c.pipe(process.stdout);
@@ -426,6 +452,42 @@ if (process.argv.includes('--stdio')) {
     });
   };
   connect();
+}
+
+// verify-r3 B-inst: THE PAIRING'S TOKENS REACH THIS PROCESS THROUGH ITS ENVIRONMENT — the installer's dial check,
+// a manual `VIBESPACE_DIAL_TOKEN=… node vibespace-device.js --dial <url>` — never an argv (/proc/<pid>/cmdline is
+// readable by every local user; the `--dial-token` flag still works for commands generated before). Read ONCE here
+// and removed from the environment, so no session, tool or worker this daemon starts ever inherits one.
+const ENV_DIAL_TOKEN = String(process.env.VIBESPACE_DIAL_TOKEN || '');
+delete process.env.VIBESPACE_DIAL_TOKEN; delete process.env.VIBESPACE_HOST_TOKEN;
+// ── DIAL CHECK (lane-pairing ⑤): `vibespace-device.js --dial-check <url> --dial-token <t> [--timeout-ms 15000]`
+// — the installer runs the daemon's OWN dial once, BEFORE it writes dial.json / state/token / the service: ONE
+// attempt carrying `x-vibespace-dial-probe: 1` (the server answers 200 after the same token check and registers
+// nothing), ONE line + one remedy line, the exit code by class (PURE src/dial-facts.js dialCheckLines). No lock,
+// no socket, nothing under state/ written — so a running daemon never blocks it. A 101 from a server older than
+// this lane counts as ok (the socket is closed at once).
+if (process.argv.includes('--dial-check')) {
+  const DFc = require('../dial-facts.js');
+  const argOf = (n) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : undefined; };
+  const url = String(argOf('--dial-check') || '');
+  const token = String(argOf('--dial-token') || ENV_DIAL_TOKEN || '');
+  const timeoutMs = Math.max(1000, Math.min(120000, Number(argOf('--timeout-ms')) || 15000));
+  let deviceId = ''; try { deviceId = new URL(url).searchParams.get('device') || ''; } catch { }
+  const host = DFc.hostOf(url) || url.slice(0, 80);
+  let done = false;
+  const finish = (r) => {
+    if (done) return; done = true;
+    const out = DFc.dialCheckLines({ host, deviceId, ...r });
+    process.stdout.write(out.lines.join('\n') + '\n', () => process.exit(out.exit));
+  };
+  try {
+    const ws = require('./ws-min.js').connect(url, { headers: { 'x-vibespace-dial-token': token, 'x-vibespace-dial-probe': '1', 'x-vibespace-daemon': String(VERSION).slice(0, 40) }, timeoutMs });
+    let lastErr = null;
+    ws.on('probe-ok', (b) => finish({ ok: true, deviceId: (b && b.deviceId) || deviceId, serverVersion: (b && b.serverVersion) || '' }));
+    ws.on('open', () => { try { ws.destroy(); } catch { } finish({ ok: true, serverVersion: '' }); });
+    ws.on('error', (e) => { lastErr = e; });
+    ws.on('close', () => { const f = DFc.dialFailureOf(lastErr, {}); finish({ ok: false, code: f.code, detail: f.detail, status: f.status }); });
+  } catch (e) { finish({ ok: false, code: 'other', detail: `not a dial address: ${e.message}` }); }
 }
 
 // node-pty is loaded LAZILY (only when a session opens) so M0's zero-dep
@@ -525,7 +587,7 @@ function acquireSingleton() {
   return false;
 }
 
-if (!process.argv.includes('--stdio')) {
+if (!process.argv.includes('--stdio') && !process.argv.includes('--dial-check')) {
 if (!acquireSingleton()) {
   process.stderr.write(`vibespace-device: already running (pid ${blockingPid || '?'}, root ${ROOT})` +
     ' — a running daemon adopts a re-pair by itself within ~30s; to force-replace it: kill the pid and the installer/launchd restarts it\n');
@@ -554,7 +616,7 @@ try {
 const tokenSha = () => {
   try {
     const raw = fs.readFileSync(TOKEN_FILE, 'utf-8').trim();
-    return require('crypto').createHash('sha256').update(raw).digest('hex');
+    return raw ? require('../pairing-token.js').tokenHash(raw) : null; // verify-r3: THE ONE DOOR (hash + compare)
   } catch { return null; }
 };
 
@@ -562,6 +624,11 @@ log(`vibespace-device ${VERSION} starting (proto ${PROTO_VERSION}, pid ${process
 fs.writeFileSync(path.join(STATE, 'agentd.pid'), String(process.pid));
 
 // ── upgrade: receive a new bundle on chan 1, land it versioned, re-exec ──
+// verify-r1 C3: the re-exec ENDS this process's link on purpose. The dial loop reads this flag when its socket
+// closes — before it, the close landed inside the 200 ms exit grace with upMs < 2 s and was classified
+// `closed-before-hello` (streak 1 into dial-status.json, so the NEW daemon's first dial-in told the server
+// "1 attempt failed" after every healthy self-upgrade).
+let upgradeLanded = false;
 function beginUpgrade(mux, { version, size }) {
   const dir = path.join(ROOT, version);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -588,6 +655,7 @@ function beginUpgrade(mux, { version, size }) {
         fs.symlinkSync(dir, curTmp);
         fs.renameSync(curTmp, path.join(ROOT, 'current'));
         mux.control({ op: 'upgrade-done', version });
+        upgradeLanded = true;
         log(`upgrade to ${version} landed — re-exec`);
         // re-exec from the new dir; the singleton lock is released on exit and
         // NOTHING outside our install dir is touched (invariant #1/#7).
@@ -1267,9 +1335,12 @@ function serveConnection(sock) {
     onControl(msg) {
       if (msg.op === 'hello') {
         if (msg.protoVersion !== PROTO_VERSION) { mux.control({ op: 'proto-mismatch', protoVersion: PROTO_VERSION }); sock.end(); return; }
-        const sha = msg.hostToken ? require('crypto').createHash('sha256').update(String(msg.hostToken)).digest('hex') : null;
         const want = tokenSha();
-        if (!want || sha !== want) { mux.control({ op: 'auth-fail' }); log('auth-fail from a connection'); sock.end(); return; }
+        // a refused hello ENDS a local (unix-socket) peer; a DIAL link (ws-min, no end()) is KEPT on purpose — this
+        // daemon dialed out to that server, and closing it would re-dial every second (verify-r1 C2); the server
+        // reads `auth-fail` on the row and refuses ops until a new command lands here
+        // verify-r3: THE ONE DOOR — a constant-time compare over the two digests (never `!==`)
+        if (!want || !require('../pairing-token.js').tokenMatches(msg.hostToken, want)) { mux.control({ op: 'auth-fail' }); log('auth-fail from a connection' + (typeof sock.end === 'function' ? '' : ' (dial link kept)')); if (typeof sock.end === 'function') sock.end(); return; }
         authed = true;
         authedServers++;
         this._countedServer = true;
@@ -1279,7 +1350,7 @@ function serveConnection(sock) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'desktop-serve'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'desktop-serve', 'dial-status'],
         });
         return;
       }
@@ -1693,6 +1764,9 @@ function serveConnection(sock) {
         } catch (e) { mux.control({ op: 'secret-result', id: msg.id, error: e.message }); }
         return;
       }
+      // lane-pairing ③ (THREE-TOUCH: reply `dial-status-result` by id, the capability in the hello-ack, no watch):
+      // the device's own record of every dial outcome (state/dial-status.json — never the token)
+      if (msg.op === 'dial-status') { mux.control({ op: 'dial-status-result', id: msg.id, status: readDialStatus() }); return; }
       if (msg.op === 'sysinfo') {
         // Machine snapshot via THE shared implementation (src/sysinfo.js) —
         // the same module the server runs for device #0, executed where the
@@ -1904,7 +1978,15 @@ function serveConnection(sock) {
             timeout: Math.min(Number(msg.timeoutMs) || 10000, 30000), maxBuffer: 2 * 1024 * 1024,
             env: spawnEnv(msg.env),
           }, (err, stdout, stderr) => {
-            mux.control({ op: 'cmd-result', id: msg.id, code: err ? (err.code ?? 1) : 0, stdout: String(stdout).slice(0, 1024 * 1024), stderr: String(stderr).slice(0, 65536) });
+            // lane-pairing ⑥: a command the 30 s cap killed says so (`timedOut` + the signal) — it read as a bare `code 1`.
+            // verify-r1 A5: `code` is ALWAYS a number (node's maxBuffer overflow set it to the STRING
+            // 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER', on which the CLI's process.exit() threw), and an output cut here
+            // (1 MiB stdout / 64 KiB stderr / the 2 MiB maxBuffer) is NAMED: `truncated: true` — a clean exit 0 with a
+            // silently missing tail read as the whole output.
+            const overflow = !!(err && err.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER');
+            const so = String(stdout), se = String(stderr);
+            mux.control({ op: 'cmd-result', id: msg.id, code: err ? (Number.isInteger(err.code) ? err.code : 1) : 0, stdout: so.slice(0, 1024 * 1024), stderr: se.slice(0, 65536),
+              timedOut: !!(err && err.killed && !overflow), signal: (err && err.signal) || null, truncated: overflow || so.length > 1024 * 1024 || se.length > 65536 });
           });
           if (msg.stdin64) { try { child.stdin.end(Buffer.from(msg.stdin64, 'base64')); } catch { } } else { try { child.stdin.end(); } catch { } }
         } catch (e) { mux.control({ op: 'cmd-result', id: msg.id, code: 127, error: e.message }); }
@@ -2099,9 +2181,24 @@ function serveConnection(sock) {
   mux._tcpChans = tcpChans; // reverse-forward accepts push sockets into the owner's map
 }
 const server = net.createServer(serveConnection);
+// THE SOCKET RUNG (lane-pairing ④): nothing fits the platform's sun_path ⇒ say
+// every rung's bytes and exit 7 (launchd / systemd restart us and the log says
+// WHY every time, instead of `listen EINVAL`); a picked short directory is made
+// 0700 and VERIFIED ours before a socket goes in it — a planted symlink / a
+// foreign owner / group bits ⇒ socket_dir_hijacked, exit 8, no socket there.
+if (SOCK_PICK && !SOCK_PICK.path) { log(SOCKP.tooLongLine(SOCK_PICK)); process.stderr.write('vibespace-device: ' + SOCKP.tooLongLine(SOCK_PICK) + '\n'); process.exit(7); }
+if (SOCK_PICK && SOCK_PICK.via !== 'natural') {
+  const dv = SOCKP.ensureSocketDir(SOCKP.socketDirOf(SOCK_PICK));
+  if (!dv.ok) { const line = `socket_dir_hijacked — ${SOCKP.socketDirOf(SOCK_PICK)}: ${dv.why}`; log(line); process.stderr.write('vibespace-device: ' + line + '\n'); process.exit(8); }
+  try { fs.unlinkSync(SOCK); } catch { }
+}
 server.listen(SOCK, () => {
   try { fs.chmodSync(SOCK, 0o600); } catch { }
-  log('listening on ' + SOCK);
+  if (SOCK_PICK) {
+    // the WITNESS: the bridge and the hub read where we REALLY listen (atomic, 0600)
+    try { const w = SOCKP.witnessPathOf(ROOT), tmp = w + '.' + process.pid + '.tmp'; fs.writeFileSync(tmp, SOCK + '\n', { mode: 0o600 }); fs.renameSync(tmp, w); } catch (e) { log('socket witness not written: ' + e.message); }
+    log(`listening on ${SOCK} (${SOCK_PICK.via}, ${SOCK_PICK.bytes}/${SOCK_PICK.max} bytes)`);
+  } else log('listening on ' + SOCK);
 });
 server.on('error', (e) => { log('server error: ' + e.message); process.exit(1); });
 // desktop apps (lane C1): a daemon restarted (a self-upgrade, a crash) with a LIVE app session on its record re-adopts
@@ -2122,14 +2219,23 @@ const DIAL_FILE = path.join(STATE, 'dial.json');
 (function setupDial() {
   const di = process.argv.indexOf('--dial');
   if (di >= 0) {
-    const cfg = { url: process.argv[di + 1], token: (process.argv[process.argv.indexOf('--dial-token') + 1] || '') };
-    try { fs.writeFileSync(DIAL_FILE, JSON.stringify(cfg), { mode: 0o600 }); } catch { }
+    // the token from the flag (older commands) or the environment (verify-r3 B-inst); an absent flag is no token —
+    // r2 read `argv[indexOf('--dial-token') + 1]`, i.e. argv[0] (the node binary's path) when the flag was missing
+    const ti = process.argv.indexOf('--dial-token');
+    const cfg = { url: process.argv[di + 1], token: (ti >= 0 ? process.argv[ti + 1] : '') || ENV_DIAL_TOKEN || '' };
+    // a `--dial <url>` with NO token never overwrites the pairing on disk (verify-r3 B-inst r2): a daemon started in the
+    // environment form removes the token from its environment on purpose, and its self-upgrade re-exec carries the
+    // FLAGS — the re-exec'd daemon wrote `token: ''` over the good dial.json and was refused for good (reproduced)
+    // atomic at 0600 (an existing looser file is REPLACED, never written through at its old mode)
+    if (cfg.token) { try { const tmp = DIAL_FILE + '.' + process.pid + '.tmp'; try { fs.unlinkSync(tmp); } catch { } fs.writeFileSync(tmp, JSON.stringify(cfg), { mode: 0o600 }); fs.renameSync(tmp, DIAL_FILE); } catch { } }
   }
   const readCfg = () => { try { return JSON.parse(fs.readFileSync(DIAL_FILE, 'utf-8')); } catch { return null; } };
   let cfg = readCfg();
   if (!cfg?.url) return;
   const wsMin = require('./ws-min.js');
+  const DF = require('../dial-facts.js');
   let attempts = 0;
+  let status = readDialStatus() || {};
   let cfgKey = cfg.url + '|' + (cfg.token || '');
   const dial = () => {
     // re-read the dial config EVERY attempt: a re-pair (identity rotation)
@@ -2143,12 +2249,32 @@ const DIAL_FILE = path.join(STATE, 'dial.json');
       if (k !== cfgKey) { log('dial config changed on disk — adopting the new pairing'); attempts = 0; }
       cfgKey = k; cfg = fresh;
     }
-    const ws = wsMin.connect(cfg.url, { headers: { 'x-vibespace-dial-token': cfg.token || '' } });
-    let up = false;
-    ws.on('open', () => { up = true; attempts = 0; log('dial-out connected: ' + cfg.url); serveConnection(ws); });
+    // lane-pairing ③: every attempt tells the server its failure streak + the previous failure (untrusted hints the
+    // server records at accept AND at refusal), and every outcome is CLASSIFIED (PURE dialFailureOf), written to
+    // state/dial-status.json (atomic, 0600) and logged as ONE line naming the class — "dial-out failed — dns: …".
+    const ws = wsMin.connect(cfg.url, { headers: { 'x-vibespace-dial-token': cfg.token || '', ...DF.dialHeadersOf({ streak: status.streak || 0, lastFail: status.lastFail, version: VERSION, boot: BOOT_ID, dialUrl: cfg.url, platform: process.platform }) } }); // verify-r4 F1/F7: + the address it dials and its OS (the device's own facts)
+    let up = false, upAt = 0, lastErr = null;
+    const host = DF.hostOf(cfg.url);
+    ws.on('error', (e) => { lastErr = e; });
+    ws.on('open', () => {
+      up = true; upAt = Date.now(); attempts = 0;
+      const failedBefore = Number(status.streak) || 0;
+      status = DF.nextDialStatus(status, { at: upAt, outcome: 'connected', host });
+      writeDialStatus(status);
+      log(DF.dialLogLine({ outcome: 'connected', url: cfg.url, failedBefore }));
+      serveConnection(ws);
+    });
     ws.on('close', () => {
+      // C3: a self-upgrade's re-exec ends the link on purpose — no failure recorded, no retry (this process exits;
+      // the new daemon dials with a clean streak).
+      if (upgradeLanded) { log('dial-out ended — self-upgrade re-exec'); return; }
       const delay = [1000, 2000, 5000, 15000, 30000][Math.min(4, attempts++)];
-      log(`dial-out ${up ? 'lost' : 'failed'} — retry in ${delay}ms`);
+      const now = Date.now();
+      const f = DF.dialFailureOf(lastErr, { up, upMs: up ? now - upAt : 0 });
+      const outcome = f.code === 'lost' ? 'lost' : 'failed';
+      status = DF.nextDialStatus(status, { at: now, outcome, code: f.code, detail: f.detail, status: f.status, host });
+      writeDialStatus(status);
+      log(DF.dialLogLine({ outcome, code: f.code, detail: f.detail, attempt: status.streak, delay, upMs: up ? now - upAt : 0 }));
       setTimeout(dial, delay);
     });
   };
@@ -2156,4 +2282,4 @@ const DIAL_FILE = path.join(STATE, 'dial.json');
 })();
 
 process.on('SIGTERM', () => { log('SIGTERM — exiting (sessions unaffected by design)'); process.exit(0); });
-} // end !--stdio daemon body
+} // end !--stdio / !--dial-check daemon body

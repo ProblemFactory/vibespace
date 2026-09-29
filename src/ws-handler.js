@@ -249,7 +249,7 @@ function registerWsHandler(wss, ctx) {
     adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
     accounts, scheduleCtxSync, activeSessionsPayload,
     USAGE_STATUSLINE_CMD, userStatuslineCmd, otelEnv, telemetry,
-    sendUserInput,
+    sendUserInput, getExitProxy = () => null,
   } = ctx;
 
   // Monotonic sequence for layout-sync rebroadcasts (shared across all
@@ -1435,6 +1435,7 @@ function registerWsHandler(wss, ctx) {
               try { hosts.device(null).then((dm) => dm.killPipeSession(session.keeperSid)).catch(() => { }); } catch { }
             }
             try { require('./server/helper-asks').forget(session); } catch { } // lane S1 verify r1: a killed parent's helper asks wait for nobody — timers cleared, For-you items resolved
+            try { getExitProxy()?.onSessionEnd?.(session, data.sessionId); } catch { } // verify-r2: its exit pairs are dropped with their connections, its waiting asks settled
             activeSessions.delete(data.sessionId);
             refreshWebuiPids();
             broadcastActiveSessions();

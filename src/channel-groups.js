@@ -456,14 +456,16 @@ function clipBytes(s, max) {
   return cut + '…';
 }
 
+/** One log record's report-line PREFIX (the part before its words) — `lineFor` and the shown lines' card text
+ *  (`reportFor` → `lines[].body`) read the same one. */
+function linePrefix(r) {
+  const who = inertFrames((r.author && (r.author.name || r.author.id)) || 'unknown');
+  const k = (r.raw && r.raw.kind) || 'message';
+  return k === 'message' ? `- [${stamp(r.at)}] ${who}: ` : `- [${stamp(r.at)}] (${k}) `;
+}
 /** One log record as one report line (agent-facing English, frame-inert). */
 function lineFor(r) {
-  const who = inertFrames((r.author && (r.author.name || r.author.id)) || 'unknown');
-  const raw = r.raw || {};
-  const k = raw.kind || 'message';
-  const body = inertFrames(clipLine(r.text));
-  if (k === 'message') return `- [${stamp(r.at)}] ${who}: ${body}`;
-  return `- [${stamp(r.at)}] (${k}) ${body}`;
+  return linePrefix(r) + inertFrames(clipLine(r.text));
 }
 
 /**
@@ -481,9 +483,14 @@ function lineFor(r) {
  * them). When not even the tight form fits, the answer is `fits:false` with
  * an EMPTY text and `upTo: null` — distinct from `null` ("nothing new"), so a
  * caller leaves the member's marker where it is and the group waits.
- * @returns {{text, upTo, count, shown, clipped, context:boolean, fits:boolean}|null}
+ * @returns {{text, upTo, count, shown, clipped, context:boolean, fits:boolean, lines}|null}
  *   `upTo` = the newest instant this report ACCOUNTS for (the clipped ones are
  *   accounted for by the `read --before` pointer), the value the engine stamps.
+ *   `lines` = the shown records, oldest first: `{rec, cut, body}` — `body` is
+ *   the record's whole text when its line was whole, the line's own (clipped,
+ *   whitespace-folded) words when it was cut: what the member was SHOWN (the
+ *   engine cards each shown message in that member's chat — lane
+ *   group-report-card).
  */
 function reportFor(group, log, member, { since = null, budget = REPORT_BUDGET, lead = null } = {}) {
   const m = memberOf(group, member);
@@ -500,7 +507,7 @@ function reportFor(group, log, member, { since = null, budget = REPORT_BUDGET, l
     const r = buildReport(group, m, recs, invite, rest, Number(budget) || 0, lead, form, log);
     if (r && (r.shown > 0 || !rest.length || form === REPORT_FORMS[REPORT_FORMS.length - 1])) return r;
   }
-  return { text: '', upTo: null, count: recs.length, shown: 0, clipped: rest.length, context: !!invite, fits: false };
+  return { text: '', upTo: null, count: recs.length, shown: 0, clipped: rest.length, context: !!invite, fits: false, lines: [] };
 }
 /** The three report forms, fullest first (see reportFor). Byte caps are on
  *  the agent-controlled parts: the group name, the inviter + context line,
@@ -545,6 +552,10 @@ function buildReport(group, m, recs, invite, rest, budget, lead, form, log) {
   // newest first, the newest always shows (clipped to the room) when there is room for it
   const lines = [];
   const cut = [];
+  // WHAT THE AGENT WAS SHOWN, record by record (lane group-report-card): the engine cards each shown message in
+  // the conversation that received it — the whole text when its line was whole, the line's own words when it was
+  // cut (the card says what the agent saw, never more)
+  const shownLines = [];
   let shown = 0;
   for (let i = rest.length - 1; i >= 0; i--) {
     let l = lineFor(rest[i]);
@@ -558,6 +569,8 @@ function buildReport(group, m, recs, invite, rest, budget, lead, form, log) {
       isCut = true;
     }
     lines.unshift(l);
+    const pre = linePrefix(rest[i]);
+    shownLines.unshift({ rec: rest[i], cut: isCut, body: isCut ? (l.startsWith(pre) ? l.slice(pre.length) : '') : String(rest[i].text == null ? '' : rest[i].text) });
     if (isCut) cut.push(rest[i]);
     used += bytes(l) + 1;
     shown++;
@@ -580,7 +593,7 @@ function buildReport(group, m, recs, invite, rest, budget, lead, form, log) {
   out.push(foot);
   const text = out.join('\n');
   if (bytes(text) > budget) return null;
-  return { text, upTo: recs[recs.length - 1].at, count: recs.length, shown, clipped, context: !!invite, fits: true };
+  return { text, upTo: recs[recs.length - 1].at, count: recs.length, shown, clipped, context: !!invite, fits: true, lines: shownLines };
 }
 
 module.exports = {

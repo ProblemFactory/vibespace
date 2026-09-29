@@ -44,7 +44,7 @@ const resolveRel = (from, spec) => {
 };
 
 // ── Tier membership (path-based; NEW files inherit their directory's tier) ──
-const PURE = new Set(['src/window-desktop.js', 'src/plugin-manifest.js', 'src/account-pool-auto.js', 'src/model-family.js', 'src/task-color-seq.js', 'src/ssh-key-format.js', 'src/session-schema.js', 'src/otel-truth.js', 'src/msg-acl.js', 'src/backend-caps.js',
+const PURE = new Set(['src/hidden-chars.js', 'src/window-desktop.js', 'src/plugin-manifest.js', 'src/account-pool-auto.js', 'src/model-family.js', 'src/task-color-seq.js', 'src/ssh-key-format.js', 'src/session-schema.js', 'src/otel-truth.js', 'src/msg-acl.js', 'src/backend-caps.js',
   // AGENT BROWSER (design-agent-browser-v2 §3.6): the identity/spawn-env decisions, the
   // registry + lease model and the keeper's verdicts — imports nothing (P0/P1); and the ONE
   // constants home every process keeper counts and bounds by (src/keeper-limits.js)
@@ -69,8 +69,10 @@ const PURE = new Set(['src/window-desktop.js', 'src/plugin-manifest.js', 'src/ac
   'src/browser-interrupt.js', // the owner's ruling (2026-09-27): the takeover's words (browser_interrupted), what was in flight off the trace, the takeover→handback cycle; imports nothing
   'src/browser-sessions.js', // browser SESSIONS (2026-09-27): markers, pairing, the chat cards of one conversation, the replay model; imports nothing
   'src/browser-recording-retention.js', // the video recordings' own 7 d / 200 MB bound (the trace became size-only, 2026-09-27); imports nothing
+  'src/browser-display.js', // lane headless-fallback (2026-09-28): headed is a preference, the display is a fact — the display verdict + the launch plan + the words; imports nothing (the keeper, the daemon's browser-serve and the client bundle share it)
   'src/search-card.js', // web-search card renderer + title query + twin key — shared server (codex normalizer) + browser (chat-renderers)
   'src/path-linkify.js', // where a chat file path ENDS (CJK punctuation) — shared browser (chat-renderers) + node tests; imports nothing
+  'src/file-disposition.js', // lane raw-filename: THE one Content-Disposition that names a file (both RFC 6266 forms) — files.js + remote-fs.js; imports nothing
   'src/collab-row.js', // codex multi-agent collab row labels/HTML — esc/t/icons injected, so the XSS rule is unit-provable
   'src/model-echo.js', // the CLI's `Set model to` echo — ONE parser for the status bar, the command-card label and the server's model-lock repin
   // login-session lifetime (2026-09-07): the claude harness descriptor reads the
@@ -99,6 +101,7 @@ const PURE = new Set(['src/window-desktop.js', 'src/plugin-manifest.js', 'src/ac
   // answer AUTHORISES A BILLED TURN — that decision must be unit-testable
   // without a server.
   'src/auto-resume-signal.js',
+  'src/record-clear.js', // "Clear content…" (2026-09-28): the five record kinds, which text fields a clear replaces, WHO may clear (owner any · an agent its own session's · a job token never), the group log's replacement-record fold — the stores' doors, the routes and the client dialog ask ONE definition
   'src/inbox-reply.js', // a reply to a For-you item (design-user-inbox-reply D1): the quote block, its parser, the ONE availability verdict — the route and the panel ask the same rule (lane S1 verify r3: its card_item rung is a lookup into helper-ask.js's table)
   'src/helper-ask.js', // lane S1: a helper's permission ask — the record, the Agent call, the chip / card / inbox words, and (verify r3) THE ask's transition table every consumer looks up
   'src/permission-outcome.js', // lane S1 verify r5: the CENSUS of the CLI's own permission-outcome sentences — the one reader of a tool_result's word (a main card and a helper's ask); unknown is never allowed
@@ -157,6 +160,11 @@ const PURE = new Set(['src/window-desktop.js', 'src/plugin-manifest.js', 'src/ac
   //     bundle for the fallback — one definition. Imports only channel-record
   //     (PURE → PURE), where the block SCHEMA lives beside the record.
   'src/channel-blocks.js',
+  //   channel-thread + channel-reactions (lane channel-threads, 2026-09-28): a message's PLACE (what it answers,
+  //     which thread, the thread's root, counts, the pane mode, the agent's words) and a message's REACTIONS
+  //     (the fold of the side log, the vocabulary rule, the words — never a reactor's name to an agent). Both
+  //     import only channel-record (PURE → PURE); the window, the pane, the engine and the suites share them.
+  'src/channel-thread.js', 'src/channel-reactions.js',
   // INTEGRATIONS & KEYS (docs/design-communication-panel.zh.md §14.2, P0b): the
   // ONE table of integration rows — fields, cluster env names, setup blocks
   // (Lark's callback URL is defined HERE and only here), test declarations,
@@ -193,6 +201,12 @@ const PURE = new Set(['src/window-desktop.js', 'src/plugin-manifest.js', 'src/ac
   // A WORKFLOW RUN DIR's view (2026-09-26): labels/phases from journal + meta files, liveness from
   // mtimes, the stalled sentence — the route builds its view with it and the window + the chat
   // card word a stalled run with it (bundled), so it may import nothing
+  // LANE-PAIRING (B-7007, 2026-09-28): the dial's facts — the address list, the custom-address verdict, the
+  // daemon's failure classifier, the header reader, the dial-status reducer, THE row state — bundled into the daemon
+  // AND the browser, so it imports nothing; and WHO MAY USE A MACHINE AS AN EXIT (two lists, the verdict, the stamp,
+  // the ask) — imports only window-reach's principal spelling (PURE → PURE), bundled into the exit dialog. (Listed
+  // BEFORE workflow-disk: test-workflow-disk pins that module as the list's last entry.)
+  'src/dial-facts.js', 'src/exit-reach.js',
   'src/workflow-disk.js']);
 const SHARED = new Set(['src/discovery-facts.js', 'src/sysinfo.js', 'src/machine-probes.js', 'src/usage-walker.js',
   'src/transcript-service.js', 'src/ctx-sync.js', 'src/writer-sweep.js', 'src/remote-shell.js', 'src/account-material.js',
@@ -266,7 +280,14 @@ const SHARED = new Set(['src/discovery-facts.js', 'src/sysinfo.js', 'src/machine
   // THE SHARED CLI-CONFIG APPLIER (design-harness-settings §6): fs/path/os only — the CAS JSON
   // writer, the comment-preserving TOML setter, applyConfigPlan/readConfigPlan, the receipt codec.
   // Its FILE TEXT is embedded into the shipped remote helper, so it may never reach up into ORCH.
-  'src/harness-config.js']);
+  'src/harness-config.js',
+  // LANE-PAIRING ④ (B-7007): WHERE A UNIX SOCKET MAY LIVE — the daemon's rung ladder, the ownership verdict, the
+  // witness reader; node builtins only (crypto; fs by injection) — the daemon, its --stdio bridge and the hub's
+  // local transport read the ONE rule
+  'src/sock-path.js',
+  // lane-pairing verify-r3: THE ONE DOOR of a pairing token (mint / hash / constant-time compare) — node crypto only;
+  // the hub's gate + minter and the device's hello share it (the daemon bundles it)
+  'src/pairing-token.js']);
 const DEVICE = new Set(['src/agentd/agentd.js', 'src/agentd/mux.js', 'src/agentd/reexec.js', 'src/agentd/version.js', 'src/agentd/ws-min.js']);
 const ORCH_FILES = ['server.js', 'src/hosts.js', 'src/ws-handler.js', 'src/ws-create.js', 'src/agentd/client.js'];
 const isOrch = (p) => p === 'server.js' || p === 'src/ws-handler.js' || p === 'src/ws-create.js' || p === 'src/hosts.js' || p === 'src/agentd/client.js'
@@ -375,6 +396,30 @@ ok(!/\/\/ src\/ws-handler\.js|\/\/ src\/ws-create\.js|\/\/ src\/hosts\.js|\/\/ s
     const ctl = 'x: 1, // note getTelemetry: () => { try { return t; } catch { return null; } }, activeSessions,';
     const cc = ctl.indexOf('//'); const ct = ctl.slice(cc + 2);
     ok(/\b[a-zA-Z_]\w*: \((\w+(, \w+)*)?\) =>/.test(ct) && /, activeSessions,\s*$/.test(ct), '§48 control: the shipped line shape is caught');
+  }
+  // §48b ("Clear content…" verify r1, the fourth strike of the mid-line-comment class): a STATEMENT appended
+  // after a mid-line `//` is a comment — `reasonInp.value = …; // a cleared reason is not offered back for
+  // editing reasonInp.placeholder = tr('optional');` shipped in src/lib/sidebar-tasks.js and the Reason box lost
+  // its placeholder. Census over EVERY product file (src/**, server.js, the shipped agent tools): a line's
+  // comment tail (the `//` preceded by whitespace, outside a string, not a URL, not a regex like /^\//) may not
+  // END with an assignment statement `x.y = …;`. Measured 2026-09-28: one hit (the shipped line), zero elsewhere.
+  {
+    const files = ['server.js'];
+    const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = d + '/' + e.name; if (e.isDirectory()) { if (e.name !== 'node_modules') walk(rel); } else if (/\.(m?js)$/.test(e.name)) files.push(rel); } };
+    walk('src');
+    for (const e of fs.readdirSync(path.join(REPO, 'data/bin'), { withFileTypes: true })) if (e.isFile() && /^(vibespace-(task|ask|job|msg|channels|docs|page|usage|hook|hook-register|browser|window|remote-keeper|usage-scan|opencode-op)(\.m?js)?|.*-wrapper\.js|pty-wrapper\.js)$/.test(e.name)) files.push('data/bin/' + e.name);
+    const judge = (l) => {
+      const m = /(^|\s)\/\/(.*)$/.exec(l); if (!m) return false;
+      const head = l.slice(0, l.length - m[0].length + m[1].length);
+      if (/^\s*$/.test(head) || /^\s*\*/.test(head)) return false;                                     // a whole-line comment / a doc block
+      if ((head.match(/'/g) || []).length % 2 || (head.match(/`/g) || []).length % 2 || (head.match(/"/g) || []).length % 2) return false; // inside a string
+      return /\b[a-zA-Z_$][\w$]*\.[a-zA-Z_$][\w$]*\s=\s[^=].*;\s*$/.test(m[2]);
+    };
+    const bad = [];
+    for (const f of files) { let src; try { src = fs.readFileSync(path.join(REPO, f), 'utf8'); } catch { continue; } src.split('\n').forEach((l, i) => { if (judge(l)) bad.push(`${f}:${i + 1}`); }); }
+    ok(bad.length === 0, `§48b no assignment statement rides at the end of a mid-line // comment in the product files (${files.length} files)`, bad);
+    ok(judge("    reasonInp.type = 'text'; reasonInp.value = cur.clearedAt ? '' : (cur.reason || ''); // a cleared reason is not offered back for editing reasonInp.placeholder = tr('optional');"), '§48b control: the shipped sidebar-tasks line is caught');
+    ok(!judge("      if (h.location && /^\\//.test(h.location) && !h.location.startsWith('/svc/')) h.location = `/svc/${p.name}${h.location}`;") && !judge("  const u = 'https://x.y/z'; // see x.y = 1; in the docs") , '§48b control: a regex `/^\\//` and a `//` inside a string are not comments');
   }
   const mods = fs.readdirSync(path.join(REPO, 'src/server')).filter((f) => f.endsWith('.js'));
   ok(mods.length >= 14, `src/server/ holds the decomposed modules (${mods.length} ≥ 14)`);
@@ -2454,6 +2499,285 @@ console.log('§63 every agent channel route that touches a conversation records 
   const jr = judge(noRead), jp = judge(planted), jc = judge(commented);
   ok(noRead !== ar && jr.bad.length === 1 && /GET \/api\/agent\/channels\/read/.test(jr.bad[0]) && jp.bad.length === 1 && /peek/.test(jp.bad[0]) && jc.bad.length === 1,
     `§63 NEGATIVE CONTROL: the read handler without its record (${jr.bad.length}), a planted verb (${jp.bad.length}) and a verb whose only call is a comment (${jc.bad.length}) are each caught`);
+}
+
+// §66 PAIRING THAT SAYS WHERE AND WHY · EXIT ACCESS WITH A WHO (lane-pairing, B-7007 — the owner's MacBook
+// 2026-09-27). Four censuses, each grep-derived with a string-copy control (nothing written):
+//   (a) `allowExit` has NO reader left outside the ONE PURE reader (src/exit-reach.js exitAccessOf) and the
+//       migration (migrateExitAccess + migrations.js migrateExitLists); a `delete x.allowExit` strip is not a read
+//   (b) THE MINT: `agentdMintDialPair(` is called from the dial-pair ROUTE and graduateHostToDial only (two user
+//       buttons), and the client POSTs /api/device/dial-pair from ONE site — the pairing dialog's `pair`, reachable
+//       only from its Create pairing / Generate a new command button (and Enter in the name field) — never from a
+//       dialog-open path (the incident: every re-open minted a new token)
+//   (c) THE RUN BOUND: the daemon's run-cmd cap literal equals EXIT_RUN_TIMEOUT_MS; the exit routes carry no 120000
+//   (d) a dial machine's row words never read `online` alone: `_buildHostRow` (sidebar-mounts) and the Machines
+//       card (manage-agents) derive dot / badge / words from dialRowState
+console.log('§66 pairing + exit access: allowExit readers · the mint · the run bound · row words from dialRowState');
+{
+  const strip = (t) => t.split('\n').map((l) => (/^\s*(\/\/|\*|\/\*)/.test(l) ? '' : l.replace(/\s\/\/\s.*$/, ''))).join('\n');
+  // (a)
+  const fnSpan = (src, head) => { const i = src.indexOf(head); if (i < 0) return ''; const e = src.indexOf('\n}', i); return src.slice(i, e < 0 ? src.length : e); };
+  const allowReaders = (files) => {
+    const bad = [];
+    for (const [f, src0] of files) {
+      const src = strip(src0);
+      let allowed = '';
+      if (f === 'src/exit-reach.js') allowed = fnSpan(src, 'function exitAccessOf(') + fnSpan(src, 'function migrateExitAccess(');
+      if (f === 'src/server/migrations.js') { const i = src.indexOf('function migrateExitLists('); allowed = i < 0 ? '' : src.slice(i, src.indexOf('\n  }\n', i)); }
+      src.split('\n').forEach((l, i) => {
+        if (!/allowExit/.test(l)) return;
+        if (!/allowExit/.test(l.replace(/\bdelete [\w.]+\.allowExit;?/g, ''))) return; // only strips (`delete x.allowExit`) on this line
+        if (/note: "/.test(l)) return; // the migration's own prose note
+        if (allowed && allowed.includes(l)) return;
+        bad.push(`${f}:${i + 1}`);
+      });
+    }
+    return bad;
+  };
+  const scope = [];
+  (function walk(d) { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = d + '/' + e.name; if (e.isDirectory()) walk(r); else if (/\.(js|mjs|cjs)$/.test(e.name) && !/i18n-(zh|ja)\.js$/.test(e.name)) scope.push(r); } })('src');
+  for (const e of fs.readdirSync(path.join(REPO, 'data/bin'))) if (!/^vibespace-agentd/.test(e) && fs.statSync(path.join(REPO, 'data/bin', e)).isFile()) scope.push('data/bin/' + e);
+  scope.push('server.js');
+  const files = scope.map((f) => [f, read(f)]);
+  const badA = allowReaders(files);
+  ok(scope.length > 300 && badA.length === 0, `§66a allowExit has no reader outside exitAccessOf / the migration (${scope.length} files)${badA.length ? ' — ' + badA.join(' ') : ''}`);
+  const plantedA = allowReaders([...files, ['src/lib/sidebar-mounts.js', read('src/lib/sidebar-mounts.js') + "\nconst on = h.allowExit ? 'accent' : '';\n"]]);
+  ok(plantedA.some((x) => x.startsWith('src/lib/sidebar-mounts.js')), '§66a NEGATIVE CONTROL: the pre-lane toggle\'s `h.allowExit ?` read planted into sidebar-mounts is caught');
+  // (b)
+  const mintSites = (fs2) => {
+    const out = [];
+    for (const [f, src0] of fs2) {
+      const src = strip(src0);
+      for (const m of src.matchAll(/agentdMintDialPair\(/g)) {
+        const before = src.slice(Math.max(0, m.index - 40), m.index);
+        if (/function\s+$/.test(before) || /\(\.\.\.a\) => $/.test(before)) continue; // the definition / the lazy wiring alias
+        const head = src.lastIndexOf("app.post(['/api/device/dial-pair'", m.index);
+        const grad = src.lastIndexOf('async function graduateHostToDial(', m.index);
+        const where = head >= 0 && (grad < head) ? 'dial-pair route' : grad >= 0 ? 'graduateHostToDial' : `${f}@${m.index}`;
+        out.push(`${f}:${where}`);
+      }
+    }
+    return out;
+  };
+  const ms = mintSites(files);
+  ok(JSON.stringify(ms.sort()) === JSON.stringify(['src/server/mounts-plugins-wiring.js:dial-pair route', 'src/server/mounts-plugins-wiring.js:graduateHostToDial']), `§66b agentdMintDialPair is called from the dial-pair route and graduateHostToDial only (${JSON.stringify(ms)})`);
+  const clientPosts = (fs2) => fs2.filter(([f]) => f.startsWith('src/lib/')).flatMap(([f, src]) => [...strip(src).matchAll(/\/api\/device\/dial-pair/g)].map((m) => ({ f, i: m.index, src: strip(src) })));
+  const cp = clientPosts(files);
+  const pairOk = (c) => {
+    if (!c || c.f !== 'src/lib/sidebar-mounts.js') return false;
+    const open = c.src.lastIndexOf('async _showDevicePairDialog(', c.i);
+    const pairAt = c.src.lastIndexOf('const pair = async () => {', c.i);
+    const end = c.src.indexOf('\n    },', open);
+    const body = c.src.slice(open, end);
+    const beforePair = c.src.slice(open, pairAt);
+    return open >= 0 && pairAt > open && c.i < end && !/dial-pair/.test(beforePair) && /go\.onclick = pair;/.test(body) && /\{ if \(e\.key === 'Enter'\) pair\(\); \}/.test(body) && (body.match(/\bpair\(\)/g) || []).length === 1;
+  };
+  ok(cp.length === 1 && pairOk(cp[0]), `§66b the client POSTs /api/device/dial-pair from ONE site — the pairing dialog's button handler (Create pairing / Generate a new command), never its open path (${cp.map((c) => c.f).join(', ')})`);
+  const sm = read('src/lib/sidebar-mounts.js');
+  const openMint = sm.replace("      let picker = null;\n      try {\n        const a = await api(`/api/device/dial-addresses", "      api('/api/device/dial-pair', { method: 'POST', body: '{}' });\n      let picker = null;\n      try {\n        const a = await api(`/api/device/dial-addresses");
+  const cpOpen = clientPosts(files.map(([f, src]) => [f, f === 'src/lib/sidebar-mounts.js' ? openMint : src]));
+  ok(openMint !== sm && !(cpOpen.length === 1 && pairOk(cpOpen[0])), '§66b NEGATIVE CONTROL: a mint planted in the dialog\'s OPEN path (the incident) is caught');
+  // (c)
+  const E = (await import(path.join(REPO, 'src/exit-reach.js'))).default;
+  const cap = (read('src/agentd/agentd.js').match(/timeout: Math\.min\(Number\(msg\.timeoutMs\) \|\| 10000, (\d+)\)/) || [])[1];
+  ok(Number(cap) === E.EXIT_RUN_TIMEOUT_MS && E.EXIT_RUN_TIMEOUT_MS === 30000, `§66c the daemon's run-cmd cap (${cap}) is EXIT_RUN_TIMEOUT_MS (${E.EXIT_RUN_TIMEOUT_MS}) — one number: daemon, CLI help, card`);
+  ok(!/120000/.test(strip(read('src/server/exit-routes.js'))) && !/120000/.test(strip(read('src/exit-proxy.js'))) && /up to 30 s/.test(read('data/bin/vibespace-exit')), '§66c no 120 000 promise is left on the exit path; the CLI says 30 s');
+  const capOf = (src) => Number((src.match(/timeout: Math\.min\(Number\(msg\.timeoutMs\) \|\| 10000, (\d+)\)/) || [])[1]);
+  ok(capOf(read('src/agentd/agentd.js').replace('|| 10000, 30000)', '|| 10000, 120000)')) !== E.EXIT_RUN_TIMEOUT_MS, '§66c NEGATIVE CONTROL: the daemon cap raised to 120 000 without the constant is caught');
+  // (d)
+  const hostRow = (src) => { const i = src.indexOf('    _buildHostRow(h) {'); const e = src.indexOf('\n    },\n', i); return i < 0 ? null : strip(src.slice(i, e)); };
+  const card = (src) => { const i = src.indexOf('for (const h of hostsList) {'); const e = src.indexOf('body.appendChild(det);', i); return i < 0 ? null : strip(src.slice(i, e)); };
+  const hr = hostRow(sm), mc = card(read('src/lib/manage-agents.js'));
+  ok(hr && mc && !/\bh\.online\b/.test(hr) && !/\bh\.online\b/.test(mc) && /dialRowState\(h\)/.test(hr) && /dialRowState\(h\)/.test(mc), '§66d the machine row and the Machines card read the dial words from dialRowState, never `online` alone');
+  ok(/\bh\.online\b/.test(hostRow(sm.replace("const dot = isDial ? (rs.state === 'connected'", "const dot = isDial ? (h.online"))), '§66d NEGATIVE CONTROL: the pre-lane `h.online ?` words planted back into the row are caught');
+}
+
+// §64 REACTIONS NEVER WAKE (lane channel-threads, spec §5.4 / §6.2 — the brief's recommendation adopted as a rule
+// WITH a census, not prose). A reaction is a SIDE record: it is folded at read time and it may reach an agent only as
+// ONE digest line on its FREE next-turn stash (`stashFor`) — never through the wake door (`billedWake`), the watcher
+// funnel (`onFresh`), the delivery ladder (`deliverToConversation`) or a watcher's `wake`. GREP-DERIVED over
+// src/server/channels-engine.js (comments stripped): every engine function that writes a side record
+// (`store.appendSide(`) plus the push lane's side branch are the SEEDS; the census walks every engine function they
+// call (a call `name(` or a `setTimeout(name`), transitively, and fails any reached body that calls a wake site. Three
+// BOUNDARIES are not descended, each with its reason (a boundary nothing reaches is a dead exemption — red). The
+// adapters' `eventToSide(` callers must hand the result to the lane as a `kind: 'side'` event (never a record), and
+// nothing outside the engine / the store writes a side record. Controls are string copies (nothing written).
+console.log('§64 a reaction never opens a turn (the side-record census)');
+{
+  const ENGP = 'src/server/channels-engine.js';
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
+  const WAKE_SITES = /\b(billedWake|onFresh|deliverToConversation|wake)\s*\(/;
+  const BOUNDARY = {
+    kick: 'a reaction on a conversation with no row asks for that conversation\'s ordinary MESSAGE pass (attack 13: the row is born); what that pass finds are messages, judged as messages — the reaction itself is never a hit',
+    adapterFor: 'the account\'s live entry accessor (the adapter instance the fold asks selfId / the vocabulary of) — it starts no pass and delivers nothing',
+    notify: 'the `channels-updated` broadcast to the windows (the RESULT of the fold) — a broadcast is never a turn',
+  };
+  const census = (src) => {
+    const code = strip(src);
+    const decls = [...code.matchAll(/\n  (?:async\s+)?function\s+(\w+)\s*\(/g)].map((m) => ({ name: m[1], at: m.index }));
+    const bodies = new Map();
+    decls.forEach((d, i) => bodies.set(d.name, code.slice(d.at, i + 1 < decls.length ? decls[i + 1].at : code.length)));
+    const names = new Set(bodies.keys());
+    const s0 = code.indexOf("if (ev.kind === 'side' && ev.side) {");
+    const s1 = s0 < 0 ? -1 : code.indexOf('const convId = ev.convId', s0);
+    if (s0 < 0 || s1 < 0) return { seeds: [], reached: [], bad: ['the push lane\'s side branch was not found'], deadBoundary: [] };
+    bodies.set('<push side branch>', code.slice(s0, s1));
+    const seeds = ['<push side branch>', ...[...bodies].filter(([n, b]) => n !== 'onPushEvent' && n !== '<push side branch>' && /\bstore\.appendSide\(/.test(b)).map(([n]) => n)];
+    const seen = new Set(), via = new Map(), queue = seeds.slice();
+    while (queue.length) {
+      const n = queue.shift();
+      if (seen.has(n)) continue;
+      seen.add(n);
+      if (BOUNDARY[n]) continue;
+      const b = bodies.get(n) || '';
+      for (const m of [...b.matchAll(/\b(\w+)\s*\(/g), ...b.matchAll(/setTimeout\(\s*(\w+)\b/g)]) if (names.has(m[1]) && m[1] !== n && !seen.has(m[1])) { if (!via.has(m[1])) via.set(m[1], n); queue.push(m[1]); }
+    }
+    const pathTo = (x) => { const p = [x]; while (via.has(p[0])) p.unshift(via.get(p[0])); return p.join(' → '); };
+    const bad = [...seen].filter((n) => !BOUNDARY[n] && WAKE_SITES.test(bodies.get(n) || '')).map((n) => `${pathTo(n)} calls ${(bodies.get(n).match(WAKE_SITES) || [])[1]}(`);
+    const deadBoundary = Object.keys(BOUNDARY).filter((k) => !seen.has(k));
+    return { seeds, reached: [...seen], bad, deadBoundary };
+  };
+  const esrc = read(ENGP);
+  const c = census(esrc);
+  ok(c.seeds.length >= 2 && c.seeds.includes('appendSides') && c.reached.includes('flushSide') && c.reached.includes('reactionDigest'), `§64 census scope is non-vacuous (seeds: ${c.seeds.join(', ')}; ${c.reached.length} functions reached, incl. the side broadcast and the digest)`);
+  ok(c.bad.length === 0, `§64 no path from a side record reaches a wake site (billedWake / onFresh / deliverToConversation / wake)${c.bad.length ? ' — ' + c.bad.join('; ') : ''}`);
+  ok(c.deadBoundary.length === 0, `§64 every declared boundary is reached (${Object.keys(BOUNDARY).length}, each with its reason)${c.deadBoundary.length ? ' — dead: ' + c.deadBoundary.join(', ') : ''}`);
+  ok(/deliver\.stashFor\(cid, \{ source: 'channel', kind: 'notification', fromName: RX_DIGEST_FROM/.test(esrc) && !/function reactionDigest[\s\S]{0,4000}?deliverToConversation/.test(strip(esrc).slice(strip(esrc).indexOf('function reactionDigest'), strip(esrc).indexOf('function reactionDigest') + 4000)), '§64 the digest is written to the FREE stash (`stashFor`) — the one way a reaction reaches an agent');
+  // the adapters: an eventToSide result leaves as a `kind: 'side'` event; nothing outside the engine / store writes a side record
+  const lark = read('src/channels/live/lark.js');
+  const e2s = [...strip(lark).matchAll(/eventToSide\(/g)].length;
+  ok(e2s >= 2 && /kind: 'side'/.test(lark) && !/kind: 'record'[^\n]*eventToSide|eventToSide[^\n]*kind: 'record'/.test(lark), `§64 the Lark lane's eventToSide results (${e2s} sites) leave as kind 'side' events — never as a record the funnel would judge`);
+  const walkJs = (d, out = []) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const f = `${d}/${e.name}`; if (e.isDirectory()) walkJs(f, out); else if (/\.js$/.test(e.name)) out.push(f); } return out; };
+  const writers = walkJs('src').filter((f) => !['src/channel-store.js', ENGP].includes(f) && /\.appendSide\(/.test(strip(read(f))));
+  ok(writers.length === 0, `§64 only the engine writes a side record (store.appendSide callers outside it: ${writers.length ? writers.join(', ') : 'none'})`);
+  // NEGATIVE CONTROLS: the digest through the ladder, the side branch through the funnel, a new helper that wakes
+  const viaLadder = esrc.replace("try { deliver.stashFor(cid, { source: 'channel', kind: 'notification', fromName: RX_DIGEST_FROM,", "try { deliver.deliverToConversation(cid, '', {}); deliver.stashFor(cid, { source: 'channel', kind: 'notification', fromName: RX_DIGEST_FROM,");
+  const viaFunnel = esrc.replace("      if (w.appended) notifySide(rec.id, sideConv, w.msgs);\n", "      if (w.appended) { notifySide(rec.id, sideConv, w.msgs); track(onFresh(rec, sideConv, [], { lane })); }\n");
+  const viaHelper = esrc.replace('      try { reactionDigest(rec, convId, ids, folded); }', '      try { reactionDigest(rec, convId, ids, folded); nudgeOnReaction(rec, convId); }').replace('  function reactionDigest(', '  function nudgeOnReaction(rec, convId) { return billedWake({ conv: convId }, () => null); }\n  function reactionDigest(');
+  const [cl, cf, ch] = [viaLadder, viaFunnel, viaHelper].map(census);
+  ok(viaLadder !== esrc && viaFunnel !== esrc && viaHelper !== esrc && cl.bad.length >= 1 && /reactionDigest calls deliverToConversation/.test(cl.bad.join()) && cf.bad.length >= 1 && /<push side branch> calls onFresh/.test(cf.bad.join()) && ch.bad.some((x) => /nudgeOnReaction calls billedWake/.test(x)),
+    `§64 NEGATIVE CONTROL: the digest through the ladder (${cl.bad.length}), the side branch through the funnel (${cf.bad.length}) and a new helper the broadcast calls that wakes (${ch.bad.length}) are each caught`, JSON.stringify([cl.bad, cf.bad, ch.bad]));
+  // §49's twin: the owner's reaction routes add / remove a reaction as the user — never a propose / approve (a wake door)
+  const rsrc = read('src/routes/channels.js');
+  const rxBlocks = rsrc.split(/\n(?=router\.(?:post|put|get|delete)\()/).filter((b) => /^router\.(post|delete)\('[^']*\/reactions/.test(b));
+  ok(rxBlocks.length >= 3 && rxBlocks.every((b) => !/engine\(\)\.(propose|approve)\(|billedWake|deliverToConversation/.test(b)) && rxBlocks.some((b) => /engine\(\)\.react\(/.test(b)) && rxBlocks.some((b) => /engine\(\)\.unreact\(/.test(b)),
+    `§49/§64 the owner's reaction routes (${rxBlocks.length}: add, remove, the trickle) call react / unreact / the list read — never a propose / approve, so §49's wake-door census rightly does not name them (a reaction can never start a turn: sendStartsTurn is a MESSAGE fact)`);
+  // …and the agent's react verb is recorded by the witness under its own op
+  const ar = strip(read('src/agent-routes.js'));
+  const reactH = ar.slice(ar.indexOf("app.post('/api/agent/channels/react'"), ar.indexOf('\n});', ar.indexOf("app.post('/api/agent/channels/react'")));
+  ok(/touchChannel\(id, \[\{ op: 'react'/.test(reactH) && /eng\.proposeReaction\(/.test(reactH) && !/eng\.react\(|eng\.unreact\(/.test(reactH), '§63/§64 the agent\'s react handler PROPOSES (proposeReaction — never the direct act) and records its touch as op `react`');
+}
+
+// §65 THE ACCESS GATE CENSUS (lane channel-threads verify r2, IDENTITY — the r1 digest and the r2 await / proposal holes
+// were each ONE producer that never asked reach; this is the census of the class). GREP-DERIVED, comments stripped:
+//   (A) THE AGENT'S ANSWERS — every engine function an `/api/agent/channels/` handler calls (src/agent-routes.js, `eng.<fn>(`),
+//       plus the ones they hand their answer to (FOLLOW): (A1) a reach gate appears before the first data read; (A2) an
+//       async one that awaits after its gate asks AGAIN after its last await (or is exempt with a reason); (A3) none
+//       answers a bare `proposalView(` — an agent's view of a proposal is `agentProposalView` (the fate only once reach
+//       is gone).
+//   (B) THE AGENT'S STASH / LADDER — every engine function that calls `deliver.stashFor(` / `deliver.deliverToConversation(`
+//       carries a gate (the digest's `mayHear`, a watcher's `stillInEffect` / `stillWatched`, the receipt's `drafterSees`).
+//   (C) THE OWNER'S SURFACES — every function that calls `broadcast(` / `userTodos.add(` is on a CLOSED list (the owner's
+//       cookie / ws / For-you inbox — reachFor answers `visible` for the user); a new one is red until named.
+//   (D) THE CLI — every API path data/bin/vibespace-channels names is an agent route (never the owner's, which serves `by`).
+// Controls are string copies (nothing written): a gate removed from one producer is RED.
+console.log('§65 every producer that can carry a conversation\'s facts to an agent asks reach first — and again after an await');
+{
+  const ENGP = 'src/server/channels-engine.js';
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
+  const GATE = /\b(?:ACL\.canSee\(|reachFor\(ctx\b|stillSees\((?:ctx|\{)|agentProposalView\((?:ctx|by)\b|mayHear\(|stillInEffect\(|stillWatched\b|drafterSees\(|withdrawRefusal\(|F\.rowNames\(r, ctx\))/g;
+  const DATA = /\b(?:store\.(?:readTail|readSide|search|findRecord)\(|withView\(|threadRead\(|reactionsFor\(|proposalView\b|deliver\.(?:stashFor|deliverToConversation)\()/;
+  const FOLLOW = { withdrawProposal: ['withdrawNow'] };
+  const EXEMPT_AWAIT = {
+    request: 'answers the caller\'s OWN request record (its reason, the conversation key it named) — nothing the conversation produced; the await is the index write of that record',
+    withdrawProposal: 'hands its answer to withdrawNow (judged as its own row)',
+  };
+  const OWNER = {
+    notify: 'the `channels-updated` broadcast to the owner\'s windows (the ws is the owner\'s cookie session)',
+    notifyOutbox: 'the Outbox broadcast to the owner\'s windows',
+    pointerSync: 'the owner\'s For-you pointer to proposals awaiting approval',
+    composePointerSync: 'the owner\'s For-you pointer to composed messages awaiting approval',
+    speakUnknown: 'the owner\'s For-you item for a lost outcome',
+    speakFailure: 'the owner\'s For-you item for a failing account',
+    speakUnsaved: 'the owner\'s For-you item for an unsaved token',
+    request: 'files the OWNER\'s For-you item for an agent\'s access request (the owner decides it)',
+  };
+  const census = (esrc, asrc, cli) => {
+    const code = strip(esrc);
+    const decls = [...code.matchAll(/\n  (?:async\s+)?function\s+(\w+)\s*\(/g)].map((m) => ({ name: m[1], at: m.index }));
+    const bodies = new Map();
+    decls.forEach((d, i) => bodies.set(d.name, code.slice(d.at, i + 1 < decls.length ? decls[i + 1].at : code.length)));
+    const ar = strip(asrc);
+    const handlers = [...ar.matchAll(/^app\.(get|post|put|patch|delete)\('(\/api\/agent\/channels\/[^']*)'/gm)].map((m) => { const end = ar.indexOf('\n});', m.index); return ar.slice(m.index, end < 0 ? ar.length : end); });
+    const roster = new Set();
+    for (const h of handlers) for (const m of h.matchAll(/\beng\.(\w+)\(/g)) roster.add(m[1]);
+    for (const n of [...roster]) for (const f of FOLLOW[n] || []) roster.add(f);
+    const bad = [];
+    for (const n of roster) {
+      const b = bodies.get(n);
+      if (!b) { bad.push(`(A) ${n}: an agent route calls it but the engine declares no such function`); continue; }
+      const gates = [...b.matchAll(GATE)].map((m) => m.index);
+      const d = DATA.exec(b);
+      if (!gates.length && !FOLLOW[n]) bad.push(`(A1) ${n} never asks reach`);
+      else if (gates.length && d && d.index < gates[0]) bad.push(`(A1) ${n} reads ${d[0]} before it asks reach`);
+      const firstGate = gates.length ? gates[0] : -1;
+      const awaits = [...b.matchAll(/\bawait\b/g)].map((m) => m.index).filter((i) => i > firstGate);
+      if (awaits.length && !EXEMPT_AWAIT[n] && !(gates.length && gates[gates.length - 1] > awaits[awaits.length - 1])) bad.push(`(A2) ${n} answers after an await without asking reach again`);
+      if (/\bproposalView\b/.test(b)) bad.push(`(A3) ${n} answers a bare proposalView( — an agent's view of a proposal is agentProposalView`);
+    }
+    const ladder = [...bodies].filter(([, b]) => /\bdeliver\.(?:stashFor|deliverToConversation)\(/.test(b)).map(([n]) => n);
+    for (const n of ladder) if (!(bodies.get(n).match(GATE) || []).length) bad.push(`(B) ${n} hands an agent something without a gate`);
+    const owners = [...bodies].filter(([, b]) => /\bbroadcast\(|\buserTodos\.add\(/.test(b)).map(([n]) => n);
+    for (const n of owners) if (!OWNER[n]) bad.push(`(C) ${n} is a new owner surface (broadcast / For-you) — name it with its reason`);
+    for (const n of Object.keys(OWNER)) if (!owners.includes(n)) bad.push(`(C) owner surface '${n}' matches no function (a dead row)`);
+    for (const n of Object.keys(EXEMPT_AWAIT)) if (!roster.has(n)) bad.push(`(A2) exemption '${n}' is no agent answer (a dead row)`);
+    const paths = [...cli.matchAll(/['`"](\/api\/[^'`"$]*)/g)].map((m) => m[1]);
+    for (const p of paths) if (!p.startsWith('/api/agent/channels/')) bad.push(`(D) the CLI calls ${p} — not an agent route`);
+    return { roster: [...roster], ladder, owners, paths, bad };
+  };
+  const esrc = read(ENGP), asrc = read('src/agent-routes.js'), cli = read('data/bin/vibespace-channels');
+  const c = census(esrc, asrc, cli);
+  const want = ['listFor', 'readFor', 'readThreadFor', 'agentRefresh', 'agentThreadRefresh', 'propose', 'proposeReaction', 'compose', 'replaceProposal', 'withdrawProposal', 'withdrawNow', 'searchFor', 'statusFor', 'accessFor', 'request'];
+  ok(want.every((n) => c.roster.includes(n)) && c.ladder.length >= 4 && c.paths.length >= 10, `§65 census scope is non-vacuous (${c.roster.length} agent answers, ${c.ladder.length} ladder producers: ${c.ladder.join(', ')}, ${c.owners.length} owner surfaces, ${c.paths.length} CLI paths)`, JSON.stringify(c.roster));
+  ok(c.bad.length === 0, `§65 every agent answer asks reach first and again after an await, every stash/ladder producer carries a gate, every owner surface is named, the CLI names agent routes only${c.bad.length ? ' — ' + c.bad.join('; ') : ''}`);
+  // NEGATIVE CONTROLS (string copies): one gate removed from one producer each
+  const cut = (src, a, b) => { if (src.split(a).length !== 2) return null; return src.replace(a, b); };
+  const controls = [
+    ['the thread read without its reach door', cut(esrc, "  function readThreadFor(ctx, adapterId, convId, msg, { limit = 50 } = {}) {\n    const { en, rec } = convFor(adapterId, convId);\n    if (!en || !rec || rec.enabled === false) return ACL.notFound();\n    if (!ACL.canSee(reachFor(ctx, rec, en).level)) return ACL.notFound();", "  function readThreadFor(ctx, adapterId, convId, msg, { limit = 50 } = {}) {\n    const { en, rec } = convFor(adapterId, convId);\n    if (!en || !rec || rec.enabled === false) return ACL.notFound();"), /\(A1\) readThreadFor/],
+    ['status answering the whole proposal', cut(esrc, '    return { ok: true, proposals: mine.slice(0, 50).map((p) => agentProposalView(ctx, p)) };', '    return { ok: true, proposals: mine.slice(0, 50).map(proposalView) };'), /\(A3\) statusFor/],
+    ['the agent\'s walk without its re-ask', cut(esrc, "    if (!stillSees(ctx, adapterId, convId)) return ACL.notFound();\n    // a thread this conversation never named", "    // a thread this conversation never named"), /\(A2\) agentThreadRefresh/],
+    ['the reaction digest without mayHear', cut(esrc, '      if (!mayHear(cid)) continue;\n', ''), null],
+    ['a new owner surface', esrc.replace('  function reactionDigest(', '  function nudgeOwner(x) { return broadcast({ type: \'x\', x }); }\n  function reactionDigest('), /\(C\) nudgeOwner/],
+  ];
+  // (the digest control: mayHear's declaration stays, so the census's (B) still finds a gate token — the RUNTIME leg,
+  // test-channels-engine ⑱ (c), is that producer's control; here a digest with NO gate token at all)
+  controls[3][1] = controls[3][1] && controls[3][1].replace(/    const reach = new Map\(\);\n    const mayHear = [\s\S]*?\n    \};\n/, '');
+  controls[3][2] = /\(B\) reactionDigest/;
+  const planted = asrc.replace("app.get('/api/agent/channels/status',", "app.get('/api/agent/channels/peek', (req, res) => {\n  const hit = agentSession(req, res);\n  res.json(eng.peekFor(hit));\n});\napp.get('/api/agent/channels/status',");
+  const plantedEng = esrc.replace('  function statusFor(ctx, proposalId = null) {', '  function peekFor(ctx) { return { ok: true, rows: store.readTail(\'a\', \'c\', { limit: 5 }) }; }\n  function statusFor(ctx, proposalId = null) {');
+  const cp = census(plantedEng, planted, cli);
+  const cliBad = census(esrc, asrc, cli.replace("'/api/agent/channels/list'", "'/api/channels/list'"));
+  const results = controls.map(([name, src, re]) => { const r = src ? census(src, asrc, cli) : { bad: ['(setup) the control\'s anchor was not found once'] }; return { name, ok: !!src && r.bad.some((x) => re.test(x)), bad: r.bad }; });
+  ok(results.every((r) => r.ok) && cp.bad.some((x) => /\(A1\) peekFor never asks reach/.test(x)) && cliBad.bad.some((x) => /\(D\) the CLI calls \/api\/channels\/list/.test(x)),
+    `§65 NEGATIVE CONTROLS: ${results.map((r) => `${r.name} (${r.ok ? 'RED' : 'missed'})`).join(', ')}, a planted agent route over an ungated read (RED), the CLI pointed at an owner route (RED)`, JSON.stringify(results.filter((r) => !r.ok)));
+}
+
+// §64b lane channel-threads i18n: every t() / tr() literal the lane's client surfaces draw has a zh AND a ja entry
+// (i18n-check in the build proves the two dictionaries agree; this proves the new words are IN them)
+console.log('§64b the lane\'s new words are in both dictionaries');
+{
+  const dictOf = (f) => { const m = new Set(); for (const ln of read(f).split('\n')) { const x = /^  ('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"): /.exec(ln); if (x) { try { m.add(new Function('return ' + x[1])()); } catch { } } } return m; };
+  const zh = dictOf('src/lib/i18n-zh.js'), ja = dictOf('src/lib/i18n-ja.js');
+  // 2026-09-28 (reply placements): + the PURE policy (the card's placement line, its refusal words) and the touch row's words
+  const FILES = ['src/channel-caps.js', 'src/lib/channel-thread-pane.js', 'src/lib/reaction-picker.js', 'src/lib/channel-window.js', 'src/lib/channel-outbox.js', 'src/lib/channel-words.js', 'src/lib/channel-filter-editor.js', 'src/lib/channel-account-dialogs.js', 'src/channel-policy.js', 'src/channel-touch.js'];
+  const keys = new Set();
+  for (const f of FILES) for (const m of read(f).matchAll(/\b(?:t|tr)\(\s*('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")/g)) { try { keys.add(new Function('return ' + m[1])()); } catch { } }
+  const LANE = ['{n} replies', 'last {age}', 'in thread', 'Reply in thread…', 'Add reaction', 'in thread · open to load', 'replying to a message not loaded', 'Lands inside this thread', 'This group does not allow replies in threads', 'Reactions can be read after one Re-authorize ({scopes})', '{names} and {n} more', 'Search emoji', 'Replaces your {glyph}', 'That emoji is not one this channel allows', 'You already reacted with that', 'This message has reached its reaction limit', 'This message cannot be reacted to', 'Only a reaction you added can be removed', 'This channel has no reactions', 'Replying in a thread is not offered here', 'Reactions are not offered here ({why})', '{agent} wants to react {glyph} to {author}: "{quote}"', 'Quoted reply — to {author}: "{quote}"', 'Reply in thread, also shown in the chat — under {author}: "{quote}"', 'That message is inside a thread — a reply to it goes in the thread', 'drafted a reply in a thread'];
+  // one literal predates the lane and is the same glyph in every language (a lone ellipsis — the "…" menu button)
+  const SAME_IN_EVERY_LANGUAGE = new Set(['…']);
+  const missing = [...keys].filter((k) => !SAME_IN_EVERY_LANGUAGE.has(k) && (!zh.has(k) || !ja.has(k)));
+  ok(LANE.every((k) => keys.has(k)) && keys.size >= 100, `§64b the census reads the lane's surfaces (${keys.size} literals, the ${LANE.length} spec §4.6 / §9 strings among them)`, LANE.filter((k) => !keys.has(k)).join(' | '));
+  ok(missing.length === 0, `§64b every literal has zh + ja${missing.length ? ' — missing: ' + missing.slice(0, 8).join(' | ') : ''}`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

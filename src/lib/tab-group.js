@@ -4,7 +4,7 @@ import { t } from './i18n.js';
 import { UI_ICONS } from './icons.js';
 import { inboxCountText } from './title-chips.js'; // lane G: the inbox chip never grows past icon + '99+'
 import { showWindowContextMenu } from './taskbar.js';
-import { normalizeChain, displayedPanes, clampRatio, splitColumns, paneMinPx, visualTabOrder, splitPartner, ownerColor, chainSyncKey, showTab, enterSplit, insertTab, moveTab, removeTab, swapSides, SPLIT_RATIO_DEFAULT, holdRatio, heldRatio, releaseRatio, ratioDiffers, followFor, foldBackTarget } from './chain-layout.js';
+import { normalizeChain, displayedPanes, clampRatio, splitColumns, paneMinPx, visualTabOrder, splitPartner, ownerColor, chainSyncKey, showTab, enterSplit, insertTab, moveTab, removeTab, swapSides, SPLIT_RATIO_DEFAULT, holdRatio, heldRatio, releaseRatio, ratioDiffers, followFor, foldBackTarget, tabDragMode } from './chain-layout.js';
 
 /**
  * Tab grouping — mixin methods for WindowManager.
@@ -1063,14 +1063,17 @@ const tabGroupMethods = {
     return !(typeof matchMedia === 'function' && matchMedia('(max-width: 768px)').matches);
   },
 
-  /** THE TAB DRAG. The first 8 px of movement decide ONCE (split tabs v2):
+  /** THE TAB DRAG. The first 8 px of movement decide (split tabs v2):
    *  mostly HORIZONTAL = a REORDER inside the strip (an insertion marker,
    *  rAF-coalesced, the drop = moveTabInChain; crossing the halves' boundary
-   *  MOVES the tab to the other side; Esc cancels; never a split, never a
-   *  detach later in the same drag), otherwise the pre-v2 DETACH path verbatim
-   *  (|dy| > 30 pulls the tab out as a window: move / snap / merge). Every
-   *  listener lives on a PER-DRAG AbortController (a per-render one would die
-   *  mid-drag), and the reorder re-reads the strip by window id each frame. */
+   *  MOVES the tab to the other side; Esc cancels; never a split), otherwise
+   *  the pre-v2 DETACH path verbatim (|dy| > 30 pulls the tab out as a window:
+   *  move / snap / merge). A REORDER whose pointer leaves the strip's band by
+   *  > 30 px TEARS the tab off into that detach path (inc-muly2izg-cks3: a
+   *  diagonal pull out of the bar was a reorder for the whole drag — PURE
+   *  chain-layout tabDragMode is the one rule). Every listener lives on a
+   *  PER-DRAG AbortController (a per-render one would die mid-drag), and the
+   *  reorder re-reads the strip by window id each frame. */
   _setupTabDrag(tabEl, winId, chain) {
     let mouseDown = false, startX = 0, startY = 0, detached = false;
     let mode = null; // null until the first 8 px: 'reorder' | 'detach'
@@ -1136,17 +1139,27 @@ const tabGroupMethods = {
 
     const processMove = (e) => {
       if (!mouseDown) return;
-      if (!mode) {
-        const dx0 = e.clientX - startX, dy0 = e.clientY - startY;
-        if (Math.max(Math.abs(dx0), Math.abs(dy0)) < 8) return;
-        mode = Math.abs(dx0) > Math.abs(dy0) && this._stripReorderable() ? 'reorder' : 'detach';
-      }
+      // THE ONE CLASSIFICATION (PURE chain-layout tabDragMode, inc-muly2izg-cks3): the first 8 px pick reorder or
+      // detach; a REORDER whose pointer leaves the strip's band (the host's title bar) by > 30 px TEARS OFF — a tab
+      // pulled diagonally out of the bar used to stay a reorder for the whole drag and never left the group
+      const hostNow = this.windows.get(chain.tabs[0]);
+      const band = mode === 'reorder' && hostNow && hostNow._tabChain === chain ? hostNow.titleBar.getBoundingClientRect() : null;
+      const next = tabDragMode({ mode, dx: e.clientX - startX, dy: e.clientY - startY, y: e.clientY, band, reorderable: this._stripReorderable() });
+      if (!next) return;
+      const tore = mode === 'reorder' && next === 'detach';
+      mode = next;
+      if (tore) endReorder(); // the insertion marker goes; the tab comes out under the pointer below
       if (mode === 'reorder') { reorderMove(e); return; }
-      if (!detached && Math.abs(e.clientY - startY) > 30) {
+      if (!detached && (tore || Math.abs(e.clientY - startY) > 30)) {
         detached = true;
+        // the FRAME the tab leaves: the host — or, when the host itself is torn out, the tab that takes the frame over
+        const frame = this.windows.get(chain.tabs[0] === winId ? chain.tabs[1] : chain.tabs[0]) || null;
         this._detachFromChain(chain, winId);
         const win = this.windows.get(winId);
         if (!win) { mouseDown = false; return; }
+        // on the Stage the torn-off window belongs to the workspace of the frame it left (inc-muly2izg-cks3: an unbound
+        // one was hidden by the next leave and never shown again by the enter)
+        try { this._app?.stage?.onTornOff?.(win, frame); } catch (err) { console.warn('[tab-group] stage onTornOff failed', err); }
         // Raise to front so the detached window isn't hidden behind others
         // (especially the original tab chain host it came from).
         this.focusWindow(winId);
@@ -1345,6 +1358,11 @@ const tabGroupMethods = {
       win.gridBounds = hostWin.gridBounds ? { ...hostWin.gridBounds } : null;
     }
     win.element.style.display = '';
+    // inc-muly2izg-cks3 (the owner: "他那个拖动出标签栏了，然后窗口就消失了"): a guest is DRAWN BY ITS HOST — a hider that
+    // marked the guest's own (display:none) element meanwhile never showed; it leaves with its frame's visibility.
+    // On the Stage a leave hid the guest (visibility:hidden + pointer-events:none), the re-enter re-showed the host
+    // only, and the tab pulled out of the bar became an INVISIBLE window (its taskbar button toggled, nothing showed).
+    if (hostWin && hostWin !== win) this._matchFrameVisibility(win, hostWin);
     const standaloneIcon = win.titleBar.querySelector(':scope > .window-icon-stack');
     if (standaloneIcon) standaloneIcon.style.display = '';
     win.titleSpan.style.display = '';
@@ -1371,6 +1389,21 @@ const tabGroupMethods = {
 
     requestAnimationFrame(() => { if (win.onResize) win.onResize(); });
     this._notify();
+  },
+
+  /** A window leaving a chain takes its FRAME's visibility (inc-muly2izg-cks3): the frame hidden by a desktop / the
+   *  Stage ⇒ the window is hidden the same way; the frame SHOWN ⇒ every hider's mark on the window goes — both flags,
+   *  the inline visibility / pointer-events, the accessibility hide, a chat's content-visibility, a suspended view. */
+  _matchFrameVisibility(win, frame) {
+    if (!win || !frame || win === frame || !win.element) return;
+    if (frame._hiddenByDesktop) { if (!win._hiddenByDesktop) this._app?.desktopManager?._hideWin?.(win); return; }
+    if (frame._hiddenByStage) { if (!win._hiddenByStage) this._app?.stage?._hideStage?.(win); return; }
+    const el = win.element;
+    win._hiddenByStage = false; win._hiddenByDesktop = false;
+    el.style.visibility = ''; el.style.pointerEvents = '';
+    try { el.removeAttribute('aria-hidden'); } catch { }
+    if (win.type === 'chat') el.style.contentVisibility = '';
+    try { this._app?.sessions?.get(win.id)?.setSuspended?.(false); } catch { }
   },
 
   removeFromTabChain(chain, winId) {

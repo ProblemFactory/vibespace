@@ -33,7 +33,8 @@ const clock = (at) => { const d = new Date(Number(at) || 0); return `${String(d.
 
 /** The window's target — what it lists: a conversation (its browser key and/or its CLI id) or one profile. */
 function targetOf(o) {
-  const browserKey = /^bk-[0-9a-f]{8}$/.test(String(o.browserKey || '')) ? String(o.browserKey) : null;
+  // BROWSE YOURSELF (B-6ae8): the user's own key `hu-<hex>` lists his browsing sessions on that profile
+  const browserKey = /^(bk|hu)-[0-9a-f]{8}$/.test(String(o.browserKey || '')) ? String(o.browserKey) : null;
   const conversation = o.conversation ? String(o.conversation).slice(0, 120) : null;
   const profileId = /^bp-[0-9a-f]{8}$/.test(String(o.profileId || '')) ? String(o.profileId) : null;
   return { browserKey, conversation, profileId, id: browserKey || conversation || (profileId ? 'profile:' + profileId : null) };
@@ -43,6 +44,7 @@ function nameOf(app, tg) {
   const rows = (app.sidebar && app.sidebar._allSessions) || [];
   const r = rows.find((s) => (tg.browserKey && s.browserKey === tg.browserKey) || (tg.conversation && (s.sessionId === tg.conversation || s.backendSessionId === tg.conversation || s.claudeSessionId === tg.conversation)));
   if (r) return (app.sidebar.getCustomName && app.sidebar.getCustomName(r)) || r.webuiName || r.name || '';
+  if (tg.browserKey && tg.browserKey.startsWith('hu-')) { const pid = 'bp-' + tg.browserKey.slice(3); const p = ((app._browserProfiles && app._browserProfiles.profiles) || []).find((x) => x.id === pid); return p ? t('{label} · you', { label: String(p.label || '') }) : ''; }
   if (tg.profileId) { const p = ((app._browserProfiles && app._browserProfiles.profiles) || []).find((x) => x.id === tg.profileId); return p ? String(p.label || '') : ''; }
   return '';
 }

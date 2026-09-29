@@ -207,14 +207,131 @@ class HostManager {
   }
   dialTokenHash(deviceId) { return this.findByDeviceId(deviceId)?.dialTokenHash || null; }
 
-  /** Opt-in flag: may an agent use this machine as an on-demand egress (exit
-   *  node)? Default off — turning a paired machine into an egress is a real
-   *  capability (SSRF into its LAN, abuse), so it's per-machine + explicit. */
-  setAllowExit(id, on) {
-    const h = this.get(id);
-    if (on) h.allowExit = true; else delete h.allowExit;
+  /** THE store's door for a one-shot reshaping (src/server/migrations.js): `fn(state)` mutates the in-memory
+   *  `{hosts: […]}` and returns a report; ONE atomic save follows. The migration goes through the LIVE manager
+   *  because it holds hosts.json in memory and saves it whole — a second writer beside it would be overwritten. */
+  reshapeStore(fn) {
+    const rep = fn(this._state);
     this._save();
+    this._reachChanged('reshape');
+    return rep;
+  }
+
+  /**
+   * A WRITE THAT CAN WITHDRAW REACH TELLS THE ONE RE-JUDGE (verify-r3 A-r3a). A machine's `exit` lists live on its
+   * record, and more than the "Who can use it" PATCH rewrites a record: Settings → Import config REPLACES every
+   * record (`importBundle` — a narrower list, or the machine gone), `remove` deletes one, a migration reshapes the
+   * store. Only the PATCH re-judged, so after an import that took a conversation off a machine its OPEN connection
+   * through the machine kept carrying bytes and its "ask me each time" request kept waiting (reproduced with the real
+   * HostManager + ExitProxyManager: scratch/r3-repro-a.mjs E1/E2). Every such writer calls this after its save;
+   * server.js points `onReachChange` at `exitProxy.rejudgeAll` (a writer before the exit manager exists — the boot
+   * migration — is a no-op: nothing is lent yet). Never throws.
+   */
+  _reachChanged(why) { try { this.onReachChange?.(why); } catch (e) { console.warn('[hosts] reach re-judge failed:', e && e.message); } }
+
+  /** EXIT ACCESS (lane-pairing ⑥): the machine's two lists — who may borrow its network (`use`) and who may run
+   *  commands on it (`run`) — as PURE src/exit-reach.js decided them (`patchVerdict` → `storedExit`). ONE write,
+   *  the `lastRun` kept. The legacy `allowExit` boolean is gone (migration 2026-09-exit-access-lists). */
+  setExitAccess(id, exit) {
+    const h = this.get(id);
+    const keep = h.exit && typeof h.exit === 'object' && h.exit.lastRun ? h.exit.lastRun : null;
+    h.exit = { ...exit, ...(keep && !exit.lastRun ? { lastRun: keep } : {}) };
+    delete h.allowExit;
+    this._save();
+    this._reachChanged('exit-access');
     return h;
+  }
+  /** The row's "last run" — throttled like the dial facts (one write per machine per 60 s; a crash loses ≤ 60 s of
+   *  last-run stamps, never a grant). A record from before the migration is lifted through the ONE PURE rule. */
+  setLastRun(id, rec) {
+    const h = this.get(id);
+    if (!h.exit || typeof h.exit !== 'object') { h.exit = require('./exit-reach.js').migrateExitAccess(h).exit; delete h.allowExit; }
+    h.exit.lastRun = rec;
+    this._saveThrottled('exit:' + id);
+    return h;
+  }
+
+  /** ONE save per `key` per 60 s (the dial facts + the run ledger are OBSERVATIONS: a refused daemon retries every
+   *  30 s and each retry must not rewrite hosts.json). A skipped save is not lost — a timer writes it at the end of
+   *  the window (unref'd: it never holds the process open); an urgent write clears the window. */
+  _saveThrottled(key, { windowMs = 60000 } = {}) {
+    this._throttle = this._throttle || new Map();
+    const t = this._throttle.get(key) || { at: 0, timer: null };
+    const now = Date.now();
+    if (now - t.at >= windowMs && !t.timer) { t.at = now; this._throttle.set(key, t); try { this._save(); } catch (e) { console.warn('[hosts] save failed:', e.message); } return true; }
+    if (!t.timer) {
+      t.timer = setTimeout(() => { t.timer = null; t.at = Date.now(); try { this._save(); } catch (e) { console.warn('[hosts] save failed:', e.message); } }, Math.max(1000, windowMs - (now - t.at)));
+      t.timer.unref?.();
+    }
+    this._throttle.set(key, t);
+    return false;
+  }
+  /** Flush every pending throttled write now (SIGTERM / a suite). */
+  flushThrottled() {
+    let pending = false;
+    for (const t of (this._throttle || new Map()).values()) if (t.timer) { clearTimeout(t.timer); t.timer = null; pending = true; }
+    if (pending) this._save();
+  }
+
+  /**
+   * THE DIAL FACTS (lane-pairing ③, §4.5): what the server observed of a device's dials, on its host record under
+   * `dial` — `{generation, tokenMintedAt, mintedHost, mintedBase, lastProbeAt, firstConnectAt, lastConnectAt, lastDisconnectAt,
+   * lastRefusal, lastAccept, lastAuthFail, lastDuplicate}`. `event` ∈ minted | refused | accepted | disconnected | authFail |
+   * probed | duplicate (verify-r1 B9: a second daemon refused as a copy of this pairing — `{at, from, boot}`, persisted at
+   * once when the row's 10-min note is not already on, else throttled — verify-r2: r1 wrote at once for every NEW boot
+   * id, so a copy sending a fresh id per knock wrote hosts.json per knock; the row carries it for 10 min).
+   * In memory at once; persisted NOW on minted / accepted / a refusal whose CODE changed / the first auth failure,
+   * else throttled (a refused daemon retries every 30 s — the code and its first instant are the facts that
+   * matter). → `{changed}` = the row's state (PURE dialRowState) moved, so the caller broadcasts; null when no
+   * record answers to the device id (an unpaired name — nothing to note).
+   */
+  noteDial(deviceId, event, facts = {}) {
+    const h = this.findByDeviceId(deviceId);
+    if (!h) return null;
+    const DF = require('./dial-facts.js');
+    const rowOf = () => DF.dialRowState({ ...h, online: h.transport === 'dial' ? !!this.dialOnline?.(h.deviceId) : false, dialLive: !!this.dialOnline?.(h.deviceId) });
+    const before = rowOf();
+    const d = h.dial && typeof h.dial === 'object' ? h.dial : (h.dial = {});
+    const at = Number(facts.at) || Date.now();
+    // verify-r4 F1 (+F7 the device's OS): `dialed` = the device's own address (the sheet's default), `host` = the Host header
+    // as received (a relay's). verify-r5 C2: the device's STATEMENTS (`dialed`, `platform`) are kept only for a dial that
+    // PROVED it holds the pairing (`own` — accepted); a refusal is anyone who knows the name (no token): its statements
+    // are nobody's facts and never land on the device's record (the row used to name a stranger's `dialed` first)
+    const hint = (own = true) => ({ from: String(facts.from || '').slice(0, 64), attempt: Number(facts.attempt) || 0, last: facts.last && facts.last.code ? { code: String(facts.last.code).slice(0, 40), at: Number(facts.last.at) || null } : null, daemon: facts.daemon ? String(facts.daemon).slice(0, 40) : null, host: String(facts.host || '').slice(0, 120), dialed: (() => { const v = own && facts.dialed ? DF.dialBaseVerdict(facts.dialed) : null; return v && v.ok ? v.base.slice(0, DF.DIAL_BASE_MAX) : null; })(), platform: own && DF.DAEMON_PLATFORMS.includes(facts.platform) ? facts.platform : null });
+    let urgent = false;
+    if (event === 'minted') {
+      d.generation = (Number(d.generation) || 0) + 1; d.tokenMintedAt = at; delete d.lastRefusal;
+      if (facts.host) d.mintedHost = String(facts.host).slice(0, 120);
+      // naive-user N-sheet: the BASE the command was made for (the pairing sheet checks it again — it used to check the
+      // browser's origin); a mint without one drops a stale one (base + host always describe the same command)
+      const vb = facts.base ? DF.dialBaseVerdict(facts.base) : null;
+      if (vb && vb.ok) d.mintedBase = vb.base.slice(0, 200); else delete d.mintedBase;
+      urgent = true;
+    } else if (event === 'refused') {
+      const prev = d.lastRefusal && d.lastRefusal.code;
+      d.lastRefusal = { code: String(facts.code || 'token-mismatch').slice(0, 40), at, ...hint(false) }; // verify-r5 C2: no token ⇒ no statement kept
+      urgent = prev !== d.lastRefusal.code;
+    } else if (event === 'accepted') {
+      d.lastAccept = { at, ...hint() };
+      d.lastConnectAt = at; if (!d.firstConnectAt) d.firstConnectAt = at;
+      urgent = true;
+    } else if (event === 'disconnected') {
+      d.lastDisconnectAt = at;
+    } else if (event === 'authFail') {
+      urgent = !(d.lastAuthFail && Number(d.lastAuthFail.at) > (Number(d.lastConnectAt) || 0));
+      d.lastAuthFail = { at };
+    } else if (event === 'probed') {
+      d.lastProbeAt = at;
+    } else if (event === 'duplicate') {
+      // verify-r2: urgent only when the row's 10-min note is not already on — a token-holder sending a fresh boot id
+      // per knock wrote hosts.json per knock (r1: urgent on every NEW boot); the note's instant is all the row reads
+      const prevAt = Number(d.lastDuplicate && d.lastDuplicate.at) || 0;
+      d.lastDuplicate = { at, from: String(facts.from || '').slice(0, 64), boot: facts.boot ? String(facts.boot).slice(0, 32) : null, daemon: facts.daemon ? String(facts.daemon).slice(0, 40) : null };
+      urgent = at - prevAt > DF.DUP_NOTE_MS;
+    } else return null;
+    if (urgent) { try { this._save(); } catch (e) { console.warn('[hosts] save failed:', e.message); } } else this._saveThrottled('dial:' + h.id);
+    const after = rowOf();
+    return { changed: before.state !== after.state || before.reason !== after.reason || !!before.dup !== !!after.dup, row: after };
   }
 
   /** B-f3e8 one-time migration: the legacy dial-tokens.json (deviceId →
@@ -308,6 +425,7 @@ class HostManager {
     // (files up to 64MB each accumulated forever — audit round-3).
     try { fs.rmSync(path.join(this.dataDir, 'remote-jsonl', id), { recursive: true, force: true }); } catch {}
     this._save();
+    this._reachChanged('remove');
   }
 
   // Boot sweep: remote-jsonl dirs whose host no longer exists (orphaned before
@@ -382,6 +500,7 @@ class HostManager {
     }
     this._state.hosts = hosts;
     this._save();
+    this._reachChanged('import'); // verify-r3 A-r3a: an import can narrow a machine's lists or drop the machine
     return { warnings };
   }
 
@@ -768,8 +887,9 @@ class HostManager {
    *  SHIM (the remote prelude puts ~/.vibespace/bin first, so it hides the
    *  real binary from the agent) and `vibespace-browser-verbs.js` the verb
    *  table the shipped `vibespace-browser` runs (copied at boot from
-   *  src/browser-verbs.js). test-architecture §52 fails a static tool left out. */
-  static AGENT_TOOLS = ['vibespace-status', 'vibespace-task', 'vibespace-ask', 'vibespace-exit', 'vibespace-job', 'vibespace-docs', 'vibespace-msg', 'vibespace-page', 'vibespace-channels', 'vibespace-browser', 'vibespace-browser-verbs.js', 'agent-browser', 'vibespace-window', 'vibespace-hook.mjs', 'vibespace-hook-register.mjs', 'vibespace-remote-keeper', 'vibespace-claude-subscription-login.mjs', 'vibespace-usage'];
+   *  src/browser-verbs.js); `vibespace-browser-stuck.js` its page-dialog words (lane browser-stuck, copied at boot from
+   *  src/browser-stuck.js). test-architecture §52 fails a static tool left out. */
+  static AGENT_TOOLS = ['vibespace-status', 'vibespace-task', 'vibespace-ask', 'vibespace-exit', 'vibespace-job', 'vibespace-docs', 'vibespace-msg', 'vibespace-page', 'vibespace-channels', 'vibespace-browser', 'vibespace-browser-verbs.js', 'vibespace-browser-stuck.js', 'agent-browser', 'vibespace-window', 'vibespace-hook.mjs', 'vibespace-hook-register.mjs', 'vibespace-remote-keeper', 'vibespace-claude-subscription-login.mjs', 'vibespace-usage'];
   /** Plugin agent-tool shims (Plugin Ph4, 2.369.30): the loader installs a
    *  provider returning the `vibespace-tool-<plugin>-<name>` files it
    *  generates right now, so they ship to ssh hosts and dial devices with the

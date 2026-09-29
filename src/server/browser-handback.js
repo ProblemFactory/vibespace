@@ -266,9 +266,12 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     if (!sess) return false;
     const label = labelOf(ev.profileId);
     const c = ev.confirmation || {};
+    // r6 A-F8: the item names what the action acts ON (the card's own target line — the keeper's first write, never a
+    // later record's) so the owner judges the upload / the url / the script, not just a verb
+    const tgt = c.target ? String(c.target) : '';
     return fileInbox(sess, {
-      text: `The agent's browser${label ? ` (${label})` : ''} is waiting for you to confirm "${c.action || 'an action'}"${c.category ? ` [${c.category}]` : ''}`,
-      detail: `Open the live view (Browser (live)) and press Confirm or Deny. The browser auto-denies after ${Math.round(T.CONFIRM_TTL_MS / 1000)} s; the agent sees the outcome as the command's result. Confirmation id ${c.id}.`,
+      text: `The agent's browser${label ? ` (${label})` : ''} is waiting for you to confirm "${c.action || 'an action'}"${tgt ? ` on ${tgt.length > 120 ? tgt.slice(0, 119) + '…' : tgt}` : ''}${c.category ? ` [${c.category}]` : ''}`,
+      detail: `${tgt ? `What it acts on: ${tgt}. ` : ''}Open the live view (Browser (live)) and press Confirm or Deny. The browser auto-denies after ${Math.round(T.CONFIRM_TTL_MS / 1000)} s; the agent sees the outcome as the command's result. Confirmation id ${c.id}.`,
       urgency: 'normal',
     });
   }
@@ -288,6 +291,9 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
   function install() {
     if (!keeper) return false;
     if (!unsubInput && typeof keeper.onInput === 'function') unsubInput = keeper.onInput((ev) => {
+      // BROWSE YOURSELF (B-6ae8, the owner 2026-09-28): the user's OWN browsing window taking / letting go of HIS tab is
+      // nobody's takeover — no card, no notice, no delivery, no stale sweep, no inbox item (it is no conversation's)
+      if (ev && ev.human) return;
       try { onLiveFactsChanged?.(ev); } catch { /* optional */ }
       // lane J r2: both moments sweep the conversation's pending browser approvals (answered stale, browser_paused)
       if (ev.kind === 'takeover' || ev.kind === 'handback') { try { sweepStale(ev, ev.kind); } catch (e) { log.warn?.(`[browser] stale-approval sweep failed — ${e && e.message}`); } }

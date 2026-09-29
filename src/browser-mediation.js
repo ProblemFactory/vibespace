@@ -26,7 +26,8 @@
  *     /json/protocol: every `Input.*`, the navigation family, a file upload, a
  *     dialog answer, a focus move, the tab acts, viewport / emulation / a frozen
  *     page, script evaluation, DOM / CSS edits, cookies…) and every method
- *     WITHOUT a row (a newer Chrome's) — a typed `browser_interrupted` CDP error
+ *     WITHOUT a row (a newer Chrome's, or an older one's — the census names the
+ *     Chromes it read, CENSUS_CHROMES) — a typed `browser_interrupted` CDP error
  *     naming the takeover, never a timeout, the unclassified one NAMED so the
  *     census can be extended (verify r4: three rounds each found a hand-written
  *     list one method short). THE OWNER'S RULING (2026-09-27, verbatim):
@@ -41,7 +42,20 @@
  *     the deprecated `Target.sendMessageToTarget`, the deaf-page arm,
  *     Tethering, an unpacked extension…) — a shared browser is nobody's to
  *     kill through a session url;
- *   · a message on a CDP `sessionId` the proxy did not hand out is refused.
+ *   · a message on a CDP `sessionId` the proxy did not hand out is refused;
+ *   · REFUSES a BROWSER-level `Target.setAutoAttach` that pauses new targets
+ *     (`waitForDebuggerOnStart: true` with no `sessionId` — identity verify r4,
+ *     2026-09-28, measured on Chrome 153.0.8010.47: one client arms it, ANOTHER
+ *     client's new tab answers `Runtime.evaluate` but its `Page.navigate` never
+ *     returns until the arming client sends `Runtime.runIfWaitingForDebugger`
+ *     on a session it alone was handed). Through the proxy that session's
+ *     `attachedToTarget` is DROPPED for a target the lease does not own, so the
+ *     lease could never resume the tabs it froze — every other conversation's
+ *     and the user's own new tab in that shared browser would hang at its first
+ *     navigation for as long as the lease's connection lived. The page-level
+ *     form (on a `sessionId`: a page's own frames / workers — what the 0.38.1
+ *     daemon sends, tapped) and the browser-level form WITHOUT the pause pass;
+ *     `Target.autoAttachRelated` names a target and the scope rule covers it.
  * What it CANNOT do: recall a script already running in the page when it is
  * AWAITING (a timer, a fetch) — its continuation runs later; the CALL is
  * rejected and the agent told (measured on Chrome 153, §6.2).
@@ -147,6 +161,8 @@ const ALWAYS_REFUSED = CENSUS.methodsOf('refused');
 const ALWAYS_REFUSED_WHY = Object.freeze(Object.fromEntries([...ALWAYS_REFUSED].map((m) => [m, CENSUS.rowOf(m).why]).filter(([, w]) => w)));
 /** Methods that NAME a target (`params.targetId`) — in scope or refused. */
 const TARGET_METHODS = new Set(['Target.attachToTarget', 'Target.activateTarget', 'Target.closeTarget', 'Target.getTargetInfo', 'Browser.getWindowForTarget']);
+/** identity verify r4: the ONE spelling of the browser-level pause refusal (the suite and the CLI's words read it). */
+const AUTO_ATTACH_PAUSE_WORDS = 'Target.setAutoAttach with waitForDebuggerOnStart at the browser level would pause every NEW tab of this shared browser at its first navigation — other conversations\' and the user\'s — and this lease is never shown those tabs, so it could not resume them; attach per tab (Target.attachToTarget on a tab of yours, then setAutoAttach on that session) or pass waitForDebuggerOnStart:false';
 /** Methods that NAME a browser context — one this lease created or refused. */
 const CONTEXT_METHODS = new Set(['Target.disposeBrowserContext']);
 /** The paused classes as sets (readers only — `pausedVerdict` is the rule): every `Input.*` is an `input` row
@@ -173,7 +189,7 @@ function pausedVerdict(method) {
 /** The sentence a refusal while the user drives carries — `browser_interrupted: <INT.interruptedText(…)>` (the CLI's
  *  refusal reader keys on the code's prefix; the takeover, the interruption and the way out are named). */
 function pausedWords(method, pv) {
-  if (pv && pv.why === 'unclassified') return INT.interruptedText(`${method} is not in VibeSpace's CDP census — Chrome ${CENSUS.CENSUS_CHROME}, src/cdp-census.js; a row classing it lifts this`);
+  if (pv && pv.why === 'unclassified') return INT.interruptedText(`${method} is not in VibeSpace's CDP census — censused on Chrome ${CENSUS.CENSUS_CHROMES.join(' + ')}, src/cdp-census.js; a row classing it lifts this`);
   return INT.interruptedText(method);
 }
 function isPausedMethod(method) { return pausedVerdict(method).refuse; }
@@ -343,6 +359,10 @@ function judge(msg, scope, { paused = false } = {}) {
     const t = params.targetId == null ? '' : String(params.targetId);
     if (!inScope(scope, t)) return { kind: 'refuse', reply: refusal(id, 'target_out_of_scope', `target ${t || '(none)'} is not one of this lease's tabs`, sid) };
   }
+  // identity verify r4 (2026-09-28): a browser-level auto-attach that PAUSES new targets freezes every other conversation's
+  // (and the user's) new tab in this shared browser — and this lease is never shown those tabs, so it could not resume them
+  if (method === 'Target.setAutoAttach' && !sid && params.autoAttach && params.waitForDebuggerOnStart === true) return { kind: 'refuse', why: 'auto_attach_pause', reply: refusal(id, 'auto_attach_pause_refused', AUTO_ATTACH_PAUSE_WORDS, sid) };
+  if (method === 'Target.autoAttachRelated' && params.waitForDebuggerOnStart === true && !inScope(scope, params.targetId == null ? '' : String(params.targetId))) return { kind: 'refuse', reply: refusal(id, 'target_out_of_scope', `target ${params.targetId == null ? '(none)' : String(params.targetId)} is not one of this lease's tabs`, sid) };
   if (method === 'Target.detachFromTarget') {
     const s2 = params.sessionId == null ? '' : String(params.sessionId);
     const t = params.targetId == null ? '' : String(params.targetId);
@@ -482,7 +502,7 @@ function mediationSentence({ profileLabel = '', others = 0 } = {}) {
 module.exports = {
   TOKEN_RE, isToken, parseMediatedPath, mediatedBrowserUrl, mediatedHttpBase, versionAnswer, listAnswer,
   newScope, inScope, admissible, admitTarget, remember, RECENT_MAX,
-  ALWAYS_REFUSED, TARGET_METHODS, CONTEXT_METHODS, PAUSED_METHODS, PAUSED_PREFIXES, isPausedMethod,
+  ALWAYS_REFUSED, TARGET_METHODS, CONTEXT_METHODS, PAUSED_METHODS, PAUSED_PREFIXES, isPausedMethod, AUTO_ATTACH_PAUSE_WORDS, // identity verify r4: the browser-level pause refusal's words
   CENSUS, pausedVerdict, pausedWords, // verify r4: the paused fence is a CENSUS over the vendor's own method list (src/cdp-census.js)
   interruptPlan, INTERRUPTED_CODE, // the owner's ruling (2026-09-27): a takeover interrupts what is in flight
   CDP_REFUSAL_CODE, refusal, refusalCodeOf, judge, admitReply, filterEvent,

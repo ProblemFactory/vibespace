@@ -263,9 +263,9 @@ console.log('⑦ wiring pins — the window really calls every rule; the doors; 
   // the reply box keeps its node across broadcasts; Enter / Ctrl+Enter send, Shift+Enter is a newline, Esc returns to the list
   ok(/if \(!st\.cur \|\| st\.cur\.id !== id\) \{/.test(w) && /if \(e\.key === 'Enter' && !e\.shiftKey && !e\.isComposing && e\.keyCode !== 229\) \{ e\.preventDefault\(\); sendReply\(ta\.value\); \}/.test(w)
     && /if \(e\.key === 'Escape' && !e\.isComposing\) \{/.test(w) && /e\.key === 'ArrowDown' \|\| e\.key === 'j'/.test(w) && /e\.key === 'ArrowUp' \|\| e\.key === 'k'/.test(w), 'the pane is rebuilt only when the selected id changes (a typed reply survives); the keys: ↑/↓ j/k · Enter · Esc · (Ctrl/Cmd+)Enter');
-  // XSS: item strings are TEXT; markdown through the escaping renderer + DOMPurify; the only innerHTML writes are those two
+  // XSS: item strings are TEXT; markdown through the escaping renderer + sanitizeHtml (src/lib/safe-html.js); the only innerHTML writes are those two
   const inner = [...w.matchAll(/\.innerHTML\s*=\s*([^;]+);/g)].map((m) => m[1].trim());
-  ok(J(inner) === J(['DOMPurify.sanitize(inline ? md.parseInline(s) : md.parse(s))', 'icon']) && /const md = new Marked\(\{ gfm: true, breaks: true, renderer: \{ html\(h\) \{ return escHtml\(/.test(w) && /b\.append\(mk\('span', 'iw-act-label', label\)\)/.test(w),
+  ok(J(inner) === J(['sanitizeHtml(inline ? md.parseInline(s) : md.parse(s))', 'icon']) && /import \{ sanitizeHtml \} from '\.\/safe-html\.js';/.test(w) && /const md = new Marked\(\{ gfm: true, breaks: true, renderer: \{ html\(h\) \{ return escHtml\(/.test(w) && /b\.append\(mk\('span', 'iw-act-label', label\)\)/.test(w),
     'XSS: exactly two innerHTML writes — the sanitized markdown (raw HTML ESCAPED by the renderer first) and a UI_ICONS constant; every other item string is textContent', inner);
   ok(/for \(const a of el\.querySelectorAll\('a\[href\]'\)\) \{ a\.target = '_blank'; a\.rel = 'noopener noreferrer'; \}/.test(w), 'a link in an item opens beside the workspace, never in place of it');
   // the window type + the doors

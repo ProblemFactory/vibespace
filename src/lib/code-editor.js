@@ -13,7 +13,7 @@ import { indentWithTab } from '@codemirror/commands';
 import { marked } from 'marked';
 import { escHtml, showConfirmDialog } from './utils.js';
 import { t } from './i18n.js';
-import DOMPurify from 'dompurify';
+import { sanitizeHtml } from './safe-html.js';
 import * as prettier from 'prettier/standalone';
 import prettierBabel from 'prettier/plugins/babel';
 import prettierEstree from 'prettier/plugins/estree';
@@ -234,7 +234,9 @@ class CodeEditor {
     btnSave.onclick = () => this.save();
     if (this._isReadOnly) btnSave.style.display = 'none';
     const btnDownload = this._btn('\u21E9'); btnDownload.title = 'Download';
-    btnDownload.onclick = () => window.open(`/api/download?path=${encodeURIComponent(filePath)}`);
+    // the file's machine rides along (lane raw-filename r2): without `&host=` a REMOTE file's ⇩ asked
+    // THIS machine for a path of the same name (test-raw-filename ⑧, the client host census)
+    btnDownload.onclick = () => window.open(`/api/download?path=${encodeURIComponent(filePath)}${this._host ? '&host=' + encodeURIComponent(this._host) : ''}`);
 
     // Reload from disk (2.341.0): the editor loaded once and never looked back
     // \u2014 files rewritten by agents/other windows were unreachable without
@@ -485,7 +487,7 @@ class CodeEditor {
         this._previewRO.observe(this._previewBody);
       }
     } else {
-      this._previewBody.innerHTML = DOMPurify.sanitize(marked.parse(src)); // previewed files may be untrusted (cloned repos)
+      this._previewBody.innerHTML = sanitizeHtml(marked.parse(src)); // previewed files may be untrusted (cloned repos)
       // Render mermaid diagrams: convert <code class="language-mermaid"> to mermaid divs
       this._previewBody.querySelectorAll('code.language-mermaid').forEach(code => {
         const pre = code.parentElement;

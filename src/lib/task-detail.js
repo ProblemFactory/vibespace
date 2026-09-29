@@ -1,6 +1,7 @@
 import { escHtml, showConfirmDialog, showToast, autoTaskColor } from './utils.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { t } from './i18n.js';
+import { isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…": a cleared Activity entry is worded here, never its stored English key
 import { registerWindowType, svgIcon16 } from './window-types.js';
 
 /**
@@ -40,6 +41,32 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
 
   const patch = (p) => sidebar._taskUpdate(taskId, p);
 
+  /** The Activity log's rows (the last 30 entries) drawn into `progList` from the CURRENT store record — the whole render
+   *  and the typing guard's in-place repaint below share it. A CLEARED entry reads the sentence in this device's words. */
+  const fillProgress = (progList, task) => {
+    progList.innerHTML = '';
+    const entries = (task.progress || []).slice(-30);
+    if (!entries.length) progList.innerHTML = `<div class="empty-hint">${escHtml(t('No progress notes yet'))}</div>`;
+    for (const p of entries) {
+      const when = new Date(p.at);
+      const stamp = `<span class="task-detail-progress-time">${when.toLocaleDateString()} ${when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>`;
+      if (p.detail && !isCleared(p)) { // (a clear drops the detail: a cleared entry is always the plain row below)
+        // summary+detail entries expand on click — the summary is the log
+        // line, the detail is the full context the agent filed with it
+        const row = document.createElement('details');
+        row.className = 'task-detail-progress-item task-detail-progress-exp';
+        row.innerHTML = `<summary>${stamp}${escHtml(p.note)}</summary><div class="task-detail-progress-detail">${escHtml(p.detail)}</div>`;
+        progList.appendChild(row);
+      } else {
+        const row = document.createElement('div');
+        row.className = 'task-detail-progress-item';
+        // a CLEARED entry (clearedAt) reads the cleared sentence in this device's language, dimmed
+        row.innerHTML = isCleared(p) ? `${stamp}<span class="rc-cleared">${escHtml(clearedText())}</span>` : `${stamp}${escHtml(p.note)}`;
+        progList.appendChild(row);
+      }
+    }
+  };
+
   // Don't clobber a field the user is actively typing in when a remote
   // update re-renders — skip re-render and let the next update catch up.
   const render = () => {
@@ -56,7 +83,10 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
     // the new item shows immediately; remember it to re-focus after the rebuild.
     const _ae = document.activeElement;
     const _typing = root.contains(_ae) && /^(INPUT|TEXTAREA)$/.test(_ae.tagName);
-    if (_typing && _ae.value) return;
+    // …but the Activity log is a RECORD's words, never the field being typed: it is repainted in place from the store
+    // (lane-redact verify r5, reproduced in chrome: a detail window whose title / objective field was focused kept a
+    // cleared entry's words — every tasks-updated returned here, and the one after the blur may never come)
+    if (_typing && _ae.value) { const pl = root.querySelector('.task-detail-progress'); if (pl && !pl.contains(_ae)) { const st = pl.scrollTop; fillProgress(pl, task); pl.scrollTop = st; } return; }
     const _refocusPlaceholder = _typing ? _ae.placeholder : null;
     // Rebuilding wipes root's scroll position — a color/toggle edit at the
     // bottom of the window must not yank the view back to the top.
@@ -202,25 +232,7 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
       const progSec = section(t('Activity log'), t('timestamped notes of what was done — agents append via vibespace-task, you can too'), { title: t('Open full activity viewer (by day, by session, search)'), onClick: () => app.openTaskLog(taskId) });
       const progList = document.createElement('div');
       progList.className = 'task-detail-progress';
-      const entries = (task.progress || []).slice(-30);
-      if (!entries.length) progList.innerHTML = `<div class="empty-hint">${escHtml(t('No progress notes yet'))}</div>`;
-      for (const p of entries) {
-        const when = new Date(p.at);
-        const stamp = `<span class="task-detail-progress-time">${when.toLocaleDateString()} ${when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>`;
-        if (p.detail) {
-          // summary+detail entries expand on click — the summary is the log
-          // line, the detail is the full context the agent filed with it
-          const row = document.createElement('details');
-          row.className = 'task-detail-progress-item task-detail-progress-exp';
-          row.innerHTML = `<summary>${stamp}${escHtml(p.note)}</summary><div class="task-detail-progress-detail">${escHtml(p.detail)}</div>`;
-          progList.appendChild(row);
-        } else {
-          const row = document.createElement('div');
-          row.className = 'task-detail-progress-item';
-          row.innerHTML = `${stamp}${escHtml(p.note)}`;
-          progList.appendChild(row);
-        }
-      }
+      fillProgress(progList, task);
       progSec.appendChild(progList);
       progList.scrollTop = progList.scrollHeight;
       const progAdd = document.createElement('input');

@@ -54,6 +54,9 @@ const RDY = 'Switching restarts the browser; open pages reopen by themselves and
 const FP = ['A few sites may still ask you to sign in again.', true];
 const EXPECT = {
   ready: { state: 'ready', sentences: [[RDY, false], FP, ['2 conversations use this browser now; their pages reopen too and their work pauses briefly.', false]], action: ['switch', 'Switch to CloakBrowser'] },
+  // lane-cloak: no key (the free build needs none) and no site named ⇒ ready, with the one sentence that says it opens nothing yet
+  'ready-no-sites': { state: 'ready', sentences: [[RDY, false], FP, ['CloakBrowser opens only the sites you list in Settings → Agent browser, and none are listed yet.', true]], action: ['switch', 'Switch to CloakBrowser'] },
+  'ready-two-sites': { state: 'ready', sentences: [[RDY, false], FP], action: ['switch', 'Switch to CloakBrowser'] },
   'not-live': { state: 'ready', sentences: [["The browser isn't open right now; the next time your agent opens “shopping” it opens in CloakBrowser. You can switch back any time.", false], FP], action: ['switch', 'Switch to CloakBrowser'] },
   'ready-confirm': { state: 'ready-confirm', sentences: [[RDY, false], FP, ["VibeSpace can't check that CloakBrowser isn't older than the browser that last opened “shopping”. If it is, “shopping” may stop opening, along with its saved logins.", true]], action: ['switch-confirm', 'Switch to CloakBrowser'] },
   // the naive-user verifier (2026-09-28): the confirm card says who else a switch moves, as the plain one does
@@ -142,8 +145,15 @@ function judgeStates(Mm, V) {
   ok(sw.switching === true && sw.targets.length === 0 && sw.notice === null && sw.empty === null && sw.now.text === 'Switching to CloakBrowser… You can close this window; the switch goes on.' && sw.now.blurb === null, 'view.switching ⇒ the now line alone (the keeper has already committed the provider it switches to)', sw);
   const rc = M.switcherModel(V['ready-confirm'], { t: tEn }).targets[0].action.confirm;
   ok(rc && rc.title === 'Switch to CloakBrowser?' && rc.confirmText === 'Switch anyway' && rc.danger === true && /can't check/.test(rc.message), 'ready-confirm: the click asks ONE question (the house confirm, "Switch anyway")');
+  // lane-cloak: the confirm's facts are the RECORD's (sizes, host); an old server's verdict without them ⇒ the generic sentence
+  const gen = M.installConfirmWords('CloakBrowser', tEn, { ok: true, proof: { status: 'measured' } });
+  ok(gen.message === "About 200 MB is downloaded from CloakBrowser's maker and kept in VibeSpace's data folder." && M.installConfirmWords('CloakBrowser', tEn).message === gen.message, 'installConfirmWords without the measured sizes (an older server) ⇒ the generic sentence, never an invented number');
+  const zhc = M.installConfirmWords('CloakBrowser', tZh, { proof: { status: 'measured', downloadBytes: 216890134, installedBytes: 729336146, downloadHost: 'cloakbrowser.dev' } });
+  ok(/217/.test(zhc.message) && /729/.test(zhc.message) && /cloakbrowser\.dev/.test(zhc.message) && zhc.message !== M.installConfirmWords('CloakBrowser', tEn, { proof: { status: 'measured', downloadBytes: 216890134, installedBytes: 729336146, downloadHost: 'cloakbrowser.dev' } }).message, 'the measured confirm is translated (zh) and carries the record\'s numbers and host');
+  const up = M.installVerdictWords({ ok: false, code: 'install_unmeasured_platform' }, { t: tEn, name: 'CloakBrowser' });
+  ok(up.state === 'not-installed-here' && up.offer === null && /can't install CloakBrowser here by itself/.test(up.text) && M.installOutcomeWords({ ok: false, code: 'install_unmeasured_platform', error: 'x' }, { t: tEn, name: 'CloakBrowser' }).text === "VibeSpace can't install CloakBrowser here by itself." && SW.rowState({ row: { canSwitchTo: 'in-place' }, currentRow: { canSwitchTo: 'in-place' }, verdict: { ok: true }, binary: { present: false }, install: { ok: false, code: 'install_unmeasured_platform', state: {} } }) === 'not-installed-here', 'a machine the measurement never covered: the row, the outcome toast and the dialog all say VibeSpace won\'t install it here (no offer)');
   const ni = M.switcherModel(V['not-installed'], { t: tEn }).targets[0].action.confirm;
-  ok(ni && ni.title === 'Install CloakBrowser?' && ni.message === "About 200 MB is downloaded from CloakBrowser's maker and kept in VibeSpace's data folder." && ni.confirmText === 'Download and install' && !ni.danger, 'not-installed: the download is behind its own confirm (a download is the user\'s explicit act)');
+  ok(ni && ni.title === 'Install CloakBrowser?' && ni.message === "About 217 MB is downloaded once from cloakbrowser.dev, its maker, and unpacked to about 729 MB in VibeSpace's data folder. VibeSpace checks it is the exact copy it tested; in that test the browser itself connected to nothing on the internet. No account or key is needed." && ni.confirmText === 'Download and install' && !ni.danger, 'not-installed: the download is behind its own confirm (a download is the user\'s explicit act)');
   const m1 = M.switcherModel(V.ready, { t: tEn });
   ok(m1.title === 'Browser for “shopping”' && m1.now.text === "Your agent's browser: Chromium" && m1.now.blurb === "VibeSpace's default browser (the open-source version of Chrome).", 'the title names the profile; the now line says whose browser it is and what it is');
 }
@@ -233,6 +243,24 @@ console.log('§3 hidden rows, the empty line, the notice');
   ok(cdpPre.notice && cdpPre.notice.text === "“shopping” can't be switched to CloakBrowser.", 'a preselected row that is not a switch of this profile ⇒ the not-a-switch notice');
   const cc = M.switcherModel(V['current-cloak'], { t: tEn });
   ok(cc.now.text === "Your agent's browser: CloakBrowser" && cc.targets.length === 1 && cc.targets[0].id === 'chromium' && cc.targets[0].action.label === 'Switch to Chromium', 'on CloakBrowser: the card is Chromium (switching back)');
+  // BROWSE YOURSELF (B-6ae8): nothing runs ⇒ the empty line opens it for the user (ONE button); the user browsing it himself
+  // ⇒ in-use-by-hand whose ONE button closes his browsing (a switch would restart the browser under his page)
+  const w1off = M.switcherModel(F.viewOf({ world: F.shipped, binary: { present: false, configured: false }, key: { source: 'none', whyCode: 'no-values' }, live: false }), { t: tEn });
+  // the .197 integration (cloak × browse-yourself): lane-cloak turned CloakBrowser's `not-installed` row into a CARD (Install…),
+  // so this world is no longer card-less — BOTH rows stand: the Install card AND the Open-it-yourself line (different rows)
+  const w1offCloak = w1off.targets.find((x) => x.id === 'cloak');
+  ok(w1off.empty && w1off.empty.text === "The browser isn't open right now. If a site blocks your agent, open “shopping” yourself and get past the check." && w1off.empty.action && w1off.empty.action.kind === 'browse-yourself' && w1off.empty.action.label === 'Open it yourself' && w1off.empty.action.profileId === F.PROFILE_ID, 'not live ⇒ "open “shopping” yourself" + ONE button Open it yourself (the profile named) — whatever the switch cards say', w1off.empty);
+  ok(w1off.targets.length === 1 && w1offCloak && w1offCloak.state === 'not-installed' && w1offCloak.action && w1offCloak.action.label === 'Download and install…', '…and lane-cloak\'s CloakBrowser Install card stands beside it (BOTH rows — a card switches, the line opens the browser there is)', w1off.targets.map((x) => [x.id, x.state, x.action && x.action.label]));
+  const w1none = M.switcherModel({ ...F.viewOf({ world: F.shipped, binary: { present: false, configured: false }, key: { source: 'none', whyCode: 'no-values' }, live: false }), rows: [] }, { t: tEn });
+  ok(w1none.targets.length === 0 && w1none.empty && w1none.empty.action && w1none.empty.action.kind === 'browse-yourself', '…and with no card at all the same line + button (the lane\'s own world)', w1none.empty);
+  ok(!(w1.empty && w1.empty.action) && !(hp.empty && hp.empty.action), '…a LIVE browser keeps the take-over sentence (no button), a paired machine\'s profile gets none');
+  const HU = 'hu-' + F.PROFILE_ID.slice(3);
+  const byHand = F.viewOf({ leases: [], humans: [], inputs: {} });
+  const selfRows = SW.switcherRows({ profile: byHand.profile, providerIds: B.providerIds(), rowOf: F.wiredCloak.row, controlOf: F.wiredCloak.control, capabilityRefusalOf: B.capabilityRefusal, sources: () => ({ source: 'user' }), now: F.NOW, leases: [], inputs: { [`${HU}|${F.PROFILE_ID}`]: { input: 'user' } }, humans: [{ profileId: F.PROFILE_ID, browserKey: HU }], binaryOf: () => ({ needed: 'cloakbrowser', present: true, configured: false }), install: F.installFor() });
+  const selfCard = M.switcherModel({ ...byHand, rows: selfRows }, { t: tEn, sessionOf: () => 'never-a-session' }).targets.find((x) => x.id === 'cloak');
+  ok(selfCard && selfCard.state === 'in-use-by-hand' && selfCard.sentences[0].text === "You're browsing “shopping” yourself. Close your browsing first, then switch." && selfCard.action && selfCard.action.kind === 'close-browsing' && selfCard.action.key === HU && selfCard.action.label === 'Close my browsing', 'the USER browsing it himself (his holder row, no lease) ⇒ in-use-by-hand, "Close your browsing first" + ONE button that closes it — never a session\'s hand-back', selfCard);
+  const noSelf = SW.switcherRows({ profile: byHand.profile, providerIds: B.providerIds(), rowOf: F.wiredCloak.row, controlOf: F.wiredCloak.control, capabilityRefusalOf: B.capabilityRefusal, sources: () => ({ source: 'user' }), now: F.NOW, leases: [], inputs: { [`${HU}|${F.PROFILE_ID}`]: { input: 'user' } }, humans: [], binaryOf: () => ({ needed: 'cloakbrowser', present: true, configured: false }), install: F.installFor() }).find((r) => r.id === 'cloak');
+  ok(noSelf.state === 'ready' && SW.switchVerdict({ profile: byHand.profile, target: 'cloak', rowOf: F.wiredCloak.row, controlOf: F.wiredCloak.control, resolveKey: () => ({ source: 'user' }), now: F.NOW, leases: [], inputs: { [`${HU}|${F.PROFILE_ID}`]: { input: 'user' } }, humans: [{ profileId: F.PROFILE_ID, browserKey: HU }] }).mode === 'proposal', 'CONTROL: without the human rows the same world reads `ready` (a switch would stop the Chrome under his page); with them the switch itself is a PROPOSAL');
 }
 
 // ── §4 THE DIGEST FACTS ──
@@ -242,7 +270,9 @@ function judgeDigest(SWm, Mm) {
   const p = { id: 'bp-1', label: 'shopping', provider: 'chromium', host: null, lastChromiumMajor: 151 };
   const ids = B.providerIds();
   const ch = (world, prof = p) => SWm.switchChoices({ profile: prof, providerIds: ids, rowOf: world.row, controlOf: world.control });
-  if (!same(ch(F.shipped), [])) bad.push(`shipped ⇒ ${JSON.stringify(ch(F.shipped))}`);
+  // lane-cloak (2026-09-28): the SHIPPED table wires cloak (its §7.2.1 record is a measurement) ⇒ [cloak]; a build whose record is refused ⇒ []
+  if (!same(ch(F.shipped), ['cloak'])) bad.push(`shipped ⇒ ${JSON.stringify(ch(F.shipped))}`);
+  if (!same(ch(F.unwired), [])) bad.push(`unwired (a refused record) ⇒ ${JSON.stringify(ch(F.unwired))}`);
   if (!same(ch(F.wiredCloak), ['cloak'])) bad.push(`wired ⇒ ${JSON.stringify(ch(F.wiredCloak))}`);
   if (!same(ch(F.wiredCloak, { ...p, host: 'dev-1' }), [])) bad.push('a paired machine ⇒ not []');
   if (!same(ch(F.wiredCloak, { ...p, provider: 'cdp' }), [])) bad.push('from cdp ⇒ not []');
@@ -256,7 +286,7 @@ function judgeDigest(SWm, Mm) {
 }
 {
   const bad = judgeDigest(SW, M);
-  ok(bad.length === 0, 'switchChoices ([] shipped, [cloak] wired, [] on a paired machine or from cdp), backendFact, chipWords (no major, no plan), backendName, choicesOf', bad.join('\n    '));
+  ok(bad.length === 0, 'switchChoices ([cloak] shipped since the measurement, [] under a refused record, [cloak] wired, [] on a paired machine or from cdp), backendFact, chipWords (no major, no plan), backendName, choicesOf', bad.join('\n    '));
 }
 
 // ── §5 PENDING ──
@@ -331,7 +361,8 @@ console.log('§7 wiring pins');
   ok(writes.length >= 8 && !writes.some((w) => /\.reason\b|\.error\b|iv\.error|whyCode/.test(w)), `no server sentence (.reason / .error / iv.error / whyCode) reaches a textContent or el() (${writes.length} writes read)`);
   ok(!/makeDefault/.test(dom) && /dialog\.appendChild\(footer\)/.test(dom) && /footer\.className = 'dialog-footer'/.test(dom) && /reconcileKeyed\(body,/.test(dom), 'no makeDefault; the footer (Close) is appended to the dialog outside the body; the body is a keyed patch');
   ok(/app\.ws\?\.onGlobal\?\.\(onGlobal\)/.test(dom) && /onClose: \(\) => \{[^}]*app\.ws\?\.offGlobal\?\.\(onGlobal\)/.test(dom), 'the broadcast handler is removed BY NAME in onClose');
-  ok(/a\.kind === 'switch-confirm'\) \{ if \(await showConfirmDialog\(a\.confirm\)\)/.test(dom) && /a\.kind === 'install'\) \{ if \(await showConfirmDialog\(a\.confirm\)\)/.test(dom), 'the downgrade and the download each go through the house showConfirmDialog');
+  ok(/a\.kind === 'switch-confirm'\) \{ if \(await showConfirmDialog\(\{ \.\.\.a\.confirm \}\)\)/.test(dom) && /a\.kind === 'install'\) \{ if \(await showConfirmDialog\(\{ \.\.\.a\.confirm \}\)\)/.test(dom),   // ONE options object (the approval census §1b, the .197 integration)
+     'the downgrade and the download each go through the house showConfirmDialog');
   ok(/if \(gen !== st\.gen \|\| st\.closed\) return;/.test(dom) && /const gen = \+\+st\.gen;/.test(dom), 'a slower fetch never paints over a newer one (st.gen)');
   const pri = /export const LIVE_BAR_PRIORITY = Object\.freeze\((\{[^}]*\})\)/.exec(lw);
   ok(pri && /backendLabel: 4/.test(pri[1]) && !/LIVE_BAR_PRIORITY\.\w+\s*=/.test(lw) && /className = 'browser-live-backend-label browser-chip'/.test(lw) && /backendLabel: backendLabelEl/.test(lw) && /key === 'backendLabel'\) rows\.push\(\{ label: t\("Your agent's browser: \{name\}", \{ name: backendLabelEl\.textContent \}\), disabled: true \}\)/.test(lw) && /key === 'backend'\) rows\.push\(\{ label: t\('Switch browser \(now \{name\}\)…'/.test(lw), 'the live bar: the plain-label span, `backendLabel: 4` INSIDE the frozen literal; folded, the name says what it is (an info row "Your agent\'s browser: …", or "Switch browser (now …)…")');
@@ -340,11 +371,11 @@ console.log('§7 wiring pins');
   ok(/pid && choices\.length \? w\.text : `\$\{w\.text\} \$\{t\('Take over to get past the check yourself\.'\)\}`/.test(banner) && /if \(w\.detail\)/.test(banner) && /st\.claimOpen/.test(banner) && !/file-tool-btn/.test(banner) && (banner.match(/textBtn\(/g) || []).length === 3, 'the banner (2026-09-28): no switch ⇒ it says the way out (take over), the agent\'s evidence behind a Details fold that survives a rebuild, every button the house text button');
   ok(/export function pickerItems\(\{[^\n]*choicesOf = \(\) => \[\] \}\)/.test(pk) && /choicesOf: \(id\) => \(this\.browserChoicesFor/.test(pk) && /this\.browserChipFor\(p\.id\)/.test(pk), 'the picker takes choicesOf (defaulted) and every chip site reads browserChipFor');
   const cloakRow = ma.slice(ma.indexOf('// ── CloakBrowser'), ma.indexOf('// ── VibeSpace integration'));
-  ok(!/'browser backend'/.test(ma) && cloakRow.length > 200 && !/\.disabled\s*=/.test(cloakRow) && /installVerdictWords\(iv,/.test(cloakRow) && /showConfirmDialog\(installConfirmWords\(/.test(cloakRow), 'Manage Agents\' CloakBrowser row: no "browser backend", no disabled control, worded by installVerdictWords, the install behind the same confirm');
+  ok(!/'browser backend'/.test(ma) && cloakRow.length > 200 && !/\.disabled\s*=/.test(cloakRow) && /installVerdictWords\(iv,/.test(cloakRow) && /showConfirmDialog\(\{ \.\.\.installConfirmWords\(/.test(cloakRow), 'Manage Agents\' CloakBrowser row: no "browser backend", no disabled control, worded by installVerdictWords, the install behind the same confirm');
   ok(/if \(w && w\.state !== 'not-in-this-version'\) \{/.test(cloakRow) && /\(w\.state === 'install-failed' \|\| w\.state === 'unavailable'\) \? 'ob-bad' : 'ob-ver'/.test(cloakRow), 'Manage Agents: a build without CloakBrowser lists no CloakBrowser row; red only for a failed install or an unusable one (a fact is never drawn as an error)');
   ok(/open\(\{ syncId, search \} = \{\}\)/.test(su), 'SettingsUI.open destructures `search`');
   const rows = sw.slice(sw.indexOf('function switcherRows('), sw.indexOf('function switchChoices('));
-  ok(/leases = \[\], inputs = \{\}, binaryOf = \(\) => null, install = null \} = \{\}\)/.test(rows) && /fingerprintChange: fingerprintChange\(\{ from, to: id \}\)/.test(rows) && !/v\.ok \? v\.fingerprintChange/.test(rows), 'switcherRows: the new inputs defaulted; fingerprintChange outside any `v.ok ?`');
+  ok(/leases = \[\], inputs = \{\}, binaryOf = \(\) => null, install = null, keyRequiredOf = keyRequiredFor, sitesOf = \(\) => null, humans = \[\] \} = \{\}\)/.test(rows) && /fingerprintChange: fingerprintChange\(\{ from, to: id \}\)/.test(rows) && !/v\.ok \? v\.fingerprintChange/.test(rows), 'switcherRows: the new inputs defaulted (browse yourself: + humans, the user\'s own holder rows — the .197 integration spells cloak\'s + browse-yourself\'s together); fingerprintChange outside any `v.ok ?`');
   ok(/why: 'switch rolled back'/.test(kp) && /SW\.installFacts\(\{ verdict: v, npm: whichOnPath\('npm'\) !== null/.test(kp) && /backends: Object\.fromEntries\(named\(\)\.map\(\(p\) => \[p\.id, backendFactFor\(p\)\]\)\)/.test(kp), 'the keeper: the start-failure rollback, installVerdict = installFacts, the digest\'s backends');
   ok(/typeof e\?\.restored === 'boolean' \? \{ restored: e\.restored, from: e\.from \|\| null, to: e\.to \|\| null \}/.test(rt) && /k\.choicesFor\(profileId\)/.test(rt), 'routes: fail() spreads restored / from / to; the blocked `next` reads the profile\'s choices');
   ok(!/^import /m.test(libTexts['browser-switcher-model.js']) && !/\bdocument\b|\bwindow\./.test(code(libTexts['browser-switcher-model.js'])), 'the model is PURE (imports nothing, no DOM)');
@@ -373,7 +404,7 @@ console.log('NEGATIVE CONTROLS (patched copies in the scratch dir)');
   const b = judgeClosed(M, SWb);
   ok(b.some((x) => /ROW_STATES ≠/.test(x)), `NEGATIVE CONTROL (b): a switch module missing 'install-failed' fails §2 (${b[0]})`);
   const c = judgeDigest(SWc, M);
-  ok(c.some((x) => /^shipped/.test(x)), `NEGATIVE CONTROL (c): switchChoices ignoring control.ok answers [cloak] on the shipped table — §4 red (${c[0]})`);
+  ok(c.some((x) => /^unwired/.test(x)), `NEGATIVE CONTROL (c): switchChoices ignoring control.ok answers [cloak] under a refused record — §4 red (${c[0]})`);
   const d = judgeStates(M, F.views(SWd));
   ok(d.some((x) => /^not-installed-and-no-key/.test(x)), `NEGATIVE CONTROL (d): rowState with the key before the program fails §1 on not-installed-and-no-key (${d.find((x) => /no-key/.test(x))})`);
   const e = judgeClosed(Me, SW);

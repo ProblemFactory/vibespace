@@ -133,10 +133,51 @@
  *    re-derivable from the log and the read mark. (`convCaps` and
  *    `scan.hostFacts` are the two NAMED exceptions and they pay for it with a
  *    TTL — see src/channel-caps.js.)
+ *
+ * 8. A SIDE RECORD IS EVIDENCE ABOUT A MESSAGE, NEVER A MESSAGE (lane
+ *    channel-threads, 2026-09-28). A reaction added or removed, a vendor's
+ *    thread count — facts that CHANGE after a message was written — land in
+ *    the conversation's SIDE log (`msgs/<adapterId>/~side/<convId>.ndjson`,
+ *    one `validateSide` record per line, append-only, deduped by `sideKey`
+ *    with the same remember-after-the-bytes / drop-on-a-throw / strict-rebuild
+ *    discipline as the message log) and are FOLDED at read time
+ *    (src/channel-reactions.js). The side log is not in `readTail`, not in
+ *    `countSince` (unread), not in `search`, not in paging, not in the message
+ *    log's dedup set — by construction: it is another FILE in a SUBDIRECTORY
+ *    whose name (`~side`) no vendor id can spell (`safeSeg` escapes `~`), so a
+ *    conversation named `x.side` can never collide with conversation `x`'s side
+ *    log. The two logs share the account's directory and `trim()`, nothing
+ *    else. SHARED tier: fs + path + the PURE record / reactions modules (the
+ *    side key and the compaction fold are theirs).
  */
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { sideKey } = require('./channel-record.js');
+const { compactSide } = require('./channel-reactions.js');
+
+/** Side-log dedup set bound per conversation (rebuilt from the whole side log on demand). */
+const SIDE_DEDUP_MAX = 20000;
+/** A reader stops after this many matching side lines (newest first). */
+const SIDE_READ_MAX = 2000;
+/** verify r1 (MONEY / the event loop): a side READ is the newest SIDE_READ_BYTES of the file, never the whole file
+ *  (it used to read it whole, synchronously, on every page read and every broadcast fold — a 20 000-event storm on
+ *  ONE message made every page read two 2.8 MiB reads on the loop, and nothing ever compacted the file: the
+ *  compaction ran only inside a MESSAGE trim, which a reaction storm never causes). Past SIDE_COMPACT_BYTES an
+ *  append COMPACTS the log in place (each message's lines folded into one snapshot + its newest thread stat — the
+ *  same `compactSide` the trim uses), so the newest window holds every message's whole state. */
+const SIDE_READ_BYTES = 2 * 1024 * 1024;
+const SIDE_COMPACT_BYTES = 1024 * 1024;
+/** verify r1 (continued, MONEY / the event loop): a compaction's OUTPUT is bounded too — at most SIDE_KEEP_BYTES, the
+ *  most recently changed messages kept (last in the file, inside the read window), the least recently changed
+ *  FORGOTTEN (a list adapter re-reads them when a window shows them; the fold of what is kept stays exact). Before:
+ *  a compacted log past SIDE_COMPACT_BYTES (5 000 messages' snapshots = 5.4 MiB) was re-read, re-parsed and
+ *  re-written WHOLE on every append (43 ms per reaction event, 10.8 MiB read + 5.4 MiB written each), and every
+ *  message whose lines sat before the newest SIDE_READ_BYTES was invisible to every read. Half the trigger, so the
+ *  next compaction is ≥ SIDE_KEEP_BYTES of appends away (amortized O(1) per event) and the window always holds it all. */
+const SIDE_KEEP_BYTES = SIDE_COMPACT_BYTES / 2;
+/** The side log's subdirectory under an account's message directory — `~` is never in a `safeSeg` output. */
+const SIDE_DIR = '~side';
 
 /** Decision 14: 90 days or 5,000 records, whichever is SMALLER, floor 7 days. */
 const RETENTION_DAYS = 90;
@@ -200,7 +241,11 @@ const dayStamp = (ms) => new Date(ms).toISOString().slice(0, 10);
  * Build the store. `dir` is `<dataDir>/channels`. `now` is injectable so the
  * retention and audit-roll rules are testable without a clock.
  */
-function createChannelStore({ dir, now = () => Date.now(), log = console } = {}) {
+function createChannelStore({ dir, now = () => Date.now(), log = console, onWrite = null } = {}) {
+  /** lane channel-threads: ONE hook every log writer calls AFTER its bytes are durable — `(adapterId, convId,
+   *  {kind:'append'|'prepend'|'trim'|'side', fresh?, msgs?})` — so the engine's derived caches (the thread index,
+   *  the message → conversation map) follow every writer, never a list of call sites. A throwing hook is logged. */
+  const wrote = (adapterId, convId, what) => { if (typeof onWrite !== 'function') return; try { onWrite(adapterId, convId, what); } catch (e) { try { (log.warn || console.warn)('[channels] store write hook threw:', (e && e.message) || e); } catch { } } };
   if (!dir) throw new Error('channel-store: dir is required');
   const warn = (...a) => { try { (log.warn || log.log || console.warn).apply(log, a); } catch { } };
   const msgsDir = path.join(dir, 'msgs');
@@ -430,6 +475,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console } = {})
     // `lastText` (2.369.159, the IM-first group list — design §22): the newest
     // appended record's text, so the index can cache the row's LAST LINE beside
     // its `lastAt` (a derived, re-derivable cache like `unread`, never a fact).
+    wrote(adapterId, convId, { kind: 'append', fresh });
     return { appended: fresh.length, duplicates, lastAt, lastText, healed, freshAt: fresh.map((r) => (Number.isFinite(r.at) ? r.at : 0)), fresh: fresh.slice() };
   }
 
@@ -638,7 +684,12 @@ function createChannelStore({ dir, now = () => Date.now(), log = console } = {})
   function trim(adapterId, convId, { days = RETENTION_DAYS, maxRecords = RETENTION_MAX_RECORDS, floorDays = RETENTION_FLOOR_DAYS } = {}) {
     const fp = logPath(adapterId, convId);
     let lines;
-    try { lines = fs.readFileSync(fp, 'utf-8').split('\n').filter(Boolean); } catch { return { removed: 0, kept: 0 }; }
+    try { lines = fs.readFileSync(fp, 'utf-8').split('\n').filter(Boolean); } catch {
+      // no message log: a side line for a conversation that never got one is "message gone" (attack 13)
+      let side = null;
+      try { side = trimSide(adapterId, convId, { liveIds: new Set() }); } catch { }
+      return { removed: 0, kept: 0, side };
+    }
     const t = now();
     const byDays = t - days * 86400e3;
     // "whichever is smaller" = the LATER cutoff of the two bounds…
@@ -646,13 +697,21 @@ function createChannelStore({ dir, now = () => Date.now(), log = console } = {})
     // …and the floor then pulls it back: nothing newer than `floorDays` is ever dropped.
     const cutoff = Math.min(Math.max(byDays, byCount), t - floorDays * 86400e3);
     const keep = lines.filter((l) => recAt(l) >= cutoff);
-    if (keep.length === lines.length) return { removed: 0, kept: keep.length };
+    // lane channel-threads: the SIDE log shares the trim — a message dropped here drops its side lines, and each kept
+    // message's side lines are compacted (invariant 8: ≤ 2 lines per message after a trim)
+    const liveIds = new Set();
+    for (const l of keep) { const id = recVendorId(l); if (id) liveIds.add(id); }
+    let side = null;
+    try { side = trimSide(adapterId, convId, { liveIds }); } catch (e) { warn('[channels] side-log trim failed:', (e && e.message) || e); }
+    if (keep.length === lines.length) { if (side && side.removed) wrote(adapterId, convId, { kind: 'trim' }); return { removed: 0, kept: keep.length, side }; }
     const tmp = `${fp}.tmp-${process.pid}`;
     fs.writeFileSync(tmp, keep.length ? keep.join('\n') + '\n' : '');
     fs.renameSync(tmp, fp);
     dedup.delete(`${adapterId}/${convId}`);
-    return { removed: lines.length - keep.length, kept: keep.length };
+    wrote(adapterId, convId, { kind: 'trim' });
+    return { removed: lines.length - keep.length, kept: keep.length, side };
   }
+  function recVendorId(line) { try { const v = JSON.parse(line).vendorId; return v ? String(v) : null; } catch { return null; } }
   function recAt(line) { try { const n = Number(JSON.parse(line).at); return Number.isFinite(n) ? n : 0; } catch { return 0; } }
 
   /**
@@ -689,7 +748,187 @@ function createChannelStore({ dir, now = () => Date.now(), log = console } = {})
     fs.writeFileSync(tmp, merged.map((r) => JSON.stringify(r)).join('\n') + '\n');
     fs.renameSync(tmp, fp);
     for (const r of fresh) rememberVendorId(set, r.vendorId);
+    wrote(adapterId, convId, { kind: 'prepend', fresh });
     return { appended: fresh.length, duplicates };
+  }
+
+  // ── THE SIDE LOG (invariant 8, lane channel-threads) ─────────────────────
+  const sidePath = (adapterId, convId) => path.join(msgsDir, safeSeg(adapterId), SIDE_DIR, `${safeSeg(convId)}.ndjson`);
+  const sideDedup = new Map();   // `${adapterId}/${convId}` -> Set<sideKey>
+  /** verify r2 (MONEY / the event loop): a compaction that FAILED (its temp write or rename refused) is not retried per
+   *  event — `${adapterId}/${convId}` → the file size it failed at; the next attempt waits for SIDE_KEEP_BYTES more
+   *  appends (amortized O(1), like a working one). Before: every append re-read the whole growing file for another
+   *  doomed attempt (measured with the temp path refused: 6 ms / 2 MiB per event at 1 MiB, 21 ms / 6 MiB at 4 MiB). */
+  const sideCompactFailedAt = new Map();
+  /** The side lines of a conversation in its READ WINDOW (the newest SIDE_READ_BYTES — verify r2: every side read is
+   *  a bounded window, never the whole file; a line before the window is invisible to every reader, so the dedup set
+   *  and a compaction fold exactly what readers see), parsed (a line that does not parse is skipped, like `readTail`).
+   *  STRICT (the dedup rebuild — the one reader whose answer writes bytes): only ENOENT is empty (invariant 2's r5). */
+  function sideWindow(adapterId, convId, { strict = false } = {}) {
+    let tail;
+    try { tail = sideTail(sidePath(adapterId, convId), SIDE_READ_BYTES, { strict }); } catch (e) { if (strict) throw e; return { lines: [], cut: false }; }
+    if (!tail) return { lines: [], cut: false };
+    const out = [];
+    for (const line of tail.text.split('\n')) { if (!line) continue; try { out.push(JSON.parse(line)); } catch { } }
+    return { lines: out, cut: !!tail.cut };
+  }
+  function sideLines(adapterId, convId, opts = {}) { return sideWindow(adapterId, convId, opts).lines; }
+  function sideDedupSet(adapterId, convId) {
+    const k = `${adapterId}/${convId}`;
+    let s = sideDedup.get(k);
+    if (s) return s;
+    s = new Set();
+    for (const r of sideLines(adapterId, convId, { strict: true })) s.add(sideKey(r));
+    sideDedup.set(k, s);
+    return s;
+  }
+  /**
+   * APPEND side records (each already `validateSide`d by the caller), dropping the ones the side log holds
+   * (`sideKey` — a vendor's redelivered event is a no-op). The set remembers only AFTER the bytes are durable
+   * (invariant 2's r2) and is DROPPED when the write throws (r4). → `{appended, duplicates, msgs}`.
+   */
+  function appendSide(adapterId, convId, sides) {
+    const list = Array.isArray(sides) ? sides : [];
+    const set = sideDedupSet(adapterId, convId);
+    const inBatch = new Set();
+    const fresh = [];
+    let duplicates = 0;
+    for (const x of list) {
+      if (!x || typeof x !== 'object' || !x.msg) continue;
+      const k = sideKey(x);
+      if (set.has(k) || inBatch.has(k)) { duplicates++; continue; }
+      inBatch.add(k);
+      fresh.push(x);
+    }
+    if (!fresh.length) return { appended: 0, duplicates, msgs: [] };
+    const fp = sidePath(adapterId, convId);
+    fs.mkdirSync(path.dirname(fp), { recursive: true });
+    try { appendLines(fp, fresh.map((x) => JSON.stringify(x)).join('\n') + '\n'); }
+    catch (e) { sideDedup.delete(`${adapterId}/${convId}`); throw e; }
+    for (const x of fresh) { set.add(sideKey(x)); if (set.size > SIDE_DEDUP_MAX) { const it = set.values(); for (let i = set.size - SIDE_DEDUP_MAX; i > 0; i--) set.delete(it.next().value); } }
+    const msgs = [...new Set(fresh.map((x) => String(x.msg)))];
+    // GROWTH IS BOUNDED WHERE IT HAPPENS (verify r1): past SIDE_COMPACT_BYTES the log is compacted in place — every
+    // message's lines fold into one snapshot (+ its newest thread stat), whatever storm wrote them. verify r2: a
+    // compaction that failed is re-attempted only SIDE_KEEP_BYTES of appends later (never once per event)
+    let compacted = null;
+    const ck = `${adapterId}/${convId}`;
+    let size = 0;
+    try { size = fs.statSync(fp).size; } catch { size = 0; }
+    const failedAt = sideCompactFailedAt.get(ck);
+    if (size > SIDE_COMPACT_BYTES && !(failedAt !== undefined && size < failedAt + SIDE_KEEP_BYTES)) {
+      try { compacted = trimSide(adapterId, convId, { liveIds: null }); sideCompactFailedAt.delete(ck); }
+      catch (e) { sideCompactFailedAt.set(ck, size); warn(`[channels] side-log compaction of ${ck} failed at ${Math.round(size / 1024)} KiB (retried after ${Math.round(SIDE_KEEP_BYTES / 1024)} KiB more): ${(e && e.message) || e}`); }
+    }
+    wrote(adapterId, convId, { kind: 'side', msgs });
+    return { appended: fresh.length, duplicates, msgs, ...(compacted ? { compacted } : {}) };
+  }
+  /** The newest `maxBytes` of a side log as text (a partial first line dropped) — never the whole file. `strict`: an
+   *  open error other than ENOENT throws (the dedup rebuild's r5 rule); otherwise it reads as no log. */
+  function sideTail(fp, maxBytes, { strict = false } = {}) {
+    let fd;
+    try { fd = fs.openSync(fp, 'r'); } catch (e) { if (strict && e.code !== 'ENOENT') throw e; return null; }
+    try {
+      const size = fs.fstatSync(fd).size;
+      if (size <= maxBytes) { const b = Buffer.allocUnsafe(size); const n = fs.readSync(fd, b, 0, size, 0); return { text: b.toString('utf-8', 0, n), cut: false }; }
+      const b = Buffer.allocUnsafe(maxBytes);
+      const n = fs.readSync(fd, b, 0, maxBytes, size - maxBytes);
+      const t = b.toString('utf-8', 0, n);
+      const nl = t.indexOf('\n');
+      return { text: nl >= 0 ? t.slice(nl + 1) : '', cut: true };
+    } finally { try { fs.closeSync(fd); } catch { } }
+  }
+  /** The `"msg":"<id>"` of a side line, read off its head without parsing the body (the line begins
+   *  `{"k":"rx","msg":` — `validateSide` builds it in that order). Linear: one bounded string match. */
+  const SIDE_HEAD_RE = /^\{"k":"(?:rx|th)","msg":("(?:[^"\\]|\\.){1,1100}")/;
+  /**
+   * The side records naming `msgs` (a Set of vendorIds), in FILE order (append order), at most `limit` — the
+   * newest are kept when there are more. A line naming another message is skipped WITHOUT parsing its body.
+   */
+  function readSide(adapterId, convId, { msgs = null, limit = SIDE_READ_MAX, maxBytes = SIDE_READ_BYTES } = {}) {
+    const tail = sideTail(sidePath(adapterId, convId), Math.max(64 * 1024, Number(maxBytes) || SIDE_READ_BYTES));
+    if (!tail) return [];
+    const text = tail.text;
+    const want = msgs instanceof Set ? msgs : (Array.isArray(msgs) ? new Set(msgs.map(String)) : null);
+    const out = [];
+    for (const line of text.split('\n')) {
+      if (!line) continue;
+      if (want) {
+        const m = SIDE_HEAD_RE.exec(line);
+        if (!m) continue;
+        let id; try { id = JSON.parse(m[1]); } catch { continue; }
+        if (!want.has(id)) continue;
+      }
+      try { out.push(JSON.parse(line)); } catch { }
+    }
+    return out.length > limit ? out.slice(out.length - limit) : out;
+  }
+  /**
+   * THE SIDE LOG'S TRIM (inside `trim()`, and the growth compaction past SIDE_COMPACT_BYTES): the lines of a message
+   * no longer in the message log are DROPPED, and each kept message's lines are COMPACTED by the PURE `compactSide`
+   * (its reactions folded into ONE snapshot, its newest thread stat kept). verify r1 (continued): the OUTPUT is
+   * ordered by each message's LAST line (the most recently changed last — the read window is the file's tail) and
+   * bounded to SIDE_KEEP_BYTES: the least recently changed messages are forgotten (`forgotten`), so a compacted log
+   * never outgrows the read window and the next compaction is SIDE_KEEP_BYTES of appends away. Temp + rename.
+   */
+  function trimSide(adapterId, convId, { liveIds } = {}) {
+    const { lines, cut } = sideWindow(adapterId, convId);
+    if (!lines.length && !cut) return { removed: 0, kept: 0, forgotten: 0 };
+    const byMsg = new Map();
+    const last = new Map();   // message → the index of its newest line (its last change)
+    lines.forEach((x, i) => {
+      if (!x || !x.msg || (liveIds && !liveIds.has(String(x.msg)))) return;
+      const k = String(x.msg);
+      if (!byMsg.has(k)) byMsg.set(k, []);
+      byMsg.get(k).push(x);
+      last.set(k, i);
+    });
+    const order = [...byMsg.keys()].sort((a, b) => last.get(a) - last.get(b));
+    const groups = order.map((k) => compactSide(byMsg.get(k)).map((x) => JSON.stringify(x)));
+    // the newest groups first, until the bound (one group is always kept — a single message's lines are ≤ 8 KiB each)
+    let from = groups.length, bytes = 0;
+    for (let i = groups.length - 1; i >= 0; i--) {
+      const b = groups[i].reduce((n, t) => n + Buffer.byteLength(t) + 1, 0);
+      if (from < groups.length && bytes + b > SIDE_KEEP_BYTES) break;
+      bytes += b; from = i;
+    }
+    const keep = groups.slice(from).flat();
+    // (a file longer than the read window is always rewritten — its head is invisible to every reader: verify r2)
+    if (keep.length === lines.length && from === 0 && !cut) return { removed: 0, kept: keep.length, forgotten: 0 };
+    const fp = sidePath(adapterId, convId);
+    const tmp = `${fp}.tmp-${process.pid}`;
+    fs.writeFileSync(tmp, keep.length ? keep.join('\n') + '\n' : '');
+    fs.renameSync(tmp, fp);
+    sideDedup.delete(`${adapterId}/${convId}`);
+    if (from > 0) log.log && log.log(`[channels] ${adapterId}/${convId}: the side log keeps the ${groups.length - from} most recently changed messages' reactions (${Math.round(bytes / 1024)} KiB); ${from} older folds forgotten — a window that shows them reads them again`);
+    return { removed: lines.length - keep.length, kept: keep.length, forgotten: from };
+  }
+  /**
+   * WHICH CONVERSATION HOLDS A MESSAGE (lane channel-threads: Lark's reaction event names the message, never the
+   * chat — vendor fact L10). Reads the account's logs off the event loop with a byte cap, like `search`; parses
+   * only a line whose bytes name the id. → convId | null.
+   */
+  async function locateMessage(adapterId, vendorId, { maxBytes = 64 * 1024 * 1024 } = {}) {
+    const id = String(vendorId || '');
+    if (!id) return null;
+    const needle = `"vendorId":${JSON.stringify(id)}`;
+    const dirA = path.join(msgsDir, safeSeg(adapterId));
+    let names = [];
+    try { names = await fs.promises.readdir(dirA); } catch { return null; }
+    let scanned = 0;
+    for (const n of names) {
+      if (!n.endsWith('.ndjson')) continue;
+      const fp = path.join(dirA, n);
+      let st; try { st = await fs.promises.stat(fp); } catch { continue; }
+      if (scanned + st.size > maxBytes) break;
+      let text; try { text = await fs.promises.readFile(fp, 'utf-8'); } catch { continue; }
+      scanned += st.size;
+      const at = text.indexOf(needle);
+      if (at < 0) continue;
+      const ls = text.lastIndexOf('\n', at) + 1;
+      let le = text.indexOf('\n', at); if (le < 0) le = text.length;
+      try { const r = JSON.parse(text.slice(ls, le)); if (r && String(r.vendorId) === id && r.convId) return String(r.convId); } catch { }
+    }
+    return null;
   }
   /** The oldest stored record of a conversation (the backfill boundary). */
   function oldestRecord(adapterId, convId) {
@@ -732,7 +971,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console } = {})
       for (const line of text.split('\n')) {
         if (!line || !line.toLowerCase().includes(needle)) continue;
         let r; try { r = JSON.parse(line); } catch { continue; }
-        const hay = `${r.text || ''}\n${(r.author && (r.author.name || '')) || ''}\n${(r.attachments || []).map((a) => a && a.name).join(' ')}`.toLowerCase();
+        const hay = `${r.text || ''}\n${(r.author && (r.author.name || '')) || ''}\n${(r.attachments || []).map((a) => (a && a.role !== 'body' ? a.name : '')).join(' ')}`.toLowerCase();
         if (hay.includes(needle)) hits.push(r);
       }
       if (hits.length > limit * 4) { hits.sort((a, b) => cmpRecord(b, a)); hits.length = limit * 2; }
@@ -1013,10 +1252,13 @@ function createChannelStore({ dir, now = () => Date.now(), log = console } = {})
     prependRecords, oldestRecord, search, attachmentGet, attachmentPut, attachmentUsage,
     // R3 (§23): one record by its vendorId (the attachment's owner), the LRU ledger's coalesced flush
     findRecord, lruFlush,
+    // lane channel-threads: the side log (invariant 8) + which conversation holds a message
+    appendSide, readSide, trimSide, sidePath, locateMessage,
   };
 }
 
 module.exports = {
   createChannelStore, writeJsonAtomic, safeSeg,
   RETENTION_DAYS, RETENTION_MAX_RECORDS, RETENTION_FLOOR_DAYS, DEDUP_MAX, TAIL_BYTES, OUTBOX_KEEP, OUTBOX_PRUNABLE, OUTBOX_PRUNE_RANK,
+  SIDE_DEDUP_MAX, SIDE_READ_MAX, SIDE_DIR, SIDE_READ_BYTES, SIDE_COMPACT_BYTES, SIDE_KEEP_BYTES,
 };

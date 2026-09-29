@@ -246,7 +246,7 @@ async function streamInstall(req, res, host, run, doneOf) {
     line(await doneOf(r));
   } catch (e) {
     if (carry) line({ log: carry });
-    line({ error: String(e?.message || e), code: e?.code || 'install_failed', ...(e && e.plan ? { plan: e.plan } : {}) });
+    line({ error: String(e?.message || e), code: e?.code || 'install_failed', ...(e && e.plan ? { plan: e.plan } : {}), ...(e && e.digest ? { digest: e.digest } : {}) });
   } finally { try { res.end(); } catch { /* gone */ } }
 }
 const xpraDone = (r) => {
@@ -254,9 +254,12 @@ const xpraDone = (r) => {
   try { ctx.keeper.facts?.({ fresh: true })?.catch?.(() => { }); } catch { /* the local ladder is re-read on the next list */ }
   return out;
 };
+// verify-r6 I1: the press names the plan it was SHOWN (`planDigest` from GET install-plan) — a plan that changed since
+// is refused plan_changed with the new one, nothing run
+const shownDigest = (req) => (req.body && typeof req.body.planDigest === 'string' && req.body.planDigest ? req.body.planDigest.slice(0, 64) : null);
 router.post('/api/desktop/install-xpra', async (req, res) => {
   const host = hostParam(req, res); if (!host) return;
-  return streamInstall(req, res, host, (o) => ctx.access.installXpra(host, o), xpraDone);
+  return streamInstall(req, res, host, (o) => ctx.access.installXpra(host, { ...o, expectDigest: shownDigest(req) }), xpraDone);
 });
 /** §7.9: after a LibreOffice install the MACHINE's catalog is asked again (its LibreOffice facts re-read at once —
  *  `facts {fresh}`) and the install counts as done only when it now serves the row; otherwise `still-absent` by name
@@ -273,8 +276,8 @@ router.post('/api/desktop/install', async (req, res) => {
   const host = hostParam(req, res); if (!host) return;
   const what = req.body && req.body.what != null && req.body.what !== '' ? String(req.body.what) : 'xpra';
   if (!INSTALL_WHATS.includes(what)) return fail(res, { code: 'bad-request', message: `unknown install ${JSON.stringify(what.slice(0, 40))} — one of ${INSTALL_WHATS.join(', ')}` });
-  if (what === 'xpra') return streamInstall(req, res, host, (o) => ctx.access.installXpra(host, o), xpraDone);
-  return streamInstall(req, res, host, (o) => ctx.access.installPackage(host, { ...o, what }), officeDone(host, what));
+  if (what === 'xpra') return streamInstall(req, res, host, (o) => ctx.access.installXpra(host, { ...o, expectDigest: shownDigest(req) }), xpraDone);
+  return streamInstall(req, res, host, (o) => ctx.access.installPackage(host, { ...o, what, expectDigest: shownDigest(req) }), officeDone(host, what));
 });
 /** §7.9: the open-with verdict for ONE file without launching — the explorer's menu row asks it (answered 200 either way:
  *  it is a question). The file rule first (no machine is asked about a refused path), then the machine's catalog. */

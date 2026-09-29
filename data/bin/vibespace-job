@@ -51,6 +51,7 @@ function printJob(j, tailLines) {
   if (j.context && j.context.payload) console.log('context: ' + j.context.payload);
   if (j.answers && j.answers.length) console.log('answers: ' + JSON.stringify(j.answers[j.answers.length - 1]));
   if (j.logTail) console.log(`log tail:\n${j.logTail.split('\n').map((l) => '  ' + l).join('\n')}`);
+  else if (j.logWithheld) console.log("log tail: (withheld — this job's content was cleared at the user's request)");
   if (j.archived) console.log(`(archived ${j.archivedAt ? new Date(j.archivedAt).toISOString() : ''} — ${j.archivedWhy || 'terminal'}; the record and its log are kept, rm deletes them for good)`);
   if (j.state === 'done' || j.state === 'failed') console.log(`next: vibespace-job logs ${j.id} --tail 200 · vibespace-job rm ${j.id}`);
 }
@@ -207,7 +208,8 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
     case 'logs': {
       const ref = pos[1] || JOBID;
       const r = await call('GET', `/api/agent/jobs/${encodeURIComponent(ref)}?tail=${Number(flags.tail) || 200}`);
-      console.log(r.job.logTail || '(no log)');
+      // a cleared job's log is WITHHELD, not absent — say which
+      console.log(r.job.logTail || (r.job.logWithheld ? "(log withheld — this job's content was cleared at the user's request)" : '(no log)'));
       break;
     }
     case 'stop': case 'start': {
@@ -261,8 +263,9 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       let panel;
       try { panel = JSON.parse(readArg(flags.form)); } catch (e) { console.error('panel JSON parse failed: ' + e.message); process.exit(1); }
       if (flags.timeout) panel.timeoutS = Math.round(dur(flags.timeout) / 1000);
-      await call('POST', `/api/agent/jobs/${encodeURIComponent(ref)}/ask`, { panel });
-      console.log('panel posted — the user sees it now; read replies with: vibespace-job answers ' + ref + ' --wait 100');
+      const posted = await call('POST', `/api/agent/jobs/${encodeURIComponent(ref)}/ask`, { panel });
+      // r6 D-F5: every panel has its own number (it only grows) — an answer names it, so `answers` shows which panel it answered
+      console.log(`panel${Number.isInteger(posted && posted.version) ? ' #' + posted.version : ''} posted — the user sees it now; read replies with: vibespace-job answers ` + ref + ' --wait 100');
       break;
     }
     default:

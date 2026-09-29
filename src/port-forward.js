@@ -248,11 +248,11 @@ class PortForwardManager {
       try {
         const jm = this.getJobs && this.getJobs();
         if (jm && jm.ready) {
-          const owned = new Map(); // port → job name
+          const owned = new Map(); // port → the job (its name to show, its id for a clear to find the page's cached scan)
           for (const j of jm.jobs.values()) {
-            if (j.kind === 'service' && ['up', 'starting', 'awaiting-user'].includes(j.state)) for (const pt of j.ports || []) owned.set(Number(pt), j.name);
+            if (j.kind === 'service' && ['up', 'starting', 'awaiting-user'].includes(j.state)) for (const pt of j.ports || []) owned.set(Number(pt), j);
           }
-          for (const row of ports) if (owned.has(row.port)) row.service = owned.get(row.port);
+          for (const row of ports) if (owned.has(row.port)) { row.service = owned.get(row.port).name; row.serviceJob = owned.get(row.port).id; }
         }
       } catch { }
       const { execFile } = require('child_process');
@@ -593,7 +593,11 @@ class PortForwardManager {
     name = String(name).toLowerCase();
     if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(name)) throw new Error('path name must be lowercase letters/digits/hyphens');
     const clash = this._state.forwards.find((r) => r.id !== id && r.pathMount === name);
-    if (clash) throw new Error(`/svc/${name} is already mounted by ${clash.label || clash.id}`);
+    // the clash is named by WHERE it points, never by its label: a Background Work service's forward is labelled
+    // `service: <the job's name>` and this sentence is toasted into every device's toast history (the For-you
+    // Notifications tab) — "Clear content…" relabels the forward but can never reach a device's history (lane-redact
+    // verify r8, the interpolation census §I)
+    if (clash) throw new Error(`/svc/${name} is already mounted by the forward of ${clash.hostId === LOCAL_ID ? 'this machine' : clash.hostId}:${clash.targetHost ? clash.targetHost + ':' : ''}${clash.remotePort}`);
     rec.pathMount = name;
     // public = shareable WITHOUT VibeSpace login (2.359.0, owner request);
     // DEFAULT stays private — exposure is an explicit act, never a side

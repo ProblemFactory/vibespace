@@ -114,7 +114,7 @@ console.log('§2 replyVerdict');
   ok(unreach.code === 'host_unreachable' && unreach.why === 'Host unreachable — reconnect, then reply', 'unreachable host ⇒ host_unreachable', unreach);
   ok(idle.ok === true && mid.ok === true, 'live idle ⇒ ok; live MID-TURN ⇒ ok too (the session queues it)');
   ok(v(idle, { ...item, sessionKey: 'accounts' }).code === 'no_session' && v(idle, { ...item, sessionKey: 'jobs' }).code === 'no_session' && v(idle, { ...item, jobId: 'j1' }).code === 'job_item', 'accounts/jobs keys ⇒ no_session; a job item ⇒ job_item (those two are HIDDEN, not disabled)');
-  ok(R.REPLY_HIDDEN_CODES.includes('no_session') && R.REPLY_HIDDEN_CODES.includes('job_item') && R.REPLY_HIDDEN_CODES.includes('card_item') && R.REPLY_HIDDEN_CODES.length === 3, 'REPLY_HIDDEN_CODES = exactly the three no-surface codes');
+  ok(R.REPLY_HIDDEN_CODES.includes('no_session') && R.REPLY_HIDDEN_CODES.includes('job_item') && R.REPLY_HIDDEN_CODES.includes('card_item') && R.REPLY_HIDDEN_CODES.includes('exit_ask') && R.REPLY_HIDDEN_CODES.length === 4, 'REPLY_HIDDEN_CODES = exactly the four no-surface codes');
   // lane S1 verify r2 (M1): a helper's permission ask is answered on ITS CARD — a typed reply
   // can never approve it (a control_response on stdin is the only answer), and it used to
   // resolve the item while the helper still waited
@@ -125,6 +125,12 @@ console.log('§2 replyVerdict');
   ok(R.REPLY_HIDDEN_CODES.includes('card_item') && R.CARD_ACTION_TYPES.includes('helper-ask') && R.CARD_ACTION_TYPES.length === 1, 'card_item is HIDDEN (no Reply button drawn) and helper-ask is the one card action kind');
   ok(v(liveChat, { ...item, action: { type: 'open-window', winId: 'w1' } }).ok === true && v(liveChat, { ...item, action: null }).ok === true, 'an item with another action kind (or none) still replies');
   ok(v(liveChat, { ...item, jobId: 'j1', action: { type: 'helper-ask', requestId: 'r' } }).code === 'job_item', 'a job item stays job_item (the earlier rung wins)');
+  // lane-pairing verify-r4 F5: an agent's "run this command on <machine>?" is answered by Allow / Deny on the item — a
+  // typed reply resolved the item and an item leaving 'open' settles the ask as NOT allowed: "yes, allow it" DENIED it
+  const exitItem = { ...item, action: { type: 'exit-run-ask', askId: 'a'.repeat(32), hostId: 'host-dial-mac', machine: 'mac', cmd: 'id' } };
+  const e1 = v(liveChat, exitItem), e2 = v({ ...liveChat, turn: 'running' }, exitItem), e3 = v(null, exitItem);
+  ok(e1.code === 'exit_ask' && e1.why === 'Answer it with Allow or Deny — a typed reply does not answer it' && e2.code === 'exit_ask' && e3.code === 'exit_ask', 'F5: an exit ask ⇒ exit_ask on a live, a mid-turn and a dead session alike (Allow / Deny is the answer, never a typed reply)', [e1, e2, e3]);
+  ok(R.REPLY_HIDDEN_CODES.includes('exit_ask') && R.ANSWER_ACTION_TYPES.includes('exit-run-ask') && R.ANSWER_ACTION_TYPES.length === 1, 'F5: exit_ask is HIDDEN (no Reply button, no option chips) and exit-run-ask is the one answer-by-buttons kind');
 }
 
 // ── §3 the store ──────────────────────────────────────────────────────────
@@ -400,6 +406,21 @@ console.log('§4b POST /api/user-todos/:id/reply on a helper-ask item');
   H.userTodos.stop(); H.userTodos.flush();
 }
 
+// ── §4c (lane-pairing verify-r4 F5) the route: an exit ask is refused by name — nothing written, nothing resolved ──
+console.log('§4c POST /api/user-todos/:id/reply on an exit ask (verify-r4 F5)');
+{
+  const H = harness();
+  const { wrote } = H.addSession('sess-x');
+  let settled = 0;
+  H.userTodos.onStatus(() => { settled++; }); // exit-proxy's one-state hook: an item leaving 'open' settles the ask DENIED
+  const item = H.userTodos.add('claude:sid-sess-x', { origin: 'machines', kind: 'action', urgency: 'high', text: 'Allow "ops" to run a command on mac?', detail: 'id', action: { type: 'exit-run-ask', askId: 'b'.repeat(32), hostId: 'host-dial-mac', machine: 'mac', cmd: 'id' } });
+  const r = H.call(item.id, { text: '可以，允许它运行 (yes, allow it)' });
+  ok(r.status === 409 && r.json.code === 'exit_ask' && /Allow or Deny/.test(r.json.error), 'F5: a typed reply to an exit ask ⇒ 409 exit_ask with the sentence (pre-fix: 200 — the item resolved and the ask was DENIED)', r);
+  ok(wrote.length === 0 && H.rec.feed.length === 0, 'F5: nothing reached the agent (it was not a message to it)', wrote.length);
+  ok(H.userTodos.get(item.id).status === 'open' && settled === 0, 'F5: the item stays OPEN — no status move, so the ask is NOT settled (Allow / Deny still answer it)', { status: H.userTodos.get(item.id).status, settled });
+  H.userTodos.stop(); H.userTodos.flush();
+}
+
 // ── §6 NEGATIVE CONTROL ──────────────────────────────────────────────────────
 console.log('§6 negative control');
 {
@@ -433,6 +454,20 @@ console.log('§6b negative control: replyVerdict without the card_item rung');
   const v = Mut.replyVerdict({ item: helperItem, session: { live: true, mode: 'chat', remoteState: null } });
   ok(v.ok === true, '§6b CONTROL: without the rung a helper-ask item is offered a typed reply (the F3 symptom: the item resolved, the helper still waiting) — the §2/§4b legs can go red', v);
   for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§6b ' })) ok(row.pass, row.name, row.detail);
+}
+
+// ── §6c negative control (verify-r4 F5): the PURE verdict without its exit_ask rung ──
+console.log('§6c negative control: replyVerdict without the exit_ask rung');
+{
+  const rel = 'src/inbox-reply.js';
+  const src = read(rel);
+  const needle = "  if (it.action && typeof it.action === 'object' && ANSWER_ACTION_TYPES.includes(it.action.type)) return no('exit_ask');\n";
+  ok(src.includes(needle), '§6c control needle exists');
+  const MUT = mutantCopies('inbox-reply-exit', REPO);
+  const Mut = MUT.load(rel, src.replace(needle, ''), 'no-exit-ask');
+  const v = Mut.replyVerdict({ item: { id: 'ut-aaaaaaaaaa', sessionKey: 'claude:sid', text: 'q', action: { type: 'exit-run-ask', askId: 'c'.repeat(32) } }, session: { live: true, mode: 'chat', remoteState: null } });
+  ok(v.ok === true, '§6c CONTROL: without the rung an exit ask is offered a typed reply (the F5 symptom: "yes" resolved the item and DENIED the command) — the §2/§4c legs go red', v);
+  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§6c ' })) ok(row.pass, row.name, row.detail);
 }
 
 // ── §7 chunk 4: setStatusMany + POST /api/user-todos/resolve-many ─────────────

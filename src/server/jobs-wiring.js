@@ -78,10 +78,15 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     // op) → the caller stashes on a miss. Shared with agent-to-agent
     // messaging via src/server/conversation-deliver.js.
     deliverToConversation: (cid, text, opts) => deliver.deliverToConversation(cid, text, opts),
+    // "Clear content…" (verify r3): the ladder's own stash is a derived copy of a job's words too
+    redactStash: (match, scope) => (deliver && typeof deliver.redactStash === 'function' ? deliver.redactStash(match, scope) : 0),
     // TRIAGE ARCHIVE policy (design §13 rule 5): the two settings rows, read
     // live; an explicit 0 = never archive that class
     archivePolicy: () => ({ doneAfterHours: serverSetting('jobs.archiveDoneAfterHours'), failedAfterDays: serverSetting('jobs.archiveFailedAfterDays') }),
   });
+  // "Clear content…" (verify r4): every entry the ladder stashes is judged by the jobs store at its write — a frame a
+  // wrapper hands back after the clear names a cleared job by id and is held as the sentence (jobs.js judgeHeldEntry)
+  if (deliver && typeof deliver.registerStashJudge === 'function') deliver.registerStashJudge((e) => jm.judgeHeldEntry(e));
 
   const USER = { isUser: true, groups: new Set() };
   const runsOf = (j) => (j.runs || []).map((r) => ({ startedAt: r.startedAt, endedAt: r.endedAt || null, exit: r.exit ?? null, cause: r.cause || null, trigger: r.trigger, lastLine: r.lastLine || '' }));
@@ -183,7 +188,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
         return res.json({ success: true, access: job.access, notify: job.notify || 'inherit' });
       }
       else return res.status(400).json({ error: `unknown action "${act}"` });
-      if (r.error) return res.status(400).json({ error: r.error });
+      if (r.error) return res.status(r.code === 'stale-panel' ? 409 : 400).json({ error: r.error, ...(r.code ? { code: r.code } : {}), ...(Number.isInteger(r.version) ? { version: r.version } : {}) }); // r6 D-F5: a refused answer is named (stale-panel / version-required)
       res.json({ success: true, ...r });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });

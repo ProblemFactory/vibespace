@@ -7,7 +7,10 @@ import { installTabGroupMixin } from './tab-group.js';
 import { windowTypeIcon } from './window-types.js';
 import { createAgentKindIcon, createBackendIcon, createModeBackendIcon, getAgentKindMeta } from './agent-meta.js';
 import { HIDE_REASONS, hiddenReasons } from './view-visibility.js';
+import { placementNote } from './pool-priority-model.js'; // 2026-09-28: which rule placed a pooled conversation, in words (PURE)
 import { chipMode, chipWords, titleMinText, CHIP_MODES } from './title-chips.js'; // THE TITLE WINS (lane G): the billing chip's form per title bar / tab
+import { stageRefusalWords } from './stage-rules.js'; // inc-muly2izg-cks3: the Stage's move refusal in words (PURE)
+import { STAGE_ID } from './stage-manager.js';
 import { displayedPanes, revealTab, pressTab } from './chain-layout.js'; // agent browser P7 (§4.6): a split's displayed panes on a narrow layout // PURE: which hiders hold a window's content off-screen (inc-mu6bfv1t-4drq)
 
 /** Show one of the billing chip's three forms (lane G): a class per form + data-mode. */
@@ -244,6 +247,10 @@ class WindowManager {
     let deskPreviewTarget = null; // desktop preview element we're hovering over
     let deskMiniWin = null; // mini window rect inside the preview
     let deskSavedBounds = null; // window bounds saved before entering desktop preview
+    // inc-muly2izg-cks3: a preview the Stage's rule REFUSES this window (a Stage window over a desktop, a desktop window
+    // over the Stage) — it is marked and the refusal's words ride beside the pointer; a drop there puts the window
+    // back and says why (the preview used to just not light up, the drop did nothing, nobody said anything)
+    let deskRefusal = null, refusedPreview = null, refuseLabel = null, dragFromMax = false, dragFromPrev = null;
     const DRAG_THRESHOLD = 5;
 
     // Shake-to-bypass-snap: vigorously shaking the window for ≥1s during a drag
@@ -306,6 +313,7 @@ class WindowManager {
       mouseDown = true; dragging = false; tabMergeTarget = null;
       startX = x; startY = y;
       dragFrom = typeof this._rectSnap === 'function' ? this._rectSnap(win) : null; // the tab-group mixin's (absent on a bare WindowManager)
+      dragFromMax = !!win.isMaximized; dragFromPrev = win.prevBounds || null; deskRefusal = null; // a refused drop puts it back as it stood
       initL = element.offsetLeft; initT = element.offsetTop;
       shiftDragStart = -1;
       resetShake({ clientX: x, clientY: y });
@@ -316,6 +324,35 @@ class WindowManager {
       beginAt(e.clientX, e.clientY);
       e.preventDefault();
     });
+
+    /** inc-muly2izg-cks3: mark the preview the Stage's rule refuses (`.stage-refuse`) and put the refusal's words beside
+     *  the pointer (`.stage-refuse-label`, a status line); `preview` null = no refusal under the pointer. */
+    const markRefusal = (preview, v = null, e = null) => {
+      if (refusedPreview && refusedPreview !== preview) refusedPreview.classList.remove('stage-refuse');
+      refusedPreview = preview || null;
+      if (!preview) { if (refuseLabel) { refuseLabel.remove(); refuseLabel = null; } return; }
+      preview.classList.add('stage-refuse');
+      const w = stageRefusalWords(v, { t });
+      if (!refuseLabel) {
+        refuseLabel = document.createElement('div');
+        refuseLabel.className = 'stage-refuse-label';
+        refuseLabel.setAttribute('role', 'status');
+        document.body.appendChild(refuseLabel);
+      }
+      refuseLabel.textContent = w ? w.line : '';
+      // the drop won't snap — no snap zone / grid cell promised under a refusal
+      this.snapIndicator.style.display = 'none'; this._clearGridHighlight();
+      if (e) {
+        // beside the pointer, kept INSIDE the viewport: the previews sit on the taskbar (bottom) or the toolbar (top) and
+        // at either end — below / right of the pointer is off-screen there (viewport px measured, layout px written)
+        const r = refuseLabel.getBoundingClientRect(), vw = window.innerWidth, vh = window.innerHeight;
+        let x = e.clientX + 14, y = e.clientY + 18;
+        if (x + r.width > vw - 4) x = e.clientX - 14 - r.width;
+        if (y + r.height > vh - 4) y = e.clientY - 18 - r.height;
+        x = Math.max(4, Math.min(x, vw - 4 - r.width)); y = Math.max(4, y);
+        refuseLabel.style.left = (x / uiScale()) + 'px'; refuseLabel.style.top = (y / uiScale()) + 'px';
+      }
+    };
 
     const processMove = (e) => {
       if (!mouseDown) return;
@@ -457,8 +494,18 @@ class WindowManager {
       // Stage↔desktop drags are blocked BOTH directions: the stage preview is
       // not a drop target, and stage-view windows (placeholder/hero/aux) never
       // drag out to a desktop preview (real report: an escaped placeholder).
-      if (hoverPreview && (hoverPreview.classList.contains('stage-preview')
-        || this._app?.stage?.dragToDesktopBlocked?.(win))) hoverPreview = null;
+      // inc-muly2izg-cks3: the refusal SPEAKS — the preview is marked and the
+      // words ride beside the pointer (PURE stage-rules.js via stage.moveVerdict)
+      let refused = null;
+      if (hoverPreview) {
+        const toStage = hoverPreview.classList.contains('stage-preview');
+        const v = this._app?.stage?.moveVerdict ? this._app.stage.moveVerdict(win, toStage ? STAGE_ID : (hoverPreview.dataset.desktopId || null))
+          : (toStage ? { ok: false, code: 'onto-stage', kind: null } : { ok: true });
+        if (!v.ok) { refused = hoverPreview; deskRefusal = v; }
+        if (!v.ok || v.same || toStage) hoverPreview = null;
+      }
+      if (!refused) deskRefusal = null;
+      markRefusal(refused, deskRefusal, e);
 
       const prevDeskTarget = deskPreviewTarget;
       deskPreviewTarget = hoverPreview || null;
@@ -543,6 +590,7 @@ class WindowManager {
       for (const [, w] of this.windows) w.element.classList.remove('tab-drop-target');
       if (mergeGhost) { mergeGhost.remove(); mergeGhost = null; }
       document.querySelectorAll('.desktop-preview').forEach(p => p.classList.remove('desktop-preview-drop'));
+      markRefusal(null); // the refused preview's mark and the words beside the pointer (inc-muly2izg-cks3)
     };
     // SEAMLESS (round 3 lane B): a drag started from a pointer the app's header bar handed over is fed by POINTER
     // events (the pane cancelled its pointerdown, so the browser sends no compatibility mouse events for that press);
@@ -557,7 +605,20 @@ class WindowManager {
       mouseDown = false;
       if (!dragging) return;
       dragging = false;
+      const refusal = deskRefusal; deskRefusal = null;
       clearDragVisuals();
+
+      // inc-muly2izg-cks3: released over a preview the Stage's rule refuses — the window goes back where the drag began
+      // (never a free drop over the toolbar) and the refusal is SAID; nothing moves between the Stage and a desktop
+      if (refusal) {
+        this._clearGridHighlight(); this.gridOverlay.classList.remove('dragging');
+        if (deskMiniWin) { deskMiniWin.remove(); deskMiniWin = null; }
+        deskPreviewTarget = null; deskSavedBounds = null; tabMergeTarget = null; savedBounds = null;
+        element.style.visibility = ''; element.style.pointerEvents = '';
+        this._putBackAfterRefusedDrop(win, dragFrom, { wasMax: dragFromMax, prev: dragFromPrev });
+        this._app?.desktopManager?.sayStageRefusal?.(refusal);
+        return;
+      }
 
       // Desktop preview drop: if we have a mini window inside a preview, commit the move
       if (deskPreviewTarget && deskMiniWin) {
@@ -696,9 +757,28 @@ class WindowManager {
         element.style.left = b.left; element.style.top = b.top; element.style.width = b.width; element.style.height = b.height; win.isMaximized = b.isMaximized; win.prevBounds = b.prevBounds; win._isSnapped = b.isSnapped;
         if (wasMax !== win.isMaximized && win.onResize) { try { win.onResize(); } catch {} } // a cancel that RE-maximizes says so too
       }
-      tabMergeTarget = null; savedBounds = null; deskPreviewTarget = null; deskSavedBounds = null; shiftDragStart = -1;
+      tabMergeTarget = null; savedBounds = null; deskPreviewTarget = null; deskSavedBounds = null; shiftDragStart = -1; deskRefusal = null;
       return true;
     };
+  }
+
+  /** A drag released over a preview the Stage's rule refuses (inc-muly2izg-cks3): the window goes back exactly where
+   *  the drag began — its rect, grid bounds and snap memory (`from` = the tab-group mixin's _rectSnap at the press),
+   *  re-maximized when it was (the drag's un-maximize applied the pre-maximize size; that size goes back first so the
+   *  re-maximize records it as prevBounds again). */
+  _putBackAfterRefusedDrop(win, from, { wasMax = false, prev = null } = {}) {
+    const el = win.element;
+    if (from) {
+      el.style.left = from.left; el.style.top = from.top; el.style.width = from.width; el.style.height = from.height;
+      win.gridBounds = from.gridBounds ? { ...from.gridBounds } : win.gridBounds;
+      win._isSnapped = !!from.isSnapped; win._preSnapBounds = from.preSnapBounds || null;
+    }
+    if (wasMax && !win.isMaximized) {
+      if (prev) { el.style.left = prev.left; el.style.top = prev.top; el.style.width = prev.width; el.style.height = prev.height; }
+      this.toggleMaximize(win.id);
+    } else if (win.gridBounds && !win.isMaximized) this._applyGridBounds(win);
+    if (win.onResize) { try { win.onResize(); } catch {} }
+    this._scheduleOverlapUpdate(); this._notify();
   }
 
   _snapVal(val, gridLines, threshold) {
@@ -1544,7 +1624,7 @@ class WindowManager {
   // (the CLI's init record) or change across a resume.
   setAuthBadge(id, auth) {
     const win = this.windows.get(id); if (!win) return;
-    const key = auth ? `${auth.source}:${auth.name || ''}:${auth.poolTarget || ''}:${auth.hostName || ''}:${auth.guessed ? 1 : 0}` : '';
+    const key = auth ? `${auth.source}:${auth.name || ''}:${auth.poolTarget || ''}:${auth.hostName || ''}:${auth.guessed ? 1 : 0}:${placementNote(auth, t)}` : '';
     win._authBadge = auth; // kept for re-apply after tab-bar rebuilds
     // No-op guard, but SELF-HEALING: tab-bar re-renders (switch/merge/detach/
     // drag) rebuild the tab DOM and destroy the badge span — with a pure key
@@ -1606,6 +1686,8 @@ class WindowManager {
         words = chipWords({ name: poolName, target: auth.poolTarget || '' });
         const tgt = auth.poolTarget ? escHtml(auth.poolTarget) : '';
         el.innerHTML = glyph(POOL_SVG) + `<span class="wab-name">${escHtml(poolName)}</span>${tgt ? `<span class="wab-pool-tgt"> → ${tgt}</span>` : ''}<span class="wab-short">${escHtml(words.short)}</span>`;
+        const how = placementNote(auth, t); // 2026-09-28: WHICH rule placed it — "全部 → UCI Max (priority #1)" / "(automatic)" / "(pinned)"
+        if (how) words = { ...words, full: `${words.full} (${how})` };
         tip = words.full + ' · ' + t('Pooled account') + (auth.poolTarget ? '' : ' · ' + t('no target')) + (hn ? ' · ' + t('on "{name}"', { name: hn }) : '');
       } else if (isApi) {
         const nm = auth.name || (auth.source === 'api-console' ? 'Console' : 'API');

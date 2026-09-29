@@ -316,7 +316,7 @@ async function ladderCheck(mod) {
   ok('the notice card: "VibeSpace · <what>" escaped, the body through the sanitized markdown renderer, never a peer head',
     /t\('VibeSpace · \{what\}', \{ what \}\)/.test(nb) && /escHtml\(head\)/.test(nb) && /this\.renderMarkdown\(view\.body\)/.test(nb) && !/chat-peer-head|Message from/.test(nb));
   ok('…a folded body sits in a closed <details> "What the assistant was told"; the card keeps the reset-credit button the usage-limit card offers',
-    /view\.folded \? `<details class="chat-vs-notice-told"><summary>\$\{escHtml\(t\('What the assistant was told'\)\)\}<\/summary>/.test(nb) && /this\._appendResetCreditBtn\(el, msg\);/.test(nb) && /this\._appendResetCreditBtn\(el, msg\);/.test(cr.slice(cr.indexOf('  _renderPeerMsg(msg, rawText) {'), cr.indexOf('  _renderAssistantNote(msg, note) {'))));
+    /view\.folded \? `<details class="chat-vs-notice-told"><summary>\$\{escHtml\(view\.foldLabel && view\.foldLabel\.key \? t\(view\.foldLabel\.key, view\.foldLabel\.params \|\| \{\}\) : t\('What the assistant was told'\)\)\}<\/summary>/.test(nb) && /this\._appendResetCreditBtn\(el, msg\);/.test(nb) && /this\._appendResetCreditBtn\(el, msg\);/.test(cr.slice(cr.indexOf('  _renderPeerMsg(msg, rawText) {'), cr.indexOf('  _renderAssistantNote(msg, note) {'))));
   ok('the ladder is the ONE site that adds the head (conversation-deliver), for kind:\'notification\' only', /if \(kind === 'notification'\) text = vibespaceNoticeText\(text\);/.test(read('src/server/conversation-deliver.js')));
   // A CODEX ROLLOUT-ONLY REBUILD (S3 verify r1): the app-server's own copy of a
   // delivered notification carries no webui_peer marker (it WINS over the
@@ -475,7 +475,7 @@ console.log('§4b WHO MAY BE A NOTICE — a peer is never VibeSpace, whatever it
   ok(`CENSUS: ${stashSites.length} stash writers — every one states the entry's kind (a re-stash of a drained entry carries its own)`, stashSites.length >= 8 && stashNoKind.length === 0, stashNoKind.length ? stashNoKind : stashSites);
   // the wrappers write the path into their marker, and echo it on a refusal
   const cw = read('data/bin/codex-chat-wrapper.js'), aw = read('data/bin/acp-wrapper.js');
-  ok('the codex wrapper records the frame\'s kind in its marker and echoes it on every refusal (the re-stash keeps the path)', /webui_peer: \{ name: fromName, body: cardText, kind: peerKind \}/.test(cw) && (cw.match(/emitTaskEvent\('peer_message_result', \{ ok: false[^\n]*\bkind: /g) || []).length === 3);
+  ok('the codex wrapper records the frame\'s kind in its marker and echoes it on every refusal (the re-stash keeps the path)', /webui_peer: \{ name: fromName, body: cardText, kind: peerKind(?:, \.\.\.\(peerGroup \? \{ group: peerGroup \} : \{\}\))? \}/.test(cw) && (cw.match(/emitTaskEvent\('peer_message_result', \{ ok: false[^\n]*\bkind: /g) || []).length === 3);
   ok('…and the ACP wrapper (as `peerKind` — `kind` is its record\'s own type)', /peer: \{ name: fromName, body: cardText, kind: peerKind \}/.test(aw) && (aw.match(/record\('peer_result', \{ ok: false[^\n]*\bpeerKind\b/g) || []).length === 3);
   ok('…the two stdout consumers re-stash with it', /stashFor\?\.\(cid, \{ source: 'agent', kind: msg\.payload\.kind \|\| null,/.test(read('src/server/stdout/codex-events.js')) && /stashFor\?\.\(cid, \{ source: 'agent', kind: msg\.peerKind \|\| null,/.test(read('src/server/stdout/acp-events.js')));
 }

@@ -66,7 +66,13 @@ const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
   // command to a machine on ANOTHER network — this box's hostname is useless
   // there, so a mapped instance URL must win over location.origin too.
   const sm = read('src/lib/sidebar-mounts.js');
-  ok('device-pair installer prefers relay/instance URL over the browser origin', sm.includes('r.relayUrl || getInstanceUrl() || location.origin'));
+  // lane-pairing ① (2026-09-28): the ladder became a CHOICE — the dialog lists every address the server can name (the
+  // instance URL / relay among them, GET /api/device/dial-addresses) and the command is built from the address the
+  // user picked (`r.httpBase`), never from the browser's origin behind their back
+  const fill = sm.slice(sm.indexOf('_fillPairCommandBody(body, close, r'), sm.indexOf('async _showDevicePairDialog('));
+  ok('device-pair installer is built from the CHOSEN address (r.httpBase), never location.origin', /const httpBase = String\(r\.httpBase \|\| ''\)/.test(fill) && !/location\.origin/.test(fill));
+  const mpw = read('src/server/mounts-plugins-wiring.js');
+  ok('…and the relay / instance URL is one of the offered addresses (the instance-url resolver\'s effective URL)', /app\.get\('\/api\/device\/dial-addresses'[\s\S]{0,900}instanceUrl\?\.status\?\.\(\)[\s\S]{0,200}effectiveUrl/.test(mpw));
   // the design row must prefer the server's absolute url over re-joining a path
   const sb = read('src/lib/chat-status-bar.js');
   ok('design row prefers the SERVER-resolved url (it was preferring the relative path)', /const abs = \(p\) => absUrl\(p\.url \|\| p\.path\)/.test(sb), 'abs() shape changed');

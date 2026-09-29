@@ -509,7 +509,10 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     ok(lp && lp.past && lp.sideShare >= 0.95 && lp.statusShown && lp.statusLines <= 2 && lp.statusAbove && lp.cut.length === 0, `⑦c the phone's view of a stopped browser: the Sessions list takes the width (${lp && lp.sideShare}), the status above it on ${lp && lp.statusLines} line(s), no row cut`, lp);
     await p1.shot('07c-zh-phone-live-stopped');
     const ctl7c = await p1.ev(`(() => { const w = [...window.app.wm.windows.values()].find((x) => x.type === 'browser-live'); const root = w.element.querySelector('.browser-live'); root.classList.remove('side-past'); const bb = w.element.querySelector('.browser-live-body').getBoundingClientRect(), sb = w.element.querySelector('.browser-live-side').getBoundingClientRect(); const st = w.element.querySelector('.browser-live-status'); const rg = document.createRange(); rg.selectNodeContents(st); const lines = new Set([...rg.getClientRects()].map((x) => Math.round(x.top))).size; const cut = [...w.element.querySelectorAll('.browser-live-session-text')].filter((e) => e.scrollWidth > e.clientWidth + 1).length; const out = { share: Math.round(sb.width / bb.width * 100) / 100, lines, cut }; root.classList.add('side-past'); return out; })()`);
-    ok(ctl7c.share < 0.95 && (ctl7c.lines > 2 || ctl7c.cut > 0), `CONTROL: without the phone's past layout (the pre-fix picture) the judge fails it — the pane ${ctl7c.share} of the width, the status on ${ctl7c.lines} lines, ${ctl7c.cut} row(s) cut`);
+    // the .196 mirror (2026-09-28): under the runner's font the squeezed status wrapped to 2 lines, not 3 — the control
+    // judges the CHANGE the fix makes (the list narrowed to a column, the status on MORE lines than the fixed layout or a
+    // row cut), never a line count that belongs to one font
+    ok(ctl7c.share < 0.95 && (ctl7c.lines > (lp && lp.statusLines || 1) || ctl7c.cut > 0), `CONTROL: without the phone's past layout (the pre-fix picture) the judge fails it — the pane ${ctl7c.share} of the width, the status on ${ctl7c.lines} lines (fixed: ${lp && lp.statusLines}), ${ctl7c.cut} row(s) cut`);
     await api('POST', '/api/browser/detach', { sessionId: SID, profile: 'work' });
 
     // ═══ ⑨ no sessions / the trace off ═══

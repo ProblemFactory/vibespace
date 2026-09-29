@@ -55,7 +55,7 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
 // hot=off → also ask ONE connected client to cold-restart the affected
 // conversations (headless instances degrade to hot behavior until a client
 // appears — the switch itself never waits on a browser).
-const { decidePoolSwitch, rankPoolMembers, poolBlockedNotice, poolCreditsNotice, conversationDisplayName, bucketRemaining, warmCache, conversationInTurn, projectCacheAhead, projectionCrossing, PROJECTION_LEAD_SEC, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
+const { decidePoolSwitch, decidePinnedPlacement, soonestUsableMember, rankPoolMembers, poolBlockedNotice, poolCreditsNotice, conversationDisplayName, bucketRemaining, warmCache, conversationInTurn, projectCacheAhead, projectionCrossing, PROJECTION_LEAD_SEC, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
 const arSignal = require('../auto-resume-signal.js'); // PURE: the limit LANE a snapshot is about + the fresh-window edge
 const resetCredit = require('../reset-credit.js'); // PURE: is a stored reset credit worth spending at THIS wall, at THIS rung (design-reset-credits §4)
 const { feedPeerCard } = require('../normalizers'); // the rebuild-gated chat-card writer (the wall card that names the credits)
@@ -346,6 +346,7 @@ async function pushSealedOrders(poolId) {
     // login deadline never enter the snapshot.
     readLogin: poolReadLogin(),
     creditsIds: creditsMemberIds(members), // usage-credits members walk LAST (B-ad05)
+    priority: poolPriorityOf(a), // the owner's manual order walks first (2026-09-28)
   }).map((m) => ({ id: m.id, dir: accounts.subDir(m.id), creds: accounts.subCredsPath(m.id) }));
   const orders = { poolId, linkPath: accounts.subDir(poolId), ranked, currentId: accounts.poolCurrent(poolId) || null,
     // Plan C: per-session links are additional MATCH+ACT targets — the daemon
@@ -563,22 +564,41 @@ function creditsMemberIds(members) {
 function noteCreditsParking(poolId, memberId, sentence, now) {
   serverNotice(`pool-credits-${poolId}-${memberId}-${Math.floor(now / (6 * 3600e3))}`, sentence, { level: 'warn' });
 }
-function poolChooserForModel(poolId, { model } = {}) {
+function poolChooserForModel(poolId, { model, pin = null } = {}) {
   try {
     const a = accounts.get(poolId);
     if (!a || a.type !== 'pooled') return null;
     const fam = familyOfModel(model);
     const cur = accounts.poolCurrent(poolId);
-    if (!fam) return cur; // no identity → the pool's default target
     const base = poolReadCache(poolId);
-    const readCache = (id) => projectCacheForFamily(base(id), fam);
+    const readCache = (id) => projectCacheForFamily(base(id), fam); // (a null family projects nothing — every bucket counts)
+    // THE CONVERSATION'S PIN (2026-09-28): a resumed pinned conversation starts on its pin when
+    // the pin can serve (the owner's choice, explicit — no warm or settle bar at a spawn); a pin
+    // that cannot serve starts it where the automatic rules would (the pin kept on the session)
+    if (pin) {
+      const pm = healthyPoolMembers(poolId);
+      const dp = decidePinnedPlacement({ explicit: true, pin, currentId: cur, members: pm, readCache, nowSec: Date.now() / 1000, hot: true, readLogin: poolReadLogin(), membership: poolMembershipOf(poolId), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(pm), creditsIds: creditsMemberIds(pm) });
+      if (dp && dp.reason === 'pin') return pin;
+      if (dp && dp.to) return dp.to;
+      return cur;
+    }
+    // (a default that names a member the pool NO LONGER LISTS — a boot before the first stale-link
+    // sweep, a narrowing made while nobody else was signed in — is no place to START a conversation:
+    // the membership fact reaches this verdict too, verify r1)
+    const membership = poolMembershipOf(poolId);
+    const staleDefault = !!cur && Array.isArray(membership) && membership.length > 0 && !membership.includes(cur);
+    if (!fam && !staleDefault) return cur; // no identity → the pool's default target
     // decidePoolSwitch FROM the default target under the projected view: if
     // the default serves this family, stay (fewest distinct billing dirs);
     // if it doesn't, the switch verdict IS the placement.
     const { decidePoolSwitch } = require('../account-pool-auto.js');
     const mem = healthyPoolMembers(poolId);
-    const d = decidePoolSwitch({ currentId: cur, members: mem, readCache, nowSec: Date.now() / 1000, hot: true, readLogin: poolReadLogin(), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsMemberIds(mem) });
-    return (d && d.to) || cur;
+    const d = decidePoolSwitch({ currentId: cur, members: mem, readCache, nowSec: Date.now() / 1000, hot: true, readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsMemberIds(mem) });
+    // (nobody can serve a conversation started here AND the default names a removed member — a boot before the
+    // first sweep: the engine's fallback, a member the pool lists, verify r2)
+    // …and 全B: the verdict's own parking member when nobody can serve (`holdTo`) — a new conversation meets that
+    // member's wall; with nobody signed in at all the store refuses the placement by name
+    return (d && d.to) || (staleDefault ? ((d && d.holdTo) || fallbackDefaultTarget(poolId, cur) || null) : cur);
   } catch (e) { console.warn('[pool] chooser failed (falling back to default target):', e.message); return null; }
 }
 // ── THE SESSION'S MODEL FACTS, one implementation for both stdout feeds ─────
@@ -3384,7 +3404,7 @@ function poolAlternativeFor(session, now = Date.now()) {
     // and spend a credit the switch rung did not need.
     const rc = poolReadCache(poolId);
     const readCache = (id) => (id === currentId ? { fetchedAt: now, sevenDay: { utilization: 1, resetsAt: 0 } } : rc(id));
-    const d = decidePoolSwitch({ currentId, members, readCache, nowSec: now / 1000, proactive: false, hot, pessimism: darkTaintedAccounts(), exclude: [...sessionWalledMembers(sid, now)], readLogin: poolReadLogin(), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), explain: true });
+    const d = decidePoolSwitch({ currentId, members, readCache, nowSec: now / 1000, proactive: false, hot, pessimism: darkTaintedAccounts(), exclude: [...sessionWalledMembers(sid, now)], readLogin: poolReadLogin(), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), explain: true });
     return !!(d && d.to && !d.toCredits);
   } catch { return null; }
 }
@@ -3539,9 +3559,17 @@ function resetCreditPreview(key, { preferSessionId = null, now = Date.now() } = 
 }
 /** THE MANUAL USE: one verb through the same writer as the auto rung. →
  *  {ok:true, sessionId, preview} | {ok:false, code, error, preview} */
-function consumeResetCreditFor(key, { preferSessionId = null, now = Date.now() } = {}) {
+function consumeResetCreditFor(key, { preferSessionId = null, now = Date.now(), expect = null } = {}) {
   const p = resetCreditPreview(key, { preferSessionId, now });
   if (p.code) return { ok: false, code: p.code, error: p.error, preview: p };
+  // verify-r6 R1 ("what you approve is what runs"): the dialog showed THIS window — its reset instant, what the credit
+  // discards, the wait it saves. A window that reset (or moved) while the dialog stayed open would spend the credit on
+  // a FRESH window ("0% discarded" shown; the whole fresh window discarded in fact): refused by name, nothing spent. A
+  // caller that names no window (an older client) keeps the pre-r6 behaviour
+  if (expect && typeof expect === 'object' && expect.resetsAtSec != null) {
+    const shown = Number(expect.resetsAtSec);
+    if (!Number.isFinite(shown) || Number(p.resetsAtSec) !== shown || now >= shown * 1000) return { ok: false, code: 'preview_changed', error: 'the limit window this dialog showed has reset (or moved) since it opened — nothing was spent; open it again to see the account now', preview: p };
+  }
   const session = activeSessions.get(p.sessionId);
   if (!session) return { ok: false, code: 'no_live_session', error: 'the session ended', preview: p };
   const wr = writeResetCredit(session, { resetsAtSec: p.resetsAtSec || 0, lane: null, origin: 'user', now, key: p.key });
@@ -4344,19 +4372,46 @@ function onMemberReadingFresh(memberId, why = 'reading', { at = Date.now() } = {
  *  already hold (a polled route may not carry an unbounded side effect), and
  *  this floor is the belt.
  *
- *  The wake runs even when the read did NOT answer: a login landing is itself
- *  new information about the roster, and half ① costs local file reads. */
+ *  THE RE-CHECK (owner 2026-09-29, "账号登录成功后，池会立刻重新决策一次并读一次用量";
+ *  wired from server.js the same day — the routes had asked for it since
+ *  2026-09-08 and server.js never passed it, so it was dead in production) =
+ *  exactly ONE usage read + exactly ONE re-decision of every pool the member
+ *  belongs to, journalled as `member wake <name> (login)`:
+ *   - a member OUTSIDE EVERY POOL triggers nothing (no read, no decision) —
+ *     there is no pool for the reading to inform;
+ *   - the read answered ⇒ the wake re-decides on it (half ①) and continues
+ *     only what nothing could move (half ②), exactly as for any fresh reading;
+ *   - the read did NOT answer (no reading / a stale one) ⇒ the pools are still
+ *     re-decided ONCE, forced like the wake's own half ① (a login landing is
+ *     itself new information about the roster, and it costs local file reads)
+ *     — and half ② sends no continue: "no reading" is never a verdict;
+ *   - a reading whose window is another member's ⇒ nothing is decided on it
+ *     (a wake may only decline on foreign numbers; the pool's own timer runs);
+ *   - another producer woke this member a moment ago (`wake-floor`) ⇒ its
+ *     re-decision was this one;
+ *   - a second login inside LOGIN_READ_FLOOR_MS ⇒ nothing (no second read).
+ *  A login that fails never reaches here: the routes wake only on a captured
+ *  login. */
 async function onMemberLoginSuccess(memberId, why = 'login success') {
   if (!memberId || typeof memberId !== 'string') return { ok: false, reason: 'no-member', wake: null };
+  if (!memberPoolsOf(memberId).length) return { ok: false, reason: 'not-in-pool', wake: null };
   const now = Date.now();
   if (now - (_loginReadAt.get(memberId) || 0) < LOGIN_READ_FLOOR_MS) return { ok: false, reason: 'login-read-floor', wake: null };
   _loginReadAt.set(memberId, now);
   if (_loginReadAt.size > 512) _loginReadAt.delete(_loginReadAt.keys().next().value);
   let probe = null;
   try { probe = await probeQuotaForKey(memberId); } catch (e) { probe = { ok: false, reason: e.message }; }
-  if (!probe || !probe.ok) console.log(`[pool] ${nameOf(memberId)}: login succeeded but the usage read did not answer (${probe?.reason || 'unknown'}) — re-examining the pool anyway`);
-  const wake = onMemberReadingFresh(memberId, why, {});
-  return { ok: !!(probe && probe.ok), probe, wake };
+  if (!probe || !probe.ok) console.log(`[pool] ${nameOf(memberId)}: login succeeded (${why}) but the usage read did not answer (${probe?.reason || 'unknown'}) — re-deciding the pool anyway`);
+  const wake = onMemberReadingFresh(memberId, 'login', {});
+  if (wake && !wake.acted && (wake.reason === 'no-reading' || wake.reason === 'stale-reading')) {
+    for (const p of memberPoolsOf(memberId)) {
+      wake.pools.push(p.id);
+      try { maybePoolAutoSwitchForPool(p.id, { force: true }); } catch (e) { console.warn(`[pool] login re-decide ${p.id} failed:`, e.message); }
+    }
+    wake.redecided = true;
+    console.log(`[pool] member wake ${nameOf(memberId)} (login): re-decided ${wake.pools.length} pool(s) without a reading (${wake.reason}) — no continue is sent on its behalf`);
+  }
+  return { ok: !!(probe && probe.ok), probe, wake, why };
 }
 
 /** THE SHARED ATTEMPT CLOCK. The auto-cli loop and the login edge spawn the
@@ -4476,6 +4531,9 @@ function armWorkflowUsageWatcher(session, sessionId, runId) {
 // own transcripts (self-throttled), the decision reads cache files; no
 // network anywhere.
 setInterval(async () => {
+  // THE STALE-LINK SWEEP first, for EVERY pool (2026-09-28): a member the pool no
+  // longer lists stops serving on this tick whatever the placement mode
+  try { sweepNonMemberLinks(); } catch { }
   try {
     const pools = (accounts.list().accounts || []).filter((a) => a.type === 'pooled' && a.auto);
     if (!pools.length) return;
@@ -4586,7 +4644,7 @@ function notePoolAuthFailure(session, sid, info = {}) {
         `Pool "${a.name}": account ${memberName} ${loginDead ? why : `is failing authentication (${why})`} and no other member can take over — re-login or replace it in Manage Agents.`, { level: 'warn' });
       return;
     }
-    const ranked = rankPoolMembers({ members: alive, readCache: poolReadCache(poolId), nowSec: now / 1000, readLogin: poolReadLogin(), creditsIds: creditsMemberIds(alive) });
+    const ranked = rankPoolMembers({ members: alive, readCache: poolReadCache(poolId), nowSec: now / 1000, readLogin: poolReadLogin(), creditsIds: creditsMemberIds(alive), priority: poolPriorityOf(a) });
     const to = (ranked[0] && ranked[0].id) || alive[0].id;
     const toName = accounts.get(to)?.name || to;
     const hasOwnLink = (() => { try { fs.lstatSync(accounts.sessionPoolLinkPath(poolId, sid)); return true; } catch { return false; } })();
@@ -4625,6 +4683,466 @@ function notePoolAuthFailure(session, sid, info = {}) {
 function hasOwnPoolLink(poolId, sid) {
   try { fs.lstatSync(accounts.sessionPoolLinkPath(poolId, sid)); return true; } catch { return false; }
 }
+
+// ── A MEMBER REMOVED FROM THE POOL STOPS SERVING AT ONCE (2026-09-28, owner:
+// "如果用到一半把账号从池里排除，不会第一时间触发切走，比如现在我把martinmax排除池子了你却还在用").
+// Production, read-only: the owner removed Martin Max from the pool's members at
+// 16:56 and six conversations kept billing it — their per-session links still
+// pointed there and nothing moved them. Two causes, one fact: the STORE
+// (updatePool) re-pointed only the pool DEFAULT, to `list[0]` (not a decision),
+// never a per-session link; and the VERDICT judged the current member by its
+// cache alone — membership was never a fact, `exclude` only removes candidates —
+// so a removed member with quota left read "healthy" and served until spent.
+// MEMBERSHIP IS A PLACEMENT FACT JUDGED BY THE VERDICT (decidePoolSwitch
+// `membership` ⇒ 'not-a-member', a HARD wall: moves now, warm or mid-turn),
+// never a candidate filter. ONE entry point acts on it, `memberRemoved`, called
+// by the members route (the Members… dialog AND the member's own "Exclude from
+// pool" action both PATCH it) and by the stale-link sweep every pool tick runs
+// first (a removal made while the server was down, an old link): the default
+// by DECISION, each linked conversation re-pointed through the ONE link writer
+// (`ensureSessionPoolLink`, attributed to the slot like every re-point), a cold
+// pool — or a process that HOLDS its member (codex) — restarted through the ONE
+// restart sender. It starts no turn: nothing here fires or sends input.
+const REMOVED_KEY = i18nKey('Pool "{pool}": {member} was removed from the pool — conversation "{title}" moved to {target}.');
+const REMOVED_KEY_COLD = i18nKey('Pool "{pool}": {member} was removed from the pool — conversation "{title}" moved to {target}. Restarting the conversation to apply it.');
+const _removedSaidAt = new Map(); // `${poolId}:${sid}:${member}` → last journal line for a conversation that could not move yet (one per 10 min)
+function poolMembershipOf(poolId) { try { const m = accounts.poolMembership(poolId); return Array.isArray(m) ? m : null; } catch { return null; } }
+/** THE POOL'S MANUAL PRIORITY (2026-09-28): the owner's ordered member list, or
+ *  null = automatic. Every decision site hands it to the verdict (the per-session
+ *  pass, the default, the spawn chooser, the removal and the credit's alternative)
+ *  and the sealed-orders snapshot is ranked by it — ONE reader, no second order. */
+function poolPriorityOf(a) { return a && Array.isArray(a.priority) && a.priority.length ? a.priority : null; }
+/** THE words a conversation moved off a removed member is told (the per-session
+ *  pass says the same when IT is the one that sees the removal first). */
+function removedMemberNotice(poolId, sid, s, fromId, toId, cold) {
+  const params = { pool: accounts.get(poolId)?.name || poolId, member: nameOf(fromId), title: convName(s, sid), target: nameOf(toId) };
+  const text = `Pool "${params.pool}": ${params.member} was removed from the pool — conversation "${params.title}" moved to ${params.target}.${cold ? ' Restarting the conversation to apply it.' : ''}`;
+  serverNotice(`pool-removed-${poolId}-${sid}-${fromId}`, text, { level: 1, i18n: { key: cold ? REMOVED_KEY_COLD : REMOVED_KEY, params } });
+}
+const PRIORITY_RETURN_KEY = i18nKey('Pool "{pool}": conversation "{title}" is back on {target} (priority #{rank}).');
+const PRIORITY_RETURN_KEY_COLD = i18nKey('Pool "{pool}": conversation "{title}" is back on {target} (priority #{rank}). Restarting the conversation to apply it.');
+/** THE words a conversation returned to a higher-priority member is told. */
+function priorityReturnNotice(poolId, sid, s, d, cold) {
+  const params = { pool: accounts.get(poolId)?.name || poolId, title: convName(s, sid), target: d.toName || nameOf(d.to), rank: d.priorityRank ?? '?' };
+  const text = `Pool "${params.pool}": conversation "${params.title}" is back on ${params.target} (priority #${params.rank}).${cold ? ' Restarting the conversation to apply it.' : ''}`;
+  serverNotice(`pool-prio-${poolId}-${sid}-${Date.now()}`, text, { level: 1, i18n: { key: cold ? PRIORITY_RETURN_KEY_COLD : PRIORITY_RETURN_KEY, params } });
+}
+// ── THE CONVERSATION'S PIN (2026-09-28, owner: "你可以加一个手动overwrite这个会话的池对象选择功能，
+// 变成池的子菜单，直接选池本身就是自动切换，如果在子菜单里选"自动"也是自动切换，但如果选择某个具体账号，那在这个
+// 账号耗尽之前就pin在这个账号下，刷新后也优先切到这个账号"). PRECEDENCE — conversation pin > pool
+// priority order > automatic. The rule is PURE (account-pool-auto decidePinnedPlacement); here:
+// the ONE writer (`setConversationPin`, behind POST /api/accounts/:poolId/pin), the reader the
+// per-session pass and the spawn chooser ask (`poolPinOf`) and the words. A pin never starts a
+// turn: setting one re-points at most a link; the per-session pass returns a conversation to its
+// pin at its first stop through the same act block as every per-session move.
+const PIN_KEYS = {
+  pinned: i18nKey('Pool "{pool}": conversation "{title}" pinned to {member}.'),
+  'pinned-later': i18nKey('Pool "{pool}": conversation "{title}" pinned to {member} — it moves there at its next restart.'),
+  'pinned-waiting': i18nKey('Pool "{pool}": conversation "{title}" pinned to {member} — {member} cannot serve right now; it moves there when it can.'),
+  unpinned: i18nKey('Pool "{pool}": conversation "{title}" is placed automatically again.'),
+  back: i18nKey('Pool "{pool}": conversation "{title}" is back on {member} (pinned).'),
+  'pin-exhausted': i18nKey('Pool "{pool}": conversation "{title}" — {member} is out of quota — running on {target} until it resets (pin kept).'),
+  'pin-recovering': i18nKey('Pool "{pool}": conversation "{title}" — {member} has not got enough quota back yet — running on {target} for now (pin kept).'), // verify r2: over its hard bar, not yet settled — never "out of quota"
+  'pin-login-dead': i18nKey('Pool "{pool}": conversation "{title}" — {member} cannot sign in — running on {target} until it is signed in again (pin kept).'),
+  'pin-member-unknown': i18nKey('Pool "{pool}": conversation "{title}" — {member} is not usable in the pool right now — running on {target} (pin kept).'),
+  'pin-member-excluded': i18nKey('Pool "{pool}": conversation "{title}" — {member} just refused this conversation — running on {target} for now (pin kept).'),
+};
+const PIN_RESTART_KEY = i18nKey('Restarting the conversation to apply it.');
+function poolPinOf(session, poolId = null) {
+  const p = session && session._poolPin;
+  if (!p || typeof p !== 'object' || typeof p.memberId !== 'string' || !p.memberId) return null;
+  if (poolId && session._accountId !== poolId) return null;
+  return p;
+}
+function pinNotice(poolId, sid, s, kind, { member = null, target = null } = {}, cold = false) {
+  const key = PIN_KEYS[kind] || PIN_KEYS['pin-member-unknown'];
+  const params = { pool: accounts.get(poolId)?.name || poolId, title: convName(s, sid), member: nameOf(member), target: nameOf(target) };
+  const fill = (tpl) => tpl.replace(/\{(\w+)\}/g, (m, x) => (params[x] !== undefined ? String(params[x]) : m));
+  const restart = cold && (kind === 'back' || String(kind).startsWith('pin-'));
+  serverNotice(`pool-pin-${poolId}-${sid}-${kind}-${Date.now()}`, fill(key) + (restart ? ' Restarting the conversation to apply it.' : ''),
+    { level: 1, i18n: { key, params, ...(restart ? { then: { key: PIN_RESTART_KEY } } : {}) } });
+}
+/** Persist the pin into the session's meta (a restart restores it at the three boot-restore
+ *  sites). Spread what is on disk, re-list only what changed (the persistFallbackStamp idiom). */
+function persistPoolPin(session) {
+  try {
+    if (!session || !session.sockName) return;
+    const prev = sessionMetaStore.readSessionMeta?.(session.sockName);
+    if (prev === undefined || prev === null || typeof prev !== 'object') return; // not wired / no meta — memory only (never create one here)
+    sessionMetaStore.writeSessionMeta?.(session.sockName, { ...prev, poolPin: session._poolPin || null });
+  } catch (e) { console.warn('[pool] pin not persisted:', e.message); }
+}
+/** THE ONE WRITER of a conversation's pin. `memberId` = a member of the conversation's pool, or
+ *  null = automatic ("自动", or the pool row itself). Returns {ok, pinned, placed, reason, code?,
+ *  current} | {ok:false, code, status, error}. A pool that can re-point a running conversation
+ *  (hot + verified + its own link) places it NOW (mid-turn included — a manual choice is never
+ *  held) unless the pinned member cannot serve (then it waits, the pin kept); any other pool
+ *  records it and it applies at the next restart/resume (never a restart by itself). Clearing
+ *  moves nothing: automatic placement resumes from wherever the conversation is. */
+function setConversationPin(sid, memberId, { by = 'user', now = Date.now() } = {}) {
+  const s = sid ? activeSessions.get(sid) : null;
+  if (!s) return { ok: false, status: 404, code: 'no_session', error: 'no live session with that id' };
+  const poolId = s._accountId || null;
+  const a = poolId ? accounts.get(poolId) : null;
+  if (!a || a.type !== 'pooled') return { ok: false, status: 400, code: 'not_pooled', error: 'this conversation does not bill a pooled account' };
+  if (s.host) return { ok: false, status: 400, code: 'remote_session', error: 'pooled accounts are local-only — a remote conversation cannot be pinned' };
+  const membership = poolMembershipOf(poolId) || [];
+  if (memberId != null && (typeof memberId !== 'string' || !membership.includes(memberId))) return { ok: false, status: 400, code: 'not_member', error: 'not a member of this pool: ' + String(memberId) };
+  s._poolPin = memberId ? { memberId, at: now, by } : null;
+  persistPoolPin(s);
+  const caps = capsOf(a.backend);
+  const own = hasOwnPoolLink(poolId, sid);
+  let current = null; try { current = own ? accounts.poolCurrentFor(poolId, sid) : (heldPoolMemberFor(s, poolId) || accounts.poolCurrent(poolId)); } catch { }
+  const out = { ok: true, pinned: s._poolPin, placed: false, reason: null, code: null, current };
+  if (!memberId) {
+    out.reason = 'automatic';
+    console.log(`[pool] pin ${poolId}/${sid}: cleared — placed automatically again (from ${current || '?'})`);
+    pinNotice(poolId, sid, s, 'unpinned');
+    return out;
+  }
+  const hotNow = !!a.hot && caps.hotSwitch === 'verified' && !!caps.planC && own;
+  if (!hotNow) {
+    out.reason = 'applies-at-restart';
+    out.code = caps.hotSwitch !== 'verified' ? 'codex_cold' : !a.hot ? 'cold_pool' : 'no_own_link'; // no_own_link = a legacy follower of the pool default (its CLI reads the pool's own link)
+    out.placed = current === memberId;
+    console.log(`[pool] pin ${poolId}/${sid}: → ${memberId} (${out.placed ? 'already there' : 'applies at the next restart'} — ${out.code})`);
+    pinNotice(poolId, sid, s, out.placed ? 'pinned' : 'pinned-later', { member: memberId });
+    return out;
+  }
+  const members = switchCandidates(poolId);
+  const base = poolReadCache(poolId);
+  const fam = projectionFamilyFor(s, sessionModelFor(s));
+  const readCache = (id) => projectCacheForFamily(base(id), fam);
+  const d = decidePinnedPlacement({ explicit: true, pin: memberId, currentId: current, members, readCache, nowSec: now / 1000, proactive: false, hot: true, pessimism: darkTaintedAccounts(), exclude: [...sessionWalledMembers(sid, now)], readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members) });
+  if (d && d.reason === 'pin' && d.to) {
+    try {
+      accounts.ensureSessionPoolLink(poolId, sid, d.to, { why: 'pin' });
+      _poolSwitchAt.set(poolId + ':' + sid, now);
+      for (const k of [poolId + ':' + sid, poolId + ':' + sid + ':soft', poolId + ':' + sid + ':prio', poolId + ':' + sid + ':pin']) _warmHoldLogAt.delete(k);
+      try { recordUsageAttribution({ claudeSessionId: s.claudeSessionId || s.backendSessionId, accountId: poolId }); } catch { }
+      out.placed = true; out.reason = 'pin'; out.current = d.to;
+    } catch (e) { out.reason = 'repoint-failed'; console.warn(`[pool] pin ${poolId}/${sid}: re-point failed:`, e.message); }
+  } else if (d && d.reason === 'pin') { out.placed = true; out.reason = 'pin'; }
+  else { out.reason = (d && d.pinWhy) || 'pin-exhausted'; }
+  console.log(`[pool] pin ${poolId}/${sid}: → ${memberId} (${out.placed ? `placed${current !== out.current ? `, from ${current || '?'}` : ', already there'}` : `waits — ${out.reason}`})`);
+  pinNotice(poolId, sid, s, out.placed ? 'pinned' : 'pinned-waiting', { member: memberId });
+  return out;
+}
+/** Can `memberId` serve THIS conversation (or, `session` null, the pool as a whole) right now —
+ *  the pin's own explicit verdict: a member of the pool, a login that can serve a turn, no bucket
+ *  of the conversation's family view under its hard bar, not a member that just refused it.
+ *  ONE judging site (gatherPlan and the held branch of memberRemoved both ask it). Facts only.
+ *  → {ok, why} — `why` = the pin verdict's own name for the refusal. */
+function memberVerdictFor(poolId, memberId, session = null, sid = null, now = Date.now()) {
+  try {
+    const base = poolReadCache(poolId);
+    const fam = session ? projectionFamilyFor(session, sessionModelFor(session)) : null;
+    const d = decidePinnedPlacement({ explicit: true, pin: memberId, currentId: memberId, members: switchCandidates(poolId), readCache: (id) => projectCacheForFamily(base(id), fam), nowSec: now / 1000, proactive: false, hot: true, pessimism: darkTaintedAccounts(), exclude: sid ? [...sessionWalledMembers(sid, now)] : null, readLogin: poolReadLogin(), membership: poolMembershipOf(poolId) });
+    return d && d.reason === 'pin' ? { ok: true, why: null } : { ok: false, why: (d && d.pinWhy) || 'pin-member-unknown' };
+  } catch { return { ok: false, why: 'pin-member-unknown' }; }
+}
+function memberCanServe(poolId, memberId, session = null, sid = null, now = Date.now()) { return memberVerdictFor(poolId, memberId, session, sid, now).ok; }
+/** "MOVE EVERY CONVERSATION HERE NOW", JUDGED BEFORE IT MOVES ANYTHING (verify r1, money). The
+ *  act's row is never greyed (addendum 4), so it is reachable on a member that is out of quota:
+ *  the route moved every conversation onto it — mid-turn included — and the next pool pass moved
+ *  them all back (two cold starts each, a wall for every request in between). ONE judgement, the
+ *  pin's own (`decidePinnedPlacement`, explicit — the owner chose the member): `ok` = the member can
+ *  take the pool as a whole (the DEFAULT may move there); per live conversation, under ITS family
+ *  view (a spent Fable cap stops a Fable conversation, never an Opus one) and its own recent walls,
+ *  `move` or `skip` with the reason by name ('pinned' = the conversation has its own pin).
+ *  → {ok, why, until, move:[sid], skip:[{sid, name, why}]} — PURE facts, it moves nothing. */
+function gatherPlan(poolId, memberId, now = Date.now()) {
+  const out = { ok: false, why: 'pin-member-unknown', until: null, move: [], skip: [] };
+  try {
+    const a = accounts.get(poolId);
+    if (!a || a.type !== 'pooled') return out;
+    const whole = memberVerdictFor(poolId, memberId, null, null, now);
+    out.ok = whole.ok;
+    out.why = whole.why;
+    if (!out.ok) { try { const v = quotaVerdict(poolReadCache(poolId)(memberId), now / 1000, { tier: 'hard' }); if (v && v.usable === false && v.until && v.until.resetsAt) out.until = v.until.resetsAt * 1000; } catch { } }
+    for (const [sid, s] of activeSessions) {
+      if (s._accountId !== poolId || s.host) continue;
+      if (poolPinOf(s, poolId)) { out.skip.push({ sid, name: convName(s, sid), why: 'pinned' }); continue; }
+      const v = memberVerdictFor(poolId, memberId, s, sid, now);
+      if (v.ok) out.move.push(sid);
+      else out.skip.push({ sid, name: convName(s, sid), why: v.why });
+    }
+  } catch (e) { console.warn('[pool] gather plan failed:', e.message); }
+  return out;
+}
+// ── THE OWNER'S DECISION (2026-09-28, "全B"): A REMOVED MEMBER WITH NOBODY TO TAKE OVER STOPS AND WAITS ──
+// A conversation on a member the pool no longer lists, with no member able to take it over, is NOT kept running on
+// that member (whatever kind it is — a subscription or a pay-per-use credits member): it finishes its CURRENT turn
+// (never cut) and then its link is parked on the verdict's `holdTo` — the listed member usable soonest — so the
+// removed member serves nothing after that turn; its next request meets that member's own wall. A conversation that
+// was RUNNING when the removal found it is ARMED at its stop (the ONE continue a member wake delivers, through
+// auto-resume's breaker + the pre-fire gate + the spend ceiling — exactly a quota wall). One that was idle is parked
+// and not armed: nothing was running, so nothing is continued (its next message meets the wall and arms like any
+// quota wall). A process that HOLDS its member (codex) is restarted onto the pool default, parked on `holdTo`
+// first. It starts no turn by itself.
+const HOLD_KEYS = {
+  armed: i18nKey('Pool "{pool}": {member} was removed from the pool and no other member can take over — conversation "{title}" stopped after its turn and continues automatically when a member can serve it.'),
+  idle: i18nKey('Pool "{pool}": {member} was removed from the pool and no other member can take over — conversation "{title}" waits: its next turn goes out when a member can serve it.'),
+  nowhere: i18nKey('Pool "{pool}": {member} was removed from the pool and no member of the pool is signed in — conversation "{title}" cannot be parked anywhere; sign a member in.'),
+};
+const HOLD_TODO_KEY = i18nKey('{member} was removed from pool "{pool}" and no other member can take over — its conversations stop after their current turn and wait until a member can serve them.');
+const _removedHoldOwed = new Set(); // `${poolId}:${sid}` — was RUNNING when the removal found it ⇒ armed at its stop
+const _removedHoldTodo = new Map(); // `${poolId}:${member}` → For-you item id (said ONCE per removal episode)
+function holdNotice(poolId, sid, s, fromId, kind, toId = null, restart = false) {
+  const params = { pool: accounts.get(poolId)?.name || poolId, member: nameOf(fromId), title: convName(s, sid), target: nameOf(toId) };
+  const fill = (tpl) => tpl.replace(/\{(\w+)\}/g, (m, x) => (params[x] !== undefined ? String(params[x]) : m));
+  const key = HOLD_KEYS[kind] || HOLD_KEYS.idle;
+  serverNotice(`pool-removed-hold-${poolId}-${sid}-${fromId}-${kind}`, fill(key) + (restart ? ' Restarting the conversation to apply it.' : ''), { level: 'warn', i18n: { key, params, ...(restart ? { then: { key: PIN_RESTART_KEY } } : {}) } });
+}
+function holdTodo(poolId, s, fromId, now) {
+  const k = `${poolId}:${fromId}`;
+  if (_removedHoldTodo.has(k)) return;
+  let todos = null;
+  try { todos = getUserTodos(); } catch { todos = null; }
+  _removedHoldTodo.set(k, null);
+  if (!todos) return;
+  const params = { pool: accounts.get(poolId)?.name || poolId, member: nameOf(fromId) };
+  const bsid = s.backendSessionId || s.claudeSessionId;
+  try {
+    const item = todos.add(bsid ? `${s.backend || 'claude'}:${bsid}` : `webui:${s._webuiId}`, {
+      origin: 'pool', kind: 'notice', urgency: 'normal', sessionName: s.name || null,
+      text: HOLD_TODO_KEY.replace(/\{(\w+)\}/g, (m, x) => (params[x] !== undefined ? String(params[x]) : m)),
+      i18n: { text: { key: HOLD_TODO_KEY, params } },
+    });
+    _removedHoldTodo.set(k, item && item.id ? item.id : null);
+  } catch (e) { console.warn('[pool] removed-member hold: could not file the For-you item:', e.message); }
+}
+/** THE ONE ACT of the hold: `d` = the verdict that said `removed-hold` (to null, `holdTo` the parking member).
+ *  → {held, deferred, armed, restarted, to} */
+function holdRemoved(poolId, sid, s, fromId, d, now = Date.now()) {
+  const key = poolId + ':' + sid;
+  const out = { held: false, deferred: false, armed: false, restarted: false, to: null };
+  try {
+    if (conversationInTurn({ isStreaming: s._isStreaming, turnState: s._turnState })) {
+      // never cut mid-turn: it finishes this turn on the removed member, then stops (its stop re-decides)
+      _removedHoldOwed.add(key);
+      out.deferred = true;
+      const k = key + ':defer:' + fromId;
+      if (now - (_removedSaidAt.get(k) || 0) > 10 * 60e3) { _removedSaidAt.set(k, now); console.log(`[pool] removed-member hold ${poolId}/${sid}: ${fromId} — mid-turn, stops at its turn end (never cut)`); }
+      return out;
+    }
+    const owed = _removedHoldOwed.delete(key);
+    const to = d && d.holdTo ? d.holdTo : null;
+    out.to = to;
+    if (!to) {
+      const k = key + ':nowhere:' + fromId;
+      if (now - (_removedSaidAt.get(k) || 0) > 60 * 60e3) { _removedSaidAt.set(k, now); console.log(`[pool] removed-member hold ${poolId}/${sid}: ${fromId} — no member of the pool is signed in; nowhere to park it`); holdNotice(poolId, sid, s, fromId, 'nowhere'); }
+      return out;
+    }
+    const held = heldPoolMemberFor(s, poolId);
+    if (held) {
+      // a process that HOLDS its member (a pool that cannot hot-switch): the only way off is a restart onto the
+      // pool DEFAULT — parked on the hold target first; the restart is a resume, never a turn
+      try { if (accounts.poolCurrent(poolId) !== to) accounts.setPoolTarget(poolId, to, { why: 'removed-from-pool' }); } catch (e) { console.warn('[pool] removed-member hold: default park failed:', e.message); return out; }
+      if (!restartInFlight(s, now)) {
+        sendColdRestart(poolId, [{ serverId: sid, backend: s.backend || 'claude', backendSessionId: s.claudeSessionId || s.backendSessionId || null, cwd: s.cwd || null, name: s.name || null, host: s.host || null }], now);
+        out.restarted = true;
+        holdNotice(poolId, sid, s, fromId, 'idle', to, true);
+        holdTodo(poolId, s, fromId, now);
+        console.log(`[pool] removed-member hold ${poolId}/${sid}: ${fromId} held by the process — restarting it onto ${to} (parked; no continue)`);
+      }
+      out.held = true;
+      return out;
+    }
+    accounts.ensureSessionPoolLink(poolId, sid, to, { why: 'removed-from-pool' });
+    _poolSwitchAt.set(key, now);
+    try { recordUsageAttribution({ claudeSessionId: s.claudeSessionId || s.backendSessionId, accountId: poolId }); } catch { }
+    out.held = true;
+    if (owed) {
+      // it was RUNNING when the removal found it: the ONE continue a member wake delivers (auto-resume's own arm —
+      // its breaker, its pre-fire gate and the spend ceiling stand between it and a billed turn)
+      const ar = getAutoResume();
+      if (ar && typeof ar.armIfEnabled === 'function') {
+        let resets = 0;
+        try { resets = Number(quotaVerdictFor(_wallScope(s), { model: sessionModelFor(s), session: s }).blockedUntil) || 0; } catch { resets = 0; }
+        if (!(resets > now)) { let maxWait = 24 * 3600e3; try { maxWait = require('./auto-resume.js').MAX_WAIT_MS || maxWait; } catch { } resets = now + maxWait + 60e3; } // no stated reset: a WATCH (the wake still continues it)
+        try { out.armed = !!ar.armIfEnabled(sid, s, resets, `removed from the pool (${nameOf(fromId)})`, { cause: { kind: 'removed-member', member: { id: fromId, name: nameOf(fromId) }, holdTo: { id: to, name: nameOf(to) } } }); } catch (e) { console.warn('[pool] removed-member hold: arm failed:', e.message); }
+      }
+    }
+    holdNotice(poolId, sid, s, fromId, out.armed ? 'armed' : 'idle', to);
+    holdTodo(poolId, s, fromId, now);
+    console.log(`[pool] removed-member hold ${poolId}/${sid}: ${fromId} → ${to} (parked on the member usable soonest; ${out.armed ? 'armed — continues when a member can serve it' : owed ? 'auto-resume is off — waits' : 'was idle — not armed'})`);
+    return out;
+  } catch (e) { console.warn('[pool] removed-member hold failed:', e.message); return out; }
+}
+/** The pool verdict for a conversation (or the DEFAULT, `session` null) sitting
+ *  on `fromId`, judged WITH the membership fact — the one decision the removal
+ *  paths share (the store's default re-point asks it through updatePool's
+ *  chooser, memberRemoved for every linked conversation). */
+function removalVerdict(poolId, fromId, session = null, sid = null, now = Date.now()) {
+  const a = accounts.get(poolId);
+  // `hot` sets the bars the verdict NAMES; never `proactive` — a removed member is a
+  // hard wall, so the move is the exhausted branch's and no voluntary tier runs here
+  const hot = !!a?.hot && capsOf(a?.backend).hotSwitch === 'verified';
+  const members = switchCandidates(poolId);
+  const base = poolReadCache(poolId);
+  const fam = session ? projectionFamilyFor(session, sessionModelFor(session)) : null;
+  const readCache = (id) => projectCacheForFamily(base(id), fam);
+  // a PINNED conversation leaving a removed member goes to its pin when the pin can serve
+  // (explicit: nothing to settle — it is leaving anyway), else where the automatic rules put it
+  const pinRec = session ? poolPinOf(session, poolId) : null;
+  if (pinRec) {
+    const dp = decidePinnedPlacement({ explicit: true, pin: pinRec.memberId, currentId: fromId, members, readCache, nowSec: now / 1000, proactive: false, hot, pessimism: darkTaintedAccounts(), exclude: sid ? [...sessionWalledMembers(sid, now)] : null, readLogin: poolReadLogin(), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), membership: poolMembershipOf(poolId) });
+    if (dp && dp.reason === 'pin' && dp.to) return dp;
+    if (dp && dp.reason === 'pin-exhausted') return { ...dp, reason: dp.autoReason };
+  }
+  return decidePoolSwitch({ currentId: fromId, members, readCache, nowSec: now / 1000, proactive: false, hot, pessimism: darkTaintedAccounts(), exclude: sid ? [...sessionWalledMembers(sid, now)] : null, readLogin: poolReadLogin(), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), membership: poolMembershipOf(poolId), explain: true });
+}
+/** Where the pool DEFAULT goes when the member it sits on left the pool — a
+ *  DECISION (never the first member in the list). null = nobody can take it. */
+function decideDefaultTarget(poolId, fromId) {
+  try { const d = removalVerdict(poolId, fromId); return d && d.to ? d.to : null; } catch (e) { console.warn('[pool] default re-decide failed:', e.message); return null; }
+}
+/** Where ONE conversation's link goes when the member it points at leaves (a deleted account — accounts.remove's
+ *  `chooseLink`, verify r2): the removal verdict for THAT conversation (its family view, its pin, its own recent
+ *  walls). null = nobody can take it — the store then falls back to the pool default. */
+function removalTargetFor(poolId, fromId, sid) {
+  try { const s = sid ? activeSessions.get(sid) : null; const d = removalVerdict(poolId, fromId, s || null, s ? sid : null); return d && d.to ? d.to : null; } catch (e) { console.warn('[pool] link re-decide failed:', e.message); return null; }
+}
+/** …and when NOBODY can take it over (decideDefaultTarget answered null): the default still has to name a
+ *  member the pool LISTS — it is where a NEW conversation starts, and a new conversation never starts on a
+ *  removed member — so the ENGINE picks it (PURE soonestUsableMember: usable soonest by the pool's hard
+ *  bars, then the owner's priority order, credits members last), never the store's list[0] and never
+ *  "stays on the removed member" (verify r2: the members route landed on list[0], the stale-link sweep left
+ *  the default on the removed member and new conversations started there). The conversations running on the
+ *  removed member are NOT moved by this (nobody can serve them; the owner's decision, pending) and a cold
+ *  pool's followers are not restarted onto it. null = no logged-in member the pool lists. */
+function fallbackDefaultTarget(poolId, fromId = null) {
+  try {
+    const a = accounts.get(poolId);
+    if (!a || a.type !== 'pooled') return null;
+    const membership = poolMembershipOf(poolId) || [];
+    const members = switchCandidates(poolId).filter((m) => m && m.id !== fromId && membership.includes(m.id));
+    return soonestUsableMember({ members, readCache: poolReadCache(poolId), nowSec: Date.now() / 1000, priority: poolPriorityOf(a), creditsIds: creditsMemberIds(members) });
+  } catch (e) { console.warn('[pool] default fallback failed:', e.message); return null; }
+}
+/** THE ONE ENTRY POINT: members `removedIds` no longer belong to `poolId` — move
+ *  everything they still serve NOW. Returns what it did (the route answers it,
+ *  the suites read it). */
+function memberRemoved(poolId, removedIds, { why = 'removed-from-pool' } = {}) {
+  const out = { pool: poolId, removed: [], moved: [], restarted: [], stayed: [], held: [], defaultMoved: null };
+  try {
+    const a = accounts.get(poolId);
+    if (!a || a.type !== 'pooled') return out;
+    const membership = poolMembershipOf(poolId);
+    if (!membership) return out;
+    // a member the pool STILL lists is never evicted, whatever the caller said
+    const removed = new Set((Array.isArray(removedIds) ? removedIds : []).filter((x) => typeof x === 'string' && x && !membership.includes(x)));
+    if (!removed.size) return out;
+    out.removed = [...removed];
+    const now = Date.now();
+    const hot = !!a.hot && capsOf(a.backend).hotSwitch === 'verified';
+    // ① the DEFAULT — where new conversations start and every legacy follower bills
+    const def = accounts.poolCurrent(poolId);
+    if (def && removed.has(def)) {
+      const to = decideDefaultTarget(poolId, def);
+      if (to) {
+        try { accounts.setPoolTarget(poolId, to, { why }); out.defaultMoved = { from: def, to }; console.log(`[pool] removed-member evict ${poolId}/default: ${def} → ${to}`); } catch (e) { console.warn('[pool] removed-member default re-point failed:', e.message); }
+      } else {
+        // nobody can take it over: new conversations still never start on the removed member (verify r2)
+        const fb = fallbackDefaultTarget(poolId, def);
+        if (fb) {
+          try { accounts.setPoolTarget(poolId, fb, { why }); out.defaultMoved = { from: def, to: fb, fallback: true }; console.log(`[pool] removed-member evict ${poolId}/default: ${def} → ${fb} — no member can take over; new conversations start on the one usable soonest`); } catch (e) { console.warn('[pool] removed-member default re-point failed:', e.message); }
+        } else console.log(`[pool] removed-member evict ${poolId}/default: ${def} stays — no member the pool lists is signed in`);
+      }
+    }
+    // ② every LIVE conversation still billed to a removed member
+    const restart = [];
+    const pack = (sid, s) => ({ serverId: sid, backend: s.backend || 'claude', backendSessionId: s.claudeSessionId || s.backendSessionId || null, cwd: s.cwd || null, name: s.name || null, host: s.host || null });
+    const stay = (sid, s, on, d) => {
+      out.stayed.push({ sid, on });
+      const k = `${poolId}:${sid}:${on}`;
+      if (now - (_removedSaidAt.get(k) || 0) < 10 * 60e3) return;
+      _removedSaidAt.set(k, now);
+      console.log(`[pool] removed-member evict ${poolId}/${sid}: ${on} stays — ${d ? `no member can take over (${d.reason})` : 'nothing to move it to yet'}`);
+      if (d) serverNotice(`pool-removed-stuck-${poolId}-${on}-${Math.floor(now / 3600e3)}`, poolBlockedNotice(d, { poolName: a.name, currentName: nameOf(on) }), { level: 'warn' });
+    };
+    for (const [sid, s] of activeSessions) {
+      if (s._accountId !== poolId || s.host) continue;
+      const held = heldPoolMemberFor(s, poolId);
+      const own = !held && hasOwnPoolLink(poolId, sid);
+      let linkCur = null;
+      if (own) { try { linkCur = accounts.poolCurrentFor(poolId, sid); } catch { } }
+      const on = held || linkCur;
+      if (!on) {
+        // a FOLLOWER of the pool default moved with ① — a hot CLI re-reads the
+        // default link by itself, a cold one restarts onto it
+        if (out.defaultMoved && !out.defaultMoved.fallback && !hot) restart.push(pack(sid, s)); // never restarted onto a fallback nobody can serve from
+        continue;
+      }
+      if (!removed.has(on)) continue;
+      let to = null;
+      if (held) {
+        // the process HOLDS the removed member's login for its life (a pool that
+        // cannot hot-switch): only a restart onto the (moved) default leaves it
+        to = accounts.poolCurrent(poolId);
+        if (!to || removed.has(to)) { stay(sid, s, on, null); continue; }
+        // …and only a default that CAN SERVE it (verify r1): when nobody can take over, the default
+        // sits on the store's first member — restarting the conversation onto that cut it off from
+        // a member that serves, for one that cannot (a linked conversation in the same state stays)
+        const dv = removalVerdict(poolId, on, s, sid, now);
+        if (dv && dv.reason === 'removed-hold') { const h = holdRemoved(poolId, sid, s, on, dv, now); if (h.held || h.deferred) out.held.push({ sid, on, to: h.to, deferred: h.deferred }); else out.stayed.push({ sid, on }); continue; } // 全B: stop and wait (a mid-turn one at its stop)
+        if (!dv || !dv.to) { stay(sid, s, on, dv); continue; }
+        if (dv.to !== to && !memberCanServe(poolId, to, s, sid, now)) { stay(sid, s, on, null); continue; }
+        if (restartInFlight(s, now)) continue; // its restart is already on the way
+        restart.push(pack(sid, s));
+      } else {
+        const d = removalVerdict(poolId, on, s, sid, now);
+        if (d && d.reason === 'removed-hold') { const h = holdRemoved(poolId, sid, s, on, d, now); if (h.held || h.deferred) out.held.push({ sid, on, to: h.to, deferred: h.deferred }); else out.stayed.push({ sid, on }); continue; } // 全B: stop and wait (a mid-turn one at its stop)
+        if (!d || !d.to) { stay(sid, s, on, d); continue; }
+        to = d.to;
+        try { accounts.ensureSessionPoolLink(poolId, sid, to, { why }); } catch (e) { console.warn(`[pool] removed-member evict ${poolId}/${sid} failed:`, e.message); stay(sid, s, on, null); continue; }
+        _poolSwitchAt.set(poolId + ':' + sid, now); // the dwell belt sees this move like any other
+        for (const k of [poolId + ':' + sid, poolId + ':' + sid + ':soft']) _warmHoldLogAt.delete(k); // a re-point ends a deferral episode (LOW-3)
+        // the link moved and the CLI re-reads it: the ledger follows from now (the
+        // slot ledger row was written by ensureSessionPoolLink)
+        try { recordUsageAttribution({ claudeSessionId: s.claudeSessionId || s.backendSessionId, accountId: poolId }); } catch { }
+        if (!hot) restart.push(pack(sid, s));
+      }
+      out.moved.push({ sid, from: on, to });
+      console.log(`[pool] removed-member evict ${poolId}/${sid}: ${on} → ${to}${held ? ' (holds its login — restarting it onto the pool default)' : ''}`);
+      removedMemberNotice(poolId, sid, s, on, to, !!held || !hot);
+    }
+    if (restart.length) {
+      const r = sendColdRestart(poolId, restart, now);
+      out.restarted = r.sent ? r.affected.map((t) => t.serverId) : [];
+      if (!r.sent && r.affected.length) console.log(`[pool] removed-member evict ${poolId}: no client connected to restart ${r.affected.length} conversation(s) — asked again on the next pool tick`);
+    }
+    global.__vsEvent?.('pool-member-removed', `${poolId}:${out.removed.length}:${out.moved.length}`);
+    return out;
+  } catch (e) { console.warn('[pool] removed-member evict failed:', e.message); return out; }
+}
+/** THE STALE-LINK SWEEP (the removed-member wall's boot half): a pool default, a
+ *  per-session link or a held member that names an account the pool no longer
+ *  lists — a removal made while the server was down, a link older than the
+ *  removal — goes through memberRemoved. Every pool tick runs it first (auto or
+ *  not: a removed member stops serving whatever the pool's placement mode). */
+function sweepNonMemberLinks({ why = 'removed-from-pool' } = {}) { // ONE spelling of the act in the slot ledger, whoever sees the removal first (verify r1)
+  const out = [];
+  try {
+    for (const a of accounts.list().accounts || []) {
+      if (a.type !== 'pooled') continue;
+      const membership = poolMembershipOf(a.id);
+      if (!membership || !membership.length) continue; // a pool that lists nobody has nowhere to move anything
+      const stale = new Set();
+      const def = accounts.poolCurrent(a.id);
+      if (def && !membership.includes(def)) stale.add(def);
+      for (const [sid, s] of activeSessions) {
+        if (s._accountId !== a.id || s.host) continue;
+        let on = heldPoolMemberFor(s, a.id);
+        if (!on && hasOwnPoolLink(a.id, sid)) { try { on = accounts.poolCurrentFor(a.id, sid); } catch { } }
+        if (on && !membership.includes(on)) stale.add(on);
+      }
+      if (stale.size) out.push(memberRemoved(a.id, [...stale], { why }));
+    }
+  } catch (e) { console.warn('[pool] stale-link sweep failed:', e.message); }
+  return out;
+}
 // A PROACTIVE move held because the conversation's prompt cache is warm
 // (decidePoolSwitch's 'warm-cache'): once per (pool, conversation) per 10 min —
 // the decision re-runs every cycle and a per-cycle line would be spam. The POOL
@@ -4643,6 +5161,14 @@ function hasOwnPoolLink(poolId, sid) {
 function noteWarmHold(poolId, sid, d, now, scope = '', key = poolId + ':' + sid) {
   if (now - (_warmHoldLogAt.get(key) || 0) < 10 * 60e3) return;
   _warmHoldLogAt.set(key, now);
+  if (d.reason === 'pin-hold') {
+    console.log(`[pool] pin ${sid}: ${d.wouldToName || d.wouldTo} (pinned) can serve again — returns at its next stop (mid-turn now)${scope}`);
+    return;
+  }
+  if (d.reason === 'priority-hold') {
+    console.log(`[pool] priority ${sid}: ${d.wouldToName || d.wouldTo} (priority #${d.priorityRank ?? '?'}) can serve again — returns at its next stop (mid-turn now)${scope}`);
+    return;
+  }
   if (d.reason === 'warm-soft-defer') {
     const b = d.softBucket || {};
     console.log(`[pool] defer ${sid}: soft-exhausted (${b.label || '?'} ${b.remaining ?? '?'}% < hot ${b.hot ?? '?'}%) but mid-turn with a warm cache — moves at its first stop (to ${d.wouldToName || d.wouldTo})${scope}`);
@@ -4702,7 +5228,8 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
     const a = accounts.get(poolId);
     if (!a || a.type !== 'pooled' || !a.auto) return;
     const now = Date.now();
-    // `force` is the new-member wake (onMemberReadingFresh) and NOTHING else:
+    // `force` is the new-member wake (onMemberReadingFresh, and its login half
+    // when the login's read did not answer) and NOTHING else:
     // this gate throttles per-RECORD kicks, and a member's first reading is not
     // a kick — it is the fact the whole decision was missing. The 180s dwell
     // belt below is deliberately NOT forced, so an evaluation forced here can
@@ -4766,6 +5293,8 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
     const readLogin = poolReadLogin(); // ONE login read per member for this whole tick (per-session pass + pool decision)
     const creditsIds = creditsMemberIds(members); // ONE raw-cache read per member for this whole tick (B-ad05)
     const burnOf = projectionBurnMemo(now); // ONE burn read per member for this whole tick (B-f69c ③)
+    const membership = poolMembershipOf(poolId); // the removed-member wall (2026-09-28): a member the pool no longer LISTS is a hard wall for every decision below
+    const priority = poolPriorityOf(a); // MANUAL PRIORITY (2026-09-28): the owner's order — null = automatic (EDF + the warm hold)
     for (const [sid, s2] of activeSessions) {
       if (!poolCaps.planC) break; // plan-C per-session links need the backend's material path
       if ((s2.backend || 'claude') === 'codex') continue;
@@ -4808,13 +5337,31 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
       const viewFor = lead ? (id) => projectCacheAhead(projected(id), burnOf(id), now / 1000, lead) : projected;
       const pc = lead ? projectionCrossing(projected(curFor), burnOf(curFor), now / 1000, { hot }) : null;
       const early = pc && pc.inSec <= lead ? `projected: ${pc.label} reaches its ${pc.line}% line in ~${Math.max(1, Math.round(pc.inSec / 60))} min at ${pc.pctPerMin}%/min` : null;
+      // THE CONVERSATION'S PIN (2026-09-28) — PRECEDENCE: pin > pool priority order > automatic.
+      // A pinned conversation is decided by decidePinnedPlacement BEFORE (instead of) the pool
+      // verdict: on its usable pin it STAYS (nothing automatic moves it); a pin that cannot serve
+      // hands the move to today's automatic rules (the pin kept — `autoReason` is acted on exactly
+      // like an unpinned verdict); a pin that can serve again takes it back at its first stop. The
+      // pin is judged on the family view of NOW (`projected`), the automatic fallback on `viewFor`.
       // never pick a member that just answered THIS session with a limit
       // rejection (verdict-level twin of the same fact)
       const rejected = [...sessionWalledMembers(sid, now)];
-      const ds = decidePoolSwitch({ currentId: curFor, members, readCache: viewFor, nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), exclude: rejected, readLogin, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm, explain: true });
+      const pinRec = poolPinOf(s2, poolId);
+      const dp = pinRec ? decidePinnedPlacement({ pin: pinRec.memberId, currentId: curFor, members, readCache: projected, autoReadCache: viewFor, nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), exclude: rejected, readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm }) : null;
+      const ds = dp ? (dp.reason === 'pin-exhausted' ? { ...dp, reason: dp.autoReason, pinExhausted: true } : dp) : decidePoolSwitch({ currentId: curFor, members, readCache: viewFor, nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), exclude: rejected, readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm, explain: true });
       if (!ds || !ds.to) {
+        // 全B (2026-09-28): the member it runs on left the pool and nobody can take it over ⇒ it stops after this turn
+        // and waits (parked on the member usable soonest; armed if it was running) — the ONE act, holdRemoved
+        if (ds && ds.reason === 'removed-hold') { holdRemoved(poolId, sid, s2, curFor, ds, now); continue; }
         if (ds && ds.reason === 'warm-cache') { noteWarmHold(poolId, sid, ds, now); continue; }
         if (ds && ds.reason === 'warm-soft-defer') { noteWarmHold(poolId, sid, ds, now, '', poolId + ':' + sid + ':soft'); continue; }
+        // MANUAL PRIORITY: a higher-priority member is usable again but this one is
+        // mid-turn — owed at its next stop (the stop re-decides, forced), never held longer
+        if (ds && ds.reason === 'priority-hold') { noteWarmHold(poolId, sid, ds, now, '', poolId + ':' + sid + ':prio'); continue; }
+        // THE PIN: on its usable pin the conversation stays (nothing to say); a return owed at
+        // the first stop is journaled once per episode
+        if (ds && ds.reason === 'pin') continue;
+        if (ds && ds.reason === 'pin-hold') { noteWarmHold(poolId, sid, ds, now, '', poolId + ':' + sid + ':pin'); continue; }
         // PARKED ON CREDITS (B-ad05): this conversation's member serves past
         // its quota on pay-per-use billing — say so once per 6 h per (pool,
         // member); it is deliberately NOT in `noWay` (the member serves).
@@ -4837,17 +5384,29 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
         }
         continue;
       }
+      // a pool that cannot re-point a running conversation (hot off) never RESTARTS one to return
+      // it to its pin — the pin applies at its next restart/resume (the spawn chooser honours it)
+      // (an ESCAPE off a member that cannot serve is no return of convenience — it moves and restarts
+      // like every wall, verify r1)
+      if (ds.reason === 'pin-return' && !a.hot && !ds.escape) continue;
       const dwellKey = poolId + ':' + sid;
       const lastS = _poolSwitchAt.get(dwellKey) || 0;
       // A DEAD LOGIN is hard death, so it is exempt from the dwell belt exactly
       // like a hard-exhausted target: every turn on that member fails, and the
       // belt exists to stop voluntary oscillation, not to delay an escape.
       // (Its `fromRemaining` is often null — quota says nothing about a login.)
-      if (now - lastS < 180000 && ds.reason !== 'login-expired' && !(ds.fromRemaining != null && ds.fromRemaining < POOL_HARD_PCT)) continue;
+      // …and a RETURN to the conversation's pin is a voluntary move like any other (verify r1): it was
+      // exempt, and so was the move off a hard-dead pin — a pin whose reading wobbled across its bars
+      // re-pointed the conversation on EVERY evaluation (12 of 12; automatic and priority: 1 of 12)
+      if (now - lastS < 180000 && !ds.escape && ds.reason !== 'not-a-member' && ds.reason !== 'login-expired' && !(ds.fromRemaining != null && ds.fromRemaining < POOL_HARD_PCT)) continue; // a removed member is hard death too (2026-09-28); `escape` = a pinned conversation leaving a wall
       _poolSwitchAt.set(dwellKey, now);
       try {
-        accounts.ensureSessionPoolLink(poolId, sid, ds.to, { why: 'per-session-switch' });
+        // (a move off a member the pool no longer lists is THE SAME ACT as memberRemoved's — one `why` in the slot ledger, verify r1)
+        if (ds.reason === 'not-a-member' || ds.escape === 'not-a-member') accounts.ensureSessionPoolLink(poolId, sid, ds.to, { why: 'removed-from-pool' });
+        else accounts.ensureSessionPoolLink(poolId, sid, ds.to, { why: 'per-session-switch' });
         _warmHoldLogAt.delete(poolId + ':' + sid); _warmHoldLogAt.delete(poolId + ':' + sid + ':soft'); // a re-point ends this conversation's deferral episode (LOW-3)
+        _warmHoldLogAt.delete(poolId + ':' + sid + ':prio'); // …and its priority-return episode
+        _warmHoldLogAt.delete(poolId + ':' + sid + ':pin'); // …and its pin-return episode
         try { recordUsageAttribution({ claudeSessionId: s2.claudeSessionId || s2.backendSessionId, accountId: poolId }); } catch { }
         const toName = accounts.get(ds.to)?.name || ds.to;
         // a same-target re-point (observed ≠ linked, the link was already on
@@ -4863,13 +5422,20 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
           ? ` — the last resort: ${toName} bills pay-per-use past its quota (usage credits)`
           : '';
         if (ds.toCredits) noteCreditsParking(poolId, ds.to, poolCreditsNotice({ toCredits: ds.toCredits, toRemaining: ds.toRemaining }, { poolName: a.name, memberName: toName }), now);
-        if (ds.to !== linkCur) serverNotice(`pool-sess-${sid}-${now}`, `Pool "${a.name}": conversation "${convName(s2, sid)}" moved to ${toName}${cm.divergent ? ` (it was still running on ${nameOf(curFor)})` : ''}${fam ? ` (its ${fam} quota${ds.fromRemaining != null ? ` ${early ? 'will be' : 'was'} at ${Math.round(ds.fromRemaining)}%${early ? ` within ${Math.round(lead / 60)} min` : ''}` : ''})` : ''}${early ? ` — moved early, ${early}` : ''}${a.hot ? '' : ' — restarting it'}${sScraps}`);
-        console.log(`[pool] per-session switch ${poolId}/${sid}: ${curFor}${cm.divergent ? ` (observed; linked ${linkCur})` : ''} → ${ds.to}${ds.to === linkCur ? ' (re-point, same target)' : ''} (fam=${fam || '?'}, from ${ds.fromRemaining}%${early ? `; ${early}` : ''})`);
+        if (ds.reason === 'not-a-member' && !ds.pinExhausted) removedMemberNotice(poolId, sid, s2, curFor, ds.to, !a.hot); // the removed-member words, whoever sees the removal first
+        else if (ds.reason === 'pin-return') pinNotice(poolId, sid, s2, 'back', { member: ds.to }, !a.hot); // back on the pinned member at its stop
+        else if (ds.pinExhausted && ds.to === ds.pinned) pinNotice(poolId, sid, s2, 'back', { member: ds.to }, !a.hot); // the automatic rules landed it ON its pin (the most headroom when nobody settles): it is back on it — never "X is out of quota — running on X" (verify r2)
+        else if (ds.pinExhausted) pinNotice(poolId, sid, s2, ds.pinWhy, { member: ds.pinned, target: ds.to }, !a.hot); // the pin cannot serve: running on the automatic pick, the pin kept
+        else if (ds.reason === 'priority-return') priorityReturnNotice(poolId, sid, s2, ds, !a.hot); // manual priority: back on the higher-ranked member at its stop
+        else if (ds.to !== linkCur) serverNotice(`pool-sess-${sid}-${now}`, `Pool "${a.name}": conversation "${convName(s2, sid)}" moved to ${toName}${ds.priorityRank ? ` (priority #${ds.priorityRank})` : ''}${cm.divergent ? ` (it was still running on ${nameOf(curFor)})` : ''}${fam ? ` (its ${fam} quota${ds.fromRemaining != null ? ` ${early ? 'will be' : 'was'} at ${Math.round(ds.fromRemaining)}%${early ? ` within ${Math.round(lead / 60)} min` : ''}` : ''})` : ''}${early ? ` — moved early, ${early}` : ''}${a.hot ? '' : ' — restarting it'}${sScraps}`);
+        console.log(`[pool] per-session switch ${poolId}/${sid}: ${curFor}${cm.divergent ? ` (observed; linked ${linkCur})` : ''} → ${ds.to}${ds.to === linkCur ? ' (re-point, same target)' : ''} (fam=${fam || '?'}, from ${ds.fromRemaining}%${early ? `; ${early}` : ''})${ds.placedBy === 'priority' ? ` — ${ds.reason === 'priority-return' ? 'priority return' : 'priority'} #${ds.priorityRank ?? '-'}` : ''}${ds.reason === 'pin-return' ? ' — pin return (pinned)' : ds.pinExhausted && ds.to === ds.pinned ? ' — onto its pin (pinned)' : ds.pinExhausted ? ` — pin kept (${nameOf(ds.pinned)}: ${ds.pinWhy})` : ''}`);
         // a hot re-point does not move an idle limit-blocked session by itself
         // (c1206711: the pool switched back and the session stayed dead) —
         // an ARMED session gets its continue NOW. Hot only: a cold switch
         // restarts the conversation through the client instead.
-        if (a.hot) { try { getAutoResume()?.fireNow?.(sid, `账号池已切换到 ${toName}`); } catch { } }
+        // …never for a REMOVED member's eviction (2026-09-28): a removal starts no turn, on
+        // this path exactly as through memberRemoved — the arm's own timer re-decides it
+        if (a.hot && ds.reason !== 'not-a-member') { try { getAutoResume()?.fireNow?.(sid, `账号池已切换到 ${toName}`); } catch { } }
         if (!a.hot) {
           sendColdRestart(poolId, [{ serverId: sid, backend: s2.backend || 'claude', backendSessionId: s2.claudeSessionId || s2.backendSessionId || null, cwd: s2.cwd || null, name: s2.name || null, host: s2.host || null }], now);
         }
@@ -4902,9 +5468,15 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
     // decision on the estimate of NOW (a projection alone never moves a warm
     // conversation).
     const defaultView = defaultWarm ? readCache : (id) => projectCacheAhead(readCache(id), burnOf(id), now / 1000, PROJECTION_LEAD_SEC);
-    const d = decidePoolSwitch({ currentId, members, readCache: defaultView, nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), readLogin, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm: defaultWarm, explain: true });
+    const d = decidePoolSwitch({ currentId, members, readCache: defaultView, nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm: defaultWarm, explain: true });
     if (!d) return;
     if (!d.to) {
+      if (d.reason === 'removed-hold') {
+        // 全B: the DEFAULT never keeps a removed member either — parked on the member usable soonest (its followers,
+        // legacy, re-read it; nobody is armed or restarted by this)
+        if (d.holdTo && d.holdTo !== currentId) { try { accounts.setPoolTarget(poolId, d.holdTo, { why: 'removed-from-pool' }); console.log(`[pool] removed-member hold ${poolId}/default: ${currentId} → ${d.holdTo} (nobody can take it over — parked)`); } catch (e) { console.warn('[pool] removed-member default park failed:', e.message); } }
+        return;
+      }
       if (d.reason === 'warm-cache') { noteWarmHold(poolId, defaultWarmSid, d, now, ' (pool default)', poolId + ':default'); return; }
       // PARKED ON CREDITS (B-ad05): not "stuck" — the current member serves,
       // billed pay-per-use past its quota. ONE notice per (pool, member) per 6 h.
@@ -4943,11 +5515,22 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
     // HARD-dead (<5%, genuinely unusable — escaping immediately is cheaper
     // than idling on a dead account). The settle-bar in decidePoolSwitch is
     // the primary anti-oscillation; this is the belt.
+    // MANUAL PRIORITY at the DEFAULT of a pool that cannot hot-switch: returning
+    // the default RESTARTS every follower, so the return waits for them to stop
+    // (never mid-turn — the owner's 17:22 rule); a follower's stop re-decides it
+    if (d.reason === 'priority-return' && !hot) {
+      let busy = null;
+      for (const [sid, s] of activeSessions) {
+        if (s._accountId !== poolId || s.host || hasOwnPoolLink(poolId, sid)) continue;
+        if (conversationInTurn({ isStreaming: s._isStreaming, turnState: s._turnState })) { busy = sid; break; }
+      }
+      if (busy) { noteWarmHold(poolId, busy, { ...d, reason: 'priority-hold', wouldTo: d.to, wouldToName: d.toName }, now, ' (pool default)', poolId + ':default:prio'); return; }
+    }
     const lastSwitch = _poolSwitchAt.get(poolId) || 0;
-    if (now - lastSwitch < 180000 && d.reason !== 'login-expired' && !(d.fromRemaining != null && d.fromRemaining < POOL_HARD_PCT)) return; // dead login = hard death, same exemption
+    if (now - lastSwitch < 180000 && d.reason !== 'not-a-member' && d.reason !== 'login-expired' && !(d.fromRemaining != null && d.fromRemaining < POOL_HARD_PCT)) return; // dead login = hard death, same exemption (and a removed member, 2026-09-28)
     _poolSwitchAt.set(poolId, now);
     _poolAutoLast.set(poolId, now);
-    accounts.setPoolTarget(poolId, d.to, { why: 'pool-switch' });
+    accounts.setPoolTarget(poolId, d.to, { why: d.reason === 'not-a-member' ? 'removed-from-pool' : 'pool-switch' });
     // Re-attribute every live session on this pool from this moment — the
     // ledger's by-time attribution resolves pool → current target at record
     // time, so a fresh record moves subsequent requests to the new account.
@@ -4979,9 +5562,13 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
     if (d.toCredits) noteCreditsParking(poolId, d.to, poolCreditsNotice({ toCredits: d.toCredits, toRemaining: d.toRemaining }, { poolName: a.name, memberName: d.toName || d.to }), now);
     serverNotice(`pool-auto-${poolId}-${now}`, d.reason === 'edf'
       ? `Pool "${a.name}" switched to ${d.toName} — draining the member whose weekly quota resets soonest (use-it-or-lose-it)`
+      : d.reason === 'priority-return'
+      ? `Pool "${a.name}" is back on ${d.toName} (priority #${d.priorityRank ?? '?'}) — new conversations start there${hot ? '' : ' (restarting its conversations)'}`
+      : d.reason === 'not-a-member'
+      ? `Pool "${a.name}" switched to ${d.toName} — ${nameOf(currentId)} was removed from the pool${hot ? '' : ' (restarting its conversations)'}${scraps}`
       : d.reason === 'login-expired'
       ? `Pool "${a.name}" switched to ${d.toName} — ${nameOf(currentId)}'s ${(() => { try { const l = accounts.loginStateOf(currentId); return l ? loginWallPhrase(l) : 'login session expired'; } catch { return 'login session expired'; } })()}; re-login it in Manage Agents${hot ? '' : ' (restarting its conversations)'}${scraps}`
-      : `Pool "${a.name}" auto-switched to ${d.toName} (previous account ${dEarly ? `will be down to ${fromPct}% within ${Math.round(PROJECTION_LEAD_SEC / 60)} min — moved early, ${dEarly}` : `down to ${fromPct}% remaining`})${hot ? '' : ' — restarting its conversations'}${scraps}`);
+      : `Pool "${a.name}" auto-switched to ${d.toName}${d.priorityRank ? ` (priority #${d.priorityRank})` : ''} (previous account ${dEarly ? `will be down to ${fromPct}% within ${Math.round(PROJECTION_LEAD_SEC / 60)} min — moved early, ${dEarly}` : `down to ${fromPct}% remaining`})${hot ? '' : ' — restarting its conversations'}${scraps}`);
     console.log(`[pool] auto-switch ${poolId}: ${currentId} → ${d.to} (${d.reason}, from ${fromPct}% left${dEarly ? `; ${dEarly}` : ''}, hot=${hot}, affected=${affected.length})`);
     if (!hot && affected.length) {
       // ONE client only — every client acting would race duplicate restarts.
@@ -5045,6 +5632,9 @@ function maybeStopOnFallback(session, id, from, to) {
     _vsuPending, usageAnchors, usageEstimator,
     armWorkflowUsageWatcher, darkSources, darkTaintedAccounts, kickPoolEval,
     markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool, notePoolAuthFailure, noteTurnStopped,
+    setConversationPin, poolPinOf, // THE CONVERSATION'S PIN (2026-09-28): the ONE writer (behind POST /api/accounts/:poolId/pin) and the reader
+    gatherPlan, // "Move every conversation here now", judged per conversation before anything moves (verify r1)
+    memberRemoved, decideDefaultTarget, fallbackDefaultTarget, removalTargetFor, sweepNonMemberLinks, holdRemoved, _removedHoldOwed, // THE REMOVED-MEMBER WALL (2026-09-28): the one entry point, the default's decision (updatePool's chooser), the stale-link sweep every pool tick runs first
     onMemberReadingFresh, onMemberLoginSuccess, readingForeignForWake, memberPoolsOf, autoCliReady, lastMemberReadAt, projectionRereadFor, // THE NEW-MEMBER WAKE (2026-09-08): the one edge every producer of a fresh reading takes, its login half, and the two facts the auto-cli loop asks before it spends a spawn
     _memberWakeAt, _loginReadAt, MEMBER_WAKE_FLOOR_MS, MEMBER_READING_FRESH_MS, LOGIN_READ_FLOOR_MS, // the wake's floors are WALL-CLOCK: a suite winds them back instead of sleeping through them (same seam as _poolAutoLast)
     maybeRepinLockedModel, maybeStopOnFallback, modelsMatch, noteServedModel, noteModelFallback, servedDefinesModel, projectionFamilyFor, rerouteAnnouncedBy, // the two stdout-fed model facts + the fallback predicate + the PROJECTION family + THE REROUTE THIS RECORD ANNOUNCES (2026-09-13: one implementation for the parse AND the device feed; r2: one rule for "which cap can refuse this turn"; r4: the fact is placed BEFORE its readers, at both feeds)

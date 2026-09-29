@@ -447,7 +447,10 @@ export function installSidebarState(SidebarClass) {
     // (the Session Properties toggle never saved), AND 'outputStyle'/'autoResume'
     // in 2.368.0 (the status-bar style pick vanished on resume — FOURTH strike,
     // owner-caught within hours) — keep it in sync with EVERY per-session
-    // config writer, and test-auto-resume now pins it. (Owner ruling 9's
+    // config writer. Since lane-pool-pin verify r2 this is a CENSUS, not a
+    // comment: src/session-schema.js declares every key a resume carries
+    // (`config: {key, example}` / SESSION_CONFIG_ONLY) and test-session-schema
+    // drives THIS function with each example — a key it drops is red. (Owner ruling 9's
     // 'worktree' is one of the TRI-STATE keys below, not this truthy list.)
     for (const k of ['model', 'effort', 'permission', 'account', 'groupManager', 'modelLock', 'lockModel', 'outputStyle']) {
       if (config?.[k]) clean[k] = config[k];
@@ -463,6 +466,16 @@ export function installSidebarState(SidebarClass) {
     // re-checked itself on the next render while the run was isolated, and a
     // fork kept inheriting a preference the user had just revoked.
     if (config?.worktree === true || config?.worktree === false) clean.worktree = config.worktree;
+    // poolPin is OBJECT-valued ({memberId, at}) — THE CONVERSATION'S POOL PIN (2026-09-28).
+    // This map is the pin's RESUME CARRIER (session-lifecycle's billing submenu writes it,
+    // resumeSession reads `savedCfg.poolPin`), and the whitelist above dropped it (verify r1,
+    // the FIFTH strike of this list): a stopped conversation's pin was never saved while the
+    // toast said "Pinned to … — applies when the conversation resumes", and a live one lost
+    // its pin at its next resume. Kept by SHAPE, never by truthiness: a pin without a member
+    // id is no pin.
+    if (config?.poolPin && typeof config.poolPin === 'object' && typeof config.poolPin.memberId === 'string' && config.poolPin.memberId) {
+      clean.poolPin = { memberId: config.poolPin.memberId, at: Number(config.poolPin.at) || null, ...(typeof config.poolPin.poolId === 'string' && config.poolPin.poolId ? { poolId: config.poolPin.poolId } : {}) }; // poolId = the pool the pin was MADE on (a resume onto another pool carries no pin)
+    }
     if (Object.keys(clean).length) this._sessionConfigs[stateKey] = clean;
     else delete this._sessionConfigs[stateKey];
     const legacyId = this._getLegacySessionId(sessionOrKey);

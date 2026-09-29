@@ -67,9 +67,13 @@
  */
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+const { CLEARED_TEXT } = require('../record-clear.js');   // "Clear content…": the sentence a cleared record's copy reads
 const S = require('../stash-summary.js');
 const { capsOf, notificationDelivery } = require('../backend-caps.js');
 const { vibespaceNoticeText } = require('../notification-senders.js');   // the ladder heads every notification with it: the frame text the wrapper echoes is the HEADED one
+const GC = require('../group-card.js');   // lane group-report-card: a waiting group message as the summary reads an entry
+const { addressableId } = require('../claude-lock-capture.js');   // the groups engine's member id = the conversation's OWN id (a pending fork has none)
 /** The name the hand-over speaks under — a VibeSpace notification SENDER (src/notification-senders.js lists it). */
 const FROM_NAME = 'VibeSpace notices';
 
@@ -90,7 +94,7 @@ const DELIVERED_FILE = 'stash-handover.json';
 const HANDOVER_TAG_RE = /\(hand-over (ho-[a-z0-9]+-[a-z0-9]+)\)/;
 const STATUS = Object.freeze({ agent_forbidden: 403, no_session: 404, no_conversation: 409, nothing_waiting: 409, in_flight: 409, held_for_next_turn: 409, spend_refused: 429, unreachable: 409, unavailable: 503, restarting: 503 });
 
-function create({ activeSessions, getDeliver = () => null, getJobs = () => null, broadcastSessions = () => {}, renderMsgStash, renderNotifStash, log = console, debounceMs = 300, now = () => Date.now(), dataDir = null } = {}) {
+function create({ activeSessions, getDeliver = () => null, getJobs = () => null, getGroups = () => null, broadcastSessions = () => {}, renderMsgStash, renderNotifStash, log = console, debounceMs = 300, now = () => Date.now(), dataDir = null } = {}) {
   const cidOf = (s) => (s && (s.backendSessionId || s.claudeSessionId)) || null;
   const jobsReady = () => { try { const jm = getJobs(); return jm && typeof jm.peekNotifs === 'function' ? jm : null; } catch { return null; } };
   let seq = 0;
@@ -119,15 +123,29 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     if (!msg.length) return 0;
     try { return renderMsgStash(msg, { maxEntries: HANDOVER_MAX_ENTRIES, maxBytes: HANDOVER_MAX_BYTES }).rest.length; } catch { return 0; }
   }
+  /** THE GROUP MESSAGES WAITING for this conversation's next turn (lane group-report-card): the groups engine's
+   *  PREVIEW (`reportsForTurn(cid, {preview:true})` — commits nothing, memoised), as summary entries (source 'group').
+   *  They live in the engine, not in a stash: a hand-over never carries them (they ride the next message). */
+  function groupEntriesOf(s) {
+    try {
+      const ge = getGroups();
+      const cid = addressableId(s);   // a pending fork carries its parent's id — its strip is not the parent's
+      if (!cid || !ge || typeof ge.reportsForTurn !== 'function') return [];
+      const pv = ge.reportsForTurn(cid, { preview: true });
+      return ((pv && Array.isArray(pv.pending)) ? pv.pending : []).map(GC.pendingEntry).filter(Boolean);
+    } catch (e) { log.warn?.(`[stash] group preview failed: ${(e && e.message) || e}`); return []; }
+  }
   /** The `stash` session fact (null = nothing waits); `billed` = the strip's "starts a turn"; `inFlight` = a hand-over
-   *  is on its way (another client's click); `held` = what one hand-over would leave; `reachable` = a hand-over exists. */
+   *  is on its way (another client's click); `held` = what one hand-over would leave; `reachable` = a hand-over exists
+   *  AND has something to carry (lane group-report-card: group messages alone are not handed over — no button). */
   function summaryFor(s) {
     const cid = cidOf(s);
     if (!cid) return null;
     try {
       const both = entriesOf(cid);
-      const sum = S.summarize(both);
-      return sum ? { ...sum, billed: billedFor(s), inFlight: inflight.has(cid), held: heldOf(both.msg), reachable: reachableFor(s) } : null;
+      const groups = groupEntriesOf(s);
+      const sum = S.summarize({ msg: [...both.msg, ...groups], jobs: both.jobs });
+      return sum ? { ...sum, billed: billedFor(s), inFlight: inflight.has(cid), held: heldOf(both.msg), reachable: reachableFor(s) && (both.msg.length + both.jobs.length) > 0 } : null;
     } catch (e) { log.warn?.(`[stash] summary failed: ${(e && e.message) || e}`); return null; }
   }
 
@@ -154,9 +172,60 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
         const obj = JSON.parse(raw);
         // a record is a hand-over's only with its conversation, its exact frame text and a NUMERIC instant — a junk `at`
         // (verify r5: a string is never older than the TTL's cut, NaN < cut is false, so it lived until the count bound)
-        for (const [id, rec] of Object.entries(obj || {})) if (rec && typeof rec === 'object' && rec.cid && typeof rec.text === 'string' && Number(rec.at) > 0) delivered.set(id, { ...rec, at: Number(rec.at), msg: Array.isArray(rec.msg) ? rec.msg : [], jobs: Array.isArray(rec.jobs) ? rec.jobs : [] });
+        for (const [id, rec] of Object.entries(obj || {})) if (rec && typeof rec === 'object' && rec.cid && (typeof rec.text === 'string' || typeof rec.textSha === 'string') && Number(rec.at) > 0) delivered.set(id, { ...rec, at: Number(rec.at), msg: Array.isArray(rec.msg) ? rec.msg : [], jobs: Array.isArray(rec.jobs) ? rec.jobs : [] });
       } catch (e) { log.warn?.(`[stash] the hand-over memory ${file} was unreadable (${(e && e.message) || e}) — starting empty; a frame handed back for a hand-over delivered before this boot is kept as one notice`); }   // verify r5: never silent
     }
+  }
+  // "CLEAR CONTENT…" (the lane-redact merge onto 2.369.196): this memory is a COPY of held words — a delivered hand-over's
+  // originals (the ladder's entries: a group wake's report, a codex hand-back; the jobs store's notifications) and the
+  // frame that carried them, on disk for 24 h and restored into both stores when the frame comes back. A clear reaches
+  // it through the ladder's door (`registerRedactor`, called by redactStash with the door's match + scope): an original
+  // the match names, or a job notification of a cleared job (`scope.jobIds`), reads the sentence; a record whose
+  // originals OR frame carried those words keeps only the frame's DIGEST — the echo is still recognised (`sameFrame`),
+  // restored as the now-cleared originals, and the words leave the disk.
+  const frameSha = (t) => crypto.createHash('sha256').update(String(t || '').trim()).digest('hex');
+  /** Does any of these entries read the cleared sentence (a ladder entry's text / sender label, a job notification's
+   *  text / name)? Asked when a delivery lands: such an entry was cleared while its post was on its way. */
+  const readsCleared = (msg, jobs) => (msg || []).some((e) => e && (String(e.text || '').includes(CLEARED_TEXT) || String(e.fromName || '').includes(CLEARED_TEXT)))
+    || (jobs || []).some((n) => n && (n.text === CLEARED_TEXT || n.jobName === CLEARED_TEXT));
+  function sameFrame(rec, echoed) {
+    if (typeof rec.text === 'string') return echoed.trim() === rec.text.trim();
+    return typeof rec.textSha === 'string' && frameSha(echoed) === rec.textSha;
+  }
+  /** Does a frame NAME job `id`? The id as a whole token, whatever stands around it (lane-redact verify r3 on the merged
+   *  tree, reproduced): a frame carries a jobs-store notification as `- 09-28 10:00 jb-… name: text` but a LADDER entry
+   *  (a codex wrapper's hand-back of the job's own notification) as `[VibeSpace Background Work] task "name" (jb-…):
+   *  …\nDetails: vibespace-job poll jb-…. …` — `' jb-… '` matched the first form only, so a spent record whose frame
+   *  carried the second kept the job's name and words on disk after the clear. */
+  const namesJob = (text, id) => new RegExp('(^|[^\\w-])' + String(id).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![\\w-])').test(text);
+  function redactDelivered(match, scope = {}) {
+    const ids = new Set(Array.isArray(scope && scope.jobIds) ? scope.jobIds.map(String) : []);
+    const ask = (e) => { let r = null; try { r = typeof match === 'function' ? match(e) : null; } catch { r = null; } return r && typeof r === 'object' ? r : null; };
+    let n = 0;
+    for (const rec of delivered.values()) {
+      let hit = false;
+      for (const e of rec.msg || []) {
+        const r = e && ask(e);
+        if (!r) continue;
+        if (typeof r.text === 'string') e.text = r.text;
+        if (typeof r.fromName === 'string') e.fromName = r.fromName;
+        hit = true;
+      }
+      for (const j of rec.jobs || []) {
+        if (!j || !ids.has(String(j.jobId))) continue;
+        j.jobName = CLEARED_TEXT; j.text = CLEARED_TEXT; hit = true;
+      }
+      // a SPENT record (restored: its originals are back in their stores) keeps only its frame — judged by the frame itself
+      if (!hit && typeof rec.text === 'string') {
+        if (ask({ source: 'agent', kind: 'notification', fromName: FROM_NAME, text: rec.text })) hit = true;
+        else for (const id of ids) if (namesJob(rec.text, id)) { hit = true; break; }
+      }
+      if (!hit) continue;
+      n++;
+      if (typeof rec.text === 'string') { rec.textSha = frameSha(rec.text); delete rec.text; }
+    }
+    if (n) persistDelivered();
+    return n;
   }
   function persistDelivered() {
     if (!file) return;
@@ -222,7 +291,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
       try {
         r = await d.deliverToConversation(cid, frame, {
           kind: 'notification', spendReason: 'stash-handover', fromName: FROM_NAME,
-          cardText: `${n} waiting notice(s) handed over`,
+          cardText: S.handoverCardText(n, text),   // 2026-09-28: the card carries the notices behind an expander (handoverFacts), not the count alone
         });
       } catch (e) { r = { ok: false, reason: (e && e.message) || String(e) }; }
       if (!r || !r.ok) {
@@ -236,6 +305,15 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
       // the exact frame the ladder wrote (headed as a notification) — the wrapper echoes it verbatim, and equality is
       // what makes a frame OURS (verify r3: a tag alone is a string a peer can write)
       delivered.set(id, { cid, msg: tookMsg, jobs: tookJobs, at: now(), text: vibespaceNoticeText(frame) });
+      // "CLEAR CONTENT…" (lane-redact verify r3, reproduced): a clear that landed WHILE the post was on its way rewrote
+      // these very entries in their stores (both doors ran before this record existed, so `redactDelivered` had nothing
+      // to touch) — yet the frame the ladder wrote still carried the words. An entry that reads the sentence now was
+      // cleared mid-flight: the record keeps the frame's DIGEST only (the echo is still recognised — `sameFrame`).
+      if (readsCleared(tookMsg, tookJobs)) {
+        const rec = delivered.get(id);
+        rec.textSha = frameSha(rec.text); delete rec.text;
+        log.log?.(`[stash] ${cid}: hand-over ${id} was on its way when a clear reached its entries — the frame is remembered by its digest only (the words it carried reached the agent as a turn)`);
+      }
       forget();
       persistDelivered();
       changed();
@@ -259,7 +337,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     if (rec.cid !== cid) return 0;
     // THE FRAME IS OURS ONLY WHEN IT IS THE FRAME (verify r3): the tag is a string any peer can write into a message
     // of its own; the echoed text must be the one the ladder wrote for this id, whole
-    if (typeof rec.text !== 'string' || echoed.trim() !== rec.text.trim()) { log.log?.(`[stash] ${cid}: a frame names hand-over ${m[1]} but is not its text — stashed as itself`); return 0; }
+    if (!sameFrame(rec, echoed)) { log.log?.(`[stash] ${cid}: a frame names hand-over ${m[1]} but is not its text — stashed as itself`); return 0; }
     // the same frame echoed twice (a Stop AND a queue removal both report it): restored once, the second echo is
     // handled (never a blob of the copy) — the record stays, marked, until its TTL
     if (rec.restored) { log.log?.(`[stash] ${cid}: hand-over ${m[1]} echoed again — already restored (${rec.restored})`); return rec.restored; }
@@ -301,7 +379,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     });
   }
 
-  return { summaryFor, billedFor, reachableFor, changed, handOver, register, entriesOf, restoreHandedOver, close, settle, isClosed: () => closed, inFlight: (cid) => inflight.has(cid), inFlightCount: () => inflight.size, _delivered: delivered };
+  return { summaryFor, billedFor, reachableFor, changed, handOver, register, entriesOf, restoreHandedOver, redactDelivered, close, settle, isClosed: () => closed, inFlight: (cid) => inflight.has(cid), inFlightCount: () => inflight.size, _delivered: delivered };
 }
 
 module.exports = { create, STATUS, FROM_NAME, HANDOVER_MAX_ENTRIES, HANDOVER_MAX_BYTES, HANDOVER_TAG_RE, DELIVERED_TTL_MS, DELIVERED_MAX, DELIVERED_FILE };

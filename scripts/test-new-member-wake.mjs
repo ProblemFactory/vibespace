@@ -140,7 +140,12 @@ function mkWorld({ auto = true, hot = true, host = null, withFireNow = true, new
   if (newLoggedIn) login(NEW);
   const P = am.createPool({ name: '全部' }).id;
   am.setPoolTarget(P, FISH);
-  am.updatePool(P, { auto, hot });
+  am.updatePool(P, { hot });
+  // 2026-09-28: the whole-pool manual switch is retired — updatePool IGNORES auto:false (a pool is automatic or by
+  // its manual priority). A pool RECORD that predates the manual-priority migration can still carry auto:false, and
+  // the engine still returns at the top of maybePoolAutoSwitchForPool for it — that is the "nothing can move the
+  // link" shape §8 measures, so the record is written the way such a store holds it
+  if (auto === false) { am.get(P).auto = false; am._save(); }
 
   const cacheDir = path.join(dataDir, 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
   const nowS = Math.floor(Date.now() / 1000);
@@ -581,7 +586,7 @@ console.log('\n§6 every producer of a fresh reading takes the SAME edge');
     routesModule.create({
       app, rootDir: w.root, HOST: '127.0.0.1', CLAUDE_CMD: 'claude', NODE_CMD: 'node',
       CLAUDE_SUBSCRIPTION_LOGIN_HELPER: '/dev/null', activeSessions: w.sessions,
-      auth: { enabled: false }, engine: w.eng, serverSetting: () => undefined,
+      auth: { enabled: false }, engine: opts.engineOf ? opts.engineOf(w.eng) : w.eng, serverSetting: () => undefined, // engineOf: §6b hands the routes EXACTLY what server.js hands them
       // `liveIds` is EXIT 4b's control: a running session on either side makes
       // `mergeSubscription` refuse with code 'merge-account-live', which is the
       // reachable exit where the fold does NOT happen and the fresh record is
@@ -727,6 +732,139 @@ console.log('\n§6 every producer of a fresh reading takes the SAME edge');
     ok('…on its OWN latch, so disabling one of the two side effects cannot silently disable the other',
       /const lastWakeFingerprint = new Map\(\)/.test(src));
   }
+
+  // ── §6b THE LOGIN RE-CHECK, WIRED (2026-09-29, owner "好" = A) ──────────
+  // Every leg above builds the routes over the WHOLE engine, which is exactly
+  // how `onMemberLoginSuccess` stayed dead in production from 2026-09-08 to
+  // 2026-09-29: the routes asked for it, server.js never passed it, and no
+  // suite could tell. These legs hand the routes EXACTLY the names server.js's
+  // `engine: {…}` literal passes (read off server.js), so un-wiring it again
+  // reddens a behaviour here, not only test-pool-auto's census. Owner words:
+  // 账号登录成功后，池会立刻重新决策一次并读一次用量.
+  console.log('\n§6b the login re-check: one usage read + one pool re-decision, handed to the routes by server.js');
+  {
+    const stripC = (t) => t.split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '')).join('\n');
+    const routesEngineNames = (srv) => {
+      const i = srv.indexOf("require('./src/server/account-usage-routes.js').create({");
+      const s0 = srv.indexOf('{', srv.indexOf('engine: {', i));
+      let d = 0, body = '';
+      for (let j = s0; j < srv.length; j++) { if (srv[j] === '{') d++; else if (srv[j] === '}') { d--; if (!d) { body = srv.slice(s0 + 1, j); break; } } }
+      return stripC(body).split(',').map((x) => x.trim()).filter((x) => /^[A-Za-z_$][\w$]*$/.test(x));
+    };
+    const names = routesEngineNames(read('server.js'));
+    const prodEngine = (eng) => Object.fromEntries(names.map((n) => [n, eng[n]]));
+    const masterEngine = (eng) => Object.fromEntries(names.filter((n) => n !== 'onMemberLoginSuccess').map((n) => [n, eng[n]]));
+    ok(`the routes get server.js's own engine literal (${names.length} names) — onMemberLoginSuccess among them, every name a real engine function`,
+      names.includes('onMemberLoginSuccess') && names.length >= 10 && names.every((n) => typeof probeWorld.eng[n] === 'function'), JSON.stringify(names));
+    /** run `fn` with console.log captured (the journal lines the engine writes) */
+    const journal = async (fn) => {
+      const lines = [], orig = console.log;
+      console.log = (...a) => { lines.push(a.map(String).join(' ')); };
+      try { await fn(); } finally { console.log = orig; }
+      return lines;
+    };
+    const WAKE_LINE = /\[pool\] member wake UCI Max \(login\)/;
+    const relogin = async (h) => {
+      let out = null, r = null;
+      h.app.locals._lastLoginWake = undefined;
+      const lines = await journal(async () => { out = await h.call('POST /api/accounts/:id/relogin-finalize', { id: h.w.NEW }); r = await h.app.locals._lastLoginWake; await settle(); });
+      return { out, r, lines, wakes: lines.filter((l) => WAKE_LINE.test(l)) };
+    };
+    // A conversation PINNED to a member that cannot sign in: the pin is kept
+    // (pin-login-dead) and the conversation runs on the automatic choice.
+    const pinWorld = (engineOf, engineModule) => {
+      const h = mkRoutes({ newLoggedIn: false, engineOf, engineModule });
+      h.w.writeCache(h.w.FISH, h.w.healthy());   // its automatic home can serve
+      h.pin = h.w.eng.setConversationPin(h.w.A._webuiId, h.w.NEW);
+      h.w.unthrottle();
+      return h;
+    };
+    {
+      const h = pinWorld(prodEngine);
+      const { w } = h;
+      ok('setup: a conversation pinned to a member that cannot sign in keeps its pin and runs on the automatic choice',
+        h.pin.ok === true && h.pin.placed === false && h.pin.reason === 'pin-login-dead' && w.linkOf(w.A._webuiId) === w.FISH, JSON.stringify(h.pin));
+      w.login(w.NEW); w.setProbeAnswer(() => w.healthy());
+      const L = await relogin(h);
+      ok('a login SUCCESS ⇒ ONE usage read of that member, through the EXISTING rung (the stubbed cli-usage panel)',
+        w.probes.length === 1 && w.probes[0] === w.NEW && L.r?.ok === true && L.r?.probe?.rung === 'cli-usage', JSON.stringify({ probes: w.probes, probe: L.r?.probe }));
+      ok('…ONE `member wake UCI Max (login)` journal line, naming the ONE pool it re-decided',
+        L.wakes.length === 1 && /re-decided 1 pool\(s\)/.test(L.wakes[0]) && L.r?.wake?.acted === true && JSON.stringify(L.r.wake.pools) === JSON.stringify([w.P]), JSON.stringify({ wakes: L.wakes, wake: L.r?.wake }));
+      ok('…and the pinned conversation RETURNS to its pin (the pin rules: its member settled, the conversation idle ⇒ pin-return at once)',
+        w.linkOf(w.A._webuiId) === w.NEW && L.lines.some((l) => l.includes(`per-session switch ${w.P}/${w.A._webuiId}`) && /pin return \(pinned\)/.test(l)),
+        L.lines.filter((l) => /per-session|pin/.test(l)).join(' | '));
+      ok('…an unpinned conversation is left to the automatic rules (it stays on its healthy member — a pin moves only its own conversation)',
+        w.linkOf(w.B._webuiId) === w.FISH, String(w.linkOf(w.B._webuiId)));
+      ok('…and nobody was continued (nothing was waiting): a re-check is not a turn', w.fired.length === 0, JSON.stringify(w.fired));
+      const L2 = await relogin(h);
+      ok('a second IDENTICAL login answer inside 60 s ⇒ no second read, no second wake (the route\'s credential-fingerprint latch)',
+        w.probes.length === 1 && L2.r === undefined && L2.wakes.length === 0 && !L2.lines.some((l) => /member wake/.test(l)), JSON.stringify({ probes: w.probes, r: L2.r, lines: L2.lines }));
+      w.login(w.NEW, { expiresAt: Date.now() + 72e5 });   // a real second login writes fresh credentials ⇒ a new fingerprint
+      const L3 = await relogin(h);
+      ok('a second REAL login (fresh credentials) inside 60 s reaches the engine and the EXISTING per-member read floor holds it — no second read, no second re-decision',
+        L3.r?.reason === 'login-read-floor' && w.probes.length === 1 && !L3.lines.some((l) => /member wake|per-session switch/.test(l)), JSON.stringify({ r: L3.r, probes: w.probes }));
+    }
+    {
+      // NEGATIVE CONTROL: server.js's literal as master left it (the name not passed)
+      const h = pinWorld(masterEngine);
+      const { w } = h;
+      w.login(w.NEW); w.setProbeAnswer(() => w.healthy());
+      const L = await relogin(h);
+      ok('NEGATIVE CONTROL (master\'s literal, onMemberLoginSuccess not passed): the same login reads nothing, re-decides nothing, and the pinned conversation stays away from its pin',
+        h.pin.reason === 'pin-login-dead' && L.out?.outcome === 'same' && w.probes.length === 0 && !L.lines.some((l) => /member wake/.test(l)) && w.linkOf(w.A._webuiId) === w.FISH,
+        JSON.stringify({ outcome: L.out?.outcome, probes: w.probes, link: w.linkOf(w.A._webuiId) }));
+    }
+    // THE READ DID NOT ANSWER: the pool is still re-decided ONCE.
+    const engSrcL = read('src/server/usage-pool-engine.js');
+    const mutE = (from, to) => { if (!engSrcL.includes(from)) return { err: 'needle missing: ' + from.slice(0, 70) }; return { mod: loadCopy('src/server/usage-pool-engine.js', engSrcL.split(from).join(to)), hits: engSrcL.split(from).length - 1 }; };
+    const noReadingWorld = async (engineModule) => {
+      const h = mkRoutes({ engineOf: prodEngine, engineModule });   // the incident's world: FISH + PANDY spent, NEW signed in and unread, A + B on FISH
+      h.w.setProbeAnswer(null);                                     // the panel does not answer
+      return { h, L: await relogin(h) };
+    };
+    {
+      const { h: { w }, L } = await noReadingWorld();
+      ok('the read did NOT answer ⇒ the pool is still re-decided ONCE, said as one `member wake UCI Max (login)` line',
+        w.probes.length === 1 && L.r?.ok === false && L.r?.wake?.reason === 'no-reading' && L.r.wake.redecided === true && L.wakes.length === 1 && /re-decided 1 pool\(s\) without a reading \(no-reading\)/.test(L.wakes[0]),
+        JSON.stringify({ probes: w.probes, wake: L.r?.wake, wakes: L.wakes }));
+      ok('…the re-decision is real (the automatic rules moved both conversations off the spent member — an unread member is unknown, never 0 %) and nobody was continued',
+        w.linkOf(w.A._webuiId) === w.NEW && w.linkOf(w.B._webuiId) === w.NEW && w.fired.length === 0 && L.r.wake.fired.length === 0,
+        JSON.stringify({ A: w.linkOf(w.A._webuiId), B: w.linkOf(w.B._webuiId), fired: w.fired.length }));
+    }
+    {
+      const m = mutE("  if (wake && !wake.acted && (wake.reason === 'no-reading' || wake.reason === 'stale-reading')) {", '  if (false) { // CONTROL: no re-decision without a reading');
+      ok('control setup: the patched engine (no re-decision without a reading) applied its one replacement', m.hits === 1, JSON.stringify(m.err || m.hits));
+      const { h: { w }, L } = await noReadingWorld(m.mod);
+      ok('NEGATIVE CONTROL (no re-decision without a reading): the same login reads once and decides NOTHING — both conversations stay on the spent member, no journal line',
+        w.probes.length === 1 && L.wakes.length === 0 && w.linkOf(w.A._webuiId) === w.FISH && w.linkOf(w.B._webuiId) === w.FISH,
+        JSON.stringify({ probes: w.probes, wakes: L.wakes, A: w.linkOf(w.A._webuiId) }));
+    }
+    // A MEMBER OUTSIDE EVERY POOL, and A LOGIN THAT FAILS: nothing.
+    {
+      const h = mkRoutes({ engineOf: prodEngine });
+      h.w.am.updatePool(h.w.P, { members: [h.w.FISH, h.w.PANDY] });
+      h.w.setProbeAnswer(() => h.w.healthy());
+      const L = await relogin(h);
+      ok('a member OUTSIDE EVERY POOL signs in ⇒ nothing: no read, no re-decision, no journal line',
+        L.out?.outcome === 'same' && L.r?.reason === 'not-in-pool' && h.w.probes.length === 0 && !L.lines.some((l) => /member wake|per-session switch/.test(l)),
+        JSON.stringify({ outcome: L.out?.outcome, r: L.r, probes: h.w.probes }));
+      const m = mutE("  if (!memberPoolsOf(memberId).length) return { ok: false, reason: 'not-in-pool', wake: null };\n", '');
+      ok('control setup: the patched engine (no pool gate) applied its one replacement', m.hits === 1, JSON.stringify(m.err || m.hits));
+      const h2 = mkRoutes({ engineOf: prodEngine, engineModule: m.mod });
+      h2.w.am.updatePool(h2.w.P, { members: [h2.w.FISH, h2.w.PANDY] });
+      h2.w.setProbeAnswer(() => h2.w.healthy());
+      await relogin(h2);
+      ok('NEGATIVE CONTROL (no pool gate): the same login spawns a usage read for a member no pool holds', h2.w.probes.length === 1, JSON.stringify(h2.w.probes));
+    }
+    {
+      const h = mkRoutes({ newLoggedIn: false, engineOf: prodEngine });
+      h.w.setProbeAnswer(() => h.w.healthy());
+      const L = await relogin(h);
+      ok('a login that FAILS (nothing captured: "pending") ⇒ nothing: no read, no re-decision, no journal line',
+        L.out?.outcome === 'pending' && L.r === undefined && h.w.probes.length === 0 && !L.lines.some((l) => /member wake|per-session switch/.test(l)),
+        JSON.stringify({ outcome: L.out?.outcome, probes: h.w.probes }));
+    }
+  }
 }
 
 // ── §8 THE CONTINUE MUST LAND ON THE MEMBER THAT BECAME USABLE ─────────────
@@ -740,7 +878,7 @@ console.log('\n§6 every producer of a fresh reading takes the SAME edge');
 // The three shapes are real production states, and they are mkWorld's own
 // controls (declared since round 1, never driven — which is exactly why they
 // went unmeasured):
-//   auto:false   a MANUAL pool — maybePoolAutoSwitchForPool returns at the top
+//   auto:false   a MANUAL pool (since 2026-09-28: a pre-migration record — updatePool ignores auto:false) — maybePoolAutoSwitchForPool returns at the top
 //   host:'…'     a REMOTE conversation — the per-session pass skips it BY DESIGN
 //   hot:false    a COLD pool — it RESTARTS the conversation through the client
 //
@@ -1035,7 +1173,7 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
       C({ kind: 'now', armReason: 'account usable again', label: 'X' }) === '账号池已切换到 X，已自动继续这个任务。');
     ok('…and the engine really writes both halves of that pair (drift pin: the near-arm reason and a kind:\'now\' switch fire)',
       /armIfEnabled\?\.\(id, session, Date\.now\(\) \+ 45000, 'account usable again'\)/.test(engSrc0)
-      && /if \(a\.hot\) \{ try \{ getAutoResume\(\)\?\.fireNow\?\.\(sid, `账号池已切换到 \$\{toName\}`\)/.test(engSrc0));
+      && /if \(a\.hot( && ds\.reason !== 'not-a-member')?\) \{ try \{ getAutoResume\(\)\?\.fireNow\?\.\(sid, `账号池已切换到 \$\{toName\}`\)/.test(engSrc0)); // 2026-09-28: a REMOVED member's eviction never fires the continue (it starts no turn)
     ok('the account that came back BY ITSELF (timed path) still reads as a recovery',
       C({ kind: 'timed', armReason: 'account usable again', label: 'X' }) === '账号 X 已恢复可用，已自动继续这个任务。');
     ok('the WAKE names the member that became usable', C({ kind: 'now', armReason: 'usage limit', label: 'X', cause: 'member-usable' }) === '账号 X 已恢复可用，已自动继续这个任务。');

@@ -34,8 +34,13 @@ import { oraclesFor, rejectedFor, blockingRejectionsFor } from '../local-oracles
 import { overageChip, spendControlChip, creditsChipHtml, creditsState } from './usage-source.js';
 import { ETA_MIN_MS, accountResetEta, bucketEta, bucketMayNameDeadline, bucketResetMs, fullEta } from './usage-eta.js'; // the ONE compact reset countdown (PURE, 2026-09-14) + the per-account full form (2026-09-15)
 import { THRESH } from '../account-pool-auto.js'; // the pool's own hard bars = what "spent" means for the per-account countdown (PURE)
+import { memberState, seedPriority, movePriority, priorityRows, rowWords, placementWords, gatherCount, gatherConfirmWords, gatherWords, evictedWords } from './pool-priority-model.js'; // manual priority (2026-09-28): the Members… dialog's rows, words and moves (PURE)
+import { deviceLocale } from './i18n.js';
 import { overageState, spendControlState } from '../spend-authorizer.js'; // the ONE overage / spend-control verdict (PURE)
 import { installVerdictWords, installOutcomeWords, installConfirmWords } from './browser-switcher-model.js'; // the CloakBrowser row's words = the switch dialog's (PURE)
+import { dialRowState } from '../dial-facts.js'; // lane-pairing ③: THE one dial state (the machine row, this card, the pairing sheet)
+import { dialStateText, dialHistoryLine } from './dial-address-picker.js';
+import { openExitAccessDialog, exitSummaryText, exitCodeWords } from './exit-access-dialog.js'; // lane-pairing ⑥: "Who can use it" 
 
 // Roster order = TYPE, never add-order (2.268.5): pool → subscription → API
 // key, name-sorted within a type. ONE comparator for both rosters (2.369.18 —
@@ -618,24 +623,28 @@ export function installManageAgents(App, ctx = {}) {
     });
   },
 
-  // ── Pooled pseudo-account: re-point + cold restart (B-6217 v1) ──────────
-  // Re-pointing moves the symlink IMMEDIATELY, and a running claude re-reads
-  // the credential file mid-session (mtime-gated) — so any conversation on the
-  // pool would silently start billing the NEW account without a restart. v1
-  // semantics are COLD: the switch restarts every affected conversation (same
-  // kill→exited→resume machinery as the billing switcher). Not optional.
-  async _poolSwitchTarget(poolId, subId, poolName, hot) {
+  // ── THE WHOLE-POOL MANUAL SWITCH IS RETIRED (2026-09-28, owner: "手动切换整个池其实比较
+  // confusing…做成'手动优先级'"): no "Switch target ▸", no "Auto-switch" toggle. A pool is
+  // placed automatically or by its MANUAL PRIORITY (Members… → Placement), and the one
+  // "everything now" act lives on the #1 row there ("Move every conversation here now",
+  // POST …/gather — never greyed, addendum 4). `_poolGather` is that act.
+  async _poolGather(poolId, memberId, memberName, poolName, hot) {
+    const fmtTime = (ms) => { try { return new Date(ms).toLocaleString(deviceLocale(), { weekday: 'short', hour: 'numeric', minute: '2-digit' }); } catch { return new Date(ms).toISOString(); } };
+    if (!hot) {
+      // ONE confirm that names HOW MANY conversations restart (verify r1) — counted from the live
+      // list; none to restart ⇒ nothing to confirm (the default alone moves)
+      const words = gatherConfirmWords(gatherCount(this.sidebar?._webuiSessions || [], poolId), t, { memberName });
+      if (words) { const ok = await showConfirmDialog({ ...words }); if (!ok) return; }   // ONE options object (the approval census §1b)
+    }
     let r;
-    try { r = await fetchJson('/api/accounts/pool/' + encodeURIComponent(poolId) + '/target', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountId: subId }) }); }
+    try { r = await fetchJson('/api/accounts/pool/' + encodeURIComponent(poolId) + '/gather', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ memberId }) }); }
     catch (e) { showToast(e?.message || t('Switch failed'), { type: 'error' }); return; }
-    if (!r?.success) { showToast(r?.error || t('Switch failed'), { type: 'error' }); return; }
-    const affected = r.affected || [];
-    // hot = re-point only: the running CLI re-reads the credential file on its
-    // next request, so the conversations continue uninterrupted on the new
-    // account. Cold (default) restarts them for clean per-process attribution.
-    const restart = !hot && affected.length;
-    showToast(t('“{name}” now uses {target}', { name: poolName, target: r.name }) + (restart ? ' — ' + t('restarting {n} conversation(s)…', { n: affected.length }) : ''), { duration: 6000 });
-    if (restart) for (const sess of affected) this._poolColdRestart(sess, poolId);
+    // the answer in words: what moved, what was left alone (pinned / the member cannot serve it),
+    // a refusal by its code — never "every conversation" when some stayed
+    const said = gatherWords(r, t, { poolName, memberName, fmtTime });
+    showToast(said.text, { type: said.type, duration: said.type ? 8000 : 6000 });
+    if (!r?.success) return;
+    for (const sess of (r.affected || [])) this._poolColdRestart(sess, poolId);
   },
   // ── Pool ⋯ menu: ONE block for every backend (2.369.18 — the codex roster
   // had no pool menu at all, and a copy of the claude block would be the
@@ -648,19 +657,15 @@ export function installManageAgents(App, ctx = {}) {
     const codex = a.backend === 'codex';
     const members = a.memberOptions || [];
     const hotOk = a.hotSupported !== false;
-    const effHot = hotOk && !!a.hot;
     const patchPool = async (body) => {
       try { await api('/api/accounts/pool/' + encodeURIComponent(id), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
       catch (e) { showToast(e?.message || t('Update failed'), { type: 'error' }); }
     };
+    // the placement is SET in Members… (automatic, or the owner's order); the menu says which
+    const mode = Array.isArray(a.priority) && a.priority.length ? 'priority' : 'automatic';
+    const top = mode === 'priority' ? members.find((m) => m.id === a.priority[0]) : null;
     const items = [
-      { label: t('Switch target'), children: members.length ? members.map((m) => ({
-        label: (m.id === a.current ? '✓ ' : '') + m.name,
-        disabled: m.id === a.current,
-        action: () => this._poolSwitchTarget(id, m.id, a.name, effHot),
-      })) : [{ label: codex ? t('no logged-in ChatGPT accounts') : t('no logged-in subscriptions'), disabled: true, action: () => {} }] },
-      { label: t('Members…'), action: () => this._poolMembersDialog(id, a, refresh) },
-      { label: (a.auto ? '✓ ' : '') + t('Auto-switch when nearly exhausted'), action: () => patchPool({ auto: !a.auto }) },
+      { label: t('Members & placement…'), title: placementWords(mode, t) + (top ? ' — #1 ' + top.name : ''), action: () => this._poolMembersDialog(id, a, refresh) },
     ];
     if (hotOk) items.push({ label: (a.hot ? '✓ ' : '') + t('Hot switch (no restart)'), action: () => patchPool({ hot: !a.hot }) });
     else items.push({ label: t('Hot switch unavailable — every switch restarts the session'), disabled: true, action: () => {}, title: t('The Codex app-server keeps its login in memory, so a re-pointed login never reaches a running session (verified) — switches restart the conversation via resume.') });
@@ -680,7 +685,7 @@ export function installManageAgents(App, ctx = {}) {
       && (Array.isArray(p.members) && p.members.length ? p.members.includes(a.id) : true));
     return pools.map((p) => ({
       label: t('Exclude from pool “{pool}”', { pool: p.name }),
-      title: t('Removes “{name}” from the pool’s member list; conversations that picked it directly keep running on it.', { name: a.name }),
+      title: t('Removes “{name}” from the pool’s member list. The pool’s conversations running on it move to another member at once — or, when no other member can take them, stop after their current turn and wait; conversations that picked it directly keep running on it.', { name: a.name }),
       action: async () => {
         const explicit = Array.isArray(p.members) && p.members.length > 0;
         const members = (explicit ? p.members : subs.map((x) => x.id)).filter((id) => id !== a.id);
@@ -696,6 +701,7 @@ export function installManageAgents(App, ctx = {}) {
         refresh?.();
         showToast(t('Excluded “{name}” from pool “{pool}”', { name: a.name, pool: p.name })
           + (explicit ? '' : ' — ' + t('the pool now lists its members explicitly (subscriptions added later no longer join it automatically)')), { duration: 7000 });
+        { const kept = evictedWords(r?.evicted, t); if (kept) showToast(kept, { type: 'error', duration: 10000 }); } // the act's own answer: what could NOT leave it (verify r1)
         // narrowing away the current target re-points the pool IMMEDIATELY —
         // the same consequences as the Members… dialog's save (review B1)
         if (r?.retargeted) {
@@ -742,6 +748,12 @@ export function installManageAgents(App, ctx = {}) {
   // includes subscriptions added LATER (the user's 全选 semantics), not a
   // snapshot of today's list. Explicit selection = a narrowed fixed set;
   // narrowing away the current target re-points server-side (updatePool).
+  // MEMBERS & PLACEMENT (2026-09-28): who is in the pool, and — with Manual priority —
+  // in which order the pool uses them (the top usable member takes it; an exhausted one
+  // hands over to the next; one that can serve again takes it back at each
+  // conversation's next stop). Rows are the PURE model's (src/lib/pool-priority-model.js):
+  // the place, the state in words (never greyed), a ⋯ menu with only what applies, a
+  // drag handle — and on #1 "Move every conversation here now" (never greyed).
   async _poolMembersDialog(poolId, a, refresh) {
     let list;
     try { list = await fetchJson('/api/accounts'); } catch { showToast(t('Could not load accounts'), { type: 'error' }); return; }
@@ -751,24 +763,89 @@ export function installManageAgents(App, ctx = {}) {
     const codex = be === 'codex';
     const effHot = a?.hotSupported !== false && !!a?.hot;
     const subs = (list?.accounts || []).filter((x) => x.type === 'subscription' && (x.backend || 'claude') === be && !x.pooled);
-    const { body, close } = createModalShell({ id: 'pool-members-dialog', title: t('Pool members — {name}', { name: a?.name || '' }), minWidth: '420px', escapeToClose: true });
-    const explicit = Array.isArray(a?.members) && a.members.length ? a.members : null;
-    body.innerHTML = `
+    const fresh = (list?.accounts || []).find((x) => x.id === poolId) || a || {};
+    const { body, close } = createModalShell({ id: 'pool-members-dialog', title: t('Pool members — {name}', { name: a?.name || '' }), minWidth: '460px', escapeToClose: true });
+    const explicit = Array.isArray(fresh.members) && fresh.members.length ? fresh.members : null;
+    // the dialog's own state; nothing is saved until Save (the one act — gather — is immediate)
+    const st = {
+      all: !explicit,
+      checked: explicit ? explicit.slice() : subs.map((x) => x.id),
+      mode: Array.isArray(fresh.priority) && fresh.priority.length ? 'priority' : 'automatic',
+      order: Array.isArray(fresh.priority) ? fresh.priority.slice() : [],
+    };
+    const nowSec = () => Date.now() / 1000;
+    const stateOf = (id) => { const x = subs.find((y) => y.id === id) || {}; return memberState({ loggedIn: !!x.loggedIn, loginState: x.loginState || null, usage: this._accountUsage?.[id] || null, nowSec: nowSec() }); };
+    const fmtTime = (ms) => { try { return new Date(ms).toLocaleString(deviceLocale(), { weekday: 'short', hour: 'numeric', minute: '2-digit' }); } catch { return new Date(ms).toISOString(); } };
+    const draw = () => {
+      const rows = priorityRows({ members: subs, checked: st.checked, order: st.order, mode: st.mode, current: fresh.current || null, stateOf });
+      body.innerHTML = `
       <div class="usage-note">${escHtml(codex ? t('The pool switches between these ChatGPT accounts. Not-signed-in accounts are skipped until they log in.') : t('The pool switches between these subscriptions. Not-signed-in accounts are skipped until they log in.'))}</div>
-      <label class="pool-mem-row pool-mem-all"><input type="checkbox" id="pool-mem-all" ${explicit ? '' : 'checked'}>
+      <div class="pool-place-row" role="radiogroup" aria-label="${escHtml(t('Placement'))}">
+        <label class="pool-place-opt"><input type="radio" name="pool-place" value="automatic" ${st.mode === 'automatic' ? 'checked' : ''}><span><b>${escHtml(t('Automatic'))}</b><br><span class="pool-mem-sub">${escHtml(t('the pool picks: the member whose weekly quota resets soonest'))}</span></span></label>
+        <label class="pool-place-opt"><input type="radio" name="pool-place" value="priority" ${st.mode === 'priority' ? 'checked' : ''}><span><b>${escHtml(t('Manual priority'))}</b><br><span class="pool-mem-sub">${escHtml(t('your order: the top usable member serves; an exhausted one hands over to the next and takes back at each conversation’s next stop'))}</span></span></label>
+      </div>
+      <label class="pool-mem-row pool-mem-all"><input type="checkbox" id="pool-mem-all" ${st.all ? 'checked' : ''}>
         <span><b>${escHtml(codex ? t('All ChatGPT accounts') : t('All subscriptions'))}</b><br><span class="pool-mem-sub">${escHtml(t('including accounts you add in the future'))}</span></span></label>
-      <div class="pool-mem-list">${subs.map((x) => `
-        <label class="pool-mem-row"><input type="checkbox" class="pool-mem-cb" data-id="${escHtml(x.id)}" ${explicit ? (explicit.includes(x.id) ? 'checked' : '') : 'checked'} ${explicit ? '' : 'disabled'}>
-          <span>${escHtml(x.name)}${x.email ? ` <span class="pool-mem-sub">${escHtml(x.email)}</span>` : ''}${x.loggedIn ? '' : ` <span class="pool-mem-sub">· ${escHtml(t('not signed in'))}</span>`}</span></label>`).join('')}
+      <div class="pool-mem-list">${rows.map((r) => { const w = rowWords(r, t, { fmtTime }); return `
+        <div class="pool-mem-row pool-prio-row${r.place ? ' ranked' : ''}" data-id="${escHtml(r.id)}"${r.place ? ' draggable="true"' : ''}>
+          ${r.place ? `<span class="pool-prio-grip" title="${escHtml(t('Drag to reorder'))}" aria-hidden="true">⋮⋮</span>` : ''}
+          <input type="checkbox" class="pool-mem-cb" data-id="${escHtml(r.id)}" ${r.checked ? 'checked' : ''} ${st.all ? 'disabled' : ''} aria-label="${escHtml(r.name)}">
+          <span class="pool-prio-place">${escHtml(w.place)}</span>
+          <span class="pool-prio-name">${escHtml(w.name)}${r.sub ? ` <span class="pool-mem-sub">${escHtml(r.sub)}</span>` : ''}<br><span class="pool-mem-sub pool-prio-state" data-state="${escHtml(r.state?.code || '')}">${escHtml(w.state)}${w.note ? ' · ' + escHtml(w.note) : ''}</span></span>
+          ${r.actions.length ? `<button class="agent-btn pool-prio-menu" data-id="${escHtml(r.id)}" title="${escHtml(t('Order'))}" aria-label="${escHtml(t('Order'))}">⋯</button>` : ''}
+        </div>`; }).join('')}
         ${subs.length ? '' : `<div class="empty-hint">${escHtml(t('No subscription accounts yet'))}</div>`}</div>
       <div class="dialog-buttons"><button class="btn-create" id="pool-mem-save">${escHtml(t('Save'))}</button></div>`;
-    const allCb = body.querySelector('#pool-mem-all');
-    const cbs = [...body.querySelectorAll('.pool-mem-cb')];
-    allCb.onchange = () => { for (const cb of cbs) { cb.disabled = allCb.checked; if (allCb.checked) cb.checked = true; } };
-    body.querySelector('#pool-mem-save').onclick = async () => {
+      wire(rows);
+    };
+    const wire = (rows) => {
+      for (const r of body.querySelectorAll('input[name="pool-place"]')) r.onchange = () => {
+        st.mode = r.value;
+        // ON seeds the order with the member the pool sits on at the top (nothing moves
+        // by the switch itself); OFF clears it
+        st.order = st.mode === 'priority' ? seedPriority({ current: fresh.current || null, memberIds: subs.map((x) => x.id).filter((id) => st.checked.includes(id)) }) : [];
+        draw();
+      };
+      const allCb = body.querySelector('#pool-mem-all');
+      allCb.onchange = () => { st.all = allCb.checked; if (st.all) st.checked = subs.map((x) => x.id); draw(); };
+      for (const cb of body.querySelectorAll('.pool-mem-cb')) cb.onchange = () => {
+        const id = cb.dataset.id;
+        st.checked = cb.checked ? [...new Set([...st.checked, id])] : st.checked.filter((x) => x !== id);
+        if (st.mode === 'priority') st.order = cb.checked ? [...st.order.filter((x) => x !== id), id] : st.order.filter((x) => x !== id);
+        draw();
+      };
+      for (const b of body.querySelectorAll('.pool-prio-menu')) b.onclick = (e) => {
+        e.stopPropagation();
+        const row = rows.find((x) => x.id === b.dataset.id);
+        const rect = b.getBoundingClientRect();
+        showContextMenu(rect.left, rect.bottom + 4, row.actions.map((ac) => ({
+          label: t(ac.key),
+          action: () => {
+            if (ac.act === 'gather') { close(); this._poolGather(poolId, row.id, row.name, a?.name || '', effHot); return; }
+            st.order = movePriority(st.order, row.id, ac.act); draw();
+          },
+        })));
+      };
+      // drag to reorder (the menu is the path that works everywhere — a phone has no drag)
+      let dragId = null;
+      for (const el of body.querySelectorAll('.pool-prio-row.ranked')) {
+        el.addEventListener('dragstart', (e) => { dragId = el.dataset.id; try { e.dataTransfer.setData('text/plain', dragId); } catch { } });
+        el.addEventListener('dragover', (e) => { if (dragId) e.preventDefault(); });
+        el.addEventListener('drop', (e) => {
+          e.preventDefault();
+          const to = el.dataset.id;
+          if (!dragId || dragId === to) return;
+          const rest = st.order.filter((x) => x !== dragId);
+          rest.splice(rest.indexOf(to), 0, dragId);
+          st.order = rest; dragId = null; draw();
+        });
+      }
+      body.querySelector('#pool-mem-save').onclick = save;
+    };
+    const save = async () => {
       // empty explicit selection would silently mean ALL in the store
       // (updatePool maps [] → null) — refuse instead of surprising
-      const members = allCb.checked ? null : cbs.filter((cb) => cb.checked).map((cb) => cb.dataset.id);
+      const members = st.all ? null : st.checked.slice();
       if (members && !members.length) { showToast(t('Pick at least one member (or choose All)'), { type: 'error' }); return; }
       // review B2: a selection with ZERO signed-in members can never take over
       // — the pool would keep billing the current (now non-member) target
@@ -776,13 +853,16 @@ export function installManageAgents(App, ctx = {}) {
       if (members && !members.some((mid) => subs.find((x) => x.id === mid)?.loggedIn)) {
         showToast(t('None of the selected members is signed in — the pool would keep billing its current (non-member) target. Sign one in first.'), { type: 'error', duration: 8000 }); return;
       }
+      const priority = st.mode === 'priority' ? st.order.filter((id) => (members ? members.includes(id) : true)) : [];
+      if (st.mode === 'priority' && !priority.length) { showToast(t('Put at least one member in the order (or choose Automatic)'), { type: 'error' }); return; }
       let r;
       try {
-        r = await fetchJson('/api/accounts/pool/' + encodeURIComponent(poolId), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ members }) });
+        r = await fetchJson('/api/accounts/pool/' + encodeURIComponent(poolId), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ members, priority }) });
         if (r?.error) { showToast(r.error, { type: 'error' }); return; }
       } catch (e) { showToast(e?.message || t('Update failed'), { type: 'error' }); return; }
       close(); refresh?.();
-      showToast(members ? t('Pool members updated ({n} selected)', { n: members.length }) : codex ? t('Pool set to all ChatGPT accounts (incl. future ones)') : t('Pool set to all subscriptions (incl. future ones)'));
+      showToast((members ? t('Pool members updated ({n} selected)', { n: members.length }) : codex ? t('Pool set to all ChatGPT accounts (incl. future ones)') : t('Pool set to all subscriptions (incl. future ones)')) + ' · ' + placementWords(st.mode, t));
+      { const kept = evictedWords(r?.evicted, t); if (kept) showToast(kept, { type: 'error', duration: 10000 }); } // the act's own answer: what could NOT leave a removed member (verify r1)
       // Narrowing away the current target re-points the pool IMMEDIATELY —
       // same consequences as an explicit target switch (review B1): tell the
       // user, and cold-restart affected conversations unless the pool is hot
@@ -792,6 +872,7 @@ export function installManageAgents(App, ctx = {}) {
         if (!effHot) for (const sess of (r.affected || [])) this._poolColdRestart(sess, poolId);
       }
     };
+    draw();
   },
 
   _watchHostLogin(hostId, hostLabel, accountId = null, loginAttempt = null) {
@@ -1551,7 +1632,7 @@ export function installManageAgents(App, ctx = {}) {
             const instBtn = document.createElement('button'); instBtn.className = 'agent-btn primary';
             instBtn.textContent = w.offer === 'install-again' ? t('Install again…') : t('Install…');
             instBtn.onclick = async () => {
-              if (!(await showConfirmDialog(installConfirmWords('CloakBrowser', t)))) return;
+              if (!(await showConfirmDialog({ ...installConfirmWords('CloakBrowser', t, iv) }))) return; // lane-cloak: the measured sizes + host ride the verdict
               const r = await fetchJson('/api/browser/install', { method: 'POST' });
               if (r && r.error) console.warn('[manage-agents] cloak install answered', r.code, r.error);
               const o = installOutcomeWords(r, { t, name: 'CloakBrowser' });
@@ -1843,8 +1924,11 @@ export function installManageAgents(App, ctx = {}) {
           if (openSet.has(h.id) || hostsList.length === 1) det.open = true;
           const sum = document.createElement('summary');
           sum.className = 'agents-mach-sum';
-          const live = h.transport === 'dial' ? !!h.online : (h.graduated ? !!h.dialLive : null);
-          const dot = live == null ? '' : `<span class="agents-mach-dot${live ? '' : ' off'}" data-tip="${escHtml(live ? t('dialed in') : t('not dialed in'))}"></span>`;
+          // lane-pairing ③: the dot + its words read THE one dial state (a refused dial is never just "not dialed in")
+          const drs = h.transport === 'dial' || h.graduated ? dialRowState(h) : null;
+          const live = drs ? drs.state === 'connected' : null;
+          const dialWords = drs ? dialStateText(drs) : '';
+          const dot = live == null ? '' : `<span class="agents-mach-dot${live ? '' : ' off'}${drs && (drs.state === 'refused' || drs.state === 'auth-fail') ? ' err' : ''}" data-tip="${escHtml(dialWords)}"></span>`;
           let pill = '';
           const hu = this._hostOwnUsage?.[h.id];
           const bs = hu ? [['5h', hu.fiveHour], ['7d', hu.sevenDay], ...(hu.scopedWeekly || []).map((sc) => [String(sc.name || '?').slice(0, 2), sc])].filter(([, x]) => x && Number.isFinite(pctOf(x))) : [];
@@ -1866,7 +1950,44 @@ export function installManageAgents(App, ctx = {}) {
             pill = `<span class="agents-mach-quota" style="color:${c}" title="${escHtml(tip)}">${escHtml(wl)} ${wp}%${wEta ? ' · ' + escHtml(wEta) : ''}${escHtml(ageTxt)}</span>`;
           }
           sum.innerHTML = `${dot}<span class="agents-mach-name">${escHtml(h.name)}</span><span class="agents-machine-sub">${escHtml(h.transport === 'dial' ? t('device') : `${h.user}@${h.host}`)}</span>${pill}`;
+          // the summary's SECOND line: the dial state's words + who can use it as an exit (textContent — names are the user's)
+          {
+            const l2 = document.createElement('span');
+            l2.className = 'agents-machine-sub agents-mach-line2';
+            l2.dataset.dialState = drs ? drs.state : '';
+            l2.textContent = [dialWords, exitSummaryText(h.exit)].filter(Boolean).join(' · '); // no `exit` ⇒ nobody / nobody (the ONE reader)
+            sum.appendChild(l2);
+          }
           det.appendChild(sum);
+          // lane-pairing ③⑥: two human-triggered tools per machine — its dial history (the device's own record, the
+          // `dial-status` op; never fetched on render) and "Who can use it…" (the exit dialog)
+          {
+            const tools = document.createElement('div');
+            tools.className = 'agents-mach-tools';
+            const who = document.createElement('button');
+            who.type = 'button'; who.className = 'btn-cancel agents-mach-who'; who.textContent = t('Who can use it…');
+            who.onclick = (e) => { e.preventDefault(); openExitAccessDialog(this, { hostId: h.id, name: h.name }); };
+            tools.appendChild(who);
+            if (h.deviceId) {
+              const hist = document.createElement('button');
+              hist.type = 'button'; hist.className = 'btn-cancel agents-mach-hist'; hist.textContent = t('Dial history…');
+              const out = document.createElement('div');
+              out.className = 'agents-mach-hist-out';
+              hist.onclick = async (e) => {
+                e.preventDefault();
+                hist.disabled = true; out.textContent = t('Loading…');
+                const r = await fetchJson(`/api/hosts/${encodeURIComponent(h.id)}/dial-status`);
+                hist.disabled = false;
+                if (!r || r.error) { out.textContent = r && r.code === 'offline' ? dialWords : exitCodeWords(r && r.code, { error: (r && r.error) || t('server unreachable') }); if (!r || r.code !== 'offline') showToast(out.textContent, { type: 'error' }); return; }
+                const list = (r.status && Array.isArray(r.status.history) ? r.status.history : []).slice().reverse();
+                out.textContent = '';
+                if (!list.length) { out.textContent = t('No dial recorded on the device yet'); return; }
+                for (const ev of list) { const d = document.createElement('div'); d.className = 'agents-mach-hist-row'; d.textContent = dialHistoryLine(ev); out.appendChild(d); }
+              };
+              tools.append(hist, out);
+            }
+            det.appendChild(tools);
+          }
           const sec = mkSection('', h.id, null, det);
           const fill = () => {
             if (det._filled) return;

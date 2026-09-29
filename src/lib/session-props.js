@@ -1,9 +1,11 @@
 import { UI_ICONS } from './icons.js';
-import { escHtml, copyText, showConfirmDialog, stripCwdHostLabel, taskGroupColor, fetchJson, showToast } from './utils.js';
+import { escHtml, copyText, showConfirmDialog, stripCwdHostLabel, taskGroupColor, fetchJson, showToast, showContextMenu } from './utils.js';
+import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): a status entry's menu + the cleared sentence
 import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
 import { getBackendMeta, getAgentKindMeta, getAgentRoleLabel, responseStyleCaps, responseStyleOrigin, spawnValueOrigin, effortDisplay, composerSendModes, notificationDeliveryFor, worktreeCapsFor, worktreePick, permissionRulesCaps } from './agent-meta.js';
 import { loadInto, renderInto } from './permission-rules-view.js';
-import { t } from './i18n.js';
+import { t, deviceLocale } from './i18n.js';
+import { placementNote } from './pool-priority-model.js'; // 2026-09-28 (PURE)
 import { registerOpenAction } from './window-types.js';
 import { btn as textBtn } from './channel-chrome.js'; // the house text button (`mounts-btn`)
 
@@ -68,11 +70,98 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
   root.className = 'task-detail session-props';
   winInfo.content.appendChild(root);
 
+  /** The "Now" value — the CURRENT status record's state, reason (a cleared one in this device's words) and detail. */
+  const nowHtml = (s) => {
+    const st = sidebar.getSessionStatus?.(s);
+    const meta = st?.state ? (SESSION_STATE_META[st.state] || { label: st.state, color: 'var(--text-dim)' }) : null;
+    const urgMark = st?.urgency ? (SESSION_URGENCY_META[st.urgency]?.mark || '') : '';
+    return meta
+      ? `<span style="color:${meta.color};font-weight:600">${escHtml(meta.label)}${urgMark ? ' ' + urgMark : ''}</span>${st.reason ? ` <span style="color:var(--text-dim)"${isCleared(st) ? ' class="rc-cleared"' : ''}>— ${escHtml(isCleared(st) ? clearedText() : st.reason)}</span>` : ''} <span class="sp-dim-note">(${st.setBy === 'agent' ? escHtml(t('agent')) : escHtml(t('you'))})</span>${st.detail ? `<details class="sp-status-detail"><summary>${escHtml(t('detail'))}</summary><div>${escHtml(st.detail)}</div></details>` : ''}`
+      : `<span style="color:var(--text-dim)">${escHtml(t('none declared'))}</span>`;
+  };
+  /** The status HISTORY timeline, fetched and drawn into `histList` — the whole render and the select guard's in-place
+   *  repaint below share it (a history entry is a record's words; the store's broadcast is the refetch). */
+  const fillHistory = (histList, s) => {
+    const keys = [refKey, s.webuiId ? 'webui:' + s.webuiId : null].filter(Boolean).join(',');
+    const my = histList._fill = (histList._fill || 0) + 1; // the LATEST fill paints (a repaint while an earlier fetch is in flight)
+    fetch(`/api/session-status/history?sessionKey=${encodeURIComponent(keys)}`).then(r => {
+      if (!r.ok) throw new Error(`${r.status} ${r.statusText || 'request failed'}`);
+      return r.json();
+    }).then(d => {
+      if (!histList.isConnected || histList._fill !== my) return;
+      const hist = (d?.history || []).slice(-20).reverse();
+      const histKey = d?.key || refKey; // the key the entries sit under — a "Clear content…" addresses an entry by it + its time
+      histList.innerHTML = hist.length ? '' : `<div class="empty-hint" style="padding:2px 0">${escHtml(t('No status changes recorded yet'))}</div>`;
+      // a row's menu (right-click / long-press): Clear content… — the one confirm dialog; the store's
+      // broadcast (session-status-updated) re-renders this window, which refetches the history
+      // …and the row's ⋯ (verify r2: the verb had no visible door) opens the same menu under it
+      const clearable = (h) => !!h && !isCleared(h) && !!(h.reason || h.detail || h.branch);
+      const histMenu = (h, x, y) => showContextMenu(x, y, [{ label: t('Clear content…'), action: () => { clearRecords([{ kind: 'status', sessionKey: histKey, id: String(h.at), at: h.at, words: h.reason || h.branch || '' }]); } }]);
+      const rowEntry = (el) => { const li = el && el.closest && el.closest('.session-history-item'); return li ? hist[Number(li.dataset.idx)] : null; };
+      histList.oncontextmenu = (ev) => {
+        const h = rowEntry(ev.target);
+        if (!clearable(h)) return;
+        ev.preventDefault(); ev.stopPropagation();
+        histMenu(h, ev.clientX, ev.clientY);
+      };
+      histList.onclick = (ev) => {
+        const more = ev.target.closest('.session-history-more');
+        const h = more && rowEntry(more);
+        if (!clearable(h)) return;
+        ev.preventDefault(); ev.stopPropagation();
+        const q = more.getBoundingClientRect();
+        histMenu(h, q.left, q.bottom + 2);
+      };
+      const moreBtn = (h) => (clearable(h) ? `<button type="button" class="session-history-more" title="${escHtml(t('More actions'))}" aria-label="${escHtml(t('More actions'))}">⋯</button>` : '');
+      const today = new Date().toDateString();
+      for (const h of hist) {
+        const li = document.createElement('div');
+        li.className = 'session-history-item' + (isCleared(h) ? ' rc-row-cleared' : '');
+        li.dataset.idx = String(hist.indexOf(h));
+        const when = new Date(h.at);
+        const tm = (when.toDateString() === today ? '' : (when.getMonth() + 1) + '/' + when.getDate() + ' ') + when.toLocaleTimeString(deviceLocale(), { hour: '2-digit', minute: '2-digit' });
+        // A NON-STATUS event row (design-unknown-records): the git fact the
+        // agent reported — "push · fix/x" — drawn in the same timeline.
+        if (h.event === 'vcs') {
+          li.innerHTML = `<span class="session-history-time">${escHtml(tm)}</span>`
+            + `<span class="session-history-dot" style="--h-color:var(--text-dim)"></span>`
+            + `<span class="session-history-state">${UI_ICONS.forkBranch || ''} ${escHtml(t('git {kind}', { kind: String(h.kind || '') }))}</span>`
+            + (h.branch ? `<span class="session-history-reason" title="${escHtml(h.branch)}">${escHtml(h.branch)}</span>` : isCleared(h) ? `<span class="session-history-reason rc-cleared">${escHtml(clearedText())}</span>` : '')
+            + `<span class="session-history-by">${escHtml(t('agent'))}</span>` + moreBtn(h);
+          histList.appendChild(li);
+          continue;
+        }
+        const m = h.state ? (SESSION_STATE_META[h.state] || { label: h.state, color: 'var(--text-dim)' }) : null;
+        li.innerHTML = `<span class="session-history-time">${escHtml(tm)}</span>`
+          + `<span class="session-history-dot" style="--h-color:${m ? m.color : 'var(--text-dim)'}"></span>`
+          + `<span class="session-history-state">${escHtml(h.cleared ? t('cleared') : (m?.label || ''))}</span>`
+          + (isCleared(h) ? `<span class="session-history-reason rc-cleared">${escHtml(clearedText())}</span>` : h.reason ? `<span class="session-history-reason" title="${escHtml(h.reason)}">${escHtml(h.reason)}</span>` : '')
+          + `<span class="session-history-by">${h.setBy === 'user' ? escHtml(t('you')) : escHtml(t('agent'))}</span>` + moreBtn(h);
+        histList.appendChild(li);
+      }
+    }).catch((e) => {
+      // A permanent "Loading history…" is indistinguishable from an op still
+      // in progress — terminate the section honestly and let the broadcast-
+      // driven re-render be the retry.
+      if (!histList.isConnected || histList._fill !== my) return;
+      histList.innerHTML = `<div class="usage-warn" style="padding:2px 0">${escHtml(t('Couldn’t load the status history — {reason}', { reason: e?.message || t('server unreachable') }))}</div>`;
+    });
+  };
+
   const render = () => {
     const s = findSession();
     if (!s) { root.innerHTML = `<div class="empty-hint">${escHtml(t('Session no longer known (transcript gone from discovery).'))}</div>`; return; }
-    // Don't clobber an open native select the user is interacting with
-    if (root.contains(document.activeElement) && document.activeElement.tagName === 'SELECT') return;
+    // Don't clobber an open native select the user is interacting with — but the STATUS the window shows is a record's
+    // words, never the select: its "Now" line and its history are repainted in place from the store (lane-redact verify r5,
+    // reproduced in chrome: a window whose select kept the focus showed a cleared history entry's words for good — every
+    // broadcast returned here)
+    if (root.contains(document.activeElement) && document.activeElement.tagName === 'SELECT') {
+      const nv = root.querySelector('.sp-now-value');
+      if (nv) { const h = nowHtml(s); if (nv.innerHTML !== h) nv.innerHTML = h; }
+      const hl = root.querySelector('.session-history-list');
+      if (hl) fillHistory(hl, s);
+      return;
+    }
     root.innerHTML = '';
     const customName = sidebar.getCustomName(s);
     const displayName = customName || s.name || s.webuiName || (s.cwd || '').split('/').pop() || s.sessionId;
@@ -121,15 +210,10 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
 
     // ── State (current + change) ──
     const stSec = section(t('State'));
-    const st = sidebar.getSessionStatus?.(s);
-    const meta = st?.state ? (SESSION_STATE_META[st.state] || { label: st.state, color: 'var(--text-dim)' }) : null;
-    const urgMark = st?.urgency ? (SESSION_URGENCY_META[st.urgency]?.mark || '') : '';
     const stRow = document.createElement('div');
     stRow.className = 'session-detail-row';
     stRow.innerHTML = `<span class="session-detail-label">${escHtml(t('Now'))}</span>
-      <span class="session-detail-value" style="flex:1">${meta
-        ? `<span style="color:${meta.color};font-weight:600">${escHtml(meta.label)}${urgMark ? ' ' + urgMark : ''}</span>${st.reason ? ` <span style="color:var(--text-dim)">— ${escHtml(st.reason)}</span>` : ''} <span class="sp-dim-note">(${st.setBy === 'agent' ? escHtml(t('agent')) : escHtml(t('you'))})</span>${st.detail ? `<details class="sp-status-detail"><summary>${escHtml(t('detail'))}</summary><div>${escHtml(st.detail)}</div></details>` : ''}`
-        : `<span style="color:var(--text-dim)">${escHtml(t('none declared'))}</span>`}</span>`;
+      <span class="session-detail-value sp-now-value" style="flex:1">${nowHtml(s)}</span>`;
     const chg = document.createElement('button');
     chg.className = 'task-detail-btn';
     chg.textContent = t('Change…');
@@ -142,46 +226,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     histList.style.marginTop = '4px';
     histList.innerHTML = `<div class="empty-hint" style="padding:2px 0">${escHtml(t('Loading history…'))}</div>`;
     stSec.appendChild(histList);
-    const keys = [refKey, s.webuiId ? 'webui:' + s.webuiId : null].filter(Boolean).join(',');
-    fetch(`/api/session-status/history?sessionKey=${encodeURIComponent(keys)}`).then(r => {
-      if (!r.ok) throw new Error(`${r.status} ${r.statusText || 'request failed'}`);
-      return r.json();
-    }).then(d => {
-      if (!histList.isConnected) return;
-      const hist = (d?.history || []).slice(-20).reverse();
-      histList.innerHTML = hist.length ? '' : `<div class="empty-hint" style="padding:2px 0">${escHtml(t('No status changes recorded yet'))}</div>`;
-      const today = new Date().toDateString();
-      for (const h of hist) {
-        const li = document.createElement('div');
-        li.className = 'session-history-item';
-        const when = new Date(h.at);
-        const tm = (when.toDateString() === today ? '' : (when.getMonth() + 1) + '/' + when.getDate() + ' ') + when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        // A NON-STATUS event row (design-unknown-records): the git fact the
-        // agent reported — "push · fix/x" — drawn in the same timeline.
-        if (h.event === 'vcs') {
-          li.innerHTML = `<span class="session-history-time">${escHtml(tm)}</span>`
-            + `<span class="session-history-dot" style="--h-color:var(--text-dim)"></span>`
-            + `<span class="session-history-state">${UI_ICONS.forkBranch || ''} ${escHtml(t('git {kind}', { kind: String(h.kind || '') }))}</span>`
-            + (h.branch ? `<span class="session-history-reason" title="${escHtml(h.branch)}">${escHtml(h.branch)}</span>` : '')
-            + `<span class="session-history-by">${escHtml(t('agent'))}</span>`;
-          histList.appendChild(li);
-          continue;
-        }
-        const m = h.state ? (SESSION_STATE_META[h.state] || { label: h.state, color: 'var(--text-dim)' }) : null;
-        li.innerHTML = `<span class="session-history-time">${escHtml(tm)}</span>`
-          + `<span class="session-history-dot" style="--h-color:${m ? m.color : 'var(--text-dim)'}"></span>`
-          + `<span class="session-history-state">${escHtml(h.cleared ? t('cleared') : (m?.label || ''))}</span>`
-          + (h.reason ? `<span class="session-history-reason" title="${escHtml(h.reason)}">${escHtml(h.reason)}</span>` : '')
-          + `<span class="session-history-by">${h.setBy === 'user' ? escHtml(t('you')) : escHtml(t('agent'))}</span>`;
-        histList.appendChild(li);
-      }
-    }).catch((e) => {
-      // A permanent "Loading history…" is indistinguishable from an op still
-      // in progress — terminate the section honestly and let the broadcast-
-      // driven re-render be the retry.
-      if (!histList.isConnected) return;
-      histList.innerHTML = `<div class="usage-warn" style="padding:2px 0">${escHtml(t('Couldn’t load the status history — {reason}', { reason: e?.message || t('server unreachable') }))}</div>`;
-    });
+    fillHistory(histList, s);
 
     // ── Billing ──
     const bilSec = section(t('Billing'));
@@ -193,13 +238,16 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
       // pooled (claude or codex) + the two codex shapes fell through to
       // "Unknown (started before tracking)" — a labeled identity is never
       // unknown (2.369.18)
-      : a.source === 'pooled' ? t('Pooled account — {name}', { name: a.name || t('Pool') }) + (a.poolTarget ? ' → ' + a.poolTarget : ' · ' + t('no target'))
+      : a.source === 'pooled' ? t('Pooled account — {name}', { name: a.name || t('Pool') }) + (a.poolTarget ? ' → ' + a.poolTarget : ' · ' + t('no target')) + (placementNote(a, t) ? ` (${placementNote(a, t)})` : '') // 2026-09-28: which rule placed it
       : a.source === 'codex-subscription' ? t('ChatGPT account — {name}', { name: a.name || 'ChatGPT' })
       : a.source === 'codex-cli' ? t('ChatGPT login (the machine’s own)')
       : t('Unknown (started before tracking)');
     // remote session: the login is the HOST's — name the machine (2.188.0)
     const authLabelHost = a?.hostName ? authLabel + ' · @ ' + a.hostName : authLabel;
     row(bilSec, t('This run'), (a && a.source?.startsWith('api')) ? `<span style="color:var(--yellow,#e5c07b)">${escHtml(authLabelHost)}</span>` : escHtml(authLabelHost));
+    // THE CONVERSATION'S POOL PIN (2026-09-28): said in words — the pin holds until the member
+    // cannot serve, then the pool's own rules run until it can again
+    if (a && a.source === 'pooled' && s.poolPin && s.poolPin.name) row(bilSec, t('Pool pin'), escHtml(t('Pinned to {name} (automatic otherwise)', { name: s.poolPin.name })));
     // Account override for the NEXT resume
     const acctRow = document.createElement('div');
     acctRow.className = 'session-detail-row';
@@ -598,7 +646,10 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
       cb.type = 'checkbox';
       cb.checked = isExplicit || viaFolder;
       cb.disabled = viaFolder; // dynamic membership — remove the folder link instead
-      cb.onchange = () => { cb.checked ? sidebar._taskBind(g.id, s) : sidebar._taskUnbind(g.id, s); };
+      // the handler keeps the group's ID, never the group (lane-redact verify r5, a heap snapshot: under the select guard
+      // this section outlives a broadcast, and a closure over `g` kept its whole record — Activity notes included)
+      const gid = g.id;
+      cb.onchange = () => { cb.checked ? sidebar._taskBind(gid, s) : sidebar._taskUnbind(gid, s); };
       const txt = document.createElement('span');
       txt.textContent = g.title + (viaFolder ? t(' (folder)') : '');
       {

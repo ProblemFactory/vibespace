@@ -204,4 +204,18 @@ async function watchCopies(cdpUrl, { targetId = null, activeUrl = '', onCopy = (
   });
 }
 
-module.exports = { readViewport, captureFrame, watchCopies, copyWatchSource, COPY_TEXT_MAX, READ_MS };
+/**
+ * BROWSE YOURSELF (verify r1, H6): every page target of the browser with its OPENER — CDP `Target.getTargets` over the
+ * keeper browser's own (browser-level) endpoint, one socket, one command, bounded. The keeper derives the user's own tabs
+ * from it (src/browser-human.js humanTabSet: his tab + what it opened). → `{ok:true, targets:[{targetId, type, openerId,
+ * url}]}` | `{ok:false, error}`; never throws.
+ */
+async function browserTargets(cdpUrl, { timeoutMs = READ_MS, WebSocketImpl = WebSocket } = {}) {
+  if (!cdpUrl) return { ok: false, error: 'no CDP endpoint' };
+  const r = await pageCommand(String(cdpUrl), 'Target.getTargets', {}, timeoutMs, WebSocketImpl);
+  if (!r.ok) return { ok: false, error: r.error };
+  const infos = r.result && Array.isArray(r.result.targetInfos) ? r.result.targetInfos : [];
+  return { ok: true, targets: infos.map((t) => ({ targetId: String(t.targetId || ''), type: String(t.type || ''), openerId: t.openerId ? String(t.openerId) : null, url: String(t.url || '') })) };
+}
+
+module.exports = { readViewport, captureFrame, watchCopies, copyWatchSource, browserTargets, COPY_TEXT_MAX, READ_MS };

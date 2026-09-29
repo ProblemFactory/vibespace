@@ -469,7 +469,47 @@ function createBrowserRuntime({ cmd = 'agent-browser', execFileImpl = execFile, 
   };
 }
 
+/**
+ * LANE HEADLESS-FALLBACK (2026-09-28) — THE DISPLAY THIS MACHINE HAS, NOW. Asked WHERE THE BROWSER RUNS at every
+ * launch (the keeper for device #0, the `browser-serve` op inside a paired machine's daemon): a display can appear or
+ * vanish between two launches — the owner logging in must take effect on the next one, with no restart. It looks at
+ * exactly the paths the PURE rule names (browser-display.js `displayCandidates`: the runtime dir's `wayland-N`
+ * entries, the socket WAYLAND_DISPLAY names, DISPLAY's X socket + its abstract twin), stats each and CONNECTS to every
+ * socket (bounded — a socket file a dead compositor left behind is not a display), then hands the findings to
+ * `displayVerdict`. Async, never throws, never on a timer: ~1 readdir + a few connects per LAUNCH. It also answers
+ * `xvfb` — an executable `Xvfb` on the env's PATH (the CLI starts its OWN invisible Xvfb there for a headed launch with
+ * no display: the hidden-window rung).
+ */
+async function probeDisplay({ env = process.env, x11Dir = undefined, connectMs = 400, fsp = require('fs').promises, netImpl = require('net') } = {}) {
+  const D = require('./browser-display.js');
+  const runtimeDir = D.runtimeDirOf(env);
+  const xdir = x11Dir || D.X11_DIR;
+  let listing = [];
+  if (runtimeDir) { try { listing = await fsp.readdir(runtimeDir); } catch { listing = []; } }
+  const connects = (p) => new Promise((resolve) => {
+    let done = false, sock = null;
+    const fin = (v) => { if (done) return; done = true; clearTimeout(tm); try { sock && sock.destroy(); } catch { /* gone */ } resolve(v); };
+    const tm = setTimeout(() => fin(false), Math.max(50, Number(connectMs) || 400));
+    try { sock = netImpl.createConnection({ path: p.startsWith('@') ? '\0' + p.slice(1) : p }); sock.once('connect', () => fin(true)); sock.once('error', () => fin(false)); } catch { fin(false); }
+  });
+  const entries = await Promise.all(D.displayCandidates({ env, runtimeDir, listing, x11Dir: xdir }).map(async (p) => {
+    if (p.startsWith('@')) return { path: p, type: 'socket', alive: await connects(p) }; // abstract (Linux): nothing to stat
+    let st = null;
+    try { st = await fsp.stat(p); } catch { return { path: p, type: 'missing', alive: false }; }
+    if (!st.isSocket()) return { path: p, type: 'other', alive: false };
+    return { path: p, type: 'socket', alive: await connects(p) };
+  }));
+  // the hidden-window rung's other fact: an Xvfb on the PATH the browser launches with (the CLI starts its own there)
+  let xvfb = false;
+  for (const d of String((env && env.PATH) || '').split(':').filter((x) => x.startsWith('/'))) {
+    try { await fsp.access(require('path').join(d, 'Xvfb'), require('fs').constants.X_OK); xvfb = true; break; } catch { /* not here */ }
+  }
+  return D.displayVerdict({ env, runtimeDir, entries, x11Dir: xdir, xvfb });
+}
+
 module.exports = { createBrowserFacts, binaryResolver, sanitizeProbeEnv, VERSION_TTL_MS, createBrowserRuntime, pidAlive, procStart, sameProcess, treeUsage,
+  // lane headless-fallback: the display this machine has now (probed at every launch where the browser runs)
+  probeDisplay,
   // lane H verify r2 (M1): the browser a daemon launched, and who holds a profile directory's lock
   procCmdline, procEnvOf, procPpid, isBrowserDaemon, readSingletonLock, readDevToolsPort, lockHolderFacts, browserOfDaemon,
   // lane H verify r3: argv[0] of either cmdline form; does this machine read starttimes (LOW 3)

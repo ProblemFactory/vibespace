@@ -54,3 +54,11 @@ GOCSPX-agent-own-secret-x
 GOCSPX-agent-rewrote-it-000
 1//echo-refresh-000
 ur-echo-refresh-000
+# 2.369.197 integration — test fixtures / doc examples the scan reads as credentials (none is real):
+# BROWSE YOURSELF's redaction legs + its CHANGELOG sentence (a password inside an address is never recorded)
+https://name:password@
+alice:hunter2pw@
+# lane channel-rich / Lark shape test: a fake app secret handed to the scripted consent
+fs-appa-secret-0001
+# lane-redact's clear census: store FILE names in its ownership table
+{ token: 'job-notifications

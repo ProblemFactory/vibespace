@@ -14,6 +14,8 @@ import { copyText, escHtml, showToast, fetchJson, showContextMenu, showConfirmDi
 import { registerMenuItem } from './contributions.js';
 import { registerWindowType } from './window-types.js';
 import { track } from './telemetry-client.js';
+import { CLEARED_TEXT } from '../record-clear.js'; // PURE: a cleared service's label / scan tag holds the stored key — worded here
+import { clearedText } from './record-clear-ui.js';
 import { Chart, LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Filler } from 'chart.js';
 // Self-contained registration (idempotent) — the rail must not depend on the
 // usage-dashboard module having run its own Chart.register first.
@@ -593,6 +595,7 @@ export function installSidebarRail(Sidebar) {
       this._prcExpanded = this._prcExpanded || new Set();
       let query = '';
       let data = null; // last /api/sysinfo/procs response
+      let dataHost = ''; // verify-r6 S1: the machine THAT listing came from — a row's signal goes there, never to the panel's machine at click time
       let showAll = false;
       root.innerHTML = '';
       const head = document.createElement('div');
@@ -737,6 +740,10 @@ export function installSidebarRail(Sidebar) {
             ev.stopPropagation();
             if (btn.dataset.copy) { copyText(p.cmd); showToast(tr('Copied')); return; }
             const sig = btn.dataset.sig;
+            // verify-r6 S1: the machine and the pid the ROW shows, captured before the confirm — the kill re-read the panel's
+            // machine after it (getHostId()), and a panel rebuild while the dialog was open (a machine removed ⇒ back to
+            // "This machine") sent SIGKILL to the same pid on ANOTHER machine
+            const host = dataHost, pid = p.pid;
             if (sig === 'TERM' || sig === 'KILL') {
               const okGo = await showConfirmDialog({
                 title: sig === 'KILL' ? tr('Force kill process?') : tr('Terminate process?'),
@@ -746,7 +753,7 @@ export function installSidebarRail(Sidebar) {
               });
               if (!okGo) return;
             }
-            const r = await fetchJson('/api/sysinfo/signal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: getHostId(), pid: p.pid, sig }) });
+            const r = await fetchJson('/api/sysinfo/signal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host, pid, sig }) });
             // fetchJson returns null on network/parse failure — an unguarded
             // r.gone here crashed the handler silently AND let STOP/CONT show
             // a false success toast (review-confirmed no-silent-failures hit)
@@ -767,6 +774,7 @@ export function installSidebarRail(Sidebar) {
         const r = await fetchJson('/api/sysinfo/procs' + (hostId ? `?host=${encodeURIComponent(hostId)}` : ''));
         if (my !== seq || !root.isConnected) return; // stale response after a switch
         data = r || { error: tr('Machine unreachable') };
+        dataHost = hostId;
         // don't yank a text selection out from under a copy-in-progress in
         // the detail zone — data is fresh, the next tick redraws
         const sel = document.getSelection();
@@ -868,6 +876,18 @@ export function installSidebarRail(Sidebar) {
       c.innerHTML = `<div class="empty-hint">${escHtml(tr('Loading…'))}</div>`;
       const api = (u, opts) => fetchJson(u, opts);
       this._portScanCache = this._portScanCache || new Map(); // hostId → last scan results (survives re-renders + panel reopen)
+      // A SCAN NAMES A LISTENER BY ITS SERVICE'S JOB (row.service = the job's name, row.serviceJob = its id) and the cache
+      // outlives the panel — "Clear content…" of that job must reach it (lane-redact verify r8, reproduced in chrome: the
+      // page's heap kept the name, and a machine with fewer listeners drew it on every re-render until the next Scan).
+      // ONE listener for the life of the page (the cache's), not the panel's.
+      if (!this._portScanScrub) {
+        this._portScanScrub = true;
+        this.app.ws.onGlobal((msg) => {
+          if (msg.type !== 'jobs-updated' || !Array.isArray(msg.cleared) || !msg.cleared.length) return;
+          const gone = new Set(msg.cleared.map(String));
+          for (const rows of this._portScanCache.values()) for (const p of rows) if (p && p.serviceJob && gone.has(String(p.serviceJob))) p.service = CLEARED_TEXT;
+        });
+      }
       let hosts = [];
       try { hosts = ((await api('/api/hosts')) || {}).hosts || []; } catch { }
       // publish needs the frp relay — without it the button must SAY so, not no-op
@@ -895,7 +915,8 @@ export function installSidebarRail(Sidebar) {
           // showed on scan rows) — forwards created by a Background Work
           // service carry label "service: <name>"
           const svcM = /^service:\s*(.+)$/.exec(f.label || '');
-          row.innerHTML = `<span class="ports-row-label" title="${label}">${label}${svcM ? ` <span class="ports-svc">${escHtml(svcM[1])}</span>` : ''} ${protoChip(f.proto, { over: !!f.protoOverride })}${f.publicUrl ? ` <span class="ports-pub" title="${escHtml(f.publicUrl)}">${PORT_ICONS.globe}</span>` : ''}</span>`;
+          const svcWords = svcM ? (svcM[1] === CLEARED_TEXT ? clearedText() : svcM[1]) : null;   // a cleared job's service in THIS device's words (verify r8)
+          row.innerHTML = `<span class="ports-row-label" title="${label}">${label}${svcM ? ` <span class="ports-svc">${escHtml(svcWords)}</span>` : ''} ${protoChip(f.proto, { over: !!f.protoOverride })}${f.publicUrl ? ` <span class="ports-pub" title="${escHtml(f.publicUrl)}">${PORT_ICONS.globe}</span>` : ''}</span>`;
           // the proto chip is the override handle
           const chip = row.querySelector('.ports-proto');
           if (chip) chip.onclick = (ev) => this._portProtoMenu(ev, f, render);
@@ -941,7 +962,7 @@ export function installSidebarRail(Sidebar) {
                 if (r?.error) showToast(r.error, { type: 'error' });
               } else {
                 const { showInputDialog } = await import('./utils.js');
-                const name = await showInputDialog({ title: tr('Mount under this domain'), label: tr('Path name → /svc/<name>/ (apps must tolerate a URL prefix — vite base, jupyter base_url, code-server do)'), value: (svcM?.[1] || '').toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, ''), placeholder: 'myapp' });
+                const name = await showInputDialog({ title: tr('Mount under this domain'), label: tr('Path name → /svc/<name>/ (apps must tolerate a URL prefix — vite base, jupyter base_url, code-server do)'), value: (svcM && svcM[1] !== CLEARED_TEXT ? svcM[1] : '').toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, ''), placeholder: 'myapp' });
                 if (name === null || !name.trim()) return;
                 const r = await api(`/api/port-forward/${encodeURIComponent(f.id)}/path`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) });
                 if (r?.error) showToast(r.error, { type: 'error' });
@@ -1037,7 +1058,7 @@ export function installSidebarRail(Sidebar) {
                 // field is remotePort (verified against the LIVE data/port-forwards.json
                 // — the first f.port guess was the fixture-shape class again)
                 const fwd = fwds.find((f) => f.hostId === m.id && Number(f.remotePort) === Number(p.port));
-                pr.innerHTML = `<span class="ports-row-label">${p.port}${p.service ? ' <span class="ports-svc">' + escHtml(p.service) + '</span>' : ''}${p.proc ? ' <span class="ports-proc">' + escHtml(p.proc) + '</span>' : ''} ${protoChip(p.proto)}${fwd ? ` <span class="ports-svc" title="${escHtml(fwd.publicUrl || tr('Managed under Active forwards above'))}">${escHtml(fwd.publicUrl ? tr('published') : tr('forwarded'))}</span>` : ''}${p.orphan ? ` <span class="ports-orphan" title="${escHtml(tr('This process is listening from a DELETED working directory — a removed worktree left its dev server running'))}">${escHtml(tr('orphan'))}</span>` : ''}</span>`;
+                pr.innerHTML = `<span class="ports-row-label">${p.port}${p.service ? ' <span class="ports-svc">' + escHtml(p.service === CLEARED_TEXT ? clearedText() : p.service) + '</span>' : ''}${p.proc ? ' <span class="ports-proc">' + escHtml(p.proc) + '</span>' : ''} ${protoChip(p.proto)}${fwd ? ` <span class="ports-svc" title="${escHtml(fwd.publicUrl || tr('Managed under Active forwards above'))}">${escHtml(fwd.publicUrl ? tr('published') : tr('forwarded'))}</span>` : ''}${p.orphan ? ` <span class="ports-orphan" title="${escHtml(tr('This process is listening from a DELETED working directory — a removed worktree left its dev server running'))}">${escHtml(tr('orphan'))}</span>` : ''}</span>`;
                 if (fwd) return pr; // its controls live on the Active forwards row
                 // orphaned (deleted-cwd) listeners get a Kill instead of Forward
                 if (p.orphan && p.pid && m.id === '__local__') {
@@ -1119,7 +1140,7 @@ export function installSidebarRail(Sidebar) {
           const cached = this._portScanCache.get(msg.hostId);
           for (const p of msg.ports) if (!cached.some((q) => q.port === p.port)) cached.push(p);
         }
-        if (msg.type === 'port-forwards-updated' || msg.type === 'machine-ports-new') render();
+        if (msg.type === 'port-forwards-updated' || msg.type === 'machine-ports-new' || (msg.type === 'jobs-updated' && Array.isArray(msg.cleared))) render();   // verify r8: a cleared service re-words its scan rows
       });
     },
 

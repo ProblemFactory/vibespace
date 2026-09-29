@@ -55,7 +55,9 @@ const byActivity = (a, b) => (num(b.lastAt) - num(a.lastAt)) || String(a.title).
  * the built-in Agents adapter's rows stay out (it lists live SESSIONS as
  * sources — the owner's "message watcher", a secondary section, §22.1).
  */
-export function groupListRows({ groups = [], conversations = [], adapters = [] } = {}) {
+/** lane lark-search-poll: a conversation that has no title yet (born by the change feed, a push event before discovery)
+ *  is WORDED by the caller (`untitled(kind)` — "Single chat"), never shown as its raw vendor id. */
+export function groupListRows({ groups = [], conversations = [], adapters = [], untitled = null } = {}) {
   const rows = [], archived = [];
   for (const g of groups || []) {
     if (!g || !g.id) continue;
@@ -74,7 +76,7 @@ export function groupListRows({ groups = [], conversations = [], adapters = [] }
     if (!a || a.builtin) continue;
     rows.push({
       kind: 'conv', key: `${c.adapterId}/${c.id}`, adapterId: c.adapterId, id: c.id,
-      title: c.title || c.id, lastAt: num(c.lastAt), lastText: c.lastText || '',
+      title: c.title || (typeof untitled === 'function' ? untitled(c.kind) : '') || c.id, lastAt: num(c.lastAt), lastText: c.lastText || '',
       unread: num(c.unread), sourceLabel: c.adapterLabel || a.label || a.id,
       mail: c.kind === 'thread' || c.kind === 'mailbox', conv: c,
     });

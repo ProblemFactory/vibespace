@@ -17,6 +17,7 @@ import { createRequire } from 'node:module';
 import { scratch, freePorts } from './scratch.mjs';
 import { spawn } from 'node:child_process';
 import { makeFixture, SESSIONS, writeAliveStamp } from './jobs-triage-fixture.mjs';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs'; // r6 D-F5: the pre-fix panel identity as a negative control
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const { JobManager, ARCHIVE_CAP, ARCHIVE_SWEEP_MS } = require(path.join(ROOT, 'src/jobs.js'));
@@ -358,6 +359,65 @@ console.log('§9 typed held notifications + the held digest on the wire');
   ok(/setJobsHeld\(text\)/.test(csb) && /chat-status-held/.test(csb) && /msg\.type === 'jobs-updated' && msg\.held/.test(cv) && /heldText\(digest, \{ t, cid \}\)/.test(cv), 'WIRING PIN: the status bar has the held chip and the live ChatView feeds it from jobs-updated.held for ITS conversation');
   ok(/refused: 'spend', why: v\.why, retryAfter: v\.retryAfter \|\| 0, identity: v\.identity \?/.test(lad), "WIRING PIN: the ladder's spend refusal carries the identity + the ceiling the stash needs");
   J.shutdown();
+}
+
+// ── §10 r6 D-F5 ("what you approve is what runs"): a job's panel identity only grows — a stale click never answers the next panel ──
+console.log('§10 r6 D-F5: monotonic panel identity, the answer names its panel, a restart keeps the count');
+{
+  const dir4 = mkDir('jobs-triage-panel');
+  const bc4 = [];
+  const { jm: J, call: callP } = boot(dir4, { broadcasts: bc4 });
+  const mkJob = (id) => ({ id, kind: 'task', name: 'deploy-' + id.slice(-2), note: '', state: 'up', desiredUp: true, owner: {}, access: { view: 'all', control: 'session' }, interaction: { pending: null, answers: [] }, runs: [{ startedAt: T0 - 60e3, trigger: 'manual' }], createdAt: T0 - 60e3 });
+  const panel = (title) => ({ title, blocks: [{ type: 'buttons', options: [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }] }], timeoutS: 1 });
+  // the probe's sequence on the REAL engine: ask #1, let it EXPIRE (the engine's own sweep), ask #2, a stale click on #1
+  const staleLeg = async (JM, job) => {
+    JM.jobs.set(job.id, job);
+    const a1 = JM.ask(job, panel('Run the unit tests?'));
+    job.interaction.pending.postedAt = Date.now() - 5000; // past its 1 s timeout
+    await JM._sweep();
+    const expired = !job.interaction.pending && job.interaction.answers.some((x) => x.expired);
+    const a2 = JM.ask(job, panel('Delete the production backup bucket?'));
+    const stale = JM.answerPanel(job, { button: 'yes', version: a1.version });
+    return { a1: a1.version, a2: a2.version, expired, stale, pendingTitle: job.interaction.pending && job.interaction.pending.panel.title, recorded: job.interaction.answers.filter((x) => !x.expired).map((x) => x.button + '@' + x.version) };
+  };
+  const job1 = mkJob('jb-panel0001');
+  const r1 = await staleLeg(J, job1);
+  ok(r1.expired && r1.a1 === 1 && r1.a2 === 2 && r1.stale.code === 'stale-panel' && /panel #1/.test(r1.stale.error) && /panel #2/.test(r1.stale.error) && r1.pendingTitle === 'Delete the production backup bucket?' && r1.recorded.length === 0, 'r6 D-F5: after panel #1 EXPIRED the next panel is #2 (never 1 again); a stale click on #1 is refused stale-panel BY NAME — nothing recorded, panel #2 still waits', JSON.stringify(r1));
+  // the user route: named refusals with their codes
+  const rNo = await callP('POST', '/api/jobs/:id/:act', { params: { id: job1.id, act: 'answer' }, body: { answers: { button: 'yes' } } });
+  const rStale = await callP('POST', '/api/jobs/:id/:act', { params: { id: job1.id, act: 'answer' }, body: { answers: { button: 'yes', version: 1 } } });
+  ok(rNo.status === 400 && rNo.body.code === 'version-required' && rStale.status === 409 && rStale.body.code === 'stale-panel' && rStale.body.version === 2 && job1.interaction.pending, 'r6 D-F5: POST …/answer with NO version ⇒ 400 version-required; with panel #1\'s ⇒ 409 stale-panel (+ the panel it waits on) — panel #2 still pending', JSON.stringify({ rNo: rNo.body, rStale: rStale.body }));
+  const rOk = await callP('POST', '/api/jobs/:id/:act', { params: { id: job1.id, act: 'answer' }, body: { answers: { button: 'no', version: 2 } } });
+  ok(rOk.status === 200 && !job1.interaction.pending && job1.interaction.answers.at(-1).button === 'no' && job1.interaction.answers.at(-1).version === 2, 'r6 D-F5: the answer naming panel #2 is recorded as #2\'s', JSON.stringify(rOk.body));
+  const a3 = J.ask(job1, panel('Rotate the keys?'));
+  ok(a3.version === 3 && job1.interaction.seq === 3, 'r6 D-F5: after an ANSWER the next panel is #3 (the identity only grows)');
+  ok(bc4.length > 0 && M.nextInteractionSeq({ pending: null, answers: [{ version: 7 }, { expired: true, version: 4 }] }) === 8 && M.nextInteractionSeq({ seq: 9, pending: { version: 3 }, answers: [] }) === 10 && M.nextInteractionSeq(null) === 1, 'r6 D-F5 PURE nextInteractionSeq: the persisted seq, else the highest version still remembered (a record from before the seq), + 1');
+  // a RESTART keeps the count (the seq rides the store)
+  J._dirty = true; J.shutdown();
+  const { jm: J2 } = boot(dir4);
+  const j2 = J2.jobs.get(job1.id);
+  const a4 = j2 ? J2.ask(j2, panel('After the restart')) : null;
+  ok(j2 && j2.interaction.seq >= 3 && a4 && a4.version === 4, 'r6 D-F5: after a RESTART the next panel is #4 — the count survived in the store', JSON.stringify({ seq: j2 && j2.interaction.seq, a4 }));
+  J2.shutdown();
+  // CONTROL (scripts/mutant-copy.mjs): the pre-fix engine — version = pending + 1 (1 again after an expiry) and an answer
+  // with a matching (or missing) version accepted ⇒ the stale click on #1 is recorded as the answer to #2
+  const MJ = mutantCopies('jobs-panel-r6', ROOT);
+  const jsrc = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf-8');
+  const seqLines = "    const version = M.nextInteractionSeq(job.interaction);\n    job.interaction.seq = version;\n";
+  const gateLines = "    const vv = M.answerVersionVerdict(p, answers);\n    if (!vv.ok) return { error: vv.error, code: vv.code, ...(p ? { version: p.version } : {}) };\n";
+  ok(jsrc.split(seqLines).length === 2 && jsrc.split(gateLines).length === 2, 'r6 D-F5 control setup: the seq and the answer\'s verdict are each wired once');
+  const JMod = MJ.load('src/jobs.js', jsrc.replace(seqLines, "    const version = ((job.interaction && job.interaction.pending && job.interaction.pending.version) || 0) + 1; // MUTANT: pre-fix\n").replace(gateLines, "    if (!p) return { error: 'no pending panel' };\n    if (answers.version && answers.version !== p.version) return { error: 'stale panel version — reopen the panel' }; // MUTANT: pre-fix\n"), 'pre-fix');
+  const dir5 = mkDir('jobs-triage-panel-mut');
+  const JX = new JMod.JobManager({ dataDir: dir5, broadcast: () => { }, notifyUser: () => { }, log: () => { }, archivePolicy: () => policy });
+  JX.init();
+  const rx = await staleLeg(JX, mkJob('jb-panel0002'));
+  const noVer = (() => { const j = mkJob('jb-panel0003'); JX.jobs.set(j.id, j); JX.ask(j, panel('x')); return JX.answerPanel(j, { button: 'yes' }); })();
+  ok(rx.a1 === 1 && rx.a2 === 1 && rx.stale.ok === true && rx.recorded.join() === 'yes@1' && noVer.ok === true, 'r6 D-F5 CONTROL (the pre-fix engine, in a copy): panel #2 is "version 1" again, the stale click on #1 is RECORDED as the answer to "Delete the production backup bucket?", and a version-less answer is accepted — the monotonic seq + the named refusal are the rule', JSON.stringify({ rx, noVer }));
+  JX.shutdown();
+  for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 1, label: 'r6 D-F5 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+  // WIRING PINS: the panel sends the version it rendered; the CLI prints the panel's number
+  const jp = fs.readFileSync(path.join(ROOT, 'src/lib/jobs-panel.js'), 'utf-8'), cli = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-job'), 'utf-8');
+  ok(/const version = pending\.version;/.test(jp) && /answers: \{ \.\.\.values, button: o\.id, version \}/.test(jp) && /r2\.code === 'stale-panel'/.test(jp) && /posted\.version/.test(cli), 'WIRING PIN (r6 D-F5): the panel answers with the version it rendered (and re-reads on stale-panel); the CLI prints the panel\'s number');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

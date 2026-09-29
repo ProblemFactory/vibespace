@@ -2936,6 +2936,9 @@ async function handleInput(msg) {
     // The delivery ladder types the frame; anything else (an older server, a
     // direct caller) is a peer — the conservative lane.
     const peerKind = msg.kind === 'notification' ? 'notification' : 'peer';
+    // A GROUP message's facts (lane group-report-card: a group wake's card is "<sender> → <group>") — carried into the
+    // marker as data only (the normalizer sanitizes them: src/group-card.js groupOf); an older server sends none
+    const peerGroup = msg.group && typeof msg.group === 'object' ? { id: String(msg.group.id || ''), name: String(msg.group.name || ''), at: Number(msg.group.at) || 0, from: msg.group.from ? String(msg.group.from) : null, self: msg.group.self === true, via: msg.group.via === 'wake' ? 'wake' : 'report' } : null;
     // afterCommit: on the IDLE path `turn/start` has ALREADY persisted the
     // app-server's own copy of this message by the time we get here, so this
     // record is the LATE one of the pair and must yield to that copy on a
@@ -2953,7 +2956,7 @@ async function handleInput(msg) {
     // round-1 major, still open for the one producer that minted no id).
     const recordPeerMessage = (afterCommit, queueCid) => record('response_item', {
       type: 'message', role: 'user', content: [{ type: 'input_text', text }],
-      webui_peer: { name: fromName, body: cardText, kind: peerKind }, // kind = the PATH the words took (S3 verify F3): a peer is never drawn as a VibeSpace notice, whatever it is called or says
+      webui_peer: { name: fromName, body: cardText, kind: peerKind, ...(peerGroup ? { group: peerGroup } : {}) }, // kind = the PATH the words took (S3 verify F3): a peer is never drawn as a VibeSpace notice, whatever it is called or says; group = a group wake's sender → group (lane group-report-card)
       ...(queueCid ? { webui_queue_id: queueCid } : {}),
       ...(afterCommit ? { webui_after_commit: true } : {}),
     });

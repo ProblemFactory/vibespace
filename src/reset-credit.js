@@ -220,6 +220,8 @@ function refusalLine(code, { until = null, why = null, member = null } = {}) {
     // r5: the only carrier's cold restart WENT OUT — the verb would ride a process a client is replacing
     case 'restart_pending': return { key: i18nKey('The only conversation holding this login is being restarted onto {member} — a credit sent through it could be lost. Try again from another conversation on this account.'), params: { member: String(member || '?') } };
     case 'spend_refused': return { key: i18nKey('The unattended-spend ceiling refused it: {why}'), params: { why: String(why || '?') } };
+    // verify-r6 R1: the window the dialog showed reset (or moved) while it stayed open — nothing was spent
+    case 'preview_changed': return { key: i18nKey('The limit this dialog showed has reset since it opened — nothing was spent. Open it again to see the account now.'), params: {} };
     default: return { key: i18nKey('The server refused it: {why}'), params: { why: String(why || code || '?') } };
   }
 }

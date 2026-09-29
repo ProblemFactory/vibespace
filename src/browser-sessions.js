@@ -39,8 +39,11 @@ const LEGACY_GAP_MS = 30 * 60 * 1000;
 const PLAY_STEP_MS = 1000;
 /** The keeper's stop reasons that are NOT an end (the lease lives on). */
 const IDLE_STOPS = Object.freeze(['idle', 'turn-idle']);
-/** Why a session ended — a closed set the chat card and the list say in words. */
-const END_REASONS = Object.freeze(['released', 'dropped', 'stopped', 'switched', 'restart']);
+/** Why a session ended — a closed set the chat card and the list say in words. BROWSE YOURSELF (B-6ae8): `left` = the
+ *  user's own browsing ended because its window closed / its connection dropped and the away clock ran out. */
+const END_REASONS = Object.freeze(['released', 'dropped', 'stopped', 'switched', 'restart', 'left']);
+/** BROWSE YOURSELF: the only holder a marker names besides a conversation (absent = a conversation's session). */
+const HOLDERS = Object.freeze(['user']);
 
 function isSessionId(v) { return SESSION_ID_RE.test(String(v || '')); }
 function mintSessionId(hex) { return 'bs-' + String(hex || '').toLowerCase().replace(/[^0-9a-f]/g, '').slice(0, 8).padEnd(8, '0'); }
@@ -69,9 +72,12 @@ function implicitIdOf(entryId) {
 const str = (v, n = 200) => (typeof v === 'string' && v ? v.slice(0, n) : null);
 
 /** One marker line, sanitized (what the recorder appends and every reader trusts). */
-function markerFor({ phase, id, browserKey, profileId = null, webuiSessionId = null, label = null, at, url = null, count = null, durationMs = null, reason = null } = {}) {
+function markerFor({ phase, id, browserKey, profileId = null, webuiSessionId = null, label = null, at, url = null, count = null, durationMs = null, reason = null, holder = null, recorded = null } = {}) {
   const m = { kind: 'session', phase: phase === 'end' ? 'end' : 'start', id: String(id || ''), browserKey: String(browserKey || ''), profileId: profileId || null, ephemeral: !profileId, at: num(at) };
-  if (webuiSessionId) m.webuiSessionId = String(webuiSessionId).slice(0, 120);
+  // BROWSE YOURSELF (B-6ae8): the USER's own browsing — `holder: 'user'`, never a conversation's (no webui session id);
+  // `recorded` = whether his actions were traced (the profile's "Also record my own actions", the owner's opt-out)
+  if (HOLDERS.includes(holder)) { m.holder = holder; if (typeof recorded === 'boolean') m.recorded = recorded; }
+  if (webuiSessionId && !m.holder) m.webuiSessionId = String(webuiSessionId).slice(0, 120);
   if (label) m.label = String(label).slice(0, 120);
   if (url) m.url = String(url).slice(0, 2000);
   if (m.phase === 'end') { m.count = Math.max(0, Math.round(num(count))); m.durationMs = Math.max(0, Math.round(num(durationMs))); m.reason = END_REASONS.includes(reason) ? reason : 'stopped'; }
@@ -98,7 +104,7 @@ const hasFrames = (e) => !!(e && ((e.before && e.before.file) || (e.after && e.a
 function pairSessions({ markers = [], entries = [], now = 0, gapMs = LEGACY_GAP_MS } = {}) {
   const byId = new Map();
   let seq = 0; // the order sessions were first seen (the marker file is appended in time order) — the tie-break
-  const mk = (id, base) => { let s = byId.get(id); if (!s) { s = { id, order: seq++, implicit: false, browserKey: null, child: false, profileId: null, ephemeral: true, scope: null, label: null, webuiSessionId: null, startAt: 0, endAt: null, open: false, reason: null, count: 0, markCount: null, firstAt: 0, lastAt: 0, durationMs: 0, frameEntries: 0, framesRemoved: 0, frameBytes: 0, hasStart: false, hasEnd: false, ...base }; byId.set(id, s); } return s; };
+  const mk = (id, base) => { let s = byId.get(id); if (!s) { s = { id, order: seq++, implicit: false, browserKey: null, child: false, profileId: null, ephemeral: true, scope: null, label: null, webuiSessionId: null, holder: null, startAt: 0, endAt: null, open: false, reason: null, count: 0, markCount: null, firstAt: 0, lastAt: 0, durationMs: 0, frameEntries: 0, framesRemoved: 0, frameBytes: 0, hasStart: false, hasEnd: false, ...base }; byId.set(id, s); } return s; };
   const sorted = (markers || []).filter(isMarker).slice().sort((a, b) => num(a.at) - num(b.at));
   for (const m of sorted) {
     const s = mk(m.id, {});
@@ -106,6 +112,7 @@ function pairSessions({ markers = [], entries = [], now = 0, gapMs = LEGACY_GAP_
     if (m.profileId) { s.profileId = m.profileId; s.ephemeral = false; }
     if (m.label && !s.label) s.label = m.label;
     if (m.webuiSessionId && !s.webuiSessionId) s.webuiSessionId = m.webuiSessionId;
+    if (HOLDERS.includes(m.holder)) { s.holder = m.holder; if (typeof m.recorded === 'boolean' && s.recorded === undefined) s.recorded = m.recorded; } // BROWSE YOURSELF: the user's own session
     if (m.phase === 'start') { if (!s.hasStart || num(m.at) < s.startAt) s.startAt = num(m.at); s.hasStart = true; }
     else { s.hasEnd = true; s.endAt = Math.max(num(s.endAt), num(m.at)); s.reason = m.reason || 'stopped'; if (Number.isFinite(Number(m.count))) s.markCount = Number(m.count); }
   }
@@ -178,7 +185,9 @@ function chatCardsFor(sessions, browserKey, { limit = 0 } = {}) {
   // oldest session first, each its start then its end; the stable sort by instant keeps that order on a tie (a session
   // that ended in the same millisecond the next one started reads end → start, never two starts in a row)
   for (const s of (sessions || []).slice().sort((a, b) => a.startAt - b.startAt || (a.order || 0) - (b.order || 0))) {
-    if (s.implicit || s.browserKey !== k) continue;
+    // BROWSE YOURSELF (B-6ae8): the user's own browsing is never a card in any chat — its key is not a browser key (the
+    // first gate, above) and a marker naming the user as its holder is skipped here too (the second gate)
+    if (s.implicit || s.browserKey !== k || s.holder === 'user') continue;
     const base = { session: s.id, browserKey: s.browserKey, profileId: s.profileId || null, ephemeral: !s.profileId, label: s.label || null };
     out.push({ id: `bs:${s.id}:start`, phase: 'start', at: s.startAt, ...base });
     if (!s.open && s.endAt) out.push({ id: `bs:${s.id}:end`, phase: 'end', at: s.endAt, durationMs: s.durationMs, count: s.count, reason: s.reason || 'stopped', framesRemoved: s.framesRemoved > 0 && s.frameEntries === 0, limit: num(limit) || 0, ...base });
@@ -208,6 +217,10 @@ function durationParts(ms) {
 function replayEmpty({ traceOn = true, sessions = [], session = null, entries = null } = {}) {
   if (!sessions || !sessions.length) return traceOn === false ? 'trace-off' : 'no-sessions';
   if (!session) return null;
+  // BROWSE YOURSELF (B-6ae8): the user's own session — recorded like an agent's unless the profile's "Also record my own
+  // actions" was off (then only when it started and stopped is kept)
+  if (session.holder === 'user' && session.recorded === false) return 'yours-not-recorded';
+  if (session.holder === 'user' && !(entries || []).length && !session.count) return traceOn === false ? 'trace-off' : 'yours-no-actions';
   const list = entries || [];
   // nothing listed: the trace was off (nothing could be recorded), the agent did nothing, or the list is still coming
   if (!list.length) return traceOn === false ? 'trace-off' : (session.count ? null : 'no-actions');
@@ -267,7 +280,7 @@ function pickIndex(entries, at = null) {
 }
 
 module.exports = {
-  SESSION_ID_RE, MARKERS_FILE, LEGACY_GAP_MS, PLAY_STEP_MS, IDLE_STOPS, END_REASONS,
+  SESSION_ID_RE, MARKERS_FILE, LEGACY_GAP_MS, PLAY_STEP_MS, IDLE_STOPS, END_REASONS, HOLDERS,
   isSessionId, mintSessionId, sessionKey, stopEndsSession, endReasonFor, markerFor, isMarker, entryFrameBytes,
   pairSessions, sessionOrdinals, sessionOfEntry, sessionsOfKey, chatCardsFor, cardBlock, durationParts,
   replayEmpty, frameState, replayKey, playTick, pickSession, pickIndex,

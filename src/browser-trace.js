@@ -124,14 +124,56 @@ function selectorOf(params) {
   return null;
 }
 /** The params an entry KEEPS — the secret-bearing ones replaced by their length. */
+/** BROWSE YOURSELF verify r1 (H2): a URL's credentials (`scheme://user:pass@host`) never reach the trace — the user's
+ *  address row and an agent's `open` both carry what was typed; the host, path and query stay (what the page WAS). */
+function withoutUserinfo(v) { return typeof v === 'string' ? v.replace(/\b([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/?#@\s]*@/g, '$1') : v; }
+/** BROWSE YOURSELF verify r2 (#7, r1's HELD query secrets re-judged: cut): a URL whose query (or fragment) NAMES a
+ *  credential-shaped key — `code` / `state`-bearing OAuth redirects (`?code=`), a magic link's `?token=`, the implicit
+ *  flow's `#access_token=`, a presigned `X-Amz-Signature` / `X-Amz-Credential`, `?session=` / `?sid=`, an `apiKey` — keeps
+ *  its scheme, host and path (what the page WAS) and loses the whole query (fragment) as `?«cut»` (`#«cut»`), for EVERY
+ *  navigation (an agent's too): an allowlist-free rule by the key's WORDS (split at _ - . and camelCase), so `postcode`,
+ *  `keyword` or `passthrough` are not keys of that shape; a query without one stays whole. Then the userinfo cut. */
+const CREDENTIAL_WORDS = new Set(['token', 'code', 'secret', 'password', 'passwd', 'pwd', 'pass', 'passcode', 'apikey', 'key', 'auth', 'authorization', 'session', 'sessionid', 'sid', 'sig', 'signature', 'credential', 'credentials', 'otp', 'ticket', 'jwt', 'assertion', 'samlresponse', 'samlrequest']);
+function credentialKey(k) {
+  let key = String(k || '');
+  try { key = decodeURIComponent(key.replace(/\+/g, ' ')); } catch { /* keep the raw name */ }
+  return key.split(/[_\-.\s]+|(?<=[a-z0-9])(?=[A-Z])/).some((w) => CREDENTIAL_WORDS.has(w.toLowerCase()));
+}
+/** verify r3 (#6): a VALUE that is itself an address naming a credential-shaped key — a redirector's `?url=` / `?continue=` /
+ *  `?next=` carrying a magic link or an OAuth callback percent-encoded (an email click-tracker, an SSO hop) — names one too:
+ *  decoded once per level, two levels deep, 4 KiB of value at most (bounded before any parse); a value that is no address
+ *  (`?next=%2Fhome`) or one that names none stays. */
+const namesCredential = (q, depth = 0) => String(q || '').split(/[&;]/).some((part) => {
+  if (!part) return false;
+  const eq = part.indexOf('=');
+  if (credentialKey(eq >= 0 ? part.slice(0, eq) : part)) return true;
+  if (eq < 0 || depth >= 2) return false;
+  let v = part.slice(eq + 1, eq + 1 + 4096);
+  try { v = decodeURIComponent(v.replace(/\+/g, ' ')); } catch { return false; }
+  const qi = v.indexOf('?'), hi = v.indexOf('#');
+  if (qi < 0 && hi < 0) return false;
+  const inQ = qi >= 0 ? v.slice(qi + 1, hi > qi ? hi : v.length) : '', inF = hi >= 0 ? v.slice(hi + 1) : '';
+  return (!!inQ && namesCredential(inQ, depth + 1)) || (!!inF && namesCredential(inF, depth + 1));
+});
+function cutSecretQuery(u) {
+  const hi = u.indexOf('#'), qi = u.indexOf('?');
+  const hasQ = qi >= 0 && (hi < 0 || qi < hi);
+  const query = hasQ ? u.slice(qi + 1, hi >= 0 ? hi : u.length) : '';
+  const frag = hi >= 0 ? u.slice(hi + 1) : '';
+  const cq = !!query && namesCredential(query), cf = !!frag && namesCredential(frag);
+  if (!cq && !cf) return u;
+  const base = u.slice(0, hasQ ? qi : (hi >= 0 ? hi : u.length));
+  return base + (hasQ ? (cq ? '?«cut»' : '?' + query) : '') + (hi >= 0 ? (cf ? '#«cut»' : '#' + frag) : '');
+}
+function withoutUrlSecrets(v) { return typeof v === 'string' ? withoutUserinfo(v.replace(/\b(?:https?|wss?):\/\/[^\s"'<>]+/gi, (m) => cutSecretQuery(m))) : v; }
 function redactParams(action, params) {
   const p = params && typeof params === 'object' ? params : {};
   const out = {};
   for (const [k, v] of Object.entries(p)) {
     if (k === 'id' || k === 'action') continue;
     if (v === null || v === undefined) continue;
-    if (typeof v === 'object') { out[k] = Array.isArray(v) ? v.map((x) => String(x).slice(0, 200)) : '{…}'; continue; }
-    out[k] = typeof v === 'string' ? v.slice(0, 500) : v;
+    if (typeof v === 'object') { out[k] = Array.isArray(v) ? v.map((x) => withoutUrlSecrets(String(x)).slice(0, 200)) : '{…}'; continue; }
+    out[k] = typeof v === 'string' ? withoutUrlSecrets(v).slice(0, 500) : v;
   }
   const a = String(action || '').toLowerCase();
   if (a === 'fill' && typeof p.value === 'string') out.value = `«${[...p.value].length} chars»`;
@@ -230,19 +272,25 @@ function afterFramePick({ resultAt, frames = [], beforeSeq = null, now, settleMs
   return { pick: 'wait' };
 }
 /** The record. `before` / `after` are `{file, bytes, ...frameMeta, at}` or null. */
-function entryFor({ id, at, sessionId = null, browserKey = null, profileId = null, browserSession = null, command, result = null, position, before = null, after = null, afterSame = false, url = null } = {}) {
+function entryFor({ id, at, sessionId = null, browserKey = null, profileId = null, browserSession = null, command, result = null, position, before = null, after = null, afterSame = false, url = null, holder = null } = {}) {
   const action = String(command && command.action || '');
   const params = redactParams(action, command && command.params);
+  // BROWSE YOURSELF (B-6ae8, the owner 3): the USER's own act (his browsing window's input, or a command of his address row)
+  // — recorded like an agent's, said as his (`you: click 120 340`), never a conversation's (no webui session id)
+  const human = holder === 'user';
   return {
-    id: String(id), at: Number(at) || 0, sessionId: sessionId || null, browserKey: browserKey || null, profileId: profileId || null,
+    ...(human ? { holder: 'user' } : {}),
+    id: String(id), at: Number(at) || 0, sessionId: human ? null : (sessionId || null), browserKey: browserKey || null, profileId: profileId || null,
     // the browser SESSION this action belongs to (`bs-…`, src/browser-sessions.js) — null only for a pre-session record
     browserSession: /^bs-[0-9a-f]{8}$/.test(String(browserSession || '')) ? browserSession : null,
     scope: profileId || EPHEMERAL_SCOPE,
-    action, kind: classifyAction(action) || 'input', text: commandText(action, params), params,
-    ok: resultOk(result), error: resultError(result), durationMs: result && Number.isFinite(result.duration_ms) ? result.duration_ms : null,
-    position: position || { kind: 'input', why: 'no position' },
+    action, kind: classifyAction(action) || 'input', text: human ? commandText(action, params).replace(/^agent-browser /, 'you: ') : commandText(action, params), params,
+    ok: resultOk(result), error: withoutUrlSecrets(resultError(result)), durationMs: result && Number.isFinite(result.duration_ms) ? result.duration_ms : null,
+    // (a navigation's position names its URL — cut like the params': verify r1 H2, the byte census found it)
+    position: position ? (typeof position.url === 'string' ? { ...position, url: withoutUrlSecrets(position.url) } : position) : { kind: 'input', why: 'no position' },
     before: before ? { ...before } : null, after: after ? { ...after } : null, afterSame: !!afterSame,
-    url: typeof url === 'string' ? url.slice(0, 2000) : null,
+    // (the page URL the entry names — its credentials cut like the params': verify r1 H2)
+    url: typeof url === 'string' ? withoutUrlSecrets(url).slice(0, 2000) : null,
   };
 }
 function isEntryId(v) { return ENTRY_ID_RE.test(String(v || '')); }
@@ -442,7 +490,12 @@ function housekeepingVerdict({ profiles = [], leases = [], browsers = {}, dirFac
     // `closedHow` (2026-09-28): the unstable record's kind as STRUCTURE, so the panel words the row in the device's language
     // (`why` stays the English sentence the agent / the CLI read)
     const closedHow = browserClosed === 'browser_unstable' ? (br.closed.unstable === 'failing' ? 'failing' : 'closing') : null;
-    const base = { id: p.id, label: p.label, dir: p.dir || null, provider: p.provider, host: p.host || null, legacy: !!p.legacy, record: !!p.record, sharing: p.sharing === 'instance' ? 'instance' : 'owner', mediated: B.isMediatedProfile(p), bytes: Number.isFinite(facts.bytes) ? facts.bytes : null, lastUsedAt: Number(p.lastUsedAt) || 0, ageMs, held, live, browserClosed, closedHow };
+    // BROWSE YOURSELF (B-6ae8): may the user browse it himself (a local profile whose provider STARTS a browser — never a
+    // paired machine's in v1, never a browser VibeSpace only connects to), and does it record his own actions (the owner's
+    // opt-out, absent = on) — structure for the row's button and checkbox
+    const row = rowOf(p.provider) || {};
+    const canBrowse = !p.host && row.starts !== false && row.leaseKind !== 'window-target';
+    const base = { id: p.id, label: p.label, dir: p.dir || null, provider: p.provider, host: p.host || null, legacy: !!p.legacy, record: !!p.record, recordMine: p.recordMine !== false, canBrowse, sharing: p.sharing === 'instance' ? 'instance' : 'owner', mediated: B.isMediatedProfile(p), bytes: Number.isFinite(facts.bytes) ? facts.bytes : null, lastUsedAt: Number(p.lastUsedAt) || 0, ageMs, held, live, browserClosed, closedHow };
     if (!q.ok) return { ...base, state: 'not-ours', why: q.error, canForget: false };
     if (held) return { ...base, state: 'in-use', why: `attached by ${held} session(s)${closedWhy}`, canForget: false };
     if (live) return { ...base, state: 'live', why: browserClosed ? `its daemon is running${closedWhy}` : 'its browser is running', canForget: false };
@@ -570,7 +623,7 @@ function scopeDigest(entries) {
 module.exports = {
   TRACE_BYTES_PER_PROFILE, TRACE_BYTES_FLOOR, TRACE_BYTES_SETTING, TRACE_TAP_FPS, AFTER_SETTLE_MS, AFTER_MAX_MS, BOX_PROBE_TIMEOUT_MS, PENDING_CAP, FRAME_RING,
   RECORDING_FLOOR, RECORDING_DIR, TRACE_DIR, FORGOTTEN_FILE, STALE_PROFILE_DAYS, INFLIGHT_GRACE_MS, PROFILE_MARKERS, FORGOTTEN_SUFFIX, EPHEMERAL_SCOPE,
-  TRACED_ACTIONS, classifyAction, isTracedCommand, selectorOf, redactParams, commandText, positionOf, resultOk, resultError, frameMeta, boxFromProbe, afterFramePick,
+  TRACED_ACTIONS, classifyAction, isTracedCommand, selectorOf, redactParams, withoutUserinfo, withoutUrlSecrets, credentialKey, commandText, positionOf, resultOk, resultError, frameMeta, boxFromProbe, afterFramePick,
   entryFor, isEntryId, mintEntryId, timelineLabel, traceWindowFor, commandDrivesBrowser, entriesInWindow, overlayGeometry,
   traceBytesLimit, entryFrameBytes, entryListBytes, traceSizePlan, recordingVerdict, recordingFileFor, isRecordingFile,
   cleanRecordError, recordingChipWords, // lane live-input: a failed record start's words kept without its command line / paths; the bar's recording chip

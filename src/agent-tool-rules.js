@@ -1,7 +1,7 @@
 'use strict';
 // VIBESPACE'S OWN AGENT TOOLS NEVER ASK PER COMMAND (lane L, 2026-09-25 — the
 // naive-user study 2: "7 to 15 'Permission: Bash' cards per task, Always Allow
-// does not stop the next one"). PURE: imports nothing, CJS, so the SAME table is
+// does not stop the next one"). PURE: imports only the PURE src/helper-ask.js (r6), CJS, so the SAME table is
 // read by the claude adapter (the spawn's `--settings` layer), by the chat
 // renderer (the permission card's plain words + the widened Always Allow) and by
 // the tests.
@@ -75,6 +75,9 @@
 // `sandbox_workspace_write.network_access=true`), where these tools already run
 // without an approval unless they need to leave the sandbox.
 const i18nKey = (s) => s; // extraction marker (scripts/i18n-extract.mjs) — the client renders through t()
+// verify r6: the ONE import — the PURE hidden-character screen (F7) the Always-Allow offer consults, so the card
+// and the server's own answer (answerFromRecord, F6) withhold it by the same rule. helper-ask imports nothing.
+const { hiddenCharsOf } = require('./helper-ask.js');
 
 const JOB_VERBS = Object.freeze(['list', 'show', 'poll', 'answers', 'logs', 'progress', 'ask', 'docs', 'stop', 'rm', 'notify', 'notify-cron', 'announce', 'subscribe', 'unsubscribe']);
 /** vibespace-page's pre-approved verbs (r2): `publish` is held AND an ask rule. */
@@ -116,6 +119,7 @@ const HELD_TOOLS = Object.freeze({
   'vibespace-hook.mjs': 'the hook the CLI runs itself',
   'vibespace-hook-register.mjs': 'the register helper VibeSpace runs over ssh',
   'vibespace-browser-verbs.js': 'a module the browser CLI requires, not a command',
+  'vibespace-browser-stuck.js': 'a module the browser CLI requires (its page-dialog words), not a command',
 });
 
 const CODEX_NOTE = 'codex: no per-spawn allow list — its only per-command allow is an execpolicy .rules file under CODEX_HOME (a write into the user\'s own config), and the default workspace-write sandbox with network on already runs these tools without an approval';
@@ -306,39 +310,152 @@ function rulesText(suggestions) {
   return out;
 }
 
+// ── EVERY update Always Allow sends, in words (verify r6 F5) ──
+// `alwaysAllowFor` passes a non-addRules update through untouched (a `setMode`, `addDirectories`, …), but the
+// card named only the RULES, in a title tooltip — a `setMode acceptEdits` rode along unseen, and a button whose
+// only update was `addDirectories ['/etc']` had no words at all (and a touch screen never shows a tooltip).
+// ONE speller: every update the button will send is a line here; the card shows the lines ON the card.
+const WHERE = Object.freeze({
+  session: i18nKey('for this session only'),
+  cliArg: i18nKey('for this session only'),
+  localSettings: i18nKey('saved in this project\'s local settings'),
+  projectSettings: i18nKey('saved in this project\'s shared settings'),
+  userSettings: i18nKey('saved in your user settings (every project)'),
+});
+const ruleWord = (r) => (r && r.toolName ? (r.ruleContent ? `${r.toolName}(${r.ruleContent})` : r.toolName) : '?');
+const listOf = (a) => (Array.isArray(a) ? a.map((x) => String(x)).join(', ') : '');
+/** `updates` → one `{key, params, where}` per update (`where` = an i18n key, or the raw destination the CLI
+ *  named when it is not one we know — never dropped). An update of a type we do not know is spelled as JSON. */
+function updatesText(updates) {
+  const out = [];
+  for (const u of Array.isArray(updates) ? updates : []) {
+    if (!u || typeof u !== 'object') continue;
+    const where = WHERE[u.destination] || String(u.destination || '');
+    const rules = Array.isArray(u.rules) ? u.rules.map(ruleWord).join(', ') : '';
+    const L = (key, params = {}) => out.push({ type: String(u.type || ''), key, params, where });
+    switch (u.type) {
+      case 'addRules':
+        if (u.behavior === 'deny') L(i18nKey('Always deny {rules}'), { rules });
+        else if (u.behavior === 'ask') L(i18nKey('Always ask before {rules}'), { rules });
+        else L(i18nKey('Always allow {rules}'), { rules });
+        break;
+      case 'replaceRules': L(i18nKey('Replace the {behavior} rules with {rules}'), { behavior: String(u.behavior || ''), rules }); break;
+      case 'removeRules': L(i18nKey('Remove the rules {rules}'), { rules }); break;
+      case 'setMode': L(i18nKey('Switch the permission mode to {mode}'), { mode: String(u.mode || '?') }); break;
+      case 'addDirectories': L(i18nKey('Let it work in {dirs}'), { dirs: listOf(u.directories) }); break;
+      case 'removeDirectories': L(i18nKey('Take away {dirs}'), { dirs: listOf(u.directories) }); break;
+      default: L(i18nKey('An update VibeSpace does not recognise: {what}'), { what: JSON.stringify(u).slice(0, 300) });
+    }
+  }
+  return out;
+}
+
+const WITHHELD_HIDDEN = i18nKey('Always Allow is not offered: this request holds hidden characters (each shown as ⟦U+…⟧).');
+/** THE Always-Allow OFFER for one permission record — the card draws it and the SERVER sends it (F6), so the
+ *  two cannot differ: `alwaysAllowFor` over the record's own suggestions and command, withheld whole when the
+ *  request holds a hidden character (F7). `{updates: [], withheld}` when nothing is offered. */
+function alwaysOfferFor(permission) {
+  const p = permission && typeof permission === 'object' ? permission : {};
+  if (hiddenCharsOf(p.input).length) return { updates: [], withheld: WITHHELD_HIDDEN };
+  const aa = alwaysAllowFor(p.suggestions || [], agentCommandText(p.input));
+  return { updates: Array.isArray(aa.updates) ? aa.updates : [], withheld: aa.withheld };
+}
+
+/** Is this record a QUESTION to the user (claude AskUserQuestion, codex requestUserInput, an ACP ask) — the
+ *  one kind whose answer the CLIENT legitimately authors (the `answers`)? */
+const isQuestionRecord = (r) => !!r && (r.kind === 'user_input' || r.toolName === 'AskUserQuestion');
+
+/** THE ANSWER A PRESS SENDS, DERIVED FROM THE SERVER'S OWN RECORD (verify r6 F6). The ws frame used to be
+ *  written as-is: the CLIENT's `toolInput` became the CLI's `updatedInput` (2.1.281's launcher path runs any
+ *  non-empty updatedInput) and the client's `permissionUpdates` were persisted — so what ran was whatever the
+ *  frame said, not the request the card showed. Now the press says only WHICH answer (allow / deny / always /
+ *  an ACP option / a question's answers) and everything else comes from `record` = the normalizer's pending
+ *  request ({input, suggestions, options?, kind?, toolName}):
+ *    · a plain Allow runs the record's input; Always Allow sends `alwaysOfferFor(record)` (never the client's list);
+ *    · a question keeps the record's input and takes ONLY `answers` from the client;
+ *    · an ACP option must be one the record offered, and its KIND decides allow / always (never the client's flag);
+ *    · a deny carries no input and no update.
+ *  `record` null (a request older than the buffer — the CLI decides, verify r1) sends NO input (the CLI then runs
+ *  its own) unless it carries a question's answers, and never updates. Returns `{ok:true, data, from:'record'|'unknown'}` or
+ *  `{ok:false, why}` for a frame no offered answer matches. Never mutates. */
+function answerFromRecord(record, data) {
+  const d = { ...(data || {}) };
+  const wantsAlways = d.always === true || (Array.isArray(d.permissionUpdates) && d.permissionUpdates.length > 0);
+  delete d.always;
+  if (!record || typeof record !== 'object') {
+    // a request this server never saw (older than the buffer — the CLI decides, verify r1): never the client's
+    // updates, and never the client's input — an EMPTY updatedInput makes 2.1.281 run the request's OWN input
+    // (its launcher path: `updatedInput && Object.keys(updatedInput).length > 0 ? updatedInput : <the request's>`);
+    // only a question's answers ride (the CLI reads them from updatedInput — the residual: its other fields too)
+    delete d.permissionUpdates;
+    const a = d.toolInput && typeof d.toolInput === 'object' ? d.toolInput.answers : undefined;
+    if (!(d.approved && a && typeof a === 'object' && !Array.isArray(a))) delete d.toolInput;
+    return { ok: true, data: d, from: 'unknown' };
+  }
+  delete d.responseData; // a harness-side answer shape the client never sends (codex derives it from `answers`)
+  const input = record.input && typeof record.input === 'object' ? record.input : {};
+  if (Array.isArray(record.options) && record.options.length && d.optionId != null) {
+    const o = record.options.find((x) => x && String(x.optionId) === String(d.optionId));
+    if (!o) return { ok: false, why: 'the option pressed is not one this request offered' };
+    const kind = String(o.kind || '');
+    const approved = /^allow/.test(kind);
+    return { ok: true, from: 'record', data: { ...d, approved, optionId: o.optionId, toolInput: approved ? input : undefined, permissionUpdates: approved && /always/.test(kind) ? [{ kind }] : undefined } };
+  }
+  if (!d.approved) { delete d.toolInput; delete d.permissionUpdates; return { ok: true, data: d, from: 'record' }; }
+  if (isQuestionRecord(record)) {
+    const a = d.toolInput && typeof d.toolInput === 'object' ? d.toolInput.answers : undefined;
+    delete d.permissionUpdates;
+    d.toolInput = a && typeof a === 'object' && !Array.isArray(a) ? { ...input, answers: a } : { ...input };
+    return { ok: true, data: d, from: 'record' };
+  }
+  d.toolInput = input;
+  const offer = alwaysOfferFor(record);
+  d.permissionUpdates = wantsAlways && offer.updates.length ? offer.updates : undefined;
+  return { ok: true, data: d, from: 'record' };
+}
+
 // ── the permission card's plain words (display only — never a permission decision) ──
 
 /** Quote-aware split of a shell line into simple commands. null = the line holds
  *  something a display must not guess at (substitution, heredoc, subshell,
- *  unbalanced quotes) — the card then shows the raw command. */
+ *  unbalanced quotes, an assigning expansion) — the card then shows the raw
+ *  command. Each segment also carries, per word (verify r6 F4), `redir[k]` = the
+ *  word holds an UNQUOTED `<` / `>` (a redirection, glued or not: `x>~/f` is
+ *  `x` into `~/f`) and `expand[k]` = the word holds an expansion the shell
+ *  resolves at run time (`$` outside single quotes, an unquoted glob `* ? [`) —
+ *  a word that can become ANY words (a file, an output option) once it runs. A
+ *  quoted `>` is text, never a redirection. */
 function splitShell(line) {
   const s = String(line || '');
   const segs = [];
-  let cur = [];
-  let tok = null;
+  let cur = [], curR = [], curX = [];
+  let tok = null, tokR = false, tokX = false, lastGt = false;
   let i = 0;
-  const endTok = () => { if (tok !== null) { cur.push(tok); tok = null; } };
-  const endSeg = (op) => { endTok(); if (cur.length) segs.push({ words: cur, op }); else if (op && op !== '\n' && op !== ';') return false; cur = []; return true; };
+  const endTok = () => { if (tok !== null) { cur.push(tok); curR.push(tokR); curX.push(tokX); tok = null; } tokR = false; tokX = false; lastGt = false; };
+  const endSeg = (op) => { endTok(); if (cur.length) segs.push({ words: cur, op, redir: curR, expand: curX }); else if (op && op !== '\n' && op !== ';') return false; cur = []; curR = []; curX = []; return true; };
   while (i < s.length) {
     const c = s[i];
     if (c === "'") {
       const j = s.indexOf("'", i + 1);
       if (j < 0) return null;
-      tok = (tok || '') + s.slice(i + 1, j); i = j + 1; continue;
+      tok = (tok || '') + s.slice(i + 1, j); lastGt = false; i = j + 1; continue;
     }
     if (c === '"') {
       let j = i + 1; let buf = '';
       while (j < s.length && s[j] !== '"') {
         if (s[j] === '\\' && j + 1 < s.length) { buf += s[j + 1]; j += 2; continue; }
-        if (s[j] === '$' && s[j + 1] === '(') return null;
+        // `$(` runs a command; `${X:=v}` / `$[X=1]` ASSIGN (r6: `echo "${NODE_OPTIONS:=--require=/tmp/e.js}"`
+        // before a vibespace-browser call chose what the node tool loads, under the browser's face)
+        if (s[j] === '$' && (s[j + 1] === '(' || s[j + 1] === '{' || s[j + 1] === '[')) return null;
         if (s[j] === '`') return null;
+        if (s[j] === '$') tokX = true;
         buf += s[j]; j++;
       }
       if (j >= s.length) return null;
-      tok = (tok || '') + buf; i = j + 1; continue;
+      tok = (tok || '') + buf; lastGt = false; i = j + 1; continue;
     }
-    if (c === '\\') { if (s[i + 1] === '\n') { i += 2; continue; } tok = (tok || '') + (s[i + 1] || ''); i += 2; continue; }
-    if (c === '`' || (c === '$' && s[i + 1] === '(') || c === '(' || c === ')' || c === '{' || c === '}') return null;
+    if (c === '\\') { if (s[i + 1] === '\n') { i += 2; continue; } tok = (tok || '') + (s[i + 1] || ''); lastGt = false; i += 2; continue; }
+    if (c === '`' || (c === '$' && (s[i + 1] === '(' || s[i + 1] === '[')) || c === '(' || c === ')' || c === '{' || c === '}') return null;
     if (c === '<' && s[i + 1] === '<') return null;
     if (c === ' ' || c === '\t') { endTok(); i++; continue; }
     if (c === '\n' || c === ';') { if (!endSeg(c)) return null; i++; continue; }
@@ -346,21 +463,72 @@ function splitShell(line) {
     if (c === '|' && s[i + 1] === '|') { if (!endSeg('||')) return null; i += 2; continue; }
     if (c === '|') { if (!endSeg('|')) return null; i++; continue; }
     if (c === '&') {
-      // `2>&1` / `&>/dev/null` stay inside the word; a bare `&` (background) is not ours to describe
-      if (tok !== null && /[0-9]?>$/.test(tok)) { tok += c; i++; continue; }
-      if (s[i + 1] === '>') { tok = (tok || '') + c; i++; continue; }
+      // `2>&1` / `&>/dev/null` stay inside the word — only right after an UNQUOTED `>` (r6: `"x>"& rm -rf ~`
+      // is a background job, never a word); a bare `&` (background) is not ours to describe
+      if (tok !== null && lastGt) { tok += c; lastGt = false; i++; continue; }
+      if (s[i + 1] === '>') { tok = (tok || '') + c; tokR = true; i++; continue; }
       return null;
     }
-    tok = (tok || '') + c; i++;
+    if (c === '<' || c === '>') { tok = (tok || '') + c; tokR = true; lastGt = c === '>'; i++; continue; }
+    if (c === '$' || c === '*' || c === '?' || c === '[') tokX = true;
+    tok = (tok || '') + c; lastGt = false; i++;
   }
   endTok();
-  if (cur.length) segs.push({ words: cur, op: null });
+  if (cur.length) segs.push({ words: cur, op: null, redir: curR, expand: curX });
   return segs;
 }
 
 const QUIET_REDIRECT = /^(?:[0-9]?>&[0-9]|&?[0-9]?>{1,2}\/dev\/null|[0-9]?>{1,2}\/dev\/null)$/;
 const FILTERS = new Set(['grep', 'egrep', 'fgrep', 'head', 'tail', 'wc', 'sort', 'uniq', 'cut', 'jq', 'cat', 'tr']);
 const QUIET = new Set(['sleep', 'echo', 'printf', 'true', ':']);
+// ── WHEN A FILTER / A QUIET COMMAND IS PROVABLY INERT (verify r6 F4) ──
+// The plain words skip a filter after a pipe and a quiet command, so a line of our tool + such a command reads as
+// "just" our tool. Before r6 the skip ignored the ARGUMENTS: `… | sort -o ~/.bashrc` (an output file),
+// `… | cat ~/.ssh/id_rsa` (a file read into the agent's context), `… | uniq - ~/.ssh/authorized_keys` (the second
+// operand is an OUTPUT file), `printf x>~/.profile` (a glued redirection) all wore the browser's face. Now a
+// command is skipped only when EVERY argument is on its row: a listed flag, a listed flag's value, or at most
+// `pos` operands that are never files (a grep pattern, a jq program, tr's sets). Anything else — an unlisted
+// option (`-o`, `-f`, `--compress-program=…`), an extra operand (a file), `-` (stdin named as an input file), a
+// word the shell expands at run time (word splitting can make it `-o /x`), a redirection — and the command is
+// NAMED in `others`. A false "also runs" costs a few words; a missing one cost the card its meaning.
+const JQ_PROGRAM = /^[\w.[\]"' |,:?=<>!+*\/()%{}@-]*$/; // no `$` (no $ENV / $__loc__), no `;` (no import / include)
+const GREP_ARGS = { flags: /^-[ivcnwxoEFhHsq]+$/, value: ['-e', '-m', '-A', '-B', '-C'], glued: /^-[mABC]\d+$/, pos: (a) => (a.includes('-e') ? 0 : 1) };
+const FILTER_ARGS = Object.freeze({
+  grep: GREP_ARGS, egrep: GREP_ARGS, fgrep: GREP_ARGS,
+  head: { flags: /^-(?:\d+|[qv]+)$/, value: ['-n', '-c'], glued: /^-[nc]-?\d+[kKmMbB]?$/, pos: 0 },
+  tail: { flags: /^-(?:\d+|[qvf]+)$/, value: ['-n', '-c'], glued: /^-[nc][+-]?\d+[kKmMbB]?$/, pos: 0 },
+  wc: { flags: /^-[lwcmL]+$/, pos: 0 },
+  sort: { flags: /^-[bdfgiMhnRrsuVz]+$/, value: ['-k', '-t'], glued: /^-(?:k[\w.,]+|t.)$/, pos: 0 },
+  uniq: { flags: /^-[cdiuDz]+$/, value: ['-f', '-s', '-w'], glued: /^-[fsw]\d+$/, pos: 0 },
+  cut: { flags: /^-[sz]+$/, value: ['-d', '-f', '-c', '-b'], glued: /^-(?:d.|[fcb][\d,-]+)$/, pos: 0 },
+  jq: { flags: /^-[rcSsjaenMC]+$/, pos: 1, posOk: (p) => JQ_PROGRAM.test(p) && !/\b(?:env|import|include|modulemeta|get_search_list)\b/.test(p) },
+  cat: { flags: /^-[nbsAETvte]+$/, pos: 0 },
+  tr: { flags: /^-[cdsC]+$/, pos: 2 },
+});
+const QUIET_ARGS = Object.freeze({
+  echo: { any: true }, // prints its words — an expansion only prints more words
+  true: { any: true }, ':': { any: true }, // ignore their words (an ASSIGNING expansion never reaches here — splitShell refuses it)
+  printf: { pos: Infinity }, // never an option (`printf -v PATH /tmp/evil` sets the variable the next command resolves through)
+  sleep: { pos: Infinity, posOk: (p) => /^\d+(?:\.\d+)?[smhd]?$/.test(p) },
+});
+/** Is every argument of a filter / quiet command on its row? `expand[k]` = the word expands at run time. */
+function inertArgs(spec, args, expand) {
+  if (!spec) return false;
+  if (spec.any) return true;
+  const maxPos = typeof spec.pos === 'function' ? spec.pos(args) : (spec.pos || 0);
+  let pos = 0;
+  for (let k = 0; k < args.length; k++) {
+    const a = args[k];
+    if (expand[k]) return false;
+    if (spec.value && spec.value.includes(a)) { if (k + 1 >= args.length || expand[k + 1]) return false; k++; continue; }
+    if (spec.glued && spec.glued.test(a)) continue;
+    if (spec.flags && spec.flags.test(a)) continue;
+    if (a.startsWith('-')) return false;
+    if (++pos > maxPos) return false;
+    if (spec.posOk && !spec.posOk(a)) return false;
+  }
+  return true;
+}
 /** THE CARD WEARS OUR FACE ONLY FOR THE HEAD THE CLI'S RULE TRUSTS (r2): a
  *  word is read as one of our tools (or a filter / a quiet command) only when
  *  it IS the bare name — `./data/bin/vibespace-browser` or
@@ -475,23 +643,28 @@ function describeAgentCommand(command) {
   const others = [];
   let scope = null;
   let prevOp = null;
-  const other = (w, env = []) => {
-    const n = [...env.map((v) => v.slice(0, v.indexOf('=')) + '=…'), shownHead(w[0])].join(' ');
-    if (!others.includes(n)) others.push(n);
+  const other = (w, env = [], extra = []) => {
+    const n = [...env.map((v) => v.slice(0, v.indexOf('=')) + '=…'), shownHead(w[0]), ...extra].filter(Boolean).join(' ');
+    if (n && !others.includes(n)) others.push(n);
   };
   for (const seg of segs) {
-    let w = seg.words.filter((x) => !QUIET_REDIRECT.test(x));
+    const R = seg.redir || [], X = seg.expand || [];
+    // an inert redirection (`2>&1`, `>/dev/null`) is dropped — only an UNQUOTED one is a redirection at all (r6)
+    const keep = seg.words.map((_, k) => k).filter((k) => !(R[k] && QUIET_REDIRECT.test(seg.words[k])));
+    let w = keep.map((k) => seg.words[k]), wr = keep.map((k) => !!R[k]), wx = keep.map((k) => !!X[k]);
     const env = [];
-    while (w.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(w[0])) { if (!SAFE_ENV.test(w[0])) env.push(w[0]); w = w.slice(1); } // VAR=value prefix
+    while (w.length && !wr[0] && /^[A-Za-z_][A-Za-z0-9_]*=/.test(w[0])) { if (!SAFE_ENV.test(w[0])) env.push(w[0]); w = w.slice(1); wr = wr.slice(1); wx = wx.slice(1); } // VAR=value prefix
     const piped = prevOp === '|';
     prevOp = seg.op;
-    if (!w.length) continue;
+    if (!w.length) { if (env.length) other([], env); continue; } // r6: a bare `PATH=/tmp/evil` sets what every later command of the line resolves through — named
     const head = w[0]; // the word AS WRITTEN — never its basename (r2)
-    const writes = w.some((x) => /^[0-9&]?>/.test(x) || x.startsWith('<'));
+    const args = w.slice(1), argsX = wx.slice(1);
+    const redirs = w.map((x, k) => (wr[k] ? (/[<>&]$/.test(x) && k + 1 < w.length ? `${x} ${w[k + 1]}` : x) : null)).filter((x) => x !== null); // `> ~/f` named with its target
     if (env.length) { other(w, env); continue; } // a prefix that can choose what runs: not our face
-    if (piped && FILTERS.has(head) && !writes) continue;
-    if (!piped && QUIET.has(head) && !writes) continue;
-    if (writes || piped) { other(w); continue; } // a redirect into a file, or a pipe into a non-filter, is not the tool's act
+    if (redirs.length) { other(w, [], redirs.map((x) => shorten(x, 60))); continue; } // r6: a redirection anywhere (`x>~/f` glued too) — named with where it goes
+    if (piped && FILTERS.has(head)) { if (!inertArgs(FILTER_ARGS[head], args, argsX)) other(w, [], [shorten(args.join(' '), 60)]); continue; }
+    if (!piped && QUIET.has(head)) { if (!inertArgs(QUIET_ARGS[head], args, argsX)) other(w, [], [shorten(args.join(' '), 60)]); continue; }
+    if (piped) { other(w); continue; } // a pipe into a non-filter is not the tool's act
     if (head === 'vibespace-browser') {
       const st = browserStep(w.slice(1));
       if (st.verb === 'close' && w.includes('--all')) scope = SCOPE_CLOSE_ALL;
@@ -512,4 +685,6 @@ module.exports = {
   AGENT_TOOL_RULES, HELD_TOOLS, JOB_VERBS, PAGE_VERBS, CODEX_NOTE, SCOPE_CLOSE_ALL, WITHHELD_ASK, WITHHELD_HELD, SAFE_ENV,
   claudeAllowRules, claudeAskRules, ASK_RULE_MODES, spawnPermissionMode, claudeAskRulesFor, parseRule, ruleMatchesCommand, coveredByAgentToolRules,
   widenSuggestions, alwaysAllowFor, rulesText, splitShell, describeAgentCommand, agentCommandText,
+  // verify r6: the inert-tail census (F4), every update in words (F5), the ONE offer + the server's own answer (F6/F7)
+  FILTER_ARGS, QUIET_ARGS, inertArgs, updatesText, WITHHELD_HIDDEN, alwaysOfferFor, isQuestionRecord, answerFromRecord,
 };

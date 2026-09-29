@@ -192,6 +192,13 @@ function armNoticeFor(armReason, resetsAtMs, nowMs, cause) {
   // engine's armCauseFor; a cause-less arm keeps the old sentence verbatim.
   const c = cause && typeof cause === 'object' ? cause : null;
   const fmt = (ms) => new Date(ms).toLocaleString();
+  // THE OWNER'S 全B (2026-09-28): the wall is a member taken OUT of the pool with nobody to take over — the card
+  // names that cause, never "usage limit reached"
+  if (c && c.kind === 'removed-member') {
+    const who = (c.member && c.member.name) || '该账号';
+    const park = c.holdTo && c.holdTo.name ? `（暂停在 ${c.holdTo.name}，${fmt(resetsAtMs)} 重置）` : '';
+    return `${who} 已被移出账号池，没有其他成员能接手：这个对话已在本回合结束后停下${park}，有成员可用时自动继续（状态栏可取消）。`;
+  }
   if (c && c.scope === 'pool' && c.soonest && c.soonest.name) {
     const s = c.soonest, r = c.rejector;
     const sb = s.bucket && s.bucket.label ? s.bucket : null;
@@ -511,6 +518,10 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     if (worked) noteFireOutcome(id, true, why);
     const a = armed.get(id);
     if (!a || a.fired) return;
+    // A REMOVED-MEMBER HOLD (the owner's 全B, 2026-09-28) is armed AT the turn end it follows — the turn that
+    // completed normally is the one it let finish, never evidence that the wall lifted (the member it ran on left
+    // the pool). Only the user's own prompt, a delivered continue, the toggle or a pool move disarm it.
+    if (a.cause && a.cause.kind === 'removed-member' && why === 'turn completed normally') return;
     armed.delete(id); save();
     _cancelArmNotify(id);
     log(`[auto-resume] ${id}: disarmed (${why})`);

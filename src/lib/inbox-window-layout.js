@@ -189,7 +189,9 @@ export function itemView(item, ctx = {}) {
   const options = !resolved && reply.show && Array.isArray(i.options) ? i.options.map((label, idx) => ({ idx, label: String(label) })) : [];
   const producer = !resolved && i.action && i.action.type === 'reset-credit' && i.action.accountKey
     ? { type: 'reset-credit', accountKey: i.action.accountKey, sessionId: i.action.sessionId || null } : null;
-  const actions = resolved ? ['reopen', 'copy'] : [...(reply.show ? ['reply'] : []), 'done', 'dismiss', 'copy', ...(producer ? ['producer'] : [])];
+  // lane-pairing ⑥: an exit's "ask me each time" item is answered HERE — Allow / Deny first (never a producer button)
+  const exitAsk = !resolved && i.action && i.action.type === 'exit-run-ask' && i.action.askId ? { askId: i.action.askId, cmd: String(i.action.cmd || '') } : null;
+  const actions = resolved ? ['reopen', 'copy'] : [...(exitAsk ? ['exit-allow', 'exit-deny'] : []), ...(reply.show ? ['reply'] : []), 'done', 'dismiss', 'copy', ...(producer ? ['producer'] : [])];
   const title = String(ctx.words != null ? ctx.words : (i.text || ''));
   const detail = String(ctx.detail != null ? ctx.detail : (i.detail || ''));
   const replied = i.reply && typeof i.reply.text === 'string' && i.reply.text ? i.reply.text : null;
@@ -203,6 +205,6 @@ export function itemView(item, ctx = {}) {
   return {
     id: i.id || null, sessionKey: i.sessionKey || null, title, detail, name: String(ctx.name || ''),
     urgency: resolved || notice ? '' : urgency, notice, resolved, status: resolved ? (i.status === 'dismissed' ? 'dismissed' : 'done') : 'open',
-    meta, replied, options, reply, actions, producer, copy, cut,
+    meta, replied, options, reply, actions, producer, exitAsk, copy, cut,
   };
 }

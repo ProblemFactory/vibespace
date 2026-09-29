@@ -85,7 +85,7 @@ console.log('\n§3 the route over the real engine');
   const engMod = require(path.join(REPO, 'src/server/usage-pool-engine.js'));
   const { registerResetCreditRoutes } = require(path.join(REPO, 'src/routes/reset-credit.js'));
   const roots = [];
-  const world = ({ credits = 3, hourCap = 100, session = true } = {}) => {
+  const world = ({ credits = 3, hourCap = 100, session = true, engine = engMod } = {}) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-rcui-'));
     roots.push(root);
     const prevHome = process.env.CODEX_HOME;
@@ -102,7 +102,7 @@ console.log('\n§3 the route over the real engine');
     const settings = { 'codex.limitResetCredit': 'off', 'spend.unattendedPerIdentityHour': hourCap };
     const sessions = new Map(), notices = [], arms = [];
     const app = { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} };
-    const eng = engMod.create({
+    const eng = engine.create({
       app, rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: sessions,
       wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice: (k, t) => notices.push(t),
       serverSetting: (k) => settings[k], getAccounts: () => wam, getHosts: () => null, getUsageHistory: () => null,
@@ -165,6 +165,28 @@ console.log('\n§3 the route over the real engine');
     w3.quietly(() => w3.eng.recordCodexQuotaSignal(w3.s1, { type: 'reset_credit_result', outcome: 'reset' }));
     ok('a PERSON\'s successful attempt ⇒ the consumed notice (the same success path as the rung)', w3.notices.some((n) => /reset credit consumed/.test(n)), JSON.stringify(w3.notices));
   }
+  // verify-r6 R1: the POST names the window the dialog SHOWED — a window that reset (or moved) while the dialog stayed
+  // open would spend the credit on a FRESH window ("0% discarded" shown): refused by name, nothing spent
+  {
+    const wr = world();
+    const shown = wr.call('GET', wr.A).body.resetsAtSec;
+    const moved = wr.quietly(() => wr.call('POST', wr.A, { body: { sessionId: 'cx1', expect: { resetsAtSec: shown - 3600 } } }));
+    ok('verify-r6 R1: the dialog showed a window that has since reset / moved (another reset instant) ⇒ 409 preview_changed, NO verb, nothing charged (pre-fix: the credit spent on the fresh window)', moved.code === 409 && moved.body.code === 'preview_changed' && wr.verbs() === 0 && wr.charged() === 0, JSON.stringify(moved.body));
+    const past = wr.quietly(() => wr.call('POST', wr.A, { body: { sessionId: 'cx1', expect: { resetsAtSec: wr.nowS - 5 } } }));
+    ok('verify-r6 R1: …a shown reset instant already in the past ⇒ preview_changed too', past.code === 409 && past.body.code === 'preview_changed' && wr.verbs() === 0);
+    const same = wr.quietly(() => wr.call('POST', wr.A, { body: { sessionId: 'cx1', expect: { resetsAtSec: shown } } }));
+    ok('verify-r6 R1: the window it showed ⇒ spent (one verb)', same.code === 200 && same.body.ok === true && wr.verbs() === 1, JSON.stringify(same.body));
+    const RC = require(path.join(REPO, 'src/reset-credit.js'));
+    ok('verify-r6 R1: the dialog words preview_changed (nothing was spent), and the dialog POSTs the window it showed', RC.refusalLine('preview_changed').key === 'The limit this dialog showed has reset since it opened — nothing was spent. Open it again to see the account now.' && /expect: \{ resetsAtSec: p\.resetsAtSec \?\? null \}/.test(read('src/lib/reset-credit-dialog.js')));
+    // CONTROL (r1): an engine that ignores what the dialog showed spends the credit on the moved window
+    const esrc = read('src/server/usage-pool-engine.js');
+    const emut = esrc.replace("  if (expect && typeof expect === 'object' && expect.resetsAtSec != null) {", '  if (false) {');
+    ok('CONTROL (r1): the patch applies', emut !== esrc);
+    const wm = world({ engine: require(MUTRC.write('src/server/usage-pool-engine.js', emut, 'r1')) });
+    const shownM = wm.call('GET', wm.A).body.resetsAtSec;
+    const movedM = wm.quietly(() => wm.call('POST', wm.A, { body: { sessionId: 'cx1', expect: { resetsAtSec: shownM - 3600 } } }));
+    ok('CONTROL (r1): an engine ignoring the shown window SPENDS the credit on the moved one — the R1 leg goes red', movedM.code === 200 && wm.verbs() === 1, JSON.stringify(movedM.body));
+  }
   const w0 = world({ session: false });
   const nl = w0.call('POST', w0.A);
   ok('no live chat session on the account ⇒ 409 no_live_session, nothing written', nl.code === 409 && nl.body.code === 'no_live_session', JSON.stringify(nl.body));
@@ -197,7 +219,7 @@ console.log('\n§3 the route over the real engine');
   const eng = read('src/server/usage-pool-engine.js');
   ok('ONE writer: the auto rung and the manual use both call writeResetCredit with the CREDIT\'S identity (the verb is spelled once in the engine)', /const wr = writeResetCredit\(session, \{ resetsAtSec: R, lane, origin: 'auto', now, key \}\);/.test(eng) && /const wr = writeResetCredit\(session, \{ resetsAtSec: p\.resetsAtSec \|\| 0, lane: null, origin: 'user', now, key: p\.key \}\);/.test(eng) && (eng.match(/type: 'codex-reset-credit' \}\)/g) || []).length === 1);
   ok('the carrier is picked by CAPABILITY (capsOf(s.backend).resetCredit), never a backend id', /capsOf\(s\.backend\)\.resetCredit === true && ids\.has\(codexQuotaKeyFor\(s\)\)/.test(eng) && !/function resetCreditCarriers[\s\S]{0,400}backend === 'codex'/.test(eng));
-  ok('the route is wired where the accounts routes live, and server.js hands the engine both functions', /require\('\.\.\/routes\/reset-credit\.js'\)\.registerResetCreditRoutes\(app, \{ engine \}\);/.test(read('src/server/account-usage-routes.js')) && /engine: \{ clearSealedOrders, resetCreditPreview, consumeResetCreditFor(, claimColdRestarts)? \}/.test(read('server.js')));
+  ok('the route is wired where the accounts routes live, and server.js hands the engine both functions', /require\('\.\.\/routes\/reset-credit\.js'\)\.registerResetCreditRoutes\(app, \{ engine \}\);/.test(read('src/server/account-usage-routes.js')) && /engine: \{ clearSealedOrders, resetCreditPreview, consumeResetCreditFor(, claimColdRestarts)?(, \w+)* \}/.test(read('server.js')));
 }
 
 console.log('\n§4 THE three entry points open ONE dialog');

@@ -1219,6 +1219,13 @@ html, body {
 }
 .desktop-preview.active .desktop-preview-label { color: var(--accent-hover); }
 .desktop-preview-drop { border-color: var(--accent) !important; background: var(--accent-dim) !important; }
+.desktop-preview.stage-refuse { border-color: var(--yellow) !important; border-style: dashed !important; cursor: not-allowed; } /* inc-muly2izg-cks3: the Stage's rule refuses this drop — the preview says so */
+.stage-refuse-label {
+  position: fixed; z-index: 9995; pointer-events: none;
+  padding: 3px 9px; border-radius: var(--radius-sm); font-size: calc(12px * var(--ui-font-scale, 1)); font-weight: 600; white-space: nowrap;
+  background: var(--bg-dialog); color: var(--text); border: 1px solid var(--yellow);
+  box-shadow: var(--shadow-window);
+}
 .desktop-preview-dragging { opacity: 0.45; }
 .desktop-preview-win-waiting { animation: blink-fade 0.7s ease-in-out infinite reverse; background: var(--yellow, #e5c07b); }
 .desktop-preview-waiting { border-color: var(--yellow, #e5c07b); }
@@ -1672,6 +1679,7 @@ html, body {
 .settings-row-apply-target { font-family: 'SF Mono','Fira Code',monospace; font-size: 10px; color: var(--text); margin-top: 2px; }
 .settings-cli-receipts { margin-top: 3px; display: flex; flex-direction: column; gap: 2px; }
 .settings-cli-receipt { font-size: 11px; line-height: 1.4; }
+.settings-row-fact { margin-top: 5px; padding: 3px 8px; border-left: 2px solid var(--border); font-size: 11px; line-height: 1.4; color: var(--text-secondary); } /* lane headless-fallback: this machine's display beside the headed preference */
 .settings-cli-dim { color: var(--text-dim); }
 .settings-link-btn { margin-top: 4px; background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--accent); font-size: 11px; padding: 2px 8px; cursor: pointer; }
 .settings-link-btn:hover { background: var(--bg-hover); }
@@ -3578,6 +3586,43 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .task-log-edit-detail:focus { outline: none; border-color: var(--accent); }
 .task-log-edit-detail.hidden { display: none; }
 .task-log-edit-btns { display: flex; gap: 6px; }
+/* ── "Clear content…" (2026-09-28): a CLEARED record keeps its place and time; its words are the cleared sentence, dimmed ── */
+.rc-cleared { color: var(--text-dim); font-style: italic; }
+.task-log-act .task-log-more { flex-shrink: 0; margin-left: auto; color: var(--text-dim); opacity: 0.45; transition: opacity var(--transition); padding: 0 4px; border-radius: var(--radius-sm); }
+.task-log-act:hover .task-log-more, .task-log-act:focus-within .task-log-more { opacity: 1; }
+.task-log-act .task-log-more:hover { color: var(--accent); }
+@media (hover: none) { .task-log-act .task-log-more { opacity: 1; } }
+.task-log-pick { flex-shrink: 0; margin: 0 2px 0 0; accent-color: var(--accent); cursor: pointer; }
+.task-log-selbtn.active { border-color: var(--accent); color: var(--accent); }
+.task-log-selbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 5px 10px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 6%, var(--bg-panel, var(--bg-titlebar))); flex-shrink: 0; }
+.task-log-picked { color: var(--text-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.task-log-clearsel:not(:disabled) { border-color: var(--red); color: var(--red); }
+.task-log-clearsel:disabled, .task-log-pickall:disabled { opacity: 0.5; cursor: default; }
+.ut-item-cleared .ut-text, .iw-row-cleared .iw-row-title, .iw-item-cleared .iw-title, .chanmsg-cleared .chanmsg-body { color: var(--text-dim); font-style: italic; }
+.rc-row-cleared .session-history-reason { color: var(--text-dim); font-style: italic; }
+.task-log-pick-sp { flex-shrink: 0; display: inline-block; width: 13px; margin: 0 2px 0 0; }
+/* verify r2: every surface shows its door — the For-you window's action row, a status history row's ⋯,
+   an expanded job's button, a group message's ⋯ (hover / focus; a long-press on touch) */
+.iw-act-clear { margin-left: auto; }
+.iw-act-clear:not(:disabled):hover { color: var(--red, #e55); border-color: var(--red, #e55); }
+.session-history-more { flex-shrink: 0; font: inherit; font-size: 11px; line-height: 1; padding: 0 4px; border: none; background: none; color: var(--text-dim); cursor: pointer; border-radius: var(--radius-sm); opacity: 0; transition: opacity var(--transition); }
+.session-history-item:hover .session-history-more, .session-history-more:focus-visible { opacity: 1; }
+.session-history-more:hover { color: var(--accent); }
+@media (hover: none) { .session-history-more { opacity: 1; } }
+.jobs-access .jobs-clear { margin-left: auto; }
+.jobs-access .jobs-clear:hover { color: var(--red); border-color: var(--red); }
+.chanmsg { position: relative; }
+.chanmsg-more { position: absolute; top: 0; right: 0; font: inherit; font-size: 12px; line-height: 1; padding: 1px 5px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-window); color: var(--text-dim); cursor: pointer; opacity: 0; pointer-events: none; transition: opacity var(--transition); }
+.chanmsg:hover .chanmsg-more, .chanmsg-more:focus-visible { opacity: 1; pointer-events: auto; }
+.chanmsg-more:hover { color: var(--accent); border-color: var(--accent); }
+@media (hover: none) and (pointer: coarse) { .chanmsg-more { display: none; } }
+.rc-dialog .rc-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.rc-dialog .rc-match { font-size: 11px; color: var(--text-dim); overflow-wrap: anywhere; }
+.rc-dialog .rc-list { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow-y: auto; margin: 0 0 10px; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); }
+.rc-dialog .rc-item { display: flex; align-items: baseline; gap: 8px; font-size: 12px; min-width: 0; }
+.rc-dialog .rc-when { flex-shrink: 0; color: var(--text-dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+.rc-dialog .rc-words { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--text); }
+.rc-dialog .rc-more { font-size: 11px; color: var(--text-dim); }
 .task-detail-backlog { display: flex; flex-direction: column; gap: 2px; }
 .task-detail-backlog-item { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
 .task-detail-backlog-item span:first-child { flex: 1; min-width: 0; }
@@ -4245,6 +4290,18 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .pool-mem-all { border-bottom: 1px solid var(--border); margin-bottom: 4px; padding-bottom: 8px; }
 .pool-mem-sub { font-size: 10px; color: var(--text-dim); }
 .pool-mem-list { max-height: 300px; overflow-y: auto; }
+/* Manual priority (2026-09-28): the Placement choice + ordered rows. A member's state
+   is WORDS on the row (never a greyed row); the ⋯ menu offers only what applies. */
+.pool-place-row { display: flex; flex-direction: column; gap: 2px; margin: 6px 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.dialog-body label.pool-place-opt, .pool-place-opt { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; padding: 4px 2px; font-size: 12px; color: var(--text); cursor: pointer; }
+.pool-place-opt input { margin-top: 2px; flex-shrink: 0; }
+.pool-prio-row { align-items: center; border-radius: var(--radius-sm); }
+.pool-prio-row.ranked { background: var(--bg-hover, transparent); }
+.pool-prio-grip { cursor: grab; color: var(--text-dim); font-size: 11px; letter-spacing: -2px; user-select: none; }
+.pool-prio-place { min-width: 22px; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--accent); }
+.pool-prio-name { flex: 1; min-width: 0; }
+.pool-prio-state[data-state="out"], .pool-prio-state[data-state="login-expired"], .pool-prio-state[data-state="signed-out"] { color: var(--yellow, var(--text-dim)); }
+.pool-prio-menu { flex-shrink: 0; min-width: 28px; }
 
 /* Long-lived token dialog (B-211a) */
 .oat-steps { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; font-size: 12px; color: var(--text-secondary); }
@@ -4784,6 +4841,37 @@ div.chanblk-attribution { white-space: normal; }
 .chanblk-card-title:last-child { border-bottom: none; padding-bottom: 0; margin-bottom: 0; }
 .chanblk-card-line { font-size: 12px; color: var(--text-secondary); overflow-wrap: anywhere; white-space: pre-wrap; }
 .chanblk-att { display: flex; min-width: 0; }
+/* lane channel-rich (D1): a card's ELEMENTS (div / markdown text, notes, button labels) and a rule */
+.chanblk-card-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 12.5px; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; }
+.chanblk-card-body > .chanblk-banner { font-size: 11px; }
+.chanblk-hr { height: 0; border-top: 1px solid var(--border); margin: 3px 0; }
+/* D3: a bot's name wears a small bot mark (the icon library's glyph) */
+.chanmsg-head .chanmsg-bot { color: var(--text-dim); align-self: center; flex-shrink: 0; }
+/* D2: a mail's FORMATTED body — the sandboxed frame (src/lib/channel-mail-frame.js). The text body stays for
+   "Plain text"; while formatted it is hidden (the frame IS the body). The mail is drawn on paper — a mail is
+   designed for a light page — inside the theme's radius and border. */
+.chanmsg.chanmail-formatted > .chanmsg-body { display: none; }
+.chanmsg.chanmail-formatted .chanmail-inlined { display: none; }
+.chanmail { display: flex; flex-direction: column; gap: 4px; min-width: 0; margin-top: 2px; }
+.chanmsg:not(.chanmail-formatted) > .chanmail { margin-bottom: 4px; }   /* the bar sits above the text body in Plain text too */
+.chanmail-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.chanmail-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; flex-shrink: 0; }
+.chanmail-mode { font: inherit; font-size: 11px; line-height: 16px; padding: 1px 9px; border: none; background: transparent; color: var(--text-secondary); cursor: pointer; white-space: nowrap; }
+.chanmail-mode + .chanmail-mode { border-left: 1px solid var(--border); }
+.chanmail-mode[aria-pressed="true"] { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--text); }
+.chanmail-mode:hover { color: var(--text); }
+.chanmail-mode:focus-visible, .chanmail-pictures:focus-visible, .chanmail-retry:focus-visible { outline: none; box-shadow: 0 0 0 1px var(--accent); }
+.chanmail-pictures { display: inline-flex; align-items: center; gap: 4px; font: inherit; font-size: 11px; line-height: 16px; padding: 1px 9px 1px 7px; border-radius: 999px; border: 1px solid var(--border); background: color-mix(in srgb, var(--text) 4%, transparent); color: var(--text-secondary); cursor: pointer; white-space: nowrap; }
+.chanmail-pictures:hover { border-color: var(--border-active); color: var(--text); }
+.chanmail-pictures[hidden], .chanmail-note[hidden], .chanmail-box[hidden] { display: none; }
+.chanmail-note { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px; color: var(--text-dim); }
+.chanmail-retry { font: inherit; font-size: 11px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); cursor: pointer; }
+.chanmail-box { min-width: 0; max-width: 100%; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--paper); }
+.chanmail-frame { display: block; width: 100%; border: 0; background: var(--paper); }
+.chanmail-ph { width: 100%; background: color-mix(in srgb, var(--text) 3%, var(--paper)); }
+@media (max-width: 768px) {
+  .chanmail-mode, .chanmail-pictures, .chanmail-retry { min-height: 36px; padding-top: 8px; padding-bottom: 8px; }
+}
 /* 2026-09-26: a message's attachments — thumbnails through our own route, chips for files */
 .chanmsg-atts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 /* A PICTURE is a rounded card (≤ 280 × 220, the window's width on a phone); its name — when the vendor gave
@@ -4814,6 +4902,78 @@ a.chanmsg-file:hover .chanmsg-att-dl { color: var(--accent); }
 .chanmsg-att-retry:hover { border-color: var(--accent); }
 .chanmsg-body.chanmsg-body-empty { display: none; }
 .chanwin-start { padding: 6px; text-align: center; color: var(--text-dim); font-size: 10px; }
+/* ── lane channel-threads (2026-09-28): the place line, the thread chip, reactions, the thread pane ── */
+.chanwin-split { flex: 1; min-height: 0; display: flex; position: relative; }
+.chanwin-main { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.chanwin-rx-note { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 4px 12px; font-size: 11px; color: var(--text-dim); border-top: 1px solid var(--border); flex-shrink: 0; }
+.chanwin-rx-note[hidden] { display: none; }
+.chanwin-rx-note-x { margin-left: auto; width: 20px; height: 20px; }
+.chanmsg-placeline { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.chanmsg-replyq { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-width: 0; font: inherit; font-size: 11px; line-height: 1.5; color: var(--text-secondary); background: transparent; border: none; border-left: 2px solid var(--border); border-radius: 0; padding: 0 6px; cursor: pointer; text-align: left; }
+.chanmsg-replyq:hover { color: var(--accent); border-left-color: var(--accent); }
+.chanmsg-replyq-who { font-weight: 600; flex-shrink: 0; }
+.chanmsg-replyq-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.chanmsg-replyq-dim { color: var(--text-dim); font-style: italic; }
+.chanmsg-in-thread { display: inline-flex; align-items: center; gap: 3px; font: inherit; font-size: 10px; color: var(--text-dim); background: transparent; border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; cursor: pointer; flex-shrink: 0; white-space: nowrap; }
+.chanmsg-in-thread:hover { color: var(--accent); border-color: var(--accent); }
+.chanmsg-thread-chip { display: inline-flex; align-items: center; gap: 4px; font: inherit; font-size: 10.5px; color: var(--accent); background: var(--accent-dim); border: 1px solid var(--border-active); border-radius: 999px; padding: 0 7px; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+.chanmsg-thread-chip:hover { border-color: var(--accent); }
+.chanmsg-flash { animation: chanmsg-flash 1.2s ease-out; }
+@keyframes chanmsg-flash { from { background: var(--accent-dim); } to { background: transparent; } }
+/* the strip wraps its chips; the `+` never wraps ALONE onto a line (spec §7.3 g): it sits at the end of the strip's
+   LAST line, out of the wrap (a reserved end gap on every line), so a narrow row wraps chips, never the `+` by itself */
+.chanmsg-rx { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; position: relative; max-width: 100%; box-sizing: border-box; }
+.chanmsg-rx:has(> .rx-add) { padding-right: 36px; min-height: 24px; width: fit-content; }
+.chanmsg-rx > .rx-add { position: absolute; right: 0; bottom: 0; }
+.rx-chip { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; font: inherit; font-size: 12px; line-height: 1; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text-secondary); cursor: pointer; white-space: nowrap; }
+.rx-chip:hover { border-color: var(--border-active); color: var(--text); }
+.rx-chip:disabled { opacity: .6; cursor: progress; }
+.rx-chip.rx-mine { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+.rx-glyph { font-size: 14px; }
+.rx-img { width: 16px; height: 16px; object-fit: contain; }
+.rx-name { font-size: 11px; max-width: 10em; overflow: hidden; text-overflow: ellipsis; }
+.rx-n { font-variant-numeric: tabular-nums; font-size: 11px; }
+.rx-add { padding: 0 7px; color: var(--text-dim); }
+.rx-who, .rx-picker { background: var(--bg-dialog); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-window); padding: 8px; color: var(--text); font-size: 12px; }
+.rx-who { max-width: 240px; display: flex; flex-direction: column; gap: 2px; }
+.rx-who-head { font-weight: 600; margin-bottom: 2px; }
+.rx-who-row, .rx-who-more { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rx-picker { width: 300px; max-width: calc(100vw - 16px); display: flex; flex-direction: column; gap: 6px; }
+.rx-picker-note { font-size: 11px; color: var(--text-dim); }
+.rx-picker-quick, .rx-picker-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; }
+.rx-picker-quick { padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.rx-picker-grid { max-height: 190px; overflow-y: auto; }
+.rx-picker-search { font: inherit; font-size: 12px; padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); }
+.rx-pick { display: inline-flex; align-items: center; justify-content: center; height: 30px; min-width: 0; font: inherit; font-size: 16px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; cursor: pointer; }
+.rx-pick[hidden] { display: none; }
+.rx-pick:hover, .rx-pick:focus-visible { background: var(--bg-hover); border-color: var(--border-active); outline: none; }
+.rx-pick .rx-name { font-size: 9px; }
+.chanthread { display: flex; flex-direction: column; min-height: 0; background: var(--bg-window); }
+.chanthread[hidden] { display: none; }
+.chanthread-side { flex: 0 0 44%; min-width: 280px; max-width: 520px; border-left: 1px solid var(--border); }
+.chanthread-stacked { position: absolute; inset: 0; z-index: 3; }
+.chanthread-bar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--border); min-width: 0; flex-shrink: 0; min-height: 36px; box-sizing: border-box; }
+.chanthread-head { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 6px; overflow: hidden; }
+.chanthread-head b { font-size: 12.5px; flex-shrink: 0; }
+.chanthread-root { font-size: 11px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.chanthread-count { font-size: 10.5px; color: var(--text-dim); white-space: nowrap; flex-shrink: 0; }
+.chanthread-back, .chanthread-close { width: 24px; height: 24px; flex-shrink: 0; }
+.chanthread-list { --chan-gutter: 38px; flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.chanthread-list:focus { outline: none; }
+.chanthread-rule { border-top: 1px solid var(--border); margin: 6px 0; }
+.chanthread-note { font-size: 11px; color: var(--warn-text); padding: 4px 0; }
+.chanthread-pick { position: absolute; top: 2px; right: 4px; width: 22px; height: 22px; opacity: 0; transition: opacity .12s; }
+.chanmsg:hover > .chanthread-pick, .chanmsg:focus-within > .chanthread-pick { opacity: 1; }
+/* naive-user pass: no ↩ where the thread cannot be answered (the foot is the read-only line) — a control that did nothing */
+.chanthread-noreply .chanthread-pick { display: none; }
+/* naive-user pass: the pane's composer line says WHERE and HOW a reply goes ("Lands inside this thread · Sent at once, as you") —
+   on a 360 px phone in ja it was cut to "…あなたとしてす…", the "sent at once" half gone; it wraps instead of cutting */
+.chanthread-composer .chanwin-note-text { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+.chanthread-target { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary); }
+.chanthread-target .icon-btn { width: 18px; height: 18px; }
+.chanthread-foot { flex-shrink: 0; border-top: 1px solid var(--border); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+/* touch: the chips are 28 px tall with 8 px gaps, a pick 36 px, the pane's Back / ✕ 36 px (the inbox window's rule) */
+@media (hover: none) { .chanthread-pick { opacity: 1; } .rx-chip { height: 28px; } .chanmsg-rx { gap: 8px; } .chanmsg-rx:has(> .rx-add) { padding-right: 42px; min-height: 28px; } .rx-pick { height: 36px; } .chanthread-back, .chanthread-close { width: 36px; height: 36px; } }
 .chanwin-outbox { margin-top: 6px; border-top: 1px solid var(--border); padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
 .chanwin-outbox-head { display: flex; align-items: center; gap: 8px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-dim); }
 .chanwin-outbox-head .chan-prop-link { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 400; cursor: pointer; }
@@ -4848,9 +5008,23 @@ a.chanmsg-file:hover .chanmsg-att-dl { color: var(--accent); }
 .chan-prop-withdrawn .chan-prop-text { color: var(--text-dim); }
 .chan-prop-who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chan-prop-when { flex-shrink: 0; margin: 0; }
-.chan-prop-where { font-size: 11px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* r6 verify F4: the envelope wraps — one fact per line, nothing clipped (a long subject pushed the Cc out of view) */
+.chan-prop-where { font-size: 11px; min-width: 0; overflow-wrap: anywhere; }
+.chan-prop-env { display: flex; align-items: baseline; gap: 6px; font-size: 11px; line-height: 1.4; min-width: 0; }
+.chan-prop-env-k { flex-shrink: 0; color: var(--text-dim); }
+.chan-prop-env-v { min-width: 0; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; }
+.chan-prop-anchor .chan-prop-env-v { color: var(--text-dim); }
+.chan-prop-anchor-who { color: var(--text-secondary); font-weight: 600; }
+/* r6 verify O1: an invisible direction / zero-width character, drawn as a visible mark */
+.chan-prop-hidden { display: inline-block; font-size: 9px; line-height: 1.3; padding: 0 3px; margin: 0 1px; border-radius: var(--radius-sm); color: var(--warn-text); background: color-mix(in srgb, var(--warn-text) 14%, transparent); vertical-align: baseline; }
+/* r6 verify F6: a card that just appeared or moved takes no decision yet — it looks so */
+.chan-prop-arming .chan-prop-actions button { opacity: 0.55; cursor: default; }
+.chan-prop-arming-nudge { outline: 1px dashed var(--warn-text); outline-offset: 1px; }
 .chan-prop-link { color: var(--accent); text-decoration: none; }
 .chan-prop-text { font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* lane channel-threads: where a threaded reply lands, and a reaction proposal's one sentence (the glyph is content) */
+.chan-prop-thread { font-size: 11px; color: var(--text-dim); padding-left: 8px; border-left: 2px solid var(--border); overflow-wrap: anywhere; }
+.chan-prop-reaction { font-size: 13px; }
 .chan-prop-orig { font-size: 10px; color: var(--text-dim); }
 .chan-prop-orig summary { cursor: pointer; }
 .chan-prop-text-orig { color: var(--text-dim); margin-top: 3px; padding-left: 8px; border-left: 2px solid var(--border); }
@@ -5104,7 +5278,9 @@ label.chan-cap-row { cursor: default; }
 .browser-live-bar > .file-tool-btn.bar-icon-btn { padding: 0 5px; font-size: 13px; }
 .browser-live-bar > .bar-folded, .desktop-bar > .bar-folded { display: none !important; }
 .browser-live-mode { padding: 0 7px; border-radius: 999px; font-size: 11px; line-height: 18px; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); white-space: nowrap; }
-.browser-live-mode.takeover { color: var(--yellow, #e5c07b); background: color-mix(in srgb, var(--yellow, #e5c07b) 14%, transparent); }
+/* lane takeover-keyboard verify r2 (H4): the takeover badge's WORDS in the theme's text colour — amber text measured 1.93 : 1
+   on the light theme and 3.46 on solarized; the amber stays as the tint and the ring (test-browser-live-input ⑥ measures) */
+.browser-live-mode.takeover { color: var(--text); background: color-mix(in srgb, var(--yellow, #e5c07b) 20%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--yellow, #e5c07b) 65%, transparent); }
 /* naive study 2 (finding 3): a STOPPED browser's view keeps its last frame, greyed, and never claims somebody drives */
 .browser-live-mode.stopped { color: var(--text-secondary); background: color-mix(in srgb, var(--text-secondary) 14%, transparent); }
 .browser-live.stopped .browser-live-img { filter: grayscale(1); opacity: 0.45; }
@@ -5133,21 +5309,53 @@ label.chan-cap-row { cursor: default; }
 /* lane I verify r1: the badge FOLDS LAST (a split pane at the divider's clamp could not hold it beside the toggle and
    the ⋯); folded, the ⋯ wears its colour — who drives stays visible, the sentence is the ⋯ menu's first row */
 .browser-live-bar > .browser-live-more[data-badge="folded"] { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
-.browser-live-bar > .browser-live-more[data-badge="folded"][data-mode="takeover"] { color: var(--yellow, #e5c07b); background: color-mix(in srgb, var(--yellow, #e5c07b) 14%, transparent); border-color: color-mix(in srgb, var(--yellow, #e5c07b) 40%, transparent); }
+/* verify r2 (H4): the folded ⋯ wears the badge's colours — the words in var(--text), the amber as tint + border */
+.browser-live-bar > .browser-live-more[data-badge="folded"][data-mode="takeover"] { color: var(--text); background: color-mix(in srgb, var(--yellow, #e5c07b) 14%, transparent); border-color: color-mix(in srgb, var(--yellow, #e5c07b) 40%, transparent); }
 .browser-live-bar > .browser-live-more[data-badge="folded"][data-mode="other"] { color: var(--text-secondary); background: color-mix(in srgb, var(--text-secondary) 14%, transparent); border-color: color-mix(in srgb, var(--text-secondary) 40%, transparent); }
-.file-tool-btn.browser-live-handback { color: var(--yellow, #e5c07b); border-color: var(--yellow, #e5c07b); width: auto; height: 22px; padding: 0 8px; font-size: 10px; }
+/* lane takeover-keyboard verify r2 (H4): Hand back's WORD in the theme's text colour — amber text measured 2.15 : 1 on the
+   light theme; the amber stays as the border and a tint (test-browser-live-input ⑥ measures it with the bar's other words) */
+.file-tool-btn.browser-live-handback { color: var(--text); border-color: var(--yellow, #e5c07b); background: color-mix(in srgb, var(--yellow, #e5c07b) 14%, transparent); width: auto; height: 22px; padding: 0 8px; font-size: 10px; }
+/* BROWSE YOURSELF (B-6ae8): the user's own browsing window — Close (his tab only) is the plain act, Quit the whole browser
+   the red one; the ADDRESS ROW under the bar (Back · Forward · Reload · the address: the screencast has no omnibox); the
+   end line (who else uses this browser, when it closes by itself); his Tabs pane rows are clickable (the tab he goes to) */
+.browser-live-bar > .file-tool-btn.browser-live-close { color: var(--text); border-color: var(--border); }
+.browser-live-bar > .file-tool-btn.browser-live-quit { color: var(--red, #e55); border-color: color-mix(in srgb, var(--red, #e55) 55%, transparent); }
+.browser-live-bar > .file-tool-btn.browser-live-kbd-btn { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.browser-live-bar > .file-tool-btn.browser-live-kbd-btn svg { width: 14px; height: 14px; }
+.browser-live-address { display: flex; align-items: center; gap: 4px; padding: 3px 8px; flex-shrink: 0; border-bottom: 1px solid var(--border); background: var(--bg-toolbar); min-width: 0; }
+.browser-live-address > .file-tool-btn.bar-icon-btn { flex: 0 0 auto; width: 24px; height: 24px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.browser-live-address > .file-tool-btn.bar-icon-btn svg { width: 14px; height: 14px; }
+.browser-live-address-input { flex: 1 1 auto; min-width: 0; height: 24px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font-family: var(--font-mono, monospace); font-size: 11px; outline: none; }
+.browser-live-address-input:focus { border-color: var(--accent); }
+.browser-live-end-line { padding: 3px 8px; flex-shrink: 0; font-size: 11px; line-height: 1.4; color: var(--text-secondary); border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+/* BROWSE YOURSELF (option A, 2026-09-28): the shared-tabs line at the top of his window — one line, never a toast */
+.browser-live-share-line { display: flex; align-items: center; gap: 6px; padding: 3px 8px; flex-shrink: 0; font-size: 11px; line-height: 1.4; color: var(--text); background: color-mix(in srgb, var(--yellow) 12%, transparent); border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.browser-live-share-icon { flex: 0 0 auto; display: inline-flex; color: var(--yellow); }
+.browser-live-share-icon svg { width: 12px; height: 12px; }
+.browser-live-tab.clickable { cursor: pointer; }
+.browser-live-tab.clickable:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+@media (hover: none) { .browser-live-address > .file-tool-btn.bar-icon-btn { width: 36px; height: 36px; } .browser-live-address-input { height: 36px; font-size: 14px; } }
 .browser-live.driving .browser-live-img { cursor: crosshair; }
 .browser-live.driving .browser-live-canvas { outline: 2px solid var(--yellow, #e5c07b); outline-offset: -2px; }
 .browser-live:focus { outline: none; }
 /* lane J r2: the keyboard while you drive — the ring says every key goes to the page; the sink is focusable, never seen */
 .browser-live.kbd-owned .browser-live-canvas { outline: 2px solid var(--accent); outline-offset: -2px; }
 .browser-live-kbd { position: absolute; left: 0; top: 0; width: 1px; height: 1px; padding: 0; margin: 0; border: 0; opacity: 0; resize: none; overflow: hidden; pointer-events: none; caret-color: transparent; background: transparent; color: transparent; z-index: 0; }
-.browser-live-kbd-chip { display: inline-flex; align-items: center; gap: 4px; padding: 0 7px; border-radius: 999px; white-space: nowrap; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+/* lane takeover-keyboard verify r2 (H4): "Typing goes / is sent to the browser" — the standing statement of where the keys are —
+   in the theme's text colour over the accent tint + ring + icon: accent text measured 2.96 : 1 on solarized, 3.89 on nord */
+.browser-live-kbd-chip { display: inline-flex; align-items: center; gap: 4px; padding: 0 7px; border-radius: 999px; white-space: nowrap; color: var(--text); background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); }
+.browser-live-kbd-chip svg { color: var(--accent); }
 .browser-live-echo { white-space: nowrap; color: var(--text-dim); font-variant-numeric: tabular-nums; transition: color 300ms; }
 .browser-live-echo.fresh { color: var(--text); }
 .browser-live-echo.error { color: var(--red, #e55); }
 /* lane S2: an input that did not reach the browser — the chip says so instead of "Typing goes to the browser" */
-.browser-live-kbd-chip.failing { color: var(--red, #e55); background: color-mix(in srgb, var(--red, #e55) 14%, transparent); }
+.browser-live-kbd-chip.failing { color: var(--text); background: color-mix(in srgb, var(--red, #e55) 16%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red, #e55) 60%, transparent); }
+.browser-live-kbd-chip.failing svg { color: var(--red, #e55); } /* verify r2 (H4): the words readable, the red kept as tint / ring / icon */
+/* lane takeover-keyboard: the keys YIELDED to a text box you pressed — the takeover's colour, and a click on it (inside the view) takes them back */
+/* verify r1: the WORDS in the theme's text colour — amber text measured 1.93 : 1 on the light theme (3.46 on solarized);
+   the amber stays as the tint, the ring and the icon (test-browser-live-input ⑥ measures ≥ 4.5 : 1 in all six themes) */
+.browser-live-kbd-chip.yielded { color: var(--text); background: color-mix(in srgb, var(--yellow, #e5c07b) 20%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--yellow, #e5c07b) 65%, transparent); cursor: pointer; }
+.browser-live-kbd-chip.yielded svg { color: var(--yellow, #e5c07b); }
 .browser-live-ripple { position: absolute; z-index: 3; width: 28px; height: 28px; margin: -14px 0 0 -14px; border-radius: 50%; border: 2px solid var(--accent); pointer-events: none; animation: browser-live-ripple 650ms ease-out forwards; }
 @keyframes browser-live-ripple { from { transform: scale(0.3); opacity: 1; } to { transform: scale(1.4); opacity: 0; } }
 .browser-live-you-cursor { position: absolute; z-index: 2; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; border: 2px solid var(--bg); background: var(--accent); box-shadow: 0 0 0 1px var(--accent); pointer-events: none; }
@@ -5156,6 +5364,12 @@ label.chan-cap-row { cursor: default; }
 .browser-live-confirms { display: flex; flex-direction: column; gap: 4px; padding: 4px 8px; flex-shrink: 0; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--yellow, #e5c07b) 10%, var(--bg-secondary)); }
 .browser-live-confirm { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text); }
 .browser-live-confirm-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* r6 A-F8: the row's body = the sentence + the TARGET (whole, wrapped — never clipped: what you approve is what runs) + a conflict note */
+.browser-live-confirm-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.browser-live-confirm-target { font-family: var(--font-mono, monospace); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
+.browser-live-confirm-target:empty, .browser-live-confirm-note:empty { display: none; }
+.browser-live-confirm-note { color: var(--red, #e55); white-space: normal; }
+.browser-live-confirm.gone { color: var(--text-dim); }
 .file-tool-btn.browser-live-confirm-btn { width: auto; height: 22px; padding: 0 10px; font-size: 10px; white-space: nowrap; flex: 0 0 auto; color: var(--green, #7fc47f); border-color: var(--green, #7fc47f); }
 .file-tool-btn.browser-live-confirm-btn.deny { color: var(--red, #e55); border-color: var(--red, #e55); }
 .chat-status-browser.driving { color: var(--yellow, #e5c07b); }
@@ -5181,11 +5395,24 @@ label.chan-cap-row { cursor: default; }
 
 /* ── agent browser P4 (§7.4): the backend chip, the blocked-claim banner, the switcher dialog ── */
 .browser-live-bar > .browser-live-backend { font-family: var(--font-mono, monospace); }
+/* lane browser-stuck (2026-09-28): a page DIALOG holds the page — the card says what the page asks and answers it as the user;
+   an UNRESPONSIVE page offers Restart (theme vars only) */
+.browser-live-dialog { display: flex; flex-direction: column; gap: 4px; padding: 6px 10px; flex-shrink: 0; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--yellow, var(--accent)) 14%, var(--bg-window)); font-size: 12px; color: var(--text); }
+.browser-live-dialog.stuck { flex-direction: row; align-items: center; gap: 8px; flex-wrap: wrap; }
+.browser-live-dialog-title { font-weight: 600; }
+.browser-live-dialog-body { overflow-wrap: anywhere; white-space: pre-wrap; min-width: 0; flex: 1 1 auto; }
+.browser-live-dialog-note { font-size: 11px; color: var(--warn-text); }
+.browser-live-dialog-input { font: inherit; font-size: 12px; padding: 3px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); min-width: 0; }
+.browser-live-dialog-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.browser-live-dialog-actions > .mounts-btn, .browser-live-dialog > .mounts-btn { white-space: nowrap; flex: 0 0 auto; }
+.browser-live-dialog-actions > .mounts-btn.danger { color: var(--warn-text); border-color: var(--warn-text); }
+.browser-live-dialog-hint { font-size: 11px; color: var(--text-secondary); flex: 1 1 12em; min-width: 0; }
 .browser-live-blocked { display: flex; flex-direction: column; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--yellow, #e5c07b) 12%, transparent); flex-shrink: 0; }
 .browser-live-blocked-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
 .browser-live-blocked-row > .mounts-btn { white-space: nowrap; flex: 0 0 auto; } /* the house text button (2026-09-28): a banner button says what it does */
 .browser-live-blocked-detail { flex: 1 0 100%; font-size: 11px; color: var(--text-secondary); overflow-wrap: anywhere; white-space: pre-wrap; }
 .browser-live-blocked-text { flex: 1; min-width: 0; }
+.browser-live-display-note { padding: 3px 8px; font-size: 12px; line-height: 1.4; color: var(--text-secondary); border-bottom: 1px solid var(--border); flex-shrink: 0; overflow-wrap: anywhere; } /* lane headless-fallback: headless because the machine has no desktop session */
 .browser-chip { font-family: var(--font-mono, monospace); font-size: 11px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--border); color: var(--text); white-space: nowrap; }
 /* the rebuilt switch dialog (2026-09-27, src/lib/browser-switcher.js): every row a block, words wrap as sentences, every
    worded button the house mounts-btn kept on ONE line (nowrap — a zh label never stacks one glyph per line); the phone
@@ -5202,6 +5429,7 @@ label.chan-cap-row { cursor: default; }
 .brsw-now-text { font-weight: 600; }
 .brsw-blurb { color: var(--text-dim); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
 .brsw-notice { font-size: 12px; line-height: 1.45; color: var(--text-secondary); overflow-wrap: anywhere; }
+.brsw-display { font-size: 12px; line-height: 1.45; color: var(--text-secondary); overflow-wrap: anywhere; } /* lane headless-fallback */
 .brsw-target { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 12px; }
 .brsw-target-name { font-weight: 600; }
 .brsw-state { display: flex; flex-direction: column; gap: 4px; }
@@ -5213,6 +5441,7 @@ label.chan-cap-row { cursor: default; }
 .brsw-actions:empty { display: none; }
 .browser-switcher .mounts-btn { white-space: nowrap; flex: 0 0 auto; max-width: 100%; }
 .brsw-empty { font-size: 12px; line-height: 1.45; }
+.brsw-empty:has(> .brsw-actions) { display: flex; flex-direction: column; gap: 8px; } /* BROWSE YOURSELF: the empty line + its ONE button (Open it yourself) */
 .brsw-error { font-size: 12px; line-height: 1.45; color: var(--red, #e55); overflow-wrap: anywhere; }
 
 /* ── agent browser P5 (§4.5 / D35): the action trace — the tool card's strip + expander, the entry dialog (before / after + the overlay), the live view's timeline pane ── */
@@ -5372,10 +5601,16 @@ label.chan-cap-row { cursor: default; }
 .bprof-why { font-size: 10px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bprof-usage { font-size: 10px; color: var(--text-dim); white-space: nowrap; }
 .bprof-usage-over { color: var(--warn-text); }
+.bprof-display { font-size: 10px; color: var(--text-dim); white-space: normal; overflow-wrap: anywhere; } /* lane headless-fallback: the launch's display fact under the state */
 .bprof-rec-live { margin-left: 6px; color: var(--red, #e55); }
 .bprof-rec-refused { margin-left: 6px; color: var(--yellow, #e5c07b); font-size: 10px; }
 .bprof-record { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; color: var(--text-secondary); cursor: pointer; }
 .bprof-record input { margin: 0; }
+/* BROWSE YOURSELF (B-6ae8): the row's first act + his own line under the state ("You are browsing it") */
+.file-tool-btn.bprof-btn.bprof-browse { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.file-tool-btn.bprof-btn.bprof-browse.open { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.bprof-human { display: block; font-size: 10px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bprof-human.driving { color: var(--accent); }
 .bprof-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; } /* owner ruling A: record · who can use it · stop · rename · delete */
 /* "WHO CAN USE IT" (2026-09-27, a LIST — src/lib/browser-trace-view.js whoCell): the row's own full-width line — the
    label, "All my conversations" or one chip per row of the list (a conversation: backend glyph · name, dim with a hollow
@@ -5555,3 +5790,85 @@ label.chan-cap-row { cursor: default; }
 .reset-credit-refusal { display: flex; align-items: flex-start; gap: 6px; font-size: 11px; margin-top: 4px; }
 .reset-credit-refusal svg { width: 13px; height: 13px; flex: none; margin-top: 2px; }
 .reset-credit-confirm:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.4); }
+
+/* ── lane-pairing (B-7007): the pairing dialog's ADDRESS choice, the dial state's words, "Who can use it" ── */
+.device-pair-body { gap: 8px; max-width: 560px; }
+.device-pair-state { margin: 0; padding: 6px 8px; border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font-size: 12px; }
+.device-pair-state[data-dial-state="refused"], .device-pair-state[data-dial-state="auth-fail"] { color: var(--red); }
+.device-pair-hint { margin: 0; }
+/* naive-user N-radio: `.dialog-body label` (0,1,1) is a COLUMN flex — every radio of the address list, the keep box and
+   the exit dialog's radios + "Ask me each time" sat on their OWN line above their words (a radio half-way between two
+   addresses; centred on the phone). `.dialog-body label.X` (0,2,1) out-ranks it — the label.dialog-check-row class.
+   Gate: test-pair-dialog-ui / test-exit-access-ui's label census (every control beside its words) + a patched copy. */
+.dialog-body label.device-pair-keep, .device-pair-keep { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; font-size: 12px; font-weight: 400; color: var(--text); cursor: pointer; }
+.device-pair-keep input { margin-top: 2px; flex: none; }
+.device-pair-err { color: var(--red); font-size: 12px; min-height: 0; }
+.device-pair-err:empty { display: none; }
+.device-pair-os { display: flex; gap: 6px; margin: 6px 0; flex-wrap: wrap; }
+#device-pair-dialog .device-pair-cmd { min-height: 110px; font-size: 11px; font-family: 'SF Mono', 'Fira Code', monospace; overflow-wrap: anywhere; width: 100%; box-sizing: border-box; }
+.dap { display: flex; flex-direction: column; gap: 2px; }
+.dap-head { font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 2px; }
+.dialog-body label.dap-row, .dap-row { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; padding: 6px 6px; border-radius: var(--radius-sm); cursor: pointer; min-height: 32px; font-weight: 400; }
+.dap-row:hover { background: var(--bg-hover); }
+.dap-row input[type="radio"] { margin-top: 3px; flex: none; }
+.dap-txt { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.dap-base { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; color: var(--text); overflow-wrap: anywhere; }
+.dap-note { font-size: 11px; color: var(--text-dim); }
+.dap-note:empty { display: none; }
+.dap-own { font-size: 11px; color: var(--accent); }
+.dap-own.dap-claim { color: var(--warn-text); } /* verify-r5 C1: the device's CLAIM — an address VibeSpace did not offer */
+.dap-listen { font-size: 11px; color: var(--text-secondary); background: var(--bg-input); border-radius: var(--radius-sm); padding: 6px 8px; margin: 2px 0 4px; line-height: 1.45; } /* verify-r4 F3: a server bound to this machine only */
+.dap-custom-wrap { display: flex; flex-direction: column; gap: 2px; }
+.dap-custom { width: 100%; box-sizing: border-box; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; }
+.dap-verdict { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 10px; color: var(--text-dim); overflow-wrap: anywhere; }
+.dap-verdict.dap-bad { font-family: inherit; color: var(--red); }
+.mounts-dial-state[data-dial-state="refused"], .mounts-dial-state[data-dial-state="auth-fail"] { color: var(--red); }
+.mounts-dial-state { white-space: normal; }
+/* naive-user N-row: at the default sidebar width a machine row is ~172 px and its 8 action icons ~190 px (flex-shrink 0) —
+   the machine's NAME was squeezed to 0 px on every row (four devices, four nameless rows), the exit / ports / new-session
+   / unpair icons sat past the panel's edge (a sideways scrollbar) and the exit summary + last run were cut "命令 …".
+   The name keeps ≥ 3em; the icons wrap onto their own line(s) when the row is narrow; the two exit lines wrap.
+   Gate: test-exit-access-ui's row census + a patched copy of this file. */
+.mounts-row-top.mounts-host-top { flex-wrap: wrap; row-gap: 2px; }
+.mounts-host-top > .mounts-name { flex: 1 1 auto; min-width: 3em; }
+.mounts-host-top > .mounts-row-actions { flex: 0 1 auto; flex-wrap: wrap; margin-left: auto; min-width: 0; }
+.mounts-exit-line { white-space: normal; overflow-wrap: anywhere; display: block; }
+.agents-mach-sum:has(.agents-mach-line2) { flex-wrap: wrap; }
+.agents-mach-line2 { flex-basis: 100%; order: 10; padding-left: 16px; white-space: normal; font-size: 10px; color: var(--text-dim); }
+.agents-mach-line2[data-dial-state="refused"], .agents-mach-line2[data-dial-state="auth-fail"] { color: var(--red); }
+.agents-mach-dot.err { background: var(--red); }
+.agents-mach-tools { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 10px 6px 26px; align-items: flex-start; }
+.agents-mach-hist-out { flex-basis: 100%; font-size: 11px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 1px; }
+.agents-mach-hist-out:empty { display: none; }
+.exit-access-dialog { max-width: 560px; }
+.exit-access-body { gap: 10px; }
+.exit-access-sec { display: flex; flex-direction: column; gap: 6px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.exit-access-title { margin: 0; font-size: 13px; color: var(--text); }
+.exit-access-sec .agents-note { margin: 0; }
+.exit-access-modes { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.dialog-body label.exit-access-mode, .dialog-body label.exit-access-ask, .exit-access-mode, .exit-access-ask { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; font-size: 12px; font-weight: 400; color: var(--text); cursor: pointer; min-height: 28px; }
+.exit-access-picker { display: flex; flex-direction: column; gap: 4px; }
+.exit-access-count:empty, .exit-access-refuse:empty { display: none; }
+.exit-access-count { color: var(--yellow); }
+.exit-access-refuse { color: var(--red); font-size: 12px; }
+.exit-access-warn { color: var(--yellow); }
+.exit-access-last { color: var(--text-dim); overflow-wrap: anywhere; }
+.ut-action-exit { width: auto; padding: 0 8px; font-size: 11px; font-weight: 600; border-radius: var(--radius-sm); }
+/* naive-user N-ask: the answer is its own line under the command, at full strength (never inside the hover-dimmed .ut-actions) */
+.ut-exit-answer { display: flex; gap: 6px; margin-top: 4px; clear: none; }
+.ut-exit-answer .ut-action-exit { height: 24px; min-width: 64px; }
+.ut-exit-allow { color: var(--accent-fg); background: var(--accent); }
+.ut-exit-deny { color: var(--text); border: 1px solid var(--border); }
+.ut-exit-cmd { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px; color: var(--text); background: var(--bg-input); border-radius: var(--radius-sm); padding: 3px 6px; margin: 3px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; } /* verify-r4 F4: the WHOLE command, lines kept, all of it above Allow — no inner scroll box (a macOS overlay scrollbar is invisible until scrolled: a clipped box read as the whole command); a command is ≤ 4 096 bytes, the popup itself scrolls */
+.iw-exit-cmd { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; color: var(--text); background: var(--bg-input); border-radius: var(--radius-sm); padding: 6px 8px; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.ut-exit-note { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+@media (max-width: 768px) {
+  .dialog-body label.dap-row, .dap-row { min-height: 44px; }
+  .device-pair-copy { flex: 1 1 100%; }
+  .dialog-body label.exit-access-mode, .dialog-body label.exit-access-ask, .exit-access-mode, .exit-access-ask { min-height: 44px; }
+  .exit-access-modes { flex-direction: column; gap: 0; }
+  .ut-exit-answer .ut-action-exit, .ut-action-exit { min-height: 36px; min-width: 72px; }
+  .exit-access-dialog .pp-row { min-height: 40px; }
+  .exit-access-dialog .pp-chip { min-height: 36px; }
+  .exit-access-actions { position: sticky; bottom: 0; background: var(--bg-dialog); padding-top: 6px; }
+}

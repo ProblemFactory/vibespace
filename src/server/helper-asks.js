@@ -41,6 +41,7 @@
 const H = require('../helper-ask.js');
 const { setAsksObserver } = require('../normalizers');
 const { answerPermission } = require('./permission-answer'); // THE one permission answer (lane J r2) — written only after the table says so
+const { answerFromRecord } = require('../agent-tool-rules.js'); // verify r6 F6: the answer's input + updates derived from the server's own record
 
 let deps = null;               // { userTodos, sessionKeyFor, activeSessions, log, persistAskedAt }
 const perSession = new WeakMap(); // session → Map<requestId, {timer, filed}>
@@ -218,6 +219,37 @@ function settledState(session, requestId) {
   return null;
 }
 
+/** THE SERVER'S OWN RECORD of a pending request (verify r6 F6): `{input, suggestions, options, kind, toolName}`
+ *  from the normalizer that raised the card — a helper's ask on its parent card (or still held as an orphan), a
+ *  main card, or a card in one of the session's helper views — else null (unknown here: the CLI decides). The
+ *  input is the request's OWN (`control_request.request.input`, never the tool_use record), so what the answer
+ *  runs is what the CLI asked about. Never throws. */
+function recordOf(session, requestId) {
+  if (!session || requestId == null) return null;
+  const rid = String(requestId);
+  const shape = (p) => ({ input: p.input, suggestions: p.suggestions, options: p.options, kind: p.kind, toolName: p.toolName });
+  const inCards = (mm) => {
+    const list = mm && Array.isArray(mm.messages) ? mm.messages : [];
+    for (let i = list.length - 1; i >= 0; i--) { const p = list[i] && list[i].permission; if (p && p.requestId != null && String(p.requestId) === rid) return p; }
+    return null;
+  };
+  try {
+    const mm = session._normalizer;
+    const hit = mm && typeof mm.helperAskById === 'function' ? mm.helperAskById(rid) : null;
+    if (hit) return shape(hit.ask);
+    if (mm && mm._helperOrphans) for (const list of mm._helperOrphans.values()) { const a = (list || []).find((x) => x && x.requestId === rid); if (a) return shape(a); }
+    const p = inCards(mm);
+    if (p) return shape(p);
+    if (session._subNormalizers) for (const sub of session._subNormalizers.values()) { const q = inCards(sub); if (q) return shape(q); }
+    // an ask that arrived before its tool card (message-manager's stash): no button draws it yet, but a crafted
+    // frame could still name it — the request's own record answers it all the same
+    if (mm && mm._askStash) for (const raw of mm._askStash.values()) {
+      if (raw && raw.request_id != null && String(raw.request_id) === rid && raw.request) return shape({ input: raw.request.input || {}, suggestions: raw.request.permission_suggestions || [], toolName: raw.request.tool_name, kind: raw.request.tool_name === 'AskUserQuestion' ? 'user_input' : undefined });
+    }
+  } catch { }
+  return null;
+}
+
 /** THE ws `permission-response` case, as one lookup (verify r3): which live
  *  session answers (sessionForAnswer — a helper View Log's frame reaches the
  *  parent), what that session knows (settledState), and what the TABLE says a
@@ -235,7 +267,11 @@ function answerFrame(data, { activeSessions = deps && deps.activeSessions, adapt
   const state = target ? settledState(target.session, data.requestId) : 'unrouted';
   const v = H.answerVerdict(state);
   if (!v.write) return { ok: false, code: v.code, state: v.state, words: v.words, why: v.words };
-  const res = answerPermission(target.session, serverDeny ? { ...data } : { ...data, denyMessage: undefined }, { adapterRegistry, feedLive });
+  // verify r6 F6: WHAT the answer runs comes from THIS server's record of the request (answerFromRecord) — the
+  // client's frame says only which answer (allow / deny / always / an ACP option / a question's answers)
+  const shaped = serverDeny ? { ok: true, data: { ...data } } : answerFromRecord(recordOf(target.session, data.requestId), { ...data, denyMessage: undefined });
+  if (!shaped.ok) { const words = `This answer was not sent: ${shaped.why}. Nothing was sent.`; return { ok: false, code: 'permission-mismatch', state: v.state, words, why: words }; }
+  const res = answerPermission(target.session, shaped.data, { adapterRegistry, feedLive });
   if (!res || !res.ok) { const words = `This answer did not reach the agent: ${(res && res.why) || 'no running session holds this request'}. Nothing was sent.`; return { ok: false, code: 'permission-unrouted', state: 'unrouted', words, why: words }; }
   return { ok: true, state: v.state, payload: res.payload };
 }
@@ -290,4 +326,4 @@ function sessionForAnswer(data, activeSessions = deps && deps.activeSessions) {
   return { id, session };
 }
 
-module.exports = { install, sync, sessionForAnswer, knowsRequest, reconcileAll, forget, settledState, answerFrame };
+module.exports = { install, sync, sessionForAnswer, knowsRequest, reconcileAll, forget, settledState, answerFrame, recordOf };

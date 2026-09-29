@@ -46,7 +46,14 @@
  *     "Pending confirmations auto-deny after 60 seconds", `confirm <id>` /
  *     `deny <id>`) off the stream's `result` mirror; `confirmationView` is
  *     the card with its countdown; `decisionArgv` is the CLI call an answer
- *     becomes — never a second mechanism beside upstream's.
+ *     becomes — never a second mechanism beside upstream's. r6 A-F8 ("what
+ *     you approve is what runs"): the STRUCTURED fields only (never an error
+ *     string), the card names the TARGET, first write wins per id
+ *     (`pendingNoteVerdict`), an answer passes `answerGate` (pending HERE; a
+ *     Confirm carries `confirmationDigest` of what its card showed), and the
+ *     card's rows keep their slots (`confirmSlots`). r6 A-F9: `handbackWakes`
+ *     is how many billed turns an explicit Hand back starts, `handbackWakeEcho`
+ *     the count the control showed, checked.
  *   · `agentCursorFromCommand` — the labelled agent cursor: the last CDP
  *     input coordinates the stream's `command` mirror carried (a selector
  *     click carries none — the label still moves to the last known point).
@@ -68,6 +75,20 @@
  *     `ownerOf` picks ONE owner when two views drive on one client. Esc goes
  *     to the page — pages close their own dialogs with it; handing back is
  *     the bar's button, never a key a user presses for another reason.
+ *   · THE USER'S OWN PRESS YIELDS (lane takeover-keyboard, userW
+ *     inc-mum339id-1zsb, 2026-09-28: the chat beside the live view in one
+ *     split group, Take over, three presses on the chat composer — the typing
+ *     went to the page): the reclaim above was written for PROGRAMMATIC focus
+ *     (an attach / reconnect / message moving the caret into the composer
+ *     while a password is typed into the page) and it treated the user's own
+ *     pointer press on the composer the same way, silently. `userPressFocus`
+ *     says whether a focus follows the user's OWN trusted press on that very
+ *     editable within `USER_PRESS_MS`; `focusVerdict` then answers `'yield'`
+ *     (the keyboard goes there, the takeover continues) instead of
+ *     `'reclaim'`; `keyboardOwnership` takes `yielded` (a yielded view owns
+ *     no keys); `yieldAfter` is the yield's transitions (a press inside the
+ *     view, a fresh claim or its release ends it). A focus nobody pressed for
+ *     is reclaimed exactly as before.
  *   · STALE APPROVALS (lane J r2, the study's S8-36): an approval card the
  *     agent queued for a browser PAGE command before the user took over
  *     would, once allowed, run a step planned on a page that may be gone.
@@ -207,6 +228,27 @@ function announceVerdict({ cause = 'explicit', announceIdle = false, sibling = f
   return { deliver: false, reason: null, why: `a ${c} handback is a state change only` };
 }
 
+/**
+ * r6 A-F9 (money): HOW MANY billed turns ONE explicit Hand back starts — the conversation whose view it is pressed on
+ * plus every sibling conversation taken WITH it whose own cycle has something to re-run: the SAME `announceVerdict` the
+ * announcer runs, once per conversation, so the number on the control is the number the ladder will spend.
+ * `siblings` = [{rerun}] (each sibling's open cycle's `interruptedVerbs`).
+ */
+function handbackWakes({ own = true, ownRerun = [], siblings = [] } = {}) {
+  let wakes = 0;
+  if (own && announceVerdict({ cause: 'explicit', sibling: false, rerun: ownRerun }).deliver) wakes++;
+  for (const s of Array.isArray(siblings) ? siblings : []) if (announceVerdict({ cause: 'explicit', sibling: true, rerun: (s && s.rerun) || [] }).deliver) wakes++;
+  return wakes;
+}
+/** The echo (the channels `expectWakes` precedent): an explicit Hand back carries the count its control showed; another
+ *  count ⇒ refused BY NAME, nothing handed back, the current count returned. Absent ⇒ not checked (a surface that shows
+ *  no count — the card row, the chip's menu — hands back the one conversation it names plus what the words said). */
+function handbackWakeEcho({ wakes = 0, expect } = {}) {
+  if (expect === undefined || expect === null) return { ok: true };
+  if (Number.isInteger(expect) && expect === wakes) return { ok: true };
+  return { ok: false, code: 'wake_count_changed', error: `this Hand back would wake ${wakes} conversation(s) = ${wakes} billed turn(s), but the control you pressed said ${Number.isInteger(expect) ? expect : '?'} — nothing was handed back; look at the button again and press it once more`, wakes };
+}
+
 /** The typed refusal an agent command gets while the user drives. */
 function browserPausedRefusal({ state = null, label = null, handles = [], now = 0, idleMs = DEFAULT_TAKEOVER_IDLE_MS, target = 'browser' } = {}) {
   const s = state && typeof state === 'object' ? state : newInputState();
@@ -318,21 +360,97 @@ function idleInboxItem({ label = null, idleMs = DEFAULT_TAKEOVER_IDLE_MS, url = 
 }
 
 // ── --confirm-actions (§4.3) ──────────────────────────────────────────────
-/** A pending confirmation read off the stream's `result` mirror (or the CLI's
- *  own JSON answer). null when the record is not one. */
-function confirmationFromUpstream(msg, now = 0) {
-  if (!isObj(msg)) return null;
+// r6 A-F8 ("what you approve is what runs"): a confirmation is read ONLY off upstream's STRUCTURED fields of a `result`
+// record (`confirmation_required` + `confirmation_id`, top level or under `data` — the 0.38.1 binary's own JSON keys),
+// never matched out of an error / message string: a `click` whose error text echoed "requires confirmation c_<the pending
+// upload's id>" parsed as {id: that upload, action: 'click'}, overwrote the upload's card, and Confirm confirmed the upload.
+// The card carries the action's TARGET (the paired `command` record's params: url / selector / files / path / script, or
+// upstream's own `description`), and an answer carries the DIGEST of what the card showed (`confirmationDigest`).
+const CONFIRMATION_ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
+const TARGET_MAX = 300;
+/** Invisible / reordering characters shown as what they are (the Trojan-Source class): the card is textContent, but a
+ *  U+202E inside a url or a path would still reorder what the owner reads. */
+// verify-r6 Z2: THE SET is src/hidden-chars.js; a one-line card marks a tab / line break too (it would break the line)
+const HC = require('./hidden-chars.js');
+const visibleText = (s) => HC.revealHidden(String(s), { open: '⟨', close: '⟩' }).replace(/[\t\n]/g, (c) => `⟨${HC.codeOf(c)}⟩`);
+/** What the pending action acts ON, as one line the owner reads (≤ 300 chars, cut said with …). Fill/type VALUES are
+ *  never shown (the trace's redaction rule — the selector is the target, the text is content). */
+function confirmationTarget({ params = null, data = null } = {}) {
+  const p = isObj(params) ? params : {};
+  const d = isObj(data) ? data : {};
+  const str = (v) => (typeof v === 'string' ? v.trim() : (typeof v === 'number' && Number.isFinite(v) ? String(v) : ''));
+  const parts = [];
+  const url = str(p.url) || str(p.href);
+  if (url) parts.push(url);
+  const sel = ['selector', 'ref', 'target', 'source', 'from'].map((k) => str(p[k])).find(Boolean);
+  if (sel) parts.push(sel);
+  if (str(p.to)) parts.push('→ ' + str(p.to));
+  const files = Array.isArray(p.files) ? p.files : Array.isArray(p.paths) ? p.paths : null;
+  if (files && files.length) parts.push(files.map((f) => str(f)).filter(Boolean).join(', '));
+  if (str(p.path)) parts.push(str(p.path));
+  const script = str(p.script) || str(p.expression) || str(p.js) || str(p.code);
+  if (script) parts.push(script.length > 200 ? script.slice(0, 200) + '…' : script);
+  if (!parts.length && str(d.description)) parts.push(str(d.description));
+  if (!parts.length) return null;
+  const line = visibleText(parts.join(' · '));
+  return line.length > TARGET_MAX ? line.slice(0, TARGET_MAX - 1) + '…' : line;
+}
+/** THE canonical text of what a card shows — the ONE thing both sides digest. */
+function confirmationShown(c) {
+  const x = c && typeof c === 'object' ? c : {};
+  return [String(x.id || ''), String(x.action || ''), String(x.category || ''), String(x.target || '')].join('\n');
+}
+/** A 64-bit FNV-1a (two 32-bit lanes) of `confirmationShown` — PURE, the same in the bundle and on the server. */
+function confirmationDigest(c) {
+  const s = confirmationShown(c);
+  let h1 = 0x811c9dc5, h2 = 0x01000193 ^ 0x5bd1e995;
+  for (let i = 0; i < s.length; i++) { const ch = s.charCodeAt(i); h1 = Math.imul(h1 ^ ch, 0x01000193) >>> 0; h2 = Math.imul(h2 ^ ch, 0x01000193) >>> 0; h2 = (h2 ^ (h2 >>> 13)) >>> 0; }
+  return h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0');
+}
+/** A pending confirmation read off the stream's `result` mirror — its STRUCTURED fields only. `command` = the paired
+ *  `command` record the bridge saw under the same id (its params name the target). null when the record is not one. */
+function confirmationFromUpstream(msg, now = 0, { command = null } = {}) {
+  if (!isObj(msg) || msg.type !== 'result') return null;
   const d = isObj(msg.data) ? msg.data : null;
-  const flag = msg.confirmation_required === true || (d && d.confirmation_required === true) || msg.status === 'confirmation_required' || (d && d.status === 'confirmation_required')
-    || (typeof msg.error === 'string' && /confirmation[_ ]required|requires? (?:a )?confirmation/i.test(msg.error)); // 0.32.0 spells it both ways ("confirmation_required" in the status, "Action requires confirmation" in the error text)
+  const flag = msg.confirmation_required === true || (d && d.confirmation_required === true) || msg.status === 'confirmation_required' || (d && d.status === 'confirmation_required');
   if (!flag) return null;
-  let id = msg.confirmation_id || (d && d.confirmation_id) || msg.confirmationId || (d && d.confirmationId) || null;
-  if (!id && typeof msg.error === 'string') { const m = msg.error.match(/\b(c_[0-9a-f]{4,})\b/i); if (m) id = m[1]; }
-  if (!id) return null;
-  const action = String(msg.action || (d && d.action) || (isObj(msg.params) && msg.params.action) || 'action').slice(0, 40);
-  const category = String((d && d.category) || msg.category || '').slice(0, 60) || null;
+  const id = [msg.confirmation_id, d && d.confirmation_id, msg.confirmationId, d && d.confirmationId].find((x) => typeof x === 'string' && x) || null;
+  if (!id || !CONFIRMATION_ID_RE.test(id)) return null; // an id the answer could never name is no card
+  const cmd = isObj(command) && command.type === 'command' && (command.id == null || msg.id == null || String(command.id) === String(msg.id)) ? command : null;
+  const action = visibleText(String(msg.action || (d && d.action) || (cmd && cmd.action) || (isObj(msg.params) && msg.params.action) || 'action').slice(0, 40));
+  const category = visibleText(String((d && d.category) || msg.category || '').slice(0, 60)) || null;
+  const target = confirmationTarget({ params: isObj(msg.params) ? msg.params : (cmd && cmd.params), data: d });
   const at = num(msg.timestamp) || num(now);
-  return { id: String(id).slice(0, 80), action, category, at, expiresAt: at + CONFIRM_TTL_MS, commandId: msg.id ? String(msg.id).slice(0, 40) : null };
+  return { id, action, category, target, at, expiresAt: at + CONFIRM_TTL_MS, commandId: msg.id ? String(msg.id).slice(0, 40) : null };
+}
+/** FIRST WRITE WINS (r6 A-F8): a second record for an id the registry already holds may never change what the owner
+ *  was shown — `same` (a re-mirror, nothing to do) | `conflict` (other content: kept, said) | `new`. */
+function pendingNoteVerdict(held, incoming) {
+  if (!held) return { kind: 'new' };
+  if (confirmationDigest(held) === confirmationDigest(incoming)) return { kind: 'same' };
+  return { kind: 'conflict', error: `a second record for confirmation ${held.id} carries other content (${JSON.stringify(String((incoming && incoming.action) || ''))}${incoming && incoming.target ? ' on ' + JSON.stringify(String(incoming.target)) : ''}) than the pending one (${JSON.stringify(String(held.action || ''))}${held.target ? ' on ' + JSON.stringify(String(held.target)) : ''}) — the first is kept, the second ignored` };
+}
+/** Before ANY answer reaches upstream (r6 A-F8): the id must be pending for THIS browser (the registry's entry, not
+ *  expired), and a Confirm must carry the digest of the card it was pressed on — equal to the entry's. A Deny runs
+ *  nothing, so it needs only the pending entry. → {ok:true} | the named refusal (nothing sent upstream). */
+function answerGate({ entry = null, decision = 'confirm', shown, now = 0 } = {}) {
+  if (!entry || num(entry.expiresAt) <= num(now)) return { ok: false, code: 'no_confirmation', error: 'no confirmation with that id is pending for this browser — nothing was sent (it was answered, it expired and the browser denied it, or it belongs to another browser)' };
+  if (decision !== 'confirm') return { ok: true };
+  if (typeof shown !== 'string' || !shown) return { ok: false, code: 'shown_required', error: 'a Confirm names the card it was pressed on (the digest of what it showed) — nothing was sent; press Confirm on the live view\'s card' };
+  const cur = confirmationDigest(entry);
+  if (shown !== cur) return { ok: false, code: 'confirmation_changed', error: 'the pending confirmation is not what your card showed — nothing was sent; look at the card again before confirming', digest: cur };
+  return { ok: true };
+}
+/** THE CARD'S SLOTS (r6 A-F8 ⑤): a row that goes (answered / expired) keeps its slot as a tombstone while any live row
+ *  sits BELOW it — the row under the pointer never moves up into a Confirm the owner meant for another; a new row joins
+ *  at the END; trailing tombstones go (nothing below them moves). `gone` is sticky. */
+function confirmSlots(prev = [], liveIds = []) {
+  const live = new Set((Array.isArray(liveIds) ? liveIds : []).map(String));
+  const out = (Array.isArray(prev) ? prev : []).map((s) => ({ id: String(s.id), gone: !!s.gone || !live.has(String(s.id)) }));
+  const have = new Set(out.map((s) => s.id));
+  for (const id of live) if (!have.has(id)) out.push({ id, gone: false });
+  while (out.length && out[out.length - 1].gone) out.pop();
+  return out;
 }
 /** A `command`/`result` for `confirm <id>` / `deny <id>` resolves a pending one. */
 function confirmationResolvedFromUpstream(msg) {
@@ -348,7 +466,7 @@ function confirmationResolvedFromUpstream(msg) {
 function confirmationView(c, now = 0) {
   if (!c) return null;
   const remainingMs = Math.max(0, num(c.expiresAt) - num(now));
-  return { type: 'confirmation', id: c.id, action: c.action, category: c.category || null, at: num(c.at), expiresAt: num(c.expiresAt), remainingMs, expired: remainingMs <= 0 };
+  return { type: 'confirmation', id: c.id, action: c.action, category: c.category || null, target: c.target || null, digest: confirmationDigest(c), at: num(c.at), expiresAt: num(c.expiresAt), remainingMs, expired: remainingMs <= 0 };
 }
 /** An answer becomes upstream's own command — never a second mechanism. */
 function decisionArgv(id, decision) {
@@ -422,14 +540,17 @@ function isPasteChord(k) {
  * the takeover (`mode:'takeover'`, `mine`), its socket is open (a dead socket
  * would swallow every key — the input side went back to the agent anyway),
  * the view is on screen (typing blind into a hidden page is not driving) and
- * the window is open. `{owns, why}`.
+ * the window is open. `{owns, why}`. lane takeover-keyboard: `yielded` — the
+ * user pressed a text box outside the view (`focusVerdict` → 'yield'), so the
+ * view owns no keys until a press inside it; the takeover itself continues.
  */
-function keyboardOwnership({ mode = 'watch', mine = false, connected = true, displayed = true, closed = false } = {}) {
+function keyboardOwnership({ mode = 'watch', mine = false, connected = true, displayed = true, closed = false, yielded = false } = {}) {
   if (closed) return { owns: false, why: 'closed' };
   if (mode !== 'takeover') return { owns: false, why: 'watch' };
   if (!mine) return { owns: false, why: 'another viewer drives' };
   if (!connected) return { owns: false, why: 'disconnected' };
   if (!displayed) return { owns: false, why: 'hidden' };
+  if (yielded) return { owns: false, why: 'yielded' };
   return { owns: true, why: 'driving' };
 }
 /**
@@ -574,10 +695,122 @@ function urlForLog(url) {
  * a dialog's field) outside the owning view may not hold it — the view takes
  * it back (`'reclaim'`); the view's own sink and every non-editable element
  * are left alone (`'allow'`). Not owning ⇒ always `'allow'`.
+ * lane takeover-keyboard (userW inc-mum339id-1zsb): the rule is about focus the
+ * user did NOT make — `byUserPress` (PURE `userPressFocus`: the focus follows
+ * the user's own press on that editable) ⇒ `'yield'`: the keyboard goes where
+ * the user pressed, the takeover continues (the agent stays refused), and a
+ * press inside the view takes the keys back (`yieldAfter`). Without it the
+ * answer is `'reclaim'` as before — the password guard.
+ * verify r2 (H1): `mine` = the takeover is this view's even while it does not
+ * drive (minimized, on another desktop, its stream reconnecting): the user's
+ * press there YIELDS too — the caret's home wins until a press on the view.
+ * Before, the press was not judged at all and the view, back on screen, took
+ * the next keys from the text box the user had pressed (measured: "c2" typed
+ * into the composer reached the PAGE). Not driving and no press ⇒ 'allow'
+ * (the transition back is `keyboardTransition`'s).
  */
-function focusVerdict({ owns = false, editable = false, insideView = false } = {}) {
-  if (!owns || !editable || insideView) return 'allow';
-  return 'reclaim';
+function focusVerdict({ owns = false, mine = false, editable = false, insideView = false, byUserPress = false } = {}) {
+  if (!editable || insideView) return 'allow';
+  if (!owns) return byUserPress && mine ? 'yield' : 'allow';
+  return byUserPress ? 'yield' : 'reclaim';
+}
+/**
+ * verify r2 (H1): ONE OWNERSHIP TRANSITION of a view — `was` / `now` = `{owns,
+ * yielded}` before and after (was null = never judged). `changed` ⇒ the bar's
+ * chip and the composers' line are redrawn AT ONCE (measured on cd867c05: a
+ * view restored with the caret in the composer said nothing until the first
+ * key had gone to the page); `moveCaret` ⇒ the keys just moved to the page
+ * while a text box (or a frame) OUTSIDE the view holds the caret — the caret
+ * moves to the sink explicitly, never merely the keys routed past it.
+ * verify r2 (H3): `release` ⇒ the keys just LEFT the page (hidden, the stream
+ * down, another view's claim) — every key still held there gets its keyup now
+ * (`heldReleases`), while this view can still send it; after, its keyup goes
+ * nowhere (measured: Shift held across a minimize — the page logged the
+ * keydown and never the keyup).
+ */
+function keyboardTransition({ was = null, now = {}, caretOutside = false } = {}) {
+  const w = { owns: !!(was && was.owns), yielded: !!(was && was.yielded) };
+  const n = { owns: !!(now && now.owns), yielded: !!(now && now.yielded) };
+  const changed = !was || w.owns !== n.owns || w.yielded !== n.yielded;
+  return { changed, moveCaret: n.owns && !w.owns && !!caretOutside, release: w.owns && !n.owns };
+}
+/** How long after the user's own press its focus may land and still be his: a mouse press focuses in the SAME task
+ *  (the mousedown's default action; xterm focuses its textarea in its mousedown handler); a touch tap focuses at its
+ *  end, which the view re-stamps (pointerup on the pressed element). */
+const USER_PRESS_MS = 250;
+/**
+ * Did the user's OWN press put the focus here? `press` = the last press the view saw OUTSIDE itself `{at, trusted}`;
+ * `sameInput` = the DOM fact that the pressed element IS the focused editable, lies inside it (a child of a
+ * contenteditable) or shares its input host (a terminal: a press on xterm's screen focuses its helper textarea);
+ * `focusAt` = the focus's instant. `{byUserPress, why}` — a script's .focus() has no press ('no press'), a synthetic
+ * pointerdown is not the user's ('synthetic press'), a press on anything else — the picture, the sidebar, a taskbar
+ * button whose handler then focuses the composer — is not a press on this editable ('pressed elsewhere'), and a press
+ * from before `windowMs` did not move the focus now ('stale press'). Fails closed: anything unproven is not a press.
+ */
+function userPressFocus({ press = null, sameInput = false, focusAt = 0, windowMs = USER_PRESS_MS } = {}) {
+  if (!press) return { byUserPress: false, why: 'no press' };
+  if (press.trusted !== true) return { byUserPress: false, why: 'synthetic press' };
+  if (!sameInput) return { byUserPress: false, why: 'pressed elsewhere' };
+  const age = Number(focusAt) - Number(press.at);
+  if (!(Number.isFinite(age) && age >= 0 && age <= windowMs)) return { byUserPress: false, why: 'stale press' };
+  return { byUserPress: true, why: 'pressed' };
+}
+/**
+ * verify r2 (Q1): a focus the user CAUSED without pressing the box — a button
+ * of his that focuses a text box (the composer's expand button; a Reply that
+ * opens its box) — stays reclaimed: binding it would reopen verify r1's K2 (a
+ * message arriving within the window of ANY press would take the keys, the
+ * password guard's whole case). It is SAID instead (measured on cd867c05: the
+ * expand button's box reclaimed, "qq" to the page, nothing said), at most
+ * every `RECLAIM_CUE_MS`, with advice that works — a press on the box itself
+ * yields. `why` = userPressFocus's answer: only 'pressed elsewhere' by the
+ * user's own fresh press; a script's focus (no press) stays unsaid.
+ */
+const RECLAIM_CUE_MS = 6000;
+function reclaimCue({ why = '', press = null, focusAt = 0, lastCueAt = null, windowMs = USER_PRESS_MS, everyMs = RECLAIM_CUE_MS } = {}) {
+  if (why !== 'pressed elsewhere' || !press || press.trusted !== true) return false;
+  const age = Number(focusAt) - Number(press.at);
+  if (!(Number.isFinite(age) && age >= 0 && age <= windowMs)) return false;
+  return !(lastCueAt != null && Number(focusAt) - Number(lastCueAt) < everyMs);
+}
+/** THE YIELD's transitions, per claim (two views driving each yield to the user's press): `'yield'` (the verdict above)
+ *  sets it; a press inside the view (`'press-view'`), a fresh takeover (`'claim'`) or its end (`'release'`) clears it;
+ *  anything else keeps it. */
+const YIELD_EVENTS = Object.freeze(['yield', 'press-view', 'claim', 'release', 'homeless']);
+function yieldAfter(yielded, event) {
+  if (event === 'yield') return true;
+  if (event === 'press-view' || event === 'claim' || event === 'release' || event === 'homeless') return false;
+  return !!yielded;
+}
+/**
+ * verify r2 (H1b'): a yield made while the view was OFF SCREEN (another desktop) can outlive its home — back on the view's
+ * desktop the text box the user pressed is on the OTHER desktop, hidden, and may still hold the focus: the keys the user
+ * types for the page he now sees would go into a chat box he cannot see (one Enter from the agent). The caret's home wins
+ * only while it is a home — when the view comes back to driving and the yielded-to element is not a visible, focused text
+ * box, the yield ends ('homeless') and the transition moves the caret to the sink.
+ */
+function yieldHomeVerdict({ yielded = false, drivesNow = false, drovePrev = true, homeVisible = false } = {}) {
+  if (!yielded || !drivesNow || drovePrev) return 'keep';
+  return homeVisible ? 'keep' : 'end';
+}
+/** CDP's modifier bits (Input.dispatchKeyEvent `modifiers`) by the key that holds each. */
+const MODIFIER_KEY_BITS = Object.freeze({ Alt: 1, Control: 2, Meta: 4, Shift: 8 });
+/**
+ * verify r1 (K4): the keys STILL HELD in the page when the user's press yields the keyboard. Their keyups now go to the
+ * text box he pressed, so the page would hold them down for good (measured in chrome: Shift held while pressing the
+ * composer — the page's log had the Shift keydown and never its keyup; a held "x" the same). → the page's releases, the
+ * LAST pressed first, each carrying the modifiers still held after it (an ordinary release sequence to the page).
+ * `pressed` = the view's held keys `[{key, code, keyCode}]` in press order (what reached the page as keydowns).
+ */
+function heldReleases(pressed = []) {
+  const list = (Array.isArray(pressed) ? pressed : []).filter((p) => p && typeof p.key === 'string' && p.key);
+  const out = [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    let modifiers = 0;
+    for (let j = 0; j < i; j++) modifiers |= MODIFIER_KEY_BITS[list[j].key] || 0;
+    out.push({ kind: 'up', key: list[i].key, code: String(list[i].code || ''), keyCode: Number(list[i].keyCode) || 0, modifiers });
+  }
+  return out;
 }
 /** Two views driving on one client (two browsers taken over): the LAST claim
  *  that still owns wins. `claims` = [{id, owns:boolean}] in claim order. */
@@ -686,14 +919,21 @@ function inputSummary(states, hasBrowser) {
 module.exports = {
   INPUT_SIDES, HANDBACK_CAUSES, TARGETS, SPEND_REASON, CONFIRM_TTL_MS, DEFAULT_TAKEOVER_IDLE_MS, MIN_TAKEOVER_IDLE_MS, POINTER_ACTIONS,
   inputKeyFor, newInputState, takeoverIdleMs, decideTakeover, decideHandback, decidePass, idleHandbackVerdict, announceVerdict,
+  handbackWakes, handbackWakeEcho, // r6 A-F9: the count one explicit Hand back spends + its echo
   browserPausedRefusal, handbackText, handbackFacts, handbackNotice, renderHandbackNotice, idleInboxItem,
   // the owner's ruling (2026-09-27): the takeover interrupts, tells, and the handback reminds (PURE browser-interrupt.js)
   takeoverNotice, takeoverNoticeText, renderTakeoverNotice, INTERRUPTED_CODE, INTERRUPTED_TEXT,
   inFlightAt, openInterruption, noteRefused, closeInterruption, interruptedVerbs, interruptionView, takeoverText, rerunSentence,
   confirmationFromUpstream, confirmationResolvedFromUpstream, confirmationView, decisionArgv, decisionVerdict,
+  // r6 A-F8: the target, the digest of what a card showed, first write wins, the answer's gate, the card's slots
+  confirmationTarget, confirmationShown, confirmationDigest, pendingNoteVerdict, answerGate, confirmSlots,
   agentCursorFromCommand, modeBadge, inputSummary,
   // lane J r2: the keyboard while you drive; stale approvals
   RESERVED_CHORDS, reservedChordOf, isPasteChord, keyboardOwnership, keyRoute, focusVerdict, ownerOf,
+  USER_PRESS_MS, userPressFocus, YIELD_EVENTS, yieldAfter, // lane takeover-keyboard: the user's own press yields the keyboard
+  keyboardTransition, yieldHomeVerdict, // lane takeover-keyboard verify r2 (H1): every ownership transition redraws at once; keys moving to the page move the caret
+  RECLAIM_CUE_MS, reclaimCue, // lane takeover-keyboard verify r2 (Q1): a reclaim the user's own press elsewhere caused is said (rate-limited)
+  heldReleases, // lane takeover-keyboard verify r1 (K4): a yield releases in the page what is still held there
   // lane live-input: a Mac viewer's ⌘ chords on a non-Mac browser, the copy-out chords, the journal's URL
   MAC_CHORD_ROWS, isMacPlatform, macChord, copyChordOf, urlForLog,
   COPY_GESTURES, COPY_GESTURE_MS, copyGestureOfRecord, armCopyGesture, copyDeliverVerdict, copyWriteVerdict, // lane live-input verify: the copy-out door is the user's own gesture (single-use, fail closed)

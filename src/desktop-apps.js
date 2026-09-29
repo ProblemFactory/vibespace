@@ -728,6 +728,11 @@ function profileDirVerdict(dir, { home = null, ownedRoot = null, confinement = n
  * three unreadable frames, no page in 30 s), firefox the `GNOME_ACCESSIBILITY=1` env (`env` in the answer — the
  * keeper merges it into the app's environment; unmeasured here: the box's firefox is a snap). Turning a11y on at
  * runtime instead would flip org.a11y.Status for the user's WHOLE session (the Windows-freeze class) — never.
+ * CHROME 154 (MEASURED 2026-09-29, 154.0.8037.57, the .197 integration's heavy tier): the flag alone no longer puts
+ * the browser on the AT-SPI bus in a minimal environment (the keeper's) — its application object appears only with one
+ * of ACCESSIBILITY_ENABLED / GNOME_ACCESSIBILITY / QT_ACCESSIBILITY = 1 in ITS env (each measured to be enough; none
+ * of them ⇒ no application object, the page unreachable, even with the flag) — so chromium carries
+ * `ACCESSIBILITY_ENABLED=1` beside the flag: the app's own environment, never the session's.
  * Refused by name: not a browser row, a forbidden (profile / automation) flag in the row, a bad profile dir, a bad URL.
  * Returns `{ ok, argv, url, env, code, error }`.
  */
@@ -742,7 +747,7 @@ function browserArgv(row, { profileDir, url = null } = {}) {
   let u = null;
   if (url !== null && url !== undefined && url !== '') { const v = validateBrowserUrl(url); if (!v.ok) return { ok: false, argv: null, url: null, code: v.code, error: v.error }; u = v.url; }
   const profile = row.browser === 'firefox' ? ['--new-instance', '-profile', d] : [`--user-data-dir=${d}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', BROWSER_A11Y_FLAG];
-  return { ok: true, argv: [...own, ...profile, ...(u ? [u] : [])], url: u, env: row.browser === 'firefox' ? { ...BROWSER_A11Y_ENV } : {}, code: null, error: null };
+  return { ok: true, argv: [...own, ...profile, ...(u ? [u] : [])], url: u, env: row.browser === 'firefox' ? { ...BROWSER_A11Y_ENV } : { ...CHROMIUM_A11Y_ENV }, code: null, error: null };
 }
 /**
  * LANE D (a) item C — CHROME DRAWS ITS OWN FRAME (MEASURED 2026-09-25, Google Chrome 153.0.8010.47 under xpra 6.5.3,
@@ -774,6 +779,8 @@ function chromiumFramePrefs(prefs) {
 /** Lane E (D4): the accessibility switch of a desktop-app browser — chromium's flag, firefox's env (see browserArgv). */
 const BROWSER_A11Y_FLAG = '--force-renderer-accessibility';
 const BROWSER_A11Y_ENV = Object.freeze({ GNOME_ACCESSIBILITY: '1' });
+/** Chrome ≥ 154 registers on the AT-SPI bus only with an accessibility env beside the flag (measured, see browserArgv). */
+const CHROMIUM_A11Y_ENV = Object.freeze({ ACCESSIBILITY_ENABLED: '1' });
 /** Firefox has no --no-first-run: its profile's user.js IS the switch (written by the keeper before the launch). */
 function firefoxUserJs() {
   return [
@@ -1394,7 +1401,7 @@ module.exports = {
   SCALE_CHOICES, SCALE_MAX, UI_SCALE_RANGE, normalizeUiScale, normalizeScale, effectiveScale, scalePick, validateRelaunchRequest, relaunchVerdict, relaunchBodyOf, scaleMenuModel,
   EXPLICIT_SCALES, SCALE_ORIGINS, parseScaleChoice, scaleChoiceVerdict, // lane D: the per-app default scale + the widened explicit set
   OUTER_CLOSE_AGAIN_MS, windowsLeftCount, exitCloseVerdict, outerCloseVerdict,
-  BROWSER_KINDS, BROWSER_BINS, REAL_BROWSER_ROOTS, isForbiddenBrowserArg, browserRowFor, validateBrowserUrl, profileDirVerdict, browserArgv, firefoxUserJs, URL_MAX, BROWSER_A11Y_FLAG, BROWSER_A11Y_ENV,
+  BROWSER_KINDS, BROWSER_BINS, REAL_BROWSER_ROOTS, isForbiddenBrowserArg, browserRowFor, validateBrowserUrl, profileDirVerdict, browserArgv, firefoxUserJs, URL_MAX, BROWSER_A11Y_FLAG, BROWSER_A11Y_ENV, CHROMIUM_A11Y_ENV,
   CHROMIUM_FRAME_MARKER, chromiumFramePrefs, // lane D (a) item C
   TRANSITIONS, transition, isLiveState, isTerminalState,
   idleState, capVerdict, profileRetireVerdict, PERSON_ENDINGS, adoptVerdict, streamTargetOf, newRecord,

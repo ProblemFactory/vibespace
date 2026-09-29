@@ -18,8 +18,12 @@
 //
 // SOCKS5 is NOT universal: it can't carry ICMP (ping/traceroute), UDP is
 // spotty, and a tool has to honor the proxy. When `use` won't do, `run` will.
-// Machines must be enabled as exits by the user first (Remote tab → a machine's
-// ⋯ → "Allow as exit"); `vibespace-exit list` shows which are available.
+// WHO MAY (lane-pairing ⑥): the user opens each machine to conversations under
+// "Who can use it" (Remote tab → the machine's exit icon) — TWO separate grants:
+// borrow its network (use / url) and run commands on it (run, as the machine's
+// user, up to 30 s; optionally "ask me each time" — the user's Allow in For you,
+// 60 s, else refused). `vibespace-exit list` shows what THIS conversation may do.
+// Background Work jobs (jbt_) can never use an exit.
 const api = process.env.VIBESPACE_API;
 const token = process.env.VIBESPACE_SESSION_TOKEN;
 if (!api || !token) { console.error('vibespace-exit: not running inside a VibeSpace session (missing env)'); process.exit(2); }
@@ -27,26 +31,37 @@ if (!api || !token) { console.error('vibespace-exit: not running inside a VibeSp
 const args = process.argv.slice(2);
 const USAGE = [
   'usage — borrow a paired machine\'s network for a SINGLE command (not your whole session):',
-  '  vibespace-exit list                     machines the user enabled as exits',
+  '  vibespace-exit list                     machines open to THIS conversation (network: yes/no · commands: yes/ask/no)',
   '  vibespace-exit use <machine>            print shell exports (ALL_PROXY/HTTPS_PROXY) for a proxy-aware command:',
   '                                            eval "$(vibespace-exit use mac)"; curl https://ifconfig.me',
-  '  vibespace-exit url <machine>            print just the socks5h://127.0.0.1:PORT url (for --proxy)',
-  '  vibespace-exit run <machine> -- <cmd>   run <cmd> ON the machine (universal: ICMP/UDP/proxy-unaware/its DNS)',
+  '  vibespace-exit url <machine>            print just the socks5h://<user>:<pass>@127.0.0.1:PORT url (for --proxy; the',
+  '                                            credentials are THIS conversation\'s — the port refuses every other client)',
+  '  vibespace-exit run <machine> -- <cmd>   run <cmd> ON the machine as its user, up to 30 s (universal: ICMP/UDP/proxy-unaware/its DNS);',
+  '                                            with "ask me each time" it first waits (≤ 60 s) for the user\'s Allow',
   '',
-  '  <machine> = id / name / unique name substring (omit if only one exit exists).',
+  '  <machine> = id / name / unique name substring (omit if only one machine is open to you).',
+  '  The user decides who may: Remote tab → the machine\'s exit icon → "Who can use it" (network and commands are two grants).',
   '  Use an exit ONLY when a request needs that machine\'s network position; otherwise go direct.',
 ].join('\n');
+const WAY_OUT = '  way out: ask the user to allow this conversation under "Who can use it" on the machine row (Remote tab)';
 
+// every refusal prints the server's sentence (it names the grant this conversation lacks — never another one);
+// a missing grant adds the way out
+function fail(data, status) {
+  console.error('vibespace-exit:', (data && data.error) || status);
+  if (data && data.code === 'not_granted') console.error(WAY_OUT);
+  process.exit(1);
+}
 async function get(path) {
   const res = await fetch(api + path, { headers: { Authorization: 'Bearer ' + token } });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) { console.error('vibespace-exit:', data.error || res.status); process.exit(1); }
+  if (!res.ok) fail(data, res.status);
   return data;
 }
 async function post(path, body) {
   const res = await fetch(api + path, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) { console.error('vibespace-exit:', data.error || res.status); process.exit(1); }
+  if (!res.ok) fail(data, res.status);
   return data;
 }
 
@@ -56,8 +71,11 @@ async function main() {
 
   if (cmd === 'list') {
     const { exits } = await get('/api/agent/exit');
-    if (!exits.length) { console.log('  (no exit machines — ask the user to enable one: Remote tab → machine ⋯ → "Allow as exit")'); return; }
-    for (const e of exits) console.log(`  ${e.name}${e.online ? '' : ' (offline)'}${e.active ? '  [active: socks5h://127.0.0.1:' + e.localPort + ']' : ''}   id=${e.id}`);
+    if (!exits.length) { console.log('  (no machine is open to this conversation — ask the user: Remote tab → the machine\'s exit icon → "Who can use it")'); return; }
+    for (const e of exits) {
+      const g = e.grants || {};
+      console.log(`  ${e.name}${e.online ? '' : ' (offline)'}   network: ${g.use ? 'yes' : 'no'} · commands: ${g.run ? (g.runAsk ? 'ask' : 'yes') : 'no'}${e.active ? '  [active: socks5h://127.0.0.1:' + e.localPort + ']' : ''}   id=${e.id}`);
+    }
     return;
   }
 
@@ -69,7 +87,7 @@ async function main() {
     console.log(`export ALL_PROXY=${r.url}`);
     console.log(`export HTTPS_PROXY=${r.url}`);
     console.log(`export HTTP_PROXY=${r.url}`);
-    console.error(`# egress via "${r.machine}" (socks5h). NOT universal — for ICMP/UDP/proxy-unaware tools use: vibespace-exit run ${machine || r.machine} -- <cmd>`);
+    console.error(`# egress via "${r.machine}" (socks5h, this conversation's own credentials in the url — a tool must send SOCKS5 username/password). NOT universal — for ICMP/UDP/proxy-unaware tools use: vibespace-exit run ${machine || r.machine} -- <cmd>`);
     return;
   }
 
@@ -81,10 +99,24 @@ async function main() {
     else { machine = rest[0]; cmdParts = rest.slice(1); } // tolerate a missing --
     const command = cmdParts.join(' ').trim();
     if (!command) { console.error('vibespace-exit run: need a command after `--`, e.g. vibespace-exit run mac -- curl -s https://ifconfig.me'); process.exit(2); }
+    // "ask me each time": the route answers once — after the user's Allow (≤ 60 s) and the run (≤ 30 s). Say so
+    // when the call outlives a second and the machine asks.
+    const waitNote = setTimeout(async () => {
+      try {
+        const res = await fetch(api + '/api/agent/exit', { headers: { Authorization: 'Bearer ' + token } }); // never get(): a failed list must not end the waiting run
+        const { exits } = res.ok ? await res.json() : { exits: [] };
+        const r0 = String(machine || '').toLowerCase();
+        const hit = (exits || []).filter((e) => !r0 || e.id === machine || String(e.name).toLowerCase().includes(r0));
+        if (hit.some((e) => e.grants && e.grants.runAsk)) console.error("# waiting for the user's approval (up to 60 s)…");
+      } catch { }
+    }, 1000);
     const r = await post('/api/agent/exit/run', { machine, cmd: command });
+    clearTimeout(waitNote);
     if (r.stdout) process.stdout.write(r.stdout.endsWith('\n') ? r.stdout : r.stdout + '\n');
     if (r.stderr) process.stderr.write(r.stderr.endsWith('\n') ? r.stderr : r.stderr + '\n');
-    process.exit(r.code || 0);
+    if (r.line) console.error(r.line);
+    // the exit code is a NUMBER or nothing (an older daemon's maxBuffer overflow named a string; process.exit throws on it)
+    process.exit(r.timedOut ? 124 : (Number.isInteger(r.code) ? r.code : (r.code == null ? 0 : 1)));
   }
 
   console.error(`vibespace-exit: unknown command "${cmd}"\n`);

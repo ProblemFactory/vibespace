@@ -75,6 +75,23 @@
  * stopAll) never keeps the listener it was binding — in fixed mode that
  * listener held the registered port for the process lifetime — and a
  * `buildConsentUrl` that throws leaves no flow, no listener, no closure.
+ *
+ * OPTIONAL SCOPES AND THE ONE NARROWING RETRY (lane channel-threads, owner ruling 2026-09-28). A caller may name
+ * scopes its consent asks for but can live without (`optionalScopes` — Lark's `im:message.reactions:read`). A vendor
+ * whose app has not enabled one of them refuses the whole consent ON ITS OWN PAGE (Lark: error 20027, "the scope
+ * parameter contains permissions the current application has not enabled" — shown on the authorize page, never
+ * redirected: the vendor's docs name only `?error=access_denied&state=` as a redirect), so this machine never hears
+ * it. `narrow(flowId)` is the retry: ONCE per flow, the same `state` and listener, the consent URL rebuilt without the
+ * optional scopes (`buildConsentUrl({…, without})`), and the exchange is told what was dropped (`narrowed`) so the
+ * account can SAY it ("Lark refused … — enable it in the app console and Re-authorize") — never a silent narrower
+ * consent. A second narrow is refused by name (`already-narrowed`). ORDERED GROUPS (lane lark-search-poll, owner
+ * decision 5, 2026-09-28: "one scope dropped per retry, each a click naming the scope"): `optionalScopes` may be a
+ * list of GROUPS (an array per group, least valuable first; a bare string is a group of one) — each `narrow()` drops
+ * the NEXT group only (so an app that lacks only the reactions scope keeps the search), `nextNarrow` names what the
+ * next press drops, `narrowed` accumulates, and `already-narrowed` is answered only once every group is gone. THE
+ * VENDOR'S ERROR REDIRECT (`?error=…&state=`,
+ * the right state and no code) ENDS the flow by name and the tab says nothing was connected — it used to answer
+ * "connected — you can close this tab" and leave the flow running until its timeout.
  */
 const http = require('http');
 const crypto = require('crypto');
@@ -91,6 +108,23 @@ const MAX_RUNNING_FLOWS = 32;
 const CAUSE_TIMEOUT = 'timeout';
 const CAUSE_OVER_LIMIT = 'over-limit';
 const PORT_BUSY_CODE = 'port-busy';
+/** The vendor's `error` query parameter is PEER-WRITTEN: bounded and reduced to a code's alphabet before it is said. */
+const VENDOR_ERROR_MAX = 64;
+const vendorErrorOf = (v) => String(v == null ? '' : v).slice(0, VENDOR_ERROR_MAX).replace(/[^A-Za-z0-9_.:-]/g, '_') || 'error';
+/** Scopes as a caller hands them: strings, bounded, deduped. */
+const scopeList = (xs) => [...new Set((Array.isArray(xs) ? xs : []).filter((x) => typeof x === 'string' && x && x.length <= 200))].slice(0, 16);
+/** The optional scopes as ORDERED GROUPS (lane lark-search-poll): an element that is an array is one group, a bare
+ *  string a group of one; a scope appears once (its first group), empty groups vanish; ≤ 16 scopes in all. */
+function groupsOf(xs) {
+  const seen = new Set();
+  const groups = [];
+  for (const g of Array.isArray(xs) ? xs : []) {
+    const list = scopeList(Array.isArray(g) ? g : [g]).filter((x) => !seen.has(x) && seen.size < 16);
+    for (const x of list) seen.add(x);
+    if (list.length) groups.push(list);
+  }
+  return { groups, optional: groups.flat() };
+}
 const MODES = Object.freeze(['ephemeral', 'fixed']);
 
 /** The fixed mode's target, parsed ONCE from the registry's literal. */
@@ -127,7 +161,7 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
   /** verify r3: the flow's END — what it held is dropped. verify r4: BOTH closures the adapter handed in go
    *  together (they are created in one scope and share one context: a kept `onDone` kept the secret `exchange`
    *  captured). Returns the `onDone` it dropped, for the ONE report an end may still owe. */
-  function forget(st) { const cb = st.onDone; st.exchange = null; st.onDone = null; if (st.endedAt == null) st.endedAt = now(); return cb; }
+  function forget(st) { const cb = st.onDone; st.exchange = null; st.onDone = null; st.build = null; if (st.endedAt == null) st.endedAt = now(); return cb; }
   async function report(cb, r) {
     if (typeof cb === 'function') { try { await cb(r); } catch (e) { log.warn && log.warn('[oauth-loopback] onDone threw:', e && e.message); } }
   }
@@ -177,7 +211,7 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
       // {ok:false, "nothing was connected"} over a token on disk — the record connected, its card contradicting it,
       // no pass kicked). The late cancel is CARRIED (`cancelled`) for a consumer whose DURABLE write is still ahead
       // (the engine's pending path refuses it there); the record door's consumer reads ok as landed.
-      st.result = await st.exchange({ code, redirectUri: st.redirectUri, state: st.state, flowId: st.flowId, cancelled: () => st.cancelled || null });
+      st.result = await st.exchange({ code, redirectUri: st.redirectUri, state: st.state, flowId: st.flowId, cancelled: () => st.cancelled || null, narrowed: st.narrowed ? st.narrowed.slice() : [] });
       st.error = null;
       if (st.cancelled) log.warn && log.warn(`[oauth-loopback] ${st.id}: a ${st.cancelled} arrived after the exchange had completed — the consent stands, the report says ok`);
     } catch (e) {
@@ -192,6 +226,19 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
       if (byId.get(st.id) === st.flowId) byId.delete(st.id);
       await report(cb, { ok: !st.error, result: st.result, error: st.error, cancelled: st.cancelled || null, flowId: st.flowId, id: st.id });
     }
+  }
+
+  /** THE VENDOR'S ERROR REDIRECT (`?error=<code>&state=<ours>`, no code — Lark's `access_denied` when the user
+   *  declines): the flow ENDS here, by name, reported once — never a "connected" tab over a flow left running. */
+  async function declined(st, err) {
+    if (st.done || st.exchanging || st.cancelled) return;
+    st.error = `${st.label} did not grant the sign-in (${err}) — nothing was connected; sign in again`;
+    st.result = null; st.done = true; st.finishedAt = now();
+    release(st);
+    const cb = forget(st);
+    if (byId.get(st.id) === st.flowId) byId.delete(st.id);
+    log.warn && log.warn(`[oauth-loopback] ${st.id}: the vendor answered the consent with error=${err} — the flow ended`);
+    await report(cb, { ok: false, result: null, error: st.error, cancelled: null, flowId: st.flowId, id: st.id });
   }
 
   function listen(srv, port) {
@@ -216,11 +263,14 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
    *                   meanwhile (a disconnect / cancel / newer begin() / the timeout / stopAll)
    *   successText     what the browser tab says after the redirect landed
    *   timeoutMs       the flow's own budget (default FLOW_TIMEOUT_MS)
+   *   optionalScopes  scopes the consent asks for but can do without — `narrow()` may drop them ONCE (the vendor refused
+   *                   the consent on its own page); `buildConsentUrl` gets `without` (the dropped ones) and the exchange
+   *                   `narrowed`
    *   onDone          async ({ok, result, error, cancelled, flowId, id}) — the adapter's finish hook; `cancelled`
    *                   beside ok:true = a cancel that arrived AFTER the exchange resolved (carried for a consumer
    *                   whose durable write is still ahead; the record's own door reads ok as landed)
    */
-  async function begin({ id, mode, callbackUrl = null, buildConsentUrl, exchange, successText = 'VibeSpace: connected — you can close this tab.', timeoutMs = FLOW_TIMEOUT_MS, onDone = null, label = null } = {}) {
+  async function begin({ id, mode, callbackUrl = null, buildConsentUrl, exchange, successText = 'VibeSpace: connected — you can close this tab.', timeoutMs = FLOW_TIMEOUT_MS, onDone = null, label = null, optionalScopes = [] } = {}) {
     if (!id || typeof id !== 'string') throw new OAuthFlowError('bad-request', 'oauth-loopback: `id` is required');
     if (!MODES.includes(mode)) throw new OAuthFlowError('bad-request', `oauth-loopback: mode must be one of ${MODES.join('|')} (got ${JSON.stringify(mode)})`);
     if (typeof buildConsentUrl !== 'function' || typeof exchange !== 'function') throw new OAuthFlowError('bad-request', 'oauth-loopback: buildConsentUrl and exchange are required');
@@ -240,7 +290,8 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
     const state = crypto.randomBytes(12).toString('hex');
     const flowId = crypto.randomBytes(8).toString('hex');
     const st = {
-      flowId, id, mode, label: label || id, state, exchange, onDone,
+      flowId, id, mode, label: label || id, state, exchange, onDone, build: buildConsentUrl,
+      ...groupsOf(optionalScopes), narrowed: null, narrowedGroups: 0,
       consentUrl: null, redirectUri: null, port: null, pathname: null,
       server: null, listening: false, refusal: null,
       result: null, error: null, done: false, exchanging: false, cancelled: null,
@@ -257,6 +308,12 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
         if (st.pathname && u.pathname !== st.pathname) { res.writeHead(404).end('not the registered callback path'); return; }
         if (u.searchParams.get('state') !== state) { res.writeHead(400).end('state mismatch'); return; }
         const code = u.searchParams.get('code');
+        const verr = !code && u.searchParams.has('error') ? vendorErrorOf(u.searchParams.get('error')) : null;
+        if (verr) {
+          res.writeHead(200, { 'Content-Type': 'text/html' }).end(`<h3>${escapeHtml(`VibeSpace: ${st.label} did not grant the sign-in (${verr}) — nothing was connected. Close this tab and sign in again.`)}</h3>`);
+          await declined(st, verr);
+          return;
+        }
         res.writeHead(200, { 'Content-Type': 'text/html' }).end(`<h3>${escapeHtml(successText)}</h3>`);
         if (code) await finish(st, code);
       } catch (e) { st.error = e.message; }
@@ -302,7 +359,7 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
 
     // verify r4: a consent URL that cannot be built leaves NOTHING — the flow had a listener and no timer
     // (nothing would ever have ended it), so the port and both closures go here and the caller gets the throw
-    try { st.consentUrl = String(buildConsentUrl({ redirectUri: st.redirectUri, state })); }
+    try { st.consentUrl = String(buildConsentUrl({ redirectUri: st.redirectUri, state, without: [] })); }
     catch (e) { st.cancelled = st.cancelled || 'failed'; release(st); forget(st); unlist(); throw e; }
     if (!st.cancelled && !st.done) {
       st.timer = setTimeout(() => endByItself(flowId, CAUSE_TIMEOUT), timeoutMs);   // verify r4: the timeout is SAID (reported once), then forgotten
@@ -320,9 +377,35 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
     const u = new URL(String(url));
     if (u.searchParams.get('state') !== st.state) throw new Error('state mismatch — restart the flow');
     const code = u.searchParams.get('code');
+    if (!code && u.searchParams.has('error')) { await declined(st, vendorErrorOf(u.searchParams.get('error'))); return { ok: false, result: null, error: st.error }; }
     if (!code) throw new Error('no code in that URL');
     await finish(st, code);
     return { ok: !st.error, result: st.result, error: st.error };
+  }
+
+  /** THE ONE NARROWING RETRY (owner ruling 2026-09-28): the vendor refused the consent on its own page because its
+   *  app has not enabled an OPTIONAL scope (Lark 20027 — never redirected, so only the person saw it). The SAME flow
+   *  (state, listener, timer) gets a consent URL without the optional scopes; ONCE — a second narrow is refused by
+   *  name; the exchange is told what was dropped, so the account says it. */
+  function narrow(flowId) {
+    const st = flows.get(flowId);
+    if (!st || st.done || st.cancelled) throw new OAuthFlowError('no-flow', 'no authorization in progress');
+    if (!st.optional.length) throw new OAuthFlowError('nothing-optional', `the ${st.label} sign-in asks for nothing it could do without`);
+    if (st.narrowedGroups >= st.groups.length) {
+      const all = st.narrowed || [];
+      throw new OAuthFlowError('already-narrowed', st.groups.length === 1
+        ? `the ${st.label} sign-in already dropped ${all.join(' + ')} once — enable it in the app console and sign in again`
+        : `the ${st.label} sign-in already dropped every permission it can do without (${all.join(' + ')}) — enable them in the app console and sign in again`);
+    }
+    if (typeof st.build !== 'function') throw new OAuthFlowError('no-flow', 'no authorization in progress');
+    const group = st.groups[st.narrowedGroups] || [];
+    const without = st.groups.slice(0, st.narrowedGroups + 1).flat();
+    const next = String(st.build({ redirectUri: st.redirectUri, state: st.state, without: without.slice() }));
+    st.narrowedGroups++;
+    st.narrowed = without;
+    st.consentUrl = next;
+    log.log && log.log(`[oauth-loopback] ${st.id}: the sign-in is retried without ${group.join(' + ')}${st.narrowedGroups > 1 ? ` (dropped so far: ${without.join(' + ')})` : ''} — the vendor refused it on its page`);
+    return status(flowId);
   }
 
   function status(flowId) {
@@ -335,6 +418,8 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
       error: st.error, cancelled: st.cancelled,
       consentUrl: st.consentUrl, redirectUri: st.redirectUri, port: st.port,
       listening: st.listening, refusal: st.refusal,
+      optional: st.optional.slice(), narrowed: st.narrowed ? st.narrowed.slice() : null,
+      groups: st.groups.map((g) => g.slice()), nextNarrow: st.narrowedGroups < st.groups.length ? st.groups[st.narrowedGroups].slice() : null,
       pasteBack: true,                       // ALWAYS offered — remote browsers take it whatever the port did
       startedAt: st.startedAt, expiresAt: st.expiresAt, finishedAt: st.finishedAt,
     };
@@ -365,7 +450,7 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
   function stopAll() { for (const id of [...flows.keys()]) cancel(id, 'shutdown'); }
   const runningFor = (id) => (byId.has(id) ? status(byId.get(id)) : null);
 
-  return { begin, status, forwardCallback, take, cancel, stopAll, runningFor, FLOW_TIMEOUT_MS, FLOW_RETIRE_MS, MAX_RUNNING_FLOWS };
+  return { begin, status, forwardCallback, take, cancel, stopAll, runningFor, narrow, FLOW_TIMEOUT_MS, FLOW_RETIRE_MS, MAX_RUNNING_FLOWS };
 }
 
-module.exports = { createOAuthLoopback, OAuthFlowError, fixedTarget, FLOW_TIMEOUT_MS, FLOW_RETIRE_MS, MAX_RUNNING_FLOWS, CAUSE_TIMEOUT, CAUSE_OVER_LIMIT, PORT_BUSY_CODE, MODES };
+module.exports = { createOAuthLoopback, OAuthFlowError, fixedTarget, FLOW_TIMEOUT_MS, FLOW_RETIRE_MS, MAX_RUNNING_FLOWS, CAUSE_TIMEOUT, CAUSE_OVER_LIMIT, PORT_BUSY_CODE, MODES, VENDOR_ERROR_MAX };

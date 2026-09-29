@@ -116,6 +116,7 @@ const ALLOW = {
   'src/plugins.js|opencode.ai': 'a help URL inside an error message ("install OpenCode first"), not a request target — the census over-includes on purpose and this row classifies it',
   'src/server/plugin-install.js|api.github.com': 'plugin install from a GitHub release (the release lookup) — a human\'s Install action, consent per package',
   'src/server/ops-routes.js|raw.githubusercontent.com': 'the update check (the public repo\'s package.json + CHANGELOG) behind ⚙ → Update VibeSpace — a human\'s click',
+  'src/channels/fake.js|img.example.invalid': 'lane channel-rich: a REMOTE picture inside the fake world\'s mail HTML (a string the fake serves as a mail body, never a request this file makes) — the heavy leg proves the browser does not ask for it before Show pictures; `.invalid` never resolves',
   'src/server/mounts-plugins-wiring.js|nodejs.org': 'the node runtime tarball relayed to a paired device that cannot reach nodejs.org itself (corporate egress) — an operator\'s pairing action',
   'data/bin/vibespace-exit|ifconfig.me': 'a help-text EXAMPLE the agent runs by hand through a borrowed exit (`curl https://ifconfig.me`); the tool\'s own fetch targets the VibeSpace API only',
 };

@@ -38,7 +38,7 @@ export function registerCommandModeCommands() {
     if (dm && dm.desktops.length > 1 && activeWin(app)) {
       const idx = dm.desktops.findIndex(d => d.id === dm.activeDesktopId);
       const next = dir > 0 ? (idx + 1) % dm.desktops.length : (idx - 1 + dm.desktops.length) % dm.desktops.length;
-      dm.moveWindowToDesktop(wm.activeWindowId, dm.desktops[next].id);
+      dm.moveWindowToDesktop(wm.activeWindowId, dm.desktops[next].id, { speak: true }); // a Stage window's refusal is said (inc-muly2izg-cks3)
     }
   };
   registerCommand({ id: 'commandMode.toggle', title: 'Toggle command mode', run: (c) => c.app._commandMode?.toggle() });

@@ -76,7 +76,7 @@ console.log('— ① sessions: pairing, open, restart, the implicit ones, the ca
   // restart end + a start at boot
   const rs = BS.pairSessions({ markers: [m('start', 'bs-00000009', t0), m('end', 'bs-00000009', t0 + 3 * MIN, { reason: 'restart', count: 4, durationMs: 3 * MIN })], entries: [] });
   ok(rs[0].reason === 'restart' && rs[0].count === 4 && rs[0].open === false, 'an end written at boot says `restart` and keeps the count its marker carried');
-  ok(BS.markerFor({ phase: 'end', id: 'bs-00000001', browserKey: KA, at: 5, reason: 'weird' }).reason === 'stopped' && BS.END_REASONS.join() === 'released,dropped,stopped,switched,restart', 'an end reason is from the closed set');
+  ok(BS.markerFor({ phase: 'end', id: 'bs-00000001', browserKey: KA, at: 5, reason: 'weird' }).reason === 'stopped' && BS.END_REASONS.join() === 'released,dropped,stopped,switched,restart,left', 'an end reason is from the closed set (browse yourself: + left)');
   // the keeper's stops: idle never ends a session
   ok(BS.endReasonFor({ kind: 'browser-stopped', why: 'idle' }) === null && BS.endReasonFor({ kind: 'browser-stopped', why: 'turn-idle' }) === null && BS.endReasonFor({ kind: 'browser-stopped', why: 'user' }) === 'stopped' && BS.endReasonFor({ kind: 'browser-stopped', why: 'switch' }) === 'switched' && BS.endReasonFor({ kind: 'detach' }) === 'released' && BS.endReasonFor({ kind: 'lease-dropped' }) === 'dropped' && BS.endReasonFor({ kind: 'attach' }) === null, 'IDLE is not an end (idle, turn-idle); a person\'s stop, a switch, a detach and a dropped lease are');
   // the chat's cards: this conversation's own key only
@@ -91,6 +91,23 @@ console.log('— ① sessions: pairing, open, restart, the implicit ones, the ca
   const tie = BS.pairSessions({ markers: [BS.markerFor({ phase: 'start', id: 'bs-000000f1', browserKey: KA, at: 7 }), BS.markerFor({ phase: 'end', id: 'bs-000000f1', browserKey: KA, at: 9, reason: 'released' }), BS.markerFor({ phase: 'start', id: 'bs-000000f2', browserKey: KA, at: 9 }), BS.markerFor({ phase: 'end', id: 'bs-000000f2', browserKey: KA, at: 9, reason: 'stopped' }), BS.markerFor({ phase: 'start', id: 'bs-000000f3', browserKey: KA, at: 9 })] });
   ok(BS.chatCardsFor(tie, KA).map((c) => c.id.replace('bs:bs-000000', '')).join() === 'f1:start,f1:end,f2:start,f2:end,f3:start' && tie.map((s) => s.id.slice(3)).join() === '000000f3,000000f2,000000f1', 'three sessions in one millisecond keep the order they happened in (start, end, start, end, start) — the marker file\'s order breaks the tie');
   ok(BS.durationParts(42000).s === 42 && BS.durationParts(3 * MIN).m === 3 && BS.durationParts(65 * MIN).h === 1 && BS.durationParts(65 * MIN).m === 5, 'durations in parts: seconds, minutes, hours + minutes');
+  // BROWSE YOURSELF (B-6ae8): the USER's own browsing — `holder: 'user'`, its key `hu-…`, never a card in any chat
+  {
+    const HU = 'hu-00000001';
+    const hs = BS.markerFor({ phase: 'start', id: 'bs-000000a1', browserKey: HU, profileId: P1, at: t0, label: 'work', holder: 'user', webuiSessionId: 'sess-x', recorded: false });
+    const he = BS.markerFor({ phase: 'end', id: 'bs-000000a1', browserKey: HU, profileId: P1, at: t0 + 4 * MIN, holder: 'user', count: 0, durationMs: 4 * MIN, reason: 'left' });
+    ok(hs.holder === 'user' && hs.recorded === false && !('webuiSessionId' in hs) && he.reason === 'left' && BS.markerFor({ phase: 'start', id: 'bs-000000a2', browserKey: KA, at: 1, holder: 'agent', recorded: true }).holder === undefined && BS.markerFor({ phase: 'start', id: 'bs-000000a2', browserKey: KA, at: 1, holder: 'agent', recorded: true }).recorded === undefined, 'a human marker carries holder:user + whether it was recorded (never a webui session id); `left` is an end reason; any other holder value (and its `recorded`) is dropped');
+    const hss = BS.pairSessions({ markers: [...markers, hs, he], entries });
+    const h = hss.find((x) => x.id === 'bs-000000a1');
+    ok(h && h.holder === 'user' && h.browserKey === HU && h.reason === 'left' && h.durationMs === 4 * MIN && h.count === 0 && !h.open && hss.filter((x) => x.holder === 'user').length === 1, 'pairSessions copies the holder: the user\'s session pairs (4 min, left), every other session has none', h);
+    ok(BS.chatCardsFor(hss, HU).length === 0 && !BS.chatCardsFor(hss, KA).some((c) => c.session === 'bs-000000a1'), 'chatCardsFor: a human key is refused by the first gate (not a browser key), and the user\'s session is never a conversation\'s card');
+    // the second gate on its own: a marker that names the user under a conversation's key (a forged / migrated line) is skipped too
+    const forged = BS.pairSessions({ markers: [BS.markerFor({ phase: 'start', id: 'bs-000000a3', browserKey: KA, profileId: P1, at: t0, holder: 'user' })] });
+    ok(BS.chatCardsFor(forged, KA).length === 0, 'chatCardsFor: the SECOND gate — a session whose holder is the user is skipped even under a conversation\'s key');
+    ok(h.recorded === false && BS.replayEmpty({ sessions: hss, session: h, entries: [] }) === 'yours-not-recorded', 'a human session whose actions were NOT recorded (the opt-out): the named empty state `yours-not-recorded` (only start and stop are kept)');
+    const hr = { ...h, recorded: true };
+    ok(BS.replayEmpty({ sessions: hss, session: hr, entries: [] }) === 'yours-no-actions' && BS.replayEmpty({ sessions: hss, session: hr, entries: [], traceOn: false }) === 'trace-off' && BS.replayEmpty({ sessions: hss, session: { ...hr, count: 2 }, entries: [{ id: 'x', before: { file: 'a' } }] }) === null, 'a RECORDED human session (the default — the owner: recorded like an agent\'s): its actions replay; none ⇒ `yours-no-actions`; the trace off says so');
+  }
 }
 
 // ═══ ② PURE: retention BY SIZE ═══════════════════════════════════════════════
@@ -427,7 +444,7 @@ console.log('— ⑦ the words (en through the module; zh + ja in the dictionari
   ok(W.sizeText(1024 * MB) === '1 GB' && W.sizeText(64 * MB) === '64 MB' && W.sizeText(1536 * MB) === '1.5 GB', 'sizes: 1 GB · 64 MB · 1.5 GB');
   ok(/^Browser session started · work · /.test(W.startCardText({ label: 'work', at: Date.now() })) && /^Browser session started · a browser of its own · /.test(W.startCardText({ at: Date.now() })), 'the start card: "Browser session started · {profile} · {time}", an ephemeral one "a browser of its own"');
   // the end card says WHY it ended (the naive-user verifier, 2026-09-28), one word per END_REASONS entry; Replay only with actions
-  const REASONS = { released: 'the conversation stopped using this browser', dropped: 'the conversation stopped', stopped: 'the browser was stopped', switched: 'the browser was switched', restart: 'VibeSpace restarted' };
+  const REASONS = { released: 'the conversation stopped using this browser', dropped: 'the conversation stopped', stopped: 'the browser was stopped', switched: 'the browser was switched', restart: 'VibeSpace restarted', left: 'you closed your browsing window' };
   ok(BS.END_REASONS.every((r) => W.endReasonText(r) === REASONS[r]) && Object.keys(REASONS).length === BS.END_REASONS.length && W.endReasonText('zz') === '' && W.endCardText({ durationMs: 125000, count: 4, reason: 'switched' }) === 'Browser session ended · 2 min · 4 actions · the browser was switched',
     'the end card names why the session ended — every reason of the closed set has its words, an unknown one says nothing');
   ok(W.endCardReplays({ count: 3 }) === true && W.endCardReplays({ count: 0 }) === false && W.endCardReplays({}) === false, 'an end card offers Replay only when the agent acted (a 0-action replay could only say "the agent did not act")');
@@ -436,6 +453,8 @@ console.log('— ⑦ the words (en through the module; zh + ja in the dictionari
   ok(W.endCardText({ durationMs: 125000, count: 4 }) === 'Browser session ended · 2 min · 4 actions' && W.endCardText({ durationMs: 5000, count: 1 }) === 'Browser session ended · 5 sec · 1 action', 'the end card: "Browser session ended · {duration} · {n} actions" (one action singular)');
   ok(W.retentionText(1024 * MB) === "Frames are kept until this profile's records reach 1 GB; the oldest are removed first." && W.framesGoneText(1024 * MB) === 'Frames of this session were removed to stay under the 1 GB limit; the action list is kept', 'the retention sentence and the swept-frames state, word for word');
   ok(W.emptyText('no-sessions') === 'No browser sessions recorded for this conversation' && W.emptyText('trace-off') === 'Action trace is off — Settings → Agent browser' && W.replayTitle('Fix login') === 'Browser replay · Fix login' && /^Session 3 · started /.test(W.dividerText(3, Date.now())), 'the empty states, the title, the divider');
+  // BROWSE YOURSELF (B-6ae8): the user's own session is ONE row "You · 14:02 · 4 min", no Replay, its named empty state
+  ok(/^You · .+ · 4 min$/.test(W.sessionRowText({ holder: 'user', startAt: Date.now(), durationMs: 4 * MIN, count: 0 })) && /^You · .+ · 4 min · 3 actions$/.test(W.sessionRowText({ holder: 'user', startAt: Date.now(), durationMs: 4 * MIN, count: 3 })) && W.sessionReplays({ holder: 'user', count: 3 }) === true && W.sessionReplays({ holder: 'user', count: 0 }) === false && W.sessionReplays({ count: 2 }) === true && W.emptyText('yours-not-recorded') === 'Only when you started and stopped is kept.' && W.emptyText('yours-no-actions') === 'You did not act on the page in this session', 'the user\'s own session: "You · {time} · {dur}" (+ its actions when recorded, then Replay), the opt-out\'s "Only when you started and stopped is kept."');
   const zh = (await import('../src/lib/i18n-zh.js')).default, ja = (await import('../src/lib/i18n-ja.js')).default;
   const OWNER = {
     'Browser session started · {profile} · {time}': ['浏览器会话开始 · {profile} · {time}', 'ブラウザセッション開始 · {profile} · {time}'],

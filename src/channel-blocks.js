@@ -549,7 +549,7 @@ function larkPostBody(c) {
 }
 
 /** A Lark `post` → blocks: lines of runs; an img / media / code block ends the paragraph. */
-function larkPostBlocks(c, mentions, { names = null } = {}) {
+function larkPostBlocks(c, mentions, { names = null, depth = 0 } = {}) {
   const body = larkPostBody(c);
   const out = [];
   if (body.title) out.push({ k: 'p', runs: [{ k: 'b', text: String(body.title) }] });
@@ -571,16 +571,25 @@ function larkPostBlocks(c, mentions, { names = null } = {}) {
     for (const el of live) {
       switch (el.tag) {
         case 'text': {
-          const t = String(el.text || '');
+          // bounded (security verify r2, 2026-09-28): a post element's text is peer bytes like any other body
+          const t = bounded(String(el.text || ''));
           const st = Array.isArray(el.style) ? el.style : [];
-          if (st.includes('bold') && t.trim()) runs.push({ k: 'b', text: t });
-          else for (const r of inlineRuns(t, ictx)) { if (r.k === 't') text(r.text); else runs.push(r); }
+          // lane channel-rich: a text element that carries MARKUP goes through the markup reader (never printed)
+          const rs = carriesTag(t) ? markupRead(t, { ictx, nameOf, mode: 'inline' }) : (st.includes('bold') || st.includes('italic')) && t.trim() ? [{ k: 't', text: t }] : inlineRuns(t, ictx);
+          const style = st.includes('bold') ? 'b' : st.includes('italic') ? 'i' : null;
+          for (const r of rs) { if (r.k === 't' && style && r.text.trim()) runs.push({ k: style, text: r.text }); else if (r.k === 't') text(r.text); else runs.push(r); }
           break;
         }
-        case 'md': for (const r of inlineRuns(String(el.text || ''), ictx)) { if (r.k === 't') text(r.text); else runs.push(r); } break;
+        case 'md': {
+          // lane channel-rich: Lark MARKDOWN — headings, lists, rules, quotes, fences, emphasis and its inline tags
+          const bl = larkMdBlocks(String(el.text || ''), { ictx, nameOf, depth });
+          if (bl.length === 1 && bl[0].k === 'p') { for (const r of bl[0].runs) { if (r.k === 't') text(r.text); else runs.push(r); } }
+          else if (bl.length) { flush(); out.push(...bl); }
+          break;
+        }
         case 'a': {
           const href = safeHref(String(el.href || ''));
-          const label = String(el.text || '');
+          const label = markupPlainLine(String(el.text || ''));   // lane channel-rich: a label's markup is read, never printed
           if (href) runs.push({ k: 'a', href, text: linkText({ href, text: label || href }) });
           else text(label ? `${label}${el.href ? ` (${el.href})` : ''}` : String(el.href || ''));
           break;
@@ -590,7 +599,7 @@ function larkPostBlocks(c, mentions, { names = null } = {}) {
           // the NAME the message's own mentions / the chat's roster give this id
           // wins over the element's `user_name` (the sender's claim — a post
           // could chip "@Admin" over any id); the claim is only the fallback
-          const nm = (id === 'all' ? 'all' : nameOf(id)) || String(el.user_name || '').slice(0, 200) || id;
+          const nm = (id === 'all' ? 'all' : nameOf(id)) || markupPlainLine(String(el.user_name || '')).slice(0, 200) || id;
           runs.push({ k: 'at', id, name: nm });
           break;
         }
@@ -599,7 +608,7 @@ function larkPostBlocks(c, mentions, { names = null } = {}) {
         case 'emotion': text(`[${String(el.emoji_type || 'emoji').slice(0, 40)}]`); break;
         case 'code_block': { flush(); const o = { k: 'code', text: String(el.text || '') }; if (el.language) o.lang = String(el.language).slice(0, 30); out.push(o); break; }
         case 'hr': flush(); break;
-        default: if (el.text) text(String(el.text));
+        default: if (el.text) { const t = String(el.text); if (carriesTag(t)) { for (const r of markupRead(t, { ictx, nameOf, mode: 'inline' })) { if (r.k === 't') text(r.text); else runs.push(r); } } else text(t); }
       }
     }
   }
@@ -645,6 +654,479 @@ function larkSystemSentence(c, fallback) {
   });
 }
 
+// ── LARK MARKUP (lane channel-rich, 2026-09-28) ─────────────────────────
+// The owner: "lark 有些消息里混入了 <p> 这种 raw tag". A Lark body can carry
+// MARKUP in several places — a `text` message an integration posted as HTML
+// (`<p>…</p>`, measured: 85 records in one conversation), a post's `text` /
+// `md` element, a card's `lark_md` / `markdown` element, Lark's own inline
+// tags (`<at …>`, `<font …>`, `<text_tag …>`). THIS is the one reader that
+// turns it into BLOCKS: `<p>`/`<div>`/`<br>` are paragraph and line breaks,
+// `<b>`/`<strong>` bold runs, `<i>`/`<em>` italic runs, `<a href>` a link
+// through `safeHref`, `<at>` a mention chip, `<pre>` a code block, headings
+// bold, list items bulleted, script/style/iframe/… dropped WITH their
+// contents, and every other tag STRIPPED to its text — never printed.
+//
+// THE WALL (`sealTags`): a tag-shaped `<…>` that is still left in a text run
+// after the reader — a lone `<country>` placeholder a person typed, a
+// `Vec<String>` — becomes `‹country›` (its words kept, its angle brackets the
+// typographic ones), so NO `<…>` literal survives into a Lark block or
+// `rec.text` (inline code and code blocks are code: shown as written).
+// `TAG_LIKE_RE` is the census's own predicate (test-channel-record ⑦).
+/** A `<…>` that reads as a tag: `<`, an optional `/`, a letter, no angle bracket, `>`. */
+const TAG_LIKE_RE = /<\/?[A-Za-z][^<>]*>/;
+const TAG_LIKE_G = /<\/?[A-Za-z][^<>]*>/g;
+/** Does this string carry a tag-shaped `<…>`? */
+function carriesTag(s) { return typeof s === 'string' && s.indexOf('<') >= 0 && TAG_LIKE_RE.test(s); }
+/** The wall: every tag-shaped `<…>` left in a string becomes `‹…›`. */
+function quoteTags(s) {
+  let x = String(s == null ? '' : s);
+  for (let i = 0; i < 4 && carriesTag(x); i++) x = x.replace(TAG_LIKE_G, (m) => '‹' + m.slice(1, -1) + '›');
+  return x;
+}
+/** Seal every TEXT string of a tree (runs t/b/i/a/at, attribution, banner, card title/lines, sys);
+ *  code runs and code blocks are code — shown as written. Returns the same (mutated) tree. */
+function sealTags(blocks) {
+  for (const b of Array.isArray(blocks) ? blocks : []) {
+    if (!b || typeof b !== 'object') continue;
+    for (const k of ['attribution', 'title']) if (typeof b[k] === 'string') b[k] = quoteTags(b[k]);
+    if ((b.k === 'banner' || b.k === 'sys') && typeof b.text === 'string') b.text = quoteTags(b.text);
+    if (Array.isArray(b.lines)) b.lines = b.lines.map((l) => (typeof l === 'string' ? quoteTags(l) : l));
+    for (const r of Array.isArray(b.runs) ? b.runs : []) {
+      if (!r || r.k === 'code') continue;
+      if (typeof r.text === 'string') r.text = quoteTags(r.text);
+      if (r.k === 'at' && typeof r.name === 'string') r.name = quoteTags(r.name);
+    }
+    if (Array.isArray(b.blocks)) sealTags(b.blocks);
+  }
+  return blocks;
+}
+
+/** The entities a markup body decodes (numeric + the common named ones); anything else stays as written. */
+const NAMED_ENTITIES = Object.freeze({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', copy: '©', reg: '®', trade: '™', hellip: '…', mdash: '—', ndash: '–', laquo: '«', raquo: '»', middot: '·', bull: '•', lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”', times: '×', deg: '°', yen: '¥', euro: '€', emsp: ' ', ensp: ' ', thinsp: ' ', zwj: '\u200d', zwnj: '\u200c' });
+function decodeEntities(s) {
+  return String(s).replace(/&(#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[a-zA-Z]{2,8});/g, (m, e) => {
+    if (e[0] === '#') {
+      const n = e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+      if (!Number.isFinite(n) || n <= 0 || n > 0x10ffff || (n >= 0xd800 && n <= 0xdfff)) return m;
+      try { return String.fromCodePoint(n); } catch { return m; }
+    }
+    return Object.prototype.hasOwnProperty.call(NAMED_ENTITIES, e.toLowerCase()) ? NAMED_ENTITIES[e.toLowerCase()] : m;
+  });
+}
+
+/** How the reader treats each tag it KNOWS. Everything else is unknown: stripped to its text. */
+const MK_BLOCK = new Set(['p', 'div', 'section', 'article', 'header', 'footer', 'main', 'aside', 'nav', 'figure', 'figcaption', 'address', 'center', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'caption', 'dl', 'dt', 'dd', 'ul', 'ol', 'form', 'fieldset', 'details', 'summary', 'html', 'body']);
+const MK_HEAD = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
+const MK_BOLD = new Set(['b', 'strong']);
+const MK_ITALIC = new Set(['i', 'em', 'cite', 'var', 'dfn']);
+const MK_CELL = new Set(['td', 'th']);
+/** Dropped WITH their contents (a script's words are not the message). */
+const MK_DROP = new Set(['script', 'style', 'iframe', 'object', 'embed', 'noscript', 'template', 'textarea', 'title', 'head', 'svg', 'math', 'select', 'option', 'applet', 'noembed', 'noframes', 'xmp', 'video', 'audio', 'canvas']);
+/** Void / inline tags the reader knows and passes through (their text kept). */
+const MK_INLINE = new Set(['span', 'font', 'u', 'ins', 's', 'del', 'strike', 'small', 'big', 'sub', 'sup', 'mark', 'abbr', 'q', 'tt', 'kbd', 'samp', 'time', 'label', 'text_tag', 'link', 'bdi', 'bdo', 'wbr', 'nobr', 'button', 'legend', 'meta', 'base', 'input', 'img', 'source', 'track', 'param', 'col', 'colgroup', 'area', 'map', 'picture', 'frame', 'frameset', 'hr', 'br', 'li', 'blockquote', 'pre', 'code', 'a', 'at', 'person']);
+const knownTag = (n) => MK_BLOCK.has(n) || MK_HEAD.has(n) || MK_BOLD.has(n) || MK_ITALIC.has(n) || MK_CELL.has(n) || MK_DROP.has(n) || MK_INLINE.has(n);
+/** A tag: `<` `/`? name attrs? `/`? `>`; a comment; a declaration.
+ *  LINEAR (security verify, 2026-09-28): the attribute run is ONE greedy `[^<>]*` — the earlier lazy run followed
+ *  by `\s*` backtracked quadratically over a long whitespace run (`<a` + 64 KB of spaces = 1.7 s of the server's
+ *  event loop per record, at ingest AND at every read through `recordView`). A trailing `/` in the run is the
+ *  self-closing mark (`markupTokens` peels it). */
+const MK_TAG_RE = /<(\/?)([A-Za-z][A-Za-z0-9_:-]{0,40})((?:\s[^<>]*)?)(\/?)>|<!--[\s\S]*?(?:-->|$)|<![^<>]{0,400}>/g;
+/** One attribute's value out of an attribute string (entities decoded). */
+function mkAttr(attrs, name) {
+  const re = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'>]+))`, 'i');
+  const m = re.exec(String(attrs || ''));
+  return m ? decodeEntities(m[1] !== undefined ? m[1] : m[2] !== undefined ? m[2] : m[3]) : null;
+}
+/** Split out the CODE spans (``` fences, `inline`) the tag reader must not touch. */
+function codeSpans(s) {
+  const out = [];
+  const re = /```[\s\S]*?```|`[^`\n]{1,300}`/g;
+  let last = 0, m;
+  while ((m = re.exec(s))) { if (m.index > last) out.push({ code: false, s: s.slice(last, m.index) }); out.push({ code: true, s: m[0] }); last = m.index + m[0].length; }
+  if (last < s.length) out.push({ code: false, s: s.slice(last) });
+  return out;
+}
+/** THE TOKENIZER: text / open / close / self tokens, code spans opaque. Bounded by the rung's `bounded()`. */
+function markupTokens(src) {
+  const toks = [];
+  for (const seg of codeSpans(src)) {
+    if (seg.code) { toks.push({ t: 'text', v: seg.s, code: true }); continue; }
+    const s = seg.s;
+    let last = 0, m;
+    MK_TAG_RE.lastIndex = 0;
+    while ((m = MK_TAG_RE.exec(s))) {
+      if (m.index > last) toks.push({ t: 'text', v: s.slice(last, m.index) });
+      last = m.index + m[0].length;
+      if (m[2] === undefined) continue;   // a comment / a declaration: dropped
+      const name = m[2].toLowerCase();
+      let attrs = m[3] || '', self = !!m[4];
+      if (!self && attrs && /\/\s*$/.test(attrs)) { self = true; attrs = attrs.replace(/\/\s*$/, ''); }
+      toks.push({ t: m[1] ? 'close' : (self ? 'self' : 'open'), name, attrs, raw: m[0] });
+    }
+    if (last < s.length) toks.push({ t: 'text', v: s.slice(last) });
+  }
+  // an UNKNOWN tag is markup when it is paired, carries attributes or closes itself — else it is a lone
+  // `<word>` a person typed (a placeholder, a generic): kept as TEXT (the wall words it ‹word›)
+  const opened = new Set(), closed = new Set();
+  for (const k of toks) { if (k.t === 'open') opened.add(k.name); else if (k.t === 'close') closed.add(k.name); }
+  for (const k of toks) {
+    if (k.t !== 'open' && k.t !== 'close') continue;
+    // A DROP TAG WITH NO CLOSER IS NOT A DROP (security verify r2, 2026-09-28): "please set the <title> of the
+    // page", "the <select> is broken", "hello <svg> world" — an open drop tag ran to the END of the message and
+    // everything after it was silently gone from the agent's text AND the window (a data loss anyone can send,
+    // and a way to hide the rest of a message from an agent). A drop is a drop only when the message CLOSES it;
+    // an unclosed one with no attributes is the word a person typed (the wall words it ‹title›), with
+    // attributes it is that one tag alone — the words after it stay either way.
+    if (k.t === 'open' && MK_DROP.has(k.name) && !closed.has(k.name)) {
+      if (!k.attrs.trim()) { k.t = 'text'; k.v = k.raw; k.lone = true; } else k.t = 'self';
+      continue;
+    }
+    if (knownTag(k.name)) continue;
+    const paired = opened.has(k.name) && closed.has(k.name);
+    if (!paired && !k.attrs.trim()) { k.t = 'text'; k.v = k.raw; k.lone = true; }
+  }
+  return toks;
+}
+
+/** Italic `*x*` / `_x_` and `~~strike~~` of Lark markdown over a run list (bold `**x**` is `inlineRuns`'). */
+function mdEmphasis(runs) {
+  const out = [];
+  const re = /~~([^~\n]{1,300})~~|(?<![*\w])\*(?![*\s])([^*\n]{1,300}?)(?<!\s)\*(?![*\w])|(?<![_\w])_(?![_\s])([^_\n]{1,300}?)(?<!\s)_(?![_\w])/g;
+  for (const r of runs) {
+    if (!r || r.k !== 't') { out.push(r); continue; }
+    let last = 0, m;
+    re.lastIndex = 0;
+    while ((m = re.exec(r.text))) {
+      if (m.index > last) out.push({ k: 't', text: r.text.slice(last, m.index) });
+      if (m[1] !== undefined) out.push({ k: 't', text: m[1] });
+      else out.push({ k: 'i', text: m[2] !== undefined ? m[2] : m[3] });
+      last = m.index + m[0].length;
+    }
+    if (last < r.text.length) out.push({ k: 't', text: r.text.slice(last) });
+  }
+  // adjacent text runs merged again
+  const merged = [];
+  for (const r of out) { const p = merged[merged.length - 1]; if (p && p.k === 't' && r.k === 't') p.text += r.text; else merged.push(r); }
+  return merged;
+}
+
+/**
+ * THE MARKUP READER: a markup string → BLOCKS (`mode: 'blocks'`) or one run
+ * list with `\n` for every block boundary (`mode: 'inline'`, inside a post
+ * line). `opts`: `ictx` (the rung's compiled inline context — ordinals and
+ * names), `nameOf(id)` (the roster's name for a mention id), `md` (Lark
+ * markdown: headings, lists, rules, quotes, fences, emphasis).
+ */
+function markupRead(text, opts = {}) {
+  const ictx = opts.ictx || inlineCtx({});
+  const mode = opts.mode === 'inline' ? 'inline' : 'blocks';
+  const nameOf = typeof opts.nameOf === 'function' ? opts.nameOf : () => '';
+  // our own frames go FIRST (rule 3 of channel-record: `<system-reminder>` is words, never a tag to strip)
+  let src = R.inertFrames(String(text == null ? '' : text));
+  const decode = carriesTag(src) || /&(#\d+|#x[0-9a-f]+|[a-z]{2,8});/i.test(src);
+  const out = [];              // the blocks (a quote's inner list while inside one)
+  const stack = [];            // open blockquotes: {outer, blocks}
+  let runs = [];
+  let bold = 0, italic = 0, drop = null, dropDepth = 0, link = null, at = null, pre = null;
+  const lists = [];            // {ordered, n}
+  // THE NESTING BOUND (security verify, 2026-09-28): 10 000 `<blockquote>` opens built a tree 10 000 deep — the
+  // text path's `blocksToPlain` overflowed the stack and `toRecord` THREW (a poison message). A quote deeper than
+  // the record's own depth limit allows (`opts.depth` = where this output lands) is a paragraph break, not a level.
+  const baseDepth = Math.max(0, Math.floor(Number(opts.depth) || 0));
+  let overQuote = 0;
+  const cur = () => (stack.length ? stack[stack.length - 1].blocks : out);
+  // THE TAIL CHARACTER IS TRACKED (security verify r2, 2026-09-28): `brk()` and a cell asked `/\n$/.test(last.text)`
+  // on the run every `<li>` / `<br>` had just been APPENDED to — V8 flattens the rope for every regex, so 10 000
+  // list items were 10 000 × (the text so far): 128 KB of `<li>` = 430 ms of the event loop at ingest, a
+  // megabyte = half a minute. One character, kept beside the run, answers the same question in O(1).
+  let tail = '';   // the last character of the last text run (or '' when the last run is not text / none)
+  const pushRun = (r) => {
+    if (!r) return;
+    const last = runs[runs.length - 1];
+    if (r.k === 't' && last && last.k === 't') { last.text += r.text; if (r.text) tail = r.text[r.text.length - 1]; return; }
+    runs.push(r);
+    tail = r.k === 't' && r.text ? r.text[r.text.length - 1] : '';
+  };
+  const flush = () => {
+    tail = '';
+    while (runs.length && runs[runs.length - 1].k === 't' && !runs[runs.length - 1].text.trim()) runs.pop();
+    while (runs.length && runs[0].k === 't' && !runs[0].text.trim()) runs.shift();
+    if (runs.length && runs[runs.length - 1].k === 't') runs[runs.length - 1].text = runs[runs.length - 1].text.replace(/\s+$/, '');
+    if (runs.length && runs[0].k === 't') runs[0].text = runs[0].text.replace(/^\s+/, '');
+    if (runs.some((r) => r.k !== 't' || r.text)) cur().push({ k: 'p', runs });
+    runs = [];
+  };
+  const brk = () => {
+    if (mode === 'inline') { if (runs.length && tail !== '\n') pushRun({ k: 't', text: '\n' }); return; }
+    flush();
+  };
+  const styled = (list) => {
+    for (const r of list) {
+      if (r.k === 't' && (bold || italic)) pushRun({ k: bold ? 'b' : 'i', text: r.text });
+      else pushRun(r);
+    }
+  };
+  const textOut = (v, code) => {
+    if (drop) return;
+    if (pre) { pre.text += code ? v : decode ? decodeEntities(v) : v; return; }
+    const s = code ? v : (decode ? decodeEntities(v) : v);
+    if (link) { link.text += s; return; }
+    if (at) { at.text += s; return; }
+    if (code) { styled(inlineRuns(s, ictx)); return; }
+    // a blank line is a paragraph break; a single newline stays in the run
+    const parts = s.split(/\n[ \t]*\n+/);
+    parts.forEach((part, i) => {
+      if (i > 0) brk();
+      if (!part) return;
+      let rs = inlineRuns(part, ictx);
+      if (opts.md) rs = mdEmphasis(rs);
+      styled(rs);
+    });
+  };
+  const toks = markupTokens(src);
+  for (const k of toks) {
+    if (k.t === 'text') { textOut(k.v, !!k.code); continue; }
+    const n = k.name;
+    if (drop) { if (n === drop) { if (k.t === 'open') dropDepth++; else if (k.t === 'close' && --dropDepth <= 0) { drop = null; dropDepth = 0; } } continue; }
+    if (k.t === 'open' && MK_DROP.has(n)) { drop = n; dropDepth = 1; continue; }
+    if (MK_DROP.has(n)) continue;   // a stray closer / a self-closing one
+    if (pre) {
+      if (n === 'pre' && k.t === 'close') { const o = { k: 'code', text: pre.text.replace(/^\n/, '').replace(/\n$/, '') }; pre = null; if (o.text.trim()) { flush(); cur().push(o); } }
+      else if (n === 'br') pre.text += '\n';
+      continue;   // markup inside a code block: its text only
+    }
+    const open = k.t === 'open', close = k.t === 'close', self = k.t === 'self';
+    if (n === 'br') { if (link) link.text += ' '; else if (at) at.text += ' '; else pushRun({ k: 't', text: '\n' }); continue; }
+    if (n === 'hr') { if (mode === 'inline') { brk(); pushRun({ k: 't', text: '—' }); brk(); } else { flush(); cur().push({ k: 'hr' }); } continue; }
+    if (n === 'pre') { if (open) { flush(); pre = { text: '' }; } continue; }
+    if (n === 'a') {
+      if (open) { link = { href: mkAttr(k.attrs, 'href') || '', text: '' }; continue; }
+      if (close && link) {
+        const href = safeHref(link.href);
+        const label = link.text.replace(/\s+/g, ' ').trim();
+        link = null;
+        if (href) pushRun({ k: 'a', href, text: linkText({ href, text: label || href }) });
+        else if (label) styled([{ k: 't', text: label }]);
+      }
+      continue;
+    }
+    if (n === 'at' || n === 'person') {
+      const id = mkAttr(k.attrs, 'user_id') || mkAttr(k.attrs, 'open_id') || mkAttr(k.attrs, 'id') || mkAttr(k.attrs, 'email') || '';
+      if (open) { at = { id: String(id).slice(0, 256), text: '' }; continue; }
+      const done = (who) => { const nm = R.peerName((who.id === 'all' ? 'all' : nameOf(who.id)) || who.text.replace(/\s+/g, ' ').trim() || who.id, 200); if (nm) pushRun({ k: 'at', id: who.id === 'all' ? 'all' : who.id, name: nm }); };   // the .197 integration: a mention's name through THE name door (lark-search-poll ④g)
+      if (self) { done({ id: String(id).slice(0, 256), text: '' }); continue; }
+      if (close && at) { const w = at; at = null; done(w); }
+      continue;
+    }
+    if (link || at) continue;   // markup inside a link label / a mention: its text only
+    if (MK_BOLD.has(n)) { if (open) bold++; else if (close && bold) bold--; continue; }
+    if (MK_ITALIC.has(n)) { if (open) italic++; else if (close && italic) italic--; continue; }
+    if (MK_HEAD.has(n)) { brk(); if (open) bold++; else if (close && bold) bold--; continue; }
+    if (n === 'blockquote') {
+      if (mode === 'inline') { brk(); continue; }
+      if (open) { flush(); if (baseDepth + stack.length + 1 > MAX_DEPTH) overQuote++; else stack.push({ blocks: [] }); continue; }
+      if (close && overQuote) { flush(); overQuote--; continue; }
+      if (close && stack.length) { flush(); const q = stack.pop(); if (q.blocks.length) cur().push({ k: 'quote', blocks: q.blocks, lines: q.blocks.length }); }
+      continue;
+    }
+    if (n === 'ul' || n === 'ol') { brk(); if (open) lists.push({ ordered: n === 'ol', n: 0 }); else if (close) lists.pop(); continue; }
+    if (n === 'li') {
+      if (!open) { brk(); continue; }
+      brk();
+      const l = lists[lists.length - 1];
+      pushRun({ k: 't', text: l && l.ordered ? `${++l.n}. ` : '• ' });
+      continue;
+    }
+    if (MK_CELL.has(n)) { if (open) { if (runs.length && !/\s/.test(tail)) pushRun({ k: 't', text: '  ' }); } continue; }
+    if (MK_BLOCK.has(n)) { brk(); continue; }
+    if (n === 'code') continue;   // an HTML <code> inline: its text (a backtick span is the code run)
+    // img / meta / input / font / span / every unknown paired tag: stripped to its text (nothing)
+  }
+  if (link) { const l = link; link = null; styled([{ k: 't', text: l.text }]); }
+  if (at) { const w = at; at = null; if (w.text) styled([{ k: 't', text: w.text }]); }
+  if (pre) { flush(); if (pre.text.trim()) cur().push({ k: 'code', text: pre.text }); pre = null; }
+  if (mode === 'inline') {
+    while (runs.length && runs[runs.length - 1].k === 't' && !runs[runs.length - 1].text.trim()) runs.pop();
+    while (stack.length) stack.pop();
+    return runs;
+  }
+  flush();
+  while (stack.length) { const q = stack.pop(); if (q.blocks.length) cur().push({ k: 'quote', blocks: q.blocks, lines: q.blocks.length }); }
+  return out;
+}
+
+/**
+ * LARK MARKDOWN (a post's `md` element, a card's `lark_md` / `markdown`):
+ * line-level first — ``` fences, `#` headings (bold), `- ` / `* ` / `1. `
+ * list items (a bullet / the number), `---` rules, `> ` quotes — then every
+ * paragraph through the markup reader (HTML-ish tags, links, mentions,
+ * emphasis). → blocks.
+ */
+function larkMdBlocks(text, opts = {}) {
+  const lines = splitLines(bounded(text));
+  const out = [];
+  let para = [];
+  const depth = Math.max(0, Math.floor(Number(opts.depth) || 0));
+  const flush = () => { if (para.length) { out.push(...markupRead(para.join('\n'), { ...opts, depth, md: true, mode: 'blocks' })); para = []; } };
+  // ONE fence walk (security verify, 2026-09-28 — the email rung's verify-round-4 rule, re-applied here): a walk
+  // that found no closer proves there is none after it, so every later opener is a plain line (13 000 "```js"
+  // lines were 0.6–1.3 s of the event loop per record, quadratic)
+  let noCloserFrom = Infinity;
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    const fence = i < noCloserFrom ? /^\s*```\s*([A-Za-z0-9_+-]{0,30})\s*$/.exec(l) : null;
+    if (fence) {
+      let j = i + 1;
+      while (j < lines.length && !/^\s*```\s*$/.test(lines[j])) j++;
+      if (j < lines.length) { flush(); const o = { k: 'code', text: lines.slice(i + 1, j).join('\n') }; if (fence[1]) o.lang = fence[1]; out.push(o); i = j; continue; }
+      noCloserFrom = i;
+    }
+    if (/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(l)) { flush(); out.push({ k: 'hr' }); continue; }
+    if (QUOTED.test(l)) {
+      flush();
+      let j = i;
+      while (j < lines.length && QUOTED.test(lines[j])) j++;
+      // the nesting bound (security verify): a quote past the record's depth limit is its words, unquoted —
+      // 20 000 `> ` on one line recursed 20 000 deep and overflowed the stack
+      if (depth + 1 > MAX_DEPTH) { para.push(...lines.slice(i, j).map((x) => String(x).replace(/^(?:\s*>\s?)+/, ''))); flush(); i = j - 1; continue; }
+      const inner = larkMdBlocks(lines.slice(i, j).map(stripQuote).join('\n'), { ...opts, depth: depth + 1 });
+      if (inner.length) out.push({ k: 'quote', blocks: inner, lines: j - i });
+      i = j - 1;
+      continue;
+    }
+    const h = /^\s*#{1,6}\s+(.*)$/.exec(l);
+    if (h) { flush(); para.push(`<b>${h[1]}</b>`); flush(); continue; }
+    if (blank(l)) { flush(); continue; }
+    const li = /^(\s*)(?:[-*+]|(\d{1,3})[.)])\s+(.*)$/.exec(l);
+    if (li) { flush(); para.push(`${' '.repeat(Math.min(3, Math.floor(li[1].length / 2)))}${li[2] ? `${li[2]}. ` : '• '}${li[3]}`); flush(); continue; }
+    para.push(l);
+  }
+  flush();
+  return out;
+}
+
+/**
+ * A markup-bearing Lark body → the words an AGENT reads (`rec.text`): the
+ * same reader's blocks, flattened — paragraphs by a newline, a link as
+ * "label (href)", a mention as "@name", a rule as "—", a quote's lines "> ",
+ * then sealed. A string with no tag-shaped `<…>` and no entity is returned
+ * AS IT IS (a plain message is never re-flowed).
+ */
+function larkPlainText(text, opts = {}) {
+  const s = String(text == null ? '' : text);
+  if (!carriesTag(s) && !/&(#\d+|#x[0-9a-f]+|[a-z]{2,8});/i.test(s)) return s;
+  return quoteTags(blocksToPlain(markupRead(bounded(s), { ...opts, ictx: inlineCtx({}), mode: 'blocks' })));
+}
+/** A tree's words, one paragraph per line (the plain text of a rich body). */
+function blocksToPlain(blocks, prefix = '') {
+  const lines = [];
+  const runText = (r) => (r.k === 'at' ? `@${r.name}` : r.k === 'a' ? (r.text && r.text !== r.href ? `${r.text} (${r.href})` : r.href) : r.k === 'code' ? `\`${r.text}\`` : r.text || '');
+  for (const b of Array.isArray(blocks) ? blocks : []) {
+    if (!b) continue;
+    switch (b.k) {
+      case 'p': lines.push(...(b.runs || []).map(runText).join('').split('\n').map((l) => prefix + l)); break;
+      case 'quote': case 'sig': lines.push(blocksToPlain(b.blocks, prefix + '> ')); break;
+      case 'code': lines.push(...String(b.text || '').split('\n').map((l) => prefix + l)); break;
+      case 'banner': case 'sys': lines.push(prefix + (b.text || '')); break;
+      case 'card': lines.push(...[b.title, ...(b.lines || [])].filter(Boolean).map((l) => prefix + l)); if (Array.isArray(b.blocks)) lines.push(blocksToPlain(b.blocks, prefix)); break;
+      case 'hr': lines.push(prefix + '—'); break;
+      case 'img': lines.push(prefix + LARK_IMAGE_TOKEN); break;
+      case 'file': lines.push(prefix + '[file]'); break;
+      default: break;
+    }
+  }
+  return lines.filter((l) => l !== undefined).join('\n');
+}
+
+/**
+ * AN INTERACTIVE CARD's elements → blocks (D1: header title, `div` / `markdown`
+ * text, `hr`, `note`, buttons as LABELS only — never a clickable vendor url).
+ * Both shapes: the list answer's post-like `elements: [[…]]` and the card
+ * JSON's `elements: [{tag…}]` (also card 2.0's `body.elements`, and
+ * `i18n_elements` by locale). Bounded: depth 6, BLOCK_LIMITS.cardLines × 4 blocks.
+ */
+const CARD_LOCALES = ['zh_cn', 'en_us', 'ja_jp'];
+function cardElementsOf(c) {
+  if (!c || typeof c !== 'object') return [];
+  if (Array.isArray(c.elements)) return c.elements;
+  if (c.body && Array.isArray(c.body.elements)) return c.body.elements;
+  if (c.i18n_elements && typeof c.i18n_elements === 'object') for (const k of [...CARD_LOCALES, ...Object.keys(c.i18n_elements)]) if (Array.isArray(c.i18n_elements[k])) return c.i18n_elements[k];
+  return [];
+}
+function cardTitleOf(c) {
+  if (!c || typeof c !== 'object') return '';
+  const h = c.header || {};
+  const t = (h.title && (h.title.content || h.title.text)) || c.title || '';
+  if (t) return String(t);
+  if (h.i18n_title && typeof h.i18n_title === 'object') for (const k of [...CARD_LOCALES, ...Object.keys(h.i18n_title)]) if (h.i18n_title[k]) return String(h.i18n_title[k]);
+  return '';
+}
+function larkCardBlocks(c, mentions, opts = {}) {
+  const ictx = inlineCtx({ ordinals: mentions });
+  const nameOf = opts.nameOf || (() => '');
+  const out = [];
+  const cap = BLOCK_LIMITS.cardLines * 4;
+  const textOf = (x) => (x && typeof x === 'object' ? { s: String(x.content || x.text || ''), md: x.tag === 'lark_md' || x.tag === 'markdown' } : { s: typeof x === 'string' ? x : '', md: false });
+  // a card's inner blocks land one level down (`card.blocks`) — the readers' nesting bound counts it
+  const para = (x, md) => { if (!x || !String(x).trim()) return; out.push(...(md ? larkMdBlocks(x, { ictx, nameOf, depth: 1 }) : markupRead(bounded(x), { ictx, nameOf, depth: 1, mode: 'blocks' }))); };
+  const walk = (els, depth) => {
+    if (!Array.isArray(els) || depth > 6) return;
+    for (const e of els) {
+      if (out.length >= cap) return;
+      if (Array.isArray(e)) {
+        // the list answer's post-like line
+        const blocks = larkPostBlocks({ content: [e] }, mentions, { names: opts.names || null, depth: 1 });
+        out.push(...blocks);
+        continue;
+      }
+      if (!e || typeof e !== 'object') continue;
+      switch (e.tag) {
+        case 'hr': out.push({ k: 'hr' }); break;
+        case 'markdown': case 'lark_md': para(e.content || (e.text && e.text.content) || '', true); break;
+        case 'plain_text': para(e.content || '', false); break;
+        case 'div': {
+          if (e.text) { const t = textOf(e.text); para(t.s, t.md); }
+          if (Array.isArray(e.fields)) for (const f of e.fields) { const t = textOf(f && f.text); para(t.s, t.md); }
+          if (e.extra && e.extra.tag === 'button' && e.extra.text) { const t = textOf(e.extra.text); if (t.s.trim()) out.push({ k: 'p', runs: [{ k: 't', text: `[${markupPlainLine(t.s)}]` }] }); }
+          break;
+        }
+        case 'note': {
+          const words = (Array.isArray(e.elements) ? e.elements : []).map((x) => (x && (x.tag === 'plain_text' || x.tag === 'lark_md') ? markupPlainLine(String(x.content || '')) : '')).filter(Boolean).join(' ');
+          if (words) out.push({ k: 'banner', text: words.slice(0, 400) });
+          break;
+        }
+        case 'action': {
+          // buttons as LABELS only — a card button's url / value is the vendor's, never a link here
+          const labels = (Array.isArray(e.actions) ? e.actions : []).map((a) => markupPlainLine(String((a && a.text && (a.text.content || a.text.text)) || (a && a.placeholder && a.placeholder.content) || ''))).filter(Boolean);
+          if (labels.length) out.push({ k: 'p', runs: [{ k: 't', text: labels.map((l) => `[${l}]`).join(' ') }] });
+          break;
+        }
+        case 'button': { const l = markupPlainLine(String((e.text && (e.text.content || e.text.text)) || '')); if (l) out.push({ k: 'p', runs: [{ k: 't', text: `[${l}]` }] }); break; }
+        case 'column_set': for (const col of Array.isArray(e.columns) ? e.columns : []) walk(col && col.elements, depth + 1); break;
+        case 'collapsible_panel': {
+          const t = e.header && e.header.title ? textOf(e.header.title) : { s: '' };
+          if (t.s.trim()) out.push({ k: 'p', runs: [{ k: 'b', text: markupPlainLine(t.s) }] });
+          walk(e.elements, depth + 1);
+          break;
+        }
+        case 'img': case 'image': { const alt = e.alt ? textOf(e.alt).s : ''; if (alt.trim()) out.push({ k: 'banner', text: `[${markupPlainLine(alt).slice(0, 200)}]` }); break; }
+        default: {
+          if (e.text) { const t = textOf(e.text); para(t.s, t.md); } else if (typeof e.content === 'string') para(e.content, false);
+          if (Array.isArray(e.elements)) walk(e.elements, depth + 1);
+          if (Array.isArray(e.columns)) for (const col of e.columns) walk(col && col.elements, depth + 1);
+        }
+      }
+    }
+  };
+  walk(cardElementsOf(c), 0);
+  return out.slice(0, cap);
+}
+/** One line of markup → its plain words (a button label, a note, a title). */
+function markupPlainLine(s) {
+  const x = String(s == null ? '' : s);
+  return carriesTag(x) || /&[#a-z0-9]{2,8};/i.test(x) ? blocksToPlain(markupRead(x.slice(0, 2000), { mode: 'blocks' })).replace(/\s+/g, ' ').trim() : x.trim();
+}
+
 /** Which `sys.what` a Lark message type is. */
 const LARK_SYS = Object.freeze({ sticker: 'sticker', share_chat: 'share-chat', share_user: 'share-user', merge_forward: 'forward', location: 'location', video_chat: 'call', share_calendar_event: 'calendar', calendar: 'calendar', todo: 'todo', system: 'system' });
 
@@ -663,19 +1145,28 @@ function larkItemBlocks(item, mentions, opts, fallback) {
   const c = parseJson(it.body && it.body.content);
   if (it.deleted === true) return finish([{ k: 'sys', what: 'deleted', text: fallback || '[deleted]' }], fallback);
   const type = String(it.msg_type || '');
+  const nameOf = (id) => (opts.names && typeof opts.names.get === 'function' && opts.names.get(id)) || ((mentions || []).find((m) => m && m.id === id) || {}).name || '';
   switch (type) {
-    case 'text': return textToBlocks(bounded(String((c && c.text) || '')), { ordinals: mentions });
-    case 'post': return finish(larkPostBlocks(c, mentions, opts), fallback);
+    case 'text': {
+      // lane channel-rich (D1): a text body that carries MARKUP (an integration's `<p>…</p>`, Lark's own inline
+      // tags) goes through the markup reader; a plain one through the generic rung as before — then the wall
+      const t = bounded(String((c && c.text) || ''));
+      if (!carriesTag(t)) return finish(sealTags(textToBlocks(t, { ordinals: mentions })), fallback);
+      return finish(sealTags(markupRead(t, { ictx: inlineCtx({ ordinals: mentions }), nameOf, mode: 'blocks' })), fallback);
+    }
+    case 'post': return finish(sealTags(larkPostBlocks(c, mentions, opts)), fallback);
     case 'image': return finish(c && c.image_key ? [{ k: 'img', attachmentId: String(c.image_key) }] : [{ k: 'sys', what: 'unknown', text: fallback }], fallback);
     case 'file': case 'folder': case 'media': case 'audio':
       return finish(c && c.file_key ? [{ k: 'file', attachmentId: String(c.file_key) }] : [{ k: 'sys', what: 'unknown', text: fallback }], fallback);
     case 'interactive': {
-      const title = String((c && (c.title || (c.header && c.header.title && c.header.title.content))) || '').trim();
-      const lines = cardLines(c && c.elements);
-      if (!title && !lines.length) return finish([{ k: 'sys', what: 'card', text: fallback || '[card]' }], fallback);
-      return finish([{ k: 'card', title, lines }], fallback);
+      // lane channel-rich (D1): a card RENDERS its elements — header title, div / markdown text, hr, note,
+      // buttons as labels — as inner blocks (the older `lines` stay empty on a new record)
+      const title = markupPlainLine(cardTitleOf(c)).slice(0, 400);
+      const blocks = larkCardBlocks(c, mentions, { ...opts, nameOf });
+      if (!title && !blocks.length) return finish([{ k: 'sys', what: 'card', text: fallback || '[card]' }], fallback);
+      return finish(sealTags([{ k: 'card', title, lines: [], blocks }]), fallback);
     }
-    case 'system': return finish([{ k: 'sys', what: 'system', text: larkSystemSentence(c, fallback) || fallback }], fallback);
+    case 'system': return finish(sealTags([{ k: 'sys', what: 'system', text: markupPlainLine(larkSystemSentence(c, fallback)) || fallback }]), fallback);
     default: return finish([{ k: 'sys', what: LARK_SYS[type] || 'unknown', text: fallback || `[${type || 'message'}]` }], fallback);
   }
 }
@@ -696,16 +1187,24 @@ function larkStoredRecordBlocks(r, text) {
   const legacy = { image: LARK_IMAGE_TOKEN, video: LARK_VIDEO_TOKEN };
   if (text === '[deleted]') return finish([{ k: 'sys', what: 'deleted', text }], text);
   switch (type) {
-    case 'text': case 'post': case '':
-      return textToBlocks(text, { attachments: atts, legacyPlaceholders: legacy, mentionNames: r.mentions });
+    case 'text': case 'post': case '': {
+      // lane channel-rich (D1): a record stored with markup in its text (the owner's `<p>` rows) — its words
+      // through the markup reader first, then the rung (the "[image]" lines are the pictures, the @names chips)
+      const words = carriesTag(text) ? larkPlainText(text) : text;
+      return finish(sealTags(textToBlocks(words, { attachments: atts, legacyPlaceholders: legacy, mentionNames: r.mentions })), text);
+    }
     case 'image': return finish(atts.length ? atts.map((a) => ({ k: 'img', attachmentId: String(a.id) })) : [{ k: 'sys', what: 'unknown', text }], text);
     case 'file': case 'folder': case 'media': case 'audio':
       return finish(atts.length ? atts.map((a) => ({ k: /^image\//i.test(String(a.mime || '')) ? 'img' : 'file', attachmentId: String(a.id) })) : [{ k: 'sys', what: 'unknown', text }], text);
     case 'interactive': {
-      const title = text.replace(/^\[card\]\s*/, '').trim();
-      return finish(title && title !== '[card]' ? [{ k: 'card', title, lines: [] }] : [{ k: 'sys', what: 'card', text }], text);
+      // a card's first line is "[card] <title>"; a record written since lane channel-rich carries its elements' words after it
+      const [first, ...rest] = text.split('\n');
+      const title = first.replace(/^\[card\]\s*/, '').trim();
+      const body = rest.join('\n').trim();
+      const blocks = body ? textToBlocks(larkPlainText(body)) : [];
+      return finish(sealTags(title && title !== '[card]' ? [{ k: 'card', title, lines: [], ...(blocks.length ? { blocks } : {}) }] : [{ k: 'sys', what: 'card', text }]), text);
     }
-    default: return finish([{ k: 'sys', what: LARK_SYS[type] || 'unknown', text }], text);
+    default: return finish(sealTags([{ k: 'sys', what: LARK_SYS[type] || 'unknown', text }]), text);
   }
 }
 
@@ -719,7 +1218,7 @@ function previewOf(blocks, max = 200) {
   for (const b of Array.isArray(blocks) ? blocks : []) {
     if (!b) continue;
     if (b.k === 'p') parts.push((b.runs || []).map(runText).join(''));
-    else if (b.k === 'card') parts.push([b.title, ...(b.lines || [])].filter(Boolean).join(' '));
+    else if (b.k === 'card') parts.push([b.title, ...(b.lines || []), Array.isArray(b.blocks) ? previewOf(b.blocks, max) : ''].filter(Boolean).join(' '));
     else if (b.k === 'sys' || b.k === 'code') parts.push(b.text || '');
     if (parts.join(' ').length > max) break;
   }
@@ -745,5 +1244,7 @@ module.exports = {
   validateBlocks, safeHref, linkText, inlineRuns,
   textToBlocks, emailToBlocks, cleanSubject, findQuoteStart,
   larkToBlocks, larkStoredBlocks, larkPostBody, larkSystemSentence, cardLines,
+  // lane channel-rich (D1): THE LARK MARKUP READER + the wall
+  TAG_LIKE_RE, carriesTag, quoteTags, sealTags, decodeEntities, markupTokens, markupRead, larkMdBlocks, larkPlainText, blocksToPlain, larkCardBlocks, cardTitleOf, markupPlainLine,
   previewOf, blockStrings,
 };

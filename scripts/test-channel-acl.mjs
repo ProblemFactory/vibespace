@@ -155,6 +155,17 @@ const A = 'fake-poll', C = 'fake-poll-ops', KEY = `${A}/${C}`;
   ok(eng.readFor(AG, A, C, {}).ok && eng.listFor(AG).conversations.find((c) => c.key === KEY).level === 'visible', 'the agent now reads it');
   ok(eng.listFor({ ...AG, id: 'agent-2' }).conversations.find((c) => c.key === KEY).level === 'requestable', 'another member of the group is still only requestable (the approval touched no default)');
   ok(!(await eng.decideRequest(rq.request.id, true)).ok, 'deciding twice is refused');
+  // verify-r6 Q1: two decisions IN FLIGHT at once (Deny in one window, Approve in another) — both used to pass the
+  // status check above the write's await and the later overwrote the earlier (a card read "denied" while the grant
+  // stood); the status is asked again inside the write: exactly one decision lands, the other is bad-state
+  {
+    const AG2 = { ...AG, id: 'agent-2', name: 'Worker 2' };
+    const rq3 = await eng.request(AG2, A, C, 'me too');
+    const [dx, dy] = await Promise.all([eng.decideRequest(rq3.request.id, false), eng.decideRequest(rq3.request.id, true)]);
+    const lvl = eng.listFor(AG2).conversations.find((c) => c.key === KEY).level;
+    const stored = eng.store.index.snapshot().conversations[KEY].reachRequests.find((r) => r.id === rq3.request.id);
+    ok(rq3.ok && dx.ok === true && dy.ok === false && dy.code === 'bad-state' && stored.status === 'denied' && lvl === 'requestable', 'verify-r6 Q1: Deny and Approve in flight at once ⇒ ONE lands (the first: denied), the other is bad-state, NO grant (pre-fix: both ok, the approval overwrote the denial)', { dx: dx.ok, dy: dy.code, status: stored && stored.status, lvl });
+  }
   eng.stop();
 }
 
@@ -184,6 +195,72 @@ console.log('§2b account + pattern grants through the REAL engine');
   await eng.setScopeAssignment(A, { kind: 'pattern', id: pr.assignment.scope.id }, null);
   ok(eng.listFor(AG).conversations.filter((c) => c.adapterId === A).length === 0, 'removing the pattern hides it again at once (nothing to clean up)');
   eng.stop();
+}
+
+// ── §2c AGENTS NEVER RECEIVE HTML (lane channel-rich security verify r2, continued, 2026-09-28) ──
+// A mail's formatted body is the person's view only (the sandboxed frame); every agent verb answers WORDS. ① THE
+// ROUTE CENSUS, derived: every engine method an `/api/agent/channels/*` handler calls is JUDGED here (a new agent
+// verb is red until someone says what it hands an agent); ② THE REAL ENGINE over the fake world's formatted mail
+// room (6 mails with a text/html body — the owner's own read carries them): list, read of every conversation,
+// search, status and access answer no `role: body` attachment, no text/html, no render tree, no markup;
+// ③ CONTROL: an engine copy whose readFor forgets `withoutBlocks` hands the body attachment to the agent.
+console.log('§2c agents never receive HTML: the agent route census + every agent read over a formatted mail room');
+{
+  const src = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
+  const handlers = [...src.matchAll(/^app\.(?:get|post)\('\/api\/agent\/channels\/[^\n]*\n([\s\S]*?)^\}\);/gm)];
+  const called = [...new Set(handlers.flatMap((m) => [...m[1].matchAll(/\beng\.([A-Za-z]+)\(/g)].map((x) => x[1])))].sort();
+  const JUDGED = {
+    listFor: 'conversation rows (titles, counts, reach) — no record; driven below',
+    readFor: 'records through withoutBlocks (no tree, no role:body attachment); driven below',
+    searchFor: 'hits = {key, title, text ≤ 400, ids}; driven below',
+    statusFor: 'proposals — the agent\'s / the owner\'s own words; driven below',
+    accessFor: 'grains (ids, modes, authority); driven below',
+    agentRefresh: 'counts + the conversation\'s key and title — no record',
+    propose: 'the agent\'s own draft', compose: 'the agent\'s own draft', replaceProposal: 'the agent\'s own draft (replacing its own)',
+    withdrawProposal: 'a proposal id and its fate', request: 'a reach request record (the agent\'s own reason)',
+    // the .197 integration: lane channel-threads' agent verbs, judged by what they hand an agent
+    readThreadFor: 'a thread\'s records through withView\'s agent branch (viewsOf → agentCopy: no tree, no role:body attachment, frame-inert) — the same door as readFor',
+    agentThreadRefresh: 'counts + the thread\'s key — no record',
+    proposeReaction: 'the agent\'s own reaction proposal (a key + the reacted message\'s id)',
+  };
+  ok(handlers.length >= 9 && called.every((k) => k in JUDGED) && Object.keys(JUDGED).every((k) => called.includes(k)), `THE ROUTE CENSUS: every engine method the ${handlers.length} agent channel handlers call is judged for what it hands an agent (${called.join(', ')})`, JSON.stringify({ called, unjudged: called.filter((k) => !(k in JUDGED)), dead: Object.keys(JUDGED).filter((k) => !called.includes(k)) }));
+  // the fake world's mail room is read from process.env by the adapter (the server's own seam)
+  const SEAMS = { VIBESPACE_CHANNELS_FAKE_MAIL: '2', VIBESPACE_CHANNELS_FAKE_BEACON: 'http://127.0.0.1:9' };
+  const prevEnv = Object.fromEntries(Object.keys(SEAMS).map((k) => [k, process.env[k]]));
+  Object.assign(process.env, SEAMS);
+  const HTML_RE = /"role":"body"|text\/html|"blocks":|<script|<img|onerror|<style|<a href/i;
+  const drive = async (E, label) => {
+    const dataDir = path.join(ROOT, `html-${label}`);
+    const eng = E.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: () => {}, log: { log() {}, warn() {}, error() {} }, liveSessions: () => [{ cid: 'agent-1', name: 'Worker', groups: ['g1'] }] });
+    await eng.pass('fake-push', { force: true });
+    const owner = eng.messages('fake-push', 'fake-push-mail', { limit: 200 });
+    const ownerBodies = (Array.isArray(owner) ? owner : []).filter((r) => (r.attachments || []).some((a) => a.role === 'body')).length;
+    await eng.setScopeAssignment('fake-push', { kind: 'account' }, { principal: { kind: 'agent', id: 'agent-1', name: 'Worker' }, mode: 'all' });
+    const answers = {};
+    answers.list = eng.listFor(AG);
+    const convs = (answers.list.conversations || []).filter((c) => c.adapterId === 'fake-push');
+    for (const c of convs) answers[`read:${c.id}`] = eng.readFor(AG, 'fake-push', c.id, { limit: 200 });
+    answers.search = await eng.searchFor(AG, 'mail', {});
+    answers.status = eng.statusFor(AG, null);
+    answers.access = eng.accessFor(AG);
+    eng.stop();
+    const leaks = Object.entries(answers).filter(([, v]) => HTML_RE.test(JSON.stringify(v))).map(([k, v]) => `${k}: ${(JSON.stringify(v).match(HTML_RE) || [])[0]}`);
+    const mailRead = answers['read:fake-push-mail'];
+    return { ownerBodies, convs: convs.length, mailRecords: mailRead && mailRead.ok ? mailRead.records.length : 0, searchHits: (answers.search.results || []).length, leaks };
+  };
+  const real = await drive(ENG, 'real');
+  ok(real.ownerBodies >= 6 && real.convs >= 3 && real.mailRecords >= 8 && real.searchHits > 0, `FIXTURE: the owner's read carries ${real.ownerBodies} formatted bodies; the agent (account access) sees ${real.convs} conversations, reads ${real.mailRecords} mails of the mail room, finds ${real.searchHits} search hits`, JSON.stringify(real));
+  ok(!real.leaks.length, 'every agent answer — list, read of every conversation, search, status, access — carries no body attachment, no text/html, no render tree, no markup', real.leaks.join('; '));
+  // CONTROL: the same drive on an engine whose readFor forgets withoutBlocks
+  const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+  const M = mutantCopies('chan-acl-html', REPO);
+  const engSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  // the .197 integration: the agent's copy is withView's agent branch (viewsOf → agentCopy, which calls withoutBlocks) — the control drops that strip
+  const noStrip = engSrc.replace('const base = agent ? viewsOf(rec, records).map(agentCopy) : withBlocks(rec, records);', 'const base = agent ? viewsOf(rec, records) : withBlocks(rec, records);');
+  const bad = await drive(M.load('src/server/channels-engine.js', noStrip, 'read-keeps-body'), 'control');
+  ok(noStrip !== engSrc && bad.leaks.some((l) => /^read:fake-push-mail: ("role":"body"|text\/html)$/.test(l)), 'CONTROL: an engine whose readFor forgets withoutBlocks hands the mail\'s text/html body attachment to the agent (the census above would be red)', bad.leaks.join('; '));
+  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(c.pass, c.name, c.detail);
+  for (const [k, v] of Object.entries(prevEnv)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
 }
 
 // ── §3 AGENT GROUPS ask msg-acl for reach (design §22.5) — the SAME answer

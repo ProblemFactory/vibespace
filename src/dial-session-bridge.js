@@ -66,7 +66,10 @@ class DialSessionBridge {
         if (msg.op === 'hello') {
           if (msg.protoVersion !== PROTO_VERSION) { mux.control({ op: 'proto-mismatch', protoVersion: PROTO_VERSION }); sock.end(); return; }
           const want = this.hostTokenFor(deviceId);
-          if (!want || msg.hostToken !== want) { mux.control({ op: 'auth-fail' }); sock.end(); return; }
+          // verify-r3: THE ONE DOOR — a constant-time compare over the two digests (a raw `!==` stops at the first differing
+          // character; any local process may knock on this loopback port)
+          const PT = require('./pairing-token.js');
+          if (!want || !PT.tokenMatches(msg.hostToken, PT.tokenHash(want))) { mux.control({ op: 'auth-fail' }); sock.end(); return; }
           authed = true;
           mux.control({ op: 'hello-ack', protoVersion: PROTO_VERSION, daemonVersion: 'bridge', platform: process.platform, arch: process.arch, nodeVersion: process.version, capabilities: [] });
           return;

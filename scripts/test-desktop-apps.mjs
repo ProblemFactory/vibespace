@@ -450,6 +450,7 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
     const hints = ['display-configure', 'configure-display', 'keyboard-config'];
     const built = [
       ['hello', {}], P.pingPacket(1), P.pingEcho(1), P.damageAck(1, 1, 10, 10, 0), P.mapWindow(1, { x: 0, y: 0, w: 1, h: 1 }), P.configureWindow(1, { x: 0, y: 0, w: 1, h: 1 }), P.unmapWindow(1), P.clipboardNone(1, 'CLIPBOARD'),
+      P.bufferRefresh(1), // the .197 integration: the repaint ask (xpra 6.5.4) — a watch type, never input
     ].map((p) => String(p[0]));
     const keymaps = [P.keyboardConfigPacket(hints), P.keyboardConfigPacket([])].map((p) => String(p[0]));
     ok(keymaps.join() === 'keyboard-config,keymap-changed' && keymaps.every((t) => S.XPRA_KEYMAP_TYPES.has(t) && !S.XPRA_WATCH_TYPES.has(t)), `both keymap spellings the shipped client builds (${keymaps.join(', ')}) are XPRA_KEYMAP_TYPES and NOT watch types — the keymap fence`);
@@ -457,7 +458,7 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
     ok(sizes.join() === 'display-configure,configure-display,desktop_size' && sizes.every((t) => S.XPRA_DISPLAY_TYPES.has(t) && !S.XPRA_WATCH_TYPES.has(t)), `all three display-size spellings the shipped client builds (${sizes.join(', ')}) are XPRA_DISPLAY_TYPES and NOT watch types — the display-size fence`);
     const client = read('src/lib/xpra-client.js');
     const used = [...new Set([...client.matchAll(/send\(P\.([a-zA-Z]+)\(/g)].map((m) => m[1]))];
-    const nonInputBuilders = ['pingPacket', 'pingEcho', 'damageAck', 'mapWindow', 'configureWindow', 'clipboardNone', 'keyboardConfigPacket', 'displayPacket'];
+    const nonInputBuilders = ['pingPacket', 'pingEcho', 'damageAck', 'mapWindow', 'configureWindow', 'clipboardNone', 'keyboardConfigPacket', 'displayPacket', 'bufferRefresh'];
     const inputBuilders = ['keyAction', 'buttonAction', 'pointerPosition', 'clipboardToken', 'clipboardContents', 'focusPacket', 'closeWindow'];
     ok(used.length >= 10 && used.every((u) => nonInputBuilders.includes(u) || inputBuilders.includes(u)), `every builder xpra-client.js sends through is classified here (${used.join(', ')}) — a new one must be judged watch or input`, used);
     // x5: configure-window LEFT the watch list (the geometry is the ACTIVE viewer's — held, replayed at a takeover) and so
@@ -815,7 +816,8 @@ console.log('§11 B-bfe6 — a BROWSER as a desktop app: the rows, the binary pi
   const P = '/tmp/vs-da/desktop-apps/da-1/profile';
   const ac = M.browserArgv({ ...cr, exec: 'google-chrome' }, { profileDir: P, url: 'https://example.com/a?b=1' });
   ok(ac.ok && same(ac.argv, [`--user-data-dir=${P}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', '--force-renderer-accessibility', 'https://example.com/a?b=1']), 'chromium argv: --user-data-dir=<the session\'s profile> --no-first-run --no-default-browser-check --password-store=basic --force-renderer-accessibility (lane E, D4: the page\'s tree for a shared browser), THEN the URL (last)', ac);
-  ok(M.BROWSER_A11Y_FLAG === '--force-renderer-accessibility' && same(Object.keys(ac.env || {}), []) && M.browserArgv({ browser: 'firefox', args: [] }, { profileDir: P }).env.GNOME_ACCESSIBILITY === '1' && !M.isForbiddenBrowserArg(M.BROWSER_A11Y_FLAG), 'lane E (D4): the accessibility switch — chromium the flag, firefox GNOME_ACCESSIBILITY=1 in the answer\'s env — and it is no forbidden (automation) flag');
+  // (the .197 integration: Chrome 154 — measured — registers on the AT-SPI bus only with an accessibility env beside the flag)
+  ok(M.BROWSER_A11Y_FLAG === '--force-renderer-accessibility' && same(Object.keys(ac.env || {}), ['ACCESSIBILITY_ENABLED']) && ac.env.ACCESSIBILITY_ENABLED === '1' && M.browserArgv({ browser: 'firefox', args: [] }, { profileDir: P }).env.GNOME_ACCESSIBILITY === '1' && !M.isForbiddenBrowserArg(M.BROWSER_A11Y_FLAG), 'lane E (D4): the accessibility switch — chromium the flag AND ACCESSIBILITY_ENABLED=1 (Chrome ≥ 154: the flag alone no longer registers it on AT-SPI), firefox GNOME_ACCESSIBILITY=1 in the answer\'s env — and it is no forbidden (automation) flag');
   const af = M.browserArgv(fx, { profileDir: P, url: 'http://127.0.0.1:8080/' });
   ok(af.ok && same(af.argv, ['--new-instance', '-profile', P, 'http://127.0.0.1:8080/']), 'firefox argv: --new-instance -profile <the session\'s profile>, THEN the URL', af);
   ok(same(M.browserArgv(cr, { profileDir: P }).argv, [`--user-data-dir=${P}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', '--force-renderer-accessibility']), 'no URL ⇒ no URL argument (the browser opens its own start page)');

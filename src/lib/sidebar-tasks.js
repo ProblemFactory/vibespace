@@ -60,14 +60,7 @@ export function installSidebarTasks(SidebarClass) {
     this._sessionStatuses = {}; // sessionKey → {state, urgency, reason, setBy, at}
     this._pendingTaskBinds = new Map(); // webuiId → {taskIds[], notId} (new-session-in-task + a fork's inherited groups, bound once the session's OWN backend id appears — fork-groups.js)
     this._fetchTasks();
-    fetch('/api/session-status').then(r => r.ok ? r.json() : null).then(d => {
-      if (d?.statuses) {
-        this._sessionStatuses = d.statuses;
-        this._render();
-        this._lastAttnSig = null;
-        this.refreshTaskAttention();
-      }
-    }).catch(() => { });
+    this._fetchStatuses();
     this.app.ws.onGlobal((msg) => {
       if (msg.type === 'tasks-updated' && Array.isArray(msg.tasks)) {
         // THE BROADCAST IS NEWER THAN ANY FETCH IN FLIGHT (R4 verify r1,
@@ -81,11 +74,15 @@ export function installSidebarTasks(SidebarClass) {
         this.refreshTaskAttention();
         this.app.onTasksUpdated?.(msg.tasks);
       } else if (msg.type === 'session-status-updated' && msg.statuses) {
+        this._statusGen = (this._statusGen || 0) + 1; // a status fetch issued before this frame never replaces it (_fetchStatuses)
         // Change-guard (audit round-2): every agent's vibespace-status call
         // broadcasts to every client — identical snapshots must not trigger a
         // full sidebar rebuild (folder grouping over ~5k sessions).
+        // …EXCEPT a history clear (lane-redact verify r5, reproduced in chrome): a cleared entry that is not the current
+        // status leaves the snapshot identical, and the expanded card's history (fetched at render) kept the words — the
+        // broadcast names what it cleared (`cleared`, ids only) and that is a change
         const sig = JSON.stringify(msg.statuses);
-        const changed = sig !== this._statusSig;
+        const changed = sig !== this._statusSig || (Array.isArray(msg.cleared) && msg.cleared.length > 0);
         this._statusSig = sig;
         this._sessionStatuses = msg.statuses;
         if (changed) {
@@ -98,6 +95,23 @@ export function installSidebarTasks(SidebarClass) {
   };
 
   // ── Session status (state/urgency chips on cards) ──
+
+  /** THE STATUS MIRROR'S FETCH — the page load and the ws-reconnect resync (app.js) share it. A FETCH NEVER OVERWRITES A
+   *  NEWER BROADCAST (the `_tasksGen` rule of `_fetchTasks`, lane-redact verify r6 — reproduced in chrome): a snapshot the
+   *  server answered BEFORE a "Clear content…" of the current status, parsed AFTER the clear's `session-status-updated`,
+   *  put the cleared reason back on the session's card (its chip, its tooltip) — and the change guard then dropped every
+   *  later frame equal to the cleared map, so it stayed until some other status changed. The generation taken before
+   *  the request says whether a broadcast landed meanwhile; if so the answer is dropped (the broadcast is newer). */
+  proto._fetchStatuses = function() {
+    const gen = this._statusGen || 0;
+    return fetch('/api/session-status').then(r => r.ok ? r.json() : null).then(d => {
+      if (!d?.statuses || (this._statusGen || 0) !== gen) return;
+      this._sessionStatuses = d.statuses;
+      this._render();
+      this._lastAttnSig = null; // declared attention may have changed while we were away
+      this.refreshTaskAttention();
+    }).catch(() => { });
+  };
 
   proto._sessionStatusKeyFor = function(sessionOrKey) {
     // Write to the key an EXISTING record lives under — the agent keys its
@@ -162,7 +176,9 @@ export function installSidebarTasks(SidebarClass) {
     reasonRow.className = 'session-status-pop-row';
     reasonRow.appendChild(document.createTextNode(tr('Reason')));
     const reasonInp = document.createElement('input');
-    reasonInp.type = 'text'; reasonInp.value = cur.reason || ''; reasonInp.placeholder = tr('optional');
+    // a cleared reason ("Clear content…") is not offered back for editing
+    const prefill = cur.clearedAt ? '' : (cur.reason || '');
+    reasonInp.type = 'text'; reasonInp.value = prefill; reasonInp.placeholder = tr('optional');
     reasonRow.appendChild(reasonInp);
     pop.appendChild(reasonRow);
     if (cur.setBy === 'agent') {
@@ -177,12 +193,18 @@ export function installSidebarTasks(SidebarClass) {
     apply.className = 'task-detail-btn'; apply.textContent = tr('Apply');
     apply.onclick = (e) => {
       e.stopPropagation();
-      this.setSessionStatusUser(sessionRef, { state: stateSel.value || null, urgency: urgSel.value || null, reason: reasonInp.value });
-      pop.remove();
+      // A PREFILL IS NOT THE OWNER'S WORDS (lane-redact verify r6 — the r5 held LOW, re-judged): a popover opened BEFORE a
+      // "Clear content…" of this reason (another device, the agent) still holds it, and Apply — pressed to change the state
+      // only — re-filed it as the owner's own status. An UNTOUCHED box follows the LIVE record at the press (a cleared
+      // reason is dropped, an agent's newer one is not overwritten by the older); what the owner typed is theirs.
+      const live = this.getSessionStatus(sessionRef) || {};
+      const reason = reasonInp.value === prefill ? (live.clearedAt ? '' : (live.reason || '')) : reasonInp.value;
+      this.setSessionStatusUser(sessionRef, { state: stateSel.value || null, urgency: urgSel.value || null, reason });
+      pop._closeCtl?.abort(); pop.remove(); // its outside-press listeners go WITH it (they would keep the box — the words — until the next press)
     };
     const clearB = document.createElement('button');
     clearB.className = 'task-detail-btn'; clearB.textContent = tr('Clear');
-    clearB.onclick = (e) => { e.stopPropagation(); this.setSessionStatusUser(sessionRef, { clear: true }); pop.remove(); };
+    clearB.onclick = (e) => { e.stopPropagation(); this.setSessionStatusUser(sessionRef, { clear: true }); pop._closeCtl?.abort(); pop.remove(); };
     btnRow.append(apply, clearB);
     pop.appendChild(btnRow);
   };
@@ -700,13 +722,16 @@ export function installSidebarTasks(SidebarClass) {
         const pat = this.getTaskPattern(g);
         if (pat) bar.dataset.pattern = pat;
         bar.dataset.tip = g.title + (g.objective ? ' — ' + g.objective.slice(0, 100) : '');
-        bar.onclick = (e) => { e.stopPropagation(); this.app.openTaskDetail(g.id); };
+        // the handlers keep the group's ID, never the group object (lane-redact verify r5, a heap snapshot: a closure over
+        // `g` kept the whole record — its Activity notes included — reachable after a clear, until the row was rebuilt)
+        const gid = g.id;
+        bar.onclick = (e) => { e.stopPropagation(); this.app.openTaskDetail(gid); };
         // Right-click (long-press on touch) = the group's full action menu —
         // incl. "New session in this task…" — so the flat view can act on a
         // group without switching to the Groups board.
         bar.addEventListener('contextmenu', (e) => {
           e.preventDefault(); e.stopPropagation();
-          this._showTaskContextMenu(e.clientX, e.clientY, g.id);
+          this._showTaskContextMenu(e.clientX, e.clientY, gid);
         });
         bars.appendChild(bar);
       }

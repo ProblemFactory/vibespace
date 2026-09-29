@@ -14,7 +14,7 @@ const { mk } = require('./lazy.js');
 
 function create({ app, rootDir, HOST, CLAUDE_CMD, NODE_CMD,
   CLAUDE_SUBSCRIPTION_LOGIN_HELPER, activeSessions, auth, engine,
-  serverSetting, recordUsageAttribution, liveAccountIdSet,
+  serverSetting, recordUsageAttribution, liveAccountIdSet, broadcastActiveSessions = () => { },
   buildClaudeSubscriptionLoginCommand, getAccounts, getHosts, getMounts,
   getTelemetry, getUsageHistory, getLoginExpiryWatch }) {
   const { clearSealedOrders } = engine;
@@ -334,7 +334,12 @@ app.patch('/api/accounts/:id', (req, res) => {
 app.delete('/api/accounts/:id', (req, res) => {
   try {
     const _wasPool = accounts.get(req.params.id)?.type === 'pooled';
-    accounts.remove(req.params.id); // throws for unknown ids → only real (shape-safe) ids continue
+    // a deleted MEMBER leaves every pool that listed it: the default and each conversation's link go where the ENGINE
+    // decides (verify r2 — the store alone re-points to the first live member / the default)
+    accounts.remove(req.params.id, {
+      chooseDefault: (poolId, from) => (typeof engine.decideDefaultTarget === 'function' ? engine.decideDefaultTarget(poolId, from) : null) || (typeof engine.fallbackDefaultTarget === 'function' ? engine.fallbackDefaultTarget(poolId, from) : null),
+      chooseLink: (poolId, from, sid) => (typeof engine.removalTargetFor === 'function' ? engine.removalTargetFor(poolId, from, sid) : null),
+    }); // throws for unknown ids → only real (shape-safe) ids continue
     // DISARM the device reflex for a deleted pool — a stale snapshot could
     // otherwise recreate the deleted pool's symlink in a server-down window
     if (_wasPool) clearSealedOrders(req.params.id);
@@ -370,9 +375,11 @@ app.post('/api/accounts/pool', (req, res) => {
   try { res.json({ success: true, ...accounts.createPool({ name: req.body?.name, members: req.body?.members, backend: req.body?.backend === 'codex' ? 'codex' : 'claude' }) }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
+const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || '')); // the pool's placement is the owner's to set — an agent's session/job token is refused
 app.patch('/api/accounts/pool/:id', (req, res) => {
   try {
     const id = req.params.id;
+    if (isAgentBearer(req)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });
     // Narrowing the member list away from the CURRENT target makes updatePool
     // re-point IMMEDIATELY (symlink swap) — a running claude re-reads the
     // credential file mid-session, so this must mirror /target's contract
@@ -380,22 +387,54 @@ app.patch('/api/accounts/pool/:id', (req, res) => {
     // `affected` so the dialog can cold-restart them. Silently it mis-billed
     // the OLD target for everything after the swap.
     const before = accounts.poolCurrent(id);
-    accounts.updatePool(id, { members: req.body?.members, auto: req.body?.auto, hot: req.body?.hot });
-    // auto turned OFF ⇒ disarm the device reflex too, or the daemon keeps
-    // switching a pool the user just set to manual (review finding)
-    if (req.body?.auto === false) clearSealedOrders(id);
+    // A MEMBER REMOVED FROM THE POOL STOPS SERVING AT ONCE (2026-09-28): the
+    // membership BEFORE the write, so the members this save took out are known —
+    // the Members… dialog and the member's own "Exclude from pool" both land here
+    let membersBefore = [];
+    try { membersBefore = accounts.poolMembership(id) || []; } catch { }
+    // (the chooser's answer is kept: `null` = the engine found NOBODY who can take the default over)
+    let decided;
+    // …and when it answers nobody, the store still places the default on a member the pool LISTS — the
+    // engine's fallback (usable soonest), never the store's list[0] (verify r2)
+    const decide = typeof engine.decideDefaultTarget === 'function' ? (from) => { decided = engine.decideDefaultTarget(id, from); return decided || (typeof engine.fallbackDefaultTarget === 'function' ? engine.fallbackDefaultTarget(id, from) : null); } : null;
+    // MANUAL PRIORITY (2026-09-28): `priority` = the owner's order ([] = automatic),
+    // validated by the store (members only, deduped, ≤ 40); `auto:false` is ignored —
+    // the whole-pool manual switch is retired, so the device reflex stays armed
+    accounts.updatePool(id, { members: req.body?.members, auto: req.body?.auto, hot: req.body?.hot, priority: req.body?.priority }, { chooseMember: decide });
+    let membersAfter = [];
+    try { membersAfter = accounts.poolMembership(id) || []; } catch { }
+    const removedIds = membersBefore.filter((m) => !membersAfter.includes(m));
+    // the engine's ONE entry point moves every conversation the removed members
+    // still serve (and requests the cold restarts itself — claimRestarts below
+    // then leaves those out, so nothing is restarted twice)
+    const evicted = removedIds.length && typeof engine.memberRemoved === 'function' ? engine.memberRemoved(id, removedIds, { why: 'removed-from-pool' }) : null;
+    // a new ORDER takes effect now: the default returns to the top usable member at
+    // once, each linked conversation at its next stop (the engine's pass, forced)
+    if (req.body?.priority !== undefined && typeof engine.maybePoolAutoSwitchForPool === 'function') { try { engine.maybePoolAutoSwitchForPool(id, { force: true }); } catch { } }
     const after = accounts.poolCurrent(id);
     const affected = [];
-    if (before !== after) {
+    // WHO THIS ANSWER HANDS TO THE CLIENT FOR A RESTART (verify r1, money): the FOLLOWERS of the
+    // default it moved — never a conversation the ENGINE decided. A conversation with its own
+    // link is placed per conversation (memberRemoved moved + restarted it, or left it where it
+    // is: "no member can take over"); the list used to be every conversation of the pool, so on a
+    // pool that restarts to move the client restarted the ones the engine had just left in place
+    // (onto a default nobody could serve from) and the ones on an untouched member of their own.
+    // …and when the engine found NOBODY to take the default over (it fell to the store's first
+    // member), nothing is restarted onto it: what runs keeps running, the hourly notice says why.
+    const engineDecided = new Set(evicted ? [...evicted.moved, ...evicted.stayed, ...(evicted.held || [])].map((x) => x.sid) : []);
+    const ownLink = (sid) => { try { fs.lstatSync(accounts.sessionPoolLinkPath(id, sid)); return true; } catch { return false; } };
+    const nobody = decided === null;
+    if (before !== after && !nobody) {
       for (const [sid, sess] of activeSessions) {
         if (sess._accountId !== id) continue;
+        if (engineDecided.has(sid) || ownLink(sid)) continue;
         // a HELD process (a non-hot pool — r3) keeps billing its member until the restart lands
         let held = false; try { held = !!accounts.poolMemberOfSession(id, sess, sid).held; } catch { }
         if (!held) { try { recordUsageAttribution({ claudeSessionId: sess.claudeSessionId || sess.backendSessionId, accountId: id }); } catch {} }
         affected.push({ serverId: sid, backend: sess.backend || 'claude', backendSessionId: sess.claudeSessionId || sess.backendSessionId || null, cwd: sess.cwd || null, name: sess.name || null, host: sess.host || null });
       }
     }
-    res.json({ success: true, retargeted: before !== after ? { from: before, to: after, name: after ? (accounts.get(after)?.name || after) : null } : null, affected: claimRestarts(affected) });
+    res.json({ success: true, retargeted: before !== after ? { from: before, to: after, name: after ? (accounts.get(after)?.name || after) : null } : null, evicted: evicted ? { removed: evicted.removed, moved: evicted.moved.length, restarted: evicted.restarted.length, stayed: evicted.stayed.length, held: (evicted.held || []).length } : null, affected: claimRestarts(affected) });
   }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -403,21 +442,104 @@ app.patch('/api/accounts/pool/:id', (req, res) => {
 // restart them (v1 = cold swap; the client owns kill+resume, same machinery as
 // the billing switcher). `hot` pools skip the restart — the running CLI
 // re-reads the credential file on its next request.
+// THE WHOLE-POOL MANUAL SWITCH IS RETIRED (2026-09-28, owner: "手动切换整个池其实比较
+// confusing，我建议移除这个功能，或者做成'手动优先级'这样的概念"). A pool is placed
+// automatically or by its manual priority (PATCH {priority}); the engine keeps
+// `setPoolTarget` as its own writer. An old client's pick is answered by name.
 app.post('/api/accounts/pool/:id/target', (req, res) => {
+  res.status(410).json({ code: 'retired', error: 'Switching a whole pool by hand is retired — set the members\' order instead (Members… → Manual priority): the top usable member takes the pool, and "Move every conversation here now" on #1 moves them at once.' });
+});
+// "MOVE EVERY CONVERSATION HERE NOW" (addendum 4, 2026-09-28): the ONE act that
+// puts every live conversation of the pool on `memberId` at once — never greyed,
+// available even when it already is the default (the owner could not reach it
+// while six conversations sat on a removed member). Hot ⇒ the default AND every
+// live link re-pointed now (a running CLI re-reads it); cold ⇒ the default moves
+// and the CALLER restarts the conversations it is handed (after its confirm).
+// It starts no turn. Answers {moved, skipped:{pinned, cannotServe:[{sid,name,why}]}, defaultMoved};
+// a member that can serve nothing here ⇒ 409 target_cannot_serve {why, until} (nothing moved).
+app.post('/api/accounts/pool/:id/gather', (req, res) => {
   try {
     const id = req.params.id;
+    if (isAgentBearer(req)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });
+    const a = accounts.get(id);
+    if (!a || a.type !== 'pooled') return res.status(400).json({ error: 'not a pooled account', code: 'not_pooled' });
+    const memberId = String(req.body?.memberId || '');
+    if (!(accounts.poolMembers(id) || []).some((m) => m.id === memberId)) return res.status(400).json({ error: 'not a signed-in member of this pool', code: 'not_member' });
+    const hot = !!a.hot && require('../backend-caps.js').capsOf(a.backend || 'claude').hotSwitch === 'verified';
     const before = accounts.poolCurrent(id);
-    // USER route → sweep live per-session links on a hot pool (the manual
-    // pick means "everything, now"); the engine's own setPoolTarget calls
-    // never sweep — their per-session moves ARE the projection state.
-    const hot = accounts.get(id)?.hot !== false;
-    const r = accounts.setPoolTarget(id, String(req.body?.accountId || ''), { sweepSessionLinks: hot });
+    const memberName = accounts.get(memberId)?.name || memberId;
+    // a PINNED conversation stays on its pin (pin > pool priority order > automatic): skipped by the sweep and the restarts
+    const pinned = new Set([...activeSessions].filter(([, s]) => s._accountId === id && s._poolPin && s._poolPin.memberId).map(([sid]) => sid));
+    // JUDGED BEFORE IT MOVES ANYTHING (verify r1, money): the row is never greyed, so the act is
+    // reachable on a member that is out of quota — it moved every conversation onto it (mid-turn
+    // included) and the next pool pass moved them all back. The engine judges the member for the
+    // pool as a whole (`ok`: the default may move there) and per conversation under its own family
+    // view; a member that can serve NOTHING here is refused by name, nothing moved; a conversation
+    // it cannot serve stays where it is and the answer names it.
+    // FAIL CLOSED (verify r2): an engine that offers no plan used to fall through to the UNJUDGED
+    // move (`plan` null ⇒ `wholeOk` true) — a server.js literal without `gatherPlan` re-created the
+    // r1 money bug with every gate green (they build the route over the whole engine). No judge,
+    // no move; test-pool-auto's routes-engine census fails such a literal.
+    if (typeof engine.gatherPlan !== 'function') {
+      console.warn(`[pool] gather ${id}: refused — the pool engine is not wired to judge it (nothing moved)`);
+      return res.status(503).json({ code: 'engine_unwired', error: 'The pool cannot judge this move right now — nothing was moved.' });
+    }
+    const plan = engine.gatherPlan(id, memberId);
+    const skipped = plan ? plan.skip : [...pinned].map((sid) => ({ sid, name: activeSessions.get(sid)?.name || sid, why: 'pinned' }));
+    const skip = new Set(skipped.map((x) => x.sid));
+    const wholeOk = plan ? plan.ok : true;
+    // (a pool that restarts to move lands its conversations on the DEFAULT — so it needs the default to move)
+    if (plan && !wholeOk && (!hot || !plan.move.length)) {
+      const whyWords = { 'pin-exhausted': 'is out of quota', 'pin-login-dead': 'cannot sign in', 'pin-member-excluded': 'just refused these conversations' }[plan.why] || 'is not usable in the pool right now';
+      console.log(`[pool] gather ${id}: → ${memberId} refused — ${plan.why} (nothing moved)`);
+      return res.status(409).json({ code: 'target_cannot_serve', why: plan.why, until: plan.until || null, member: memberName, error: `${memberName} ${whyWords} — nothing was moved. The pool brings its conversations back to it when it can serve again.` });
+    }
+    let r;
+    if (wholeOk) r = accounts.setPoolTarget(id, memberId, { sweepSessionLinks: hot, skipSessKeys: skip, why: 'gather' });
+    else {
+      // hot, and the member cannot take the pool as a WHOLE (a cap some conversations never use is
+      // spent): the conversations it can serve move through the ONE link writer, the default stays
+      let swept = 0;
+      for (const sid of plan.move) { try { accounts.ensureSessionPoolLink(id, sid, memberId, { why: 'gather' }); swept++; } catch (e) { console.warn(`[pool] gather ${id}/${sid} failed:`, e.message); } }
+      r = { id, current: before, name: before ? (accounts.get(before)?.name || before) : null, swept };
+    }
     const affected = [];
     for (const [sid, s] of activeSessions) {
-      if (s._accountId !== id) continue;
+      if (s._accountId !== id || s.host || skip.has(sid)) continue;
+      if (hot) { try { recordUsageAttribution({ claudeSessionId: s.claudeSessionId || s.backendSessionId, accountId: id }); } catch { } } // a cold process keeps billing what it holds until its restart (the spawn records it)
       affected.push({ serverId: sid, backend: s.backend || 'claude', backendSessionId: s.claudeSessionId || s.backendSessionId || null, cwd: s.cwd || null, name: s.name || null, host: s.host || null });
     }
-    res.json({ success: true, ...r, previous: before, affected: hot ? affected : claimRestarts(affected) });
+    const cannotServe = skipped.filter((x) => x.why !== 'pinned');
+    console.log(`[pool] gather ${id}: every conversation → ${memberId} (${hot ? `hot — ${r.swept} link(s) re-pointed` : `cold — ${affected.length} to restart`}${skipped.length ? `; left alone: ${skipped.length - cannotServe.length} pinned, ${cannotServe.length} it cannot serve` : ''}${wholeOk ? '' : '; the default stays'})`);
+    res.json({ success: true, ...r, previous: before, hot, member: memberName, defaultMoved: wholeOk && before !== memberId, moved: affected.length,
+      skipped: { pinned: skipped.length - cannotServe.length, cannotServe: cannotServe.map((x) => ({ sid: x.sid, name: x.name, why: x.why })) },
+      affected: hot ? [] : claimRestarts(affected) });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// THE CONVERSATION'S PIN (2026-09-28): POST /api/accounts/:poolId/pin {sessionId, memberId|null} —
+// pin one live conversation of this pool to a member (null = automatic: "自动", or the pool row
+// itself). Human-only. Thin over the engine's ONE writer (setConversationPin); answers the
+// placement it made {pinned, placed, reason, code, current} and broadcasts the session facts
+// (active-sessions carries `poolPin` + auth.pinned). Codes: not_pooled · not_member ·
+// remote_session · no_session · not_on_pool · agent_forbidden; a pool that cannot re-point a
+// running conversation answers 200 with code codex_cold / cold_pool (applies at the next restart).
+app.post('/api/accounts/:poolId/pin', (req, res) => {
+  try {
+    if (isAgentBearer(req)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });
+    if (typeof engine.setConversationPin !== 'function') return res.status(503).json({ error: 'pool engine unavailable', code: 'no_engine' });
+    const poolId = String(req.params.poolId || '');
+    const pa = accounts.get(poolId);
+    if (!pa || pa.type !== 'pooled') return res.status(400).json({ error: 'not a pooled account', code: 'not_pooled' });
+    const sid = typeof req.body?.sessionId === 'string' && /^[\w.:-]{1,120}$/.test(req.body.sessionId) ? req.body.sessionId : null;
+    const s = sid ? activeSessions.get(sid) : null;
+    if (!s) return res.status(404).json({ error: 'no live session with that id', code: 'no_session' });
+    if (s._accountId !== poolId) return res.status(400).json({ error: 'this conversation does not bill this pool', code: 'not_on_pool' });
+    const memberId = req.body?.memberId == null || req.body.memberId === '' ? null : String(req.body.memberId);
+    const r = engine.setConversationPin(sid, memberId, { by: 'user' });
+    if (!r || !r.ok) return res.status((r && r.status) || 400).json({ error: (r && r.error) || 'refused', code: (r && r.code) || 'refused' });
+    try { broadcastActiveSessions(); } catch { }
+    res.json({ success: true, pinned: r.pinned, placed: r.placed, reason: r.reason, code: r.code || null, current: r.current || null });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 

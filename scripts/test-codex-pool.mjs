@@ -145,7 +145,8 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
   ok('a codex pool row is POOLED (pooled:true, type pooled, backend codex)', row?.pooled === true && row.type === 'pooled' && row.backend === 'codex', JSON.stringify(row));
   ok('…carries current + currentName (the member the symlink points at)', row?.current === cur && row.currentName === am.get(cur)?.name, JSON.stringify({ current: row?.current, cur }));
   ok('…carries memberOptions = poolMembers (logged-in ChatGPT members only)', JSON.stringify((row?.memberOptions || []).map((m) => m.id)) === JSON.stringify(am.poolMembers(pid).map((m) => m.id)) && row?.memberOptions?.length === 1);
-  ok('…carries auto/hot flags (false by default) and members:null (= all)', row?.auto === false && row?.hot === false && row?.members === null);
+  // 2026-09-28: the whole-pool manual switch is retired — a pool is ALWAYS auto (automatic or by its manual priority)
+  ok('…carries auto (always true) + placement automatic, hot false by default and members:null (= all)', row?.auto === true && row?.placement === 'automatic' && JSON.stringify(row?.priority) === '[]' && row?.hot === false && row?.members === null);
   ok("…hotSupported is the registry verdict: codex 'impossible' ⇒ false (the UI hides the toggle)", row?.hotSupported === false);
   ok('…supported is true for codex (the darwin exclusion is claude-keychain-specific)', row?.supported === true);
   ok('…identity reads THROUGH the symlink with the codex reader (loggedIn + email + plan of the current member)', row?.loggedIn === true && row?.email === 'cxa@example.com' && row?.subscriptionType === 'plus', JSON.stringify({ loggedIn: row?.loggedIn, email: row?.email, plan: row?.subscriptionType }));
@@ -173,9 +174,10 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
   const count = (s, re) => (s.match(re) || []).length;
   ok('manage-agents defines ONE pool menu block (_poolMenuItems)', count(ma, /_poolMenuItems\(id, a, refresh\) \{/g) === 1);
   ok('…spliced into BOTH rosters (claude + codex) — no per-backend copy', count(ma, /items\.splice\(0, 1, \.\.\.this\._poolMenuItems\(id, a, refresh\)\)/g) === 2);
-  ok('…the Switch target / Hot switch labels live ONLY in the shared block', count(ma, /t\('Switch target'\)/g) === 1 && count(ma, /t\('Hot switch \(no restart\)'\)/g) === 1 && count(ma, /t\('Auto-switch when nearly exhausted'\)/g) === 1);
+  // 2026-09-28: the whole-pool manual switch is retired — no Switch target, no Auto-switch toggle; Members & placement… + Hot switch stay in the shared block
+  ok('…the Members & placement / Hot switch labels live ONLY in the shared block (Switch target + Auto-switch retired)', count(ma, /t\('Members & placement…'\)/g) === 1 && count(ma, /t\('Hot switch \(no restart\)'\)/g) === 1 && count(ma, /t\('Switch target'\)/g) === 0 && count(ma, /t\('Auto-switch when nearly exhausted'\)/g) === 0);
   ok("…the hot toggle is gated on the server's hotSupported verdict (codex gets a disabled explanatory row, SVG-free text)", /const hotOk = a\.hotSupported !== false;/.test(ma) && /if \(hotOk\) items\.push\(\{ label: \(a\.hot \? '✓ ' : ''\) \+ t\('Hot switch \(no restart\)'\)/.test(ma) && /Hot switch unavailable — every switch restarts the session/.test(ma));
-  ok('…a codex pool cold-restarts even when hot is set (effHot = hotOk && a.hot)', /const effHot = hotOk && !!a\.hot;/.test(ma) && /this\._poolSwitchTarget\(id, m\.id, a\.name, effHot\)/.test(ma));
+  ok('…a codex pool cold-restarts even when hot is set (the gather act is handed the effective-hot verdict)', /const effHot = a\?\.hotSupported !== false && !!a\?\.hot;/.test(ma) && /this\._poolGather\(poolId, row\.id, row\.name, a\?\.name \|\| '', effHot\)/.test(ma));
   ok('…the members dialog filters members by the POOL\'s backend and uses the same effective-hot rule', /\(x\.backend \|\| 'claude'\) === be && !x\.pooled/.test(ma) && /const effHot = a\?\.hotSupported !== false && !!a\?\.hot;/.test(ma) && /if \(!effHot\) for \(const sess of \(r\.affected \|\| \[\]\)\) this\._poolColdRestart/.test(ma));
   ok('…ONE create-pool dialog for both rosters (api(), so a refused create is a visible error)', count(ma, /_createPoolDialog\(/g) === 3 && /await api\('\/api\/accounts\/pool', \{ method: 'POST'/.test(ma) && !/fetchJson\('\/api\/accounts\/pool'/.test(ma));
   ok('…BOTH rosters sort with the shared rosterSort (pool → login → key)', count(ma, /\.sort\(rosterSort\)/g) === 2 && /export const rosterSort/.test(ma));
@@ -620,7 +622,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
   //      row, persisted beside accountId and restored on BOTH restore paths
   {
     const wc = read('src/ws-create.js'), br = read('src/server/boot-restore.js');
-    ok('R13 WIRING: ws-create stamps the held member for a LOCAL pool on a backend that cannot hot-switch (caps row, never an id)', /if \(pa && pa\.type === 'pooled' && capsOf\(backend\)\.hotSwitch !== 'verified'\) heldPoolMember = accounts\.poolCurrent\(pa\.id\) \|\| null;/.test(wc) && /_heldPoolMember: heldPoolMember,/.test(wc));
+    ok('R13 WIRING: ws-create stamps the held member for a LOCAL pool on a backend that cannot hot-switch (caps row, never an id)', /if \(pa && pa\.type === 'pooled' && capsOf\(backend\)\.hotSwitch !== 'verified'\) heldPoolMember = (spawnAccount\.pinnedMember \|\| )?accounts\.poolCurrent\(pa\.id\) \|\| null;/.test(wc) && /_heldPoolMember: heldPoolMember,/.test(wc));
     ok('R13 WIRING: …persisted in the session meta and restored by the dtach AND the pipe restore paths', /heldPoolMember: session\._heldPoolMember \|\| undefined,/.test(wc) && (br.match(/_heldPoolMember: typeof meta\.heldPoolMember === 'string' \? meta\.heldPoolMember : null,/g) || []).length === 2);
     ok('R13 the ONE rule (accounts.poolMemberOfSession) honours the stamp only for a non-hot pool (a claude pool re-reads its link; the stamp is ignored there) and the engine resolves through it', /if \(capsOf\(a\.backend \|\| session\.backend \|\| 'claude'\)\.hotSwitch === 'verified'\) return \{ id: link\(\), held: false, origin: 'link' \};/.test(read('src/accounts.js')) && /const r = accounts\.poolMemberOfSession\(pid, session\);/.test(read('src/server/usage-pool-engine.js')));
     { const held = (backend, hot) => { const fake = Object.create(AccountManager.prototype); fake.get = (id) => (id === 'P' ? { id: 'P', type: 'pooled', backend } : id === 'A' ? { id: 'A' } : null); fake.poolCurrentFor = () => 'B'; return fake.poolMemberOfSession('P', { _accountId: 'P', _webuiId: 'w', _heldPoolMember: 'A', backend }); };
@@ -788,8 +790,9 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     const four = eng + "\n{ type: 'pool-auto-switched' }";
     ok('R14d CENSUS NEGATIVE CONTROL: a second builder is counted', census(four) === 2);
     const aur = read('src/server/account-usage-routes.js');
-    const routePin = (txt) => /affected: claimRestarts\(affected\) \}\);/.test(txt) && /affected: hot \? affected : claimRestarts\(affected\) \}\);/.test(txt);
-    ok('R14d WIRING: both manual routes (member narrowing, the target pick) answer only claimed conversations', routePin(aur));
+    // 2026-09-28: the whole-pool target pick is retired (410); its successor, "Move every conversation here now" (gather), is the second manual route
+    const routePin = (txt) => /affected: claimRestarts\(affected\) \}\);/.test(txt) && /affected: hot \? \[\] : claimRestarts\(affected\) \}\);/.test(txt);
+    ok('R14d WIRING: both manual routes (member narrowing, move-everything-here) answer only claimed conversations', routePin(aur));
     ok('R14d WIRING NEGATIVE CONTROL: the pin fails on the r3 routes', !routePin(aur.split('claimRestarts(affected)').join('affected')));
   }
   // (15) THE RESET'S ANSWER IN THE WRAPPER'S REAL ORDER: `reset_credit_result`
@@ -930,7 +933,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     const s3 = w.mk(3); s3._heldPoolMember = w.B;
     rec({ backendSessionId: 'thread-3', accountId: w.P });
     ok('R16 …a conversation spawned after the switch (stamped B) bills B', rows.length === 2 && rows[1].acct === w.B, JSON.stringify(rows));
-    ok('R16 the billing badge reads the same rule (sessionAuth poolAuth → accounts.poolMemberOfSession) and it answers A for the held process', /const poolAuth = \(a\) => \{ let cur = null; try \{ const c = accounts\.poolMemberOfSession\(a\.id, s, s\._webuiId \|\| null\)\.id;/.test(srv) && w.wam.poolMemberOfSession(w.P, w.ss[0]).id === w.A);
+    ok('R16 the billing badge reads the same rule (sessionAuth poolAuth → accounts.poolMemberOfSession) and it answers A for the held process', /const poolAuth = \(a\) => \{[^\n]*accounts\.poolMemberOfSession\(a\.id, s, s\._webuiId \|\| null\)\.id/.test(srv) && w.wam.poolMemberOfSession(w.P, w.ss[0]).id === w.A);
     const oldTxt = body.replace('acct = (live ? accounts.poolMemberOfSession(acct, live, sessKey).id : accounts.poolCurrentFor(acct, sessKey)) || null;', 'acct = accounts.poolCurrentFor(acct, sessKey) || null;');
     ok('R16 NEGATIVE CONTROL: the patch hit the production text', oldTxt !== body);
     const rowsN = []; resolver(oldTxt, w, rowsN)({ backendSessionId: 'thread-1', accountId: w.P });

@@ -74,6 +74,30 @@ function mintBrowserKey(hex8) {
 }
 const BROWSER_KEY_RE = /^bk-[0-9a-f]{8}$/;
 function isBrowserKey(v) { return BROWSER_KEY_RE.test(String(v || '')); }
+/**
+ * THE FRESH-KEY RULE (identity verify r4, 2026-09-28). A browser key is 8 hex digits — 32 bits — and it is the ONE
+ * identifier every authority in this subsystem hangs on: "Who can use it" rows, leases, pins, caps, the `told` memory,
+ * child handles, the bindings, the trace, the env directory. It was the only id minted with NO uniqueness check (the
+ * profile id, the grant token and the blocked-claim id each loop), so a mint that landed on a key the store still
+ * named — a stopped conversation's (its binding pruned past MAX_BINDINGS, its list row kept for good) — made the new
+ * conversation BE that one: its attachments, its alias, its pin (a logged-in kept profile as the new conversation's
+ * default browser), its admission. `freshBrowserKey` mints until `named(key)` is false (the caller's rule over every
+ * store that names a key — the keeper's registry, the env's bindings + directory + meta, the live sessions), at most
+ * `tries` times: 2^32 keys against a store that names hundreds cannot exhaust that, so an exhausted loop means `named`
+ * is broken — the last candidate is returned WITH `exhausted: true` (a create is never refused for it; the caller says
+ * so by name). Pure: the randomness and the store rule are the caller's; `named` throwing is the caller's to catch.
+ */
+const FRESH_KEY_TRIES = 64;
+function freshBrowserKey({ mint, named = () => false, tries = FRESH_KEY_TRIES } = {}) {
+  if (typeof mint !== 'function') throw new Error('freshBrowserKey: a mint function is required');
+  let key = '', retries = 0;
+  for (let i = 0; i < Math.max(1, Math.floor(Number(tries) || 0)); i++) {
+    key = String(mint());
+    if (!named(key)) return { key, retries, exhausted: false };
+    retries++;
+  }
+  return { key, retries, exhausted: true };
+}
 
 // ── §3.2.1 the continuity ladder ────────────────────────────────────────────
 /**
@@ -738,11 +762,15 @@ function pinFenceConflict({ userConfig = {}, pinnedDir = null }) {
  * watched browser (measured). `userConfig` alone (no `projectConfig`) is the
  * pre-r3 call shape and composes the same way.
  */
-function generatedConfigParts({ userConfig = {}, projectConfig = null, pinnedDir = null, headed = null, mark = null }) {
+function generatedConfigParts({ userConfig = {}, projectConfig = null, pinnedDir = null, headed = null, mark = null, holdDialogs = false }) {
   const r = VERBS.sanctionedConfig({ user: userConfig, project: projectConfig, deny: Object.keys(EPHEMERAL_DENY) });
   const out = r.config;
   // OUR value is ours to coerce; the user's rides across verbatim.
   if (headed !== null) out.headed = !!headed;
+  // lane browser-stuck (measured on 0.38.1): the daemon auto-accepts alert + beforeunload SILENTLY (a beforeunload
+  // accept loses what was typed) — a config VibeSpace launches with holds every page dialog for a decision; the dialog
+  // watch (src/server/browser-dialogs.js) reports it and accepts an alert itself. A launch-view key: set at a launch.
+  if (holdDialogs) out.noAutoDialog = true;
   if (pinnedDir) out.profile = String(pinnedDir);
   // lane H verify r4: the keeper's launch MARK (the browser key this config's browser runs for) — how its Chrome is
   // proven VibeSpace's by its command line after its daemon is gone (a user/project file's own mark was dropped above)
@@ -827,6 +855,171 @@ function isProfileId(v) { return PROFILE_ID_RE.test(String(v || '')); }
 /** The user-data-dir NAME for a minted profile: `~/.agent-browser/vs-bp-<id>`.
  *  Adopted directories keep their own path; the LABEL never reaches a path. */
 function profileDirName(id) { return 'vs-' + String(id); }
+/**
+ * §7.2.1 — THE EGRESS PRECONDITION, AS A RECORDED RESULT. Modelled on
+ * src/local-oracles.js: a record carries `tool`, `date`, `version` and
+ * per-run INET connect counts, or it is not a record. CloakBrowser is a
+ * network tool by definition, so it can never be an ORACLE — this record
+ * contributes the proof's SHAPE, not a zero-network verdict; it lives beside
+ * the provider row so the UI can show what was measured and when.
+ *
+ * MEASURED 2026-09-28 (lane-cloak, the owner's 「下载吧」): npm `cloakbrowser`
+ * 0.5.10 into a scratch prefix, its Chromium 146.0.7680.177.5 for linux-x64
+ * downloaded ONCE into a VibeSpace-owned cache (never ~/.cloakbrowser), every
+ * run under `env -i HOME=<empty dir>` + strace, launched the way the product
+ * launches it (agent-browser 0.38.1, the binary + arguments in agent-browser's
+ * own env names). What it says, in words:
+ *   · the download reaches cloakbrowser.dev, which serves the archive through
+ *     GitHub's release storage (github.com + release-assets.githubusercontent.com);
+ *     the wrapper checks an Ed25519 signature over SHA256SUMS against a key
+ *     pinned in its own code, locally, then the archive's SHA-256;
+ *   · the BROWSER never connected anywhere but the loopback CDP port
+ *     agent-browser drives it through — not at its first start, not from
+ *     cache, not with a key in its environment, not idle for 10 minutes;
+ *   · the free tier needs NO key and NO sign-in (the "gated by login" of the
+ *     design's §7.2 is the vendor's upsell for its newer build, see `freeTier`).
+ * Every target is named (a DNS answer in the trace names each address; a
+ * loopback / resolver address is named by what it is) and tagged with the
+ * PHASE it belongs to — `egressHostsOf` derives the two allowlists from those
+ * tags, so the proxy admits exactly what the record implies and nothing is
+ * written twice. `CLOAK_WIRED` (the row's `wired` cell) is DERIVED from this
+ * record: a row cannot be re-enabled without a record the discipline accepts.
+ *
+ * Re-measure with scripts/measure-cloak-egress.mjs (its header lists what the
+ * real package taught it); the version it names is the version the counts
+ * describe, and the install pins exactly that version AND that Chromium.
+ */
+const CLOAK_EGRESS_RUNS = Object.freeze(['first launch (download expected)', 'second launch from cache', 'launch with a license key present', '10-minute idle browser']);
+/** The PHASES a target may belong to: `npm` = the package manager fetching the
+ *  wrapper (the registry, not the vendor — named, not proxied); `download` =
+ *  the wrapper fetching the pinned Chromium (THE install allowlist); `launch` =
+ *  anything a running browser (or its driver) reached (THE run allowlist). */
+const EGRESS_PHASES = Object.freeze(['npm', 'download', 'launch']);
+const tgt = (host, addr, port, by, n, phase) => Object.freeze({ host, addr, port, by, n, phase });
+const LOOPBACK_CDP = (port) => tgt('loopback', '127.0.0.1', port, 'browser driver', 1, 'launch'); // the driver → the browser's own CDP port
+const CLOAK_EGRESS_PROOF = Object.freeze({
+  provider: 'cloak',
+  tool: 'strace -f -qq -e trace=%network,execve,clone,clone3,fork,vfork -s 1024 -xx',
+  date: '2026-09-28',
+  version: '0.5.10',
+  package: 'cloakbrowser@0.5.10',
+  chromium: '146.0.7680.177.5',
+  platform: 'linux-x64',
+  status: 'measured',
+  measuredWith: 'scripts/measure-cloak-egress.mjs',
+  launchedVia: 'the browser driver VibeSpace runs (0.38.1), its executable path set to <chrome> and its browser arguments to --no-sandbox,--fingerprint=<seed>, both in its environment',
+  pins: Object.freeze({ CLOAKBROWSER_VERSION: '146.0.7680.177.5', CLOAKBROWSER_AUTO_UPDATE: 'false' }),
+  download: Object.freeze({
+    url: 'https://cloakbrowser.dev/chromium-v146.0.7680.177.5/cloakbrowser-linux-x64.tar.gz',
+    bytes: 216890134,
+    sha256: '4a12bcde95fa1bb1beef2b41ab5e5c27c36be78e3be3d0dac8c64d705216670e',
+    signature: 'Ed25519 over SHA256SUMS, checked locally against the one key pinned in the wrapper (dist/config.js BINARY_SIGNING_PUBKEYS); the manifest must name the pinned version; then the archive\'s SHA-256',
+  }),
+  binary: Object.freeze({ path: 'chromium-146.0.7680.177.5/chrome', sha256: '715722e8605ae3ce81523c1218aba1ec89425786ab33ceaf99f8a6cb5e70e6e8', dirBytes: 729336146, lastVersion: '146.0.7680.177' }),
+  // measured with the same strace method BEFORE the four runs: the package manager, and the vendor's own offline probe
+  install: Object.freeze([
+    Object.freeze({ what: 'npm install --prefix <scratch> --no-save cloakbrowser@0.5.10 (the wrapper + its one dependency, tar)', inetConnects: 57, addrProbes: 48, targets: Object.freeze([tgt('dns resolver', '127.0.0.53', 53, 'npm', 2, 'npm'), tgt('registry.npmjs.org', '104.16.4.34', 443, 'npm', 7, 'npm')]) }),
+    Object.freeze({ what: 'cloakbrowser info --quick --json (the vendor\'s network-free mode — the pin and the path are read from it)', inetConnects: 0, addrProbes: 0, targets: Object.freeze([]) }),
+  ]),
+  runs: Object.freeze([
+    Object.freeze({
+      what: CLOAK_EGRESS_RUNS[0], inetConnects: 21, addrProbes: 12, browserStarts: 10,
+      targets: Object.freeze([tgt('dns resolver', '127.0.0.53', 53, 'wrapper', 4, 'download'), tgt('cloakbrowser.dev', '172.67.208.193', 443, 'wrapper', 2, 'download'), tgt('github.com', '140.82.116.3', 443, 'wrapper', 1, 'download'), tgt('release-assets.githubusercontent.com', '185.199.110.133', 443, 'wrapper', 1, 'download'), LOOPBACK_CDP(33851)]),
+      note: 'the download: `cloakbrowser install` (pinned, auto-update off) fetched 216 890 134 bytes and printed "SHA256SUMS signature verified: Ed25519 OK" + "Checksum verified: SHA-256 OK". The binary\'s first start then came up (zygote + network service, one loopback CDP connect) and about a second later was replaced by a relaunch that the measurement\'s own flag-less `get cdp-url` caused (the 0.38.1 driver relaunches the browser when a call\'s launch view differs — the product carries the flags in the env of every call since); the relaunches, without --no-sandbox, died on the sandbox. The first-start trace spans about 60 s. No DNS query and no non-loopback connect from any browser process.',
+    }),
+    Object.freeze({ what: CLOAK_EGRESS_RUNS[1], inetConnects: 1, addrProbes: 0, browserStarts: 1, heldMs: 30000, targets: Object.freeze([LOOPBACK_CDP(33149)]), note: 'a second `cloakbrowser install` found the pinned build in the cache and made 0 connects; the browser then ran 30 s on about:blank' }),
+    Object.freeze({ what: CLOAK_EGRESS_RUNS[2], inetConnects: 1, addrProbes: 0, browserStarts: 1, heldMs: 30000, targets: Object.freeze([LOOPBACK_CDP(42783)]), key: 'a dummy value in CLOAKBROWSER_LICENSE_KEY — not a license (no CloakBrowser account exists); the browser driver hands its environment to the browser it starts (checked with a stub browser that wrote its env)', note: 'the build received a key and sent it nowhere — it neither checks nor uses one' }),
+    Object.freeze({ what: CLOAK_EGRESS_RUNS[3], inetConnects: 1, addrProbes: 0, browserStarts: 1, heldMs: 600000, targets: Object.freeze([LOOPBACK_CDP(33589)]), note: '10 minutes idle on about:blank: nothing but the loopback CDP connect it was opened with' }),
+  ]),
+  // what the free tier needs — measured where it could be, read in the vendor's own code (dist/*.js) where it could not
+  freeTier: Object.freeze({
+    key: 'none', login: 'none', chromiumMajor: 146,
+    measured: 'the keyless build (Chromium 146) installed, started and ran with no key and no sign-in; its only output about keys is the wrapper\'s banner "Running the free binary (v146). The latest binary (v151) is free too, with 1 concurrent session. Get your key: run cloakbrowser login or visit https://cloakbrowser.dev/free"',
+    withAKey: 'NOT measured (no key is authorized): with a key the wrapper validates it at cloakbrowser.dev/api/license/validate (a 24 h local cache) and downloads a DIFFERENT build (Chromium 151, cloakbrowser.dev/api/download/<v> with the key as a Bearer token), which checks the key with cloakbrowser.dev when it starts (exit 76 seat limit / 77 invalid key / 78 server unreachable). VibeSpace installs only the measured keyless build.',
+  }),
+  // the vendor's code names these; the pinned install never reached them, and the proxy refuses them (not in either allowlist)
+  notReached: Object.freeze([
+    Object.freeze({ host: 'api.github.com', why: 'the wrapper\'s hourly update check (then a silent download of a newer build) — off: CLOAKBROWSER_AUTO_UPDATE=false and a pinned CLOAKBROWSER_VERSION' }),
+    Object.freeze({ host: 'registry.npmjs.org', why: 'the wrapper\'s own "update available" check — off with the same switch (npm reaching it to install the wrapper is the `npm` phase)' }),
+    Object.freeze({ host: 'cloakbrowser.dev/api/license/*, /api/download/*', why: 'only with a key (see freeTier.withAKey)' }),
+  ]),
+  expectedRuns: CLOAK_EGRESS_RUNS,
+});
+/** A loopback / resolver address is never an egress host (it is named by what it is). */
+function isLocalAddr(a) { const s = String(a || '').toLowerCase(); return /^127\./.test(s) || s === '::1' || s === 'localhost'; }
+/** THE ALLOWLISTS A RECORD IMPLIES, derived from its phase-tagged targets (the
+ *  record is the one source — the proxy never carries a second hand-written
+ *  list): `install` = what the pinned download reached, `run` = what a running
+ *  browser reached beyond loopback, `npm` = the package manager's registry
+ *  (named, not proxied), `unnamed` = a non-local target the record cannot name. */
+function egressHostsOf(proof) {
+  const out = { install: [], run: [], npm: [], unnamed: [], badPhase: [] };
+  if (!proof || typeof proof !== 'object') return out;
+  const all = [...(Array.isArray(proof.install) ? proof.install : []), ...(Array.isArray(proof.runs) ? proof.runs : [])];
+  for (const r of all) for (const t of (r && Array.isArray(r.targets) ? r.targets : [])) {
+    if (!t || isLocalAddr(t.addr)) continue;
+    const h = String(t.host || '').toLowerCase();
+    if (!h || h === '?' || !/^[a-z0-9.-]+$/.test(h)) { out.unnamed.push(`${t.addr}:${t.port}`); continue; }
+    const bucket = t.phase === 'download' ? out.install : t.phase === 'launch' ? out.run : t.phase === 'npm' ? out.npm : null;
+    if (!bucket) { out.badPhase.push(h); continue; }
+    if (!bucket.includes(h)) bucket.push(h);
+  }
+  return out;
+}
+/** THE PINNED DOWNLOAD's allowlist (the install step runs under the egress proxy with exactly these). */
+function cloakInstallAllowlist(proof = CLOAK_EGRESS_PROOF) { return egressHostsOf(proof).install; }
+/** A RUNNING cloak browser's allowlist: what the record says the browser itself
+ *  needs (measured: nothing) + the sites this deployment names for its profiles
+ *  (`browser.cloak.egressAllowlist`). Loopback is never admitted by a rule. */
+function cloakRunAllowlist(proof = CLOAK_EGRESS_PROOF, sites = '') {
+  const out = [];
+  for (const h of [...egressHostsOf(proof).run, ...parseEgressAllowlist(sites)]) if (!out.includes(h)) out.push(h);
+  return out;
+}
+/** The local-oracles discipline over a proof record + the rows it claims to
+ *  explain: `{ok:true}` or `{ok:false, error}`. A record with no counts is
+ *  not a record; a `blocks` claim must name a cell that IS false; a measured
+ *  record must carry every run §7.2.1 names, each with an INET count, name
+ *  the build it describes (version + Chromium + platform) and name every
+ *  non-local address it reached, each under one of the EGRESS_PHASES. */
+function proofVerdict(proof, rows = PROVIDERS) {
+  if (!proof || typeof proof !== 'object') return { ok: false, error: 'no proof record' };
+  for (const k of ['tool', 'date', 'version', 'runs']) if (!(k in proof)) return { ok: false, error: `proof record lacks ${k}` };
+  if (!Array.isArray(proof.runs)) return { ok: false, error: 'proof.runs is not a list' };
+  if (proof.status === 'measured') {
+    if (proof.blocks) return { ok: false, error: 'a measured record may not carry a blocks claim (the cell it would explain is not explained by a measurement that succeeded)' };
+    if (!proof.version) return { ok: false, error: 'a measured record names the version it describes' };
+    if (proof.provider === 'cloak' && (!proof.chromium || !proof.platform)) return { ok: false, error: 'a measured cloak record names the Chromium build and the platform it describes (the install pins both)' };
+    const want = proof.expectedRuns || CLOAK_EGRESS_RUNS;
+    for (const w of want) {
+      const r = proof.runs.find((x) => x && x.what === w);
+      if (!r) return { ok: false, error: `measured record lacks the run "${w}"` };
+      if (!Number.isInteger(r.inetConnects) || r.inetConnects < 0) return { ok: false, error: `run "${w}" has no INET connect count` };
+    }
+    const hosts = egressHostsOf(proof);
+    if (hosts.unnamed.length) return { ok: false, error: `a measured record names every address it reached — unnamed: ${hosts.unnamed.join(', ')}` };
+    if (hosts.badPhase.length) return { ok: false, error: `a reached host sits in no phase (${EGRESS_PHASES.join(' / ')}): ${hosts.badPhase.join(', ')}` };
+    return { ok: true };
+  }
+  if (proof.status !== 'refused') return { ok: false, error: `unknown proof status ${JSON.stringify(proof.status)}` };
+  if (!proof.refusal) return { ok: false, error: 'a refused record names its refusal' };
+  if (proof.runs.length) return { ok: false, error: 'a refused record carries no runs (a run with counts is a measurement)' };
+  const m = /^([a-z:-]+)\.([a-zA-Z]+)$/.exec(String(proof.blocks || ''));
+  if (!m) return { ok: false, error: 'a refused record must say which capability cell it blocks (`<provider>.<cell>`)' };
+  const row = rows[m[1]];
+  if (!row) return { ok: false, error: `blocks names an unknown provider ${m[1]}` };
+  if (row[m[2]] !== false) return { ok: false, error: `blocks claims ${proof.blocks} is false, but the cell reads ${JSON.stringify(row[m[2]])} — re-enabled without re-measuring` };
+  return { ok: true };
+}
+/** The proof record that explains a false cell, or null (`blockedCell('cloak','wired')`). */
+function blockedCell(provider, cell) {
+  return CLOAK_EGRESS_PROOF.blocks === `${provider}.${cell}` ? CLOAK_EGRESS_PROOF : null;
+}
+/** The cloak row's `wired` cell, DERIVED: a measured record the discipline
+ *  accepts (asked with no rows — a measured record's verdict never reads
+ *  them). A refused record ⇒ false, and its `blocks` claim names this cell. */
+const CLOAK_WIRED = CLOAK_EGRESS_PROOF.status === 'measured' && proofVerdict(CLOAK_EGRESS_PROOF, {}).ok;
+
 // ═══ P4 — PROVIDERS ARE ROWS, NOT AN `if` CHAIN (§7.1's two tables, §7.2.1,
 // §7.3, §7.6). `provider` IS the backend and the TIER is derived from it
 // (§3.3) — never stored twice. Every capability a provider lacks is a CELL a
@@ -834,7 +1027,7 @@ function profileDirName(id) { return 'vs-' + String(id); }
 // failing at use time (the backend-caps discipline). Cells:
 //   tier         1 CDP undisguised · 2 fingerprint (still CDP) · 3 no CDP at all
 //   wired        this build can START/REACH one — false ⇒ `provider_unavailable`
-//                naming why (for `cloak` the why is the §7.2.1 record below)
+//                naming why (for `cloak` it is DERIVED from the §7.2.1 record above)
 //   keyScope     'none' | 'local-only' (D34: a key-bearing provider is REFUSED
 //                on `host != null` — `provider_needs_local_key`)
 //   canSwitchTo  §7.4: 'in-place' | 'export-only' | 'no'
@@ -857,7 +1050,7 @@ function profileDirName(id) { return 'vs-' + String(id); }
 //                a user act with its own confirmation; agents cannot write settings)
 const PROVIDERS = Object.freeze({
   chromium: Object.freeze({ tier: 1, wired: true, label: 'Chromium (a browser VibeSpace starts)', keyScope: 'none', canSwitchTo: 'in-place', ownsDir: true, leaseKind: 'tab', remote: 'browser-serve', starts: true, headed: null, binary: 'agent-browser', cdp: true, allowedDomains: true, pinTab: true, consent: null }),
-  cloak: Object.freeze({ tier: 2, wired: false, label: 'CloakBrowser (the same profile directory opened by the cloakbrowser binary, seeded)', keyScope: 'local-only', canSwitchTo: 'in-place', ownsDir: true, leaseKind: 'tab', remote: null, starts: true, headed: false, binary: 'cloakbrowser', cdp: true, allowedDomains: true, pinTab: true, consent: null }),
+  cloak: Object.freeze({ tier: 2, wired: CLOAK_WIRED, label: 'CloakBrowser (the same profile directory opened by the cloakbrowser binary, seeded)', keyScope: 'local-only', canSwitchTo: 'in-place', ownsDir: true, leaseKind: 'tab', remote: null, starts: true, headed: false, binary: 'cloakbrowser', cdp: true, allowedDomains: true, pinTab: true, consent: null }),
   cdp: Object.freeze({ tier: 1, wired: true, label: 'An existing browser over CDP (yours, or one on a paired machine)', keyScope: 'none', canSwitchTo: 'no', ownsDir: false, leaseKind: 'tab', remote: 'tcp-forward', starts: false, headed: null, binary: null, cdp: true, allowedDomains: true, pinTab: true, consent: null }),
   // P10 (§7.6 tier 3, D27 (b), D31): WIRED — a window already open on the user's
   // own desktop, addressed through vibespace-window (the AT-SPI tree + its own
@@ -886,74 +1079,6 @@ function providerRow(id) {
   return null;
 }
 function providerIds() { return [...Object.keys(PROVIDERS), ...CLOUD_PROVIDERS.map((n) => 'cloud:' + n)]; }
-
-/**
- * §7.2.1 — THE EGRESS PRECONDITION, AS A RECORDED RESULT. Modelled verbatim
- * on src/local-oracles.js: a record carries `tool`, `date`, `version` and
- * per-run INET connect counts, or it is not a record. CloakBrowser is a
- * network tool by definition, so it can never be an ORACLE — this record
- * contributes the proof's SHAPE, not a zero-network verdict; it lives beside
- * the provider row so the UI can show what was measured and when.
- *
- * `status: 'refused'` + `blocks: 'cloak.wired'` is the local-oracles `blocks`
- * discipline: the measurement could not be taken, and THAT is why the caps
- * cell is false. test-browser-providers asserts the named cell really IS
- * false — a row somebody re-enables without re-measuring fails the suite —
- * and that a `measured` record carries the four runs §7.2.1 names.
- *
- * Taken with scripts/measure-cloak-egress.mjs (the same strace method as
- * local-oracles: `env -i HOME=<empty dir> PATH=… strace -f -qq -e
- * trace=network`, every connect(AF_INET|AF_INET6) counted, a DNS :53 connect
- * counted as INET). Re-run it after installing the pinned package and paste
- * its output here; the version it names is the version the counts describe
- * (an unpinned auto-download silently invalidates the record).
- */
-const CLOAK_EGRESS_RUNS = Object.freeze(['first launch (download expected)', 'second launch from cache', 'launch with a license key present', '10-minute idle browser']);
-const CLOAK_EGRESS_PROOF = Object.freeze({
-  provider: 'cloak',
-  tool: 'strace -f -qq -e trace=network',
-  date: '2026-09-16',
-  version: null,
-  status: 'refused',
-  refusal: 'binary_absent',
-  detail: 'neither `cloakbrowser` nor `cloakserve` is installed on the measuring machine and the package is not in node_modules (npm `cloakbrowser` 0.5.10 downloads a ~200 MB proprietary binary on first launch — installing it is a USER action that comes AFTER this measurement, never a side effect of it). Nothing was downloaded; no vendor host was contacted.',
-  blocks: 'cloak.wired',
-  runs: Object.freeze([]),
-  expectedRuns: CLOAK_EGRESS_RUNS,
-});
-/** The local-oracles discipline over a proof record + the rows it claims to
- *  explain: `{ok:true}` or `{ok:false, error}`. A record with no counts is
- *  not a record; a `blocks` claim must name a cell that IS false; a measured
- *  record must carry every run §7.2.1 names, each with an INET count. */
-function proofVerdict(proof, rows = PROVIDERS) {
-  if (!proof || typeof proof !== 'object') return { ok: false, error: 'no proof record' };
-  for (const k of ['tool', 'date', 'version', 'runs']) if (!(k in proof)) return { ok: false, error: `proof record lacks ${k}` };
-  if (!Array.isArray(proof.runs)) return { ok: false, error: 'proof.runs is not a list' };
-  if (proof.status === 'measured') {
-    if (proof.blocks) return { ok: false, error: 'a measured record may not carry a blocks claim (the cell it would explain is not explained by a measurement that succeeded)' };
-    if (!proof.version) return { ok: false, error: 'a measured record names the version it describes' };
-    const want = proof.expectedRuns || CLOAK_EGRESS_RUNS;
-    for (const w of want) {
-      const r = proof.runs.find((x) => x && x.what === w);
-      if (!r) return { ok: false, error: `measured record lacks the run "${w}"` };
-      if (!Number.isInteger(r.inetConnects) || r.inetConnects < 0) return { ok: false, error: `run "${w}" has no INET connect count` };
-    }
-    return { ok: true };
-  }
-  if (proof.status !== 'refused') return { ok: false, error: `unknown proof status ${JSON.stringify(proof.status)}` };
-  if (!proof.refusal) return { ok: false, error: 'a refused record names its refusal' };
-  if (proof.runs.length) return { ok: false, error: 'a refused record carries no runs (a run with counts is a measurement)' };
-  const m = /^([a-z:-]+)\.([a-zA-Z]+)$/.exec(String(proof.blocks || ''));
-  if (!m) return { ok: false, error: 'a refused record must say which capability cell it blocks (`<provider>.<cell>`)' };
-  const row = rows[m[1]];
-  if (!row) return { ok: false, error: `blocks names an unknown provider ${m[1]}` };
-  if (row[m[2]] !== false) return { ok: false, error: `blocks claims ${proof.blocks} is false, but the cell reads ${JSON.stringify(row[m[2]])} — re-enabled without re-measuring` };
-  return { ok: true };
-}
-/** The proof record that explains a false cell, or null (`blockedCell('cloak','wired')`). */
-function blockedCell(provider, cell) {
-  return CLOAK_EGRESS_PROOF.blocks === `${provider}.${cell}` ? CLOAK_EGRESS_PROOF : null;
-}
 
 /**
  * THE ONE ANSWER to "may this provider be used here" — the typed refusal a
@@ -1067,7 +1192,8 @@ function cloakservePlan({ enabled = false, proof = CLOAK_EGRESS_PROOF, allowlist
   const pv = proofVerdict(proof);
   if (!pv.ok) return { ok: false, code: 'egress_proof_invalid', error: `the §7.2.1 egress record is malformed: ${pv.error}` };
   if (proof.status !== 'measured') return { ok: false, code: 'egress_not_measured', error: `the §7.2.1 egress precondition is recorded as ${proof.refusal} (${proof.date}) — measure first (scripts/measure-cloak-egress.mjs), then install the pinned package` };
-  const hosts = parseEgressAllowlist(allowlist);
+  // the record's own run hosts (measured: none) + the sites this deployment names — ONE derivation (cloakRunAllowlist)
+  const hosts = cloakRunAllowlist(proof, allowlist);
   if (!hosts.length) return { ok: false, code: 'egress_allowlist_empty', error: 'the egress allowlist is empty — name the sites this profile is for (browser.cloak.egressAllowlist)' };
   const pp = Number(proxyPort);
   if (!Number.isInteger(pp) || pp < 1 || pp > 65535) return { ok: false, code: 'egress_proxy_missing', error: 'the allowlisting egress proxy is not listening' };
@@ -1237,6 +1363,10 @@ function normalizeRegistry(doc) {
     // "Who can use it" (2026-09-27): the tabs the keeper CLOSED when the user took a profile from a conversation
     // (`<profileId>|<browserKey>` → when) — measured on 0.38.1, a session whose bound tab was closed answers `tab_gone`
     // until it binds a new one; the keeper binds one at that conversation's next attach, then drops the mark
+    // BROWSE YOURSELF verify r2 (orphan tabs): per live profile, the conversations whose lease was DROPPED while its browser
+    // ran (their page stayed) — a tab the user takes marks them, so a session that comes back binds a new tab first
+    // (verify r3: a detach and a helper's handle too — a child key rides with its suffix)
+    leftTabs: Object.fromEntries(Object.entries(obj(d.leftTabs)).filter(([k, v]) => isProfileId(k) && v && typeof v === 'object' && !Array.isArray(v)).map(([k, v]) => [k, Object.fromEntries(Object.entries(v).filter(([bk, at]) => /^bk-[0-9a-f]{8}(\.\d{1,4})?$/.test(bk) && Number.isFinite(Number(at))).slice(-64).map(([bk, at]) => [bk, Number(at)]))]).filter(([, v]) => Object.keys(v).length)),
     tabClosed: Object.fromEntries(Object.entries(obj(d.tabClosed)).filter(([k, v]) => /^bp-[0-9a-f]{8}\|bk-[0-9a-f]{8}(\.\d{1,4})?$/.test(k) && Number.isFinite(Number(v))).map(([k, v]) => [k, Number(v)])),
     // MULTIVIEW D4: each conversation's EXPLICIT per-conversation browser cap
     // (browserKey → {cap, at}) — conversation-level like `pins`, so a resume
@@ -1252,6 +1382,13 @@ function normalizeRegistry(doc) {
     seats: obj(d.seats),
     majors: obj(d.majors),
     blocked: list(d.blocked, (b) => typeof b.url === 'string' && b.by === 'agent'),
+    // BROWSE YOURSELF verify r1 (H4): the USER's own holder per profile (profileId → {key, since, launched, ownTab, state,
+    // awaySince}) — persisted so a server restart inside his keep neither idles the browser out under his page nor
+    // orphans his tab; the keeper restores each AWAY (its window re-attaches) and drops one whose browser did not survive
+    humans: Object.fromEntries(Object.entries(obj(d.humans)).filter(([k, v]) => isProfileId(k) && v && typeof v === 'object' && v.key === 'hu-' + k.slice(3)).map(([k, v]) => [k, {
+      key: v.key, profileId: k, since: Number(v.since) || 0, launched: v.launched === true, ownTab: /^[0-9A-Fa-f]{32}$/.test(String(v.ownTab || '')) ? String(v.ownTab) : null,
+      adopted: (Array.isArray(v.adopted) ? v.adopted : []).map(String).filter((x) => /^[0-9A-Fa-f]{32}$/.test(x)).slice(-32), // verify r2: the orphan tabs he took
+      state: v.state === 'driving' ? 'driving' : 'away', awaySince: Number(v.awaySince) || 0 }])),
   };
 }
 /** Resolve a profile by id or by label (exact, case-insensitive). */
@@ -1323,7 +1460,7 @@ function ephemeralLabel(sessionName) {
  * exactly as a new named lease is. A lease naming no known profile is dropped
  * (never a dangling row). `view` decorates a row (the keeper's `mediated`).
  */
-function holderRows({ leases = [], profiles = [], browsers = {}, view = (l) => ({ ...l }) } = {}) {
+function holderRows({ leases = [], profiles = [], browsers = {}, view = (l) => ({ ...l }), humans = [] } = {}) {
   const byId = new Map((Array.isArray(profiles) ? profiles : []).filter(Boolean).map((p) => [p.id, p]));
   const out = [];
   for (const l of Array.isArray(leases) ? leases : []) {
@@ -1333,6 +1470,14 @@ function holderRows({ leases = [], profiles = [], browsers = {}, view = (l) => (
     const b = browsers ? browsers[l.profileId] : null;
     if (!b || b.state !== 'ready') continue;
     out.push({ ...view(l), ephemeral: true, child: isChildKey(l.browserKey), label: p.label });
+  }
+  // BROWSE YOURSELF (B-6ae8): the user's own holder row on a NAMED profile — `human: true`, `holder: 'user'`,
+  // `sessionId: null` (no conversation: every reader that needs one — the auto-bind, the owner dots, the phone's
+  // auto-open — skips a row without a session id; the picker's attached count filters `!human`)
+  for (const h of Array.isArray(humans) ? humans : []) {
+    const p = h ? byId.get(h.profileId) : null;
+    if (!p || isEphemeralProfile(p) || !h.human || !/^hu-[0-9a-f]{8}$/.test(String(h.browserKey || ''))) continue;
+    out.push({ ...h, sessionId: null, holder: 'user', human: true });
   }
   return out;
 }
@@ -1526,6 +1671,9 @@ function agentProfileView(p, facts = {}, extra = {}) {
   const { owner, createdBy, scopeAt, ...rest } = publicProfileView(p);
   // eslint-disable-next-line no-unused-vars
   const { use: _u, owner: _o, createdBy: _c, scopeAt: _s, ...ex } = extra || {};
+  // BROWSE YOURSELF verify r1 (H1): `lastUsedAt` moves when the USER browses it (and when another conversation does — the
+  // identity class) and `recordMine` is his own switch: neither is an agent's to read (the CLI prints neither)
+  delete rest.lastUsedAt; delete rest.recordMine; delete ex.lastUsedAt; delete ex.recordMine;
   return { ...rest, ...ex, scope: scopeOf(p), use: agentUseOf(p, facts) };
 }
 /**
@@ -1550,6 +1698,9 @@ function ownRow(row, myKey) { const K = parentKeyOf(String(myKey || '')); return
  *  session id, its handle, its tab or its label (a managed ephemeral's label names the conversation). */
 function agentLeaseRow(l, myKey) {
   if (!l) return null;
+  // BROWSE YOURSELF verify r1 (H1): the USER's own holder row is never an agent's to read — not even as a count (whether he
+  // browses, drives or is away is his fact); every agent answer is byte-identical with and without him
+  if (l.human === true || /^hu-[0-9a-f]{8}$/.test(String(l.browserKey || ''))) return null;
   if (ownRow(l, myKey)) return { ...l };
   // r3: another conversation's EPHEMERAL browser is its own record — its id names nothing an agent may act on (no handle,
   // no `use`), and it keyed the digest's `browsers` map to that conversation's pid + namespace; the count needs no id
@@ -1620,9 +1771,17 @@ function agentDigestView(d, facts = {}, profileOf = () => null) {
  * the census pins that it is the only one. Pure: never mutates the body; a non-object body is returned as is.
  */
 const BELT_EXCEPTIONS = Object.freeze(['drivers']);
-const KEY_IN_TEXT_RE = /\bbk-[0-9a-f]{8}(?:\.\d{1,4})?\b/g;
+// identity verify r4 (2026-09-28): NO word boundaries and NO case — `trace_bk-…`, `xbk-…`, `bk-…f` (a 9th hex digit) and
+// `BK-…` slipped the old `\bbk-[0-9a-f]{8}\b`; a key-shaped run anywhere in a string is masked (over-masking is safe)
+const KEY_IN_TEXT_RE = /bk-[0-9a-f]{8}(?:\.\d{1,4})?/gi;
+// BROWSE YOURSELF verify r1 + the .197 integration: the user's `hu-` key with r4's edges closed too (no word boundary,
+// no case) — a key-shaped run anywhere in a string is masked
+const HUMAN_KEY_IN_TEXT_RE = /hu-[0-9a-f]{8}/gi;
 const MASKED_KEY = 'bk-********';
 const MASKED_ID = '[another conversation]';
+/** r4: the belt's depth ceiling — a subtree deeper than this is DROPPED (null), never returned unjudged. */
+const BELT_MAX_DEPTH = 64;
+const escapeRe = (t) => String(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** Every string leaf of the given values (a request's body / query / params) — what the asker itself said. */
 function echoesOf(...sources) {
   const out = new Set();
@@ -1636,24 +1795,35 @@ function echoesOf(...sources) {
   return out;
 }
 function agentAnswerView(body, { me = null, foreign = null, echoes = null } = {}) {
-  const K = parentKeyOf(String(me || ''));
+  const K = parentKeyOf(String(me || '')).toLowerCase();
   const ids = foreign && foreign.ids instanceof Set ? foreign.ids : new Set(Array.isArray(foreign && foreign.ids) ? foreign.ids : []);
   const pids = foreign && foreign.pids instanceof Set ? foreign.pids : new Set(Array.isArray(foreign && foreign.pids) ? foreign.pids : []);
   const said = echoes instanceof Set ? echoes : new Set(Array.isArray(echoes) ? echoes : []);
+  // r4: ONE alternation over every id long enough to be nobody else's (≥ 8) that the asker did not say — one pass per
+  // string, whatever its length (the old per-id `includes` loop needed a 64 KiB cut-off that returned a long string RAW)
+  const longIds = [...ids].filter((id) => typeof id === 'string' && id.length >= 8 && !said.has(id));
+  const IDS_RE = longIds.length ? new RegExp(longIds.map(escapeRe).join('|'), 'g') : null;
   const maskText = (s) => {
     if (ids.has(s) && !said.has(s)) return MASKED_ID; // the whole leaf is another session's id
-    let t = s.replace(KEY_IN_TEXT_RE, (m) => (K && parentKeyOf(m) === K ? m : said.has(m) ? m : MASKED_KEY));
-    for (const id of ids) if (id && id.length >= 8 && t.includes(id) && !said.has(id)) t = t.split(id).join(MASKED_ID); // inside a sentence / a path: ids long enough to be nobody else's
+    let t = s.replace(KEY_IN_TEXT_RE, (m) => (K && parentKeyOf(m.toLowerCase()) === K ? m : said.has(m) ? m : MASKED_KEY));
+    t = t.replace(HUMAN_KEY_IN_TEXT_RE, (m) => (said.has(m) ? m : MASKED_KEY)); // BROWSE YOURSELF verify r1: the user's key is nobody's to read (a proposal's reason, a raw route tomorrow)
+    if (IDS_RE) t = t.replace(IDS_RE, MASKED_ID); // inside a sentence / a path
     return t;
   };
   const walk = (v, depth) => {
-    if (depth > 24) return v;
-    if (typeof v === 'string') return v && v.length < 65536 ? maskText(v) : v;
+    if (depth > BELT_MAX_DEPTH) return null; // r4: fail closed — never a subtree returned unjudged
+    if (typeof v === 'string') return v ? maskText(v) : v;
     if (typeof v === 'number') return pids.has(v) ? null : v;
     if (v === null || typeof v !== 'object') return v;
     if (Array.isArray(v)) return v.map((x) => walk(x, depth + 1));
     const out = {};
-    for (const [k, x] of Object.entries(v)) out[k] = depth === 0 && BELT_EXCEPTIONS.includes(k) ? x : walk(x, depth + 1);
+    for (const [k, x] of Object.entries(v)) {
+      // r4: an object KEY is a string too (a map keyed by a conversation's key or webui id); two keys masking to one
+      // spelling are told apart by a counter so nothing is silently dropped
+      let mk = maskText(k);
+      if (mk !== k) { let n = 2; const base = mk; while (Object.prototype.hasOwnProperty.call(out, mk)) mk = `${base}#${n++}`; }
+      out[mk] = depth === 0 && BELT_EXCEPTIONS.includes(k) ? x : walk(x, depth + 1);
+    }
     return out;
   };
   return walk(body, 0);
@@ -2783,7 +2953,7 @@ module.exports = {
   HEAL_FAIL_BUDGET, HEAL_FAIL_SPAN_MS, failedAskVerdict, // lane H verify r6: a failed relaunch ask is not a relaunch — its own streak + cap
   // P4 (§7.1–§7.3): provider rows + capability gating, the §7.2.1 egress record, the cdp env pair, the cloakserve plan
   CLOUD_PROVIDERS, CLOUD_UNWIRED, providerRow, providerIds, providerControl, capabilityRefusal, providerRows,
-  CLOAK_EGRESS_PROOF, CLOAK_EGRESS_RUNS, proofVerdict, blockedCell,
+  CLOAK_EGRESS_PROOF, CLOAK_EGRESS_RUNS, EGRESS_PHASES, CLOAK_WIRED, proofVerdict, blockedCell, egressHostsOf, cloakInstallAllowlist, cloakRunAllowlist,
   isCdpPair, forwardedCdpUrl, cdpPortOf,
   parseEgressAllowlist, egressVerdict, CLOAKSERVE_IMAGE, cloakservePlan,
   // P1 second half (§3.7/§3.8): the attachment set, handles, the two refusals, the audit line
@@ -2796,7 +2966,8 @@ module.exports = {
   // the write's verdicts, the pick that writes the list, the migration
   WHO_KINDS, WHO_MAX, whoRow, normalizeWho, whoMayUse, useDigestOf, groupsUnreadableRefusal, agentUseOf, agentProfileView,
   remoteSessionRefusal, ownRow, agentLeaseRow, agentDigestView, // identity verify r2 (2026-09-28): a remote session never uses a profile; the agent's digest
-  agentBrowserView, agentAnswerView, echoesOf, BELT_EXCEPTIONS, MASKED_KEY, MASKED_ID, KEY_IN_TEXT_RE, // identity verify r3 (2026-09-28): the browser record's view + THE SERVER BELT every agent answer passes
+  freshBrowserKey, FRESH_KEY_TRIES, // identity verify r4 (2026-09-28): the fresh-key rule — a key the store still names is never minted again
+  agentBrowserView, agentAnswerView, echoesOf, BELT_EXCEPTIONS, MASKED_KEY, MASKED_ID, KEY_IN_TEXT_RE, BELT_MAX_DEPTH, // identity verify r3 (2026-09-28): the browser record's view + THE SERVER BELT every agent answer passes
   useStamp, useBaseVerdict, useShapeVerdict, usePatchVerdict, ownerWithConversation, ownerForWrite, migrateWhoList,
   ownsLiveBrowser, conversationOwnCount, ephemeralHolderRefusal,
 };

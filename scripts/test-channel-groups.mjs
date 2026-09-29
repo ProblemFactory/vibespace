@@ -28,16 +28,37 @@
 //      engine carries spendReason peer-message.
 //   §6 THE CLI (data/bin/vibespace-msg) against a stub server: the verbs'
 //      request shapes and the answer's woken / refused / next-turn lines.
+//   §7 THE CARDS (lane group-report-card; the owner 2026-09-28: "怎么在那个对话里
+//      看不到你发了消息？"): a report handed to a member's turn carries ONE card per
+//      message it showed (the sender, the words the member was shown, the group;
+//      "… and N more" on a budget-cut report's oldest card; a cut line's own
+//      words; the owner as "self"; a system record none); commitReports emits
+//      them through the ladder's card door BEFORE the marker moves; through the
+//      REAL prompt-context route a user turn draws them, a machine turn none;
+//      THE DOOR (src/normalizers.js) keys (group, record instant) once — a
+//      re-report after a lost marker draws nothing twice — keeps the ring, and a
+//      rebuild after a restart places the SAME card (stable id) between the
+//      turn's user record and its reply; a WAKE's ladder card is the group card
+//      too (the ring keeps its key only — the transcript holds that post); the
+//      codex wrapper's marker carries the group, and a wake's transcript record is
+//      drawn as its group card after a restart; THE STAMP PRECEDES THE FRAME (a
+//      hook the CLI runs while the post is in flight reads a machine turn); the
+//      fold kind; five patched-copy controls (no emission / no key / no rebuild
+//      replay / no group on the wake / the stamp after the post).
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
+import { pathToFileURL } from 'node:url';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 
 const G = require(path.join(REPO, 'src/channel-groups.js'));
+// r6 verify F6: the approve route REQUIRES `shown` — the digest of the card being approved (the card's own PURE function)
+const SHOWN = (view) => require(path.join(REPO, 'src/channel-policy.js')).shownDigest(view);
 const R = require(path.join(REPO, 'src/channel-record.js'));
 const { createChannelStore } = require(path.join(REPO, 'src/channel-store.js'));
 const GE = require(path.join(REPO, 'src/server/groups-engine.js'));
@@ -385,7 +406,7 @@ console.log('§1e the PACE rules (PURE) — r3 findings 4 + 5');
 }
 
 // ── the engine fixture: the REAL store + the REAL ladder + a recording authorizer
-function fixture(name, { refuse = new Set(), paceClock = undefined, log = { info() {}, warn() {}, log() {} } } = {}) {
+function fixture(name, { refuse = new Set(), paceClock = undefined, log = { info() {}, warn() {}, log() {} }, onCleared = undefined } = {}) {
   const dataDir = path.join(ROOT, name);
   fs.mkdirSync(dataDir, { recursive: true });
   const store = createChannelStore({ dir: path.join(dataDir, 'channels') });
@@ -407,7 +428,7 @@ function fixture(name, { refuse = new Set(), paceClock = undefined, log = { info
     noteSpend: () => {}, releaseSpend: () => {},
   });
   let t = T0;
-  const eng = GE.create({ store, deliver, broadcast: (m) => bcasts.push(m), now: () => (t += 1000), roster: () => roster, groupSetting: () => 'none', log, ...(paceClock ? { paceClock } : {}) });
+  const eng = GE.create({ store, deliver, broadcast: (m) => bcasts.push(m), now: () => (t += 1000), roster: () => roster, groupSetting: () => 'none', log, ...(paceClock ? { paceClock } : {}), ...(onCleared ? { onCleared } : {}) });
   return { store, eng, deliver, sessions, auths, posts, cards, bcasts, dataDir, roster, close: () => { try { deliver.flush(); } catch {} store.close(); } };
 }
 
@@ -770,11 +791,11 @@ console.log('§3j the Agents adapter\'s send / propose / approve routes: a conse
   const h2 = await api('POST', `/api/channels/agents/${C}/propose`, { text: 'held two' });
   ok(h1.status === 200 && h1.body.proposal.state === 'awaiting-approval' && h2.body.proposal.state === 'awaiting-approval', 'FIXTURE: under review two proposals wait (no wake yet ⇒ no echo needed)', JSON.stringify([h1.body && h1.body.proposal && h1.body.proposal.state, h2.body && h2.body.code]));
   a0 = auths.length;
-  r = await api('POST', `/api/channels/outbox/${h1.body.proposal.id}/approve`, {});
+  r = await api('POST', `/api/channels/outbox/${h1.body.proposal.id}/approve`, { shown: SHOWN(h1.body.proposal) });
   ok(r.status === 409 && r.body.code === 'wake-count-mismatch' && auths.length === a0 && w.channels.store.outbox.live().proposals[h1.body.proposal.id].state === 'awaiting-approval', 'auth OFF: approve with no echo ⇒ 409, the proposal still awaits', JSON.stringify(r));
-  r = await api('POST', `/api/channels/outbox/${h1.body.proposal.id}/approve`, { expectWakes: 1 });
+  r = await api('POST', `/api/channels/outbox/${h1.body.proposal.id}/approve`, { expectWakes: 1, shown: SHOWN(h1.body.proposal) });
   ok(r.status === 200 && r.body.proposal.state === 'sent' && auths.length === a0 + 1, '…with the echo it is sent', JSON.stringify(r.body && r.body.proposal && r.body.proposal.state));
-  r = await api('POST', `/api/channels/outbox/${h2.body.proposal.id}/approve`, { expectWakes: 1 });
+  r = await api('POST', `/api/channels/outbox/${h2.body.proposal.id}/approve`, { expectWakes: 1, shown: SHOWN(h2.body.proposal) });
   ok(r.status === 429 && r.body.code === 'rate-floor' && auths.length === a0 + 1 && w.channels.store.outbox.live().proposals[h2.body.proposal.id].state === 'awaiting-approval', 'auth OFF: a second approve to the same target at once ⇒ 429 rate-floor, and the proposal STAYS awaiting (approve again later)', JSON.stringify(r));
   // the side door and the group route share ONE ledger (user|<cid>)
   const g = await api('POST', '/api/channel-groups', { name: 'shared floor', members: [D, B], expectWakes: 2 });
@@ -814,9 +835,9 @@ console.log('§3j the Agents adapter\'s send / propose / approve routes: a conse
     const h3 = await api('POST', `/api/channels/agents/${X7}/propose`, { text: 'held for the blocked approve' });
     L0 = paceNow(); a0 = auths.length;
     failOnce(blocked);
-    r = await api('POST', `/api/channels/outbox/${h3.body.proposal.id}/approve`, { expectWakes: 1 });
+    r = await api('POST', `/api/channels/outbox/${h3.body.proposal.id}/approve`, { expectWakes: 1, shown: SHOWN(h3.body.proposal) });
     ok(r.status === 503 && r.body.code === 'store-blocked' && paceNow() === L0 && ob.live().proposals[h3.body.proposal.id].state === 'awaiting-approval', 'auth OFF: an approve whose transition write is refused after the grant ⇒ 503, the ledger unchanged, the proposal still awaits', JSON.stringify({ r, st: ob.live().proposals[h3.body.proposal.id].state }));
-    r = await api('POST', `/api/channels/outbox/${h3.body.proposal.id}/approve`, { expectWakes: 1 });
+    r = await api('POST', `/api/channels/outbox/${h3.body.proposal.id}/approve`, { expectWakes: 1, shown: SHOWN(h3.body.proposal) });
     ok(r.status === 200 && r.body.proposal.state === 'sent' && auths.length === a0 + 1, '…approving again once the store is back is SENT', JSON.stringify(r.body && (r.body.code || r.body.proposal.state)));
     // ④ CONTROL: a throw AFTER the request left (the delivery happened, the outcome write fails) keeps the floor — that wake is real
     const p0 = posts.length;
@@ -985,6 +1006,283 @@ console.log('§4b wiring pins');
   ok(/const own = ownConversationIdOf\(s\);\s*\n\s*return \{ job: null, cid: own\.cid, cidWhy: own\.why, s, id, myGroups: _myGroupIds\(s, id\) \};/.test(ar), 'PIN (channel-withdraw verify r4): msgCaller answers a session caller with its OWN conversation id — null while a fork still carries its parent\'s (a pending fork sent as the parent: the pair group held the parent\'s id, the target\'s reply woke the parent)');
   ok(/const fits = !rep\.text \|\| used \+ 2 \+ Buffer\.byteLength\(rep\.text, 'utf-8'\) <= INLINE_CAP - 64;\s*\n\s*if \(fits\) \{/.test(ar), 'PIN: prompt-context pushes the section (and commits its marks) only when it fits WHOLE');
   ok(/reachability: s\._msgReachability \|\| null/.test(read('server.js')) && /groupSetting: \(gid\) =>/.test(read('server.js')), 'PIN: the roster carries the msg-acl override + the Task Group setting');
+}
+
+console.log('§7 the cards: a group message handed to a turn is SEEN in that chat (lane group-report-card)');
+{
+  const N = require(path.join(REPO, 'src/normalizers.js'));
+  const GC = require(path.join(REPO, 'src/group-card.js'));
+  const NS = require(path.join(REPO, 'src/notification-senders.js'));
+  const { CodexMessageManager } = require(path.join(REPO, 'src/codex-message-manager.js'));
+  const RS = await import(pathToFileURL(path.join(REPO, 'src/lib/chat-run-summary.js')).href);
+  const SCHEMA = await import(pathToFileURL(path.join(REPO, 'src/lib/settings-schema.js')).href).catch(() => null);
+  const peerMsgs = (mm) => mm.messages.filter((m) => m.originKind === 'peer-message');
+  const liveSession = (wid = 'w-bb') => ({ claudeSessionId: B, backend: 'claude', mode: 'chat', sockName: 'cw-' + wid, _normalizer: N.createMessageManager('claude', wid), _historyLoaded: true });
+  const persisted = [];
+  N.setGroupCardPersist((sess) => persisted.push(JSON.parse(JSON.stringify(sess._groupCards))));
+
+  // (a) the cards a report carries
+  const f = fixture('gc-a');
+  const gid = (await f.eng.create({ by: A, name: 'cards', members: [B], quiet: true })).group.id;
+  for (const t of ['first: the API is down', 'second:\n- a list\n- two items', 'third']) await f.eng.post({ group: gid, from: A, text: t });
+  const rep = f.eng.reportsForTurn(B);
+  const cs = rep.marks[0] && rep.marks[0].cards;
+  ok(rep.marks.length === 1 && Array.isArray(cs) && cs.length === 3 && rep.cards.length === 3, 'a report\'s mark carries ONE card per message it shows (3)', JSON.stringify(rep.marks));
+  const msgs = f.store.readTail('groups', gid, { limit: 50 }).filter((r) => r.raw.kind === 'message');
+  ok(cs.map((x) => x.text).join('|') === 'first: the API is down|second:\n- a list\n- two items|third' && cs.every((x) => x.fromName === 'alpha' && x.group.id === gid && x.group.name === 'cards' && x.group.from === 'alpha' && x.group.via === 'report' && x.group.cut === false && x.group.more === 0 && x.group.self === false),
+    'each card: the sender, the WHOLE text with its own line breaks (its line was whole), the group, via report', cs);
+  ok(cs.map((x) => x.group.at).join() === msgs.map((r) => r.at).join(), '…keyed by each record\'s OWN instant, oldest first');
+  // (b) commitReports: one card per message through the ladder's door, before the marker
+  const seen = [];
+  const orig = f.deliver.emitPeerCard;
+  f.deliver.emitPeerCard = (cid, card) => { seen.push({ cid, card, marker: G.memberOf(f.store.groups.live().groups[gid], B).reportedUpTo }); return orig(cid, card); };
+  await f.eng.commitReports(B, rep.marks);
+  f.deliver.emitPeerCard = orig;
+  ok(seen.length === 3 && seen.every((x) => x.cid === B && x.card.kind === 'group' && x.marker === null) && f.cards.filter((c) => c.kind === 'group').length === 3,
+    'commitReports emits ONE card per message through THE ladder\'s card door (kind group) — BEFORE the marker moves', seen.map((x) => ({ cid: x.cid, kind: x.card.kind, marker: x.marker })));
+  ok(G.memberOf(f.store.groups.live().groups[gid], B).reportedUpTo === msgs[msgs.length - 1].at && f.eng.reportsForTurn(B).text === '', '…then stamps the marker (the report is gone)');
+  // (c) a budget-cut report: the shown ones, "… and N more" on the oldest
+  const f2 = fixture('gc-b');
+  const g2 = (await f2.eng.create({ by: A, name: 'long', members: [B], quiet: true })).group.id;
+  for (let i = 0; i < 8; i++) await f2.eng.post({ group: g2, from: A, text: `update ${i}: ` + 'x'.repeat(180) });
+  const small = f2.eng.reportsForTurn(B, { budget: 900 });
+  const sc = small.marks[0] ? small.marks[0].cards : [];
+  const pointed = Number((/\((\d+) earlier message\(s\) not shown/.exec(small.text) || [])[1]);
+  ok(sc.length >= 1 && sc.length < 8 && pointed >= 8 - sc.length && sc[0].group.more === pointed && sc.slice(1).every((x) => x.group.more === 0),
+    `a report CUT by the budget: one card per message it SHOWED (${sc.length}), and its oldest card counts the rest (${pointed}: the unshown records, the group's create line too) — the same N the agent's own pointer says`, { cards: sc.map((x) => x.group), text: small.text });
+  ok(sc.map((x) => x.text).every((t, i) => t === `update ${8 - sc.length + i}: ` + 'x'.repeat(180)), '…the NEWEST are the shown ones (the report\'s own rule)');
+  // (d) a line cut short: the card says what the agent saw
+  const f3 = fixture('gc-c');
+  const g3 = (await f3.eng.create({ by: A, name: 'cut', members: [B, C], quiet: true })).group.id;
+  const LONG = 'L'.repeat(300) + ' ' + 'M'.repeat(300);
+  await f3.eng.post({ group: g3, from: A, text: LONG });
+  await f3.eng.post({ group: g3, from: G.OWNER, text: 'from the owner' });
+  const r3 = f3.eng.reportsForTurn(B);
+  const [c3, co] = r3.marks[0].cards;
+  ok(c3.group.cut === true && c3.text.length <= G.LINE_MAX && c3.text.endsWith('…') && r3.text.includes(c3.text) && LONG.startsWith(c3.text.slice(0, -1)),
+    'a message the report CUT SHORT: the card holds the words the agent was shown (its line, ≤ LINE_MAX, "…"), marked cut', { len: c3.text.length, cut: c3.group.cut });
+  ok(co && co.group.self === true && co.fromName === null && co.text === 'from the owner', 'the OWNER\'s own message: `self`, no sender name (the chat says "You")', co);
+  const inv = await f3.eng.invite({ by: A, group: g3, members: ['eps'], quiet: true, context: 'join us' });
+  const rE = f3.eng.reportsForTurn(E);
+  ok(inv.ok && rE.text.includes('join us') && rE.marks.length === 1 && rE.marks[0].cards.length === 0, 'a SYSTEM record (an invite with its context) rides the report and draws NO card', rE.marks);
+
+  // (e) THE DOOR — the REAL normalizers' feedPeerCard
+  const sess = liveSession();
+  const ops = []; sess._normalizer.onOp((o) => ops.push(o));
+  const first = { ...seen[0].card };
+  ok(N.feedPeerCard(sess, first) === true, 'the door takes a group card');
+  const pm = peerMsgs(sess._normalizer);
+  ok(pm.length === 1 && pm[0].id === `w-bb:gm:${gid}:${first.group.at}` && pm[0].peerFrom === 'alpha' && pm[0].peerVia === 'peer' && pm[0].peerGroup && pm[0].peerGroup.id === gid && pm[0].peerGroup.name === 'cards' && pm[0].content[0].text === 'first: the API is down' && ops.some((o) => o.op === 'create' && o.message.id === pm[0].id),
+    '…ONE user-role peer card with a STABLE id (<view>:gm:<group>:<instant>), `peerGroup`, `peerVia: peer` — a live create op', pm[0]);
+  ok(!NS.isVibespaceNotice(pm[0].peerFrom, pm[0].content[0].text, pm[0].peerVia) && !NS.isVibespaceNotice('VibeSpace', 'x', 'peer'), '…a PEER\'s words — never a VibeSpace notice, whatever the sender is called');
+  ok(N.feedPeerCard(sess, { ...first }) === false && peerMsgs(sess._normalizer).length === 1, 'the SAME (group, record) again — a re-report — draws NOTHING (the door keys it once)');
+  ok(persisted.length >= 1 && persisted[persisted.length - 1].length === 1 && persisted[persisted.length - 1][0].k === `${gid}:${first.group.at}` && persisted[persisted.length - 1][0].card && persisted[persisted.length - 1][0].card.text === 'first: the API is down',
+    'the ring is handed to the persistence hook with the card (a report card is replayed on a rebuild)', persisted[persisted.length - 1]);
+  // a re-report after a LOST marker, end to end: the engine re-reports, the door draws nothing twice
+  const f5 = fixture('gc-e');
+  const g5 = (await f5.eng.create({ by: A, name: 'again', members: [B], quiet: true })).group.id;
+  await f5.eng.post({ group: g5, from: A, text: 'once only' });
+  const s5 = liveSession('w-b5');
+  f5.deliver.emitPeerCard = (cid, card) => (cid === B ? N.feedPeerCard(s5, card) : false);
+  const r5 = f5.eng.reportsForTurn(B);
+  await f5.eng.commitReports(B, r5.marks);
+  await f5.store.groups.update((gr) => { G.memberOf(gr.groups[g5], B).reportedUpTo = null; });   // the marker write was lost (a crash)
+  const r5b = f5.eng.reportsForTurn(B);
+  await f5.eng.commitReports(B, r5b.marks);
+  ok(r5b.text.includes('once only') && peerMsgs(s5._normalizer).length === 1, 'a RE-REPORT after a lost marker (the agent is told again — accepted-lost): the chat draws ONE card, not two', peerMsgs(s5._normalizer).length);
+
+  // (e2) THE .197 INTEGRATION (lane-redact × lane group-report-card): "Clear content…" on a group message RE-WORDS its card —
+  // the groups door hands the cleared records' keys to `onCleared`; the wiring's hook (N.redactGroupCards) rewrites the
+  // ring entry (persisted) and the drawn card in place (an `edit` op: `peerCleared`, the sentence); nothing else moves
+  {
+    const RCm = require(path.join(REPO, 'src/record-clear.js'));
+    const seenKeys = [];
+    const f6 = fixture('gc-clear', { onCleared: (g, keys) => seenKeys.push({ g, keys }) });
+    const g6 = (await f6.eng.create({ by: A, name: 'clearme', members: [B], quiet: true })).group.id;
+    await f6.eng.post({ group: g6, from: A, text: 'SECRET words to clear' });
+    await f6.eng.post({ group: g6, from: A, text: 'kept words' });
+    const s6 = liveSession('w-c6'); const ops6 = []; s6._normalizer.onOp((o) => ops6.push(o));
+    f6.deliver.emitPeerCard = (cid, card) => (cid === B ? N.feedPeerCard(s6, card) : false);
+    await f6.eng.commitReports(B, f6.eng.reportsForTurn(B).marks);
+    const recs6 = f6.store.readTail('groups', g6, { limit: 50 }).filter((r) => r.raw.kind === 'message');
+    const secret = recs6.find((r) => r.text === 'SECRET words to clear');
+    const cl = await f6.eng.clearMessages({ group: g6, ids: [secret.vendorId] });
+    ok(cl.ok && cl.cleared.length === 1 && seenKeys.length === 1 && seenKeys[0].g === g6 && JSON.stringify(seenKeys[0].keys) === JSON.stringify([`${g6}:${secret.at}`]), 'the groups door hands onCleared THE KEY of each cleared record (<group>:<record instant>) — the card\'s own key', seenKeys);
+    const n6 = N.redactGroupCards(s6, seenKeys[0].keys, RCm.CLEARED_TEXT);
+    const pm6 = peerMsgs(s6._normalizer);
+    const hit = pm6.find((m) => m.peerGroup && m.peerGroup.at === secret.at), kept = pm6.find((m) => m.content[0].text === 'kept words');
+    const ent = s6._groupCards.find((e) => e.k === `${g6}:${secret.at}`);
+    ok(n6 === 1 && hit && hit.peerCleared === true && hit.content[0].text === RCm.CLEARED_TEXT && kept && !kept.peerCleared && ent && ent.card.cleared === true && ent.card.text === RCm.CLEARED_TEXT && !JSON.stringify(s6._groupCards).includes('SECRET'),
+      'the ring entry and the DRAWN card lose the words (the sentence, `peerCleared`); the other card is untouched; the ring holds no trace of them', { n6, ring: s6._groupCards.map((e) => e.card.text) });
+    ok(ops6.some((o) => o.op === 'edit' && o.id === hit.id && o.fields && o.fields.peerCleared === true && o.fields.content[0].text === RCm.CLEARED_TEXT) && persisted.length && !JSON.stringify(persisted[persisted.length - 1]).includes('SECRET'),
+      '…an `edit` op re-words the card on every client, and the ring handed to the persistence hook (the session meta) holds the sentence');
+    ok(N.redactGroupCards(s6, seenKeys[0].keys, RCm.CLEARED_TEXT) === 0, '…a second clear of the same record changes nothing');
+    const rb = require(path.join(REPO, 'src/server/channels-wiring.js'));
+    const wsrc = fs.readFileSync(path.join(REPO, 'src/server/channels-wiring.js'), 'utf8');
+    ok(/onCleared: onGroupCardsCleared \}\);/.test(wsrc) && /N\.redactGroupCards\(s, keys, RCm\.CLEARED_TEXT\)/.test(wsrc) && typeof rb.create === 'function', 'WIRING: the wiring hands the groups engine its onCleared — every LIVE session\'s cards re-worded through the ONE normalizer function');
+    const rsrc = fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf8');
+    ok(/if \(msg\.peerCleared\) core = clearedText\(\);/.test(rsrc), 'WIRING: the chat renderer draws a cleared group card as the sentence in the device\'s words');
+    f6.close();
+  }
+
+  // (f) THE RESTART: the ring from the meta, a rebuild — the SAME card, between the turn's user record and its reply
+  const ring = JSON.parse(JSON.stringify(sess._groupCards));
+  const shownAt = ring[0].card.shownAt;
+  const iso = (ms) => new Date(ms).toISOString();
+  const records = [
+    { type: 'user', uuid: 'u-1', timestamp: iso(shownAt - 400), message: { role: 'user', content: 'hello beta' } },
+    { type: 'assistant', uuid: 'a-1', timestamp: iso(shownAt + 9000), message: { id: 'msg_gc1', type: 'message', role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text: 'on it' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } } },
+  ];
+  const s2 = { claudeSessionId: B, backend: 'claude', mode: 'chat', _groupCards: ring, _normalizer: N.createMessageManager('claude', 'w-bb') };
+  await N.rebuildHistory(s2, 'w-bb', records);
+  const order = s2._normalizer.messages.map((m) => (m.originKind === 'peer-message' ? 'card:' + m.id : m.role + ':' + ((m.content && m.content[0] && m.content[0].text) || '')));
+  ok(order.join(' | ') === `user:hello beta | card:w-bb:gm:${gid}:${first.group.at} | assistant:on it`, 'AFTER A RESTART the rebuild places the SAME card (same id) from the persisted ring — under the turn\'s user message, before its reply', order);
+  ok(N.feedPeerCard(s2, { ...first }) === false && peerMsgs(s2._normalizer).length === 1, '…and a re-report after the restart draws nothing twice (the ring came back with its keys)');
+  const s2b = { claudeSessionId: B, backend: 'claude', mode: 'chat', _groupCards: ring, _normalizer: N.createMessageManager('claude', 'w-bb') };
+  await N.rebuildHistory(s2b, 'w-bb', [{ type: 'user', uuid: 'u-9', timestamp: iso(shownAt + 1200), message: { role: 'user', content: 'hello beta' } }, records[1]]);
+  ok(s2b._normalizer.messages.map((m) => m.originKind || m.role).join() === 'user,peer-message,assistant', '…the turn\'s user record stamped just AFTER the hook call (the CLI\'s own order) still comes first — the card is placed at its instant + the slack');
+
+  // (g) A WAKE: the ladder's own card is the group card; the ring keeps its key only
+  const f4 = fixture('gc-d');
+  const g4 = (await f4.eng.create({ by: A, name: 'loud', members: [B], quiet: true })).group.id;
+  await f4.eng.setNotify({ by: B, group: g4, notify: 'always' });
+  const p4 = await f4.eng.post({ group: g4, from: A, text: 'wake up please' });
+  const wc = f4.cards.filter((c) => c.group);
+  ok(p4.woke.length === 1 && wc.length === 1 && wc[0].kind === 'peer' && wc[0].text === 'wake up please' && wc[0].group.id === g4 && wc[0].group.at === p4.message.at && wc[0].group.via === 'wake' && wc[0].group.from === 'alpha' && typeof wc[0].recorded === 'string' && wc[0].recorded.includes('wake up please'),
+    'a WAKE (--wake / @ / always) renders the SAME group card: the ladder\'s own card after the post carries the group (via wake, the message that woke it)', wc);
+  const s4 = liveSession('w-b4');
+  ok(N.feedPeerCard(s4, wc[0]) === true && peerMsgs(s4._normalizer).length === 1 && peerMsgs(s4._normalizer)[0].peerGroup.via === 'wake' && peerMsgs(s4._normalizer)[0].peerVia === 'peer' && peerMsgs(s4._normalizer)[0].peerFrom === 'alpha', '…through the REAL door: a peer card with `peerGroup` (via wake), its sender "alpha" (never the ladder\'s "alpha · loud" label)', peerMsgs(s4._normalizer)[0]);
+  ok(s4._groupCards.length === 1 && s4._groupCards[0].k === `${g4}:${p4.message.at}` && s4._groupCards[0].card && s4._groupCards[0].card.recordedHead === wc[0].recorded.trim().slice(0, 400),
+    '…the ring keeps its key + `recordedHead` (the CLI recorded that post: a rebuild draws THAT record as the group card)', s4._groupCards);
+  ok(N.feedPeerCard(s4, { fromName: 'alpha', text: 'wake up please', kind: 'group', group: { id: g4, name: 'loud', at: p4.message.at, from: 'alpha', via: 'report' } }) === false && peerMsgs(s4._normalizer).length === 1, '…and the same record reported later (a wake over a range a report shows) draws nothing twice');
+  // …after a RESTART: the CLI's own record of that post (a name-less peer record holding the whole agent-facing report)
+  // is drawn as the SAME group card — upgraded in place, one card, at the record's position
+  const ring4 = JSON.parse(JSON.stringify(s4._groupCards));
+  const at4 = ring4[0].card.shownAt;
+  const wakeRecords = [
+    { type: 'user', uuid: 'wu-1', timestamp: new Date(at4 + 50).toISOString(), origin: { kind: 'peer', from: 'unknown' }, message: { role: 'user', content: 'Another Claude session sent a message:\n' + wc[0].recorded + '\nThis came from another Claude session, not the user.' } },
+    { type: 'assistant', uuid: 'wa-1', timestamp: new Date(at4 + 4000).toISOString(), message: { id: 'msg_gw1', type: 'message', role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text: 'looking' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } } },
+  ];
+  const s4b = { claudeSessionId: B, backend: 'claude', mode: 'chat', _groupCards: ring4, _normalizer: N.createMessageManager('claude', 'w-b4') };
+  await N.rebuildHistory(s4b, 'w-b4', wakeRecords);
+  const w4 = peerMsgs(s4b._normalizer);
+  ok(w4.length === 1 && w4[0].peerGroup && w4[0].peerGroup.id === g4 && w4[0].peerGroup.via === 'wake' && w4[0].peerFrom === 'alpha' && w4[0].content[0].text === 'wake up please' && s4b._normalizer.messages.map((m) => m.originKind || m.role).join() === 'peer-message,assistant',
+    "AFTER A RESTART a wake is the SAME group card: the transcript's own record of the post, upgraded in place (one card, at its place) — never the raw report beside a second card", JSON.stringify({ w4, order: s4b._normalizer.messages.map((m) => m.originKind || m.role) }));
+  const s4c = { claudeSessionId: B, backend: 'claude', mode: 'chat', _groupCards: ring4, _normalizer: N.createMessageManager('claude', 'w-b4c') };
+  await N.rebuildHistory(s4c, 'w-b4c', [wakeRecords[1]]);
+  ok(peerMsgs(s4c._normalizer).length === 0, '…and a wake whose record is not in the transcript draws nothing on a rebuild (never a card the CLI did not take)');
+  // the codex rung: the frame carries the group, the wrapper's marker hands it to the normalizer
+  const cd = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
+  ok(/type: 'peer-message', text, fromName: opts\.fromName \|\| null, cardText: opts\.cardText \|\| null, kind, \.\.\.\(opts\.group \? \{ group: opts\.group \} : \{\}\) \}/.test(cd), 'the codex (rpc-queue) frame carries `group`');
+  ok(/webui_peer: \{ name: fromName, body: cardText, kind: peerKind, \.\.\.\(peerGroup \? \{ group: peerGroup \} : \{\}\) \}/.test(fs.readFileSync(path.join(REPO, 'data/bin/codex-chat-wrapper.js'), 'utf-8')), '…and the codex wrapper writes it into its marker');
+  const cx = new CodexMessageManager('cx-g').convertHistory([{ timestamp: new Date(T0).toISOString(), type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'group news' }], webui_peer: { name: 'alpha · loud', body: 'wake up please', kind: 'peer', group: { id: g4, name: 'loud', at: p4.message.at, from: 'alpha', via: 'wake' } } } }]);
+  const cxp = cx.filter((m) => m.originKind === 'peer-message');
+  ok(cxp.length === 1 && cxp[0].peerGroup && cxp[0].peerGroup.id === g4 && cxp[0].peerGroup.via === 'wake' && cxp[0].peerVia === 'peer' && cxp[0].peerFrom === 'alpha', '…the codex normalizer draws the marker\'s group (live and on a rebuild — the buffer copy carries it)', cxp[0]);
+
+  // (g2) THE STAMP PRECEDES THE FRAME (reproduced by the chrome leg: the CLI takes the inbox frame and runs its turn's
+  // hook while postToPeer still waits out its 150 ms — the stamp after the post was too late, the WAKE's turn read as
+  // the user's and was handed the next-turn report, the woken message included)
+  const AR0 = require(path.join(REPO, 'src/agent-routes.js'));
+  const stampLeg = async (Mod, dir, postOk) => {
+    const sx = { claudeSessionId: B, name: 'beta', mode: 'chat', _userInputAt: Date.now() - 5000, _machineInputAt: 7 };
+    const during = [];
+    fs.mkdirSync(path.join(ROOT, dir), { recursive: true });
+    const d = Mod.create({ dataDir: path.join(ROOT, dir), activeSessions: new Map([['w-s', sx]]), serverSetting: () => undefined,
+      peerMsg: { findPeer: () => ({ name: B, socketPath: '/dev/null' }), postToPeer: async () => { during.push(AR0.turnIsUserInitiated(sx)); return postOk ? { ok: true } : { ok: false, reason: 'refused by the inbox' }; }, postChannelEvent: async () => ({ ok: false }) },
+      emitPeerCard: () => {}, authorizeSpend: () => ({ ok: true, identity: { key: 'k' } }), noteSpend() {}, releaseSpend() {} });
+    const r = await d.deliverToConversation(B, 'wake frame', { kind: 'peer', spendReason: 'peer-message', fromName: 'alpha · loud', cardText: 'x' });
+    return { ok: r.ok, during, after: sx._machineInputAt };
+  };
+  const st1 = await stampLeg(DELIVER, 'gc-st1', true);
+  ok(st1.ok && st1.during.length === 1 && st1.during[0] === false, 'the machine turn is STAMPED BEFORE the post: a hook the CLI runs while the post is in flight reads the turn as nobody\'s typing (no group report rides a wake)', st1);
+  const st2 = await stampLeg(DELIVER, 'gc-st2', false);
+  ok(!st2.ok && st2.during[0] === false && st2.after === 7, '…and a post that did not land GIVES THE STAMP BACK (a failed wake never holds the user\'s own next report)', st2);
+
+  // (h) through the REAL prompt-context route: a user turn draws the cards, a machine turn none
+  const AR = require(path.join(REPO, 'src/agent-routes.js'));
+  const f6 = fixture('gc-f');
+  const g6 = (await f6.eng.create({ by: A, name: 'route', members: [B], quiet: true })).group.id;
+  await f6.eng.post({ group: g6, from: A, text: 'news for beta via the route' });
+  const routes = {};
+  const app = { get: (p, h) => { routes['GET ' + p] = h; }, post: (p, h) => { routes['POST ' + p] = h; }, put() {}, delete() {}, use() {} };
+  const wB = [...f6.sessions.keys()].find((k) => f6.sessions.get(k).claudeSessionId === B);
+  const sB = Object.assign(f6.sessions.get(wB), { agentToken: 'vsst_beta7', cwd: '/tmp', _toolsIntroSeen: true, _mgrIntroSeen: true });
+  AR.setupAgentRoutes({
+    app, activeSessions: f6.sessions,
+    tasks: { groupsForSession: () => [], _persistRescueLine: () => '', backlogNudgeFor: () => '' },
+    sessionStatus: { consumeNotices: () => [], pendingNotices: () => [], get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' },
+    userTodos: {}, sessionStatusKey: (x) => 'claude:' + x.claudeSessionId, serverSetting: (k) => (k === 'agents.perTurnToolReminder' ? false : undefined),
+    integrationEnabled: () => true, scheduleCtxSync() {}, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => null, deliver: null,
+    getGroups: () => f6.eng,
+  });
+  const ask = () => new Promise((resolve) => { routes['GET /api/agent/prompt-context']({ headers: { authorization: 'Bearer vsst_beta7' }, query: {} }, { json: (o) => resolve(o), status() { return this; } }); });
+  sB._userInputAt = 1;
+  await f6.deliver.deliverToConversation(B, 'a job finished', { kind: 'notification', spendReason: 'job-notification' });
+  const n0 = f6.cards.filter((c) => c.kind === 'group').length;
+  const onMachine = await ask();
+  ok(!String(onMachine.context || '').includes('news for beta via the route') && f6.cards.filter((c) => c.kind === 'group').length === n0, 'a MACHINE turn: no report — and no card');
+  sB._userInputAt = Date.now() + 1;
+  const onUser = await ask();
+  const gcards = f6.cards.filter((c) => c.kind === 'group');
+  ok(String(onUser.context || '').includes('news for beta via the route') && gcards.length === 1 && gcards[0].cid === B && gcards[0].text === 'news for beta via the route' && gcards[0].group.id === g6,
+    'the REAL prompt-context route on a USER turn: the report is injected AND its card is drawn in B\'s chat (the injection point)', gcards);
+
+  // (i) the fold kind: its own, off by default
+  ok(RS.RUN_KINDS.includes('group') && RS.messageKind(pm[0], { toolCard: false }) === 'group' && RS.messageKind({ role: 'user', originKind: 'peer-message', peerFrom: 'x', content: [] }, { toolCard: false }) === null,
+    'the card\'s fold kind is `group` (a plain peer card keeps none)');
+  if (SCHEMA && SCHEMA.SETTINGS_SCHEMA) {
+    const ck = SCHEMA.SETTINGS_SCHEMA['chat.collapseKinds'];
+    ok(ck.options.some((o) => o.value === 'group') && !ck.default.includes('group'), '…offered in chat.collapseKinds and OFF by default (the owner asked to see them)');
+  } else ok(/\{ value: 'group', label: t\('Group messages delivered to this agent \(vibespace-msg\)'\) \}/.test(fs.readFileSync(path.join(REPO, 'src/lib/settings-schema.js'), 'utf-8')), '…offered in chat.collapseKinds (source pin)');
+
+  // (j) PATCHED-COPY CONTROLS
+  const MUT = mutantCopies('chan-groups-cards', REPO);
+  const ge = fs.readFileSync(path.join(REPO, 'src/server/groups-engine.js'), 'utf-8');
+  const emitLine = "    else for (const c of cards) { try { deliver.emitPeerCard(cid, { fromName: c.fromName, text: c.text, kind: 'group', group: c.group }); }";
+  if (!ge.includes(emitLine)) throw new Error('mutation anchor missing: the emission');
+  const NoEmit = MUT.load('src/server/groups-engine.js', ge.replace(emitLine, "    else for (const c of []) { try { deliver.emitPeerCard(cid, { fromName: c.fromName, text: c.text, kind: 'group', group: c.group }); }"), 'no-emit');
+  const fc = fixture('gc-ctl');
+  const engC = NoEmit.create({ store: fc.store, deliver: fc.deliver, now: () => Date.now(), roster: () => fc.roster, groupSetting: () => 'none', log: { info() {}, warn() {}, log() {} } });
+  const gC = (await engC.create({ by: A, name: 'ctl', members: [B], quiet: true })).group.id;
+  await engC.post({ group: gC, from: A, text: 'unseen' });
+  await engC.commitReports(B, engC.reportsForTurn(B).marks);
+  ok(fc.cards.filter((c) => c.kind === 'group').length === 0, 'CONTROL commitReports without the emission: the report is handed out and NO card is drawn (§7 (b) can go red)');
+  const nz = fs.readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf-8');
+  const keyLine = "  if (GC.ringHas(ring, key)) return false;   // carded before in this conversation — never twice\n";
+  if (!nz.includes(keyLine)) throw new Error('mutation anchor missing: the key');
+  const NoKey = MUT.load('src/normalizers.js', nz.replace(keyLine, ''), 'no-key');
+  const sk = liveSession('w-k');
+  NoKey.feedPeerCard(sk, { ...first }); NoKey.feedPeerCard(sk, { ...first, group: { ...first.group } });
+  const skn = sk._normalizer.messages.filter((m) => m.originKind === 'peer-message').length;
+  ok(skn === 1, `CONTROL the door without its key check (the card's stable id still guards one normalizer: ${skn}) …`);
+  const sk2 = { ...liveSession('w-k2'), _groupCards: JSON.parse(JSON.stringify(sess._groupCards)) };
+  NoKey.feedPeerCard(sk2, { ...first });
+  ok(sk2._normalizer.messages.filter((m) => m.originKind === 'peer-message').length === 1 && N.feedPeerCard({ ...liveSession('w-k3'), _groupCards: JSON.parse(JSON.stringify(sess._groupCards)) }, { ...first }) === false,
+    '…but after a RESTART (a fresh normalizer, the ring from the meta) the keyless door draws the re-report AGAIN while the real one draws nothing (§7 (e)/(f) can go red)');
+  const replayLine = "[...browserCardsFor({ session }), ...GC.ringCards(session._groupCards)]";
+  if (!nz.includes(replayLine)) throw new Error('mutation anchor missing: the rebuild replay');
+  const NoReplay = MUT.load('src/normalizers.js', nz.replace(replayLine, 'browserCardsFor({ session })'), 'no-replay');
+  const s3 = { claudeSessionId: B, backend: 'claude', mode: 'chat', _groupCards: ring, _normalizer: NoReplay.createMessageManager('claude', 'w-bb') };
+  await NoReplay.rebuildHistory(s3, 'w-bb', records);
+  ok(s3._normalizer.messages.filter((m) => m.originKind === 'peer-message').length === 0, 'CONTROL a rebuild without the ring\'s cards: after a restart the card is GONE (§7 (f) can go red)');
+  const cdSrc = cd;
+  const cardLine = ", ...(opts.group ? { group: opts.group } : {}) }); } catch (e) { log('[deliver] card emit failed:', e.message); } };";
+  if (!cdSrc.includes(cardLine)) throw new Error('mutation anchor missing: the wake card');
+  const NoGroupCard = MUT.load('src/server/conversation-deliver.js', cdSrc.replace(cardLine, " }); } catch (e) { log('[deliver] card emit failed:', e.message); } };"), 'no-group-card');
+  const wcards = [];
+  const sessW = new Map([['w-x', { claudeSessionId: B, name: 'beta', mode: 'chat' }]]);
+  const dW = NoGroupCard.create({ dataDir: path.join(ROOT, 'gc-w'), activeSessions: sessW, serverSetting: () => undefined, peerMsg: { findPeer: () => ({ name: B, socketPath: '/dev/null' }), postToPeer: async () => ({ ok: true }), postChannelEvent: async () => ({ ok: false }) }, emitPeerCard: (c, card) => wcards.push(card), authorizeSpend: () => ({ ok: true, identity: { key: 'k' } }), noteSpend() {}, releaseSpend() {} });
+  fs.mkdirSync(path.join(ROOT, 'gc-w'), { recursive: true });
+  await dW.deliverToConversation(B, 'x', { kind: 'peer', spendReason: 'peer-message', fromName: 'alpha · loud', cardText: 'wake up please', group: { id: g4, name: 'loud', at: 5, from: 'alpha', via: 'wake' } });
+  ok(wcards.length === 1 && !wcards[0].group, 'CONTROL a ladder whose card drops `group`: a wake draws the plain "Message from" card (§7 (g) can go red)', wcards);
+  const armLine = "          undo1 = armTurn();\n";
+  if (!cdSrc.includes(armLine)) throw new Error('mutation anchor missing: the stamp before the post');
+  const LateStamp = MUT.load('src/server/conversation-deliver.js', cdSrc.replace(armLine, "          undo1 = () => {};\n"), 'late-stamp');
+  const stc = await stampLeg(LateStamp, 'gc-st3', true);
+  ok(stc.ok && stc.during[0] === true, 'CONTROL the stamp only AFTER the post (the pre-fix ladder): the hook during the post reads the wake\'s turn as the USER\'s (§7 (g2) can go red)', stc);
+  for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 5, label: '§7 ' })) ok(c.pass, c.name, c.detail);
+  N.setGroupCardPersist(null);
+  for (const x of [f, f2, f3, f4, f5, f6, fc]) x.close();
 }
 
 console.log('§5 censuses');

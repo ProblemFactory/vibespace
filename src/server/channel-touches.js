@@ -87,6 +87,7 @@ function create({ sessions = () => null, broadcast = () => {}, metaStore = () =>
         title: inert(x.title, T.TITLE_MAX),
         account: inert(x.account || (acc && acc.label) || '', T.LABEL_MAX),
         kind: x.kind || (acc && acc.kind) || null,
+        ...(x.glyph ? { glyph: inert(x.glyph, 70) } : {}),
       });
       if (!t) continue;
       const { touch, merged: m } = T.appendTouch(ring, t);

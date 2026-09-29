@@ -81,6 +81,14 @@ ok(!M.validatePanel({ title: 't', blocks: [{ type: 'image', path: 'rel.png' }, {
 ok(M.validateAnswers(panel, { code: '123456', button: 'submit' }).ok, 'answers matching pattern accepted');
 ok(!M.validateAnswers(panel, { code: 'abc', button: 'submit' }).ok, 'pattern-violating answer refused');
 ok(!M.validateAnswers(panel, { code: '123456' }).ok, 'missing button refused');
+// r6 D-F5: the answer NAMES its panel — missing ⇒ version-required, another ⇒ stale-panel, no panel ⇒ no-pending-panel
+{
+  const pend = { panel, version: 2 };
+  const V = (a, pp = pend) => { const r = M.answerVersionVerdict(pp, a); return r.ok ? 'ok' : r.code; };
+  const table = [[{ button: 's', version: 2 }, 'ok'], [{ button: 's', version: '2' }, 'ok'], [{ button: 's' }, 'version-required'], [{ button: 's', version: 0 }, 'stale-panel'], [{ button: 's', version: 1 }, 'stale-panel'], [{ button: 's', version: '2x' }, 'stale-panel'], [{ button: 's', version: 2.5 }, 'stale-panel']];
+  ok(table.every(([a, want]) => V(a) === want) && V({ version: 2 }, null) === 'no-pending-panel', 'r6 D-F5 answerVersionVerdict: the matching panel only; a missing version is refused by name (never "accepted because absent")', JSON.stringify(table.map(([a, w]) => [a.version, V(a), w])));
+  ok(M.nextInteractionSeq({ pending: { version: 1 }, answers: [] }) === 2 && M.nextInteractionSeq({ seq: 5, pending: null, answers: [{ version: 1 }] }) === 6, 'r6 D-F5 nextInteractionSeq never goes back (the seq, the pending, every answer)');
+}
 
 // ── owner auto-notify (2.344.0) ──
 ok(M.notifyEffective({ notify: 'off' }, true, true).on === false && M.notifyEffective({ notify: 'off' }, true, true).source === 'job', 'job override beats group+global');
@@ -231,12 +239,15 @@ ok(M.renderNotifStash(stash, { budget: 250, spillPath: '/data/job-notifications-
   ok(gB.find((g) => g.family === 'build').expanded === true && gB.find((g) => g.family === 'build').running === 1, 'a group holding a RUNNING job is expanded by default');
   ok(lay.sessions.find((s) => s.key === 'w:sess-9').groups[0].expanded === true, 'a group holding an awaiting-user job is expanded by default');
   ok(lay.groups.length === 6, `groups: 248 rows would become a handful — here 7 rows ⇒ ${lay.groups.length} groups`);
-  const lay2 = L.foldTasks(tasks, { expanded: { 's:conv-A|render': false, 's:conv-A|export': true, 'stale|key': true }, sessionNames: {} });
+  // a family's fold key is a DIGEST of the family, never the job's name (lane-redact verify r6: the map is persisted in user state)
+  const KR = 's:conv-A|' + L.familyKey('render'), KE = 's:conv-A|' + L.familyKey('export');
+  ok(gA.every((g) => g.key === 's:conv-A|' + L.familyKey(g.family) && !g.key.includes(g.family)) && L.isFoldKey(KR) && !L.isFoldKey('s:conv-A|render') && L.isFoldKey('s:conv-A') && L.isFoldKey('manual'), 'a family group\'s key is <session key>|f:<digest> — no job name in the persisted fold map; an older build\'s <session>|<name> key is not a key this build keeps');
+  const lay2 = L.foldTasks(tasks, { expanded: { [KR]: false, [KE]: true, 'stale|key': true }, sessionNames: {} });
   const gA2 = lay2.sessions.find((s) => s.key === 's:conv-A').groups;
   ok(gA2.find((g) => g.family === 'render').expanded === false && gA2.find((g) => g.family === 'export').expanded === true, "the user's persisted folds OVERRIDE the defaults in both directions");
   ok(gA2.find((g) => g.family === 'render').defaultExpanded === true, '…while defaultExpanded still states what the rule alone would do');
-  const pruned = L.pruneFolds({ 's:conv-A|render': false, 'stale|key': true, 's:conv-A|export': true }, lay2);
-  ok(Object.keys(pruned).sort().join() === 's:conv-A|export,s:conv-A|render', 'pruneFolds drops a key no current group holds (user state stays bounded)');
+  const pruned = L.pruneFolds({ [KR]: false, 'stale|key': true, [KE]: true }, lay2);
+  ok(Object.keys(pruned).sort().join() === [KE, KR].sort().join(), 'pruneFolds drops a key no current group holds (user state stays bounded)');
   // heldText: structure in, the device's words out
   const dg = { total: 3, byConversation: { 'conv-A': { count: 3, kinds: { 'spend-cap': 3 }, reason: { kind: 'spend-cap', why: 'hour-cap', identity: 'Member A', cap: 12 } } } };
   const txt = L.heldText(dg, { t: (s, p) => s.replace(/\{(\w+)\}/g, (_, k) => p[k]) });
@@ -308,8 +319,9 @@ ok(M.renderNotifStash(stash, { budget: 250, spillPath: '/data/job-notifications-
   ok(B && B.ackable.join() === 'b-done' && B.failedUnacked === 0, 'ackable ids are per session');
   const folded = L.foldTasks(jobs.filter((x) => !x.archived), { expanded: { 's:conv-A': false } });
   ok(folded.sessions.find((s) => s.key === 's:conv-A').expanded === false && folded.sessions.find((s) => s.key === 's:conv-B').expanded === true, 'a persisted session fold applies by the session key; other sessions untouched');
-  const pruned = L.pruneFolds({ 's:conv-A': false, 's:conv-GONE': false, 's:conv-A|fail': true, 'zzz|old': false }, lay);
-  ok(JSON.stringify(pruned) === JSON.stringify({ 's:conv-A': false, 's:conv-A|fail': true }), 'pruneFolds keeps live session keys and live group keys, drops the rest', pruned);
+  const KF = 's:conv-A|' + L.familyKey('fail'); // the group key is a digest of the family (verify r6)
+  const pruned = L.pruneFolds({ 's:conv-A': false, 's:conv-GONE': false, [KF]: true, 'zzz|old': false }, lay);
+  ok(JSON.stringify(pruned) === JSON.stringify({ 's:conv-A': false, [KF]: true }), 'pruneFolds keeps live session keys and live group keys, drops the rest', pruned);
   // wiring pins (the 2.355.0 lesson)
   const panel = fs.readFileSync(new URL('../src/lib/jobs-panel.js', import.meta.url), 'utf8');
   ok(/import \{[^}]*ackableIds[^}]*\} from '\.\/jobs-layout\.js'/.test(panel) && /className = 'jobs-sess-head'/.test(panel) && /sh\.setAttribute\('aria-expanded'/.test(panel) && /setFold\(sess, layout\)/.test(panel) && /if \(!sess\.expanded\) continue;/.test(panel), 'the panel: the session header is a fold button (aria-expanded, setFold by the session key) and folded sessions render no groups');

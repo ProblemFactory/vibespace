@@ -81,20 +81,20 @@ function create({ integrations = null, fetchImpl = null, now = Date.now, log = c
 
   // ── the runners ──
   /** `cloak` — shape-only. Zero network, starts no process, downloads no
-   *  byte: it validates the `cb_…` shape through the row's own validator. No
-   *  key resolved is a FAILED test (2026-09-28, the naive-user verifier: it
-   *  used to pass as "empty = free tier" while every switch and start answer
-   *  backend_no_key for exactly that state — the card and the dialog said two
-   *  things). The seat tier is NOT read here (that needs the 200 MB binary and
-   *  §7.2.1's egress proof, neither of which a card opened to paste a key may
-   *  trigger). */
+   *  byte: it validates the `cb_…` shape through the row's own validator.
+   *  lane-cloak (MEASURED 2026-09-28): NO key is a PASSING test — the free
+   *  build VibeSpace installs runs with no key and no sign-in, and a switch or
+   *  a start no longer refuses it (browser-switch keyRequiredFor('cloak') is
+   *  false). A key present is only checked for its shape; the installed build
+   *  sends it nowhere (the §7.2.1 record's run 3). The seat tier is NOT read
+   *  here (that needs a launch). */
   async function cloakTest({ resolved, row }) {
     const f = (row && row.fields || []).find((x) => x.key === 'licenseKey');
     const v = resolved && resolved.values ? String(resolved.values.licenseKey || '') : '';
-    if (!v) return { ok: false, error: `no key resolved for cloak${resolved && resolved.why ? ' (' + resolved.why + ')' : ''} — CloakBrowser is used only with a key (the user's own, or a cluster default); a switch or a start answers backend_no_key` };
+    if (!v) return { ok: true, detail: { network: 'none', key: 'none needed — the free CloakBrowser runs without one', source: resolved ? resolved.source : 'none' } };
     const r = f && typeof f.validate === 'function' ? f.validate(v) : { ok: true };
     if (!r || r.ok !== true) return { ok: false, error: `validate: licenseKey ${(r && r.why) || 'invalid'}` };
-    return { ok: true, detail: { network: 'none', shape: 'cb_ key present', tier: 'read back from the first real launch, not from this check', source: resolved ? resolved.source : 'none' } };
+    return { ok: true, detail: { network: 'none', shape: 'cb_ key present', used: 'not by the free build VibeSpace installs (measured: it sends a key nowhere)', tier: 'read back from a launch, not from this check', source: resolved ? resolved.source : 'none' } };
   }
   /** `cloud:*` — credential-exchange: ONE bounded read-only request to the
    *  ONE derived host; the key rides a header. */
@@ -130,7 +130,7 @@ function create({ integrations = null, fetchImpl = null, now = Date.now, log = c
     for (const id of KEY_IDS) { try { st.registerTest(id, runners[id]); done.push(id); } catch (e) { log.warn?.(`[browser-backend] ${id}: runner not registered — ${e && e.message}`); } }
     return done;
   }
-  return { keyFor, sourceOf, runners, registerTests, KEY_IDS, testHostFor: SW.testHostFor, resolveCount: () => resolves, now };
+  return { keyFor, sourceOf, keyRequired: SW.keyRequiredFor, runners, registerTests, KEY_IDS, testHostFor: SW.testHostFor, resolveCount: () => resolves, now };
 }
 
 module.exports = { create, KEY_IDS, RESOLVE };

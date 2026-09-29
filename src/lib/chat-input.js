@@ -3,7 +3,7 @@ import { UI_ICONS } from './icons.js';
 import { composerSendModes, slashCompletionList } from './agent-meta.js';
 import { t } from './i18n.js';
 import { isNotificationQueueItem } from '../notification-senders.js';
-import { keyboardOwned } from './keyboard-owner.js'; // lane J r2: a driven live view owns the keyboard — focus() stands down
+import { keyboardOwned, keyboardYielded, onKeyboardChange } from './keyboard-owner.js'; // lane J r2: a driven live view owns the keyboard — focus() stands down; lane takeover-keyboard: …unless the user pressed this box (the line above it says so)
 import { createStashStrip } from './stash-strip.js'; // 2026-09-27: what waits for this agent's next turn + Hand over now
 
 /**
@@ -407,7 +407,21 @@ export class ChatInput {
     this._sendHint = document.createElement('div');
     this._sendHint.className = 'chat-send-hint hidden';
 
-    inputArea.append(this._stashStrip.el, this._queueStrip, this._attachArea, this._todoDisplay, this._streamStatus, inputWrap, this._steerBtn, sendCol, this._sendHint);
+    // WHERE THE KEYS ARE (lane takeover-keyboard, userW inc-mum339id-1zsb): while this client drives the agent's browser
+    // and the user PRESSED this composer, his keys come here, not to the page — one line right above the box says so,
+    // and that the browser is still his. ONE node, toggled in place (never a toast): shown while keyboard-owner.js says
+    // the keys were yielded AND this box holds the focus; re-read on this box's focus / blur and on the owner's signal.
+    this._kbdLine = document.createElement('div');
+    this._kbdLine.className = 'chat-kbd-yield';
+    this._kbdLine.hidden = true;
+    this._kbdLine.setAttribute('role', 'status');
+    { const ic = document.createElement('span'); ic.className = 'chat-kbd-yield-icon'; ic.innerHTML = UI_ICONS.browserLive || ''; const tx = document.createElement('span'); tx.className = 'chat-kbd-yield-text'; tx.textContent = t('You are typing to the agent (you still drive the browser)'); this._kbdLine.append(ic, tx); }
+    const renderKbdLine = () => { const on = keyboardYielded() && document.activeElement === this._textarea; if (this._kbdLine.hidden === on) this._kbdLine.hidden = !on; };
+    this._offKbdLine = onKeyboardChange(renderKbdLine);
+    this._textarea.addEventListener('focus', renderKbdLine);
+    this._textarea.addEventListener('blur', renderKbdLine);
+
+    inputArea.append(this._stashStrip.el, this._queueStrip, this._attachArea, this._todoDisplay, this._streamStatus, this._kbdLine, inputWrap, this._steerBtn, sendCol, this._sendHint);
   }
 
   /** The .chat-input-area wrapper element */
@@ -1070,6 +1084,7 @@ export class ChatInput {
     // must not keep them (the per-drag controller is what makes this one line).
     if (this._queueDrag) { try { this._queueDrag.ctl.abort(); } catch { } this._queueDrag = null; }
     if (this._stopPendingTimer) { clearTimeout(this._stopPendingTimer); this._stopPendingTimer = null; }
+    if (this._offKbdLine) { this._offKbdLine(); this._offKbdLine = null; } // lane takeover-keyboard: the keyboard owner's signal
     if (this._draftSyncHandler) {
       const sync = getStateSync();
       if (sync) sync.off('drafts', 'chat:' + this._sessionId, this._draftSyncHandler);

@@ -326,6 +326,11 @@
 /* the head's sentence is ONE flex item (lane S3): as three items the 6 px gap
    rendered `Message from “ VibeSpace browser ”` */
 .chat-peer-message .chat-peer-title { min-width: 0; }
+/* A GROUP MESSAGE (lane group-report-card): "<sender> → <group>" — the group a link to its window; a dim line under
+   the text when the agent was shown it cut short, or "… and N more" on a report's oldest card */
+.chat-peer-group { text-decoration: underline dotted; cursor: pointer; overflow-wrap: anywhere; }
+.chat-peer-group:hover { text-decoration: underline; }
+.chat-group-message .chat-group-note { margin-top: 4px; font-size: 11px; color: var(--text-dim); overflow-wrap: anywhere; }
 /* A VIBESPACE NOTICE (lane S3): the browser handback, a Background Work event, a
    channel wake — VibeSpace speaking, titled "VibeSpace · <what happened>", in
    the accent tint (a peer message keeps its magenta). Two-class selector for
@@ -526,6 +531,17 @@
 .chat-permission-also { color: var(--text-dim); }
 .chat-permission-scope, .chat-permission-withheld { font-size: 11px; color: var(--text-secondary); margin-top: -4px; }
 .chat-agent-cmd { font-weight: 400; color: var(--text-secondary); overflow-wrap: anywhere; }
+/* verify r6 — WHAT YOU APPROVE IS WHAT RUNS: the WHOLE request above Allow (F3/F4) — wrapped, never clipped, no
+   scroll box (the button sits below every line); each hidden character a marked token (F7); every update Always
+   Allow sends, on the card (F5) */
+.chat-permission-cmd, .chat-helper-ask-cmd { margin: 4px 0 0; padding: 5px 8px; font-family: var(--font-mono, monospace); font-size: 11px; line-height: 1.45; color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.chat-hidden-char { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); border-radius: var(--radius-sm); padding: 0 1px; font-weight: 600; }
+.chat-permission-hidden { display: flex; gap: 6px; align-items: flex-start; font-size: 11px; color: var(--red); margin-top: 2px; overflow-wrap: anywhere; }
+.chat-permission-hidden svg { flex-shrink: 0; margin-top: 1px; }
+.chat-perm-btn.chat-perm-allow.armed { outline: 2px solid var(--red); outline-offset: 1px; }
+.chat-permission-always-what { font-size: 11px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.chat-permission-always-head { color: var(--text-dim); }
+.chat-permission-always-line { padding-left: 10px; }
 .chat-perm-always { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 .chat-perm-always:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 .chat-perm-deny { background: var(--bg-input); color: var(--text); }
@@ -592,7 +608,7 @@
    One line on a desktop (the parts ellipsize; the whole sentence is the title); on the phone it folds to
    the head + the button. Keyed and patched in place (src/lib/stash-strip.js). */
 .chat-stash-strip {
-  width: 100%; display: flex; align-items: center; gap: 6px; box-sizing: border-box;
+  width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; box-sizing: border-box;   /* wrap: the details list (2026-09-28) takes its own row under the strip */
   padding: 4px 8px; margin-bottom: 6px; font-size: 11px; color: var(--text-secondary);
   border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border)); border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--accent) 7%, var(--bg-input));
@@ -600,7 +616,7 @@
 .chat-stash-strip[hidden] { display: none; }
 .chat-stash-icon { display: inline-flex; flex-shrink: 0; color: var(--accent); }
 .chat-stash-icon svg { width: 12px; height: 12px; }
-.chat-stash-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-stash-text { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } /* basis 0 (the .197 integration): the strip WRAPS for its details list, so an auto basis wrapped the button onto a 2nd line on a phone — the text yields and ellipsizes instead */
 .chat-stash-head { color: var(--text); }
 .chat-stash-go { flex-shrink: 0; display: inline-flex; align-items: center; gap: 2px; padding: 2px 8px; font: inherit; font-size: 11px; color: var(--accent); background: transparent; border: 1px solid var(--accent); border-radius: 999px; cursor: pointer; white-space: nowrap; }
 .chat-stash-go:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
@@ -608,10 +624,31 @@
 .chat-stash-cost { color: var(--text-dim); }
 .chat-stash-nobutton { flex-shrink: 0; color: var(--text-dim); white-space: nowrap; } /* verify r2: a harness with no live inbox — the sentence stands where the button would */
 .chat-stash-go[hidden], .chat-stash-nobutton[hidden], .chat-stash-held[hidden] { display: none; }
+/* the details toggle + list (2026-09-28): the list wraps under the strip's row, one line per waiting entry */
+.chat-stash-more { flex-shrink: 0; padding: 2px 6px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-dim); font: inherit; font-size: inherit; cursor: pointer; }
+.chat-stash-more:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--text); }
+.chat-stash-list { flex-basis: 100%; display: flex; flex-direction: column; gap: 2px; padding: 4px 0 2px 20px; }
+.chat-stash-list[hidden] { display: none; }
+.chat-stash-row { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-stash-row-more { color: var(--text-dim); }
 .chat-stash-held { flex-shrink: 0; color: var(--text-dim); white-space: nowrap; } /* what one hand-over would leave — beside the button, never inside it */
 .chat-stash-parts { unicode-bidi: isolate; } /* a peer's name is its own — isolated so an RTL override in it never re-orders the head or the button */
 /* the phone folds the parts and the held count — NEVER the money word on the button (verify r4: a press that bills says so where it is pressed) */
 @media (max-width: 768px) { .chat-stash-parts, .chat-stash-held { display: none; } .chat-stash-go { min-height: 32px; } }
+
+/* ── WHERE THE KEYS ARE (lane takeover-keyboard, userW inc-mum339id-1zsb): you drive the agent's browser and pressed
+   THIS composer — your keys come here, the browser is still yours. One line right above the box, the takeover's colour;
+   one node toggled in place (src/lib/chat-input.js), never a toast over the chat. */
+.chat-kbd-yield {
+  width: 100%; display: flex; align-items: center; gap: 6px; box-sizing: border-box;
+  padding: 3px 8px; margin-bottom: 6px; font-size: 11px; color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--yellow, #e5c07b) 55%, var(--border)); border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--yellow, #e5c07b) 10%, var(--bg-input));
+}
+.chat-kbd-yield[hidden] { display: none; }
+.chat-kbd-yield-icon { display: inline-flex; flex-shrink: 0; color: var(--yellow, #e5c07b); }
+.chat-kbd-yield-icon svg { width: 12px; height: 12px; }
+.chat-kbd-yield-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── INPUT QUEUE STRIP (messages sent during the running turn) ────────────
    Sits ABOVE everything in the input area: it is about what was already sent,

@@ -19,6 +19,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { applyClear, CLEARED_TEXT } = require('./record-clear'); // PURE: "Clear content…" (2026-09-28) — this store holds the door (clearHistory)
 
 // A Task (= a session) has one of these states; `done` = this piece of work is
 // finished (the "岗位/Task Group" itself has no status — only archive).
@@ -77,7 +78,11 @@ class SessionStatusManager {
   // Synchronous flush for process exit (SIGINT/SIGTERM), like SyncStore/layouts.
   flush() { if (this._writeTimer) { clearTimeout(this._writeTimer); this._writeTimer = null; } this._flush(); }
 
-  _notify() { try { this._onChange(this.snapshot()); } catch { } }
+  // `extra` rides the broadcast beside the statuses: a history clear names what it touched (`cleared: [{key, ats}]` —
+  // ids only) because the statuses map it sends may be EXACTLY what every client already holds (a cleared entry that is
+  // not the current status) and a client's change guard would drop it (lane-redact verify r5: the sidebar's expanded
+  // card kept the cleared words for good)
+  _notify(extra = null) { try { this._onChange(this.snapshot(), extra); } catch { } }
 
   snapshot() { return this._state.statuses; }
 
@@ -177,6 +182,56 @@ class SessionStatusManager {
     return null;
   }
 
+  /**
+   * "CLEAR CONTENT…" — THE door for a status HISTORY entry (2026-09-28). An entry
+   * has no id: it is named by (key, at). Each instant is looked up under `key`,
+   * each entry of that instant asked `allow(entry)` (the caller's PURE
+   * clearVerdict) and cleared IN PLACE (src/record-clear.js applyClear: the
+   * reason becomes the ONE sentence, the detail goes; state, urgency, setBy, at
+   * and position stay). The COPIES of those words go with it: the CURRENT record
+   * (`statuses[key]` repeats the newest entry's reason/detail — the card chips,
+   * the "Now" row and `vibespace-msg list` read it) when its reason OR its detail
+   * still says what the cleared entry said, and a queued status-override notice that quotes it (it
+   * would be injected into the agent's next turn). ONE save and ONE broadcast —
+   * history itself is not in the broadcast; Session Properties refetches it on
+   * every `session-status-updated`. Returns {cleared: [ats], already: [ats],
+   * unknown: [ats], refused: [{at, code, why, status}]}.
+   */
+  clearHistory(key, ats, { by = 'owner', at = Date.now(), allow = null } = {}) {
+    const out = { cleared: [], already: [], unknown: [], refused: [] };
+    const arr = (this._state.history && this._state.history[key]) || [];
+    const rec = this._state.statuses[key] || null;
+    for (const want of new Set((Array.isArray(ats) ? ats : [ats]).map(Number))) {
+      const hits = Number.isFinite(want) ? arr.filter((h) => h && Number(h.at) === want) : [];
+      if (!hits.length) { out.unknown.push(want); continue; }
+      let any = false, refused = null;
+      for (const h of hits) {
+        const v = allow ? allow(h) : { ok: true };
+        if (!v || !v.ok) { refused = v || { code: 'not_yours' }; continue; }
+        const oldReason = typeof h.reason === 'string' ? h.reason : '';
+        const oldDetail = typeof h.detail === 'string' ? h.detail : '';
+        const r = applyClear(h, { kind: 'status', by, at });
+        if (!r.changed) continue;
+        any = true;
+        // the current record, when it still carries these words — its reason OR its detail
+        // (verify r1: an entry set with `--detail` and no reason left the current record's
+        // detail, the Session Properties "Now" row's expander, untouched)
+        if (rec && ((oldReason && rec.reason === oldReason) || (oldDetail && rec.detail === oldDetail))) applyClear(rec, { kind: 'status', by, at });
+        for (const n of (rec && Array.isArray(rec.pendingNotices) ? rec.pendingNotices : [])) {
+          if (n && n.kind === 'status-override' && n.agent && oldReason && n.agent.reason === oldReason) n.agent.reason = CLEARED_TEXT;
+        }
+      }
+      if (any) out.cleared.push(want);
+      else if (refused) out.refused.push({ at: want, code: refused.code || 'not_yours', why: refused.why || '', status: refused.status || 403 });
+      else out.already.push(want);
+    }
+    // ON DISK BEFORE THE OWNER IS TOLD (lane-redact verify r4, reproduced): `_save` here is a 500 ms debounce flushed on
+    // SIGTERM only — a SIGKILL / OOM inside that window brought the reason back at the next boot after the route had
+    // answered "cleared". A clear is one owner decision: ONE synchronous write (user-todos.js clearItems says the same).
+    if (out.cleared.length) { this._save(); this.flush(); this._notify({ cleared: [{ key, ats: out.cleared.slice() }] }); }
+    return out;
+  }
+
   // Move a webui:<id> placeholder record onto the real sessionKey once known.
   rekey(fromKey, toKey) {
     if (fromKey === toKey || !this._state.statuses[fromKey]) return;
@@ -201,11 +256,15 @@ class SessionStatusManager {
   // `{kind, …}`, the renderer dispatches on `kind` (an unknown kind is refused
   // LOUDLY at push time, never rendered as garbage), and the injection site
   // DRAINS. Zero billed turns: the text rides the user's own next message.
-  pushNotice(key, notice) {
+  // `replaceKind` (verify r1 A3/A6 of lane browser-stuck, 2026-09-28): a producer whose notices describe ONE present
+  // state (a page dialog) keeps ONE pending notice per key — a page answered ten times in the live view queued ten
+  // stale `browser-dialog` notices and the bound evicted the takeover notice the agent was owed (reproduced).
+  pushNotice(key, notice, { replaceKind = false } = {}) {
     const n = notice && typeof notice === 'object' ? notice : null;
     if (!n || !NOTICE_RENDERERS[n.kind]) throw new Error(`pushNotice: unknown notice kind ${JSON.stringify(n && n.kind)} (one of ${Object.keys(NOTICE_RENDERERS).join('/')})`);
     const rec = this._state.statuses[key] || (this._state.statuses[key] = { state: null, urgency: null, reason: null, setBy: null, at: Date.now(), pendingNotices: [] });
     if (!Array.isArray(rec.pendingNotices)) rec.pendingNotices = [];
+    if (replaceKind) rec.pendingNotices = rec.pendingNotices.filter((x) => !(x && x.kind === n.kind));
     // BOUNDED: a producer that fires faster than the user types must not grow
     // the record without limit; the newest notices are the ones that describe
     // the present, so the oldest go first.
@@ -213,6 +272,20 @@ class SessionStatusManager {
     if (rec.pendingNotices.length > MAX_NOTICES) rec.pendingNotices.splice(0, rec.pendingNotices.length - MAX_NOTICES);
     this._save(); this._notify();
     return rec.pendingNotices.length;
+  }
+
+  /** Withdraw the pending notices `pred` names (a notice about a state that ended before the agent's turn — a page dialog
+   *  answered in the live view: its next verb says so instead). → how many went. */
+  dropNotices(key, pred) {
+    const rec = this._state.statuses[key];
+    if (!rec || !Array.isArray(rec.pendingNotices) || !rec.pendingNotices.length || typeof pred !== 'function') return 0;
+    const keep = rec.pendingNotices.filter((x) => { try { return !pred(x); } catch { return true; } });
+    const n = rec.pendingNotices.length - keep.length;
+    if (!n) return 0;
+    rec.pendingNotices = keep;
+    if (!keep.length && !rec.state && !rec.urgency && !rec.reason) delete this._state.statuses[key];
+    this._save(); this._notify();
+    return n;
   }
 
   /** What is queued for a key, without consuming it (a UI hint, a test). */
@@ -268,6 +341,9 @@ const NOTICE_RENDERERS = Object.freeze({
   'browser-handback': (n) => require('./browser-takeover').renderHandbackNotice(n),
   // the owner's ruling (2026-09-27 — "告知agent发生了打断"): the takeover's zero-spend notice — what it interrupted, read at the agent's next turn
   'browser-takeover': (n) => require('./browser-takeover').renderTakeoverNotice(n),
+  // lane browser-stuck (2026-09-28, rule 6): a page dialog opened while the agent ran no browser command — the ONE free
+  // next-turn line (never a wake); its next verb says it again, by rule 2
+  'browser-dialog': (n) => require('./browser-stuck').renderDialogNotice(n),
 });
 
 module.exports = { SessionStatusManager, SESSION_STATES: STATES, SESSION_URGENCIES: URGENCIES, NOTICE_KINDS: Object.keys(NOTICE_RENDERERS) };

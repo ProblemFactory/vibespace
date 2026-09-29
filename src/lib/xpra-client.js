@@ -92,6 +92,7 @@ const PASTE_KEY_DELAY_MS = 60; // the token must reach the server before the app
 export const BELT_GAP_MS = 500;    // at most one corrective configure-window per window per 500 ms
 export const BELT_FIGHT_MS = 2000; // an undo within 2 s of our last correction is a FIGHT…
 export const BELT_MAX_FIGHTS = 3;  // …and three in a row ⇒ the app wins until the pane or its hints change
+export const REFRESH_DELAYS_MS = Object.freeze([200, 500]); // the repaint ask after a client configure / an un-iconify (xpra-html5's own resize-stop timing; measured need on xpra 6.5.4)
 
 /** The browser decoder: bytes + mime → ImageBitmap (closed by the painter). */
 export function defaultDecode(bytes, mime) {
@@ -110,7 +111,7 @@ export function defaultDecode(bytes, mime) {
  *   on.moveresize(ev)          {wid, xRoot, yRoot, direction, button, source, main} — the app asked its window manager to move/resize it
  * Returns the session handle (see the tail).
  */
-export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, cover = false, layout = 'us', uuid = null, on = {}, Worker: WorkerCtor = (typeof Worker !== 'undefined' ? Worker : null), decode = defaultDecode, now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()), log = null, helloTimeoutMs = HELLO_TIMEOUT_MS, pasteKeyDelayMs = PASTE_KEY_DELAY_MS, beltGapMs = BELT_GAP_MS, beltFightMs = BELT_FIGHT_MS, beltMaxFights = BELT_MAX_FIGHTS } = {}) {
+export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, cover = false, layout = 'us', uuid = null, on = {}, Worker: WorkerCtor = (typeof Worker !== 'undefined' ? Worker : null), decode = defaultDecode, now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()), log = null, helloTimeoutMs = HELLO_TIMEOUT_MS, pasteKeyDelayMs = PASTE_KEY_DELAY_MS, beltGapMs = BELT_GAP_MS, beltFightMs = BELT_FIGHT_MS, beltMaxFights = BELT_MAX_FIGHTS, refreshDelaysMs = REFRESH_DELAYS_MS } = {}) {
   const emit = (name, ...args) => { try { on[name]?.(...args); } catch (e) { log?.warn?.(`[xpra] on.${name} threw: ${e && e.message}`); } };
   const windows = new Map();
   const ime = new P.ImeKeymap();
@@ -135,7 +136,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     if (state === 'closed') return;
     state = 'closed'; closedReason = reason || 'closed';
     clearTimeout(helloTimer); clearInterval(pingTimer);
-    for (const w of windows.values()) clearTimeout(w.belt && w.belt.timer);
+    for (const w of windows.values()) { clearTimeout(w.belt && w.belt.timer); for (const t of w.refreshTimers || []) clearTimeout(t); }
     if (worker) { try { worker.postMessage({ c: 'c' }); } catch {} try { worker.postMessage({ c: 't' }); } catch {} try { worker.terminate?.(); } catch {} }
     worker = null;
     emit('status', 'closed', closedReason);
@@ -181,10 +182,26 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     const g = P.fitGeometry({ paneW: pane.width, paneH: pane.height }, P.sizeHintsOf(win.meta));
     syncDisplay(); // the display follows the fit FIRST (a minimum larger than the pane grows it; a smaller one gives it back)
     if (g.x === win.x && g.y === win.y && g.w === win.w && g.h === win.h) return;
+    const grew = g.w > win.w || g.h > win.h;
     Object.assign(win, g);
     beltOf(win).at = now(); // a client-initiated fit: a packet inside the gap is its confirmation
     send(P.configureWindow(win.wid, g));
+    if (grew) refreshSoon(win); // only a window that GREW has a region nothing painted yet
     emit('window', 'geometry', win);
+  };
+  /** THE REPAINT ASK (the .197 integration, MEASURED on xpra 6.5.4): after a client fit that GREW the window, or an
+   *  un-iconify, the server may leave the window's new region unpainted for good (the Calculator minimized, resized by
+   *  the sidebar opening, restored: 70.9 % of its right edge and 0 % of its bottom edge drawn); ONE buffer-refresh
+   *  repaints it at once. Asked the way xpra-html5 asks after its own resize (+200 ms, +500 ms), debounced per window,
+   *  never while the window is iconic, never from Watch / view-only (a refused viewer relays nothing); a shrink or a
+   *  same-size configure exposes nothing new and asks nothing. */
+  const refreshSoon = (win) => {
+    if (!win || watch || viewOnly || !refreshDelaysMs.length) return;
+    for (const t of win.refreshTimers || []) clearTimeout(t);
+    win.refreshTimers = refreshDelaysMs.map((ms) => setTimeout(() => {
+      const w = windows.get(win.wid);
+      if (w && state === 'connected' && !dormant && !watch && !viewOnly && !(w.meta && w.meta.iconic)) send(P.bufferRefresh(w.wid));
+    }, ms));
   };
   // ── the belt: the server's geometry packets are checked against the fit ──
   const beltOf = (win) => (win.belt ||= { at: 0, fights: 0, gaveUp: false, timer: null });
@@ -212,9 +229,11 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     if (b.at && t - b.at < beltGapMs) { b.timer = setTimeout(() => { b.timer = null; belt(windows.get(win.wid), why); }, Math.max(1, Math.ceil(b.at + beltGapMs - t))); return; }
     b.fights = b.at && t - b.at <= beltFightMs ? b.fights + 1 : 1;
     if (b.fights > beltMaxFights) { b.gaveUp = true; log?.log?.(`[xpra] window ${win.wid} undid the fit ${beltMaxFights} times in a row — leaving it at ${win.w}x${win.h}+${win.x}+${win.y} until the pane or its size hints change`); return; }
+    const grew = g.w > win.w || g.h > win.h;
     Object.assign(win, g);
     b.at = t;
     send(P.configureWindow(win.wid, g));
+    if (grew) refreshSoon(win);
     emit('window', 'geometry', win);
   };
   const newWindow = (p, overrideRedirect) => {
@@ -247,6 +266,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     if (!win) return;
     windows.delete(wid);
     clearTimeout(win.belt && win.belt.timer);
+    for (const t of win.refreshTimers || []) clearTimeout(t);
     emit('window', 'lost', win);
     if (focusedWid === wid) focusedWid = 0;
     if (mainWid === wid) { mainWid = 0; pickMain(); }
@@ -514,7 +534,9 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     if (!Object.keys(clean).length) return false;
     if ('maximized' in clean) main.meta.maximized = clean.maximized;
     if ('iconified' in clean) main.meta.iconic = clean.iconified;
-    return send(P.configureWindow(main.wid, { x: main.x, y: main.y, w: main.w, h: main.h }, clean));
+    const sent = send(P.configureWindow(main.wid, { x: main.x, y: main.y, w: main.w, h: main.h }, clean));
+    if (clean.iconified === false) refreshSoon(main); // back from iconic: the region it was resized to while hidden is asked for
+    return sent;
   };
 
   return {

@@ -170,9 +170,16 @@ export function installPluginsUI(App) {
               }, { rerender: false });
             }
             btn(t('Stop'), '', async () => {
-              const ok = await showConfirmDialog(t('Stop {name}?', { name: p.label }), isFrp
-                ? t('Public URLs from this instance will stop working until you start it again.')
-                : t('Tailnet connections from this instance will drop. The login persists — starting again reconnects without re-auth.'));
+              // verify-r6 D1: an OPTIONS OBJECT — the two positional strings this passed rendered a blank "Confirm / OK"
+              // dialog (showConfirmDialog destructures its first argument), and OK stopped frp / Tailscale unsaid
+              const ok = await showConfirmDialog({
+                title: t('Stop {name}?', { name: p.label }),
+                message: isFrp
+                  ? t('Public URLs from this instance will stop working until you start it again.')
+                  : t('Tailnet connections from this instance will drop. The login persists — starting again reconnects without re-auth.'),
+                confirmText: t('Stop'),
+                danger: true,
+              });
               if (ok) await api('stop');
             });
           }

@@ -435,6 +435,30 @@ console.log('§2d round 3 lane B (docs/design-desktop-apps-seamless §3.3): init
   ok(A.c.setMainState({ maximized: false }) === true && same(A.w.sent('configure-window').slice(n0)[0], ['configure-window', 4, 0, 0, A.c.windows.get(4).w, A.c.windows.get(4).h, {}, 0, { maximized: false }, false]), 'setMainState({maximized:false}) ⇒ configure-window of the MAIN at its own geometry with the state dict (the ui driver\'s; xpra seamless.py _set_window_state)');
   ok(A.c.setMainState({ iconified: false }) === true && same(A.w.sent('configure-window').slice(-1)[0][8], { iconified: false }) && A.c.setMainState({ bogus: 1 }) === false, 'setMainState({iconified:false}) likewise; an empty/unknown state sends nothing');
   A.c.close();
+  // THE REPAINT ASK (the .197 integration, MEASURED on xpra 6.5.4: the Calculator minimized, resized by the sidebar
+  // opening and restored kept 0 % of its bottom edge painted until ONE buffer-refresh): after an un-iconify / a client fit
+  // the client asks the server to repaint the window — xpra-html5's own packet and timing — debounced, never while iconic
+  {
+    const mk = async () => { FakeWorker.instances.length = 0; const c = C.createXpraClient({ url: 'ws://x/s', workerUrl: '/w.js', screen: { width: 900, height: 600 }, Worker: FakeWorker, decode: async () => ({ close() {} }), log: null, refreshDelaysMs: [20, 50] }); c.connect(); const w = await until(() => FakeWorker.instances[0]); await until(() => w.sent('hello').length); w.feed(['hello', { 'packet-types': ['keyboard-config', 'display-configure'] }]); w.feed(['new-window', 4, 0, 0, 360, 616, { title: 'Calculator', 'window-type': ['NORMAL'], decorations: 0, 'size-constraints': { 'minimum-size': [360, 616] } }]); await sleep(150); return { c, w }; };
+    const R = await mk();
+    const m0 = R.w.sent('buffer-refresh').length;   // a MAP paints the whole window: no ask
+    R.c.resize(700, 650); await sleep(150);          // a new pane ⇒ a client fit (configure-window) ⇒ the ask
+    const fit = R.w.sent('buffer-refresh').length - m0;
+    const s0 = R.w.sent('buffer-refresh').length, c0 = R.w.sent('configure-window').length;
+    R.c.resize(600, 620); await sleep(150);          // a SHRINK: a configure, but nothing new to paint ⇒ no ask
+    const shrink = { asks: R.w.sent('buffer-refresh').length - s0, cfgs: R.w.sent('configure-window').length - c0 };
+    const r0 = R.w.sent('buffer-refresh').length;
+    R.c.setMainState({ iconified: true }); await sleep(150);
+    const whileIconic = R.w.sent('buffer-refresh').length - r0;
+    R.c.setMainState({ iconified: false }); R.c.setMainState({ iconified: false }); await sleep(200);
+    const after = R.w.sent('buffer-refresh').slice(r0);
+    const WANT = ['buffer-refresh', 4, 0, 100, { 'refresh-now': true, batch: { reset: true } }, {}];
+    ok(m0 === 0 && fit === 2 && shrink.cfgs >= 1 && shrink.asks === 0 && whileIconic === 0 && after.length === 2 && after.every((p) => same(p, WANT)), `the repaint ask: a map asks nothing (${m0}), a client fit that GROWS the window asks (${fit} — at +20 / +50 ms), a shrinking fit asks nothing (${shrink.asks} after ${shrink.cfgs} configure), nothing while iconic (${whileIconic}), and two un-iconifies in a row ask ONCE per delay (${after.length} × buffer-refresh 4) — xpra-html5's request_refresh`, { fit, shrink, whileIconic, after });
+    R.c.close();
+    const Wt = await mk(); Wt.c.watch = true; const w0 = Wt.w.sent('buffer-refresh').length; Wt.c.setMainState({ iconified: false }); await sleep(150);
+    ok(Wt.w.sent('buffer-refresh').length === w0, 'Watch: no repaint ask (a refused viewer asks the server for nothing)');
+    Wt.c.close();
+  }
   for (const [name, o] of [['Watch', { watch: true }], ['view-only', { viewOnly: true }], ['blocked (dormant)', { dormant: true }]]) {
     const B = await run(C, o);
     ok(B.ev.mr.length === 0 && B.c.setMainState({ maximized: true }) === false, `${name}: no on.moveresize and no setMainState — only the DRIVING pane moves the window the app asked to move`);

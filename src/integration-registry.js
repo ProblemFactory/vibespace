@@ -272,16 +272,17 @@ const ROWS = Object.freeze([
     label: 'CloakBrowser',
     fields: [
       { key: 'licenseKey', label: i18nKey('License key'), secret: true, required: false, placeholder: 'cb_…',
-        // the naive-user verifier (2026-09-28): the old "Empty means the free tier" was a promise the resolver never
-        // kept — an empty field resolves to NO key and every switch / start answers backend_no_key — so the switch
-        // dialog's "needs a license key" and this card contradicted each other; the help says what the product does
-        help: i18nKey('It starts with cb_. CloakBrowser is used only with a key: yours, saved here, or one this VibeSpace provides.'), validate: V.cloakLicense },
+        // lane-cloak (MEASURED 2026-09-28): the free CloakBrowser build runs with NO key and no sign-in, and a key in its
+        // environment is sent nowhere — so a switch / a start no longer refuses an empty key (keyRequiredFor('cloak')
+        // is false) and the help says what the measurement found (the naive-user verifier's rule: the card and the
+        // dialog say the same thing)
+        help: i18nKey('Not needed: the free CloakBrowser that VibeSpace installs runs without a key or a sign-in, and does not use one. A key (it starts with cb_) only unlocks the maker\'s newer build, which VibeSpace does not install.'), validate: V.cloakLicense },
     ],
     clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_CLOAK_' },
     setup: null,
     test: {
       kind: 'shape-only',
-      describe: i18nKey('Checks the key\'s shape. A real launch probe would download the browser and needs the egress precondition; neither belongs on a card opened to paste a key.'),
+      describe: i18nKey('Checks the key\'s shape, offline. No key passes: the free CloakBrowser needs none.'),
       caveat: i18nKey('Shape only. The seat tier is read back from the first real launch, not from this check.'),
     },
     consumers: ['src/server/browser-backend.js'],

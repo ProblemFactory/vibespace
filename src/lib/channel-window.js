@@ -87,7 +87,14 @@ import * as chanCaps from '../channel-caps.js';
 import { composerMode, isGroupConv, mentionQuery, mentionCandidates, insertMention, wakePreview, OWNER, GROUP_ADAPTER_ID } from './channel-groups-view.js';
 import { showGroupDetail, showGroupMembersDialog, renameGroup, archiveGroup } from './channel-group-dialogs.js';
 import { groupErrorText, wakeEchoText } from './channel-words.js';
+import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): a group message's menu + the cleared sentence
 import { touchedByRow } from './channel-touch-view.js'; // §26 (B-099e): "Drafted by <agent>" — the reverse link to the chat
+// lane channel-rich (D2): a mail's formatted body in the ONE sandboxed frame (the surface's only srcdoc lives there)
+import { createMailFrames } from './channel-mail-frame.js';
+// lane channel-threads (2026-09-28): a reply shows WHAT it answers, a root its thread, every message its REACTIONS;
+// a thread opens as a side pane (desktop) / a pushed view (phone) — never inline (spec §4.1)
+import { quoteLine, threadChip, threadChipText, inThreadTag, createThreadPane } from './channel-thread-pane.js';
+import { renderReactionStrip, patchReactionStrip, toggleReaction, loadEmojiSet, openReactionPicker, refaceStrips } from './reaction-picker.js';
 
 const ICON = svgIcon16('<path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/>');
 
@@ -178,7 +185,8 @@ function attachmentNode(rec, a, base) {
   return card;
 }
 function renderAttachments(rec, base, { skip = null } = {}) {
-  const list = Array.isArray(rec.attachments) ? rec.attachments.filter((a) => a && a.id && !(skip && skip.has(a.id))) : [];
+  // a message's formatted BODY (`role: 'body'`, a mail's text/html part) is the mail frame, never a file chip
+  const list = Array.isArray(rec.attachments) ? rec.attachments.filter((a) => a && a.id && a.role !== 'body' && !(skip && skip.has(a.id))) : [];
   if (!list.length || !base) return null;
   const box = el('div', 'chanmsg-atts');
   for (const a of list) box.appendChild(attachmentNode(rec, a, base));
@@ -274,7 +282,7 @@ function authorAvatar(rec) {
  *  on hover in the avatar's gutter). `base` = the conversation's route prefix
  *  (its attachments load through it). `folds` = the window's memory of which
  *  quotes the person opened. */
-function renderRecord(rec, { cont = false, base = null, folds = null } = {}) {
+function renderRecord(rec, { cont = false, base = null, folds = null, mail = null, ctx = null } = {}) {
   const sys = isSysRow(rec);
   const self = !!(rec.author && rec.author.isSelf);
   const row = el('div', 'chanmsg' + (sys ? ' chanmsg-sysrow' : cont ? ' chanmsg-cont' : '') + (rec.author && rec.author.isBot ? ' chanmsg-agent' : '') + (self && !sys ? ' chanmsg-self' : ''));
@@ -296,7 +304,16 @@ function renderRecord(rec, { cont = false, base = null, folds = null } = {}) {
     const who = el('b', '', (rec.author && rec.author.name) || (rec.author && rec.author.id) || t('unknown'));
     const when = el('span', 'chanmsg-at', stamp(rec.at));
     when.title = full;
-    head.append(who, when);
+    // D3 (lane channel-rich): a bot's name wears a small bot mark (the icon library's glyph — never an emoji)
+    if (rec.author && rec.author.isBot) {
+      const mark = icon('robot', 11, 'chanmsg-bot');
+      mark.title = t('Bot');
+      mark.setAttribute('role', 'img');
+      mark.setAttribute('aria-label', t('Bot'));
+      head.append(who, mark, when);
+    } else head.append(who, when);
+    // W2 (lane channel-threads): a ROOT's thread chip — "N replies · last 5m", a click opens the pane (never inside the pane itself)
+    if (ctx && !ctx.inPane && rec.place) { const chip = threadChip(rec.place, { onOpen: (th) => ctx.onOpenThread && ctx.onOpenThread(th, chip) }); if (chip) head.appendChild(chip); }
     if (rec.raw && rec.raw.synthetic) {
       // A scraped source mints its own key. Saying so on the row is the same
       // honesty the freshness chip owes: the reader should know which evidence
@@ -311,6 +328,14 @@ function renderRecord(rec, { cont = false, base = null, folds = null } = {}) {
     const when = el('span', 'chanmsg-at chanmsg-at-hover', stamp(rec.at));
     when.title = full;
     row.appendChild(when);
+  }
+  // W1 (lane channel-threads): the QUOTE LINE of what this reply answers (a click jumps to it) and, for a reply the
+  // main list shows inside a thread, the dim "in thread" tag (a click opens the pane on its root). In the pane a
+  // reply to the ROOT carries no quote (the root is right above it); a nested reply does.
+  if (ctx && rec.place) {
+    const q = rec.place.quote && !(ctx.inPane && rec.place.quote.of === ctx.rootVid) ? quoteLine(rec.place, { onJump: (vid, place) => ctx.onJump && ctx.onJump(vid, place) }) : null;
+    const tag = !ctx.inPane ? inThreadTag(rec.place, { onOpen: (th) => ctx.onOpenThread && ctx.onOpenThread(th, tag) }) : null;
+    if (q || tag) { const line = el('div', 'chanmsg-placeline'); if (q) line.appendChild(q); if (tag) line.appendChild(tag); row.appendChild(line); }
   }
   // THE BODY: the record's typed tree (else the generic rung over its text)
   // through the ONE renderer — a picture the tree places is drawn in place
@@ -327,10 +352,18 @@ function renderRecord(rec, { cont = false, base = null, folds = null } = {}) {
     },
   });
   row.appendChild(body);
+  // D2 (lane channel-rich): a mail's formatted body — the sandboxed frame's slot (the text body stays for Plain text)
+  // — ABOVE the text body (naive-user verify 2026-09-28: appended after it, the Formatted | Plain text bar sat
+  // above the frame but UNDER the text once Plain text was pressed — the control jumped away from the pointer)
+  const slot = mail ? mail.slotFor(rec, row) : null;
+  if (slot) row.insertBefore(slot, body);
   // what the tree did not place (a mail's attachments, a fixture's files) goes in the strip below
   for (const id of placedAttachments(blocks)) if (atts.some((a) => a.id === id)) placed.add(id);
   const rest = renderAttachments(rec, base, { skip: placed });
   if (rest) row.appendChild(rest);
+  // W3 (lane channel-threads): the REACTION STRIP — chips keyed by key, the `+` only where `react` is offered
+  if (ctx) { const strip = renderReactionStrip(rec, ctx.strip(rec)); if (strip) row.appendChild(strip); }
+  row._place = rec.place || null;
   return row;
 }
 /** A day separator: a centred pill on a hairline. */
@@ -374,7 +407,15 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
   // tab order: -1)
   list.tabIndex = -1;
   const foot = el('div', 'chanwin-foot');
-  root.append(bar, list, foot);
+  // lane channel-threads: the list + its composer are ONE column; the thread pane sits beside it (desktop) or over
+  // it (phone) inside the split — the bar spans both
+  const split = el('div', 'chanwin-split');
+  const main = el('div', 'chanwin-main');
+  const rxNote = el('div', 'chanwin-rx-note');
+  rxNote.hidden = true;
+  main.append(list, rxNote, foot);
+  split.appendChild(main);
+  root.append(bar, split);
   // an agent GROUP is a different object behind the same window type (g3)
   if (isGroupConv(adapterId)) { root.classList.add('chanwin-group'); return openGroupWindow(app, winInfo, convId, { bar, list, foot }); }
 
@@ -386,6 +427,9 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
   /** The conversation summary the last render drew — the ONLY thing the
    *  pointer handler consults, so it never POSTs about a stale unread. */
   let lastConv = null;
+  /** The account view the last render drew (its `reactionsGrant` words the `+` chip's title). */
+  let lastAdapter = null;
+  const accountOf = () => lastAdapter;
   /** §25: THE WINDOW'S MEMORY — which quotes / signatures the person opened
    *  (per record, re-applied on every repaint) and which records are drawn
    *  (a broadcast APPENDS the new ones; it never rebuilds a row the person
@@ -407,20 +451,22 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     }
     const c = r.conversation;
     lastConv = c;
+    lastAdapter = r.adapter || null;
     // The MANAGER owns titles (`wm.setTitle` updates the bar, the taskbar
     // and a tab label). `winInfo.setTitle?.(…)` was a permanent no-op (r3):
     // the winInfo literal has no such member, so every channel window read
     // "Channel" and two open conversations were indistinguishable — the same
     // silent-optional-call shape as the `off?.()` r2 removed.
-    app.wm.setTitle(winInfo.id, c.title || convId);
+    const shownTitle = c.title || chanCaps.untitledText(c.kind, { t });   // lane lark-search-poll: never the raw vendor id
+    app.wm.setTitle(winInfo.id, shownTitle);
     // THE LOOK (channel-polish): the conversation's avatar, then ONE column —
     // the title row (title · the access chip · ⋯) over the meta line; on a
     // phone the bar is one line (the avatar and the meta line hidden by CSS)
-    bar.appendChild(convAvatar({ key: `${adapterId}/${convId}`, title: c.title || convId, kind: c.kind }, null, 'chanwin-av'));
+    bar.appendChild(convAvatar({ key: `${adapterId}/${convId}`, title: shownTitle, kind: c.kind }, null, 'chanwin-av'));
     const headCol = el('div', 'chanwin-head');
     bar.appendChild(headCol);
     const titleRow = el('div', 'chanwin-title-row');
-    titleRow.appendChild(el('b', '', c.title || convId));
+    titleRow.appendChild(el('b', '', shownTitle));
     // the ONE control at title height: the row menu (the panel's contribution
     // menu, same ctx) — Mark read / Refresh now / Refresh every ▸ / Assign & filter… / Reach & policy…
     const more = document.createElement('button');
@@ -461,6 +507,16 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       titleRow.insertBefore(chipEl, more);
     }
 
+    // lane channel-threads (§2.4 / §9): READING reactions needs a permission this account's sign-in does not hold —
+    // ONE short line says what unlocks it (the scope, the console step where declared) with the fix right there,
+    // exactly like the send line; keyed so a repaint that changes nothing leaves it alone
+    drawRxNote(c, r.adapter || null);
+    // the vocabulary (a declaration — no vendor call) is loaded ONCE per window where reactions show: a strip drawn
+    // before the server had it (the first page after a boot) shows `:key:` until then — re-faced in place
+    if (!vocabAsked && c.reactionCaps && c.reactionCaps.read !== 'none' && c.offers && (c.offers.react || c.offers.readReactions)) {
+      vocabAsked = true;
+      loadEmojiSet(adapterBase).then((set) => { refaceStrips(list, set, adapterBase); if (pane) refaceStrips(pane.rows(), set, adapterBase); }).catch(() => { vocabAsked = false; });
+    }
     // The send half by the capability row (g3): DIRECT as you, the proposal
     // path when only the bot identity is offered, or NOT offered WITH its
     // reason (never silence).
@@ -573,6 +629,49 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     return c;
   }
 
+  /** The words for "reading reactions needs a sign-in" on this account — the line above the list and the `+` chip's
+   *  title say the SAME sentence (channel-caps' reactWhyText: the vendor's refusal by name, else one Re-authorize). */
+  function rxReadText(a) {
+    const g = a && a.reactionsGrant;
+    return chanCaps.reactWhyText('reactions-scope-not-granted', { t, scopes: g ? (g.missing && g.missing.length ? g.missing : g.scopes) : null, refused: g ? g.refused || null : null, vendor: a && a.vendor ? t(a.vendor) : ((a && (a.label || a.kind)) || '') });
+  }
+  /** The reactions line (see renderBar): shown only where the adapter reads reactions and this account's sign-in
+   *  lacks the read permission; a ✕ hides it on this device for this account. */
+  function drawRxNote(c, a) {
+    const rr = c && c.offers && c.offers.readReactions;
+    const hideKey = `vs-rx-note-hidden:${adapterId}`;
+    let hidden = false; try { hidden = localStorage.getItem(hideKey) === '1'; } catch { }
+    const show = !!(rr && !rr.offered && rr.why === 'reactions-scope-not-granted' && c.reactionCaps && c.reactionCaps.read !== 'none' && !hidden);
+    const g = a && a.reactionsGrant;
+    const k = JSON.stringify([show, g ? g.missing : null, g ? g.refused || null : null, a ? a.id : null]);
+    if (rxNote.dataset.key === k) return;
+    rxNote.dataset.key = k;
+    rxNote.textContent = '';
+    rxNote.hidden = !show;
+    if (!show) return;
+    rxNote.dataset.channelRxNote = '1';
+    // owner ruling (2026-09-28): ONE sentence with the account card and the chips — "can be read after one Re-authorize",
+    // or the vendor's refusal by name when the last consent dropped the scope (the console step lives in that sentence)
+    rxNote.appendChild(el('span', '', rxReadText(a)));
+    if (a && a.connectable) {
+      const fix = btn(t('Re-authorize'), async () => {
+        // the consent asks for the read permission only when the account says so (the adapter's `reactions` option)
+        await fetchJson(`/api/channels/adapters/${encodeURIComponent(a.id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ options: { reactions: 'read' } }) });
+        const d = await fetchJson('/api/channels');
+        if (!d || d.error) { showToast(routeErrorText(d), { type: 'error' }); return; }
+        const acct = (d.adapters || []).find((x) => x.id === a.id) || a;
+        showReauthAccountDialog(app, acct, { kinds: d.kinds || [] });
+      });
+      fix.dataset.channelRxReauth = a.id;
+      rxNote.appendChild(fix);
+    }
+    const x = document.createElement('button');
+    x.type = 'button'; x.className = 'icon-btn chanwin-rx-note-x';
+    x.appendChild(icon('close', 10));
+    x.title = t('Hide'); x.setAttribute('aria-label', t('Hide'));
+    x.onclick = () => { try { localStorage.setItem(hideKey, '1'); } catch { } rxNote.hidden = true; };
+    rxNote.appendChild(x);
+  }
   /** The beginning of the conversation, said once at the top. */
   function markStart(noOlderAtVendor) {
     if (list.querySelector('.chanwin-start')) return;
@@ -589,6 +688,142 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
   }
 
   const base = `/api/channels/${encodeURIComponent(adapterId)}/${encodeURIComponent(convId)}`;
+  /** D2 (lane channel-rich): the window's mail frames — lazy, one listener, the person's Formatted / Plain
+   *  choice per message kept across a full redraw (`mailModes`, like `folds`). */
+  const mailModes = new Map();
+  const mail = createMailFrames({ list, base, signal: winInfo._listenerCtl?.signal || null, modes: mailModes });
+
+  const adapterBase = `/api/channels/${encodeURIComponent(adapterId)}`;
+  let vocabAsked = false;
+
+  // ── lane channel-threads (2026-09-28): the rows' place facts, the reaction strips, the pane ──
+  /** Every drawn row of one message, in the list AND in the pane (a record may be drawn in both). */
+  const rowsFor = (vid) => { const sel = `.chanmsg[data-vid="${CSS.escape(String(vid))}"]`; return [...list.querySelectorAll(sel), ...(pane ? pane.rows().querySelectorAll(sel) : [])]; };
+  /** A folded list the route / a broadcast answered → every drawn row's strip patched IN PLACE by key. */
+  const applyReactions = (vid, reactions) => { for (const row of rowsFor(vid)) patchReactionStrip(row, { vendorId: vid, reactions }, reactions || [], stripCtx({ vendorId: vid })); };
+  /** The strip's context for one record: `+` only where `react` is offered; a system line never has a strip. */
+  const stripCtx = (rec) => ({
+    canAdd: !!(lastConv && lastConv.offers && lastConv.offers.react && lastConv.offers.react.offered) && !isSysRow(rec),
+    // owner ruling (2026-09-28): while this account's sign-in cannot READ reactions, the `+` says why, by name
+    readNote: (lastConv && lastConv.offers && lastConv.offers.readReactions && !lastConv.offers.readReactions.offered && lastConv.offers.readReactions.why === 'reactions-scope-not-granted') ? rxReadText(accountOf()) : '',
+    adapterBase,
+    onToggle: (chip, key) => { const x = chip._rx || {}; toggleReaction({ base, vid: rec.vendorId, key, mine: !!x.mine, chip, onList: (l) => applyReactions(rec.vendorId, l) }); },
+    onAdd: (anchor) => {
+      loadEmojiSet(adapterBase).then((set) => openReactionPicker(anchor, {
+        set, adapterBase, replaces: null,
+        onPick: (key) => {
+          const row = rowsFor(rec.vendorId)[0];
+          const had = row ? row.querySelector(`.rx-chip[data-key="${CSS.escape(key)}"]`) : null;
+          toggleReaction({ base, vid: rec.vendorId, key, mine: !!(had && had._rx && had._rx.mine), chip: had || null, onList: (l) => applyReactions(rec.vendorId, l) });
+        },
+      })).catch((r) => showToast(routeErrorText(r), { type: 'error' }));
+    },
+  });
+  /** THE ROW CONTEXT every renderRecord of this window gets (the list's; the pane passes `inPane` + its root). */
+  const rowCtx = {
+    strip: (rec) => stripCtx(rec),
+    onJump: (vid, place) => jumpTo(vid, place),
+    onOpenThread: (th, from) => openThread(th, from),
+  };
+  /** THE PANE (one per window, created on first open; never persisted in the layout). */
+  let pane = null;
+  function openThread(th, from = null) {
+    if (!th) return;
+    if (!pane) {
+      pane = createThreadPane(split, {
+        app, base, adapterId, convId,
+        getConv: () => lastConv,
+        renderRecord: (rec, o) => renderRecord(rec, { cont: false, base, folds, ctx: { ...rowCtx, inPane: true, rootVid: o.rootVid } }),
+        observe: (container) => observeRows(container),
+        onClose: () => {},
+      });
+    }
+    pane.open(th, { from });
+  }
+  /** THE JUMP (W1): the parent on screen ⇒ scroll it into view and flash it; not drawn ⇒ page up (≤ JUMP_PAGES_MAX
+   *  pages — the rule-19 belt still bounds the vendor side), then flash; older than everything loaded ⇒ said. */
+  const JUMP_PAGES_MAX = 5;
+  async function jumpTo(vid, place) {
+    const flash = (row) => { row.scrollIntoView({ block: 'center' }); row.classList.remove('chanmsg-flash'); void row.offsetWidth; row.classList.add('chanmsg-flash'); setTimeout(() => row.classList.remove('chanmsg-flash'), 1200); };
+    const find = () => list.querySelector(`.chanmsg[data-vid="${CSS.escape(String(vid))}"]`);
+    let row = find();
+    if (row) { flash(row); return; }
+    const pages = place && place.quote && place.quote.loaded === false ? 1 : JUMP_PAGES_MAX;
+    for (let i = 0; i < pages && !row; i++) {
+      const n = await serial(async () => { const before = list.scrollHeight; const k = await loadPage({ prepend: true }); if (k) list.scrollTop = list.scrollHeight - before; return k; });
+      row = find();
+      if (!n) break;
+    }
+    if (row) flash(row);
+    else showToast(t('That message is older than what is loaded'), { type: 'warn' });
+  }
+
+  // THE REACTION TRICKLE (spec §3.3 source 2, drain rule 20b): the rows INSIDE the viewport — of the list and of the
+  // pane — debounced 800 ms, newest first, ≤ 20, only those never asked or asked longer ago than the list stays
+  // fresh; the server's floor / ceiling / budget answer the rest by name, and a ceiling holds the window quiet
+  const RX_DEBOUNCE_MS = 800;
+  const rxVisible = new Set();
+  const rxAskedAt = new Map();
+  let rxTtlMs = 10 * 60e3, rxHoldUntil = 0, rxTimer = null;
+  const rxIo = typeof IntersectionObserver === 'function' ? new IntersectionObserver((entries) => {
+    for (const en of entries) { const vid = en.target.dataset.vid; if (!vid) continue; if (en.isIntersecting) rxVisible.add(vid); else rxVisible.delete(vid); }
+    if (rxVisible.size && !rxTimer) { rxTimer = setTimeout(() => { rxTimer = null; askReactions().catch(() => {}); }, RX_DEBOUNCE_MS); }
+  }, { threshold: 0.1 }) : null;
+  winInfo._listenerCtl?.signal.addEventListener('abort', () => { if (rxIo) rxIo.disconnect(); if (rxTimer) clearTimeout(rxTimer); });
+  function observeRows(container) {
+    if (!rxIo || !container) return;
+    for (const row of container.querySelectorAll('.chanmsg[data-vid]:not([data-rx-obs])')) { if (row.classList.contains('chanmsg-sysrow')) continue; row.dataset.rxObs = '1'; rxIo.observe(row); }
+  }
+  async function askReactions() {
+    const off = lastConv && lastConv.offers && lastConv.offers.readReactions;
+    if (!off || !off.offered || Date.now() < rxHoldUntil) return;
+    const t0 = Date.now();
+    const rows = [...rxVisible].map((vid) => ({ vid, at: Number(((rowsFor(vid)[0] || {}).dataset || {}).at) || 0 }))
+      .filter((x) => !rxAskedAt.has(x.vid) || t0 - rxAskedAt.get(x.vid) > rxTtlMs)
+      .sort((a, b) => b.at - a.at).slice(0, 20);
+    if (!rows.length) return;
+    for (const x of rows) rxAskedAt.set(x.vid, t0);
+    const r = await fetchJson(`${base}/reactions/refresh`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: rows.map((x) => x.vid) }) });
+    if (!r || r.error) { if (r && r.retryAfterSec) rxHoldUntil = Date.now() + r.retryAfterSec * 1000; return; }
+    if (Number(r.ttlMs) > 0) rxTtlMs = Number(r.ttlMs);
+    const ceiling = (r.refused || []).filter((x) => x.code === 'vendor-budget' || x.code === 'backoff');
+    if (ceiling.length) { for (const x of ceiling) rxAskedAt.delete(x.id); rxHoldUntil = Date.now() + Math.max(5e3, Math.min(60e3, ...ceiling.map((x) => Number(x.retryAfterMs) || 15e3))); }
+  }
+  /** A broadcast said "re-read the page's reactions" (past the patch bound): ONE local read for the drawn rows. */
+  async function rereadReactions() {
+    const ids = [...new Set([...list.querySelectorAll('.chanmsg[data-vid]')].map((r) => r.dataset.vid).filter(Boolean))].slice(-50);
+    if (!ids.length) return;
+    const r = await fetchJson(`${base}/reactions?ids=${encodeURIComponent(ids.join(','))}`);
+    if (!r || r.error) return;
+    for (const [vid, l] of Object.entries(r.reactions || {})) applyReactions(vid, l);
+  }
+  /** A `threads` broadcast: each root's chip re-spelled in place (a chip born where there was none), the pane's count. */
+  function applyThreads(map) {
+    for (const [tk, st] of Object.entries(map || {})) {
+      let matched = false;
+      for (const row of list.querySelectorAll('.chanmsg[data-vid]')) {
+        const pl = row._place;
+        if (!pl || !pl.thread || !pl.thread.isRoot || pl.thread.key !== tk) continue;
+        matched = true;
+        pl.thread = { ...pl.thread, count: st.count, lastAt: st.lastAt, walked: true };
+        const words = row.querySelector(`.chanmsg-thread-chip[data-thread-key="${CSS.escape(tk)}"] .chanmsg-thread-words`);
+        if (words) words.textContent = threadChipText(pl.thread);
+        else { const head = row.querySelector(':scope > .chanmsg-head'); const chip = threadChip(pl, { onOpen: (th) => openThread(th, chip) }); if (head && chip) head.appendChild(chip); }
+      }
+      // quote-vs-topic (2026-09-28): a message that headed no topic when it was drawn (a plain message, or a quote)
+      // and was just answered INTO a new topic (`reply_in_thread` — the vendor mints the thread on it): the broadcast
+      // names the topic's root, so its row becomes a topic root in place and grows its chip (never a rebuilt row)
+      const root = !matched && st && st.root ? list.querySelector(`.chanmsg[data-vid="${CSS.escape(String(st.root))}"]`) : null;
+      if (root && !(root._place && root._place.thread)) {
+        const pl = { ...(root._place || { quote: null }), kind: 'topic-root', thread: { key: tk, count: st.count, lastAt: st.lastAt, isRoot: true, kind: 'vendor', root: String(st.root), walked: true } };
+        root._place = pl;
+        const head = root.querySelector(':scope > .chanmsg-head');
+        const chip = threadChip(pl, { onOpen: (th) => openThread(th, chip) });
+        if (head && chip) head.appendChild(chip);
+      }
+    }
+    if (pane) pane.applyThreads(map);
+  }
   /** Past the local log's start: nothing older here AND the vendor said so. */
   let historyExhausted = false;
   let olderInFlight = false;
@@ -634,6 +869,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     oldestId = head.vendorId || null;
     list.insertBefore(rowsOf(recs, null), prepend ? list.firstChild : (outboxSec.isConnected ? outboxSec : null));
     dedupeDays();
+    observeRows(list);
     return recs.length;
   }
   /** Rows for records oldest-first; `prev` = the record the first one follows
@@ -643,8 +879,10 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     for (const rec of recs) {
       if (rec && rec.vendorId) drawn.add(rec.vendorId);
       if (!prev || dayKey(prev.at) !== dayKey(rec.at)) frag.appendChild(daySeparator(rec.at));
-      const cont = !!prev && dayKey(prev.at) === dayKey(rec.at) && authorKey(prev) === authorKey(rec) && (Number(rec.at) - Number(prev.at)) < GROUP_MS && !(rec.raw && rec.raw.synthetic) && !(prev.raw && prev.raw.synthetic) && !isSysRow(prev) && !isSysRow(rec);
-      frag.appendChild(renderRecord(rec, { cont, base, folds }));
+      // W4 (lane channel-threads): a REPLY breaks the run (its quote line needs a head), and so does a thread's ROOT
+      const rootChip = !!(rec.place && rec.place.thread && rec.place.thread.isRoot);
+      const cont = !!prev && dayKey(prev.at) === dayKey(rec.at) && authorKey(prev) === authorKey(rec) && (Number(rec.at) - Number(prev.at)) < GROUP_MS && !(rec.raw && rec.raw.synthetic) && !(prev.raw && prev.raw.synthetic) && !isSysRow(prev) && !isSysRow(rec) && !rec.replyTo && !rootChip;
+      frag.appendChild(renderRecord(rec, { cont, base, folds, mail, ctx: rowCtx }));
       prev = rec;
     }
     return frag;
@@ -694,6 +932,9 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     if (!drawn.size) return renderNow();
     const r = await fetchJson(`${base}/messages?${new URLSearchParams({ limit: String(PAGE) })}`);
     if (!r || r.error) return;
+    // lane channel-threads (attack 16): the re-read page carries each drawn row's FOLDED reactions — a window that
+    // missed a `patches` broadcast (a dropped socket, a reconnect) reconciles its strips here, by key, in place
+    for (const x of r.records || []) if (x && x.vendorId && drawn.has(x.vendorId)) applyReactions(x.vendorId, Array.isArray(x.reactions) ? x.reactions : []);
     const fresh = (r.records || []).filter((x) => x && x.vendorId && !drawn.has(x.vendorId));
     if (!fresh.length) return;
     const seam = tailSeam();
@@ -707,6 +948,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     list.querySelector('.chanwin-empty')?.remove();
     list.insertBefore(rowsOf(fresh, seam), outboxSec.isConnected ? outboxSec : null);
     dedupeDays();
+    observeRows(list);
     if (stick) list.scrollTop = list.scrollHeight;
   }
 
@@ -871,6 +1113,15 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     // changed nothing (or changed other conversations) repaints nothing here;
     // a WHOLE digest (an account-level change) repaints every window
     const key = `${adapterId}/${convId}`;
+    // lane channel-threads (§4.4): a SIDE change (reactions) and a thread's stats ride the broadcast as the RESULT —
+    // applied to the drawn rows IN PLACE by key; no /messages fetch, no row rebuilt (another client's reaction lands
+    // on the chip under the reader's pointer as a re-spelled count)
+    let sideOnly = false;
+    if (msg.patches && msg.patches[key]) { for (const [vid, p] of Object.entries(msg.patches[key])) applyReactions(vid, (p && p.reactions) || []); sideOnly = true; }
+    if (Array.isArray(msg.rereadReactions) && msg.rereadReactions.includes(key)) { rereadReactions().catch(() => {}); sideOnly = true; }
+    if (msg.threads && msg.threads[key]) { applyThreads(msg.threads[key]); sideOnly = true; }
+    if (sideOnly) return;
+    if (pane && pane.isOpen() && (!msg.partial || (Array.isArray(msg.changedKeys) && msg.changedKeys.includes(key)))) pane.onConversation();
     if (msg.partial) { if (!Array.isArray(msg.changedKeys) || !msg.changedKeys.includes(key)) return; }
     else if (Array.isArray(msg.changed) && msg.changed.length && !msg.changed.includes(convId)) return;
     // §25: an in-place PATCH (new rows appended, drawn rows untouched), never a rebuild
@@ -944,11 +1195,12 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
   function renderGroupRecord(rec, { cont = false } = {}) {
     const raw = rec.raw || {};
     if (raw.kind && raw.kind !== 'message') {
-      const row = el('div', 'chanmsg chanmsg-sys');
+      const row = el('div', 'chanmsg chanmsg-sys' + (isCleared(rec) ? ' chanmsg-cleared' : ''));
       row.dataset.at = String(rec.at || 0);
       row.dataset.vid = rec.vendorId || '';
       row.appendChild(el('div', 'chanmsg-sys-line', `${groupSysText(rec, nameOf)} · ${stamp(rec.at)}`));
       if (raw.kind === 'invite' && raw.context) row.appendChild(el('div', 'chanmsg-ctx', raw.context));
+      if (isCleared(rec)) row.appendChild(el('div', 'chanmsg-ctx rc-cleared', clearedText())); // its context / previous name went with the clear
       return row;
     }
     const self = !!(rec.author && (rec.author.isSelf || rec.author.id === OWNER));
@@ -968,15 +1220,42 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
       when.title = fullStamp(rec.at);
       row.appendChild(when);
     }
-    row.appendChild(el('div', 'chanmsg-body', rec.text || ''));
+    // a CLEARED message ("Clear content…"): its place, time and author stay; its words read the cleared sentence, dimmed
+    row.appendChild(el('div', 'chanmsg-body' + (isCleared(rec) ? ' rc-cleared' : ''), isCleared(rec) ? clearedText() : (rec.text || '')));
+    if (isCleared(rec)) row.classList.add('chanmsg-cleared');
+    else {
+      // the message's ⋯ (verify r2: the verb had no visible door) — shown on hover / focus, the same menu
+      // as a right-click; on touch a long-press is the door (the ⋯ would sit on every message)
+      const more = el('button', 'chanmsg-more', '⋯');
+      more.type = 'button';
+      more.title = t('More actions');
+      more.setAttribute('aria-label', t('More actions'));
+      row.appendChild(more);
+    }
     return row;
   }
+  /** The records a clear replaced (the broadcast's `cleared`): each drawn row is re-drawn IN PLACE —
+   *  same slot, same continuation state — never appended, never a list rebuild. */
+  function patchCleared(list2) {
+    for (const c of list2 || []) {
+      if (!c || c.groupId !== groupId || !c.record) continue;
+      const row = list.querySelector(`.chanmsg[data-vid="${CSS.escape(String(c.vendorId || ''))}"]`);
+      if (!row) continue;
+      row.replaceWith(renderGroupRecord(c.record, { cont: row.classList.contains('chanmsg-cont') }));
+    }
+  }
+  // the record behind a drawn row (for its menu): the page or the broadcast that drew it
+  const drawn = new Map();   // vendorId → record
+  // THE RECORDS A CLEAR REPLACED while this window was open (the broadcast's `cleared` — the sentence, no word): a page
+  // that was on its way when the clear landed was read before it, and must never draw the original over it (lane-redact
+  // verify r5 — client-side order: patchCleared finds no row for a record the page has not placed yet)
+  const clearedSeen = new Map();   // vendorId → the cleared record
 
   /** Append records (oldest-first) at the bottom or prepend a page at the top. */
   function place(recs, { prepend = false } = {}) {
-    const fresh = recs.filter((r) => r && !seen.has(r.vendorId));
+    const fresh = recs.filter((r) => r && !seen.has(r.vendorId)).map((r) => clearedSeen.get(r.vendorId) || r);
     if (!fresh.length) return 0;
-    for (const r of fresh) seen.add(r.vendorId);
+    for (const r of fresh) { seen.add(r.vendorId); drawn.set(r.vendorId, r); }
     const frag = document.createDocumentFragment();
     let prev = null;
     if (!prepend) { const tail = [...list.querySelectorAll('.chanmsg')].pop(); if (tail) prev = { at: Number(tail.dataset.at), author: { id: tail.dataset.author }, raw: { kind: tail.classList.contains('chanmsg-sys') ? 'sys' : 'message' } }; }
@@ -996,12 +1275,16 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
     return fresh.length;
   }
 
+  // every group entry a broadcast carried bumps it: a page answered before a newer entry landed never replaces it (the
+  // entry's `lastText` is a message's words — lane-redact verify r6, the first page raced a clear)
+  let groupGen = 0;
   async function loadPage({ prepend = false } = {}) {
     const q = new URLSearchParams({ limit: String(PAGE) });
     if (prepend && oldest !== null) q.set('before', String(oldest));
+    const g0 = groupGen;
     const r = await fetchJson(`/api/channel-groups/${encodeURIComponent(groupId)}/messages?${q}`);
     if (!r || r.error) return { error: r || {} };
-    if (r.group) group = r.group;
+    if (r.group && groupGen === g0) group = r.group;
     const recs = r.records || [];
     if (recs.length) oldest = Number(recs[0].at) || 0;
     return { n: place(recs, { prepend }) };
@@ -1160,7 +1443,7 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
 
   async function render() {
     list.textContent = '';
-    seen.clear(); oldest = null;
+    seen.clear(); drawn.clear(); oldest = null;
     const r = await loadPage({});
     if (r.error || !group) {
       bar.textContent = '';
@@ -1175,6 +1458,29 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
     markRead();   // opening the window is a USER act
   }
 
+  // a message's menu (right-click / long-press): Clear content… — the one confirm dialog; the broadcast's
+  // `cleared` part then re-draws the row in place on every client (this one included)
+  const msgMenu = (rec, x, y) => {
+    const words = (rec.raw && rec.raw.kind && rec.raw.kind !== 'message') ? groupSysText(rec, nameOf) : (rec.text || '');
+    showContextMenu(x, y, [{ label: t('Clear content…'), action: () => { clearRecords([{ kind: 'group-message', groupId, id: rec.vendorId, at: rec.at, words }]); } }]);
+  };
+  list.addEventListener('contextmenu', (ev) => {
+    const row = ev.target.closest('.chanmsg[data-vid]');
+    const rec = row && drawn.get(row.dataset.vid);
+    if (!rec || isCleared(rec)) return;
+    ev.preventDefault(); ev.stopPropagation();
+    msgMenu(rec, ev.clientX, ev.clientY);
+  }, { signal: winInfo._listenerCtl?.signal });
+  list.addEventListener('click', (ev) => {
+    const more = ev.target.closest('.chanmsg-more');
+    if (!more) return;
+    const row = more.closest('.chanmsg[data-vid]');
+    const rec = row && drawn.get(row.dataset.vid);
+    if (!rec || isCleared(rec)) return;
+    ev.preventDefault(); ev.stopPropagation();
+    const q = more.getBoundingClientRect();
+    msgMenu(rec, q.left, q.bottom + 2);
+  }, { signal: winInfo._listenerCtl?.signal });
   list.addEventListener('scroll', () => {
     if (list.scrollTop > 4 || oldest === null) return;
     const before = list.scrollHeight;
@@ -1185,11 +1491,19 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
   // from its entry) and the new records (appended, deduplicated by vendorId —
   // the send answer may have drawn one already). No full re-render per event.
   const onBroadcast = (msg) => {
-    if (msg.type !== 'channel-groups-updated' || !group) return;
+    if (msg.type !== 'channel-groups-updated') return;
     const g = Array.isArray(msg.groups) ? msg.groups.find((x) => x.id === groupId) : null;
+    if (g) groupGen++;
+    // A CLEAR IS KEPT EVEN BEFORE THE FIRST PAGE (lane-redact verify r6, reproduced in chrome by the client census's stale
+    // answers): a window opened (or replayed) while a clear landed returned here on `!group` and dropped the clear, and its
+    // first page — read before the clear — drew the original words for good. The cleared records are remembered first
+    // (clearedSeen: place() substitutes them) and so is the group's newest entry; nothing is drawn before the first page.
+    if (Array.isArray(msg.cleared)) { for (const c of msg.cleared) if (c && c.groupId === groupId && c.record) { drawn.set(c.vendorId, c.record); clearedSeen.set(c.vendorId, c.record); } }
+    if (!group) { if (g) group = g; return; }
     const wasArchived = !!group.archivedAt;
     if (g) { group = g; drawBar(); }
     if (Array.isArray(msg.messages)) place(msg.messages.filter((m) => m && m.convId === groupId));
+    if (Array.isArray(msg.cleared)) patchCleared(msg.cleared);
     if (g && !!g.archivedAt !== wasArchived) drawFoot();
   };
   app.ws.onGlobal(onBroadcast);

@@ -19,6 +19,7 @@ const { sliceTextWindow } = require('./text-window.js'); // PURE: the attach sla
 const { agentName, collabSummaryText } = require('./collab-row');
 const { rewoundByTurns, applyRewound, rewoundOp } = require('./rewind-ops.js');
 const { offerOf } = require('./reset-credit.js'); // PURE: the reset-credit offer a peer card may carry (design-reset-credits §5)
+const { groupOf: groupCardOf } = require('./group-card.js'); // PURE (lane group-report-card): a group message's card facts — `peerGroup`
 
 function safeJsonParse(text, fallback = null) {
   try { return JSON.parse(text); } catch { return fallback; }
@@ -140,7 +141,9 @@ function peerRecordOf(item, content) {
   const inferred = peerOriginOf(null, text);
   const from = marker && marker.name ? String(marker.name) : inferred.name;
   const via = marker && (marker.kind === 'notification' || marker.kind === 'peer') ? marker.kind : inferred.via;
-  return { content: body ? [{ type: 'text', text: body }] : content, from, via };
+  // lane group-report-card: the wrapper writes the ladder's `group` into its marker — a group WAKE's card, live and on a rebuild
+  const group = marker ? groupCardOf(marker.group) : null;
+  return { content: body ? [{ type: 'text', text: body }] : content, from: group ? (group.self ? null : (group.from || from)) : from, via: group ? 'peer' : via, group };
 }
 
 function toTs(value) {
@@ -502,7 +505,7 @@ class CodexMessageManager {
   // it: there the wrapper's own buffer record is the carrier (peerRecordOf)
   // and a second card here would double-render live. Containment-free: the
   // delivery site posts once per fire (same-body repeats are legitimate).
-  injectPeerCard({ fromName, text, resetCredit = null, kind = null }) {
+  injectPeerCard({ fromName, text, resetCredit = null, kind = null, group = null }) {
     const body = String(text || '').trim();
     if (!body) return null;
     this._currentRk = null; // outside any record context — take the s-fallback id, never the last record's key
@@ -517,6 +520,8 @@ class CodexMessageManager {
     // card / the auto-resume arm card — two numbers-and-a-mode, never markup
     const rc = offerOf(resetCredit);
     if (rc) msg.resetCredit = rc;
+    const gc = groupCardOf(group);   // lane group-report-card: sender → group, a peer's words
+    if (gc) { msg.peerGroup = gc; msg.peerVia = 'peer'; msg.peerFrom = gc.self ? null : (gc.from || msg.peerFrom); }
     this._emit({ op: 'create', message: msg });
     return msg;
   }
@@ -1347,6 +1352,7 @@ class CodexMessageManager {
         msg.originKind = 'peer-message';
         msg.peerFrom = peer.from;
         if (peer.via) msg.peerVia = peer.via; // S3 verify F3: never read off the words
+        if (peer.group) msg.peerGroup = peer.group; // lane group-report-card: sender → group
         this._stampUserIdentity(msg, queueMsgId);
         if (emit) this._emit({ op: 'create', message: msg });
         return;

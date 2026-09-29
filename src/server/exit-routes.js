@@ -1,8 +1,9 @@
 'use strict';
 // EXIT ROUTES + REMOTE-FS SINGLETONS (decomposition #10): the vibespace-exit
-// agent routes (on-demand egress via a machine's SOCKS/run), the machine
-// allow-exit toggle, plus the RemoteFs and ssh-key singletons that were
-// declared alongside them. Extracted VERBATIM. ORCH tier.
+// agent routes (on-demand egress via a machine's SOCKS/run), the machine's
+// "Who can use it" (lane-pairing ⑥: two lists, the ask answer, the audit),
+// plus the RemoteFs and ssh-key singletons that were declared alongside them.
+// ORCH tier.
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
@@ -11,42 +12,109 @@ const { mk } = require('./lazy.js');
 
 function create({ app, rootDir, AGENT_BIN_DIR, activeSessions, auth, wss, WS_OPEN,
   bcastAll, integrationEnabled, unpairDialDevice, hosts,
-  getExitProxy, getMounts, getPortForwards }) {
+  getExitProxy, getMounts, getPortForwards, getTasks = null }) {
   const exitProxy = mk(getExitProxy);
   const mounts = mk(getMounts);
   const portForwards = mk(getPortForwards);
-// ── AGENT-facing exit routes (vsst_ token; exempt from cookie auth in
-// auth.middleware). The agent's `vibespace-exit` CLI hits these. ──
-function exitAgentSession(req) {
-  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.body?.token;
+// ── EXIT ROUTES (lane-pairing ⑥): the agent's vibespace-exit (vsst_ — a live conversation only) and the user's
+// "Who can use it" (cookie). Thin: every decision is PURE src/exit-reach.js through the ExitProxyManager. ──
+const E = require('../exit-reach.js');
+const bearerOf = (req) => String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '') || String((req.body && req.body.token) || '');
+const isAnyBearer = (req) => /^Bearer\s+\S/i.test(String((req.headers && req.headers.authorization) || '')) || typeof (req.body && req.body.token) === 'string';
+/** The live conversation behind a vsst_ token → [webuiId, session] | null. */
+function exitAgentEntry(req) {
+  const token = bearerOf(req);
   if (!token || !token.startsWith('vsst_')) return null;
-  for (const [, s] of activeSessions) if (s.agentToken === token) return s;
+  for (const [id, s] of activeSessions) if (s.agentToken === token) return [id, s];
   return null;
 }
+function exitAgentSession(req) { const e = exitAgentEntry(req); return e ? e[1] : null; }
+/** vsst_ only: a Background Work job token (jbt_) is refused BY NAME — a job's owner lineage never inherits an exit. */
+function agentOr401(req, res) {
+  const token = bearerOf(req);
+  if (token.startsWith('jbt_')) { res.status(401).json({ error: E.refusalText('session_token_required'), code: 'session_token_required' }); return null; }
+  const e = exitAgentEntry(req);
+  if (!e) { res.status(401).json({ error: 'missing or unknown session token', code: 'session_token_required' }); return null; }
+  return e;
+}
+const STATUS = { not_granted: 403, ask_denied: 403, ask_changed: 409, ask_expired: 403, ask_unfiled: 409, groups_unreadable: 409, fork_pending: 409, ask_pending: 409, no_machine: 404, no_exits: 404, ambiguous: 400, offline: 503, run_failed: 502, bad_command: 400, unknown_shape: 409, conversation_gone: 410, remote_session: 409 };
+const agentFail = (res, e) => res.status(STATUS[e && e.code] || 400).json({ error: (e && e.message) || 'failed', code: (e && e.code) || 'failed', ...(e && e.grant ? { grant: e.grant } : {}), ...(e && e.has ? { has: e.has } : {}) });
 app.get('/api/agent/exit', (req, res) => {
-  if (!exitAgentSession(req)) return res.status(401).json({ error: 'missing or unknown session token' });
-  res.json({ exits: exitProxy.list() });
+  const e = agentOr401(req, res); if (!e) return;
+  res.json({ exits: exitProxy.listFor(e[1], e[0]) });
 });
 app.post('/api/agent/exit/use', async (req, res) => {
-  if (!exitAgentSession(req)) return res.status(401).json({ error: 'missing or unknown session token' });
-  try { res.json(await exitProxy.use((req.body || {}).machine)); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  const e = agentOr401(req, res); if (!e) return;
+  try { res.json(await exitProxy.use(e[1], e[0], (req.body || {}).machine)); }
+  catch (err) { agentFail(res, err); }
 });
-// RUN a command natively ON the exit machine (the universal fallback for
-// ICMP/UDP/proxy-unaware tools + that machine's own DNS). Bounded.
+// RUN a command natively ON the exit machine (the universal fallback for ICMP/UDP/proxy-unaware tools + that
+// machine's own DNS) — bounded by the daemon's 30 s cap (EXIT_RUN_TIMEOUT_MS), possibly waiting ≤ 60 s for the
+// user's Allow first ("ask me each time").
 app.post('/api/agent/exit/run', async (req, res) => {
-  if (!exitAgentSession(req)) return res.status(401).json({ error: 'missing or unknown session token' });
+  const e = agentOr401(req, res); if (!e) return;
   const { machine, cmd } = req.body || {};
-  if (!cmd || typeof cmd !== 'string') return res.status(400).json({ error: 'cmd (a shell command string) is required' });
+  // verify-r2 ask-a: the CLI's call ending (its process gone, its own timeout, the conversation killed) settles a
+  // waiting ask — the answer would reach nobody and the command must not run for nobody
+  const ac = new AbortController();
+  res.on('close', () => { if (!res.writableFinished) ac.abort(); });
+  try { res.json(await exitProxy.run(e[1], e[0], machine, cmd, { signal: ac.signal })); }
+  catch (err) { agentFail(res, err); }
+});
+// ── the user's side (cookie) ──
+const COOKIE_STATUS = { 'not-found': 404, list_changed: 409, bad_mode: 400, bad_grant: 400, bad_principal: 400, empty_list: 400, too_many: 400, 'session-gone': 410, human_only: 403, ask_unknown: 404, ask_settled: 409, ask_changed: 409, ask_expired: 410, conversation_gone: 410 };
+const cookieFail = (res, e) => res.status(COOKIE_STATUS[e && e.code] || 400).json({ error: (e && e.message) || 'failed', code: (e && e.code) || 'failed', ...(e && e.added ? { added: e.added, removed: e.removed } : {}), ...(e && e.grant ? { grant: e.grant } : {}) });
+app.get('/api/exits', (req, res) => res.json({ exits: exitProxy.list() }));
+app.post('/api/hosts/:id/allow-exit', (req, res) => res.status(410).json({ error: 'use PATCH /api/hosts/:id/exit-access — exit access is two lists now', code: 'retired' }));
+/** The live roster principalsNow reads names from (the sidebar's sessions + the Task Groups). */
+const rosterNow = () => {
+  const sessions = [];
+  for (const [id, s] of activeSessions) sessions.push({ id, name: s.name || s.webuiName || '', backend: s.backend || 'claude', backendSessionId: s.backendSessionId || null, claudeSessionId: s.claudeSessionId || null });
+  let groups = [];
+  try { groups = (getTasks?.()?.list?.() || []).map((g) => ({ id: g.id, title: g.title, name: g.name, archived: !!g.archived })); } catch { groups = []; }
+  return { sessions, groups };
+};
+app.get('/api/hosts/:id/exit-access', (req, res) => {
+  if (isAnyBearer(req)) return res.status(403).json({ error: 'the user decides who can use a machine — an agent token may not read or change it', code: 'human_only' });
+  try { res.json(exitProxy.view(req.params.id, { roster: rosterNow() })); }
+  catch (e) { cookieFail(res, e); }
+});
+app.patch('/api/hosts/:id/exit-access', async (req, res) => {
+  if (isAnyBearer(req)) return res.status(403).json({ error: 'the user decides who can use a machine — an agent token may not read or change it', code: 'human_only' });
+  const b = req.body && typeof req.body === 'object' ? { ...req.body } : req.body;
+  // a row picked LIVE names the session by its webui id ({kind:'session', session:'<id>'}): resolved HERE to its
+  // durable key through addressableId (a pending fork ⇒ its `webui:<id>` key, said in `resolved`) — never trusted
+  const resolved = [];
   try {
-    const h = exitProxy.resolve(machine); // enforces allowExit + resolves the ref
-    // Bounded connect (B-fa6f review catch): every sibling exit path uses
-    // deviceBounded — an agent's `vibespace-exit run` must error in seconds
-    // on a flapping link, not sit on the ~2.7-min connect ladder.
-    const dm = await hosts.deviceBounded(h.id, 8000);
-    const r = await dm.runCmd('sh', ['-lc', cmd], { timeoutMs: 120000 });
-    res.json({ machine: h.name || h.id, code: r.code ?? 0, stdout: String(r.stdout || ''), stderr: String(r.stderr || '') });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+    for (const g of ['use', 'run']) {
+      if (!b || !b[g] || !Array.isArray(b[g].who)) continue;
+      b[g] = { ...b[g], who: b[g].who.map((row) => {
+        if (!row || row.kind !== 'session' || typeof row.session !== 'string') return row;
+        const s = activeSessions.get(row.session);
+        if (!s) throw Object.assign(new Error(`"${String(row.name || row.session).slice(0, 60)}" is not running any more — pick it again when it is`), { code: 'session-gone' });
+        const key = exitProxy.keyOf(s, row.session);
+        resolved.push({ session: row.session, key, forkPending: key.startsWith('webui:') && !!(s.claudeSessionId || s.backendSessionId) });
+        return { kind: 'session', id: key };
+      }) };
+    }
+    const out = await exitProxy.setAccess(req.params.id, b, { by: 'user' });
+    res.json({ ...out, resolved });
+  } catch (e) { cookieFail(res, e); }
+});
+app.get('/api/exits/audit', (req, res) => {
+  if (isAnyBearer(req)) return res.status(403).json({ error: 'the exit audit is the user\'s', code: 'human_only' });
+  res.json({ lines: exitProxy.auditTail({ hostId: req.query.host ? String(req.query.host) : null, limit: Number(req.query.limit) || 50 }) });
+});
+app.get('/api/exits/asks', (req, res) => {
+  if (isAnyBearer(req)) return res.status(403).json({ error: 'only the user answers these', code: 'human_only' });
+  res.json({ asks: exitProxy.listAsks() });
+});
+// "ask me each time" — a PERSON's answer. Cookie ONLY: any bearer (vsst_ / jbt_) is refused human_only — an agent
+// never approves its own command.
+app.post('/api/exits/asks/:askId', (req, res) => {
+  if (isAnyBearer(req)) return res.status(403).json({ error: 'only the user answers this — an agent cannot approve its own command', code: 'human_only' });
+  try { res.json(exitProxy.answerAsk(req.params.askId, { answer: (req.body || {}).answer, by: 'user' })); }
+  catch (e) { cookieFail(res, e); }
 });
 setTimeout(() => { try { hosts.sweepJsonlCache(); } catch {} }, 60000); // orphaned/stale remote-transcript cache
 const sshKey = require('../ssh-key'); // passphrase-protected private-key import

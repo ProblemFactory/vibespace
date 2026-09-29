@@ -36,7 +36,14 @@ const RUNAWAY_VOID_TEXT = 'stopped by the old resource guard (a per-process RSS 
 // that rewrote data/desktop-apps.json or data/browser-profiles.json beside it
 // would be overwritten by its next save — the reshape goes THROUGH the keeper
 // (`reshapeStore`), the file directly only when there is none (a suite).
-function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null, userTodos = null, desktopKeeper = null, browserKeeper = null }) {
+// `hosts` (lane-pairing ⑥) is the LIVE HostManager (or a getter): it holds data/hosts.json in memory and saves it
+// whole, so the exit-access reshape goes through `hosts.reshapeStore`, the file directly only when there is none.
+// `accounts` (2026-09-28) is the LIVE AccountManager (or a getter for it): it holds
+// data/accounts.json in memory and saves the whole state on every write, so the
+// pool reshape goes THROUGH it (`migrateManualPools`) — a file written beside it
+// would be overwritten by its next save. Without one the migration FAILS (and is
+// retried next boot) rather than writing beside a store it cannot see.
+function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null, userTodos = null, desktopKeeper = null, browserKeeper = null, hosts = null, accounts = null }) {
   const dataDir = path.join(rootDir, 'data');
   const archiveDir = path.join(dataDir, 'archive');
 
@@ -441,6 +448,24 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       },
     },
     {
+      id: '2026-09-channel-threads-derive',
+      note: "THREADED REPLIES AND REACTIONS IN CHANNELS (lane channel-threads, 2026-09-28 — the owner: \"我发现你似乎不支持 lark 的内嵌回复 (thread) 功能, 以及 reaction\"). NO message line is rewritten: a record's place (what it answers, which thread, the thread's root) is DERIVED from the columns it already holds — the fold recovers a topic's root as its earliest record with no parent — and reactions live in a new append-only side log. Through the engine's own serialized doors: every conversation whose adapter declares a thread / reaction capability row and whose cached send verdict predates those rows is marked for re-resolution on its next open (`convCaps.at = 0` — one chat lookup, the pattern every open already follows), and every channel account is stamped `reactionPolicy: 'propose'` (an agent's reaction is proposed to you, like a reply; an absent row reads the same — the stamp makes it explicit). Idempotent: a second run finds nothing to reset or stamp.",
+      run() {
+        const eng = typeof channels === 'function' ? channels() : channels;
+        if (!eng || typeof eng.migrateThreads !== 'function') {
+          let doc; try { doc = JSON.parse(fs.readFileSync(path.join(dataDir, 'channels', 'adapters.json'), 'utf-8')); } catch { return; }
+          const pending = ((doc && doc.adapters) || []).filter((r) => r && !['propose', 'direct', 'off'].includes(r.reactionPolicy)).length;
+          if (pending) throw new Error(`no channels engine to stamp the reaction policy on ${pending} account(s) — retried on a boot that has one`);
+          return;
+        }
+        const rep = eng.migrateThreads();
+        rep.write.catch((err) => console.error(`[migrate] channel-threads-derive: the queued write failed after the plan was counted (${(err && err.message) || err}) — an absent reaction policy reads 'propose' and a stale verdict is re-resolved on open anyway`));
+        const counts = { stamped: rep.stamped.length, reset: rep.reset };
+        console.log('[migrate] channel-threads-derive:', JSON.stringify(counts));
+        return counts;
+      },
+    },
+    {
       id: '2026-09-spend-notices-expire',
       note: "SPEND NOTICES LIVED FOREVER AS ACTIONS (owner's instance, measured 2026-09-22: 33 open 'For you' items, 15 from Spending, 13 of them filed before the notice lane existed (2.369.118) — no kind, so in the ACTION list colouring the badge — and 137–288 h old: '… has used 10 of its 12 unattended turns this hour (83%)', '… 48 of 60 today (80%)', 'VibeSpace refused the Stop bookkeeping mini-turn …', warnings about hour/day windows that closed weeks ago). The producer now stamps expiresAt and the store expires it; this moves what the store already holds into the lane: every Spending item (sessionName 'Spending' in the 'accounts' row — the name spend-guard's one fileInbox freezes on every item it files, and nothing else writes) becomes kind 'notice'; an OPEN one gets the end of the window it was about (its detail's `Scope: hour` = filing + 1 h, a refusal = + 6 h, anything else + 24 h — the longest window any spend notice talks about): past ⇒ resolved 'expired' with resolvedAt = that end (when it SHOULD have died, so it sorts as old history — kept in the ledger, never deleted), still ahead ⇒ stamped as its expiresAt so it cannot live forever either. Written through the live store and flushed before the ledger row; counts in the ledger's report row.",
       run() {
@@ -535,6 +560,23 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       },
     },
     {
+      id: '2026-09-pool-manual-priority',
+      note: "the whole-pool manual switch is retired (owner 2026-09-28: \"手动切换整个池其实比较confusing…做成'手动优先级'\"): a pool with auto:false — pinned by hand to its current target — gets priority [current target, …the other members in list order] and auto:true. The owner's intent is kept as the top of the order and nothing moves at boot by itself (#1 is the member the pool already sits on); a pool already auto is untouched",
+      run() {
+        const am = typeof accounts === 'function' ? accounts() : accounts;
+        if (!am || typeof am.migrateManualPools !== 'function') {
+          // no store on this boot: nothing to reshape is a success; a manual pool is a FAILURE by name (retried next boot)
+          let doc = null; try { doc = JSON.parse(fs.readFileSync(path.join(dataDir, 'accounts.json'), 'utf-8')); } catch { return []; }
+          const manual = (doc && Array.isArray(doc.accounts) ? doc.accounts : []).filter((a) => a && a.type === 'pooled' && a.auto !== true).length; // manual = anything the retired switch read as manual (`!!auto` false)
+          if (manual) throw new Error(`no live account store to reshape ${manual} manual pool(s) through`);
+          return [];
+        }
+        const rep = am.migrateManualPools();
+        console.log('[migrate] pool-manual-priority:', JSON.stringify(rep.map((r) => ({ id: r.id, priority: r.priority.length }))));
+        return rep;
+      },
+    },
+    {
       id: '2026-08-archive-dormant-task-plans',
       note: 'dormant checklist plan arrays (feature removed 2.121.0) → data/archive/',
       run() {
@@ -556,7 +598,58 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         fs.renameSync(f + '.tmp', f);
       },
     },
+    {
+      id: '2026-09-exit-access-lists',
+      note: "lane-pairing ⑥ (B-7007): a machine's exit access was ONE boolean `allowExit` that opened it to EVERY conversation for both things an exit does — borrowing its network and running shell commands on it as the machine's user. It is now two lists per machine (`exit.use`, `exit.run`: nobody | everyone | only [conversations / Task Groups], run with 'ask me each time'). Behaviour is unchanged by this pass: `allowExit: true` becomes everyone / everyone (every agent could use and run before), off / absent becomes nobody / nobody; a record that already carries `exit` is kept. Every record's old value is archived to data/archive/hosts-allow-exit-<ts>.json FIRST, then the field is stripped. Through the live HostManager when there is one (it saves hosts.json whole), else the file (atomic). An unreadable hosts.json fails the run by name (retried next boot, nothing touched).",
+      run() {
+        const rep = migrateExitLists();
+        console.log('[migrate] exit-access-lists:', JSON.stringify(rep));
+        return rep;
+      },
+    },
   ];
+
+  /** 2026-09-exit-access-lists (lane-pairing ⑥): archive every record's `allowExit`, then lift each record through
+   *  the ONE PURE rule (src/exit-reach.js migrateExitAccess) and strip the boolean. */
+  function migrateExitLists() {
+    const E = require('../exit-reach.js');
+    const file = path.join(dataDir, 'hosts.json');
+    if (!fs.existsSync(file)) return { converted: [], defaulted: 0, kept: 0, via: 'none' };
+    let disk;
+    try { disk = JSON.parse(fs.readFileSync(file, 'utf-8')); } catch (e) { throw new Error(`data/hosts.json is unreadable (${e.message}) — exit access not migrated; nothing was touched`); }
+    if (!disk || !Array.isArray(disk.hosts)) throw new Error('data/hosts.json has no hosts list — exit access not migrated; nothing was touched');
+    const H = typeof hosts === 'function' ? hosts() : hosts;
+    const now = Date.now();
+    const reshape = (state) => {
+      const out = { converted: [], defaulted: 0, kept: 0 };
+      const recs = Array.isArray(state && state.hosts) ? state.hosts : [];
+      if (!recs.some((h) => h && (h.exit === undefined || 'allowExit' in h))) return out;
+      // ARCHIVE FIRST (archive-never-destroy): every record's old boolean, before anything is stripped
+      fs.mkdirSync(archiveDir, { recursive: true });
+      const arch = path.join(archiveDir, `hosts-allow-exit-${now}.json`);
+      const snap = {};
+      for (const h of recs) if (h && h.id) snap[h.id] = h.allowExit === true;
+      fs.writeFileSync(arch + '.tmp', JSON.stringify(snap, null, 2));
+      fs.renameSync(arch + '.tmp', arch);
+      for (const h of recs) {
+        if (!h || typeof h !== 'object') continue;
+        const m = E.migrateExitAccess(h, { now });
+        if (m.kind === 'kept') out.kept++;
+        else { h.exit = m.exit; if (m.kind === 'converted') out.converted.push(h.id); else out.defaulted++; }
+        delete h.allowExit;
+      }
+      out.archive = path.basename(arch);
+      return out;
+    };
+    if (H && typeof H.reshapeStore === 'function') return { ...H.reshapeStore(reshape), via: 'hosts' };
+    const rep = reshape(disk);
+    if (!rep.archive) return { ...rep, via: 'file' };
+    let mode = 0o600; try { mode = fs.statSync(file).mode & 0o777; } catch { }
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(disk, null, 2), { mode });
+    fs.renameSync(tmp, file);
+    return { ...rep, via: 'file' };
+  }
 
   /** The 2026-09-runaway-parks-void reshape of ONE keeper store: drop the park
    *  map, rewrite the old guard's RSS-sum lastError on every record under

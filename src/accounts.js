@@ -244,7 +244,7 @@ class AccountManager {
           // loginState on a pool = its MEMBERS' worst (a pool has no login of
           // its own); the row names the member that earned it so the user can
           // act without opening the pool's Members dialog.
-          return { ...base, pooled: true, loggedIn: !!info.loggedIn, email: info.email || null, subscriptionType: info.subscriptionType || null, current: cur, currentName: curAcct?.name || null, members: a.members || null, memberOptions: this.poolMembers(a.id), auto: !!a.auto, hot: !!a.hot, hotSupported: capsOf(backend).hotSwitch === 'verified', supported: backend === 'codex' || this.poolSupported(), loginState: this.poolLoginState(a.id) };
+          return { ...base, pooled: true, loggedIn: !!info.loggedIn, email: info.email || null, subscriptionType: info.subscriptionType || null, current: cur, currentName: curAcct?.name || null, members: a.members || null, memberOptions: this.poolMembers(a.id), auto: true, priority: Array.isArray(a.priority) ? a.priority.slice() : [], placement: Array.isArray(a.priority) && a.priority.length ? 'priority' : 'automatic', hot: !!a.hot, hotSupported: capsOf(backend).hotSwitch === 'verified', supported: backend === 'codex' || this.poolSupported(), loginState: this.poolLoginState(a.id) };
         }
         if (type === 'subscription') {
           // ONE branch for every harness (S2): the descriptor's parseAuth reads
@@ -675,7 +675,10 @@ class AccountManager {
     return { id: a.id, name: a.name, email: a.email || null };
   }
 
-  remove(id) {
+  // `opts.chooseDefault(poolId, fromId)` / `opts.chooseLink(poolId, fromId, sessKey)` = the ENGINE's decision for a
+  // pool default / a per-session link that pointed at the deleted account (verify r2): the store has no usage cache
+  // to decide with, so without them the heal below keeps its no-engine fallback (the first live member / the default).
+  remove(id, opts = {}) {
     const i = this._state.accounts.findIndex((x) => x.id === id);
     if (i < 0) throw new Error('account not found');
     const a = this._state.accounts[i];
@@ -689,7 +692,7 @@ class AccountManager {
     // Deleting a member must leave every pool self-consistent NOW.
     if (this._acctBackend(a) === 'claude' && this._acctType(a) === 'subscription') {
       this._save(); // poolMembers below must not offer the removed account
-      this._healPoolsAfterRemoval(id);
+      this._healPoolsAfterRemoval(id, opts);
     }
     // Isolated-login accounts own a creds dir — wipe it (best-effort).
     if (this._acctType(a) === 'pooled') { try { fs.unlinkSync(this._acctDir(this._acctBackend(a), id)); } catch { } try { fs.rmSync(this.poolLinksDir(id), { recursive: true, force: true }); } catch { } } // unlink ONLY — the target is a real account's dir; the links dir holds only symlinks (rm never follows)
@@ -703,7 +706,7 @@ class AccountManager {
    *  account, and re-point (or drop, when no member is left) per-session
    *  links that targeted it. Symlink re-points don't care that the old
    *  target dir is about to be rm'd — order-independent of the wipe. */
-  _healPoolsAfterRemoval(removedId) {
+  _healPoolsAfterRemoval(removedId, { chooseDefault = null, chooseLink = null } = {}) {
     const readTarget = (p) => { try { return path.basename(fs.readlinkSync(p)); } catch { return null; } };
     for (const pool of this._state.accounts.filter((x) => this._acctType(x) === 'pooled')) {
       try {
@@ -717,11 +720,16 @@ class AccountManager {
           // filter, which is the honest "unusable pool" state.
           if (rest.length) pool.members = rest;
         }
+        if (Array.isArray(pool.priority)) pool.priority = pool.priority.filter((m) => m !== removedId); // a deleted account has no place in the manual order
         const alive = this.poolMembers(pool.id);
         if (readTarget(this.subDir(pool.id)) === removedId) {
           if (alive.length) {
-            this.setPoolTarget(pool.id, alive[0].id);
-            console.warn(`[pool] "${pool.name}" target was the deleted account — re-pointed to ${alive[0].name}`);
+            // the ENGINE's decision when it is wired (verify r2) — `alive[0]` only as the no-engine fallback
+            let pick = null;
+            try { const c = chooseDefault ? chooseDefault(pool.id, removedId) : null; if (alive.some((m) => m.id === c)) pick = c; } catch { }
+            const to = alive.find((m) => m.id === pick) || alive[0];
+            this.setPoolTarget(pool.id, to.id, { why: 'member-removed' });
+            console.warn(`[pool] "${pool.name}" target was the deleted account — re-pointed to ${to.name}${pick ? ' (decided)' : ''}`);
           } else {
             try { fs.unlinkSync(this.subDir(pool.id)); } catch { } // a dangling link reads as a phantom login path; absent = honestly signed-out
             console.warn(`[pool] "${pool.name}" lost its only member to deletion — pool is unusable until a member logs in`);
@@ -729,7 +737,11 @@ class AccountManager {
         }
         for (const l of this.sessionPoolLinks(pool.id)) {
           if (readTarget(l.path) !== removedId) continue;
-          const target = this.poolCurrent(pool.id);
+          // each conversation to where the ENGINE decides for IT (its family view, its pin, its own recent walls —
+          // verify r2), else the pool default as before (it had to leave: the account's dir is about to be wiped)
+          let chosen = null;
+          try { const c = chooseLink ? chooseLink(pool.id, removedId, l.sessKey) : null; if (alive.some((m) => m.id === c)) chosen = c; } catch { }
+          const target = chosen || this.poolCurrent(pool.id);
           if (target) {
             require('./account-material.js').repointPoolSymlink(l.path, this.subDir(target), this.subCredsPath(target));
             this._noteSlot({ sessionId: l.sessKey, poolId: pool.id, from: removedId, to: target, why: 'member-removed' });
@@ -963,6 +975,21 @@ class AccountManager {
     const loggedIn = (x) => !!this._readAuthFor(be, x.id).loggedIn;
     return wanted.filter(loggedIn).map((x) => ({ id: x.id, name: x.name }));
   }
+  /** The pool's CONFIGURED membership (2026-09-28, the removed-member wall):
+   *  ids of every same-backend subscription the pool LISTS — the explicit list,
+   *  or (members:null) every one of them — WHATEVER their login state. This is
+   *  the placement fact the pool verdict judges `currentId` against
+   *  (decidePoolSwitch `membership`); `poolMembers` (logged-in only) stays the
+   *  CANDIDATE list, because a signed-out member is still a member — its wall
+   *  is the login, and it must keep saying "re-login", never "removed". */
+  poolMembership(id) {
+    const a = this.get(id);
+    if (!a || this._acctType(a) !== 'pooled') return [];
+    const be = this._acctBackend(a) || 'claude';
+    const all = this._state.accounts.filter((x) => this._acctBackend(x) === be && this._acctType(x) === 'subscription');
+    const wanted = Array.isArray(a.members) && a.members.length ? all.filter((x) => a.members.includes(x.id)) : all;
+    return wanted.map((x) => x.id);
+  }
 
   /** The pool's own symlink path + a member's home dir — per backend (codex
    *  pool = symlink among the CODEX_HOME dirs; P2, design-backend-parity §2). */
@@ -1149,7 +1176,7 @@ class AccountManager {
   // concurrent spawn either sees the old target or the new one, never a gap.
   // The target's creds mtime is bumped because the CLI's credential cache is
   // mtime-gated and two accounts could otherwise share an mtimeMs.
-  setPoolTarget(id, subId, { sweepSessionLinks = false, why = 'pool-target' } = {}) {
+  setPoolTarget(id, subId, { sweepSessionLinks = false, skipSessKeys = null, why = 'pool-target' } = {}) {
     const a = this.get(id);
     if (!a || this._acctType(a) !== 'pooled') throw new Error('not a pooled account');
     const be = this._acctBackend(a) || 'claude';
@@ -1180,6 +1207,9 @@ class AccountManager {
     let swept = 0;
     if (sweepSessionLinks) {
       for (const { sessKey, path: lp } of this.sessionPoolLinks(id)) {
+        // a conversation PINNED to a member is not the pool's to move (2026-09-28: pin > pool
+        // priority order > automatic — the "everything now" act included)
+        if (skipSessKeys && typeof skipSessKeys.has === 'function' && skipSessKeys.has(sessKey)) continue;
         const fromLink = this.poolCurrentFor(id, sessKey);
         try { mat.repointPoolSymlink(lp, this.subDir(subId), null); swept++; this._noteSlot({ sessionId: sessKey, poolId: id, from: fromLink, to: subId, why: why + '-sweep' }); } catch { }
       }
@@ -1197,7 +1227,9 @@ class AccountManager {
     // directory symlinks do.
     if (be === 'claude' && !this.poolSupported()) throw new Error('pooled accounts need a platform with directory symlinks and no keychain-backed credentials (Linux)');
     const id = 'pool-' + crypto.randomBytes(6).toString('hex');
-    const a = { id, name: String(name || '').trim().slice(0, 60) || 'Pool', type: 'pooled', backend: be, members: Array.isArray(members) && members.length ? members.slice(0, 40) : null, auto: false, hot: false, createdAt: Date.now() };
+    // auto:true ALWAYS (2026-09-28): the whole-pool manual switch is retired — a pool is
+    // placed automatically or by its manual `priority` list (empty = automatic)
+    const a = { id, name: String(name || '').trim().slice(0, 60) || 'Pool', type: 'pooled', backend: be, members: Array.isArray(members) && members.length ? members.slice(0, 40) : null, auto: true, priority: [], hot: false, createdAt: Date.now() };
     this._state.accounts.push(a);
     this._save();
     const first = this.poolMembers(id)[0];
@@ -1208,23 +1240,77 @@ class AccountManager {
   }
 
   // members / auto / hot. A member list that drops the CURRENT target re-points
-  // to the first remaining member (a pool must always resolve to something).
-  updatePool(id, { members, auto, hot } = {}) {
+  // the default (a pool must always resolve to something) — to the member the
+  // ENGINE decides (`chooseMember(fromId, list)`, the pool verdict from the
+  // removed member with the new membership, 2026-09-28), never simply the first
+  // one. `list[0]` below is ONLY the no-engine fallback (a suite, a store used
+  // before the engine is wired): this store holds no usage cache to decide with.
+  //
+  // MANUAL PRIORITY (2026-09-28, the owner retired the whole-pool manual switch):
+  // `priority` = an ORDERED list of member ids — validated here (every id a member
+  // of THIS pool, deduped, ≤ 40; [] / null = automatic) and pruned whenever the
+  // membership narrows. `auto` is ALWAYS true now: a pool is placed automatically
+  // or by its priority, never pinned by hand as a whole — `auto:false` is ignored
+  // (said once in the journal; the record keeps `auto` for old clients).
+  updatePool(id, { members, auto, hot, priority } = {}, { chooseMember = null } = {}) {
     const a = this.get(id);
     if (!a || this._acctType(a) !== 'pooled') throw new Error('not a pooled account');
     if (members !== undefined) a.members = Array.isArray(members) && members.length ? members.slice(0, 40) : null;
-    if (auto !== undefined) a.auto = !!auto;
+    if (auto === false && !AccountManager._autoOffSaid) { AccountManager._autoOffSaid = true; console.log('[pool] auto:false ignored — a pool is placed automatically or by its manual priority (the whole-pool manual switch is retired, 2026-09-28)'); }
+    a.auto = true;
     if (hot !== undefined) a.hot = !!hot;
+    if (priority !== undefined) {
+      if (priority !== null && !Array.isArray(priority)) throw new Error('priority must be a list of member ids');
+      const membership = this.poolMembership(id);
+      const seen = new Set(), list = [];
+      for (const pid of priority || []) {
+        if (typeof pid !== 'string' || !membership.includes(pid)) throw new Error('not a member of this pool: ' + String(pid));
+        if (!seen.has(pid)) { seen.add(pid); list.push(pid); }
+      }
+      if (list.length > 40) throw new Error('a priority lists at most 40 members');
+      a.priority = list;
+    }
+    // a narrowed membership prunes the order (a removed member has no place in it)
+    if (Array.isArray(a.priority) && a.priority.length) { const m = this.poolMembership(id); a.priority = a.priority.filter((x) => m.includes(x)); }
     this._save();
     const cur = this.poolCurrent(id);
     const list = this.poolMembers(id);
-    if (list.length && !list.some((m) => m.id === cur)) this.setPoolTarget(id, list[0].id);
+    if (list.length && !list.some((m) => m.id === cur)) {
+      let pick = null;
+      try { const c = chooseMember ? chooseMember(cur, list) : null; if (list.some((m) => m.id === c)) pick = c; } catch { }
+      this.setPoolTarget(id, pick || list[0].id, { why: 'removed-from-pool' });
+    }
     this._notify();
     return this.get(id);
   }
 
+  /** THE ONE-SHOT RESHAPE of the retired whole-pool manual switch (migration
+   *  `2026-09-pool-manual-priority`, 2026-09-28): a pool with `auto:false` was
+   *  pinned by hand to its current target — that intent becomes the TOP of a
+   *  manual priority (`[current, …the other members in list order]`) and the pool
+   *  becomes auto. Nothing moves by itself: #1 is the member it already sits on.
+   *  A pool already auto (with or without a priority) is untouched. Idempotent
+   *  by construction (a reshaped pool is auto). → [{id, name, priority}] */
+  migrateManualPools() {
+    const out = [];
+    for (const a of this._state.accounts) {
+      // MANUAL = what the retired switch READ as manual: `auto` anything but true (the list and the
+      // engine's tick both asked `!!a.auto`, so a record with no `auto` field was a manual pool too —
+      // verify r1: `auto !== false` skipped it and its hand-picked target became an automatic pool's)
+      if (this._acctType(a) !== 'pooled' || a.auto === true) continue;
+      const cur = this.poolCurrent(a.id);
+      const membership = this.poolMembership(a.id);
+      const order = (cur && membership.includes(cur) ? [cur] : []).concat(membership.filter((m) => m !== cur)).slice(0, 40);
+      a.priority = order;
+      a.auto = true;
+      out.push({ id: a.id, name: a.name, priority: order.slice() });
+    }
+    if (out.length) { this._save(); this._notify(); }
+    return out;
+  }
+
   resolveForSpawn(requested, backend = 'claude', opts = {}) {
-    if (backend === 'codex') return this._resolveCodexSpawn(requested);
+    if (backend === 'codex') return this._resolveCodexSpawn(requested, opts);
     if (requested === 'subscription') return null; // the CLI's own global login
     const id = requested || this._state.defaultAccountId;
     if (!id) return null;
@@ -1253,7 +1339,9 @@ class AccountManager {
         // still start the session (and then say so) rather than throw here.
         alive.sort((x, y) => loginRank(this.loginStateOf(x)) - loginRank(this.loginStateOf(y)));
         let pick = null;
-        try { const c = opts.chooseMember?.(); if (alive.includes(c)) pick = c; } catch { }
+        // (the chooser is TOLD which pool it decides for — the one this spawn resolved — and that this is the POOL's
+        // default it is placing, not one conversation: a conversation's pin must never become the pool default, verify r2)
+        try { const c = opts.chooseMember?.(id, { forDefault: true }); if (alive.includes(c)) pick = c; } catch { }
         pick = pick || alive[0];
         const was = cur;
         this.setPoolTarget(id, pick);
@@ -1271,7 +1359,7 @@ class AccountManager {
       // pool's current target, i.e. exactly the legacy behaviour.
       if (opts.sessionKey) {
         let member = null;
-        try { member = opts.chooseMember?.(); } catch { }
+        try { member = opts.chooseMember?.(id); } catch { } // the pool THIS spawn bills — the caller never re-derives it (verify r2)
         // The chooser ranks by QUOTA (it reads the usage caches); credentials
         // are this store's authority. A member that is signed out is not a
         // candidate no matter how much quota it shows — same outage, second
@@ -1281,6 +1369,19 @@ class AccountManager {
           member = null;
         }
         member = member || cur;
+        // THE OWNER'S 全B (2026-09-28): a conversation never STARTS on a member the pool no longer lists — the
+        // default can still name one (a removal the engine has not acted on yet, a boot before its first sweep):
+        // then the pool's own choice for its default, else the first signed-in member it lists; with none at all
+        // the placement is REFUSED with the removal's own sentence (nothing may bill the removed member).
+        const listedNow = this.poolMembership(id);
+        if (member && !listedNow.includes(member)) {
+          const alive2 = this.poolMembers(id).map((m) => m.id);
+          let alt = null;
+          try { const c = opts.chooseMember?.(id, { forDefault: true }); if (alive2.includes(c)) alt = c; } catch { }
+          alt = alt || alive2[0] || null;
+          if (!alt) throw Object.assign(new Error(`"${this.get(member)?.name || member}" was removed from pool "${a.name}" and no other member can take over — sign a member of the pool in, or add one`), { code: 'removed_no_candidate' });
+          member = alt;
+        }
         const link = this.ensureSessionPoolLink(id, opts.sessionKey, member, { why: 'spawn' });
         // `linkPath` NAMES the credential symlink (2026-09-07 readings-by-slot):
         // it is the SLOT, and a consumer that needs it (the statusline's
@@ -1328,7 +1429,7 @@ class AccountManager {
 
   // Codex spawn: undefined/null → the account's own global login (default) or
   // ~/.codex when none; a 'cxs-…' id → that account's isolated CODEX_HOME.
-  _resolveCodexSpawn(requested) {
+  _resolveCodexSpawn(requested, opts = {}) {
     if (requested === 'subscription') return null; // codex's own global login
     const id = requested || this._state.defaultCodexAccountId;
     if (!id) return null;
@@ -1348,6 +1449,13 @@ class AccountManager {
         this.setPoolTarget(id, first.id);
         cur = first.id;
       }
+      // THE CONVERSATION'S PIN (2026-09-28): a codex process HOLDS the member its CODEX_HOME names
+      // for its whole life, so a pinned conversation spawns straight onto the pinned member's own
+      // home (the pool's symlink would give it the pool's current member) — only when the pin is
+      // a logged-in member of this pool; else the pool's member, as before (the pin kept)
+      let pinned = null;
+      try { const m = opts.pinned && opts.chooseMember ? opts.chooseMember(id) : null; if (m && m !== cur && this.poolMembers(id).some((x) => x.id === m) && this.readCodexSubAuth(m).loggedIn) pinned = m; } catch { pinned = null; }
+      if (pinned) return { id: a.id, name: a.name, kind: 'codex-pooled', pinnedMember: pinned, localEnv: { [this._credsOf('codex').spawnEnvVar]: this._acctDir('codex', pinned) }, secret: null, remoteCreds: null };
       return { id: a.id, name: a.name, kind: 'codex-pooled', localEnv: { [this._credsOf('codex').spawnEnvVar]: this._acctDir('codex', id) }, secret: null, remoteCreds: null };
     }
     if (this._acctBackend(a) !== 'codex') throw new Error('not a Codex account: ' + a.name);

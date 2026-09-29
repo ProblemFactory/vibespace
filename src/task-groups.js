@@ -39,6 +39,9 @@ const { pickColorSeq } = require('./task-color-seq');
 // the per-turn reminders, the show/backlog listing) — the store keeps every
 // item; which ones a read shows is decided there (2026-09-22).
 const { PRIORITIES: BACKLOG_PRIORITIES, normalizePriority, markedText, escapeItemText, unescapeItemText, sortBacklog, selectReminders, nudgeThreshold, backlogNudge, nudgeTextAll } = require('./backlog-select');
+// "Clear content…" (2026-09-28): the ONE definition of what a clear replaces and
+// who may do it — this store only holds the door (clearProgress below).
+const { applyClear } = require('./record-clear');
 
 // Task Groups (岗位) have NO status — they are persistent roles; only an
 // `archived` flag. Task STATUS lives on the session (session-status.js STATES,
@@ -78,6 +81,20 @@ const BACKLOG_ID_RE = /^B-[0-9a-f]{4,8}$/i;
 function mintBacklogId(taken) {
   let id;
   do { id = 'B-' + crypto.randomBytes(2).toString('hex'); } while (taken.has(id));
+  taken.add(id);
+  return id;
+}
+// ACTIVITY-LOG ENTRY IDS (2026-09-28, "Clear content…"): an entry used to be
+// {at, note, detail?, session} — addressable only by its millisecond (two
+// writers can share one, an import mints whole minutes) or by an array index
+// the 500-entry cap shifts. Every entry now carries a stable `P-<6 hex>` id,
+// minted at addProgress and backfilled once at load (the backlog-id precedent
+// above); `vibespace-task show` prints it for the caller's own entries and
+// `progress-redact <id>` names it.
+const PROGRESS_ID_RE = /^P-[0-9a-f]{6}$/;
+function mintProgressId(taken) {
+  let id;
+  do { id = 'P-' + crypto.randomBytes(3).toString('hex'); } while (taken.has(id));
   taken.add(id);
   return id;
 }
@@ -171,6 +188,16 @@ class TaskGroupManager {
             b.claimedBy = (b.addedBy && b.addedBy !== 'user') ? [b.addedBy] : [];
             migrated = true;
           }
+        }
+      }
+      // Activity-log entry ids (2026-09-28): every entry gets its stable P- id,
+      // idempotently — an entry that already has a valid, unique one keeps it.
+      {
+        const taken = new Set();
+        for (const p of (Array.isArray(t.progress) ? t.progress : [])) {
+          if (!p || typeof p !== 'object') continue;
+          if (typeof p.id === 'string' && PROGRESS_ID_RE.test(p.id) && !taken.has(p.id)) { taken.add(p.id); continue; }
+          p.id = mintProgressId(taken); migrated = true;
         }
       }
     }
@@ -1225,13 +1252,62 @@ class TaskGroupManager {
     const clean = String(note || '').trim().slice(0, CAPS.note);
     if (!clean) throw new Error('note required');
     const cleanDetail = typeof detail === 'string' && detail.trim() ? detail.trim().slice(0, CAPS.detail) : null;
-    t.progress.push({ at: Date.now(), note: clean, ...(cleanDetail ? { detail: cleanDetail } : {}), session: typeof session === 'string' ? session.slice(0, 200) : null });
+    const taken = new Set((t.progress || []).map((p) => p && p.id).filter(Boolean));
+    t.progress.push({ id: mintProgressId(taken), at: Date.now(), note: clean, ...(cleanDetail ? { detail: cleanDetail } : {}), session: typeof session === 'string' ? session.slice(0, 200) : null });
     if (t.progress.length > 500) t.progress = t.progress.slice(-500);
     t.updatedAt = Date.now();
     t.contentUpdatedAt = t.updatedAt; // progress is injected content
     this._save();
     this._notify();
     return { ...t };
+  }
+
+  /** The Activity-log entries `ref` names in group `id`: a `P-<hex>` id (at most
+   *  one), or an entry's `at` in ms (every entry of that instant — the caller
+   *  refuses an ambiguous one). [] = none. */
+  findProgress(id, ref) {
+    const t = this.get(id);
+    const r = String(ref == null ? '' : ref).trim();
+    if (!r) return [];
+    if (PROGRESS_ID_RE.test(r)) return (t.progress || []).filter((p) => p && p.id === r);
+    if (/^\d{10,}$/.test(r)) return (t.progress || []).filter((p) => p && Number(p.at) === Number(r));
+    return [];
+  }
+
+  /**
+   * "CLEAR CONTENT…" — THE door for an Activity-log entry (2026-09-28). Each ref
+   * (a P- id or an entry's ms `at`) is looked up, asked `allow(entry)` (the
+   * caller's PURE clearVerdict — this store knows no callers) and cleared IN
+   * PLACE through src/record-clear.js applyClear: the note becomes the ONE
+   * sentence, the detail goes, `clearedAt`/`clearedBy` are stamped; the id,
+   * time, author and position stay. ONE atomic save for the whole batch —
+   * `_save()` is also what regenerates every context folder's TASK.md — and ONE
+   * `tasks-updated` broadcast. `updatedAt` moves, `contentUpdatedAt` does NOT:
+   * the injected context re-renders from this store on every call, so the next
+   * injection already shows the sentence, and nothing would be news to a member
+   * agent (the diff snapshot keys activity by `lastProgressAt`, which a clear
+   * keeps). Returns {cleared: [ids], already: [ids], unknown: [refs],
+   * ambiguous: [refs], refused: [{ref, id, code, why, status}]}.
+   */
+  clearProgress(id, refs, { by = 'owner', at = Date.now(), allow = null } = {}) {
+    const t = this.get(id);
+    const out = { cleared: [], already: [], unknown: [], ambiguous: [], refused: [] };
+    for (const ref of Array.isArray(refs) ? refs : [refs]) {
+      const hits = this.findProgress(id, ref);
+      if (!hits.length) { out.unknown.push(String(ref)); continue; }
+      if (hits.length > 1) { out.ambiguous.push(String(ref)); continue; }
+      const p = hits[0];
+      const v = allow ? allow(p) : { ok: true };
+      if (!v || !v.ok) { out.refused.push({ ref: String(ref), id: p.id, code: (v && v.code) || 'not_yours', why: (v && v.why) || '', status: (v && v.status) || 403 }); continue; }
+      const r = applyClear(p, { kind: 'activity', by, at });
+      (r.changed ? out.cleared : out.already).push(p.id);
+    }
+    if (out.cleared.length) {
+      t.updatedAt = Date.now();
+      this._save();
+      this._notify();
+    }
+    return out;
   }
 
   // ── Repo task files (P4): a task ⇄ a self-contained committable markdown
@@ -1400,7 +1476,12 @@ class TaskGroupManager {
       ...(existing?.plan?.length ? { plan: existing.plan } : {}),
       // prefer the store's live log if the task already exists (it's fuller —
       // the file caps at the last 30); otherwise seed from the file.
-      progress: (existing?.progress?.length ? existing.progress : parsedProgress).slice(-500),
+      progress: (() => {
+        // every entry keeps (or gets) its stable P- id — a file-seeded log is minted here
+        const list = (existing?.progress?.length ? existing.progress : parsedProgress).slice(-500);
+        const taken = new Set();
+        return list.map((p) => ({ ...p, id: (typeof p.id === 'string' && PROGRESS_ID_RE.test(p.id) && !taken.has(p.id)) ? (taken.add(p.id), p.id) : mintProgressId(taken) }));
+      })(),
       sessions: existing?.sessions || [],
       folders: existing?.folders || [],
       contextDir: existing?.contextDir || null,
@@ -1448,7 +1529,15 @@ class TaskGroupManager {
         // dormant passthrough: a config bundle from an older instance may carry
         // a checklist — keep the data (never rendered), don't destroy it
         ...(Array.isArray(raw.plan) && raw.plan.length ? { plan: raw.plan.slice(0, 200) } : {}),
-        progress: Array.isArray(raw.progress) ? raw.progress.slice(-500).map((p) => ({ at: Number(p?.at) || now, note: String(p?.note || '').slice(0, CAPS.note), session: typeof p?.session === 'string' ? p.session.slice(0, 200) : null })) : [],
+        // an entry keeps its P- id and, when it was cleared, its clear stamp (the sentence is its note)
+        progress: (() => {
+          const taken = new Set();
+          return Array.isArray(raw.progress) ? raw.progress.slice(-500).map((p) => ({
+            id: (typeof p?.id === 'string' && PROGRESS_ID_RE.test(p.id) && !taken.has(p.id)) ? (taken.add(p.id), p.id) : mintProgressId(taken),
+            at: Number(p?.at) || now, note: String(p?.note || '').slice(0, CAPS.note), session: typeof p?.session === 'string' ? p.session.slice(0, 200) : null,
+            ...(Number(p?.clearedAt) ? { clearedAt: Number(p.clearedAt), clearedBy: String(p?.clearedBy || 'owner').slice(0, 200) } : {}),
+          })) : [];
+        })(),
         sessions: sanitizeStrArray(raw.sessions, 2000),
         folders: this._sanitizeFolders(raw.folders),
         contextDir: (typeof raw.contextDir === 'string' && path.isAbsolute(raw.contextDir)) ? raw.contextDir : null,

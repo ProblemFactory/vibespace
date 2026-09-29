@@ -1,13 +1,15 @@
 // Background Work window + rail panel + Interaction Panel window (2.342.x,
 // docs/design-background-work.md §9). XSS LAW: every job-record string is
 // agent-/process-controlled and synced to all clients — EVERYTHING renders via
-// textContent; agent markup NEVER touches our DOM (panel md → DOMPurify).
-import { escHtml, fetchJson, showConfirmDialog, showToast, createModalShell } from './utils.js';
+// textContent; agent markup NEVER touches our DOM (panel md → sanitizeHtml, src/lib/safe-html.js).
+import { escHtml, fetchJson, showConfirmDialog, showToast, createModalShell, showContextMenu } from './utils.js';
+import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): a job's menu + the cleared sentence
+import { CLEARED_TEXT } from '../record-clear.js'; // PURE: a family of cleared jobs is named by the stored key — worded here
 import { t } from './i18n.js';
 import { marked } from 'marked';
-import DOMPurify from 'dompurify';
+import { sanitizeHtml } from './safe-html.js';
 import { registerWindowType } from './window-types.js';
-import { badgeCounts, foldTasks, pruneFolds, heldText, ackableIds } from './jobs-layout.js';
+import { badgeCounts, foldTasks, pruneFolds, heldText, ackableIds, isFoldKey } from './jobs-layout.js';
 
 const GLYPH = { 'awaiting-user': '⚑', failed: '✖', unverified: '?', missed: '✖', up: '●', starting: '◌', down: '○', scheduled: '◷', interrupted: '⚠', done: '✔' }; // text glyphs only — emoji ban
 const SEV = { failed: 'bad', missed: 'bad', unverified: 'bad', 'awaiting-user': 'warn', interrupted: 'warn', up: 'ok', starting: 'ok', scheduled: 'idle', down: 'idle', done: 'idle' };
@@ -31,14 +33,21 @@ const EXPANDED = new Set();
 let FOLDS = null;
 let foldsWired = false;
 let ARCHIVE_OPEN = false;
+// ONLY this build's keys (lane-redact verify r6): an older build keyed a family's fold by the job's NAME — a copy of a
+// record's words in the server's user state the job's clear never reached. Such keys are dropped when the map is read
+// (the family's fold falls back to its default once) and the cleaned map is written back, once per page.
+const foldsOf = (m) => { const out = {}; let dropped = 0; for (const [k, v] of Object.entries(m && typeof m === 'object' ? m : {})) { if (isFoldKey(k)) out[k] = !!v; else dropped++; } return { folds: out, dropped }; };
+let foldsCleaned = false;
 async function loadFolds(app) {
   if (!foldsWired) {
     foldsWired = true;
-    app.ws.onGlobal((msg) => { if (msg.type === 'user-state-updated' && msg.state && msg.state.jobsPanelFolds && typeof msg.state.jobsPanelFolds === 'object') FOLDS = { ...msg.state.jobsPanelFolds }; });
+    app.ws.onGlobal((msg) => { if (msg.type === 'user-state-updated' && msg.state && msg.state.jobsPanelFolds && typeof msg.state.jobsPanelFolds === 'object') FOLDS = foldsOf(msg.state.jobsPanelFolds).folds; });
   }
   if (FOLDS) return FOLDS;
   const st = await fetchJson('/api/user-state');
-  FOLDS = st && st.jobsPanelFolds && typeof st.jobsPanelFolds === 'object' ? { ...st.jobsPanelFolds } : {};
+  const { folds, dropped } = foldsOf(st && st.jobsPanelFolds);
+  FOLDS = folds;
+  if (dropped && !foldsCleaned) { foldsCleaned = true; fetch('/api/user-state', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobsPanelFolds: FOLDS }) }).catch(() => {}); }
   return FOLDS;
 }
 /** BATCH "Mark all seen" (2.369.121, owner: 批量已读): ONE request for every
@@ -120,7 +129,7 @@ function stateLine(j) {
 
 async function jobAction(app, j, act, refresh) {
   if (act === 'panel') return openInteractWindow(app, j.id); // redirects to the rail panel when it exists
-  if (act === 'rm' && !(await showConfirmDialog({ title: t('Remove job'), message: t('Remove {name} and its run history?', { name: j.name }), confirmText: t('Remove'), danger: true }))) return;
+  if (act === 'rm' && !(await showConfirmDialog({ title: t('Remove job'), message: t('Remove {name} and its run history?', { name: isCleared(j) ? clearedText() : j.name }), confirmText: t('Remove'), danger: true }))) return; // a cleared job's name is the sentence in this device's words (lane-redact verify r5 — the belt)
   const r = await fetchJson(`/api/jobs/${j.id}/${act}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   if (r?.error) showToast(r.error, { error: true });
   refresh?.();
@@ -205,7 +214,7 @@ function renderTaskSection(app, root, list, { compact, refresh, archivedCount })
       btn.setAttribute('aria-expanded', g.expanded ? 'true' : 'false');
       btn.dataset.group = g.key;
       const chev = document.createElement('span'); chev.className = 'jobs-group-chev'; chev.textContent = g.expanded ? '▾' : '▸';
-      const fam = document.createElement('span'); fam.className = 'jobs-group-name'; fam.textContent = g.family;
+      const fam = document.createElement('span'); fam.className = 'jobs-group-name' + (g.family === CLEARED_TEXT ? ' rc-cleared' : ''); fam.textContent = g.family === CLEARED_TEXT ? clearedText() : g.family;
       const cnt = document.createElement('span'); cnt.className = 'jobs-group-count'; cnt.textContent = `×${g.count}`;
       btn.append(chev, fam, cnt);
       const chip = (cls, text) => { const s = document.createElement('span'); s.className = 'jobs-group-chip ' + cls; s.textContent = text; btn.appendChild(s); };
@@ -255,7 +264,7 @@ function renderCard(app, root, j, { compact, refresh, archived = false }) {
   el.className = 'jobs-card jobs-sev-' + (SEV[j.state] || 'idle') + (archived ? ' jobs-card-archived' : '');
   const l1 = document.createElement('div'); l1.className = 'jobs-card-l1';
   const dot = document.createElement('span'); dot.className = 'jobs-dot'; dot.textContent = GLYPH[j.state] || '·';
-  const name = document.createElement('span'); name.className = 'jobs-name'; name.textContent = j.name;
+  const name = document.createElement('span'); name.className = 'jobs-name' + (isCleared(j) ? ' rc-cleared' : ''); name.textContent = isCleared(j) ? clearedText() : j.name;
   const st = document.createElement('span'); st.className = 'jobs-state'; st.textContent = stateLine(j) + (archived ? ` · ${t('archived')}` : '');
   const sp = document.createElement('span'); sp.style.flex = '1';
   l1.append(dot, name, st, sp, ...(archived ? [rmButton(app, j, refresh)] : actionButtons(app, j, refresh, { compact })));
@@ -278,6 +287,13 @@ function renderCard(app, root, j, { compact, refresh, archived = false }) {
   // spawned a WINDOW from the sidebar was jarring): expand inline, in
   // the rail panel and the fallback window alike
   el.dataset.job = j.id;
+  // the row's menu (right-click / long-press): Clear content… — live AND archived rows (the registry and
+  // the archive both hold the record); the one confirm dialog, then the jobs-updated broadcast repaints
+  el.oncontextmenu = (ev) => {
+    // offered on a cleared job too: a job that ran again after a clear has new words (its runs' last lines)
+    ev.preventDefault(); ev.stopPropagation();
+    showContextMenu(ev.clientX, ev.clientY, [{ label: t('Clear content…'), action: () => { clearRecords([{ kind: 'job', id: j.id, at: j.createdAt, words: isCleared(j) ? clearedText() : j.name }]).then((r) => { if (r && r.ok) refresh?.(); }); } }]);
+  };
   el.onclick = () => {
     if (el.classList.contains('jobs-open')) { EXPANDED.delete(j.id); el.classList.remove('jobs-open'); el.querySelector('.jobs-detail')?.remove(); }
     else { EXPANDED.add(j.id); expandDetail(app, el, j, refresh); }
@@ -323,6 +339,13 @@ async function expandDetail(app, el, j, refresh) {
   setL();
   lock.onclick = async () => { const r2 = await fetchJson(`/api/jobs/${j.id}/access`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lock: job.access?.lockedBy !== 'user' }) }); if (!r2?.error) { job.access = r2.access; setL(); } };
   acc.appendChild(lock);
+  // "Clear content…" (verify r2: the verb had no visible door, only the card's right-click) — the
+  // one confirm dialog; the jobs-updated broadcast repaints. Offered on a cleared job too: a job
+  // that ran again after a clear has new words (its runs' last lines)
+  const clr = document.createElement('button'); clr.type = 'button'; clr.className = 'jobs-btn jobs-clear';
+  clr.textContent = t('Clear content…');
+  clr.onclick = (ev) => { ev.stopPropagation(); clearRecords([{ kind: 'job', id: j.id, at: j.createdAt, words: isCleared(j) ? clearedText() : j.name }]).then((r) => { if (r && r.ok) refresh?.(); }); };
+  acc.appendChild(clr);
   d.appendChild(acc);
   // owner auto-notify state (2.344.0): which lane told (or will tell) the
   // owner conversation about this job, and when it last happened
@@ -357,6 +380,8 @@ async function expandDetail(app, el, j, refresh) {
     d.appendChild(rr);
   }
   if (job.logTail) { const lt = document.createElement('pre'); lt.className = 'jobs-log'; lt.textContent = job.logTail; d.appendChild(lt); }
+  // a cleared job's run log is WITHHELD, and says so (never an empty space that reads "no output")
+  else if (job.logWithheld) { const lw = document.createElement('div'); lw.className = 'jobs-meta rc-cleared jobs-log-withheld'; lw.textContent = t('The log is hidden — this job’s content was cleared'); d.appendChild(lw); }
 }
 
 function openCreateDialog(app, onDone) {
@@ -407,8 +432,13 @@ export function openJobsWindow(app, opts = {}) {
   shell.append(bar, root);
   winInfo.content.appendChild(shell);
 
+  // the LATEST render paints (lane-redact verify r5): a list fetched before a clear must not land after the one fetched
+  // after it — every jobs-updated, the 30 s tick and ⟳ start a render, and their answers can arrive out of order
+  let renderSeq = 0;
   async function render() {
+    const seq = ++renderSeq;
     const [r] = await Promise.all([fetchJson('/api/jobs'), loadFolds(app)]);
+    if (seq !== renderSeq) return;
     root.textContent = '';
     if (r?.error) { const e = document.createElement('div'); e.className = 'jobs-empty'; e.style.color = 'var(--red)'; e.textContent = r.error; root.appendChild(e); return; }
     const jobs = r?.jobs || [];
@@ -421,6 +451,7 @@ export function openJobsWindow(app, opts = {}) {
     if (seenAll) seenSlot.appendChild(seenAll);
     renderList(app, root, jobs, { compact: false, refresh: render, archivedCount: r?.archivedCount || 0 });
     const esc = await fetchJson('/api/jobs-escapes');
+    if (seq !== renderSeq) return;
     if (esc && (esc.systemd?.length || esc.crontab?.length)) {
       const h = document.createElement('div'); h.className = 'jobs-sec-head jobs-sec-esc'; h.textContent = t('Outside the registry (read-only)');
       root.appendChild(h);
@@ -484,7 +515,7 @@ function renderPanelBlocks(app, root, jobId, pending, { onAnswered } = {}) {
   const title = document.createElement('div'); title.style.cssText = 'font-weight:600;font-size:13px'; title.textContent = p.title || ''; if (title.textContent) root.appendChild(title);
   const values = {};
   for (const b of p.blocks || []) {
-      if (b.type === 'md') { const el = document.createElement('div'); el.className = 'markdown-preview'; el.innerHTML = DOMPurify.sanitize(marked.parse(String(b.text || ''))); root.appendChild(el); }
+      if (b.type === 'md') { const el = document.createElement('div'); el.className = 'markdown-preview'; el.innerHTML = sanitizeHtml(marked.parse(String(b.text || ''))); root.appendChild(el); }
       else if (b.type === 'image') { const img = document.createElement('img'); img.style.cssText = 'max-width:100%;border-radius:var(--radius-sm)'; img.src = '/api/file/raw?path=' + encodeURIComponent(b.path); root.appendChild(img); }
       else if (b.type === 'progress') { const pr = document.createElement('progress'); pr.max = 100; pr.value = Number(b.value) || 0; pr.style.width = '100%'; root.appendChild(pr); }
       else if (b.type === 'input' || b.type === 'textarea') {
@@ -518,7 +549,9 @@ function renderPanelBlocks(app, root, jobId, pending, { onAnswered } = {}) {
           btn.textContent = o.label || o.id;
           btn.onclick = async () => {
             const r2 = await fetchJson(`/api/jobs/${jobId}/answer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answers: { ...values, button: o.id, version } }) });
-            if (r2?.error) return showToast(r2.error, { error: true });
+            // r6 D-F5: an answer names its panel (`version`, which only grows per job); a panel the job no longer waits on
+            // is refused by name (stale-panel) — the toast says so and the form re-reads the panel the job DOES wait on
+            if (r2?.error) { showToast(r2.error, { error: true }); if (r2.code === 'stale-panel' || r2.code === 'no-pending-panel') onAnswered?.(); return; }
             root.textContent = '';
             const okEl = document.createElement('div'); okEl.className = 'empty-hint'; okEl.textContent = t('Submitted — the job continues.');
             root.appendChild(okEl);
@@ -539,20 +572,28 @@ export function openInteractWindow(app, jobId, opts = {}) {
   const root = document.createElement('div');
   root.style.cssText = 'height:100%;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px';
   winInfo.content.appendChild(root);
+  let renderSeq = 0; // the LATEST render paints (a fetch answered before a clear must not land after the one answered after it)
   async function render() {
+    const seq = ++renderSeq;
     const r = await fetchJson(`/api/jobs/${jobId}`);
+    if (seq !== renderSeq) return;
     root.textContent = '';
     const job = r?.job;
-    if (!job) { root.textContent = t('Job not found'); return; }
+    if (!job) { app.wm.setTitle(winInfo.id, t('Job input')); root.textContent = t('Job not found'); return; }
     // `winInfo.setTitle?.(…)` was a permanent no-op (the literal has no such
     // member); the MANAGER owns titles — found while fixing the same shape in
     // channel-window.js (channels r3).
-    app.wm.setTitle(winInfo.id, job.name + ' — ' + t('needs your input'));
+    // A CLEARED job's title is the sentence in this device's words (lane-redact verify r5): the title is persisted in
+    // data/layouts.json, replayed on every device and copied into an incident's scene snapshot
+    app.wm.setTitle(winInfo.id, (isCleared(job) ? clearedText() : job.name) + ' — ' + t('needs your input'));
     const pending = job.interaction?.pending;
     if (!pending) { const e = document.createElement('div'); e.className = 'empty-hint'; e.textContent = t('Nothing to answer — the job continues.'); root.appendChild(e); return; }
     renderPanelBlocks(app, root, jobId, pending, { onAnswered: () => setTimeout(render, 2500) });
   }
-  const off = app.ws.onGlobal((msg) => { if (msg.type === 'jobs-updated' && msg.id === jobId) render(); });
+  // THE CLEAR IS NEWS HERE (lane-redact verify r5, reproduced in chrome): "Clear content…" broadcasts `jobs-updated
+  // {cleared: [ids]}` — no `id` — and a window listening to its own id only kept the job's name in its title (the window,
+  // the taskbar, data/layouts.json, an incident's snapshot) and the ask it had dropped (title + markdown) on every device
+  const off = app.ws.onGlobal((msg) => { if (msg.type === 'jobs-updated' && (msg.id === jobId || (Array.isArray(msg.cleared) && msg.cleared.includes(jobId)))) render(); });
   winInfo._listenerCtl?.signal.addEventListener('abort', () => { try { off?.(); } catch { } });
   render();
   return winInfo;

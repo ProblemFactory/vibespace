@@ -42,9 +42,16 @@
 const { startLane } = require('./lane.js');
 
 const SDK_NAME = '@larksuiteoapi/node-sdk';
-/** The ONE event this lane subscribes to (a v2 event; enable it in the
- *  app's Event Subscriptions with the long-connection mode). */
+/** The message event (a v2 event; enable it in the app's Event
+ *  Subscriptions with the long-connection mode). */
 const EVENT = 'im.message.receive_v1';
+/** lane channel-threads (2026-09-28, vendor fact L10): the two REACTION events — delivered for every message in
+ *  the chats the bot is in, whatever the push claim says (a reaction is not a message; the exclusivity claim is
+ *  about messages). Enable them beside the message event (scope `im:message.reactions:read` or `:readonly`). */
+const REACTION_CREATED = 'im.message.reaction.created_v1';
+const REACTION_DELETED = 'im.message.reaction.deleted_v1';
+/** Every event this lane subscribes to. */
+const EVENTS = Object.freeze([EVENT, REACTION_CREATED, REACTION_DELETED]);
 /** THE DECLARED EGRESS (§3.1): none — the SDK owns the connection. */
 const EGRESS = Object.freeze([]);
 /** How long the push path waits for chat-member names before writing the
@@ -80,6 +87,21 @@ function eventToItem(data) {
     })),
   };
 }
+/**
+ * A reaction event → ONE side record (a `delta`): the message it names, the key (`emoji_type`), the actor (the
+ * user's open id, else the app's id), `action_time`. The event carries NO reaction id and NO chat id (L10): the
+ * side key is (msg, key, actor, op, at), and the ENGINE finds the message's conversation. Bounded here only by
+ * shape; `validateSide` judges every length before the engine reads it.
+ */
+function eventToSide(data, op) {
+  const e = (data && data.event) || data || {};
+  const rt = e.reaction_type || {};
+  const uid = e.user_id || {};
+  const actor = String(uid.open_id || uid.user_id || uid.union_id || e.app_id || '');
+  const t = Number(e.action_time);
+  return { k: 'rx', msg: e.message_id ? String(e.message_id) : '', at: Number.isFinite(t) && t > 0 ? t : 0, form: 'delta', op, key: rt.emoji_type == null ? '' : String(rt.emoji_type), actor: { id: actor, name: '' }, src: 'event' };
+}
+
 /** The vendor's event id (v2: `header.event_id`; the SDK may flatten it). */
 function eventIdOf(data) {
   const h = (data && data.header) || {};
@@ -123,6 +145,15 @@ function createLarkLive({ adapterId, brand = 'feishu', credential, toRecord, now
               if (r && r.ok === false && r.why === 'stopped') throw new Error('lane stopped before the event was persisted — not acknowledged');
               return r;
             },
+            // lane channel-threads: a reaction added / removed — ONE side record, durable before the ack (fence 11)
+            ...Object.fromEntries([[REACTION_CREATED, 'add'], [REACTION_DELETED, 'remove']].map(([name, op]) => [name, async (data) => {
+              h.heard();
+              const side = eventToSide(data, op);
+              if (!side.msg || !side.key) return;   // not a reaction we can place: acked, nothing to persist
+              const r = await h.event({ kind: 'side', eventId: eventIdOf(data) || `rx:${side.msg}:${side.key}:${side.actor.id}:${op}:${side.at}`, messageId: side.msg, side, at: now() });
+              if (r && r.ok === false && r.why === 'stopped') throw new Error('lane stopped before the reaction was persisted — not acknowledged');
+              return r;
+            }])),
           });
           await client.start({ eventDispatcher: dispatcher });
           // Ping/pong observability, best effort: the SDK's socket, when reachable.
@@ -144,4 +175,4 @@ function createLarkLive({ adapterId, brand = 'feishu', credential, toRecord, now
   };
 }
 
-module.exports = { createLarkLive, eventToItem, eventIdOf, EVENT, EGRESS, SDK_NAME, NAMES_WAIT_MS };
+module.exports = { createLarkLive, eventToItem, eventToSide, eventIdOf, EVENT, EVENTS, REACTION_CREATED, REACTION_DELETED, EGRESS, SDK_NAME, NAMES_WAIT_MS };

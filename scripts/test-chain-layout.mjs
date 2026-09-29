@@ -43,6 +43,11 @@
 //      (removeTab, the same key: the owner's [A | B, E] minus E is [A | B] still split, the host promoted, one
 //      tab ⇒ no chain, non-members change nothing, the record never mutated). Control: the record rebuilt by
 //      filtering the members (the pre-fix reconcile) flattens the split.
+//   ⑮ THE TAB DRAG'S CLASSIFICATION (inc-muly2izg-cks3, userW on the Stage: "Browser 拖不出来"): `tabDragMode` —
+//      the first 8 px pick reorder / detach, and a REORDER whose pointer leaves the strip's band by > 30 px TEARS
+//      OFF (the reporter's own pull from the ring, Δ −451/+351, was a reorder for the whole drag on b970f16d);
+//      a wobble within the margin stays a reorder. Controls: the pre-fix "never tears", a tear that only looks
+//      down. + a wiring pin: tab-group.js asks it every move with the host's title bar as the band.
 //   ⑪ (v2 verify r1, finding ①) THE HELD RATIO: a user's divider act holds its
 //      ratio (holdRatio) until a save carries it (releaseRatio); heldRatio
 //      answers only while the chain still shows that value and for at most
@@ -351,6 +356,27 @@ function legs(C, { quiet = false } = {}) {
     leg(two && two.layout === 'tabs' && J(two.tabs) === J(['A', 'B']) && two.tabs[two.active] === 'A', '⑭ two held closes empty the right side ⇒ the split ends, the left side\'s shown pane keeps the focus (removeTab\'s rule, in the order given)', J(two));
     leg(run(() => wm_(null, ['E'])) === null && run(() => wm_({}, ['E'])) === null, '⑭ no record ⇒ null');
   }
+  // ⑮ THE TAB DRAG'S CLASSIFICATION (inc-muly2izg-cks3, userW on the Stage: "Browser 拖不出来"): the first 8 px pick
+  // reorder / detach; a REORDER that leaves the strip's band by > 30 px TEARS OFF (the reporter's pull from the ring:
+  // the live tab at (1246, 104) → the empty workspace at (795, 455), Δ (−451, +351) — more horizontal than vertical)
+  {
+    const md = F('tabDragMode');
+    const band = { top: 92, bottom: 118 }; // a title bar at the reporter's page
+    const TEAR = C.TAB_TEAR_PX, DEC = C.TAB_DRAG_DECIDE_PX;
+    leg(TEAR === 30 && DEC === 8, '⑮ the constants: decide at 8 px, tear at 30 px (the vertical pull\'s own distance)', J({ TEAR, DEC }));
+    leg(run(() => md({ mode: null, dx: 5, dy: -6, y: 98, band })) === null && run(() => md({ mode: null, dx: 0, dy: 0 })) === null, '⑮ under 8 px ⇒ not decided (null)');
+    leg(run(() => md({ mode: null, dx: -9, dy: 7, y: 111, band })) === 'reorder', '⑮ the reporter\'s first 8 px (Δ −451/+351 scaled) are HORIZONTAL ⇒ a reorder while near the strip');
+    leg(run(() => md({ mode: null, dx: 3, dy: 12, y: 116, band })) === 'detach' && run(() => md({ mode: null, dx: -4, dy: -9, y: 95, band })) === 'detach', '⑮ a vertical start ⇒ the detach path (up or down), unchanged');
+    leg(run(() => md({ mode: null, dx: 20, dy: 2, y: 104, band, reorderable: false })) === 'detach', '⑮ a strip that does not reorder (the ≤ 768 px phone) ⇒ detach, as before');
+    // walk the reporter's straight pull frame by frame: it starts a reorder and TEARS OFF once the pointer is 30 px below the bar
+    let mode = null, toreAt = null; const from = { x: 1246, y: 104 };
+    for (let i = 1; i <= 60; i++) { const dx = -451 * i / 60, dy = 351 * i / 60; const was = mode; mode = run(() => md({ mode, dx, dy, y: from.y + dy, band })); if (was === 'reorder' && mode === 'detach' && toreAt === null) toreAt = from.y + dy; }
+    leg(mode === 'detach' && toreAt !== null && toreAt > band.bottom + TEAR && toreAt < band.bottom + TEAR + 12, `⑮ the reporter's pull: a reorder that TEARS OFF the frame the pointer is > 30 px below the bar (at y ${toreAt && Math.round(toreAt)}) — b970f16d kept it a reorder for the whole drag`, J({ mode, toreAt }));
+    leg(run(() => md({ mode: 'reorder', dx: 300, dy: 25, y: band.bottom + 25, band })) === 'reorder' && run(() => md({ mode: 'reorder', dx: 300, dy: -20, y: band.top - 29, band })) === 'reorder', '⑮ a sideways reorder that wobbles within 30 px of the bar (below or above) stays a reorder — the v2 promise');
+    leg(run(() => md({ mode: 'reorder', dx: 40, dy: -45, y: band.top - 31, band })) === 'detach', '⑮ …pulled UP past the margin (toward the desktop previews) it tears off too');
+    leg(run(() => md({ mode: 'reorder', dx: 300, dy: 200, y: 400, band: null })) === 'reorder' && run(() => md({ mode: 'reorder', dx: 1, dy: 1, y: 'x', band })) === 'reorder', '⑮ no band known / an unreadable y ⇒ stays a reorder (never a guessed tear)');
+    leg(run(() => md({ mode: 'detach', dx: 1, dy: 0, y: 104, band })) === 'detach', '⑮ a detach never goes back to a reorder (the torn tab follows the pointer; the strip is a merge target again)');
+  }
   return failed;
 }
 
@@ -380,6 +406,10 @@ const MUTANTS = [
   // inc-mukeyzpt-lpou: the record rebuilt around the members still present (the pre-fix reconcile) — the gone pane
   // leaves a pair naming nobody and normalize flattens the split
   { tag: 'without-members-by-filter', find: '  for (const id of ids || []) removeTab(c, id);\n', repl: '  { const drop = new Set((ids || []).map(String)); c.tabs = c.tabs.filter((x) => !drop.has(x)); normalizeChain(c); }\n', expect: /still SPLIT/ },
+  // inc-muly2izg-cks3: the pre-fix rule (a reorder is a reorder for the whole drag — the reporter's pull never left the
+  // group) and a tear that only looks down (a tab pulled UP toward the desktop previews would stay in the bar)
+  { tag: 'reorder-never-tears', find: "    return py < top - TAB_TEAR_PX || py > bottom + TAB_TEAR_PX ? 'detach' : 'reorder';", repl: "    return 'reorder';", expect: /reporter's pull/ },
+  { tag: 'tear-only-downward', find: "    return py < top - TAB_TEAR_PX || py > bottom + TAB_TEAR_PX ? 'detach' : 'reorder';", repl: "    return py > bottom + TAB_TEAR_PX ? 'detach' : 'reorder';", expect: /pulled UP past the margin/ },
 ];
 for (const m of MUTANTS) {
   const found = SRC.includes(m.find);
@@ -390,6 +420,20 @@ for (const m of MUTANTS) {
   ok(f.some((n) => m.expect.test(n)), `control ${m.tag}: the patched copy turns its leg RED (${f.length} legs failed: ${f.slice(0, 2).join(' | ').slice(0, 160)})`);
 }
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: MUTANTS.length })) ok(r.pass, r.name, r.detail);
+
+// ⑮ WIRING (inc-muly2izg-cks3): the tab drag asks the ONE rule every move, with the host's title bar as the band, and a
+// reorder that tears off drops its marker and detaches at once — no second, inline classification left in tab-group.js
+console.log('— ⑮ wiring: src/lib/tab-group.js classifies the tab drag through tabDragMode');
+{
+  const TG = fs.readFileSync(path.join(REPO, 'src/lib/tab-group.js'), 'utf8');
+  const body = (() => { const i = TG.indexOf('  _setupTabDrag(tabEl, winId, chain) {'); const j = TG.indexOf('\n  _detachFromChain(', i); return i >= 0 && j > i ? TG.slice(i, j) : ''; })();
+  ok(body.length > 2000, `⑮ _setupTabDrag found (${body.length} chars)`);
+  ok(/import \{[^}]*\btabDragMode\b[^}]*\} from '\.\/chain-layout\.js';/.test(TG), '⑮ tab-group.js imports tabDragMode from the PURE model');
+  ok(/tabDragMode\(\{ mode, dx: e\.clientX - startX, dy: e\.clientY - startY, y: e\.clientY, band, reorderable: this\._stripReorderable\(\) \}\)/.test(body), '⑮ processMove asks tabDragMode with the travel, the pointer y, the band and the phone rule');
+  ok(/const band = mode === 'reorder' && hostNow && hostNow\._tabChain === chain \? hostNow\.titleBar\.getBoundingClientRect\(\) : null;/.test(body), '⑮ …the band is the host\'s title bar (the strip), read while a reorder runs');
+  ok(/if \(tore\) endReorder\(\);/.test(body) && /if \(!detached && \(tore \|\| Math\.abs\(e\.clientY - startY\) > 30\)\)/.test(body), '⑮ …a tear drops the insertion marker and detaches on that frame');
+  ok(!/Math\.abs\(dx0\) > Math\.abs\(dy0\)/.test(body) && !/mode = .*\? 'reorder' : 'detach'/.test(body), '⑮ no inline first-8-px classification left beside it (the rule lives in one place)');
+}
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
 process.exit(fail || realFailed.length ? 1 : 0);

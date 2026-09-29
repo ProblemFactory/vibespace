@@ -18,6 +18,10 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const { NOT_FOUND_TEXT } = require(path.join(REPO, 'src/channel-acl.js'));
+// 2026-09-28 (reply PLACEMENTS): the stub decides a reply's placement with the REAL PURE verdict over the REAL Lark
+// caps row, so the CLI leg prints the product's own sentences (a message id `om_t*` sits in a vendor thread)
+const P = require(path.join(REPO, 'src/channel-policy.js'));
+const LARK_CAPS = require(path.join(REPO, 'src/channels/lark.js')).caps;
 const CLI = path.join(REPO, 'data/bin/vibespace-channels');
 ok(fs.existsSync(CLI) && (fs.statSync(CLI).mode & 0o111) !== 0, 'data/bin/vibespace-channels exists and is executable');
 ok(require(path.join(REPO, 'src/hosts.js')).HostManager.AGENT_TOOLS.includes('vibespace-channels'), 'it is in HostManager.AGENT_TOOLS (ships to remote hosts with the other tools)');
@@ -84,8 +88,32 @@ const server = http.createServer((req, res) => {
     if (req.headers.authorization !== 'Bearer vsst_test') return send(401, { error: 'unknown session token' });
     if (url.pathname === '/api/agent/channels/list') return send(200, { ok: true, conversations: [VISIBLE, READONLY] });
     if (url.pathname === '/api/agent/channels/read') {
+      // lane channel-threads: the server's PLACE words + reactions line (spec §5.1), and a thread never walked here
+      if (url.searchParams.get('conv') === 'fake-poll/threads') {
+        const conversation = { key: 'fake-poll/threads', adapterId: 'fake-poll', id: 'threads', title: 'Weekly sync', polledAt: 1000 };
+        if (url.searchParams.get('thread')) return send(200, { ok: true, conversation, thread: { key: 'omt_t1', count: 0, lastAt: null, walked: false }, records: [], note: '(thread not loaded here — the user\'s window loads it; ask again after)' });
+        return send(200, { ok: true, conversation, records: [
+          { at: 1, author: { name: 'A' }, text: 'when is the weekly?', vendorId: 'om_x1', placeText: { tag: '[thread omt_t1 · 3 replies · last 5 min ago]', line: null }, reactionsText: 'reactions: 👍 3 · 🎉 1', reactions: [{ key: 'thumbsup', glyph: '👍', count: 3, mine: false }] },
+          { at: 2, author: { name: 'B' }, text: 'at three', vendorId: 'om_x2', placeText: { tag: null, line: '↳ replying to A: "when is the weekly?" (id om_x1) · in thread omt_t1' } },
+          { at: 3, author: { name: 'me' }, text: 'three it is', vendorId: 'om_x4', placeText: { tag: null, line: '↳ replying to A: "when is the weekly?" (id om_x1) · in thread omt_t1' }, reactionsText: 'reactions: 👍 1 (the account owner)' },
+        ] });
+      }
       if (url.searchParams.get('conv') !== VISIBLE.key) return send(404, notFound());
       return send(200, { ok: true, conversation: { key: VISIBLE.key, adapterId: 'fake-poll', id: 'ops', title: 'Ops room', polledAt: 1000 }, records: [{ at: 1, author: { name: 'Ada' }, text: 'the deploy finished', vendorId: 'm1', attachments: [{ id: 'img_1', name: 'graph.png', mime: 'image/png', bytes: 1234 }] }] });
+    }
+    // lane channel-threads: the agent's thread walk — its own refusals (thread-floor) are exit 4
+    const tw = /^\/api\/agent\/channels\/([^/]+)\/([^/]+)\/thread\/([^/]+)\/refresh$/.exec(url.pathname);
+    if (tw && req.method === 'POST') {
+      if (decodeURIComponent(tw[3]) === 'om_floor') return send(429, { ok: false, code: 'thread-floor', error: 'this thread was loaded from the vendor less than 60 s ago — try again in 41 s', retryAfterSec: 41 });
+      return send(200, { ok: true, appended: 2, walked: true, key: 'omt_t1' });
+    }
+    // lane channel-threads: a reaction is a PROPOSAL (spec §5.3) — the engine's refusals by code
+    if (url.pathname === '/api/agent/channels/react') {
+      if (body.conv === 'fake-poll/off') return send(409, { ok: false, code: 'react-not-available', why: 'policy-off', error: 'reactions are not offered here (policy-off): the user turned agent reactions off for this account' });
+      if (body.key === 'nope') return send(400, { ok: false, code: 'bad-emoji', why: 'key', error: 'that emoji is not one this channel allows' });
+      if (body.op === 'remove' && body.key === 'tea') return send(409, { ok: false, code: 'reaction-not-mine', error: 'only a reaction the account owner added can be removed' });
+      if (body.conv !== VISIBLE.key) return send(404, notFound());
+      return send(200, { ok: true, proposal: { id: 'p-rx', kind: 'reaction', state: 'awaiting-approval', adapterId: 'fake-poll', convId: 'ops', reaction: { msg: body.msg, key: body.key, op: body.op, glyph: body.key === 'thumbsup' ? '👍' : null } }, decision: { mode: 'review', reasons: ['reaction-policy'] } });
     }
     // 2026-09-26: the agent's refresh — floor / budget refusals are 429 with their number
     const rf = /^\/api\/agent\/channels\/([^/]+)\/([^/]+)\/refresh$/.exec(url.pathname);
@@ -105,7 +133,14 @@ const server = http.createServer((req, res) => {
       // 2026-09-27: --replaces — the engine's replace answers (accepted / the old one decided first)
       if (body.replaces === 'p-sent') return send(409, { ok: false, code: 'not-withdrawable', error: 'proposal p-sent cannot be withdrawn: it is sent — decided already', replaces: 'p-sent' });
       const replaced = body.replaces ? { replaces: body.replaces, replaced: { id: body.replaces, state: 'withdrawn' } } : {};
-      return send(200, { ok: true, proposal: { id: 'p-1', state: 'awaiting-approval', adapterId: 'fake-poll', convId: 'ops', policy: { mode: 'review', reasons: ['channel-policy', 'authority'] }, sendAs: 'user', identity: { marking: 'unknown', text: null }, ...(body.replaces ? { replaces: body.replaces } : {}) }, decision: { mode: 'review', reasons: ['channel-policy', 'authority'] }, ...replaced });
+      // the engine's order: the proposal's shape, then THE PLACEMENT (before anything exists), worded by the policy
+      const v = P.validateProposal(body);
+      if (!v.ok) return send(400, { ok: false, code: 'bad-proposal', why: v.why, error: v.error });
+      const pv = P.placementVerdict({ requested: v.proposal.placement || null, replyTo: v.proposal.replyTo, caps: LARK_CAPS, parent: v.proposal.replyTo ? { inThread: /^om_t/.test(v.proposal.replyTo) } : null, alias: !!v.proposal.placementAlias });
+      if (!pv.ok) return send(pv.code === 'placement-not-offered' ? 409 : 400, { ok: false, code: pv.code, why: pv.why, placement: pv.placement, offered: pv.offered, error: pv.error });
+      const into = P.isThreadPlacement(pv.placement);
+      const place = { placement: pv.placement, placementText: P.placementWords(pv.placement), ...(pv.placement !== 'chat' ? { replyTo: v.proposal.replyTo } : {}), ...(pv.defaulted && pv.placement !== 'chat' ? { placementDefaulted: pv.rule } : {}), ...(into ? { inThread: true, threadKey: 'omt_t1' } : {}) };
+      return send(200, { ok: true, proposal: { id: 'p-1', state: 'awaiting-approval', adapterId: 'fake-poll', convId: 'ops', ...place, policy: { mode: 'review', reasons: ['channel-policy', 'authority'] }, sendAs: 'user', identity: { marking: 'unknown', text: null }, ...(body.replaces ? { replaces: body.replaces } : {}) }, decision: { mode: 'review', reasons: ['channel-policy', 'authority'] }, ...replaced });
     }
     // 2026-09-27: WITHDRAW — the engine's three answers (own: ok; somebody else's: 403 not-yours; decided: 409 not-withdrawable)
     const wd = /^\/api\/agent\/channels\/proposals\/([^/]+)\/withdraw$/.exec(url.pathname);
@@ -117,7 +152,7 @@ const server = http.createServer((req, res) => {
       return send(200, { ok: true, proposal: { id: 'p-1', state: 'withdrawn', withdrawal: { why: body.why || null } } });
     }
     if (url.pathname === '/api/agent/channels/status') {
-      const p = { id: 'p-1', state: 'sent', adapterId: 'fake-poll', convId: 'ops', title: 'Ops room', at: 1, updatedAt: 2, text: 'hello', policy: { mode: 'review', reasons: [] }, receipt: { status: 'edited', edited: true, sentAs: 'user', vendorMessageId: 'v-9', identityMarking: 'marked', identityMarkingText: 'The channel shows this message as sent by Example App' } };
+      const p = { id: 'p-1', state: 'sent', adapterId: 'fake-poll', convId: 'ops', title: 'Ops room', at: 1, updatedAt: 2, text: 'hello', policy: { mode: 'review', reasons: [] }, receipt: { status: 'edited', edited: true, sentAs: 'user', vendorMessageId: 'v-9', identityMarking: 'marked', identityMarkingText: 'The channel shows this message as sent by Example App' }, replyTo: 'om_t2', placement: 'thread', placementText: P.placementWords('thread'), inThread: true, threadKey: 'omt_t1' };
       if (url.searchParams.get('id')) return url.searchParams.get('id') === 'p-1' ? send(200, { ok: true, proposal: p }) : send(404, { ok: false, code: 'not-found', error: 'no such proposal (not found, or not yours)' });
       // R4: what the agent was given — access (with its authority) and, separately, whether it is watched
       return send(200, { ok: true, proposals: [p], access: [
@@ -254,6 +289,59 @@ const rq = await run(['request', 'fake-poll/requestable', 'I answer the alerts h
 ok(rq.code === 0 && /requested/.test(rq.out) && /rq-1/.test(rq.out) && /grants YOU visibility on this ONE conversation/.test(rq.out), 'request files and explains what approval grants', rq.out);
 const rqHidden = await run(['request', 'fake-poll/hidden', 'why']);
 ok(rqHidden.code === 1 && rqHidden.err.includes(NOT_FOUND_TEXT), 'a request on a hidden conversation is the uniform not-found (no oracle)');
+
+// ── lane channel-threads (spec §5): the place + reactions lines, --thread, --in-thread, react / unreact ──
+calls.length = 0;
+const rt = await run(['read', 'fake-poll/threads']);
+ok(rt.code === 0 && /\(id om_x1\)  \[thread omt_t1 · 3 replies · last 5 min ago\]\n    reactions: 👍 3 · 🎉 1\n/.test(rt.out) && /\(id om_x2\)\n    ↳ replying to A: "when is the weekly\?" \(id om_x1\) · in thread omt_t1\n/.test(rt.out) && /reactions: 👍 1 \(the account owner\)/.test(rt.out), 'read prints the three new lines: a root\'s thread tag on its own line, a reply\'s "↳ replying to …", the reactions as counts (the owner\'s own named, never who)', rt.out);
+const rth = await run(['read', 'fake-poll/threads', '--thread', 'om_x1']);
+ok(rth.code === 0 && calls.at(-1).query.thread === 'om_x1' && /thread omt_t1 \(0 replies\)/.test(rth.out) && /thread not loaded here — the user's window loads it; ask again after/.test(rth.out), 'read --thread passes thread=<msg> and says a never-walked thread is not loaded here (no vendor call from a read)', rth.out);
+// 2026-09-28 THE PLACEMENT FLAGS (the owner's "the boolean is Lark-shaped"): --to / --in-thread / --also-in-chat — the
+// server decides a --to-only reply by the vendor's norm; the CLI says where it lands in the server's words
+calls.length = 0;
+const rit = await run(['reply', 'fake-poll/ops', 'three works', '--in-thread', 'om_x1']);
+ok(rit.code === 0 && calls.length === 1 && calls[0].body.placement === 'thread' && calls[0].body.replyTo === 'om_x1' && calls[0].body.inThread === undefined && /\(lands in a thread, answering om_x1 — thread omt_t1\)/.test(rit.out), 'reply --in-thread <id> (the lane\'s first spelling) still names the message: placement thread + replyTo <id>, and says where it lands', JSON.stringify([calls[0] && calls[0].body, rit.out]));
+calls.length = 0;
+const rTo = await run(['reply', 'fake-poll/ops', 'agreed', '--to', 'om_x1']);
+ok(rTo.code === 0 && calls.length === 1 && calls[0].body.replyTo === 'om_x1' && calls[0].body.placement === undefined && /\(lands as a quoted reply, in the chat, answering om_x1 — this channel's default for a reply\)/.test(rTo.out), '--to alone on a message OUTSIDE a thread: no placement sent, the server applies the vendor\'s norm (Lark: a quote) and the CLI says so', JSON.stringify([calls[0] && calls[0].body, rTo.out]));
+calls.length = 0;
+const rToT = await run(['reply', 'fake-poll/ops', 'agreed', '--to', 'om_t2']);
+ok(rToT.code === 0 && calls[0].body.placement === undefined && /\(lands in a thread, answering om_t2 — thread omt_t1 — the default: that message is already in a thread\)/.test(rToT.out), '--to alone on a message ALREADY IN a thread lands in the thread (it cannot be quoted from the main list) and says why', rToT.out);
+calls.length = 0;
+const rToIn = await run(['reply', 'fake-poll/ops', 'agreed', '--to', 'om_x1', '--in-thread']);
+ok(rToIn.code === 0 && calls[0].body.placement === 'thread' && calls[0].body.replyTo === 'om_x1' && /lands in a thread, answering om_x1 — thread omt_t1\)/.test(rToIn.out) && !/default/.test(rToIn.out), '--to <id> --in-thread = placement thread, asked (not a default)', rToIn.out);
+calls.length = 0;
+const rAlso = await run(['reply', 'fake-poll/ops', 'agreed', '--to', 'om_x1', '--also-in-chat']);
+ok(rAlso.code === 1 && calls.length === 1 && calls[0].body.placement === 'thread+chat' && /a reply in a thread that is also shown in the chat is not offered on this channel — offered here: chat, quote, thread \[placement-not-offered\]/.test(rAlso.err) && !/proposal/.test(rAlso.out), '--also-in-chat sends thread+chat; Lark does not declare it ⇒ placement-not-offered BY NAME with what IS offered, nothing proposed', JSON.stringify([calls[0] && calls[0].body, rAlso.err]));
+const rQuoteT = await run(['reply', 'fake-poll/ops', 'agreed', '--reply-to', 'om_t2']);
+ok(rQuoteT.code === 0 && /lands in a thread, answering om_t2/.test(rQuoteT.out), '--reply-to is the old name of --to (the same default)', rQuoteT.out);
+calls.length = 0;
+const rNoTo = await run(['reply', 'fake-poll/ops', 'agreed', '--in-thread']);
+const rNoTo2 = await run(['reply', 'fake-poll/ops', 'agreed', '--also-in-chat']);
+const rBare = await run(['reply', 'fake-poll/ops', 'agreed', '--to']);
+const rTwo = await run(['reply', 'fake-poll/ops', 'agreed', '--to', 'om_x1', '--in-thread', 'om_x2']);
+ok(calls.length === 0 && [rNoTo, rNoTo2, rBare, rTwo].every((r) => r.code === 1) && /--in-thread places a reply to a message — add --to/.test(rNoTo.err) && /--also-in-chat places a reply to a message/.test(rNoTo2.err) && /--to names the message the reply answers/.test(rBare.err) && /name two different messages/.test(rTwo.err), 'a placement flag with no message, a bare --to and two different messages are usage errors — NOTHING is sent', JSON.stringify([rNoTo.err, rNoTo2.err, rBare.err, rTwo.err].map((x) => x.split('\n')[0])));
+calls.length = 0;
+const rPlain = await run(['reply', 'fake-poll/ops', 'a plain message']);
+ok(rPlain.code === 0 && calls[0].body.replyTo === undefined && calls[0].body.placement === undefined && !/lands/.test(rPlain.out), 'no --to = a plain message in the chat: no replyTo, no placement, no "lands" line', JSON.stringify([calls[0] && calls[0].body, rPlain.out]));
+const stPl = await run(['status', 'p-1']);
+ok(stPl.code === 0 && /placed in a thread — answering om_t2 \(thread omt_t1\)/.test(stPl.out), 'status <id> says where a reply landed', stPl.out);
+calls.length = 0;
+const rx1 = await run(['react', 'fake-poll/ops', 'om_x1', 'thumbsup', '--why', 'ack']);
+ok(rx1.code === 0 && calls.length === 1 && calls[0].path === '/api/agent/channels/react' && calls[0].body.op === 'add' && calls[0].body.key === 'thumbsup' && calls[0].body.msg === 'om_x1' && calls[0].body.why === 'ack' && /proposed — reacting 👍 on om_x1 is awaiting the user's approval \(proposal p-rx\)/.test(rx1.out), 'react PROPOSES (one POST /react, op add) and says the user approves it', JSON.stringify([calls[0] && calls[0].body, rx1.out]));
+const rx2 = await run(['unreact', 'fake-poll/ops', 'om_x1', 'tea']);
+ok(rx2.code === 4 && /not proposed: only a reaction the account owner added can be removed \[reaction-not-mine\]/.test(rx2.out), 'unreact of a reaction that is not the owner\'s ⇒ exit 4 by name', rx2.out);
+const rx3 = await run(['react', 'fake-poll/off', 'om_x1', 'thumbsup']);
+const rx4 = await run(['react', 'fake-poll/ops', 'om_x1', 'nope']);
+ok(rx3.code === 4 && /\(policy-off\) \[react-not-available\]/.test(rx3.out) && rx4.code === 4 && /\[bad-emoji\]/.test(rx4.out), 'policy-off and bad-emoji are refusals (exit 4) with their sentence', JSON.stringify([rx3.out, rx4.out]));
+const rx5 = await run(['react', 'fake-poll/hidden', 'om_x1', 'thumbsup']);
+ok(rx5.code === 1 && rx5.err.includes(NOT_FOUND_TEXT), 'react on a hidden conversation is the uniform not-found (exit 1)');
+const rx6 = await run(['react', 'fake-poll/ops', 'om_x1']);
+ok(rx6.code === 1 && /usage: vibespace-channels react/.test(rx6.err), 'react without a key prints its usage and sends nothing');
+calls.length = 0;
+const tr1 = await run(['refresh', 'fake-poll/ops', '--thread', 'om_x1']);
+const tr2 = await run(['refresh', 'fake-poll/ops', '--thread', 'om_floor']);
+ok(tr1.code === 0 && calls[0].path === '/api/agent/channels/fake-poll/ops/thread/om_x1/refresh' && /loaded the thread: 2 new message/.test(tr1.out) && tr2.code === 4 && /thread not loaded: .*60 s.*\(retry in 41 s\) \[thread-floor\]/.test(tr2.out), 'refresh --thread walks that thread (the only door), a per-thread floor is a refusal with the wait (exit 4)', JSON.stringify([tr1.out, tr2.out]));
 
 const usage = await run([]);
 ok(usage.code === 0 && /vibespace-channels reply <conv>/.test(usage.out) && /PROPOSAL/.test(usage.out), 'no verb prints the usage and says a reply is a proposal');

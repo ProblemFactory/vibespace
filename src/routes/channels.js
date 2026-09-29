@@ -23,6 +23,7 @@
  */
 const fs = require('fs');
 const express = require('express');
+const { contentDisposition } = require('../file-disposition.js');   // lane-raw-filename: THE Content-Disposition builder
 const router = express.Router();
 
 let ctx = null;
@@ -169,6 +170,17 @@ router.get('/api/channels/oauth/status', (req, res) => {
     res.json(engine().oauthStatus(typeof req.query.flowId === 'string' ? req.query.flowId : null));
   } catch (e) { fail(res, e); }
 });
+/** THE ONE NARROWING RETRY of a sign-in that runs before its account exists (owner ruling 2026-09-28): `{flowId}` →
+ *  `{flowId, flow}` — the same flow, a consent URL without the optional scopes the vendor refused on its page;
+ *  `409 already-narrowed` the second time, `409 nothing-optional`, `404 no-flow`. */
+router.post('/api/channels/oauth/narrow', (req, res) => {
+  try {
+    forHost(req);
+    if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return;
+    const b = req.body || {};
+    res.json({ ok: true, ...engine().oauthNarrow(typeof b.flowId === 'string' ? b.flowId : null) });
+  } catch (e) { fail(res, e); }
+});
 router.post('/api/channels/oauth/callback', async (req, res) => {
   try {
     forHost(req);
@@ -267,6 +279,10 @@ router.post('/api/channels/adapters/:id/auth/finish', async (req, res) => {
     if (!r.ok) return bad(res, 400, r.error || 'the consent flow failed', { code: 'auth-failed' });
     res.json({ ok: true });
   } catch (e) { fail(res, e); }
+});
+/** …and of an ACCOUNT's running sign-in (Re-authorize): `{flow}` with the narrower consent URL. */
+router.post('/api/channels/adapters/:id/auth/narrow', (req, res) => {
+  try { forHost(req); if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return; res.json({ ok: true, ...engine().narrowAuth(req.params.id) }); } catch (e) { fail(res, e); }
 });
 router.post('/api/channels/adapters/:id/auth/cancel', async (req, res) => {
   try { forHost(req); if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return; res.json(await engine().cancelAuth(req.params.id)); } catch (e) { fail(res, e); }   // verify r5
@@ -400,6 +416,8 @@ router.put('/api/channels/adapters/:id', async (req, res) => {
     // r4 (the Edit dialog's in-place saves): the account's name, and a custom
     // client's SECRET for the SAME id (another id / a preset = a client
     // switch = `409 client-change-needs-reauth`: use Re-authorize)
+    // lane channel-threads (spec §2.6): the account's row for an AGENT's reactions — propose | direct | off
+    if (b.reactionPolicy !== undefined) { const rp = await engine().setReactionPolicy(req.params.id, b.reactionPolicy); if (!rp.ok) return res.status(rp.code === 'not-found' ? 404 : 400).json({ error: rp.error, code: rp.code }); out = { ...out, ...rp }; }
     if (typeof b.label === 'string') out = { ...out, ...(await engine().setLabel(req.params.id, b.label)) };
     if (b.credential && typeof b.credential === 'object' && !Array.isArray(b.credential)) out = { ...out, ...(await engine().setCustomSecret(req.params.id, { appId: b.credential.appId, appSecret: b.credential.appSecret })) };
     res.json(out);
@@ -454,6 +472,47 @@ router.get('/api/channels/:adapterId/:convId/touches', (req, res) => {
   } catch (e) { fail(res, e); }
 });
 
+// ── lane channel-threads (2026-09-28, spec §9): THREADS + REACTIONS ────────
+/** A thread / reaction verb's typed answer → status BY CODE (every refusal named; the window words the code). */
+const RX_STATUS = Object.freeze({
+  'not-found': 404, 'thread-not-loaded': 404, 'bad-request': 400, 'bad-emoji': 400, 'bad-proposal': 400,
+  'react-not-available': 409, 'already-reacted': 409, 'reaction-cap': 409, 'not-reactable': 409, 'reaction-not-mine': 409,
+  'reactions-scope-not-granted': 409, 'topic-forbidden': 409, 'account-changed': 409, disabled: 409, 'not-a-thread': 409,
+  'thread-floor': 429, 'reactions-floor': 429, 'older-floor': 429, 'vendor-budget': 429, backoff: 429, 'rate-limited': 429,
+  'not-supported': 501, stopped: 503,
+});
+function answerRx(res, r) {
+  if (r && r.ok) return res.json(r);
+  const code = (r && r.code) || 'error';
+  if (r && r.retryAfterSec) res.setHeader('Retry-After', String(r.retryAfterSec));
+  return res.status(RX_STATUS[code] || 502).json({ ...(r && typeof r === 'object' ? r : {}), error: (r && r.error) || 'refused', code });
+}
+/** The picker's vocabulary (cached 6 h): `{keys:[{key, glyph, label, custom}], quick, custom, at}`. */
+router.get('/api/channels/:adapterId/emoji-set', async (req, res) => {
+  try { forHost(req); answerRx(res, await engine().emojiSet(req.params.adapterId)); } catch (e) { fail(res, e); }
+});
+/** A CUSTOM emoji's picture through OUR route (attack 22: the key judged by its alphabet before any path) —
+ *  the attachment route's headers: nosniff, a sandbox CSP, inline only for a raster picture. */
+router.get('/api/channels/:adapterId/emoji/:key', async (req, res) => {
+  try {
+    forHost(req);
+    const r = await engine().emojiImage(req.params.adapterId, req.params.key);
+    if (!r || !r.ok) { res.setHeader('Cache-Control', 'no-store'); return answerRx(res, r); }
+    const mime = String((r.meta && r.meta.mime) || '').toLowerCase().split(';')[0].trim();
+    const raster = INLINE_IMAGE_RX.has(mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.setHeader('Content-Type', raster ? mime : 'application/octet-stream');
+    // the .197 integration (lane-raw-filename's byte census): THE one header builder, never a hand-spelled value
+    res.setHeader('Content-Disposition', contentDisposition('emoji.png', raster && String(req.query.inline || '') === '1' ? 'inline' : 'attachment'));
+    const st = fs.createReadStream(r.file);
+    st.on('error', (e) => { if (!res.headersSent) bad(res, 500, String((e && e.message) || e)); else res.destroy(); });
+    st.pipe(res);
+  } catch (e) { fail(res, e); }
+});
+const INLINE_IMAGE_RX = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+
 /** OPEN — ONE conversation's FULL view (2026-09-26: the digest rows are slim;
  *  the window's bar, the editors and the reach dialog read this) + its
  *  adapter row. Never a full digest per request. */
@@ -486,6 +545,7 @@ router.get('/api/channels/:adapterId/:convId/messages', (req, res) => {
     const before = req.query.before ? Number(req.query.before) : null;
     const beforeId = req.query.beforeId ? String(req.query.beforeId) : null;
     const records = engine().messages(req.params.adapterId, req.params.convId, { before, beforeId, limit });
+    if (!records) return bad(res, 404, 'No such conversation'); // a conversation the engine does not know (an agent group's log is read by its OWN route, folded)
     res.json({ records, limit, before: before || null, beforeId });
   } catch (e) { fail(res, e); }
 });
@@ -545,6 +605,59 @@ router.post('/api/channels/:adapterId/:convId/older', async (req, res) => {
     readerAnswer(res, await engine().loadOlder(req.params.adapterId, req.params.convId, { before: Number.isFinite(before) ? before : null, beforeId: b.beforeId ? String(b.beforeId) : null, limit: Number(b.limit) || null }));
   } catch (e) { fail(res, e); }
 });
+/** ONE THREAD (spec §9): the root + its replies from the LOCAL log — never a vendor call. `msg` = the root's
+ *  vendorId (a reply's id answers its thread); a message the log does not hold answers `thread-not-loaded`. */
+router.get('/api/channels/:adapterId/:convId/thread/:msg', (req, res) => {
+  try {
+    forHost(req);
+    const before = req.query.before ? Number(req.query.before) : null;
+    answerRx(res, engine().threadRead(req.params.adapterId, req.params.convId, req.params.msg, { limit: Number(req.query.limit) || 50, before: Number.isFinite(before) ? before : null, beforeId: req.query.beforeId ? String(req.query.beforeId) : null }));
+  } catch (e) { fail(res, e); }
+});
+/** THE THREAD WALK (drain rule 20a): the pane's open / its beat — paced, metered, a per-thread floor. */
+router.post('/api/channels/:adapterId/:convId/thread/:msg/refresh', async (req, res) => {
+  try { forHost(req); answerRx(res, await engine().threadRefresh(req.params.adapterId, req.params.convId, req.params.msg)); } catch (e) { fail(res, e); }
+});
+/** A thread's older replies (the rule-19 belt): the local page, one walk past its start. */
+router.post('/api/channels/:adapterId/:convId/thread/:msg/older', async (req, res) => {
+  try {
+    forHost(req);
+    const b = req.body || {};
+    const before = b.before !== undefined && b.before !== null && b.before !== '' ? Number(b.before) : null;
+    answerRx(res, await engine().threadOlder(req.params.adapterId, req.params.convId, req.params.msg, { before: Number.isFinite(before) ? before : null, beforeId: b.beforeId ? String(b.beforeId) : null, limit: Number(b.limit) || null }));
+  } catch (e) { fail(res, e); }
+});
+/** The LOCAL reaction fold for ≤ 50 messages + when each list was last fetched — never a vendor call. */
+router.get('/api/channels/:adapterId/:convId/reactions', (req, res) => {
+  try {
+    forHost(req);
+    const ids = String(req.query.ids || '').split(',').map((x) => x.trim()).filter(Boolean);
+    answerRx(res, engine().reactionsRead(req.params.adapterId, req.params.convId, ids));
+  } catch (e) { fail(res, e); }
+});
+/** THE TRICKLE (drain rule 20b): the open window's visible rows, ≤ 20 ids — one flight per message, the floor,
+ *  the per-minute ceiling, the budget; `{asked, refused:[{id, code}], floorMs}`. */
+router.post('/api/channels/:adapterId/:convId/reactions/refresh', async (req, res) => {
+  try {
+    forHost(req);
+    const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids.map(String) : null;
+    if (!ids) return answerRx(res, { ok: false, code: 'bad-request', error: 'ids is required (the visible messages, at most 20)' });
+    answerRx(res, await engine().reactionsRefresh(req.params.adapterId, req.params.convId, ids));
+  } catch (e) { fail(res, e); }
+});
+/** ADD a reaction AS THE USER (like `/send`: the owner's own act, direct) → the folded list. */
+router.post('/api/channels/:adapterId/:convId/messages/:msg/reactions', async (req, res) => {
+  try {
+    forHost(req);
+    const key = req.body && typeof req.body.key === 'string' ? req.body.key : '';
+    if (!key) return answerRx(res, { ok: false, code: 'bad-emoji', error: 'key is required (an emoji the channel lists)' });
+    answerRx(res, await engine().react(req.params.adapterId, req.params.convId, req.params.msg, key, { by: 'user' }));
+  } catch (e) { fail(res, e); }
+});
+/** REMOVE OUR reaction → the folded list (`reaction-not-mine` when none of ours is there). */
+router.delete('/api/channels/:adapterId/:convId/messages/:msg/reactions/:key', async (req, res) => {
+  try { forHost(req); answerRx(res, await engine().unreact(req.params.adapterId, req.params.convId, req.params.msg, req.params.key, { by: 'user' })); } catch (e) { fail(res, e); }
+});
 /** ONE ATTACHMENT (design §6.5): fetched through the adapter on first use,
  *  then served from the account's 0600 LRU cache. NEVER EXECUTED and never
  *  rendered in our origin: `nosniff`, a `default-src 'none'; sandbox` CSP,
@@ -571,6 +684,9 @@ router.get('/api/channels/:adapterId/:convId/attachment/:id', async (req, res) =
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.setHeader('Content-Type', raster ? mime : 'application/octet-stream');
     res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`);
+    // THE SIZE, SAID (security verify r2, 2026-09-28): a piped file stream is chunked with no Content-Length, so a
+    // reader could not refuse a body over its bound before downloading it — the file's own size rides the answer
+    try { const stat = await fs.promises.stat(r.file); if (Number.isFinite(stat.size)) res.setHeader('Content-Length', String(stat.size)); } catch {}
     const st = fs.createReadStream(r.file);
     st.on('error', (e) => { if (!res.headersSent) bad(res, 500, String((e && e.message) || e)); else res.destroy(); });
     st.pipe(res);
@@ -649,7 +765,7 @@ function answer3(res, r) {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';
   const status = code === 'not-found' ? 404
-    : code === 'send-not-available' || code === 'bad-state' || code === 'reconcile-not-available' || code === 'wake-count-mismatch' ? 409
+    : code === 'send-not-available' || code === 'bad-state' || code === 'reconcile-not-available' || code === 'wake-count-mismatch' || code === 'changed-since-shown' || code === 'topic-forbidden' || code === 'placement-not-offered' ? 409
     : code === 'rate-floor' ? 429
     : code === 'bad-proposal' || code === 'bad-policy' || code === 'bad-grant' || code === 'bad-request' ? 400
     : code === 'failed' || code === 'unknown' ? 502 : 500;
@@ -676,7 +792,7 @@ router.post('/api/channels/:adapterId/:convId/propose', async (req, res) => {
   try {
     forHost(req);
     const b = req.body || {};
-    answer3(res, await engine().propose({ kind: 'user' }, req.params.adapterId, req.params.convId, { text: b.text, replyTo: b.replyTo, why: b.why, attachments: b.attachments }, wakeGuards(b)));
+    answer3(res, await engine().propose({ kind: 'user' }, req.params.adapterId, req.params.convId, { text: b.text, replyTo: b.replyTo, why: b.why, attachments: b.attachments, ...(b.inThread !== undefined ? { inThread: b.inThread } : {}), ...(b.placement !== undefined ? { placement: b.placement } : {}) }, wakeGuards(b)));
   } catch (e) { fail(res, e); }
 });
 /** THE OWNER'S OWN MESSAGE (design §22, 2.369.159): the composer's Send on
@@ -688,7 +804,7 @@ router.post('/api/channels/:adapterId/:convId/send', async (req, res) => {
   try {
     forHost(req);
     const b = req.body || {};
-    answer3(res, await engine().propose({ kind: 'user' }, req.params.adapterId, req.params.convId, { text: b.text, replyTo: b.replyTo, attachments: b.attachments, direct: true }, wakeGuards(b)));
+    answer3(res, await engine().propose({ kind: 'user' }, req.params.adapterId, req.params.convId, { text: b.text, replyTo: b.replyTo, attachments: b.attachments, direct: true, ...(b.inThread !== undefined ? { inThread: b.inThread } : {}), ...(b.placement !== undefined ? { placement: b.placement } : {}) }, wakeGuards(b)));
   } catch (e) { fail(res, e); }
 });
 /** APPROVE (`{text?}` = approve with an edit) — the unconditional convCaps
@@ -708,13 +824,18 @@ function deliverOf(b) {
   if (RECEIPT_DELIVERIES.includes(b.deliver)) return { ok: true, deliver: b.deliver };
   return { ok: false, code: 'bad-request', error: `deliver must be ${RECEIPT_DELIVERIES.join(' | ')}` };
 }
+// r6 verify F6 (2026-09-28, "what you approve is what runs"): `shown` = the PURE digest
+// (channel-policy `shownDigest`) of the record the card was drawn from — REQUIRED; the
+// engine refuses a proposal that is no longer that record (`409 changed-since-shown`,
+// nothing sent). A request without it (a tab from before this rule) is refused by name.
 router.post('/api/channels/outbox/:id/approve', async (req, res) => {
   try {
     forHost(req);
     const b = req.body || {};
     const d = deliverOf(b);
     if (!d.ok) return answer3(res, d);
-    answer3(res, await engine().approve(req.params.id, { text: typeof b.text === 'string' ? b.text : null, by: 'user', deliver: d.deliver, ...wakeGuards(b) }));
+    if (typeof b.shown !== 'string' || !b.shown) return answer3(res, { ok: false, code: 'bad-request', why: 'shown-required', error: 'shown is required — the digest of the card being approved (reload the page if this tab is from before the update)' });
+    answer3(res, await engine().approve(req.params.id, { text: typeof b.text === 'string' ? b.text : null, by: 'user', deliver: d.deliver, shown: b.shown, ...wakeGuards(b) }));
   } catch (e) { fail(res, e); }
 });
 router.post('/api/channels/outbox/:id/reject', async (req, res) => {

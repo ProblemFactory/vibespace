@@ -76,7 +76,13 @@ const TERMINAL_STATES = Object.freeze(['sent', 'failed', 'rejected', 'expired', 
  *  never a second hand-written list). */
 const WITHDRAWABLE_STATES = Object.freeze(Object.keys(TRANSITIONS).filter((s) => TRANSITIONS[s].withdrawn && TRANSITIONS[s].withdrawn.includes('agent')));
 const POLICY_MODES = Object.freeze(['direct', 'review']);
-const DECISION_REASONS = Object.freeze(['channel-policy', 'links', 'attachments', 'off-hours', 'authority']);
+/** lane channel-threads (spec §2.6 / §5.3): the ACCOUNT's row for an AGENT's reactions — `propose` (the default:
+ *  a reaction speaks as the user, on someone else's message ⇒ the user approves it), `direct` (the channel's own
+ *  verdict — never past it), `off` (the agent verb answers `react-not-available`, why `policy-off`). An unknown
+ *  value reads `propose` (fail closed — spec §6.5). */
+const REACTION_POLICIES = Object.freeze(['propose', 'direct', 'off']);
+const reactionPolicyOf = (v) => (REACTION_POLICIES.includes(v) ? v : 'propose');
+const DECISION_REASONS = Object.freeze(['channel-policy', 'links', 'attachments', 'off-hours', 'authority', 'reaction-policy']);
 const RECEIPT_STATUSES = Object.freeze(['sent', 'rejected', 'edited', 'expired', 'failed', 'withdrawn']);
 /** The reason stored on a withdrawal the agent gave no words for — a CONTRACT
  *  string (the CLI prints it, the receipt carries it), never rendered as-is by
@@ -216,7 +222,11 @@ function decideOutbound({ channelPolicy = null, guards = {}, proposal = {}, now 
   else if (pm.mode === 'review') reasons.push('channel-policy');
 
   const g = guards && typeof guards === 'object' ? guards : null;
-  if (!g) { detail.guardsUnparseable = 'guards are not an object'; reasons.push('channel-policy'); }
+  // lane channel-threads (spec §5.3): a REACTION has no text — links / attachments / off-hours cannot apply to it;
+  // only the channel's policy and the drafter's authority decide (the account's reaction row sits above, decideReaction)
+  const reaction = proposal && proposal.kind === 'reaction';
+  if (reaction) detail.reaction = true;
+  else if (!g) { detail.guardsUnparseable = 'guards are not an object'; reasons.push('channel-policy'); }
   else {
     // links / attachments: ON unless explicitly switched off (decision 9).
     if (g.linksReview !== false && hasLinks(proposal.text)) reasons.push('links');
@@ -234,13 +244,234 @@ function decideOutbound({ channelPolicy = null, guards = {}, proposal = {}, now 
   return { mode: uniq.length ? 'review' : 'direct', reasons: uniq, detail };
 }
 
+/**
+ * CHARACTERS THAT HIDE WHAT A LINE SAYS (r6 verify O1, 2026-09-28). The
+ * direction controls change the ORDER text is displayed in ("Trojan Source":
+ * the bidi embedding / override / isolate controls U+202A–E and U+2066–9, the
+ * marks U+200E / U+200F / U+061C — the very set src/exit-reach.js
+ * `hiddenOrderOf` refuses in a command; test-channel-outbox pins the two
+ * equal over every BMP code point); the zero-width characters U+200B / U+2060
+ * / U+FEFF hide inside a word. The joiners U+200C / U+200D are apart: an
+ * emoji sequence and several scripts need them, so only an ADDRESS or an id
+ * refuses them. An agent's to / cc / subject / replyTo refuse the set by
+ * name; its TEXT keeps them (RTL writing uses the marks) and the card draws
+ * each one as a visible mark (`revealSegments`) — the approver reads what is
+ * sent, never a reordered line.
+ */
+// verify-r6 Z2: THE SET is src/hidden-chars.js (one answer for every approval surface; the outbox's own raw-character
+// lists were a third spelling). An address / an id refuses the joiners too; a subject keeps them (emoji); a TEXT keeps
+// line endings and joiners and the card MARKS the rest (`revealSegments`)
+const HC = require('./hidden-chars.js');
+/** The hidden characters `s` carries, as `U+XXXX` names (distinct, in order). `joiners: true` = an address / an id. */
+function hiddenCharsOf(s, { joiners = false } = {}) {
+  return HC.hiddenCharsOf(String(s == null ? '' : s), { allowJoiners: !joiners, allowCR: false });
+}
+/** `s` as display segments: `{text}` runs and `{hidden: 'U+202E'}` marks —
+ *  the card renders a mark as a visible chip, never the character itself. */
+function revealSegments(s) {
+  return HC.revealParts(s, { allowJoiners: true, allowCR: true }).map((p) => (p.code ? { hidden: p.code } : { text: p.text }));
+}
+
+/** The reaction ops a proposal may carry (spec §5.3). */
+const REACTION_OPS = Object.freeze(['add', 'remove']);
+const REACTION_QUOTE_MAX = 120;
+/**
+ * A REACTION PROPOSAL (lane channel-threads, spec §5.3) — the shape beside the text proposal:
+ * `{kind:'reaction', msg, key, op:'add'|'remove', glyph, label, why}`. `set` = the adapter's reaction vocabulary
+ * (`{keys:[{key, glyph, label}]}` or an array of keys) — a key it does not list is `bad-emoji`, judged by the key's
+ * own alphabet FIRST (bound before parse: a 64 KiB "key" is refused before any lookup). `text` absent by design.
+ * `{ok, proposal}` | `{ok:false, code:'bad-emoji'|'bad-proposal', error, why}`.
+ */
+function validateReaction(input = {}, set = null) {
+  const p = input && typeof input === 'object' ? input : {};
+  const msg = typeof p.msg === 'string' || typeof p.msg === 'number' ? String(p.msg) : '';
+  if (!msg || msg.length > 512) return { ok: false, code: 'bad-proposal', error: 'msg (the vendor id of the message to react to) is required', why: 'msg' };
+  const op = p.op === undefined || p.op === null ? 'add' : p.op;
+  if (!REACTION_OPS.includes(op)) return { ok: false, code: 'bad-proposal', error: 'op must be add or remove', why: 'op' };
+  const key = typeof p.key === 'string' ? p.key : '';
+  if (!/^[A-Za-z0-9_+\-:.]{1,64}$/.test(key)) return { ok: false, code: 'bad-emoji', error: 'that is not an emoji key this channel knows', why: 'key' };
+  const keys = Array.isArray(set) ? set.map((k) => (k && typeof k === 'object' ? k : { key: k })) : set && Array.isArray(set.keys) ? set.keys : null;
+  const hit = keys ? keys.find((k) => k && k.key === key) : null;
+  // a REMOVE of a key the set no longer lists is still a removal of OUR reaction (the vendor judges it); an ADD must be listed
+  if (op === 'add' && !hit) return { ok: false, code: 'bad-emoji', error: 'that emoji is not one this channel allows', why: 'key' };
+  let why = null;
+  if (typeof p.why === 'string' && p.why.trim()) why = { kind: 'text', id: null, label: p.why.replace(/[\r\n\t]+/g, ' ').trim().slice(0, 300) };
+  else if (p.why && typeof p.why === 'object') why = { kind: 'text', id: null, label: String(p.why.label || '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 300) || null };
+  const glyph = hit && typeof hit.glyph === 'string' && hit.glyph.length <= 16 ? hit.glyph : null;
+  const label = String((hit && hit.label) || key).slice(0, 40);
+  return { ok: true, proposal: { kind: 'reaction', msg, key, op, glyph, label, why } };
+}
+/** The quote a reaction card shows: the message's author + its text, one line, ≤ 120 (never re-parsed). */
+function reactionQuote(record) {
+  const r = record || {};
+  const a = r.author || {};
+  const text = inertFrameLine(inertFrames(String(r.text == null ? '' : r.text).replace(/[\r\n\t]+/g, ' ').trim()));
+  return { author: String(a.name || a.id || '').replace(/[\r\n\t]+/g, ' ').slice(0, 200), text: text.length > REACTION_QUOTE_MAX ? text.slice(0, REACTION_QUOTE_MAX - 1) + '…' : text };
+}
+/**
+ * THE ACCOUNT'S REACTION ROW OVER THE CHANNEL'S VERDICT (spec §5.3 / §2.6). `reactionPolicy`: `off` ⇒ refused
+ * (`react-not-available`, why `policy-off` — no proposal row); `propose` (the default, and any unknown value) ⇒
+ * REVIEW whatever the channel says (a reaction speaks as the user, on someone else's message); `direct` ⇒ the
+ * channel's own verdict for a reaction (`decideOutbound` with kind reaction: channel policy + authority only) —
+ * the row can only relax to the channel's verdict, never past it.
+ * `{refused:true, code, why}` | `{mode, reasons, detail}`.
+ */
+function decideReaction({ reactionPolicy = null, channelPolicy = null, authority = 'draft', now = Date.now() } = {}) {
+  const row = reactionPolicyOf(reactionPolicy);
+  if (row === 'off') return { refused: true, code: 'react-not-available', why: 'policy-off' };
+  const base = decideOutbound({ channelPolicy, guards: {}, proposal: { kind: 'reaction', authority }, now });
+  if (row === 'direct') return { ...base, detail: { ...base.detail, reactionPolicy: row } };
+  const reasons = [...new Set([...base.reasons, 'reaction-policy'])];
+  return { mode: 'review', reasons, detail: { ...base.detail, reactionPolicy: row } };
+}
+
+/**
+ * WHERE A REPLY LANDS — THE PLACEMENT (owner 2026-09-28, after lane channel-threads verify r2: "the boolean is
+ * Lark-shaped"). A proposal used to carry `{replyTo, inThread: boolean}`; three vendors answer a message four ways:
+ *   chat         a plain message in the conversation (it answers no message)       every vendor
+ *   quote        answers a message, shown in the MAIN list                          Lark reply · Telegram reply_to · Slack: none
+ *   thread       inside the answered message's thread                               Lark reply_in_thread / topic groups · Slack thread_ts
+ *   thread+chat  inside the thread AND echoed to the conversation                   Slack reply_broadcast only
+ * The ADAPTER declares which it offers in its `threads` cap row (`placements`, + `rootReply` = the vendor's own norm
+ * for a reply to a message OUTSIDE any thread: Lark quote, Slack thread, Telegram quote); the registry validates the
+ * declaration (src/channels/index.js `validateCaps`) and refuses an undeclared placement at `send`; THIS verdict
+ * decides a proposal's placement BEFORE the proposal exists — an undeclared one is `placement-not-offered`, worded,
+ * and nothing is created. The rules (each a row of scripts/test-channel-placement.mjs, with a patched copy):
+ *  PL1 a placement outside the closed set is a malformed request (`bad-proposal`, why `placement`);
+ *  PL2 `quote` / `thread` / `thread+chat` name the message they answer (no `replyTo` ⇒ `bad-proposal`, why `replyTo`
+ *      — why `inThread` when the request spoke the old boolean); `chat` names none (`replyTo` with `chat` ⇒ why
+ *      `placement`);
+ *  PL3 the caller named only the message (no placement) ⇒ THE VENDOR'S NORM: a message already inside a VENDOR thread
+ *      (its root or a reply — the parent's thread index kind `vendor`) ⇒ `thread` (it cannot be quoted from the main
+ *      list: Lark itself files a reply to a topic message in the topic); a message outside one ⇒ the row's
+ *      `rootReply`; neither declared ⇒ `placement-not-offered`, why `no-replies`;
+ *  PL4 a placement the adapter does not declare ⇒ `placement-not-offered`, why `not-declared` (+ `offered`);
+ *  PL5 `quote` of a message inside a vendor thread ⇒ `placement-not-offered`, why `parent-in-thread` — the vendor
+ *      would file it in the thread and the card would have said "quoted";
+ *  PL6 no message and no placement ⇒ `chat` (where declared).
+ * A stored proposal keeps `inThread` as a READ ALIAS (`placementOf`): no `placement` + `inThread: true` = `thread`.
+ */
+const PLACEMENTS = Object.freeze(['chat', 'quote', 'thread', 'thread+chat']);
+/** The placements that land INSIDE a thread (the old `inThread: true`). */
+const THREAD_PLACEMENTS = Object.freeze(['thread', 'thread+chat']);
+/** The placements a vendor may declare as its norm for a reply to a message outside any thread. */
+const ROOT_REPLIES = Object.freeze(['quote', 'thread']);
+const PLACEMENT_WHYS = Object.freeze(['not-declared', 'parent-in-thread', 'no-replies']);
+const isThreadPlacement = (x) => THREAD_PLACEMENTS.includes(x);
+const capsThreads = (caps) => (caps && typeof caps === 'object' && caps.threads && typeof caps.threads === 'object' ? caps.threads : null);
+/**
+ * The placements an adapter OFFERS, in the closed order — its `threads.placements` declaration, CLAMPED by the rest of
+ * its row (a read-only adapter offers none; a thread placement needs `replyInto`; `thread+chat` needs `thread`) so a
+ * declaration can never widen a control (validateCaps refuses the incoherent ones at registration anyway). A row that
+ * predates the enum (a suite's scripted module) reads as the contract it carried: chat, a reply to a message
+ * (`quote`), and `thread` where it can reply into one.
+ */
+function placementsOf(caps) {
+  const c = caps && typeof caps === 'object' ? caps : {};
+  if (!(Array.isArray(c.sendAs) && c.sendAs.length)) return [];
+  const t = capsThreads(c);
+  const replyInto = !!(t && t.replyInto === true);
+  const declared = t && Array.isArray(t.placements) ? t.placements : ['chat', 'quote', ...(replyInto ? ['thread'] : [])];
+  return PLACEMENTS.filter((x) => declared.includes(x) && (!isThreadPlacement(x) || replyInto) && (x !== 'thread+chat' || declared.includes('thread')));
+}
+/** The vendor's norm for a reply to a message OUTSIDE any thread (PL3), or null when the adapter answers no message. */
+function rootReplyOf(caps) {
+  const offered = placementsOf(caps);
+  const t = capsThreads(caps);
+  if (t && Array.isArray(t.placements)) return ROOT_REPLIES.includes(t.rootReply) && offered.includes(t.rootReply) ? t.rootReply : null;
+  return offered.includes('quote') ? 'quote' : offered.includes('thread') ? 'thread' : null;   // the pre-enum contract: replyTo = a reply in the list
+}
+/** A stored proposal's placement — THE READ ALIAS (a proposal stored before the enum carries `inThread` / `replyTo`
+ *  only). null for a composed message and a reaction (they are not replies). */
+function placementOf(p) {
+  const x = p && typeof p === 'object' ? p : {};
+  if (x.compose || x.kind === 'reaction') return null;
+  if (PLACEMENTS.includes(x.placement)) return x.placement;
+  if (x.inThread === true) return 'thread';
+  return x.replyTo ? 'quote' : 'chat';
+}
+/** The placement in the agent's words (the receipt block, the CLI's `placementText`). */
+function placementWords(placement) {
+  switch (placement) {
+    case 'chat': return 'in the chat';
+    case 'quote': return 'as a quoted reply, in the chat';
+    case 'thread': return 'in a thread';
+    case 'thread+chat': return 'in a thread, and also shown in the chat';
+    default: return null;
+  }
+}
+/** The placement's NAME in an agent-facing refusal / list (`offered here: chat, quote, thread`). */
+const placementName = (x) => (x === 'thread+chat' ? 'thread+chat (in the thread and also in the chat)' : String(x));
+/**
+ * THE VERDICT (PL1–PL6), PURE: `{requested, replyTo, caps, parent, alias}` → `{ok:true, placement, defaulted, rule}` |
+ * `{ok:false, code, why, placement?, offered?, error}`. `caps` = the adapter's STATIC caps (the declaration);
+ * `parent` = `{inThread: boolean}` — the answered message sits in a VENDOR thread (null: not loaded here ⇒ outside);
+ * `alias` = the request spoke the old `inThread` boolean (its refusals keep `why: 'inThread'`).
+ */
+function placementVerdict({ requested = null, replyTo = null, caps = null, parent = null, alias = false } = {}) {
+  const offered = placementsOf(caps);
+  const req = requested === undefined || requested === null || requested === '' ? null : requested;
+  if (req !== null && !PLACEMENTS.includes(req)) return { ok: false, code: 'bad-proposal', why: 'placement', error: `placement must be one of ${PLACEMENTS.join(' | ')}` };
+  const to = replyTo === undefined || replyTo === null || String(replyTo) === '' ? null : String(replyTo);
+  const inThread = !!(parent && parent.inThread === true);
+  const refuse = (placement, why, error) => ({ ok: false, code: 'placement-not-offered', why, placement, offered, error });
+  if (!to) {
+    if (req && req !== 'chat') return { ok: false, code: 'bad-proposal', why: alias ? 'inThread' : 'replyTo', error: `a reply ${placementWords(req)} names the message it answers (replyTo / --to <message id>)` };
+    if (!offered.includes('chat')) return refuse('chat', 'not-declared', `a message in the chat is not offered on this channel — offered here: ${offered.map(placementName).join(', ') || 'none'}`);
+    return { ok: true, placement: 'chat', defaulted: !req, rule: 'no-message' };
+  }
+  if (req === 'chat') return { ok: false, code: 'bad-proposal', why: 'placement', error: 'a message in the chat answers no message — leave out replyTo (--to), or place it as a quote or in the thread' };
+  let placement = req, rule = 'asked';
+  if (!placement) {
+    if (inThread && offered.includes('thread')) { placement = 'thread'; rule = 'parent-in-thread'; }
+    else { placement = rootReplyOf(caps); rule = 'root'; }
+    if (!placement) return refuse(null, 'no-replies', `this channel cannot answer a specific message — send it without --to (offered here: ${offered.map(placementName).join(', ') || 'none'})`);
+  }
+  if (!offered.includes(placement)) return refuse(placement, 'not-declared', `${placement === 'quote' ? 'a quoted reply' : placement === 'thread' ? 'a reply in a thread' : placement === 'thread+chat' ? 'a reply in a thread that is also shown in the chat' : 'that placement'} is not offered on this channel — offered here: ${offered.map(placementName).join(', ') || 'none'}`);
+  if (placement === 'quote' && inThread) return refuse('quote', 'parent-in-thread', `that message is inside a thread, so a reply to it lands in the thread — reply in the thread (--in-thread${offered.includes('thread+chat') ? ', or --also-in-chat' : ''}), or leave the placement out`);
+  return { ok: true, placement, defaulted: !req, rule };
+}
+/**
+ * THE PLACEMENT IN WORDS (the approval card, the Outbox — the device's language through the injected `t`):
+ * `{placement, quote: {author, text}}` → one line, or null for `chat` (a plain message has no place to say).
+ */
+function placementText(placement, { t = defaultT, quote = null } = {}) {
+  const q = quote && typeof quote === 'object' ? quote : {};
+  const has = !!(q.author || q.text);
+  const vars = { author: q.author || '?', quote: q.text || '' };
+  switch (placement) {
+    case 'quote': return has ? t('Quoted reply — to {author}: "{quote}"', vars) : t('Quoted reply, shown in the chat');
+    case 'thread': return has ? t('Reply in thread — under {author}: "{quote}"', vars) : t('Reply in thread');
+    case 'thread+chat': return has ? t('Reply in thread, also shown in the chat — under {author}: "{quote}"', vars) : t('Reply in thread, also shown in the chat');
+    default: return null;
+  }
+}
+/** A `placement-not-offered` refusal in the device's language (`routeErrorText` — the engine's sentence is the
+ *  agent's contract). */
+function placementRefusalText(r, { t = defaultT } = {}) {
+  const x = r || {};
+  if (x.why === 'parent-in-thread') return t('That message is inside a thread — a reply to it goes in the thread');
+  if (x.why === 'no-replies') return t('This channel cannot answer a specific message — send it as a plain message');
+  switch (x.placement) {
+    case 'chat': return t('A plain message is not offered here');
+    case 'quote': return t('A quoted reply is not offered here');
+    case 'thread': return t('Replying in a thread is not offered here');
+    case 'thread+chat': return t('A thread reply that is also shown in the chat is not offered here');
+    default: return t('That kind of reply is not offered here');
+  }
+}
+
+
 /** A proposal's shape, validated. */
 function validateProposal(input = {}) {
   const p = input && typeof input === 'object' ? input : {};
   const text = typeof p.text === 'string' ? p.text : '';
   if (!text.trim()) return { ok: false, error: 'text is required' };
   if (Buffer.byteLength(text, 'utf-8') > TEXT_MAX_BYTES) return { ok: false, error: `text is larger than ${TEXT_MAX_BYTES / 1024}KB` };
-  const replyTo = p.replyTo === undefined || p.replyTo === null ? null : String(p.replyTo).slice(0, 200);
+  const replyTo = p.replyTo === undefined || p.replyTo === null || !String(p.replyTo).trim() ? null : String(p.replyTo).trim().slice(0, 200);
+  // O1: a message id never carries an invisible character — one that does is refused by name
+  const hiddenReply = replyTo === null ? [] : hiddenCharsOf(replyTo, { joiners: true });
+  if (hiddenReply.length) return { ok: false, error: `replyTo carries invisible characters (${hiddenReply.join(', ')}) — a message id never does`, why: 'replyTo' };
   let why = null;
   if (p.why && typeof p.why === 'object') {
     const kinds = ['record', 'alert', 'task', 'session', 'text'];
@@ -248,7 +479,21 @@ function validateProposal(input = {}) {
     why = { kind, id: p.why.id === undefined || p.why.id === null ? null : String(p.why.id).slice(0, 200), label: String(p.why.label || '').slice(0, 300) || null };
   } else if (typeof p.why === 'string' && p.why.trim()) why = { kind: 'text', id: null, label: p.why.trim().slice(0, 300) };
   const attachments = Array.isArray(p.attachments) ? p.attachments.slice(0, 20).map((a) => ({ name: String((a && a.name) || '').slice(0, 200), bytes: Number(a && a.bytes) || 0 })) : [];
-  return { ok: true, proposal: { text, replyTo, why, attachments } };
+  // lane channel-threads (spec §5.2): a reply INTO a thread is a PROMISE the composer / the agent makes — it names
+  // what it answers (a thread reply without a parent is refused by name, `why: 'inThread'`)
+  if (p.inThread !== undefined && p.inThread !== null && p.inThread !== false && p.inThread !== true) return { ok: false, error: 'inThread must be true or false', why: 'inThread' };
+  // THE PLACEMENT (2026-09-28): its SHAPE here (PL1, PL2 — no adapter needed); whether the adapter offers it is
+  // `placementVerdict`, asked by the engine with the adapter's caps before the proposal exists. `inThread: true` is the
+  // old spelling of `thread` (a READ ALIAS kept for stored proposals and older callers).
+  const placement = p.placement === undefined || p.placement === null || p.placement === '' ? null : p.placement;
+  if (placement !== null && !PLACEMENTS.includes(placement)) return { ok: false, error: `placement must be one of ${PLACEMENTS.join(' | ')}`, why: 'placement' };
+  const alias = p.inThread === true && placement === null;
+  if (p.inThread === true && placement !== null && !isThreadPlacement(placement)) return { ok: false, error: `inThread says a thread but placement says ${placement}`, why: 'placement' };
+  const requested = alias ? 'thread' : placement;
+  if (requested && requested !== 'chat' && !replyTo) return { ok: false, error: `a reply ${placementWords(requested)} names the message it answers (replyTo)`, why: alias ? 'inThread' : 'replyTo' };
+  if (requested === 'chat' && replyTo) return { ok: false, error: 'a message in the chat answers no message — leave out replyTo, or place it as a quote or in the thread', why: 'placement' };
+  const inThread = isThreadPlacement(requested);
+  return { ok: true, proposal: { text, replyTo, why, attachments, ...(requested ? { placement: requested } : {}), ...(alias ? { placementAlias: true } : {}), ...(inThread ? { inThread: true } : {}) } };
 }
 
 /** A NEW message's recipients: at most this many (To + Cc together). */
@@ -277,10 +522,140 @@ function validateCompose(input = {}) {
   const to = list(p.to), cc = list(p.cc);
   if (!to.length) return { ok: false, error: 'to is required (one or more addresses)', why: 'to' };
   if (to.length + cc.length > COMPOSE_MAX_RECIPIENTS) return { ok: false, error: `at most ${COMPOSE_MAX_RECIPIENTS} recipients (To + Cc)`, why: 'recipients' };
-  for (const a of [...to, ...cc]) if (!ADDRESS_RE.test(a) || a.length > 254) return { ok: false, error: `not a plain address: ${JSON.stringify(a.slice(0, 80))}`, why: 'address' };
+  for (const a of [...to, ...cc]) {
+    // O1: an address with a direction control / a zero-width character / a joiner reads as another one
+    const h = hiddenCharsOf(a, { joiners: true });
+    if (h.length) return { ok: false, error: `an address carries invisible characters (${h.join(', ')}) — it would read as another address`, why: 'address' };
+    if (!ADDRESS_RE.test(a) || a.length > 254) return { ok: false, error: `not a plain address: ${JSON.stringify(a.slice(0, 80))}`, why: 'address' };
+  }
   const subject = String(p.subject === undefined || p.subject === null ? '' : p.subject).replace(/[\r\n\t]+/g, ' ').trim();
   if (!subject) return { ok: false, error: 'subject is required', why: 'subject' };
+  const hiddenSubject = hiddenCharsOf(subject);
+  if (hiddenSubject.length) return { ok: false, error: `the subject carries invisible characters that change how it reads (${hiddenSubject.join(', ')})`, why: 'subject' };
   return { ok: true, proposal: { ...base.proposal, replyTo: null, compose: { to: to.map((x) => x.toLowerCase()), cc: cc.map((x) => x.toLowerCase()), subject: subject.slice(0, COMPOSE_SUBJECT_MAX) } } };
+}
+
+/**
+ * WHAT A REPLY ANSWERS (r6 verify F1, 2026-09-28). A Lark reply is POSTed to
+ * `/messages/<replyTo>/reply` — a request that never names the chat — so a
+ * proposal in conversation A carrying a message id of chat B posted into B
+ * while the card showed A (and on a direct-policy A it went out with no card,
+ * past B's own policy and reach). A reply may answer ONLY a message the
+ * engine STORED for that very conversation: `record` is the engine's own
+ * lookup in A's log (`store.findRecord(adapterId, convId, replyTo)`), and
+ * this verdict is asked at propose AND again at approval / send. `code`
+ * `reply-anchor` (the proposal is refused, nothing created).
+ */
+function replyAnchorVerdict({ replyTo = null, convId = null, record = null } = {}) {
+  if (replyTo === null || replyTo === undefined || replyTo === '') return { ok: true, code: null, why: null };
+  const id = JSON.stringify(String(replyTo).slice(0, 80));
+  if (!record || typeof record !== 'object' || String(record.vendorId) !== String(replyTo)) return { ok: false, code: 'reply-anchor', why: `replyTo ${id} is not a message of this conversation — a reply may answer only a message of the conversation it is proposed in` };
+  if (convId !== null && record.convId !== undefined && record.convId !== null && String(record.convId) !== String(convId)) return { ok: false, code: 'reply-anchor', why: `replyTo ${id} belongs to another conversation` };
+  return { ok: true, code: null, why: null };
+}
+const ANCHOR_EXCERPT_MAX = 200;
+/** The anchor as the CARD shows it ("In reply to <author>: <excerpt>") —
+ *  what is stored on the proposal; the record itself stays in the log. */
+function anchorView(record) {
+  const r = record || {};
+  const a = r.author || {};
+  const text = String(r.text == null ? '' : r.text).replace(/\s+/g, ' ').trim();
+  return {
+    vendorId: String(r.vendorId || ''), at: Number(r.at) || null,
+    author: { id: a.id == null ? null : String(a.id).slice(0, 200), name: a.name == null ? null : String(a.name).slice(0, 200), isSelf: !!a.isSelf },
+    excerpt: text.length > ANCHOR_EXCERPT_MAX ? text.slice(0, ANCHOR_EXCERPT_MAX - 1) + '…' : text,
+  };
+}
+/**
+ * WHO A REPLY GOES TO, decided when it is PROPOSED (r6 verify F3). An adapter
+ * whose reply's recipients follow from the message it answers (caps
+ * `replyEnvelope`: Gmail — To = the anchor's Reply-To / From) used to decide
+ * them at SEND time from the thread's newest message THEN — a message landing
+ * after the owner looked re-targeted the approved reply. The adapter's answer
+ * at propose is normalized here, stored on the proposal, SHOWN on the card
+ * and handed back verbatim at send. Refused (never clipped — a clipped header
+ * is another recipient list): no anchor id, a different anchor, no recipient,
+ * a header past its bound, a CR/LF.
+ */
+const ENVELOPE_HEADER_MAX = 8000;
+function envelopeVerdict(env, anchorId) {
+  const e = env && typeof env === 'object' ? env : null;
+  if (!e) return { ok: false, why: 'the channel resolved no recipients for this reply' };
+  const s = (v) => (v === undefined || v === null ? null : String(v));
+  const view = { anchorId: s(e.anchorId) || '', to: (s(e.to) || '').trim(), cc: s(e.cc) ? s(e.cc).trim() || null : null, subject: s(e.subject) || '', inReplyTo: s(e.inReplyTo), references: s(e.references) };
+  if (!view.anchorId || String(view.anchorId) !== String(anchorId)) return { ok: false, why: 'the channel resolved the recipients of another message than the one this reply answers' };
+  if (!view.to) return { ok: false, why: 'the message this reply answers names nobody to reply to' };
+  for (const k of ['to', 'cc', 'subject', 'inReplyTo', 'references']) {
+    const v = view[k];
+    if (v === null) continue;
+    if (v.length > ENVELOPE_HEADER_MAX) return { ok: false, why: `the reply's ${k} is longer than ${ENVELOPE_HEADER_MAX} characters` };
+    if (/[\r\n]/.test(v)) return { ok: false, why: `the reply's ${k} carries a line break` };
+  }
+  return { ok: true, why: null, envelope: view };
+}
+
+/**
+ * WHAT THE CARD SHOWED (r6 verify F6). The Approve request carries `shown` =
+ * this digest of the record the card was drawn from; the engine computes the
+ * same digest of the proposal as it stands and refuses the approval
+ * (`changed-since-shown`, nothing sent) when they differ — the owner approves
+ * the text, the conversation, the answered message, the recipients, the
+ * identity and the sender line he SAW, never a later one. The id is inside,
+ * so a card never approves another proposal's words. PURE and bundled: the
+ * card and the engine run THIS function over the same view shape
+ * (`proposalView`). A change detector, not a MAC — content under one id is
+ * immutable while it awaits; an agent's replacement is a NEW id (and the
+ * arming delay below keeps it from sliding under the pointer).
+ */
+function shownFields(p) {
+  const q = p || {};
+  const s = (v) => (v === undefined || v === null ? null : String(v));
+  const env = q.replyEnvelope && typeof q.replyEnvelope === 'object' ? q.replyEnvelope : null;
+  const cp = q.compose && typeof q.compose === 'object' ? q.compose : null;
+  const an = q.replyAnchor && typeof q.replyAnchor === 'object' ? q.replyAnchor : null;
+  return [
+    'v1', s(q.id), s(q.adapterId), s(q.convId), s(q.text),
+    s(q.replyTo), an ? s(an.vendorId) : null,
+    env ? [s(env.anchorId), s(env.to), s(env.cc), s(env.subject)] : null,
+    cp ? [(Array.isArray(cp.to) ? cp.to : []).map(String), (Array.isArray(cp.cc) ? cp.cc : []).map(String), s(cp.subject)] : null,
+    s(q.sendAs), s(q.honestyLine),
+    // the .197 integration (pairing r6 × channel-threads): WHERE the reply lands (read through the alias) and a
+    // REACTION's op / key / message decide what is sent too — the card shows both, so the digest covers both
+    s(placementOf(q)), q.reaction && typeof q.reaction === 'object' ? [s(q.reaction.op), s(q.reaction.key), s(q.reaction.msg)] : null,
+  ];
+}
+/** FNV-1a 32 over the UTF-16 units, seeded (the plugin-manifest precedent). */
+function fnv32(str, seed) {
+  let h = seed >>> 0;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16).padStart(8, '0');
+}
+function shownDigest(p) {
+  const canon = JSON.stringify(shownFields(p));
+  return `v1:${fnv32(canon, 0x811c9dc5)}${fnv32(canon.split('').reverse().join(''), 0x9747b28c)}:${canon.length}`;
+}
+
+/**
+ * THE ARMING DELAY (r6 verify F6): a card that just APPEARED or MOVED under
+ * the pointer takes no decision for `ARM_MS` — a new or replacing proposal
+ * inserted at the top used to land under the owner's pointer, armed, and his
+ * next click approved a text he never saw. `armedAt` = the instant the card
+ * may be decided; only a TRUSTED event (a person's pointer / key) is held — a
+ * script's `.click()` is no pointer sliding onto a card.
+ */
+const ARM_MS = 700;
+function armVerdict({ armedAt = 0, now = Date.now(), trusted = true } = {}) {
+  const wait = Math.max(0, (Number(armedAt) || 0) - (Number(now) || 0));
+  if (!trusted) return { armed: true, waitMs: 0 };
+  return { armed: wait === 0, waitMs: wait };
+}
+/** Did a placement MOVE this card (or is it new here)? A card whose top
+ *  shifted by more than a pixel is no longer where the pointer found it. */
+function rearmVerdict({ isNew = false, prevTop = null, top = null } = {}) {
+  if (isNew) return true;
+  const known = (v) => v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v));
+  if (!known(prevTop) || !known(top)) return false;
+  return Math.abs(Number(top) - Number(prevTop)) > 1;
 }
 
 /**
@@ -373,14 +748,14 @@ function outcomeOf(p) {
 }
 /** The outcome sentence. `errorCodeText` is channel-caps' composer, injected
  *  so this module keeps importing nothing but channel-record. */
-function outcomeText(o, { t = defaultT, errorCodeText = (c) => String(c || '') } = {}) {
+function outcomeText(o, { t = defaultT, errorCodeText = (c) => String(c || ''), sendWhyText = (w) => String(w || '') } = {}) {
   if (!o || !o.kind) return '';
   const code = o.code ? errorCodeText(o.code, { t }) : '';
   switch (o.kind) {
     case 'boot': return t('Outcome unknown: the server stopped between the attempt and the answer.');
     case 'threw': return o.detail ? t('Outcome unknown: the channel threw while sending ({detail}).', { detail: o.detail }) : t('Outcome unknown: the channel threw while sending.');
     case 'lost': return o.detail ? t('Outcome unknown: the request left and the answer was lost ({detail}).', { detail: o.detail }) : t('Outcome unknown: the request left and the answer was lost.');
-    case 'send-not-available': return t('Not sent: sending was not available at approval time ({detail}).', { detail: o.detail || '' });
+    case 'send-not-available': return t('Not sent: sending was not available at approval time ({detail}).', { detail: o.detail ? sendWhyText(o.detail, { t }) : '' });
     case 'not-landed': return t('Not sent: the platform holds no such message.');
     case 'refused': return o.detail ? t('Refused by the channel ({code}): {detail}', { code: code || o.code || '', detail: o.detail }) : t('Refused by the channel ({code}).', { code: code || o.code || '' });
     case 'expired': return t('Expired: not approved within 24 h.');
@@ -544,6 +919,8 @@ function receiptDeliveryVerdict(choice, proposal, session = {}) {
   const d = p.draftedBy || {};
   if (d.kind !== 'agent' || !d.id) return { deliver: 'none', why: 'user-draft' };
   if (p.state === 'withdrawn') return { deliver: 'none', why: 'withdrawn' };
+  // lane channel-threads (spec §5.3): a reaction never earns a billed turn — its receipt rides the next one
+  if (p.kind === 'reaction') return { deliver: 'next-turn', why: 'reaction' };
   if (choice !== 'wake-now') return { deliver: 'next-turn', why: choice === undefined || choice === null || choice === 'next-turn' ? 'chosen' : 'unknown-choice' };
   if (session && session.live === false) return { deliver: 'next-turn', why: 'gone' };
   if (p.receiptWake) return { deliver: 'next-turn', why: 'already-woken' };
@@ -637,7 +1014,31 @@ function receiptFor(p) {
     honestyLine: !!(p.result && p.result.honestyLine),
     // 2026-09-27: a withdrawal names the proposal that replaced it (if any)
     replacedBy: p.state === 'withdrawn' ? (p.replacedBy || null) : null,
+    // lane channel-threads: a REACTION's receipt names the emoji, the message and the op (its block is one line)
+    ...(p.kind === 'reaction' && p.reaction ? { kind: 'reaction', reaction: { msg: p.reaction.msg, key: p.reaction.key, glyph: p.reaction.glyph || null, op: p.reaction.op } } : {}),
+    // …and a REPLY names where it landed (2026-09-28: its PLACEMENT — a quote, a thread, a thread also shown in the
+    // chat; `inThread` + the thread's key kept beside it as the alias older readers know)
+    ...replyPlaceOf(p),
   };
+}
+
+/** A reply's place on its receipt: `{placement}` for a quote / thread / thread+chat (+ `inThread` and the thread's key
+ *  for the thread ones); nothing for a plain message, a composed one or a reaction. */
+function replyPlaceOf(p) {
+  const pl = placementOf(p);
+  if (!pl || pl === 'chat') return {};
+  return { placement: pl, ...(isThreadPlacement(pl) ? { inThread: true, threadKey: p.threadKey || null } : {}) };
+}
+
+/** THE WITHHELD RECEIPT (lane channel-threads verify r2, IDENTITY): one line — the proposal id (the drafter's own), its
+ *  status in the receipt block's own words, `(a reaction)` for that kind, and why nothing more is said. The ONE speller
+ *  for the ladder's block and the `status` view of a proposal whose conversation the drafter no longer sees. */
+const WITHHELD_WORDS = Object.freeze({ sent: 'SENT', edited: 'SENT after the user edited it', rejected: 'REJECTED by the user', expired: 'EXPIRED unapproved (24 h)', failed: 'FAILED', withdrawn: 'WITHDRAWN by you (the drafting agent)' });
+const ACCESS_REMOVED_NOTE = 'you no longer have access to that conversation, so nothing more from it is shown';
+function withheldReceiptLine(r) {
+  const x = r || {};
+  const what = WITHHELD_WORDS[x.status] || String(x.status || 'decided').toUpperCase().slice(0, 40);
+  return inertFrames(`Channel receipt — proposal ${safeInline(x.proposalId, 80)}: ${what}${x.kind === 'reaction' ? ' (a reaction)' : ''} — ${ACCESS_REMOVED_NOTE}`);
 }
 
 /** ONE vendor-controlled value, safe to embed in the receipt: frames neutered,
@@ -654,12 +1055,27 @@ function safeInline(text, max) {
 
 /** The text an agent is handed with its receipt — a §7.5-shaped block, frame-inert
  *  in EVERY vendor-controlled field (label, title, vendor id, sentAs, reason). */
-function renderReceiptBlock(receipt, { adapterLabel = null, title = null, text = null, proposed = null, maxBytes = RECEIPT_BLOCK_MAX_BYTES } = {}) {
+function renderReceiptBlock(receipt, { adapterLabel = null, title = null, text = null, proposed = null, maxBytes = RECEIPT_BLOCK_MAX_BYTES, withheld = false } = {}) {
   const r = receipt || {};
+  // lane channel-threads verify r2 (IDENTITY): the drafter no longer has access to the conversation — its receipt says
+  // the FATE of its own proposal and nothing the conversation produced (no title, no vendor message / thread id, no
+  // reason's words, no text): `withheldReceiptLine`
+  if (withheld) return withheldReceiptLine(r);
+  // lane channel-threads (spec §5.3): a REACTION's receipt is ONE line — `reaction 👍 on om_x1: sent / rejected`
+  if (r.kind === 'reaction' && r.reaction) {
+    const x = r.reaction;
+    const em = x.glyph ? safeInline(x.glyph, 16) : `:${safeInline(x.key, 64)}:`;
+    const st = r.status === 'edited' ? 'sent' : String(r.status || '');
+    const tail = r.reason && st !== 'sent' && r.reason !== REJECTED_DEFAULT_REASON ? ` (${safeInline(r.reason, 200)})` : '';
+    return inertFrames(`Channel receipt — ${safeInline(adapterLabel || r.adapterId || 'channel', 60)} · ${safeInline(title || r.convId || '', 120)}\n${x.op === 'remove' ? 'removing reaction' : 'reaction'} ${em} on ${safeInline(x.msg, 200)}: ${st}${tail} (proposal ${safeInline(r.proposalId, 80)})`);
+  }
   const lines = [];
   lines.push(`Channel receipt — ${safeInline(adapterLabel || r.adapterId || 'channel', 60)} · ${safeInline(title || r.convId || '', 120)}`.trim());
   const what = r.status === 'edited' ? 'SENT after the user edited it' : r.status === 'sent' ? 'SENT' : r.status === 'rejected' ? 'REJECTED by the user' : r.status === 'expired' ? 'EXPIRED unapproved (24 h)' : r.status === 'failed' ? 'FAILED' : r.status === 'withdrawn' ? `WITHDRAWN by you (the drafting agent)${r.replacedBy ? ` — replaced by proposal ${safeInline(r.replacedBy, 80)}` : ''}` : String(r.status || '').toUpperCase();
   lines.push(`proposal ${safeInline(r.proposalId, 80)}: ${what}${r.vendorMessageId ? ` (vendor id ${safeInline(r.vendorMessageId, 200)})` : ''}`);
+  // the PLACEMENT (a receipt from before the enum carries `inThread` only — read as `thread`)
+  const pl = PLACEMENTS.includes(r.placement) ? r.placement : r.inThread ? 'thread' : null;
+  if (pl && pl !== 'chat') lines.push(`placed ${placementWords(pl)}${isThreadPlacement(pl) && r.threadKey ? ` (thread ${safeInline(r.threadKey, 200)})` : ''}`);
   if (r.status === 'sent' || r.status === 'edited') {
     lines.push(`sent as: ${safeInline(r.sentAs || 'unknown', 40)}`);
     if (r.identityMarking === 'none') lines.push('the recipient sees this as the user, with no application marker');
@@ -697,6 +1113,13 @@ module.exports = {
   WITHDRAWABLE_STATES, WITHDRAWN_DEFAULT_REASON, withdrawVerdict, withdrawWhy, withdrawReason,
   RECEIPT_DIFF_MAX, RECEIPT_BLOCK_MAX_BYTES, RECEIPT_GUIDANCE, receiptDiff, receiptFeedback, receiptFateOf, receiptFateText, RECEIPT_DELIVERIES, receiptDeliveryVerdict, utf8Bytes,
   canTransition, isTerminal, policyMode, hasLinks, offHoursVerdict, decideOutbound, validateProposal, validateCompose, COMPOSE_MAX_RECIPIENTS, expiryVerdict, receiptFor, renderReceiptBlock,
+  ACCESS_REMOVED_NOTE, withheldReceiptLine,
+  REACTION_POLICIES, reactionPolicyOf, REACTION_OPS, validateReaction, reactionQuote, decideReaction,
+  PLACEMENTS, THREAD_PLACEMENTS, ROOT_REPLIES, PLACEMENT_WHYS, isThreadPlacement, placementsOf, rootReplyOf, placementOf, placementWords, placementVerdict, placementText, placementRefusalText,
   honestyLine, withHonestyLine, canReconcile, reconcileVerdict,
   REJECTED_DEFAULT_REASON, outcomeOf, outcomeText, reconcileWhyText,
+  // r6 verify (2026-09-28): what you approve is what runs — the reply's anchor (F1), its recipients (F3),
+  // the digest of the card (F6), the arming delay (F6), the characters that hide what a line says (O1)
+  replyAnchorVerdict, anchorView, envelopeVerdict, ENVELOPE_HEADER_MAX, shownFields, shownDigest, ARM_MS, armVerdict, rearmVerdict,
+  hiddenCharsOf, revealSegments,
 };

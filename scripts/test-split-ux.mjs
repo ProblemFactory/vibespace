@@ -42,7 +42,8 @@
 //      neutered ⇒ misaligned); L2 a LEFT-half tab shows on the left, the right pane untouched; L3 a drag inside a
 //      half reorders (marker, persisted, client 2 follows in place, no ping-pong; control: moveTabInChain neutered);
 //      L4 across the boundary MOVES the tab (it carries its display), the last tab out ends the split; L5 vertical
-//      still detaches, horizontal-first never does; L10 Ctrl+Shift+PageDown / PageUp (control: inert outside a
+//      still detaches; horizontal-first TEARS OFF once pulled out of the bar, a wobble inside the 30 px margin stays
+//      a reorder (inc-muly2izg-cks3 — b970f16d kept it a reorder for the whole drag); L10 Ctrl+Shift+PageDown / PageUp (control: inert outside a
 //      group); L6 a path opened from a chat is born beside THAT chat (never the active window), again = its tab,
 //      tab / window per setting, a reload restores the born windows, client 2 gets the async viewer IN the chain
 //      (control: the pre-fix reconcile ⇒ free); L9 a pre-v2 record restores as a valid split; L7 mergeDropLayout =
@@ -778,14 +779,17 @@ else await (async () => {
     const s4b = await v2(P1);
     ok(s4b.chain && s4b.layout === 'tabs' && s4b.halves.length === 0 && s4b.order.length === 3 && s4b.order[2] === sidB, 'L4 dragging the LAST tab out of the left side ends the split: tabs, all three still grouped, B where it was dropped', S(s4b));
 
-    // L5 — the first 8 px decide: vertical = the old detach path; horizontal-first never detaches
+    // L5 — the first 8 px decide: vertical = the old detach path; horizontal-first = a reorder until it leaves the bar
     s = await v2(P1);
     const cT = tabAt(s, sidC).r;
     await tabDrag(centre(cT), { x: centre(cT).x + 12, y: centre(cT).y + 90 }, { steps: 10 });
     const s5 = await v2(P1);
     const cFree = await ev(`const w = bySid(${S(sidC)}); return { chain: !!w._tabChain, disp: getComputedStyle(w.element).display };`);
     ok(!cFree.chain && cFree.disp === 'flex' && s5.chain && !s5.order.includes(sidC), 'L5 a VERTICAL tab drag still pulls the tab out as its own window (the pre-v2 detach, |dy| > 30)', S({ cFree, s5 }));
-    // re-group C, then a drag that starts HORIZONTAL and then drops 80 px lower stays a reorder
+    // re-group C, then a drag that starts HORIZONTAL and is then pulled 90 px down OUT of the bar TEARS OFF
+    // (inc-muly2izg-cks3, 2026-09-28 — userW on the Stage: "Browser 拖不出来": his pull from the tab toward the
+    // workspace was more horizontal than vertical, and v2's "decided once" kept it a reorder for the whole drag;
+    // PURE tabDragMode now tears a reorder off once the pointer leaves the strip's band by > 30 px)
     await ev(`const A = bySid(${S(sidA)}), Cw = bySid(${S(sidC)}); wm.addToTabChain(A._tabChain, Cw); return true;`); await sleep(300);
     s = await v2(P1);
     const aT = tabAt(s, sidA).r;
@@ -793,7 +797,18 @@ else await (async () => {
     for (let i = 1; i <= 4; i++) { await mouse('mouseMoved', centre(aT).x + 5 * i, centre(aT).y, { button: 'left', buttons: 1 }); await sleep(30); }
     for (let i = 1; i <= 6; i++) { await mouse('mouseMoved', centre(aT).x + 20, centre(aT).y + 15 * i, { button: 'left', buttons: 1 }); await sleep(30); }
     await mouse('mouseReleased', centre(aT).x + 20, centre(aT).y + 90, { button: 'left', clickCount: 1 }); await sleep(350);
-    ok(await ev(`return !!bySid(${S(sidA)})._tabChain && wm.windows.size === 3 && chats().every((w) => w._tabChain);`), 'L5 a drag decided HORIZONTAL in its first 8 px stays a reorder even when it then moves 90 px down — no late detach');
+    const aTorn = await ev(`const A = bySid(${S(sidA)}); return { chain: !!A._tabChain, disp: getComputedStyle(A.element).display, others: chats().filter((w) => w !== A).every((w) => w._tabChain) };`);
+    ok(!aTorn.chain && aTorn.disp === 'flex' && aTorn.others, 'L5 a drag decided HORIZONTAL in its first 8 px and then pulled 90 px down out of the bar TEARS the tab off as its own window (the reporter\'s diagonal pull — b970f16d kept it a reorder, inc-muly2izg-cks3)', S(aTorn));
+    // re-group A; a sideways drag that WOBBLES 18 px below the bar (inside the 30 px margin) stays a reorder
+    await ev(`const A = bySid(${S(sidA)}), Bw = bySid(${S(sidB)}); wm.addToTabChain(Bw._tabChain, A); return true;`); await sleep(300);
+    s = await v2(P1);
+    const aW = tabAt(s, sidA).r;
+    const barW = await ev(`const h = wm.windows.get(bySid(${S(sidB)})._tabChain.tabs[0]); return rect(h.titleBar);`);
+    await mouse('mouseMoved', centre(aW).x, centre(aW).y); await mouse('mousePressed', centre(aW).x, centre(aW).y, { button: 'left', clickCount: 1 });
+    for (let i = 1; i <= 4; i++) { await mouse('mouseMoved', centre(aW).x - 5 * i, centre(aW).y, { button: 'left', buttons: 1 }); await sleep(30); }
+    for (let i = 1; i <= 6; i++) { await mouse('mouseMoved', centre(aW).x - 20 - 10 * i, barW.bottom + 18, { button: 'left', buttons: 1 }); await sleep(30); }
+    await mouse('mouseReleased', centre(aW).x - 80, barW.bottom + 18, { button: 'left', clickCount: 1 }); await sleep(350);
+    ok(await ev(`return !!bySid(${S(sidA)})._tabChain && wm.windows.size === 3 && chats().every((w) => w._tabChain);`), 'L5 a sideways reorder that wobbles 18 px below the bar (inside the 30 px margin) stays a reorder — nothing tears off');
 
     // L10 — Ctrl+Shift+PageDown / PageUp move the active tab within its list; inert outside a group
     await ev(`const A = bySid(${S(sidA)}); const ch = A._tabChain; ch.order = [A.id, ...ch.tabs.filter((x) => x !== A.id)]; wm._normalizeChain(ch); wm._renderTabBar(ch); wm.switchTab(ch, ch.tabs.indexOf(A.id)); wm.focusWindow(A.id); return true;`);

@@ -1,5 +1,6 @@
-import { cssVarDefault, showContextMenu, showInputDialog, uiScale } from './utils.js';
+import { cssVarDefault, showContextMenu, showInputDialog, showToast, uiScale } from './utils.js';
 import { t } from './i18n.js';
+import { stageRefusalSentence } from './stage-rules.js'; // inc-muly2izg-cks3: the Stage's move refusal, in words (PURE)
 
 /**
  * DesktopManager — virtual desktop system.
@@ -339,22 +340,29 @@ export class DesktopManager {
     }
   }
 
-  /** Move a window to another desktop */
-  moveWindowToDesktop(winId, desktopId) {
+  /** Move a window to another desktop → `{ok:true}` | `{ok:true, moved:false}` (nothing to move) | a Stage refusal
+   *  `{ok:false, code:'stage-window'|'onto-stage', kind}` (PURE stage-rules.js). `speak` = a USER's act (a drop on a
+   *  preview, the menu, the keyboard): a refusal is said in a toast — never silent (inc-muly2izg-cks3). Programmatic
+   *  callers (resume placement) pass nothing and read the result. */
+  moveWindowToDesktop(winId, desktopId, { speak = false } = {}) {
     let win = this.app.wm.windows.get(winId);
-    if (!win) return;
+    if (!win) return { ok: false, code: 'no-window' };
 
     // Stage↔desktop moves are blocked in BOTH directions (user directive
     // 2.112.4, superseding the earlier unbind+move design): stage-view
-    // windows stay on the stage, and nothing moves ONTO the stage.
-    if (this.app.stage?.dragToDesktopBlocked?.(win) || desktopId === '__stage__') return;
+    // windows stay on the stage, and nothing moves ONTO the stage — and the
+    // refusal SPEAKS (inc-muly2izg-cks3: it used to return in silence).
+    const v = this.app.stage?.moveVerdict ? this.app.stage.moveVerdict(win, desktopId)
+      : (desktopId === '__stage__' ? { ok: false, code: 'onto-stage', kind: null } : { ok: true });
+    if (!v.ok) { if (speak) this.sayStageRefusal(v); return v; }
+    if (v.same) return { ok: true, moved: false };
     // Tab chains live on ONE desktop (invariant enforced at creation):
     // move the whole group together, anchored at the host. Moving a single
     // guest used to split the chain across desktops, which captureState /
     // restoreTabChain can't represent.
     const members = win._tabChain ? win._tabChain.tabs.map(id => this.app.wm.windows.get(id)).filter(Boolean) : [win];
     if (win._tabChain) win = members[0]; // host owns the visible element
-    if (!win || win._desktopId === desktopId) return;
+    if (!win || win._desktopId === desktopId) return { ok: true, moved: false };
 
     // breadcrumb AFTER the guards — the ONE op that relocates a window between
     // desktops, and an incident bundle must be able to answer "what moved my
@@ -374,6 +382,14 @@ export class DesktopManager {
     this.app.updateTaskbar();
     this.app.layoutManager.scheduleAutoSave();
     this.app._checkWelcome();
+    return { ok: true, moved: true };
+  }
+
+  /** Say a Stage move refusal (the ONE toast every user door shows — the drop on a preview, the menu, the keyboard). */
+  sayStageRefusal(v) {
+    const text = stageRefusalSentence(v, { t });
+    if (text) showToast(text, { type: 'warn', duration: 6000 });
+    return text;
   }
 
   /** Rebuild cached state for a non-active desktop from its live windows */
@@ -665,7 +681,7 @@ export class DesktopManager {
         const dragDesk = e.dataTransfer.getData('text/desktop-id');
         if (dragDesk && dragDesk !== desk.id) { this.reorderDesktop(dragDesk, desk.id); return; }
         const winId = e.dataTransfer.getData('text/window-id');
-        if (winId) this.moveWindowToDesktop(winId, desk.id);
+        if (winId) this.moveWindowToDesktop(winId, desk.id, { speak: true }); // a taskbar item dropped here: a refusal is said
       });
 
       container.appendChild(wrapper);
@@ -701,15 +717,21 @@ export class DesktopManager {
     this._renderSwitcher();
   }
 
-  /** Build "Move to Desktop" submenu items for window context menu */
+  /** Build "Move to Desktop" submenu items for window context menu. A Stage window gets ONE row that SAYS why it
+   *  stays (inc-muly2izg-cks3 — the desktop rows used to be listed and do nothing; never greyed names with a hidden
+   *  hint: the reason is the row). */
   getDesktopMenuItems(winId) {
     const win = this.app.wm.windows.get(winId);
-    if (!win || this._desktops.length < 2) return [];
+    if (!win || this._desktops.length < 1) return [];
+    const target = this._desktops.find((d) => d.id !== win._desktopId);
+    const v = target && this.app.stage?.moveVerdict ? this.app.stage.moveVerdict(win, target.id) : { ok: true };
+    if (!v.ok) return [{ label: stageRefusalSentence(v, { t }), stageRefusal: v.code }];
+    if (this._desktops.length < 2) return [];
     return this._desktops
       .filter(d => d.id !== win._desktopId)
       .map(d => ({
         label: d.name,
-        action: () => this.moveWindowToDesktop(winId, d.id),
+        action: () => this.moveWindowToDesktop(winId, d.id, { speak: true }),
       }));
   }
 

@@ -52,7 +52,7 @@ console.log('① PURE src/channel-touch.js');
   const cp = T.normalizeTouch({ op: 'compose', adapterId: 'gmail', proposalId: 'p9', title: 'x'.repeat(500) + '\nline', at: 5 });
   ok(cp && cp.convId === null && T.touchKey(cp) === 'gmail/~compose/p9' && cp.title.length === T.TITLE_MAX && !/\n/.test(cp.title), 'a composed message (no conversation yet) is keyed <account>/~compose/<proposal>; strings bounded, one line', cp);
   ok(T.touchKey(touch({ adapterId: 'lark', convId: 'oc_1' })) === 'lark/oc_1', 'a conversation touch is keyed <adapter>/<conversation>');
-  ok(T.OPS.join(',') === 'reply,compose,read,search,refresh,request,status', 'the closed op set, drafts first');
+  ok(T.OPS.join(',') === 'reply,compose,react,read,search,refresh,request,status', 'the closed op set, drafts first (lane channel-threads: react after the two drafts)');
   // the ring
   const ring = [];
   T.appendTouch(ring, touch({ id: 'a', at: 1000, count: 3 }));

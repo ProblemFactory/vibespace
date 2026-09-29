@@ -18,6 +18,8 @@ import { t, tc } from './i18n.js';
  *  from one process; the literals stay `t('…')` for the extractor. */
 const tDevice = t;
 import * as chanCaps from '../channel-caps.js';
+// 2026-09-28: the reply placement's refusal words live beside its verdict (PURE, bundled)
+import * as P from '../channel-policy.js';
 import * as F from '../channel-filter.js';
 import { wakeCount } from './channel-groups-view.js';
 
@@ -97,6 +99,8 @@ export function routeErrorText(r, { fallback = null, ruleLabel = (k) => k } = {}
     case 'send-not-available': return t('Sending is not available here: {why}', { why: chanCaps.sendWhyText(r.why || 'unknown', { t }) });
     // 2026-09-27: the drafting agent took it back while the card was open
     case 'bad-state': return r.state === 'withdrawn' ? t('The agent withdrew this proposal — there is nothing to decide') : t('This proposal can no longer be decided');
+    // r6 verify F6 (2026-09-28): the card's `shown` digest no longer matches the proposal — nothing was sent
+    case 'changed-since-shown': return t('This proposal changed since the card was drawn — nothing was sent; read it again, then decide');
     case 'not-yours': return t('Only the agent that proposed it can withdraw it');
     case 'not-withdrawable': return t('This proposal can no longer be withdrawn');
     case 'reconcile-not-available': return t('This channel cannot be checked by the machine');
@@ -104,8 +108,35 @@ export function routeErrorText(r, { fallback = null, ruleLabel = (k) => k } = {}
     // the account / pattern grains answer the validator's closed code (hotfix 2026-09-26); a route that does not keeps the sentence
     case 'bad-assignment': { const w = assignmentRefusalText(r.why); if (w) return w; return raw ? t('The request was refused: {error}', { error: raw }) : t('The request was refused'); }
     case 'bad-filter': case 'bad-pattern': { const w = ruleRefusalText(r, code === 'bad-pattern' ? 'pattern' : 'filter', ruleLabel); if (w) return w; return raw ? t('The request was refused: {error}', { error: raw }) : t('The request was refused'); }
-    case 'bad-proposal': case 'bad-policy': case 'bad-grant': case 'bad-request':
+    // lane channel-threads (spec §9): a reply INTO a thread where the channel does not offer it
+    case 'bad-proposal': if (r.why === 'inThread') return t('Replying in a thread is not offered here');
+      // 2026-09-28: the placement's SHAPE (a reply names its message; a plain message names none)
+      if (r.why === 'replyTo') return t('A reply must name the message it answers');
+      if (r.why === 'placement') return t('A plain message answers no message — choose a quote or the thread, or leave the message out');
       return raw ? t('The request was refused: {error}', { error: raw }) : t('The request was refused');
+    // 2026-09-28: a placement the channel does not offer (the PURE policy's words — the card and this toast agree)
+    case 'placement-not-offered': return P.placementRefusalText(r, { t });
+    case 'bad-policy': case 'bad-grant': case 'bad-request':
+      return raw ? t('The request was refused: {error}', { error: raw }) : t('The request was refused');
+    // lane channel-threads (2026-09-28, spec §2.7 / §9): threads + reactions, every refusal in words
+    case 'bad-emoji': return t('That emoji is not one this channel allows');
+    case 'already-reacted': return t('You already reacted with that');
+    case 'reaction-cap': return t('This message has reached its reaction limit');
+    case 'not-reactable': return t('This message cannot be reacted to');
+    case 'reaction-not-mine': return t('Only a reaction you added can be removed');
+    case 'reactions-scope-not-granted': return chanCaps.reactWhyText('reactions-scope-not-granted', { t, scopes: Array.isArray(r.scopes) && r.scopes.length ? r.scopes : null });
+    case 'react-not-available': return t('Reactions are not offered here ({why})', { why: chanCaps.reactWhyText(r.why || 'unknown', { t }) });
+    case 'topic-forbidden': return t('This group does not allow replies in threads');
+    // naive-user pass (2026-09-28): a thread pane / refresh on a DISABLED account showed the engine's English sentence
+    // ("Lark / 飞书 is disabled") on a zh / ja page — the code had no words, the default fell through to the raw sentence
+    case 'disabled': return t('This account is disabled — enable it in the account’s ⋯ menu to load or send here');
+    case 'thread-not-loaded': return chanCaps.threadWhyText('thread-not-loaded', { t });
+    // quote-vs-topic (owner 2026-09-28): a quoted reply is a quote — it has no thread to open or load
+    case 'not-a-thread': return t('That message is not in a thread — a quoted reply is shown in the conversation itself');
+    case 'thread-floor': return t('This thread was loaded a moment ago — try again in {s} s', { s: Number(r.retryAfterSec) || 1 });
+    case 'reactions-floor': return t('These reactions were checked a moment ago');
+    case 'policy-off': return chanCaps.reactWhyText('policy-off', { t });
+    case 'older-floor': return t('Loading older messages is paused for a moment');
     // R4 (2026-09-27): access and notification — two operations, access first
     case 'bad-access': case 'bad-watcher': { const w = assignmentRefusalText(r.why); if (w) return w; return raw ? t('The request was refused: {error}', { error: raw }) : t('The request was refused'); }
     case 'duplicate-principal': return t('{who} is listed twice — one row per agent or group', { who: principalText(r.principal) });
@@ -350,6 +381,18 @@ function around(text, who) {
 
 /** An instant's age in the TAG's compact words (the tag's width budget lives in
  *  its words — test-channels-e2e ⑰): just now / Nm ago / Nh ago. */
+/** A wake's `why` in the device's language (owner decision A, 2026-09-28): the place rules' three contract strings
+ *  (src/channel-filter.js PLACE_WHYS — "quoted your message" = a quote of one of your messages, the condition that
+ *  still wakes now that a quote chain is never a thread); any other rule's `why` carries its own value and is shown
+ *  as the rule wrote it. */
+export function wakeWhyText(why) {
+  switch (String(why || '')) {
+    case 'quoted your message': return t('quoted your message');
+    case 'a reply to a message of yours': return t('a reply to a message of yours');
+    case 'in a thread you are in': return t('in a thread you are in');
+    default: return String(why || '');
+  }
+}
 export function agoText(at, now = Date.now(), opts = {}) { return agoWords(at, now, opts); }
 function agoWords(at, now = Date.now(), { t = tDevice } = {}) {
   const s = Math.max(0, Math.round((now - Number(at || 0)) / 1000));
@@ -381,6 +424,9 @@ export function statusTagParts(tag, { now = Date.now(), t = tDevice } = {}) {
     case 'read': return { ...around(t('{agent} read {ago}', { agent: WHO, ago: agoText(tag.at) }), who), tone: 'neutral', icon: null, title: t('{agent} read this conversation {ago}', { agent: who, ago: agoText(tag.at) }) };
     case 'new-since-read': return { ...around(t('New since {agent}', { agent: WHO }), who), tone: 'attn', icon: null, title: t('New messages arrived after {agent} read this conversation ({ago})', { agent: who, ago: agoText(tag.at) }) };
     case 'held': return { ...around(t('last wake held'), ''), tone: 'warn', icon: 'alert', title: t('A wake for this conversation is held — its messages wait for the agent\'s next turn') };
+    // lane lark-search-poll (owner decision 1): a single chat with unread messages — "单聊 · N 条新消息" (the tag's WIDTH
+    // BUDGET lives in its words — test-channels-e2e ⑰: en "DM · N new", ja "個別 · 新着 N 件")
+    case 'direct': return { ...around(t('DM · {n} new', { n: tag.n || 1 }), ''), tone: 'attn', icon: null, title: t('Somebody wrote to you in a single chat — {n} unread', { n: tag.n || 1 }) };
     case 'replied': return { ...around(t('replied {ago}', { ago: agoText(tag.at) }), ''), tone: 'neutral', icon: null, title: t('You wrote in this conversation {ago}', { ago: agoText(tag.at) }) };
     default: return null;
   }

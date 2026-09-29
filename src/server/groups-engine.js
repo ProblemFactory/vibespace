@@ -35,11 +35,31 @@
  *                woken member is never handed the same message again.
  *   BROADCAST    every change pushes `channel-groups-updated` {changed, groups,
  *                messages?} — the recomputed list, never a dirty bit.
+ *   CARDS        (lane group-report-card, the owner 2026-09-28: "怎么在那个对话里
+ *                看不到你发了消息？") a report handed to a member's turn is SEEN in
+ *                that member's chat: every mark `reportsForTurn` returns carries
+ *                the CARDS of the messages its report showed (src/group-card.js —
+ *                sender, the words the member was shown, the group, "… and N
+ *                more" on the oldest), and `commitReports` emits them through
+ *                THE ladder's card door (`deliver.emitPeerCard`, kind 'group')
+ *                before it stamps a marker. A wake's post carries `group` to the
+ *                ladder, whose own card says the same. The door keys a card by
+ *                (group, record instant): a message carded once is never carded
+ *                again in that conversation.
+ *   PENDING      `reportsForTurn(cid, {preview:true})` commits nothing and adds
+ *                `pending` = every group message waiting for that member's next
+ *                turn (the stash strip above the composer lists them — src/server/
+ *                stash-handover.js), memoised against the facts it reads; every
+ *                change that can move it calls `onPending()` (the strip's
+ *                re-publish).
  */
 const crypto = require('crypto');
 const G = require('../channel-groups.js');
+const GC = require('../group-card.js');
 const { makeRecord, inertFrames } = require('../channel-record.js');
 const msgAcl = require('../msg-acl.js');
+// "Clear content…" (2026-09-28): the replacement record, the fold every reader applies, the clear itself
+const RC = require('../record-clear.js');
 
 const WAKE_BUDGET = 4096;       // one wake's report (it rides its own turn, not the 10 KiB injection)
 const TURN_BUDGET = 4096;       // every group report on ONE user turn together
@@ -49,7 +69,12 @@ const LOG_READ = 2000;
 const READ_MAX = 200;
 const LAST_TEXT_MAX = 160;
 const WAITING_NAMED = 3;        // the trailer names at most this many waiting groups, then counts
+const PENDING_TEXT_MAX = 400;   // a waiting message's words as the strip previews them (its first line is what shows)
 const WAITING_NAME_BYTES = 40;
+// a log read asks for this many records more than it shows when the group holds cleared
+// records (their replacement records are dropped by the fold) — bounded, so a group
+// with thousands of clears never turns one page into a whole-log read
+const REPLACEMENT_READ_MAX = 5000;
 /** A group name clipped to WAITING_NAME_BYTES (UTF-8, never mid-character). */
 function clipName(name) {
   const v = String(name);
@@ -69,12 +94,19 @@ function create({
   // `() => [{cid, name, groups[], reachability}]` — the live agent sessions
   // (the wiring's liveSessions). Reach and names are asked of THIS, per call.
   roster = () => [],
+  // the .197 integration: the copies of a cleared group message OUTSIDE the engine — the group cards' rings
+  // (lane group-report-card) — `(groupId, keys)` with THE KEY `<group>:<record instant>` per cleared record
+  onCleared = () => {},
   // Task Group externalVisibility (msg-acl's group setting)
   groupSetting = () => 'none',
   rand = () => crypto.randomBytes(4).toString('hex'),
   // the WAKE PACE's clock (real time by default — the pace is about billed
   // turns in the world, never the injected record clock `now`)
   paceClock = () => Date.now(),
+  // lane group-report-card: something that moves a member's waiting group
+  // messages happened (a post, a membership / notify change, a marker) — the
+  // stash strip's re-publish (server.js → stash-handover `changed()`, debounced)
+  onPending = () => {},
 } = {}) {
   if (!store || !store.groups) throw new Error('groups-engine: a channel store with the groups family is required');
   const A = G.GROUP_ADAPTER_ID;
@@ -177,7 +209,7 @@ function create({
   function view(g) {
     return {
       id: g.id, name: g.name, pair: g.pair ? g.pair.slice() : null, createdBy: g.createdBy, createdAt: g.createdAt,
-      archivedAt: g.archivedAt || null, lastAt: g.lastAt || g.createdAt, lastText: g.lastText || '',
+      archivedAt: g.archivedAt || null, lastAt: g.lastAt || g.createdAt, lastText: g.lastText || '', lastCleared: !!g.lastCleared, // lastCleared: the last line IS the cleared sentence (a client words it)
       members: g.members.map((m) => ({ member: m.member, name: displayName(g, m.member), notify: m.notify, joinedAt: m.joinedAt, invitedBy: m.invitedBy, live: !!sessionOf(m.member) })),
     };
   }
@@ -226,13 +258,18 @@ function create({
   /** The OWNER's list (the panel, every broadcast): every group + its unread
    *  count for the owner. Agents read `listFor` (their own counts). */
   const list = () => Object.values(all()).map((g) => ({ ...view(g), unread: ownerUnread(g) })).sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
-  function announce(changed, messages) {
+  const pendingChanged = () => { try { onPending(); } catch (e) { log.warn && log.warn('[groups] pending hook failed:', e && e.message); } };
+  // the .197 integration (redact × group-report-card): ONE options shape carries both lanes' third parameters — the
+  // cleared-record facts ("Clear content…") and the pending-strip flag (the roster call passes { pending: false })
+  function announce(changed, messages, cleared = null, { pending = true } = {}) {
     try {
       const groups = list();
       for (const g of groups) rosterSig.set(g.id, sigOfView(g));
-      broadcast({ type: 'channel-groups-updated', changed, groups, ...(messages && messages.length ? { messages } : {}) });
+      // `cleared` (2026-09-28): the records a clear replaced, AS CLEARED — a window patches its row in place
+      broadcast({ type: 'channel-groups-updated', changed, groups, ...(messages && messages.length ? { messages } : {}), ...(cleared && cleared.length ? { cleared } : {}) });
     }
     catch (e) { log.warn && log.warn('[groups] broadcast failed:', e && e.message); }
+    if (pending) pendingChanged();   // a post / a membership or notify change moves what waits for a member (never a roster rename — noteRoster)
   }
   /** WHAT A CLIENT'S COPY OF A GROUP SAYS ABOUT ITS MEMBERS (r3): the names
    *  and liveness `view()` derives from the LIVE roster. A session renamed
@@ -257,7 +294,7 @@ function create({
       }).join('|');
       if (rosterSig.get(g.id) !== sig) changed.push(g.id);
     }
-    if (changed.length) announce(changed);
+    if (changed.length) announce(changed, null, null, { pending: false });   // names / liveness only: nothing waiting moved (and this runs FROM the session list's broadcast — never a re-publish loop)
     return changed;
   }
 
@@ -275,9 +312,21 @@ function create({
     g.lastAt = at;
     bumpUnread(g, prevLastAt, at, author);
     g.lastText = String(rec.text).replace(/\s+/g, ' ').slice(0, LAST_TEXT_MAX);
+    delete g.lastCleared;
     return rec;
   }
-  const readLog = (gid) => store.readTail(A, gid, { limit: LOG_READ });
+  /** THE LOG AS EVERY READER SEES IT (2026-09-28): a clear APPENDS a replacement
+   *  record (`raw.kind:'cleared'`, the log is append-only) and names the record
+   *  in the group's `cleared` index; `RC.foldClears` drops the replacements and
+   *  clears every record either names. A page asks for as many extra records as
+   *  the group holds replacements (bounded), so a page of fifty stays fifty. */
+  const clearedCountOf = (g) => (g && g.cleared && typeof g.cleared === 'object' ? Math.min(REPLACEMENT_READ_MAX, Object.keys(g.cleared).length) : 0);
+  function readFolded(gid, opts) {
+    const g = getGroup(gid);
+    const n = Math.max(1, Number(opts.limit) || 50);
+    return RC.foldClears(store.readTail(A, gid, { ...opts, limit: n + clearedCountOf(g) }), g && g.cleared).slice(-n);
+  }
+  const readLog = (gid) => readFolded(gid, { limit: LOG_READ });
 
   async function markReported(gid, member, upTo) {
     if (!Number.isFinite(upTo)) return;
@@ -286,6 +335,7 @@ function create({
       const m = g && G.memberOf(g, member);
       if (m && !(Number(m.reportedUpTo) >= upTo)) m.reportedUpTo = upTo;
     });
+    pendingChanged();   // what waits for that member moved
   }
 
   const WAKE_LEAD = {
@@ -306,7 +356,10 @@ function create({
     if (!deliver || typeof deliver.deliverToConversation !== 'function') r = { ok: false, reason: 'no delivery ladder wired' };
     else {
       try {
-        r = await deliver.deliverToConversation(member, rep.text, { kind: 'peer', spendReason: 'peer-message', fromName: `${displayName(g, rec.author.id)} · ${g.name}`, cardText: rec.text });
+        // `group` (lane group-report-card): the ladder's own card after a successful post is the GROUP card — the
+        // sender → the group, the message that woke it — keyed like a report's (a later re-report renders no second)
+        const self = !!(rec.author && rec.author.id === G.OWNER);
+        r = await deliver.deliverToConversation(member, rep.text, { kind: 'peer', spendReason: 'peer-message', fromName: `${displayName(g, rec.author.id)} · ${g.name}`, cardText: rec.text, group: { id: g.id, name: g.name, at: rec.at, from: self ? null : displayName(g, rec.author.id), self, via: 'wake' } });
       } catch (e) { r = { ok: false, reason: 'delivery threw: ' + (e && e.message) }; }
     }
     try { store.audit({ kind: 'group-wake', groupId: gid, member, why, ok: !!(r && r.ok), lane: (r && r.lane) || null, reason: r && !r.ok ? r.reason || null : null, refused: (r && r.refused) || null, spendWhy: (r && r.why) || null }); } catch { }
@@ -643,7 +696,123 @@ function create({
     const n = Math.max(1, Math.min(READ_MAX, Number(limit) || 50));
     const opts = { limit: n };
     if (Number.isFinite(Number(before)) && before !== null && before !== '') { opts.before = Number(before); }
-    return { ok: true, group: view(rg.group), records: store.readTail(A, rg.group.id, opts) };
+    return { ok: true, group: view(rg.group), records: readFolded(rg.group.id, opts) };
+  }
+
+  /**
+   * "CLEAR CONTENT…" — THE door for group messages (2026-09-28). The log is
+   * APPEND-ONLY (invariant 1 of channel-store), so a clear WRITES, it never
+   * rewrites: one REPLACEMENT record per cleared record — `{vendorId:'gx-…',
+   * at: the clear's instant, author: the clearer, text:'', raw:{kind:'cleared',
+   * of:<vendorId>, by}}` — appended in the groups door, then the record is named
+   * in the group's `cleared` index (`{vendorId: {at, by}}`, groups.json) that
+   * every page applies even when it does not reach the replacement. Log FIRST,
+   * index SECOND, like appendIn. Neither moves `lastAt` (a clear is not
+   * activity: no unread, no report, no re-sort); `lastText` becomes the sentence
+   * when the cleared record was the newest (`lastCleared`). THE ORIGINAL LINE
+   * STAYS ON DISK: a group log is never rolled or trimmed (trim runs on adapter
+   * logs only), so there is no roll to compact it on — every reader shows the
+   * cleared text, the bytes remain in msgs/groups/<id>.ndjson. Each vendorId is
+   * found with the store's findRecord (a batch past 8 reads the log once),
+   * asked `allow(record)` (the caller's PURE clearVerdict). ONE audit line
+   * (kind + ids + by, never words), ONE announce carrying the cleared records.
+   * @returns {ok:true, cleared:[vid], already:[vid], unknown:[vid], refused:[{id, code, why, status}], records:[cleared]} | a refusal
+   */
+  async function clearMessages({ group: gid, ids, by = G.OWNER, at = null, allow = null } = {}) {
+    const g0 = getGroup(gid);
+    if (!g0) return { ok: false, code: 'not-found', error: `no group ${String(gid).slice(0, 40)}` };
+    const want = [...new Set((Array.isArray(ids) ? ids : [ids]).map(String))];
+    const out = { ok: true, cleared: [], already: [], unknown: [], refused: [], records: [] };
+    // look every record up OUTSIDE the door (a read), decide inside it
+    const found = originalsOf(gid, want);
+    const stamp = Number.isFinite(at) ? at : now();
+    const byWho = by === G.OWNER ? 'owner' : String(by);
+    await store.groups.update((gr) => {
+      const g = gr.groups[gid];
+      if (!g) return;
+      if (!g.cleared || typeof g.cleared !== 'object') g.cleared = {};
+      const fresh = [];
+      for (const vid of want) {
+        const rec = found.get(vid);
+        if (!rec) { out.unknown.push(vid); continue; }
+        if (g.cleared[vid]) { out.already.push(vid); continue; }
+        const v = allow ? allow(rec) : { ok: true };
+        if (!v || !v.ok) { out.refused.push({ id: vid, code: (v && v.code) || 'not_yours', why: (v && v.why) || '', status: (v && v.status) || 403 }); continue; }
+        fresh.push(rec);
+      }
+      if (!fresh.length) return;
+      const repl = fresh.map((r) => makeRecord({
+        adapterId: A, convId: gid, vendorId: `gx-${stamp.toString(36)}-${(++seq).toString(36)}`, at: stamp,
+        author: { id: by, name: by === G.OWNER ? 'User' : displayName(g, by), isSelf: by === G.OWNER, isBot: false },
+        text: '', raw: { kind: RC.REPLACEMENT_KIND, of: r.vendorId, by: byWho },
+      }));
+      store.appendRecords(A, gid, repl);                       // the log FIRST…
+      for (const r of fresh) g.cleared[r.vendorId] = { at: stamp, by: byWho };   // …the index SECOND
+      if (fresh.some((r) => Number(r.at) === Number(g.lastAt))) { g.lastText = RC.CLEARED_TEXT; g.lastCleared = true; }
+      for (const r of fresh) { out.cleared.push(r.vendorId); out.records.push(RC.clearedRecord(r, { kind: 'group-message', by: byWho, at: stamp })); }
+    });
+    if (out.cleared.length) {
+      try { store.audit({ kind: 'clear', groupId: gid, recordIds: out.cleared, by: byWho, at: stamp }); } catch { }
+      // the delivery ladder's stash (data/msg-stash.json): a wake a codex member's wrapper could not queue
+      // is handed back to the ladder WHOLE (the report text, a line per record) and drained into that
+      // member's next turn — every line of a held report that repeats a cleared record's words goes
+      // (verify r3; the engine itself never stashes a wake, the wrapper's hand-back does)
+      try { if (deliver && typeof deliver.redactStash === 'function') deliver.redactStash((e) => redactHeldReport(e, gid, out.cleared.map((vid) => found.get(vid)))); } catch (err) { log.warn && log.warn('[groups] ladder stash rewrite failed:', err && err.message); }
+      announce([gid], null, out.records.map((record) => ({ groupId: gid, vendorId: record.vendorId, record })));
+      // the .197 integration: a member's chat card of a cleared message re-words (its ring copy lost the words too)
+      try { onCleared(gid, out.cleared.map((vid) => found.get(vid)).filter(Boolean).map((r) => `${gid}:${Number(r.at)}`)); } catch (err) { log.warn && log.warn('[groups] the group cards were not re-worded:', err && err.message); }
+    }
+    return out;
+  }
+  /** THE CLEAR'S OWN LOOKUP: the ORIGINAL records `vids` name in group `gid` (a raw read of the log — the
+   *  replacement records are never an original; a batch past 8 reads the log once) → Map(vendorId → record | null).
+   *  Shared by `clearMessages` and the held-entry judge below (verify r4) — the ONLY two readers that may see an
+   *  original after its clear, and neither serves it: the clear returns cleared copies, the judge only matches. */
+  function originalsOf(gid, vids) {
+    const want = [...new Set((Array.isArray(vids) ? vids : [vids]).map(String))];
+    if (want.length > 8) {
+      const all = store.readTail(A, gid, { limit: 1e7 });
+      const byId = new Map(all.filter((r) => r && r.vendorId && !RC.isReplacement(r)).map((r) => [r.vendorId, r]));
+      return new Map(want.map((v) => [v, byId.get(v) || null]));
+    }
+    return new Map(want.map((v) => { const r = store.findRecord(A, gid, v); return [v, r && !RC.isReplacement(r) ? r : null]; }));
+  }
+  /**
+   * "CLEAR CONTENT…" — THE LADDER'S JUDGE (lane-redact verify r4, 2026-09-28, reproduced): the delivery ladder asks this
+   * of EVERY entry it stashes (`deliver.registerStashJudge` below). The door's own rewrite takes the held reports queued
+   * at the clear — but a wake report a codex member's wrapper hands BACK later (a queued wake dropped by Stop / removed
+   * from the queue: an unbounded window, past a restart too) re-enters the queue WHOLE with the record's pre-clear words.
+   * A report names its group `(<gid>)`; every group it names whose `cleared` index is not empty lends its originals
+   * (read from the log — the bytes stay, the index says which are cleared; cached per group by the index's size) and
+   * `redactHeldReport` replaces each line that repeats a cleared record's witness. Store-backed, never a memory of past
+   * clears. null = nothing of a cleared record.
+   */
+  const heldNeedles = new Map();   // gid → {n: the index's size when read, recs: the witnesses only ({text: first 40 code points}), never the records}
+  const witnessOf = (r) => ({ text: Array.from(String((r && r.text) || '').replace(/\s+/g, ' ').trim()).slice(0, 40).join('') });
+  function judgeHeldEntry(e) {
+    if (!e || typeof e.text !== 'string' || !e.text.includes('(')) return null;
+    let out = null;
+    for (const [gid, g] of Object.entries(all())) {
+      const vids = g && g.cleared && typeof g.cleared === 'object' ? Object.keys(g.cleared).slice(0, REPLACEMENT_READ_MAX) : [];
+      if (!vids.length || !e.text.includes(`(${gid})`)) continue;
+      let c = heldNeedles.get(gid);
+      if (!c || c.n !== vids.length) { c = { n: vids.length, recs: [...originalsOf(gid, vids).values()].filter(Boolean).map(witnessOf) }; heldNeedles.set(gid, c); }
+      const r = redactHeldReport({ ...e, ...(out || {}) }, gid, c.recs);
+      if (r) out = { ...(out || {}), ...r };
+    }
+    return out;
+  }
+  if (deliver && typeof deliver.registerStashJudge === 'function') deliver.registerStashJudge(judgeHeldEntry);
+  /** A held report (one stash entry) that names group `gid`: every LINE that carries a cleared record's
+   *  words (the report writes each record's text whitespace-collapsed, possibly cut — the first 40 code
+   *  points of the collapsed text are the witness) becomes the sentence; null when nothing matched. */
+  function redactHeldReport(e, gid, recs) {
+    if (!e || typeof e.text !== 'string' || !e.text.includes(`(${gid})`)) return null;
+    const needles = recs.map((r) => Array.from(String((r && r.text) || '').replace(/\s+/g, ' ').trim()).slice(0, 40).join('')).filter((n) => n.length >= 4);
+    if (!needles.length) return null;
+    let hit = false;
+    const lines = e.text.split('\n').map((l) => { if (needles.some((n) => l.includes(n))) { hit = true; return `- ${RC.CLEARED_TEXT}`; } return l; });
+    return hit ? { text: lines.join('\n') } : null;
   }
 
   /** The OWNER opened / touched a group's window (g3): its read mark moves to
@@ -694,10 +863,68 @@ function create({
    * would push the section over is taken back out (its marker unmoved) until
    * it fits (2026-09-23 verifier: 60 long-named groups made a 4096 B section
    * 18 579 B, capInline trimmed it after the markers had moved).
-   * @returns {{text, marks:[{groupId, upTo}]}} — commit the marks with
-   *   `commitReports` once the text is actually handed out.
+   * @returns {{text, marks:[{groupId, upTo, cards?}], cards}} — commit the
+   *   marks with `commitReports` once the text is actually handed out (it
+   *   draws each mark's cards, then stamps it). `{preview:true}` commits
+   *   nothing: `marks` is empty and `pending` lists every waiting message.
    */
-  function reportsForTurn(cid, { budget = TURN_BUDGET } = {}) {
+  function reportsForTurn(cid, { budget = TURN_BUDGET, preview = false } = {}) {
+    if (preview) return previewFor(cid, budget);
+    return composeReports(cid, budget);
+  }
+  /** THE CARDS a shown report carries (lane group-report-card): one per group MESSAGE the member was shown, oldest
+   *  first — the sender, the words it was shown (whole, or cut as its line was), the group — and the count of the
+   *  older records the report did not show on the oldest card ("… and N more"; the agent's own pointer counts the
+   *  same). A system record (an invite, a rename) rides the report and renders no card. */
+  function cardsOf(g, rep, via = 'report') {
+    const shown = (rep && Array.isArray(rep.lines) ? rep.lines : []).filter((x) => x && x.rec && ((x.rec.raw && x.rec.raw.kind) || 'message') === 'message' && String(x.body || '').trim());
+    const cards = shown.map((x) => {
+      const a = x.rec.author || {};
+      const self = a.id === G.OWNER;
+      const from = self ? null : (a.name || a.id || null);
+      return { fromName: from, text: String(x.body), group: { id: g.id, name: g.name, at: x.rec.at, from, self, via, cut: !!x.cut, more: 0 } };
+    });
+    if (cards.length && Number(rep.clipped) > 0) cards[0].group.more = Number(rep.clipped);
+    return cards;
+  }
+  /** PREVIEW (the strip above the composer): the same composition a user turn would get under `budget`, committing
+   *  NOTHING (no marks are handed out — a preview is never committable), plus `pending` = every group message
+   *  waiting for this member's next turn (not only the ones that would fit). Memoised against the facts it reads —
+   *  per group: its `lastAt`, the member's marker, its notify mode (the log is append-only: a new record moves
+   *  `lastAt`) — so the session list's broadcast reads no log twice. */
+  const previewMemo = new Map();   // cid → {sig, value}
+  function pendingSig(cid) {
+    const parts = [];
+    for (const g of Object.values(all())) { const m = G.memberOf(g, cid); if (m) parts.push(`${g.id}:${Number(g.lastAt) || 0}:${memberSince(m)}:${m.notify}`); }
+    return parts.join('|');
+  }
+  function pendingOf(cid) {
+    const out = [];
+    for (const g of Object.values(all())) {
+      const m = G.memberOf(g, cid);
+      if (!m || m.notify === 'mute') continue;
+      const since = memberSince(m);
+      if (!((Number(g.lastAt) || 0) > since)) continue;
+      for (const r of readLog(g.id)) {
+        if (!r || !(Number(r.at) > since) || (r.author && r.author.id === cid) || ((r.raw && r.raw.kind) || 'message') !== 'message') continue;
+        const self = !!(r.author && r.author.id === G.OWNER);
+        out.push({ groupId: g.id, groupName: g.name, at: r.at, from: self ? null : ((r.author && (r.author.name || r.author.id)) || null), self, text: String(r.text == null ? '' : r.text).slice(0, PENDING_TEXT_MAX) });
+      }
+    }
+    return out.sort((a, b) => a.at - b.at);
+  }
+  function previewFor(cid, budget) {
+    const sig = pendingSig(cid) + '#' + (Number(budget) || 0);
+    const hit = previewMemo.get(cid);
+    if (hit && hit.sig === sig) return hit.value;
+    const r = composeReports(cid, budget);
+    const value = { text: r.text, marks: [], cards: r.cards, pending: pendingOf(cid), preview: true };
+    previewMemo.delete(cid);
+    previewMemo.set(cid, { sig, value });
+    if (previewMemo.size > 1000) previewMemo.delete(previewMemo.keys().next().value);
+    return value;
+  }
+  function composeReports(cid, budget) {
     const cands = [];
     for (const g of Object.values(all())) {
       const m = G.memberOf(g, cid);
@@ -706,7 +933,7 @@ function create({
       if (!((g.lastAt || 0) > since)) continue;
       cands.push(g);
     }
-    if (!cands.length) return { text: '', marks: [] };
+    if (!cands.length) return { text: '', marks: [], cards: [] };
     cands.sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
     const cap = Math.min(TURN_BUDGET, Number(budget) || 0);
     const head = '### Group messages since your last turn (vibespace-msg — nobody was woken for these; reply only if it helps)';
@@ -721,7 +948,7 @@ function create({
       const rep = G.reportFor(g, readLog(g.id), cid, { budget: Math.min(G.REPORT_BUDGET, room) });
       if (!rep) { quiet.push({ groupId: g.id, upTo: g.lastAt }); continue; }   // only its own messages since — nothing to say, move the marker
       if (rep.fits === false) { waiting.push(g); continue; }
-      entries.push({ g, text: rep.text, mark: { groupId: g.id, upTo: rep.upTo } });
+      entries.push({ g, text: rep.text, mark: { groupId: g.id, upTo: rep.upTo, cards: cardsOf(g, rep) } });
       room -= Buffer.byteLength(rep.text, 'utf-8') + 2;
     }
     const compose = () => {
@@ -745,7 +972,8 @@ function create({
         if (Buffer.byteLength(t, 'utf-8') <= cap) text = t;
       }
     }
-    return { text, marks: [...entries.map((e) => e.mark), ...quiet] };
+    const cards = entries.flatMap((e) => e.mark.cards).sort((a, b) => a.group.at - b.group.at);
+    return { text, marks: [...entries.map((e) => e.mark), ...quiet], cards };
   }
   /** The trailer: at most WAITING_NAMED groups named (each name clipped), the
    *  rest counted — bounded whatever the names are. */
@@ -754,7 +982,15 @@ function create({
     const more = waiting.length - named.length;
     return `(${waiting.length} more group(s) with new messages — ${named.length ? named.join(', ') : 'none named here'}${more > 0 ? ` +${more} more` : ''} — arrive on your next turn, or vibespace-msg read <group>)`;
   }
+  /** The report was handed out: its CARDS first (lane group-report-card — synchronously, before any await, so they
+   *  land in the chat while the hook's answer is composed: under the message that carried them, oldest first,
+   *  through THE ladder's card door, which keys each (group, record) once), then the markers. */
   async function commitReports(cid, marks) {
+    const cards = [];
+    for (const mk of marks || []) for (const c of (mk && Array.isArray(mk.cards) ? mk.cards : [])) cards.push(c);
+    cards.sort((a, b) => a.group.at - b.group.at);
+    if (cards.length && !(deliver && typeof deliver.emitPeerCard === 'function')) (log.warn || log.log || (() => {})).call(log, `[groups] ${cards.length} group message card(s) for ${String(cid).slice(0, 8)} not drawn — no card door wired`);
+    else for (const c of cards) { try { deliver.emitPeerCard(cid, { fromName: c.fromName, text: c.text, kind: 'group', group: c.group }); } catch (e) { (log.warn || log.log || (() => {})).call(log, '[groups] a group message card failed:', e && e.message); } }
     for (const mk of marks || []) await markReported(mk.groupId, cid, mk.upTo);
   }
 
@@ -779,7 +1015,7 @@ function create({
   return {
     list, listFor, markRead, liveRoster, pacerFor, noteRoster, get: (id) => { const g = getGroup(id); return g ? view(g) : null; }, resolveGroup, resolveMember, resolveTarget, reach,
     create: createGroup, invite, leave: (o) => remove({ ...o, kick: false }), kick: (o) => remove({ ...o, kick: true }),
-    rename: renameGroup, archive: archiveGroup, setNotify, post, sendToAgent, findPair, findOrCreatePair, read,
+    rename: renameGroup, archive: archiveGroup, setNotify, post, sendToAgent, findPair, findOrCreatePair, read, clearMessages,
     reportsForTurn, commitReports,
     WAKE_BUDGET, TURN_BUDGET, MIN_REPORT_ROOM,
   };

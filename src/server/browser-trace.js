@@ -70,6 +70,7 @@ const RR = require('../browser-recording-retention.js'); // the video recordings
 const INT = require('../browser-interrupt.js'); // the owner's ruling (2026-09-27): what was IN FLIGHT at a takeover is read off this recorder's ring
 const B = require('../browser-profiles.js');
 const S = require('../browser-stream.js');
+const HM = require('../browser-human.js'); // BROWSE YOURSELF (B-6ae8): the user's own browsing — his session markers, his recorded acts
 
 const SWEEP_EVERY_MS = 60 * 60 * 1000;
 const SIZE_CACHE_MS = 10 * 60 * 1000;
@@ -211,8 +212,11 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     try { onSession?.(m); } catch (e) { log.warn?.(`[browser-trace] session hook failed: ${e && e.message}`); }
   }
   /** Open the session of (browser key, scope) unless one is open; answers it. */
-  function startSession({ browserKey, profileId = null, webuiSessionId = null, why = null, at = null } = {}) {
-    if (!/^bk-[0-9a-f]{8}(\.\d{1,4})?$/.test(String(browserKey || ''))) return null;
+  function startSession({ browserKey, profileId = null, webuiSessionId = null, why = null, at = null, holder = null, recorded = null } = {}) {
+    // BROWSE YOURSELF (B-6ae8): the gate widens ONLY for the user's own browsing — a `hu-` key, `holder: 'user'`, on a
+    // named profile's scope (never a chat card: chatCardsFor refuses the key and skips the holder)
+    const human = holder === 'user' && HM.isHumanKey(browserKey) && B.isProfileId(profileId);
+    if (!human && !/^bk-[0-9a-f]{8}(\.\d{1,4})?$/.test(String(browserKey || ''))) return null;
     // the trace switch OFF means nothing is recorded — no new session either (an open one still ends: its end is written)
     if (!enabled()) return null;
     ensureOpenLoaded();
@@ -221,7 +225,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     const had = openSessions.get(k);
     if (had) { if (webuiSessionId && !had.webuiSessionId) had.webuiSessionId = webuiSessionId; return had; }
     let label = null; try { label = profileId && keeper && typeof keeper.profile === 'function' ? (keeper.profile(profileId) || {}).label || null : null; } catch { label = null; }
-    const m = BS.markerFor({ phase: 'start', id: BS.mintSessionId(crypto.randomBytes(4).toString('hex')), browserKey, profileId, webuiSessionId, label, at: at || now(), reason: why });
+    const m = BS.markerFor({ phase: 'start', id: BS.mintSessionId(crypto.randomBytes(4).toString('hex')), browserKey, profileId, webuiSessionId: human ? null : webuiSessionId, label, at: at || now(), reason: why, ...(human ? { holder: 'user', recorded: recorded === true } : {}) });
     appendMarker(scope, m);
     const o = { ...m, scope, count: 0, lastAt: 0 };
     openSessions.set(k, o);
@@ -230,7 +234,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     return o;
   }
   function endOpen(scope, o, reason, count, at) {
-    const m = BS.markerFor({ phase: 'end', id: o.id, browserKey: o.browserKey, profileId: o.profileId || null, webuiSessionId: o.webuiSessionId || null, label: o.label || null, at, count, durationMs: Math.max(0, at - o.at), reason });
+    const m = BS.markerFor({ phase: 'end', id: o.id, browserKey: o.browserKey, profileId: o.profileId || null, webuiSessionId: o.webuiSessionId || null, label: o.label || null, at, count, durationMs: Math.max(0, at - o.at), reason, ...(o.holder === 'user' ? { holder: 'user' } : {}) });
     appendMarker(scope, m);
     log.log?.(`[browser-trace] browser session ${o.id} ended (${reason}): ${o.browserKey} on ${o.profileId || 'its own browser'}, ${count} action(s)`);
     sayMarker(m);
@@ -250,6 +254,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   function sessionForTap(tp) {
     const bk = tp.browserKey || tp.wantKey || null;
     if (!bk) return null;
+    if (tp.human) return startSession({ browserKey: bk, profileId: tp.profileId || null, why: 'action', holder: 'user', recorded: true }); // BROWSE YOURSELF: his own session
     return startSession({ browserKey: bk, profileId: tp.profileId || null, webuiSessionId: tp.sessionId || null, why: 'action' });
   }
 
@@ -340,7 +345,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     const after = p.afterSame && p.after === p.before ? (before ? { ...before, file: before.file } : null) : writeFrame(p.after, 'after');
     const position = T.positionOf({ kind: p.kind, params: p.command.params, box: p.box, boxWhy: p.boxWhy });
     const bs = sessionForTap(tp); // 2026-09-27: the browser session this action belongs to (an action with none opens one)
-    const entry = T.entryFor({ id, at: p.at, sessionId: tp.sessionId, browserKey: tp.browserKey, profileId: tp.profileId, browserSession: bs ? bs.id : null, command: p.command, result: p.result, position, before, after, afterSame: p.afterSame, url: tp.lastUrl || p.url || null });
+    const entry = T.entryFor({ id, at: p.at, sessionId: tp.sessionId, browserKey: tp.browserKey, profileId: tp.profileId, browserSession: bs ? bs.id : null, command: p.command, result: p.result, position, before, after, afterSame: p.afterSame, url: tp.lastUrl || p.url || null, holder: tp.human ? 'user' : null });
     if (bs) { bs.count++; bs.lastAt = Math.max(bs.lastAt || 0, entry.at); }
     try { fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(entry), { mode: FILE_MODE }); } catch (e) { log.warn?.(`[browser-trace] entry write failed: ${e && e.message}`); }
     appendIndex(scope, entry);
@@ -398,6 +403,46 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     log.log?.(`[browser-trace] tracing ${sessionId} on ${profileId || (tp.childKey ? 'its sub-agent browser ' + tp.childKey : 'its ephemeral browser')}`);
     return { ok: true, key };
   }
+  /**
+   * BROWSE YOURSELF (B-6ae8, the owner 3/4): the tap on the USER's own browsing (his relay, scope = the profile) — armed
+   * while a window of his holds his tab (the keeper's `human-start` / `human-driving`), only when the trace is on AND the
+   * profile records his actions (`recordMine`, default on); disarmed when he goes away / ends, or the switch goes off.
+   * His acts arrive as the bridge's synthetic command/result pairs; the address row's own commands mirror by themselves.
+   */
+  function watchHuman({ key, profileId } = {}) {
+    if (!enabled()) return Promise.resolve({ ok: false, code: 'trace_off', error: 'the action trace is off (browser.actionTrace)' });
+    if (!bridge || typeof bridge.tapHuman !== 'function') return Promise.resolve({ ok: false, code: 'unavailable', error: 'the stream bridge is not wired' });
+    const p = keeper && typeof keeper.profile === 'function' ? keeper.profile(profileId) : null;
+    if (!p || !HM.recordsMine(p)) return Promise.resolve({ ok: false, code: 'record_mine_off', error: 'this profile does not record your own actions' });
+    const k = 'human:' + key;
+    const had = taps.get(k);
+    if (had) return had.arming ? had.arming.then((r) => (r && r.ok ? { ...r, already: true } : r)) : Promise.resolve({ ok: true, key: k, already: true });
+    const tp = tapState(k, { sessionId: null, profileId, browserKey: key, target: null });
+    tp.human = true;
+    taps.set(k, tp);
+    tp.arming = (async () => {
+      let r;
+      try { r = await bridge.tapHuman(key, (msg, _text, relay) => onRecord(tp, msg, relay)); } catch (e) { r = { ok: false, code: 'internal', error: String(e && e.message) }; }
+      if (!r || !r.ok) { if (taps.get(k) === tp) taps.delete(k); try { r && r.untap && r.untap(); } catch { /* */ } return { ok: false, code: (r && r.code) || 'refused', error: (r && r.error) || 'tap refused' }; }
+      if (taps.get(k) !== tp) { try { r.untap && r.untap(); } catch { /* */ } return { ok: false, code: 'ended', error: 'disarmed while the tap was connecting' }; }
+      tp.untap = r.untap;
+      tp.target = r.target || null;
+      log.log?.(`[browser-trace] recording the user's own browsing of ${profileId} (${key})`);
+      return { ok: true, key: k };
+    })().finally(() => { tp.arming = null; });
+    return tp.arming;
+  }
+  function unwatchKey(k) {
+    armFailedAt.delete(k); armFailSaid.delete(k);
+    const tp = taps.get(k);
+    if (!tp) return false;
+    for (const p of [...tp.pending.values()]) finalizeNow(tp, p, 'tracing stopped');
+    for (const t of tp.timers) clearTimeout(t);
+    taps.delete(k);
+    try { tp.untap?.(); } catch { /* */ }
+    return true;
+  }
+  const unwatchHuman = (key) => unwatchKey('human:' + key);
   function unwatch({ sessionId, profileId = null, childKey = null } = {}) {
     const key = tapKey(sessionId, profileId, childKey);
     armFailedAt.delete(key); armFailSaid.delete(key);
@@ -445,6 +490,11 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
    *  (after the taps finalized what was in flight, so the last actions carry the session they happened in); an IDLE
    *  stop closes nothing. Sessions are recorded whether or not the trace is on (they are small, and say what ran). */
   function sessionsOnEvent(ev) {
+    // BROWSE YOURSELF (B-6ae8): the user's own browsing is a session of the PROFILE's scope — its start names whether his
+    // actions are recorded (the trace on AND the profile's "Also record my own actions"); its end names why
+    if (ev.kind === 'human-start') { const p = keeper && keeper.profile ? keeper.profile(ev.profileId) : null; startSession({ browserKey: ev.key, profileId: ev.profileId, why: 'browse', holder: 'user', recorded: enabled() && HM.recordsMine(p) }); return; }
+    if (ev.kind === 'human-end') { endSession({ browserKey: ev.key, profileId: ev.profileId, reason: BS.END_REASONS.includes(ev.reason) ? ev.reason : 'released' }); return; }
+    if (ev.kind === 'human-driving' || ev.kind === 'human-away') return;
     const reason = BS.endReasonFor(ev);
     if (ev.ephemeral) {
       if (!ev.browserKey) return;
@@ -465,6 +515,15 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     return out;
   }
   function leaseTaps(ev) {
+    // BROWSE YOURSELF (B-6ae8): his tap follows his window — armed while one holds his tab, never while he is away
+    if (ev.kind === 'human-start' || ev.kind === 'human-driving') return ev.key ? watchHuman({ key: ev.key, profileId: ev.profileId }).catch(() => null) : null;
+    if (ev.kind === 'human-away' || ev.kind === 'human-end') { if (ev.key) unwatchHuman(ev.key); return null; }
+    if (ev.kind === 'profile-updated' && ev.changed && ev.changed.recordMine) {
+      const h = keeper && typeof keeper.humanOf === 'function' ? keeper.humanOf(ev.profileId) : null;
+      if (h && ev.changed.recordMine.now && h.state === 'driving') watchHuman({ key: h.browserKey, profileId: ev.profileId }).catch(() => { });
+      else if (h && !ev.changed.recordMine.now) unwatchHuman(h.browserKey);
+      return null;
+    }
     if (ev.ephemeral) {
       if (ev.kind === 'browser-ready') return armEphemeral(ev);
       if (ev.kind === 'verb') return armOnVerb(ev);
@@ -474,7 +533,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     if (ev.kind === 'attach') { const p = ev.sessionId ? watch({ sessionId: ev.sessionId, profileId: ev.profileId }).catch(() => null) : null; maybeStartRecording(ev.profileId, ev.browserKey, ev.sessionId).catch(() => { }); return p; }
     else if (ev.kind === 'browser-ready') { const p = armProfile(ev.profileId); for (const l of keeper ? keeper.leasesOn(ev.profileId) : []) maybeStartRecording(ev.profileId, l.browserKey, l.sessionId).catch(() => { }); return p; }
     else if (ev.kind === 'detach' || ev.kind === 'lease-dropped') { if (ev.sessionId) unwatch({ sessionId: ev.sessionId, profileId: ev.profileId }); stopRecording(ev.profileId, ev.browserKey, ev.kind).catch(() => { }); }
-    else if (ev.kind === 'browser-stopped') { for (const tp of [...taps.values()]) if (tp.profileId === ev.profileId) unwatch({ sessionId: tp.sessionId, profileId: tp.profileId }); for (const k of [...recordings.keys()]) if (k.startsWith(ev.profileId + '|')) recordings.delete(k); }
+    else if (ev.kind === 'browser-stopped') { for (const tp of [...taps.values()]) if (tp.profileId === ev.profileId) { if (tp.human) unwatchKey(tp.key); else unwatch({ sessionId: tp.sessionId, profileId: tp.profileId }); } for (const k of [...recordings.keys()]) if (k.startsWith(ev.profileId + '|')) recordings.delete(k); }
     else if (ev.kind === 'profile-updated' && ev.changed && ev.changed.record) { if (ev.changed.record.now) { for (const l of keeper ? keeper.leasesOn(ev.profileId) : []) maybeStartRecording(ev.profileId, l.browserKey, l.sessionId).catch(() => { }); } else { for (const k of [...recordings.keys()]) if (k.startsWith(ev.profileId + '|')) stopRecording(ev.profileId, k.slice(ev.profileId.length + 1), 'record off').catch(() => { }); } }
     return null;
   }
@@ -786,6 +845,8 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
       r.recording = [...recordings.values()].find((x) => x.profileId === r.id) || null;
       r.recordingRefused = recordingRefusals.get(r.id) || null;
       r.usage = keeper && typeof keeper.usageOf === 'function' ? keeper.usageOf(r.id) : null; // 2026-09-25: the live resource row (report only — memBytes + memMetric, `over`)
+      r.human = keeper && typeof keeper.humanOf === 'function' ? keeper.humanOf(r.id) : null; // BROWSE YOURSELF (B-6ae8): the user browsing it himself (the row's state line)
+      r.display = keeper && typeof keeper.browserOf === 'function' ? ((keeper.browserOf(r.id) || {}).display || null) : null; // lane headless-fallback: its launch's display fact (headless instead of a window, and why)
     }
     const eph = { scope: T.EPHEMERAL_SCOPE, trace: { ...T.scopeDigest(loadIndex(T.EPHEMERAL_SCOPE)), ...usageOf(T.EPHEMERAL_SCOPE) } };
     const o = await orphans();
@@ -850,10 +911,10 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     if (keeper && typeof keeper.addDigest === 'function') keeper.addDigest(digest);
     if (keeper && typeof keeper.setInFlightReader === 'function') keeper.setInFlightReader(inFlightFor); // the owner's ruling (2026-09-27)
   }
-  function shutdown() { if (timer) clearInterval(timer); timer = null; for (const tp of [...taps.values()]) unwatch({ sessionId: tp.sessionId, profileId: tp.profileId }); try { unsubLease?.(); } catch { /* */ } unsubLease = null; }
+  function shutdown() { if (timer) clearInterval(timer); timer = null; for (const tp of [...taps.values()]) { if (tp.human) unwatchKey(tp.key); else unwatch({ sessionId: tp.sessionId, profileId: tp.profileId }); } try { unsubLease?.(); } catch { /* */ } unsubLease = null; }
 
   return {
-    enabled, watch, unwatch, list, entry, framePath, sweep, housekeeping, sessions, sessionEntries, chatCardsFor, startSession, endSession, usageOf, bytesLimit, orphans, forgetProfile, forgetOrphan, deleteForgotten, adoptOrphan,
+    enabled, watch, unwatch, watchHuman, unwatchHuman, list, entry, framePath, sweep, housekeeping, sessions, sessionEntries, chatCardsFor, startSession, endSession, usageOf, bytesLimit, orphans, forgetProfile, forgetOrphan, deleteForgotten, adoptOrphan,
     maybeStartRecording, stopRecording, recordingsOf, recordingPath, digest, boot, install, shutdown, inFlightFor,
     traceRoot, recRoot, forgottenFile, abBase, _taps: taps, _recordings: recordings, _onRecord: onRecord, _lastSweep: () => lastSweep, _openSessions: openSessions,
   };

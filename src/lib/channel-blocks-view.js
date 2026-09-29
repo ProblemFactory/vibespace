@@ -97,6 +97,11 @@ function runsInto(el, runs, ctx) {
       const b = doc.createElement('strong');
       b.textContent = r.text || '';
       el.appendChild(b);
+    } else if (r.k === 'i') {
+      // lane channel-rich (D1): Lark's `<i>` / `*x*` / an italic post style — a run, never the literal markup
+      const i = doc.createElement('em');
+      i.textContent = r.text || '';
+      el.appendChild(i);
     } else el.appendChild(doc.createTextNode(r.text || ''));
   }
   return el;
@@ -175,8 +180,17 @@ function blockEl(b, path, ctx, siblingsHaveContent, depth) {
       d.className = 'chanblk-card';
       if (b.title) { const h = doc.createElement('div'); h.className = 'chanblk-card-title'; h.textContent = b.title; d.appendChild(h); }
       for (const line of b.lines || []) { const l = doc.createElement('div'); l.className = 'chanblk-card-line'; runsInto(l, CB.inlineRuns(line), ctx); d.appendChild(l); }
+      // lane channel-rich (D1): a card's ELEMENTS (div / markdown text, notes, rules, button labels) as blocks
+      if (Array.isArray(b.blocks) && b.blocks.length) {
+        const inner = doc.createElement('div');
+        inner.className = 'chanblk-card-body';
+        const has = hasContent(b.blocks);
+        b.blocks.forEach((k, i) => { const n = blockEl(k, `${path}.c${i}`, ctx, has, depth + 1); if (n) inner.appendChild(n); });
+        d.appendChild(inner);
+      }
       return d;
     }
+    case 'hr': { const h = doc.createElement('div'); h.className = 'chanblk-hr'; h.setAttribute('role', 'separator'); return h; }
     case 'sys': { const d = doc.createElement('div'); d.className = 'chanblk-sys'; d.textContent = sysWords(b, ctx.t); return d; }
     default: return null;
   }

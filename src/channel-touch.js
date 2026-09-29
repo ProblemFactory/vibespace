@@ -43,7 +43,7 @@
  */
 
 /** The closed op set, in the order a row SAYS them (a draft outranks a read). */
-const OPS = Object.freeze(['reply', 'compose', 'read', 'search', 'refresh', 'request', 'status']);
+const OPS = Object.freeze(['reply', 'compose', 'react', 'read', 'search', 'refresh', 'request', 'status']);
 /** The ops that make a row a DRAFT row (sorted first; the reverse link says "Drafted by"). */
 const DRAFT_OPS = Object.freeze(['reply', 'compose']);
 /** The per-session ring (the witness keeps the newest). */
@@ -61,6 +61,9 @@ const SEARCH_MAX_CONVS = 20;
 const TITLE_MAX = 200;
 const LABEL_MAX = 120;
 const ID_MAX = 300;
+/** Where a drafted reply lands (2026-09-28) — the outbox policy's closed set (src/channel-policy.js PLACEMENTS; this
+ *  module imports nothing, so test-channel-placement pins the two spellings equal). The row says it in words. */
+const TOUCH_PLACEMENTS = Object.freeze(['chat', 'quote', 'thread', 'thread+chat']);
 
 const str = (v, max) => {
   if (v === null || v === undefined) return '';
@@ -96,6 +99,10 @@ function normalizeTouch(x) {
     account: str(x.account, LABEL_MAX),
     kind: str(x.kind, 40) || null,
     count: Math.max(0, Math.floor(num(x.count))),
+    // lane channel-threads: the emoji a `react` touch proposed (a glyph ≤ 16 units, or `:key:`) — the row says it
+    ...(op === 'react' && x.glyph ? { glyph: str(x.glyph, 70) } : {}),
+    // 2026-09-28: where a drafted reply lands (a value outside the closed set is dropped, never printed)
+    ...(op === 'reply' && TOUCH_PLACEMENTS.includes(x.placement) ? { placement: x.placement } : {}),
     at,
   };
 }
@@ -110,6 +117,7 @@ function appendTouch(ring, t, { mergeMs = MERGE_MS, max = RING_MAX } = {}) {
     last.at = t.at;
     if (t.title) last.title = t.title;
     if (t.account) last.account = t.account;
+    if (t.placement) last.placement = t.placement;
     return { touch: last, merged: true };
   }
   ring.push(t);
@@ -207,6 +215,8 @@ function foldTouches(touches) {
       if (t.account) r.account = t.account;
       if (t.kind) r.kind = t.kind;
       if (t.proposalId) r.proposalId = t.proposalId;
+      if (t.glyph) r.glyph = t.glyph;
+      if (t.placement) r.placement = t.placement;
     } else {
       if (!r.title && t.title) r.title = t.title;
       if (!r.account && t.account) r.account = t.account;
@@ -229,14 +239,27 @@ function foldView(rows, { max = FOLD_SHOWN, expanded = false } = {}) {
 function rowWords(row, t) {
   const o = (row && row.ops) || {};
   const out = [];
-  if (o.reply) out.push(o.reply === 1 ? t('drafted a reply') : t('drafted {n} replies', { n: o.reply }));
+  if (o.reply) out.push(o.reply === 1 ? replyWords(row && row.placement, t) : t('drafted {n} replies', { n: o.reply }));
   if (o.compose) out.push(o.compose === 1 ? t('wrote a new message') : t('wrote {n} new messages', { n: o.compose }));
+  if (o.react) out.push(o.react === 1 && row.glyph ? t('reacted {glyph}', { glyph: row.glyph }) : t('proposed {n} reactions', { n: o.react }));
   if (o.read || row.readCalls) out.push(o.read === 1 ? t('read 1 message') : t('read {n} messages', { n: o.read || 0 }));
   if (o.search) out.push(o.search === 1 ? t('1 search hit') : t('{n} search hits', { n: o.search }));
   if (o.refresh) out.push(t('refreshed'));
   if (o.request) out.push(t('asked for access'));
   if (o.status) out.push(t('checked its draft'));
   return out.join(' · ');
+}
+
+/** ONE drafted reply, with where it lands (2026-09-28): a plain message, a quote, a reply in a thread (+ also in the
+ *  chat); a touch from before the placement said "drafted a reply" and still does. */
+function replyWords(placement, t) {
+  switch (placement) {
+    case 'chat': return t('drafted a message');
+    case 'quote': return t('drafted a quoted reply');
+    case 'thread': return t('drafted a reply in a thread');
+    case 'thread+chat': return t('drafted a reply in a thread, also shown in the chat');
+    default: return t('drafted a reply');
+  }
 }
 
 /** The row's name: `account › title` (the title alone when the account is unknown). */
@@ -315,7 +338,7 @@ function searchTouches(results, { max = SEARCH_MAX_CONVS } = {}) {
 }
 
 module.exports = {
-  OPS, DRAFT_OPS, RING_MAX, MERGE_MS, SKEW_MS, BATCH_MS, FOLD_SHOWN, SEARCH_MAX_CONVS, TITLE_MAX, LABEL_MAX,
-  touchKey, normalizeTouch, appendTouch, upsertTouch, commandTouchesChannels, namesTouch, bindToCall, foldTouches, foldView, rowWords, rowName,
+  OPS, DRAFT_OPS, RING_MAX, MERGE_MS, SKEW_MS, BATCH_MS, FOLD_SHOWN, SEARCH_MAX_CONVS, TITLE_MAX, LABEL_MAX, TOUCH_PLACEMENTS,
+  touchKey, normalizeTouch, appendTouch, upsertTouch, commandTouchesChannels, namesTouch, bindToCall, foldTouches, foldView, rowWords, replyWords, rowName,
   glyphFor, chipView, chipText, sessionSummary, touchedByWords, agoText, searchTouches,
 };

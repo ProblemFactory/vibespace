@@ -8,10 +8,14 @@
 //   ① PURE (src/browser-profiles.js): the rows' cells, the two tables'
 //      consistency, `providerControl`'s exact refusals (a disabled control
 //      names its reason), `capabilityRefusal` per cell, the local-oracles
-//      discipline over the egress proof (a `blocks` claim's cell IS false; a
-//      measured record without its four runs FAILS), the create validator
+//      discipline over the egress proof — since lane-cloak (2026-09-28) the
+//      shipped record IS a measurement: cloak's `wired` derived from it, every
+//      reached host named + phase-tagged, a control per rule (no counts, a
+//      missing run, an unnamed address, a phaseless host, no Chromium named,
+//      the pre-measurement refusal against the wired row) — the create validator
 //      with host/cdpPort, the cdp env pair, url re-pointing, the cloakserve
-//      plan's typed refusals + docker argv, the egress verdict table.
+//      plan's typed refusals + docker argv, the egress verdict table; ⑦ the
+//      record's install and run allowlists through a real proxy (lane-cloak).
 //   ② SHARED (src/browser-serve.js): the op runner over a FAKE agent-browser
 //      on PATH — the machine composes its own directory.
 //   ③ DEVICE: a REAL agentd daemon answers `browser-serve` (capability in
@@ -106,7 +110,7 @@ console.log('— ① the provider rows, their refusals, the egress record, the c
   const cdp = B.providerRow('cdp'), lw = B.providerRow('local-window'), cloak = B.providerRow('cloak'), chromium = B.providerRow('chromium'), cloud = B.providerRow('cloud:kernel');
   ok(cdp.canSwitchTo === 'no' && cdp.ownsDir === false && cdp.leaseKind === 'tab' && cdp.keyScope === 'none' && cdp.starts === false && cdp.remote === 'tcp-forward' && cdp.tier === 1, '`cdp`: tier 1, no key, switch "no", owns no dir, starts nothing, reached over tcp-forward');
   ok(lw.canSwitchTo === 'no' && lw.ownsDir === false && lw.leaseKind === 'window-target' && lw.tier === 3 && lw.wired === true && lw.consent === 'window.realDesktopTargets' && lw.cdp === false, '`local-window`: the three "no"s (§7.6 rule 3), the window-target lease kind, WIRED since P10 behind its named consent setting, no CDP');
-  ok(cloak.keyScope === 'local-only' && cloak.canSwitchTo === 'in-place' && cloak.ownsDir === true && cloak.tier === 2 && cloak.wired === false, '`cloak`: tier 2, local-only key, in-place switch, owns its dir — NOT wired (the §7.2.1 record says why)');
+  ok(cloak.keyScope === 'local-only' && cloak.canSwitchTo === 'in-place' && cloak.ownsDir === true && cloak.tier === 2 && cloak.wired === true && B.CLOAK_WIRED === true, '`cloak`: tier 2, local-only key scope, in-place switch, owns its dir — WIRED, and the cell is DERIVED from the §7.2.1 record (lane-cloak, measured 2026-09-28)');
   ok(chromium.wired && chromium.remote === 'browser-serve' && chromium.keyScope === 'none' && chromium.ownsDir, '`chromium`: wired, runs on a paired machine through browser-serve');
   ok(cloud && cloud.cloud === 'kernel' && cloud.keyScope === 'local-only' && cloud.canSwitchTo === 'export-only' && cloud.ownsDir === false && cloud.wired && cloud.starts && B.providerRow('cloud:agentcore').wired === false && /unverified/.test(B.providerRow('cloud:agentcore').unwiredWhy), '`cloud:<name>`: a FAMILY of rows — local-only key, export-only switch, no dir; wired since the key half landed (P4 second half), except agentcore whose field set is unverified — unwired BY NAME');
   ok(B.providerRow('cloud:nope') === null && B.providerRow('nope') === null, 'an unknown provider / cloud name is not a row');
@@ -114,7 +118,7 @@ console.log('— ① the provider rows, their refusals, the egress record, the c
   const c1 = B.providerControl('nope');
   ok(!c1.ok && c1.code === 'provider_unknown' && /one of chromium/.test(c1.error), 'unknown ⇒ provider_unknown listing the rows');
   const c2 = B.providerControl('cloak');
-  ok(!c2.ok && c2.code === 'provider_unavailable' && /binary_absent/.test(c2.error) && /nothing was downloaded/i.test(c2.error), 'cloak here ⇒ provider_unavailable NAMING the §7.2.1 refusal (binary_absent) and that nothing was downloaded');
+  ok(c2.ok && c2.row === cloak, 'cloak here ⇒ admitted: its §7.2.1 record is a measurement (whether the program is installed is the install\'s question, not the row\'s)');
   const c3 = B.providerControl('cloak', { host: 'dev-1' });
   ok(!c3.ok && c3.code === 'provider_needs_local_key' && /D34/.test(c3.error) && /dev-1/.test(c3.error), 'cloak on host != null ⇒ provider_needs_local_key (D34) — the structural refusal wins over the measurement state');
   ok(B.providerControl('cloud:browserbase', { host: 'dev-1' }).code === 'provider_needs_local_key', 'cloud:* on host != null ⇒ provider_needs_local_key too');
@@ -127,22 +131,37 @@ console.log('— ① the provider rows, their refusals, the egress record, the c
   ok(B.capabilityRefusal('chromium', 'fly').code === 'bad-request' && B.capabilityRefusal('nope', 'start').code === 'provider_unknown', 'an unknown capability / provider is refused, never silently "has it"');
   const rows = B.providerRows({ host: 'dev-1' });
   const rc = rows.find((r) => r.id === 'cloak');
-  ok(rows.length === ids.length && rc.control.code === 'provider_unavailable' && rc.onHost.code === 'provider_needs_local_key' && rc.onHost.host === 'dev-1' && rc.proof && rc.proof.refusal === 'binary_absent' && rows.find((r) => r.id === 'chromium').onHost.ok === true, 'providerRows carries the local verdict, the per-host verdict and the proof beside the row it explains');
+  ok(rows.length === ids.length && rc.control.ok === true && rc.onHost.code === 'provider_needs_local_key' && rc.onHost.host === 'dev-1' && rc.proof === null && rows.find((r) => r.id === 'chromium').onHost.ok === true, 'providerRows carries the local verdict, the per-host verdict, and a proof only beside a cell it explains (a measured record blocks nothing)');
 
-  // the §7.2.1 record: the local-oracles discipline
+  // the §7.2.1 record: the local-oracles discipline — MEASURED (lane-cloak, 2026-09-28, the owner's 「下载吧」)
   const P = B.CLOAK_EGRESS_PROOF;
-  ok(['tool', 'date', 'version', 'runs'].every((k) => k in P) && P.status === 'refused' && P.refusal === 'binary_absent' && P.blocks === 'cloak.wired' && P.runs.length === 0 && /strace/.test(P.tool), 'the shipped record has the proof shape, is a REFUSAL by name (binary_absent) and blocks cloak.wired');
-  ok(B.proofVerdict(P).ok, 'proofVerdict accepts it: the cell it blocks really IS false');
-  const reEnabled = { ...B.PROVIDERS, cloak: { ...B.PROVIDERS.cloak, wired: true } };
-  const v1 = B.proofVerdict(P, reEnabled);
-  ok(!v1.ok && /re-enabled without re-measuring/.test(v1.error), 'a caps row re-enabled without re-measuring FAILS the discipline (the blocks claim would be a lie)');
-  ok(!B.proofVerdict({ ...P, status: 'measured', version: 'x', runs: [] }).ok, 'a record that CLAIMS measured while carrying a blocks claim fails');
-  const measured = { ...P, status: 'measured', version: 'cloakbrowser 0.5.10', blocks: undefined, runs: B.CLOAK_EGRESS_RUNS.map((what, i) => ({ what, inetConnects: i === 0 ? 12 : 0 })) };
-  ok(B.proofVerdict(measured).ok, 'a measured record with all four runs (first launch expected to connect) passes');
-  ok(!B.proofVerdict({ ...measured, runs: measured.runs.slice(0, 3) }).ok && /lacks the run/.test(B.proofVerdict({ ...measured, runs: measured.runs.slice(0, 3) }).error), 'a measured record missing the idle run FAILS (a record with no counts is not a record)');
-  ok(!B.proofVerdict({ ...measured, runs: measured.runs.map((r) => ({ what: r.what })) }).ok, 'a run without an INET count fails');
-  ok(!B.proofVerdict({ ...P, refusal: undefined }).ok && !B.proofVerdict({ ...P, blocks: 'nope.wired' }).ok && !B.proofVerdict({ ...P, runs: [{ what: 'x', inetConnects: 1 }] }).ok, 'a refusal without a name / naming an unknown row / carrying runs fails');
-  ok(B.blockedCell('cloak', 'wired') === P && B.blockedCell('cdp', 'wired') === null, 'blockedCell finds the record that explains the false cell, and only that one');
+  ok(['tool', 'date', 'version', 'runs'].every((k) => k in P) && P.status === 'measured' && !P.blocks && !P.refusal && P.version === '0.5.10' && P.chromium === '146.0.7680.177.5' && P.platform === 'linux-x64' && /strace/.test(P.tool), 'the shipped record is a MEASUREMENT: the wrapper version, the Chromium build and the platform it describes, the strace tool');
+  ok(B.CLOAK_EGRESS_RUNS.every((w) => { const r = P.runs.find((x) => x.what === w); return r && Number.isInteger(r.inetConnects) && Array.isArray(r.targets); }) && P.runs[0].inetConnects > 0 && P.runs.slice(1).every((r) => r.targets.every((t) => t.host === 'loopback')), 'all four runs carry an INET count and their named targets; the first launch (the download) connected, the other three reached nothing but the loopback CDP port');
+  ok(B.proofVerdict(P).ok, 'proofVerdict accepts it');
+  const H = B.egressHostsOf(P);
+  ok(JSON.stringify(H.install) === JSON.stringify(['cloakbrowser.dev', 'github.com', 'release-assets.githubusercontent.com']) && H.run.length === 0 && JSON.stringify(H.npm) === JSON.stringify(['registry.npmjs.org']) && H.unnamed.length === 0, `egressHostsOf DERIVES the allowlists from the phase-tagged targets: install = the pinned download's three hosts, run = none, npm = the registry (named, not the vendor) — ${JSON.stringify(H)}`);
+  ok(P.download && P.download.bytes > 0 && /^[0-9a-f]{64}$/.test(P.download.sha256) && P.binary && /^[0-9a-f]{64}$/.test(P.binary.sha256) && P.pins.CLOAKBROWSER_AUTO_UPDATE === 'false' && P.pins.CLOAKBROWSER_VERSION === P.chromium, 'the record names what was downloaded (bytes + sha256), the binary\'s sha256 and the two pins the install carries');
+  ok(P.freeTier && P.freeTier.key === 'none' && P.freeTier.login === 'none' && /NOT measured/.test(P.freeTier.withAKey) && P.notReached.some((n) => n.host === 'api.github.com'), 'the free-tier finding (no key, no sign-in) and the vendor hosts the pinned install never reached are NAMED in the record');
+  // the controls: every rule of the discipline turns a mutated record red
+  const REFUSED = { provider: 'cloak', tool: 'strace -f -qq -e trace=network', date: '2026-09-16', version: null, status: 'refused', refusal: 'binary_absent', detail: 'the pre-measurement record', blocks: 'cloak.wired', runs: [], expectedRuns: B.CLOAK_EGRESS_RUNS };
+  const unwiredRows = { ...B.PROVIDERS, cloak: { ...B.PROVIDERS.cloak, wired: false } };
+  ok(B.proofVerdict(REFUSED, unwiredRows).ok, 'the pre-measurement REFUSED record is well-formed against a table whose cloak cell reads false');
+  const v1 = B.proofVerdict(REFUSED);
+  ok(!v1.ok && /re-enabled without re-measuring/.test(v1.error), 'CONTROL: the same refused record against the SHIPPED table (cloak wired) fails — a row re-enabled without a measurement is caught either way');
+  ok(!B.proofVerdict({ ...P, blocks: 'cloak.wired' }).ok, 'CONTROL: a record that CLAIMS measured while carrying a blocks claim fails');
+  ok(!B.proofVerdict({ ...P, runs: P.runs.slice(0, 3) }).ok && /lacks the run/.test(B.proofVerdict({ ...P, runs: P.runs.slice(0, 3) }).error), 'CONTROL: a measured record missing the idle run FAILS');
+  ok(!B.proofVerdict({ ...P, runs: P.runs.map((r) => ({ what: r.what })) }).ok && /no INET connect count/.test(B.proofVerdict({ ...P, runs: P.runs.map((r) => ({ what: r.what })) }).error), 'CONTROL: a record with no counts is refused (a record with no counts is not a record)');
+  const unnamed = { ...P, runs: P.runs.map((r, i) => (i === 3 ? { ...r, targets: [...r.targets, { host: '?', addr: '203.0.113.9', port: 443, by: 'chrome', n: 1, phase: 'launch' }] } : r)) };
+  ok(!B.proofVerdict(unnamed).ok && /unnamed: 203\.0\.113\.9:443/.test(B.proofVerdict(unnamed).error), 'CONTROL: a record reaching an address it cannot NAME fails (the allowlist would have a hole nobody can read)');
+  const phaseless = { ...P, runs: P.runs.map((r, i) => (i === 0 ? { ...r, targets: r.targets.map((t) => (t.host === 'github.com' ? { ...t, phase: undefined } : t)) } : r)) };
+  ok(!B.proofVerdict(phaseless).ok && /no phase/.test(B.proofVerdict(phaseless).error), 'CONTROL: a reached host tagged with no phase fails (it would belong to neither allowlist)');
+  ok(!B.proofVerdict({ ...P, chromium: null }).ok && !B.proofVerdict({ ...P, platform: undefined }).ok, 'CONTROL: a measured cloak record that does not name its Chromium build or platform fails (the install pins both)');
+  ok(!B.proofVerdict({ ...P, refusal: 'x', status: 'refused' }).ok && !B.proofVerdict({ ...REFUSED, refusal: undefined }, unwiredRows).ok && !B.proofVerdict({ ...REFUSED, blocks: 'nope.wired' }, unwiredRows).ok && !B.proofVerdict({ ...REFUSED, runs: [{ what: 'x', inetConnects: 1 }] }, unwiredRows).ok, 'a refusal without a name / naming an unknown row / carrying runs fails');
+  ok(B.blockedCell('cloak', 'wired') === null && B.blockedCell('cdp', 'wired') === null, 'blockedCell: a measured record explains no false cell');
+  // the allowlists: the RUN list = the record's run hosts (none) + the deployment's sites; the INSTALL list = the download's hosts
+  ok(JSON.stringify(B.cloakRunAllowlist(P, 'Portal.Example, .docs.example')) === JSON.stringify(['portal.example', '.docs.example']) && B.cloakRunAllowlist(P, '').length === 0 && JSON.stringify(B.cloakInstallAllowlist(P)) === JSON.stringify(H.install), 'cloakRunAllowlist = the record\'s run hosts + the named sites (empty stays empty: deny by default); cloakInstallAllowlist = the download\'s hosts');
+  ok(['cloakbrowser.dev', 'github.com', 'release-assets.githubusercontent.com', 'api.github.com', 'registry.npmjs.org'].every((h) => !B.egressVerdict(h, B.cloakRunAllowlist(P, 'portal.example')).allow) && B.egressVerdict('portal.example', B.cloakRunAllowlist(P, 'portal.example')).allow, 'a RUNNING cloak browser may not reach the vendor\'s download / update / registry hosts — only the named site');
+  ok(['cloakbrowser.dev', 'github.com', 'release-assets.githubusercontent.com'].every((h) => B.egressVerdict(h, B.cloakInstallAllowlist(P)).allow) && ['api.github.com', 'registry.npmjs.org', 'objects.githubusercontent.com', 'evil.example'].every((h) => !B.egressVerdict(h, B.cloakInstallAllowlist(P)).allow), 'the INSTALL list admits exactly the three measured download hosts — the update-check host (api.github.com), the registry and anything else are refused');
 
   // the create validator with host / cdpPort
   const v = B.validateProfileInput({ label: 'Ext', provider: 'cdp', host: 'dev-1', cdpPort: '9222' });
@@ -150,7 +169,7 @@ console.log('— ① the provider rows, their refusals, the egress record, the c
   ok(B.validateProfileInput({ label: 'Ext', provider: 'cdp' }).code === 'cdp_port_required', 'a cdp profile without a port is refused cdp_port_required');
   ok(B.validateProfileInput({ label: 'Ext', provider: 'cdp', cdpPort: 70000 }).code === 'cdp_port_required' && B.validateProfileInput({ label: 'Ext', provider: 'cdp', cdpPort: 0 }).code === 'cdp_port_required', 'an out-of-range port is refused');
   ok(B.validateProfileInput({ label: 'C', cdpPort: 9222 }).code === 'bad-request', 'cdpPort on a non-cdp provider is refused (never silently dropped)');
-  ok(B.validateProfileInput({ label: 'C', provider: 'cloak' }).code === 'provider_unavailable' && B.validateProfileInput({ label: 'C', provider: 'cloak', host: 'dev-1' }).code === 'provider_needs_local_key' && B.validateProfileInput({ label: 'C', provider: 'local-window', host: 'dev-1' }).code === 'provider_local_only', 'the validator speaks the control\'s codes');
+  ok(B.validateProfileInput({ label: 'C', provider: 'cloak' }).ok === true && B.validateProfileInput({ label: 'C', provider: 'cloak', host: 'dev-1' }).code === 'provider_needs_local_key' && B.validateProfileInput({ label: 'C', provider: 'local-window', host: 'dev-1' }).code === 'provider_local_only' && B.validateProfileInput({ label: 'C', provider: 'cloud:agentcore' }).code === 'provider_unavailable', 'the validator speaks the control\'s codes (cloak admitted here since the measurement; agentcore still unwired by name)');
   const rec = B.newProfileRecord({ id: 'bp-0000000a', label: 'Ext', dir: null, provider: 'cdp', host: 'dev-1', cdpPort: 9222 });
   ok(rec.dir === null && rec.host === 'dev-1' && rec.cdpPort === 9222 && B.publicProfileView(rec).cdpPort === 9222, 'the record carries host + cdpPort and a null dir; the public view keeps both (a port is not a secret)');
   ok(B.newProfileRecord({ id: 'bp-0000000b', label: 'L', dir: '/x' }).host === null && B.newProfileRecord({ id: 'bp-0000000b', label: 'L', dir: '/x' }).cdpPort === null, 'a local chromium record: host null, cdpPort null');
@@ -164,10 +183,10 @@ console.log('— ① the provider rows, their refusals, the egress record, the c
   ok(B.cdpPortOf('ws://127.0.0.1:19222/devtools/browser/x') === 19222 && B.cdpPortOf('http://localhost:9222') === 9222 && B.cdpPortOf('ws://10.0.0.1:9222/') === null, 'cdpPortOf reads a LOOPBACK url\'s port only');
 
   // the cloakserve plan + the egress verdicts
-  ok(B.cloakservePlan({}).code === 'cloak_opt_in_off' && B.cloakservePlan({ enabled: true }).code === 'egress_not_measured' && /binary_absent/.test(B.cloakservePlan({ enabled: true }).error), 'the plan refuses: opt-in off; then the unmeasured precondition BY NAME');
-  ok(B.cloakservePlan({ enabled: true, proof: measured }).code === 'egress_allowlist_empty' && B.cloakservePlan({ enabled: true, proof: measured, allowlist: 'a.test' }).code === 'egress_proxy_missing', 'then an empty allowlist; then a proxy that is not listening');
-  ok(B.cloakservePlan({ enabled: true, proof: { ...P, status: 'measured' } }).code === 'egress_proof_invalid', 'a malformed record refuses before anything else is considered');
-  const plan = B.cloakservePlan({ enabled: true, proof: measured, allowlist: 'portal.example, .docs.example', proxyPort: 4321 });
+  ok(B.cloakservePlan({}).code === 'cloak_opt_in_off' && B.cloakservePlan({ enabled: true }).code === 'egress_allowlist_empty' && B.cloakservePlan({ enabled: true, proof: REFUSED }).code === 'egress_proof_invalid' && /re-enabled without re-measuring/.test(B.cloakservePlan({ enabled: true, proof: REFUSED }).error), 'the plan refuses: opt-in off; on the SHIPPED record an empty allowlist (the browser itself needs no host); the pre-measurement refusal against the wired table is an invalid record');
+  ok(B.cloakservePlan({ enabled: true, proof: REFUSED, }).code !== 'ok' && B.cloakservePlan({ enabled: true, proof: P, allowlist: 'a.test' }).code === 'egress_proxy_missing', 'then a proxy that is not listening');
+  ok(B.cloakservePlan({ enabled: true, proof: { ...P, runs: [] } }).code === 'egress_proof_invalid', 'a malformed record refuses before anything else is considered');
+  const plan = B.cloakservePlan({ enabled: true, proof: P, allowlist: 'portal.example, .docs.example', proxyPort: 4321 });
   ok(plan.ok && plan.image === B.CLOAKSERVE_IMAGE && /:\d+\.\d+\.\d+$/.test(plan.image) && plan.egress.hosts.join() === 'portal.example,.docs.example' && plan.egress.proxy === 'http://host.docker.internal:4321', 'a full plan: the image is PINNED to a version, the egress hosts and the proxy named');
   const run = plan.docker[1];
   ok(plan.docker[0].join(' ') === 'network create --internal vs-cloak-egress' && run.includes('--internal') === false && run.includes('--network') && run[run.indexOf('--network') + 1] === 'vs-cloak-egress' && run.includes('-p') && run[run.indexOf('-p') + 1] === '127.0.0.1:9222:9222' && run.includes('HTTPS_PROXY=http://host.docker.internal:4321') && run[run.length - 1] === B.CLOAKSERVE_IMAGE, 'docker argv: an INTERNAL network, 9222 published on the hub\'s loopback only, the proxy as the only way out, the pinned image last');
@@ -326,14 +345,14 @@ let remoteId, extId, localCdpId;
   ok(rp.host === 'dev-1' && rp.dir === null && rp.provider === 'chromium' && !fs.existsSync(path.join(HOME, '.agent-browser', 'vs-' + rp.id)), 'a chromium profile on a paired machine: host set, NO directory here (the machine owns its own)');
   const e1 = await threw(() => k.createProfile({ label: 'X', host: 'nope' }));
   ok(e1 && e1.code === 'unsupported-host' && /not a paired machine/.test(e1.message), 'an unpaired host is refused BY NAME by the keeper');
-  ok((await threw(() => k.createProfile({ label: 'C1', provider: 'cloak' }))).code === 'provider_unavailable' && (await threw(() => k.createProfile({ label: 'C2', provider: 'cloak', host: 'dev-1' }))).code === 'provider_needs_local_key' && (await threw(() => k.createProfile({ label: 'C3', provider: 'cdp' }))).code === 'cdp_port_required', 'the keeper speaks the PURE refusals (cloak unavailable / cloak on a host / cdp without a port)');
+  ok((await threw(() => k.createProfile({ label: 'C1', provider: 'cloud:agentcore' }))).code === 'provider_unavailable' && (await threw(() => k.createProfile({ label: 'C2', provider: 'cloak', host: 'dev-1' }))).code === 'provider_needs_local_key' && (await threw(() => k.createProfile({ label: 'C3', provider: 'cdp' }))).code === 'cdp_port_required', 'the keeper speaks the PURE refusals (an unwired row / cloak on a host / cdp without a port)');
   const ep = k.createProfile({ label: 'Their Chrome', provider: 'cdp', host: 'dev-1', cdpPort: CDP_PORT }, { owner: { kind: 'session', id: KEY_A } });
   extId = ep.id;
   ok(ep.provider === 'cdp' && ep.cdpPort === CDP_PORT && ep.dir === null, 'a cdp profile on a paired machine: the port, no dir');
   const lp = k.createProfile({ label: 'My Chrome here', provider: 'cdp', cdpPort: CDP_PORT }, { owner: { kind: 'session', id: KEY_B } });
   localCdpId = lp.id;
   ok(lp.host === null && lp.cdpPort === CDP_PORT, 'a cdp profile on THIS machine: no host');
-  ok(k.list().providers.length === B.providerIds().length && k.list().providers.find((r) => r.id === 'cloak').control.code === 'provider_unavailable', 'the digest carries the provider rows with their local verdicts');
+  ok(k.list().providers.length === B.providerIds().length && k.list().providers.find((r) => r.id === 'cloak').control.ok === true && k.list().providers.find((r) => r.id === 'cloud:agentcore').control.code === 'provider_unavailable', 'the digest carries the provider rows with their local verdicts (cloak admitted since the measurement, agentcore unwired)');
 
   // remote chromium: start on the device, forward its port, env names the forward
   const launchesBefore = launches().length;
@@ -438,7 +457,8 @@ let srv = null;
   };
   const bearer = (t) => ({ Authorization: 'Bearer ' + t });
   let r = await j('GET', '/api/browser/providers');
-  ok(r.status === 200 && r.json.providers.length === B.providerIds().length && r.json.proof.refusal === 'binary_absent' && r.json.cloak.code === 'cloak_opt_in_off' && r.json.host === null && r.json.hostKnown === true && Array.isArray(r.json.forwards), 'GET /api/browser/providers: the rows, the §7.2.1 record, the cloakserve refusal by name, the forwards');
+  ok(r.status === 200 && r.json.providers.length === B.providerIds().length && r.json.proof.status === 'measured' && r.json.proof.version === '0.5.10' && r.json.cloak.code === 'cloak_opt_in_off' && r.json.host === null && r.json.hostKnown === true && Array.isArray(r.json.forwards), 'GET /api/browser/providers: the rows, the §7.2.1 record (measured), the cloakserve refusal by name, the forwards');
+  ok(r.json.egress && JSON.stringify(r.json.egress.install) === JSON.stringify(B.cloakInstallAllowlist(B.CLOAK_EGRESS_PROOF)) && r.json.egress.run.length === 0 && Array.isArray(r.json.cloakSites) && r.json.cloakSites.length === 0, '…with the allowlists the record implies (derived, never a second list) and the sites a cloak browser may open here (none named)');
   r = await j('GET', '/api/browser/providers?host=dev-1');
   ok(r.status === 200 && r.json.hostKnown === true && r.json.providers.find((x) => x.id === 'cloak').onHost.code === 'provider_needs_local_key' && r.json.providers.find((x) => x.id === 'chromium').onHost.ok === true, '?host=dev-1: the verdict FOR that machine per row (a host the route answers ABOUT is not refused)');
   r = await j('GET', '/api/browser/providers?host=nope');
@@ -448,8 +468,10 @@ let srv = null;
   r = await j('POST', '/api/browser/profiles', { label: 'Their Chrome (route)', provider: 'cdp', host: 'dev-1', cdpPort: CDP2 });
   ok(r.status === 200 && r.json.profile.host === 'dev-1' && r.json.profile.cdpPort === CDP2 && r.json.profile.dir === null, 'POST /api/browser/profiles with host + cdpPort creates the remote cdp profile', JSON.stringify(r.json));
   const extRoute = r.json.profile.id;
+  r = await j('POST', '/api/browser/profiles', { label: 'Cloaked', provider: 'cloud:agentcore' });
+  ok(r.status === 400 && r.json.code === 'provider_unavailable' && /unverified/.test(r.json.error), 'an unwired row (agentcore) ⇒ 400 provider_unavailable naming why');
   r = await j('POST', '/api/browser/profiles', { label: 'Cloaked', provider: 'cloak' });
-  ok(r.status === 400 && r.json.code === 'provider_unavailable' && /binary_absent/.test(r.json.error), 'cloak ⇒ 400 provider_unavailable naming the measurement');
+  ok(r.status === 200 && r.json.profile.provider === 'cloak' && Number.isInteger(r.json.profile.fingerprintSeed), 'cloak ⇒ created since the measurement (its seed minted at creation; whether the program is installed is asked at start)', JSON.stringify(r.json).slice(0, 300));
   r = await j('POST', '/api/browser/profiles', { label: 'Elsewhere', host: 'nope' });
   ok(r.status === 400 && r.json.code === 'unsupported-host' && /not a paired machine/.test(r.json.error), 'an unpaired host ⇒ 400 unsupported-host by name');
   r = await j('POST', '/api/browser/profiles', { label: 'Portless', provider: 'cdp' });
@@ -466,14 +488,14 @@ let srv = null;
   // runs in THIS process, so a spawnSync would block the very loop that has to answer it
   const cli = (args) => new Promise((resolve) => execFile(process.execPath, [path.join(REPO, 'data/bin/vibespace-browser'), ...args], { env: cliEnv, encoding: 'utf8', timeout: 20000 }, (err, stdout, stderr) => resolve({ status: err ? (typeof err.code === 'number' ? err.code : null) : 0, stdout: String(stdout || ''), stderr: String(stderr || '') + (err && typeof err.code !== 'number' ? `\n[spawn error] ${err.message}` : '') })));
   const pv = await cli(['providers', '--host', 'dev-1']);
-  ok(pv.status === 0 && /✗ cloak/.test(pv.stdout) && /provider_needs_local_key|needs a key/.test(pv.stdout) && /✓ chromium/.test(pv.stdout) && /egress measurement .* refused — binary_absent/.test(pv.stdout), 'vibespace-browser providers --host dev-1 prints each row with its verdict and the egress record', pv.stdout + pv.stderr);
+  ok(pv.status === 0 && /✗ cloak/.test(pv.stdout) && /provider_needs_local_key|needs a key/.test(pv.stdout) && /✓ chromium/.test(pv.stdout) && /egress measurement .* measured \(2026-09-28, 0\.5\.10, Chromium 146\.0\.7680\.177\.5\)/.test(pv.stdout) && /the browser itself reached: nothing beyond loopback; its one-time download: cloakbrowser\.dev, github\.com, release-assets\.githubusercontent\.com/.test(pv.stdout) && /a cloak browser may open here: no site yet/.test(pv.stdout), 'vibespace-browser providers --host dev-1 prints each row with its verdict, the egress record and what it implies', pv.stdout + pv.stderr);
   const nw = await cli(['new', 'Laptop Chrome', '--provider', 'cdp', '--host', 'dev-1', '--cdp-port', String(CDP2)]);
   ok(nw.status === 0 && /reaching an existing browser over CDP \(dev-1:\d+; nothing is started\)/.test(nw.stdout), 'vibespace-browser new --provider cdp --host --cdp-port says what it made', nw.stdout + nw.stderr);
   const newId = /\((bp-[0-9a-f]{8})\)/.exec(nw.stdout)?.[1];
   const up = await cli(['use', newId]);
   ok(up.status === 0 && !/AGENT_BROWSER_CDP=|ws:\/\/|devtools/i.test(up.stdout + up.stderr) && !/export /.test(up.stdout) && /attached — run `vibespace-browser <verb>`/.test(up.stdout), '`use` of a reached browser prints no env and no CDP url (§5.1; takeover C2: there is nothing to export)', up.stdout + up.stderr);
-  const cl = await cli(['new', 'Cloaked', '--provider', 'cloak']);
-  ok(cl.status !== 0 && /provider_unavailable/.test(cl.stdout + cl.stderr), 'the CLI prints the typed refusal for cloak', cl.stdout + cl.stderr);
+  const cl = await cli(['new', 'Agentcore box', '--provider', 'cloud:agentcore']);
+  ok(cl.status !== 0 && /provider_unavailable/.test(cl.stdout + cl.stderr), 'the CLI prints the typed refusal for an unwired row (agentcore)', cl.stdout + cl.stderr);
   const pf = await cli(['profiles']);
   ok(pf.status === 0 && /cdp on dev-1 cdp:\d+/.test(pf.stdout), '`profiles` shows host + cdp port on the row', pf.stdout);
   await kR.stop(extRoute, { why: 'user' }).catch(() => { });
@@ -526,6 +548,45 @@ console.log('— ⑥ the allowlisting egress proxy (§7.2.1: enforcing, not obse
   // allowed: t1, t2, g1 · refused: t3, t4, g2, t5 (g3's 400 is a malformed request, not a verdict)
   ok(proxy.stats.allowed === 3 && proxy.stats.refused === 4, `stats count what happened (${proxy.stats.allowed} allowed / ${proxy.stats.refused} refused)`);
   await proxy.close();
+  await new Promise((r) => target.close(() => r())); servers.delete(target);
+}
+
+// ═══ ⑦ lane-cloak: the allowlists THE RECORD IMPLIES, through the real proxy ═══
+console.log('— ⑦ the §7.2.1 record\'s two allowlists through the real proxy (names resolved to a loopback target — nothing leaves)');
+{
+  const P = B.CLOAK_EGRESS_PROOF;
+  const target = http.createServer((req, res) => { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('reached ' + req.headers.host); });
+  servers.add(target);
+  const TP = await new Promise((r) => target.listen(0, '127.0.0.1', () => r(target.address().port)));
+  const via = async (allowlist, host) => {
+    const px = E.create({ allowlist: () => allowlist, resolve: () => '127.0.0.1', log: { log: () => { } } });
+    const port = await px.listen();
+    const out = await new Promise((resolve) => {
+      const sk = net.connect({ host: '127.0.0.1', port }); let buf = '', stage = 0;
+      sk.on('data', (d) => { buf += d; if (stage === 0 && /\r\n\r\n/.test(buf)) { if (/ 200 /.test(buf)) { stage = 1; buf = ''; sk.write(`GET / HTTP/1.1\r\nHost: ${host}\r\nConnection: close\r\n\r\n`); } else sk.end(); } });
+      sk.on('close', () => resolve({ stage, buf })); sk.on('error', () => resolve({ stage, buf }));
+      sk.once('connect', () => sk.write(`CONNECT ${host}:${TP} HTTP/1.1\r\nHost: ${host}:${TP}\r\n\r\n`));
+      setTimeout(() => { try { sk.destroy(); } catch { /* gone */ } }, 3000);
+    });
+    const recent = px.recent();
+    await px.close();
+    return { ...out, recent };
+  };
+  const install = B.cloakInstallAllowlist(P);
+  const inst = [];
+  for (const h of install) inst.push(await via(install, h));
+  ok(install.length === 3 && inst.every((x, i) => x.stage === 1 && x.buf.includes('reached ' + install[i])), `the INSTALL proxy tunnels each of the record's download hosts (${install.join(', ')})`);
+  const instRefused = [];
+  for (const h of ['api.github.com', 'registry.npmjs.org', 'objects.githubusercontent.com', 'telemetry.example']) instRefused.push([h, await via(install, h)]);
+  ok(instRefused.every(([h, x]) => x.stage === 0 && /403/.test(x.buf) && x.recent.some((r) => r.host === h && /not in the egress allowlist/.test(r.why))), 'the INSTALL proxy refuses the vendor\'s update-check host, the registry and anything else — each named in its recent refusals');
+  const run = B.cloakRunAllowlist(P, 'portal.example');
+  const r1 = await via(run, 'portal.example');
+  const runRefused = [];
+  for (const h of [...install, 'api.github.com', 'localhost']) runRefused.push([h, await via(run, h)]);
+  ok(r1.stage === 1 && runRefused.every(([, x]) => x.stage === 0 && /403/.test(x.buf)), 'the RUN proxy admits exactly the named site; the download hosts, the update host and loopback are refused');
+  const r0 = await via(B.cloakRunAllowlist(P, ''), 'portal.example');
+  ok(r0.stage === 0 && /empty/.test(r0.buf), 'no site named ⇒ the run proxy admits nothing (the browser itself needs no host: measured)');
+  ok(Array.isArray(r0.recent) && r0.recent.length === 1 && r0.recent[0].host === 'portal.example' && typeof r0.recent[0].at === 'number', 'the proxy remembers its refusals by name (host + sentence + time)');
   await new Promise((r) => target.close(() => r())); servers.delete(target);
 }
 

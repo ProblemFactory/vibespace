@@ -324,7 +324,9 @@ class App {
         // Probe-reported condition (2.226.0): server-side silent failures now
         // surface as toasts (+ notification history) instead of dying in the
         // server log. Key-deduped server-side, once per boot per issue.
-        showToast(msg.text, { type: msg.level >= 2 ? 'error' : undefined });
+        // i18n (2026-09-28): a notice that carries {key, params} is worded by THIS device's t(); `text` is the English
+        // (+ an optional `then: {key}` sentence after it — the pin notices' "Restarting the conversation to apply it.")
+        showToast(msg.i18n && msg.i18n.key ? t(msg.i18n.key, msg.i18n.params || {}) + (msg.i18n.then && msg.i18n.then.key ? ' ' + t(msg.i18n.then.key, msg.i18n.then.params || {}) : '') : msg.text, { type: msg.level >= 2 ? 'error' : undefined });
       }
       if (msg.type === 'sysinfo-alert') {
         // Event-loop degradation (2.235.0): the "everything is slow but CPU
@@ -520,14 +522,7 @@ class App {
       // boot fetch lost to a restart window leaves _tasksLoaded false, which
       // pins task-detail windows on "Loading task…" forever).
       try { this.sidebar?._fetchTasks?.(); } catch {}
-      fetchJson('/api/session-status').then((d) => {
-        const sb = this.sidebar;
-        if (!d?.statuses || !sb) return;
-        sb._sessionStatuses = d.statuses;
-        sb._render?.();
-        sb._lastAttnSig = null; // declared attention may have changed while we were away
-        sb.refreshTaskAttention?.();
-      }).catch(() => {});
+      try { this.sidebar?._fetchStatuses?.(); } catch {} // generation-guarded: an answer older than a status frame that landed meanwhile is dropped (lane-redact verify r6)
       for (const [winId, session] of this.sessions) {
         if (session instanceof TerminalSession && session.sessionId) {
           this.ws.send({ type: 'attach', sessionId: session.sessionId });

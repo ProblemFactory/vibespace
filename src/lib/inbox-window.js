@@ -10,7 +10,7 @@
 //         with the popup's counts, a scope (All sessions | the session you are reading) and
 //         a text filter (PURE scopeRows); rows keyed and patched in place (reconcileKeyed)
 //   RIGHT the item at FULL WIDTH — its title and detail rendered as markdown (every byte is
-//         agent-controlled: raw HTML in it is ESCAPED by the renderer, then DOMPurify), its
+//         agent-controlled: raw HTML in it is ESCAPED by the renderer, then sanitizeHtml), its
 //         option chips, a multi-line reply box, and the action row (Reply · Mark done ·
 //         Dismiss · Reopen · Copy · the producer's action) — every verb THE model's
 //         (src/lib/user-todos-actions.js), the same routes the popup calls
@@ -22,9 +22,10 @@
 // is THE door (the popup's ⤢, a row's ⤢, the mini inbox's ⤢, ⚙ Communication ▸ For you…).
 import { t, tc } from './i18n.js';
 import { Marked } from 'marked';
-import DOMPurify from 'dompurify';
-import { copyText, escHtml, showToast } from './utils.js';
+import { sanitizeHtml } from './safe-html.js';
+import { copyText, escHtml, showContextMenu, showToast } from './utils.js';
 import { UI_ICONS } from './icons.js';
+import { pressVerdict } from './press-arm.js'; // verify-r6 V1: an Allow counts only once its pane has been shown ARM_MS
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
 import { inboxModel, actionWords } from './user-todos-actions.js'; // THE store + the verbs (one implementation with the popup)
@@ -38,12 +39,12 @@ const ICON = svgIcon16('<path d="M2 9.5h3l1 1.8h4l1-1.8h3"/><path d="M3.5 3.5h9l
 // MARKDOWN FOR AGENT TEXT: an item's title/detail/reply are written by an agent
 // (or a peer) and sync to EVERY client. Raw HTML inside them is not markup here:
 // this renderer ESCAPES every html token (so `<img onerror=…>` reads as the text
-// it is), and the output still goes through DOMPurify (the house rule). A private
+// it is), and the output still goes through sanitizeHtml (src/lib/safe-html.js, the house rule). A private
 // Marked instance — the chat's global `marked` keeps its own options.
 const md = new Marked({ gfm: true, breaks: true, renderer: { html(h) { return escHtml(typeof h === 'string' ? h : (h && h.text) || ''); } } });
 function mdInto(el, src, { inline = false } = {}) {
   const s = String(src || '');
-  el.innerHTML = DOMPurify.sanitize(inline ? md.parseInline(s) : md.parse(s));
+  el.innerHTML = sanitizeHtml(inline ? md.parseInline(s) : md.parse(s));
   // a link opens beside the workspace, never in place of it
   for (const a of el.querySelectorAll('a[href]')) { a.target = '_blank'; a.rel = 'noopener noreferrer'; }
 }
@@ -170,7 +171,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
   const patchListRow = (el, e) => {
     const p = rowSig(e);
     const on = e.item.id === st.selected;
-    const cls = 'iw-row' + (e.resolved ? ' iw-row-resolved' : '') + (e.notice ? ' iw-row-notice' : '') + (on ? ' on' : '');
+    const cls = 'iw-row' + (e.resolved ? ' iw-row-resolved' : '') + (e.notice ? ' iw-row-notice' : '') + (e.item.clearedAt ? ' iw-row-cleared' : '') + (on ? ' on' : '');
     if (el.className !== cls) el.className = cls;
     if (el.dataset.sig !== p.sig) {
       el.replaceChildren();
@@ -311,6 +312,10 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     reopen: () => actBtn('reopen', UI_ICONS.refresh, t('Reopen'), t('Reopen')),
     copy: () => actBtn('copy', UI_ICONS.copy, t('Copy'), t('Copy the whole item')),
     producer: () => actBtn('producer', UI_ICONS.refresh, t('Use a reset credit…'), t('Use a reset credit…'), 'iw-act-producer'),
+    // "Clear content…" (verify r2: the verb had no visible door, only a right-click) — THE model's verb, the one dialog
+    clear: () => actBtn('clear', UI_ICONS.eraser, t('Clear content…'), t('Replace this item’s text — it keeps its place and time'), 'iw-act-clear'),
+    'exit-allow': () => actBtn('exit-allow', UI_ICONS.check, t('Allow'), t('Allow'), 'iw-act-primary iw-act-exit'),
+    'exit-deny': () => actBtn('exit-deny', UI_ICONS.close, t('Deny'), t('Deny'), 'iw-act-exit'),
   };
   const viewOf = (it, e) => itemView(it, {
     t, words: model.wordsOf(it), detail: model.detailOf(it), name: model.nameFor(it.sessionKey, [it]),
@@ -327,7 +332,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     const word = b ? b.word : '';
     if (c.board.textContent !== word) c.board.textContent = word;
     c.board.style.display = word ? '' : 'none';
-    if (word) { c.board.dataset.state = b.rec.state; c.board.title = typeof b.rec.reason === 'string' ? b.rec.reason : ''; } // an agent's words — a title PROPERTY
+    if (word) { c.board.dataset.state = b.rec.state; c.board.title = b.why || ''; } // an agent's words (or the cleared sentence, worded here) — a title PROPERTY
   };
   let sending = false;
   const patchLivePane = () => {
@@ -378,9 +383,22 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
       c.sig.meta = metaSig;
     }
     c.el.classList.toggle('iw-item-resolved', v.resolved);
-    // the words: the title and the detail at FULL width, rendered (escaped raw HTML + DOMPurify), selectable
+    c.el.classList.toggle('iw-item-cleared', model.isCleared(it)); // "Clear content…": the cleared sentence, dimmed
+    // the words: the title and the detail at FULL width, rendered (escaped raw HTML + sanitizeHtml), selectable
     if (c.sig.title !== v.title) { mdInto(c.title, v.title, { inline: true }); c.sig.title = v.title; }
-    if (c.sig.detail !== v.detail) { mdInto(c.detail, v.detail); c.detail.style.display = v.detail ? '' : 'none'; c.sig.detail = v.detail; }
+    // verify-r4 F4: an exit ask's detail IS the command it asks to run — shown VERBATIM (textContent in a <pre>), never as
+    // markdown: `echo "*important*"` rendered as "echo "important"" (the asterisks gone) and a `# clean up` line as a
+    // heading, the line breaks folded — the user allowed a command the pane did not show (reproduced)
+    const isCmd = !!(it.action && it.action.type === 'exit-run-ask'); // open or answered: a command is never markdown
+    // verify r6 F3: a helper's ask carries its WHOLE request in the detail — verbatim too (markdown would eat a `*`,
+    // fold its lines and make a `# …` line a heading: the same trap as F4 of r4)
+    const verbatim = isCmd || !!(it.action && it.action.type === 'helper-ask');
+    const detailSig = (verbatim ? 'cmd\u0000' : 'md\u0000') + v.detail;
+    if (c.sig.detail !== detailSig) {
+      if (verbatim) { const pre = mk('pre', 'iw-exit-cmd'); pre.textContent = v.detail; c.detail.replaceChildren(pre); }
+      else mdInto(c.detail, v.detail);
+      c.detail.style.display = v.detail ? '' : 'none'; c.sig.detail = detailSig;
+    }
     // a PREVIEWED detail (a resolved item's snapshot): the rest is loaded once, and the pane SAYS it is not whole yet
     if (it.detailTruncated) loadDetail(id);
     const cutTxt = v.cut ? v.cut.text : '';
@@ -400,8 +418,10 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     // the reply box exists while the item has a reply surface; its node is never replaced
     c.reply.style.display = v.reply.show ? '' : 'none';
     // the action row, keyed by the verdict's action list
-    const actSig = v.actions.join(',');
-    if (c.sig.actions !== actSig) { c.actions.replaceChildren(...v.actions.map((a) => ACT[a]())); c.sig.actions = actSig; }
+    // …and, last, Clear content… on an item that still has words (a cleared one has nothing left to clear)
+    const acts = model.isCleared(it) ? v.actions : [...v.actions, 'clear'];
+    const actSig = acts.join(',');
+    if (c.sig.actions !== actSig) { c.actions.replaceChildren(...acts.map((a) => ACT[a]())); c.sig.actions = actSig; }
     // the verdict's sentence sits under the box — or, with no box, where the box would be
     // (a helper's ask is answered on its card, a job item in the job panel: itemView's `why`)
     if (!v.reply.show) { if (c.why.parentNode !== c.el) c.el.insertBefore(c.why, c.actions); }
@@ -413,6 +433,8 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
 
   // ── THE RENDER (every snapshot, every change of tab / scope / filter / selection) ──
   function render() {
+    // verify-r6 V1: the pane's item changed ⇒ its Allow starts its ARM_MS now
+    if (st.selected !== st.armId) { st.armId = st.selected; st.armAt = performance.now(); }
     const todos = model.todos;
     if (model.loaded) {
       // STABLE ORDER WHILE OPEN (inc-mtw02kbq-kj96, the popup's rule): append-only until the next open
@@ -553,6 +575,14 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
       copyText(itemView(cur, { t, words: model.wordsOf(cur), detail: model.detailOf(cur) }).copy); showToast(t('Copied')); return;
     }
     if (a === 'producer') { model.runAction(it); return; }
+    if (a === 'clear') { model.clearContent(id); return; } // the store's broadcast repaints the pane (and drops this button)
+    if (a === 'exit-allow' || a === 'exit-deny') {
+      // verify-r6 V1: Allow advances to the next item, whose pane shows Allow in the same place — a press on a pane
+      // shown ARM_MS ago or less is not a press on what the user read (a double-click allowed the next ask unseen)
+      if (a === 'exit-allow') { const pv = pressVerdict({ since: st.armId === id ? st.armAt : null, now: performance.now() }); if (!pv.ok) { showToast(t('That Allow moved under the pointer just now — read it, then press it again')); return; } }
+      if (await model.runAction(it, a === 'exit-allow' ? 'allow' : 'deny')) advance(id);
+      return;
+    }
     if (a === 'reopen') { await model.setStatus(id, 'open'); return; }
     if (a === 'done' || a === 'dismiss') { if (await model.setStatus(id, a === 'done' ? 'done' : 'dismissed')) advance(id); }
   };
@@ -587,6 +617,18 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     }
     const b = e.target.closest('.iw-act');
     if (b && !b.disabled) act(b.dataset.act, c.id);
+  }, { signal });
+  // A ROW'S / THE ITEM'S MENU (right-click; a touch long-press is a contextmenu too): "Clear content…"
+  // (2026-09-28) through THE model's verb — the one confirm dialog; the store's broadcast repaints
+  // the row and the pane in place. The reply box keeps its own native menu.
+  root.addEventListener('contextmenu', (e) => {
+    if (e.target.closest('.iw-reply')) return;
+    const row = e.target.closest('.iw-row');
+    const id = row ? row.dataset.id : (st.cur && st.cur.el.contains(e.target) ? st.cur.id : null);
+    const items = id ? model.menuFor(id) : [];
+    if (!items.length) return;
+    e.preventDefault(); e.stopPropagation();
+    showContextMenu(e.clientX, e.clientY, items);
   }, { signal });
   list.addEventListener('keydown', (e) => {
     if (e.target !== list || e.isComposing) return;

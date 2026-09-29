@@ -205,6 +205,7 @@ export function installRefusalText(code, what = 'xpra') {
   if (code === 'install_timeout') return t('The install did not finish in time and is still running on this machine — VibeSpace never stops apt halfway. Check again once it ends.');
   if (code === 'install_link_lost') return t('The link to this machine dropped during the install. The install keeps running there — once the machine is back and has finished it, check again.');
   if (code === 'install_unrecorded') return t('The install ended without saying how (it was stopped, or the machine restarted) — check again.');
+  if (code === 'plan_changed') return t('What would run on this machine changed after it was shown — nothing ran. The commands above are the new ones; press Install again to run them.');
   return '';
 }
 
@@ -312,7 +313,8 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null } = {}
   const q = m.hostId === 'local' ? '' : `?host=${encodeURIComponent(m.hostId)}`;
   const r = await fetchJson(`/api/desktop/install-plan${q}${xp ? '' : `${q ? '&' : '?'}what=${encodeURIComponent(what)}`}`);
   if (!r || r.error) { note.textContent = (r && r.error) || t('Could not read the install plan'); note.classList.add('is-bad'); return; }
-  const plan = r.plan || {};
+  let plan = r.plan || {};
+  let shownDigest = r.digest || null; // verify-r6 I1: the press names the plan these commands are
   if (!plan.ok) { note.textContent = installRefusalText(plan.code, what) || plan.error || ''; note.classList.add('is-bad'); return; }
   pre.textContent = plan.commands.join('\n'); pre.style.display = '';
   copyBtn.style.display = '';
@@ -329,7 +331,7 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null } = {}
     log.style.display = ''; log.textContent = '';
     note.textContent = t('Installing on {machine}…', { machine: name }); note.classList.remove('is-bad');
     let res;
-    try { res = await fetch(xp ? '/api/desktop/install-xpra' : '/api/desktop/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(xp ? { host: m.hostId } : { host: m.hostId, what }) }); }
+    try { res = await fetch(xp ? '/api/desktop/install-xpra' : '/api/desktop/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(xp ? { host: m.hostId, planDigest: shownDigest } : { host: m.hostId, what, planDigest: shownDigest }) }); }
     catch (e) { note.textContent = t('Could not start the install: {why}', { why: e.message }); note.classList.add('is-bad'); goBtn.disabled = false; return; }
     if (!res.ok || !res.body) { let j = null; try { j = await res.json(); } catch { j = null; } note.textContent = (j && (installRefusalText(j.code, what) || j.error)) || t('Could not start the install'); note.classList.add('is-bad'); goBtn.disabled = false; return; }
     const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = ''; let end = null;
@@ -348,6 +350,16 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null } = {}
     }
     if (end && end.done && xp) { note.textContent = t('xpra {version} is installed on {machine}', { version: end.installed || '', machine: name }); showToast(t('xpra is installed on {machine}', { machine: name })); onDone?.(); }
     else if (end && end.done) { note.textContent = t('{app} is installed on {machine}', { app: end.label || appLabel, machine: name }); showToast(t('{app} is installed on {machine}', { app: end.label || appLabel, machine: name })); onDone?.(); }
+    else if (end && end.code === 'plan_changed' && end.plan && Array.isArray(end.plan.commands)) {
+      // verify-r6 I1: the machine's plan moved after the dialog showed it — NOTHING ran; the new commands replace the old
+      // ones above the button, and the next press names THEM
+      plan = end.plan; shownDigest = end.digest || null;
+      pre.textContent = plan.commands.join('\n');
+      log.style.display = 'none';
+      note.textContent = installRefusalText('plan_changed', what); note.classList.add('is-bad');
+      showToast(installRefusalText('plan_changed', what), { type: 'error' });
+      goBtn.disabled = false; copyBtn.disabled = false;
+    }
     else { note.textContent = (end && (installRefusalText(end.code, what) || end.error)) || t('The install ended without an answer — the log above says what ran'); note.classList.add('is-bad'); showToast(xp ? t('The xpra install on {machine} failed', { machine: name }) : t('The LibreOffice install on {machine} failed', { machine: name }), { type: 'error' }); goBtn.disabled = false; copyBtn.disabled = false; }
   };
   void iclose;

@@ -269,6 +269,11 @@ console.log('§6 the capability gate');
   fs.writeFileSync(oldBundle, oldText.replace('if (msg.op === "desktop-serve") {', 'if (false) {'));
   killDaemon(home2); dmOld.stop();
   const dmOld2 = deviceOn(home2, oldBundle);
+  // the .197 integration: install the rewritten copy EXPLICITLY — a spawn reuses <root>/current when it exists, and this
+  // control used to get the rewritten file only through a version-mismatch "upgrade" (the bundle's VERSION marker sat
+  // past the 400 000 bytes the client read, so the expected version was never the daemon's); lane-pairing verify-r1 C1
+  // reads the whole bundle, the versions now agree and nothing is pushed — the control must say which daemon it runs
+  dmOld2.installLocal();
   await dmOld2.connect();
   const t2 = Date.now();
   const raw = await dmOld2._request({ op: 'desktop-serve', action: 'facts', params: {}, timeoutMs: 1500 }).then((r) => ({ answered: r }), (e) => ({ error: e.message }));

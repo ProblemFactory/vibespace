@@ -21,8 +21,9 @@ import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, badgeCoun
 import { inboxModel, tierCounts, actionWords } from './user-todos-actions.js'; // THE client model (§9): the store, the live facts (the running dot + the reply verdict, D1.5/D1.7), the words, every verb — shared with the For-you window
 import { trayWhere } from './user-todos-layout.js'; // lane S3: the new-item toast names the corner the tray sits in on this device
 import { renderRow, patchRow, applyLive, replyBoxEl, reconcileKeyed, agoText as agoTextOf } from './user-todos-row.js'; // THE row renderer (one spelling of a row; keyed patching keeps a reply box alive)
-import { anchorFixedPopup, createPopover, escHtml, fetchJson, getToastHistory, onOutsidePress, showToast } from './utils.js';
+import { anchorFixedPopup, createPopover, escHtml, fetchJson, getToastHistory, onOutsidePress, showContextMenu, showToast, stripLegacyRecordToasts } from './utils.js';
 import { UI_ICONS } from './icons.js';
+import { pressVerdict, armAfterLayout } from './press-arm.js'; // verify-r6 V1: an Allow counts only once it sat still where it was read
 
 const URG_RANK = { low: 0, normal: 1, high: 2, urgent: 3 };
 
@@ -62,12 +63,21 @@ export function installUserTodos(app) {
   const histSeen = () => { try { const v = Number(localStorage.getItem(HISTORY_SEEN_KEY)); return Number.isFinite(v) && v > 0 ? v : null; } catch { return null; } };
   const markHistorySeen = () => { try { localStorage.setItem(HISTORY_SEEN_KEY, String(Date.now())); } catch { } };
   if (histSeen() == null) markHistorySeen();
+  // an older build kept a For-you item's WORDS in its arrival toast (this device's localStorage) — cut back to the head on every
+  // load, in this device's language and in English (lane-redact verify r4; a cleared item's words must not outlive the clear here)
+  stripLegacyRecordToasts([t('Added to For you'), 'Added to For you']);
 
   // The words of an item, its session's name, the jump to where it is answered
   // and the status POST are THE model's (moved verbatim, §9) — the popup hides
   // itself before a jump; the window stays.
   const { wordsOf, detailOf, nameFor } = model;
-  const hidePopup = () => popup.classList.add('hidden');
+  // A CLOSED POPUP KEEPS NOTHING BUT THE DRAFTS (lane-redact verify r7): every closer — a jump, the ⤢, an outside press,
+  // Escape, the button — goes through here, and the rows LEAVE the DOM with the close (a typed reply is kept as a draft
+  // first). A record cleared while the popup is closed — the owner's natural path: the right-click on another surface's
+  // row is the outside press that closed it — otherwise stayed in the hidden rows (the item's text, its session's status
+  // chip) until the next open rebuilt them; an open popup is patched live, and every open builds a fresh skeleton.
+  const hidePopup = () => { popup.classList.add('hidden'); layout = null; dropRows(); };
+  const dropRows = () => { if (!popup.firstChild) return; stashDrafts(popup); popup.replaceChildren(); };
   const jump = (key, item) => model.jump(key, item, { close: hidePopup });
   const setStatus = (id, status) => model.setStatus(id, status);
 
@@ -205,13 +215,16 @@ export function installUserTodos(app) {
     for (const c of [...popup.children]) if (c !== tabs && c !== page) { stashDrafts(c); c.remove(); }
     if (page.parentNode !== popup) popup.append(page);
   };
+  // a record's toast is worded from the LIVE store — its label and its words (a cleared item reads the sentence; one no longer
+  // in the snapshot, nothing): the entry itself keeps the head only
+  const histWords = (e) => { if (!e || !e.ref || e.ref.kind !== 'todo') return ''; const it = byId(e.ref.id); return it ? `${nameFor(it.sessionKey, [it])}: ${wordsOf(it)}` : ''; };
   const renderHistory = () => {
     markHistorySeen(); // the page is being LOOKED AT — its unread count clears
     const h = getToastHistory();
     const list = popup.querySelector(':scope > .ut-hist') || mk('div', 'ut-hist');
     list.innerHTML = h.length
       ? h.map((e) => `<div class="ut-hist-item${e.type === 'error' ? ' ut-hist-err' : ''}">
-          <div class="ut-hist-msg">${escHtml(e.m)}</div>
+          <div class="ut-hist-msg">${escHtml(e.m)}${histWords(e) ? ' · ' + escHtml(histWords(e)) : ''}</div>
           <div class="ut-meta">${escHtml(agoText(e.ts))}</div>
         </div>`).join('')
       : `<div class="empty-hint">${escHtml(t('No notifications yet.'))}</div>`;
@@ -240,9 +253,22 @@ export function installUserTodos(app) {
   /** Bring `container`'s rows (after `head`, when given) to `entries`, keyed by
    *  data-id. A node moves only when it is out of place — never the common case
    *  while the layout is append-only (moving a focused textarea would blur it). */
-  const reconcileRows = (container, entries, head = null, ctx = rowCtx) => reconcileKeyed(container, entries, {
-    head, isRow: (c) => c.classList.contains('ut-item'), create: (e) => renderRow(e, ctx), patch: (row, e) => patchRow(row, e, ctx),
-  });
+  const reconcileRows = (container, entries, head = null, ctx = rowCtx) => {
+    reconcileKeyed(container, entries, {
+      head, isRow: (c) => c.classList.contains('ut-item'), create: (e) => renderRow(e, ctx), patch: (row, e) => patchRow(row, e, ctx),
+    });
+    armExitButtons();
+  };
+  // verify-r6 V1: every "Allow … to run a command?" button in the page, re-stamped after each row pass — one that
+  // appeared or MOVED (a resolved row above it shrank, an expiry) starts its ARM_MS again (PURE src/lib/press-arm.js)
+  const armExitButtons = () => {
+    const now = performance.now();
+    for (const b of document.querySelectorAll('.ut-action-exit.ut-exit-allow')) {
+      const top = b.getBoundingClientRect().top;
+      b._armSince = armAfterLayout({ prevTop: b._armTop ?? null, top, prevSince: b._armSince ?? null, now });
+      b._armTop = top;
+    }
+  };
   const patchDot = (dot) => model.patchDot(dot); // THE running dot (D1.7: liveDotState over the model's live fact)
   // A group = its BAR (the head — a button that jumps — and, beside it, the
   // "Mark all seen" button: a button never nests in a button), its rows, and
@@ -289,7 +315,7 @@ export function installUserTodos(app) {
     if (!chip) { chip = mk('span', 'ut-board'); head.insertBefore(chip, head.querySelector(':scope > .ut-group-n')); }
     if (chip.dataset.state !== rec.state) chip.dataset.state = rec.state;
     if (chip.textContent !== word) chip.textContent = word;
-    const why = typeof rec.reason === 'string' ? rec.reason : ''; // an agent's words — a title PROPERTY, never markup
+    const why = b.why || ''; // an agent's words (or the cleared sentence, worded here) — a title PROPERTY, never markup
     if (chip.title !== why) chip.title = why;
   };
   const patchBoards = () => {
@@ -376,7 +402,7 @@ export function installUserTodos(app) {
   };
   const renderPanel = () => {
     if (popup.classList.contains('hidden')) { folds.clear(); noticeOrder = null; }
-    if (popup.classList.contains('hidden')) { layout = null; return; }
+    if (popup.classList.contains('hidden')) { layout = null; dropRows(); return; } // a closed popup holds no rows (hidePopup, verify r7)
     if (tab === 'history') { renderHistory(); return; }
     const root = ensureInbox();
     // the groups in THE order (PURE sortGroups — Background Work last, worst
@@ -595,6 +621,7 @@ export function installUserTodos(app) {
       replyKeys(e);
     });
     pop.addEventListener('input', growOnInput);
+    pop.addEventListener('contextmenu', rowMenu);
     mini = { pop, winId, keys, layout: null, rows, dot, name, empty };
     renderMini();
     return pop;
@@ -623,9 +650,10 @@ export function installUserTodos(app) {
   // the nav button is exempt like the taskbar one — a press on it would hide the popup and the click would re-open it
   // (a tap that never closes); the title-bar mini inbox (chunk 3) is a layer ABOVE the panel, not outside it; any
   // other popover is outside (the panel never honoured the chained-popover rule)
-  onOutsidePress(popup, () => popup.classList.add('hidden'), {
+  onOutsidePress(popup, hidePopup, {
     exclude: [btn, mBtn],
-    ignore: (t) => !!t?.closest?.('.ut-mini-popover, .win-inbox-badge'),
+    // a row's own menu (right-click → Clear content…) and the confirm dialog it opens are ABOVE the panel too
+    ignore: (t) => !!t?.closest?.('.ut-mini-popover, .win-inbox-badge, .context-menu, #record-clear-dialog'),
     nested: false, once: false,
   });
   // Escape closes the popup / phone sheet (verifier r2). This is a PERSISTENT
@@ -654,7 +682,7 @@ export function installUserTodos(app) {
     for (const o of document.querySelectorAll('.dialog-overlay')) if (!o.classList.contains('hidden')) return;
     const box = e.target?.closest?.('.ut-reply');
     if (box && popup.contains(box)) { foldBox(box); e.preventDefault(); e.stopPropagation(); return; }
-    popup.classList.add('hidden');
+    hidePopup();
     e.preventDefault();
   }, { capture: true });
   function replyKeys(e) {
@@ -671,6 +699,19 @@ export function installUserTodos(app) {
   const growOnInput = (e) => { if (e.target?.classList?.contains('ut-reply-input')) growBox(e.target); };
   popup.addEventListener('keydown', replyKeys);
   popup.addEventListener('input', growOnInput);
+  // A ROW'S MENU (right-click; a long-press on touch is a contextmenu too — utils
+  // installLongPressContextMenu): "Clear content…" (2026-09-28) through THE model's
+  // verb (the ONE confirm dialog, then the store's broadcast repaints the row in place).
+  // A reply box is a place to type — its own native menu stays.
+  function rowMenu(e) {
+    if (e.target.closest('.ut-reply')) return;
+    const row = e.target.closest('.ut-item');
+    const items = row ? model.menuFor(row.dataset.id) : [];
+    if (!items.length) return;
+    e.preventDefault(); e.stopPropagation();
+    showContextMenu(e.clientX, e.clientY, items);
+  }
+  popup.addEventListener('contextmenu', rowMenu);
   // "Mark all seen" (chunk 4): ONE POST for the group's open asks (hidden rows
   // included) ⇒ the store's setStatusMany ⇒ ONE broadcast ⇒ every row strikes
   // IN PLACE (the slot law) and the badges recount; a failure is a toast.
@@ -752,6 +793,19 @@ export function installUserTodos(app) {
       model.runAction(todos.open.find((i) => i.id === id)); // THE producer's verb (the model maps the type)
       return;
     }
+    const exitBtn = e.target.closest('.ut-action-exit');
+    if (exitBtn && exitBtn.dataset.answer === 'allow') {
+      // verify-r6 V1: an Allow that appeared or moved under the pointer a moment ago is not the one the user read
+      armExitButtons();
+      const pv = pressVerdict({ since: exitBtn._armSince ?? null, now: performance.now() });
+      if (!pv.ok) { showToast(t('That Allow moved under the pointer just now — read it, then press it again')); return; }
+    }
+    if (exitBtn) {
+      // lane-pairing ⑥: an exit's "ask me" answered where it appears (Allow / Deny)
+      exitBtn.disabled = true;
+      Promise.resolve(model.runAction(todos.open.find((i) => i.id === id), exitBtn.dataset.answer)).finally(() => { exitBtn.disabled = false; });
+      return;
+    }
     if (e.target.closest('.ut-done')) setStatus(id, 'done');
     else if (e.target.closest('.ut-dismiss')) setStatus(id, 'dismissed');
     else if (e.target.closest('.ut-reopen')) setStatus(id, 'open');
@@ -788,13 +842,27 @@ export function installUserTodos(app) {
         // right)") — measured off this device's own button, once per item
         const where = trayWhere(trayRect(), window.innerWidth, window.innerHeight);
         const head = where ? t('Added to For you ({where})', { where: t(where) }) : t('Added to For you');
-        const el = showToast(`${head} · ${nameFor(i.sessionKey, [i])}: ${wordsOf(i)}`);
-        if (el) el.dataset.todoId = i.id;
-        if (el) { el.style.cursor = 'pointer'; el.onclick = () => jump(i.sessionKey, i); }
+        // the history keeps the HEAD + the item's id — never its words (lane-redact verify r4) NOR its label: a Background
+        // Work ask's label (`sessionName`, what nameFor() falls back to) IS the job's name (verify r5, reproduced in chrome);
+        // the label and the words are looked up live wherever the entry is shown
+        const el = showToast(`${head} · ${nameFor(i.sessionKey, [i])}: ${wordsOf(i)}`, { history: { m: head, ref: { kind: 'todo', id: i.id } } });
+        if (el) { el.dataset.todoId = i.id; el.dataset.todoHead = head; }
+        // the click keeps the item's ID and key, never the item (lane-redact verify r5, a heap snapshot: the toast's handler
+        // kept the original record — its words — reachable for the toast's life after a clear); it jumps with the LIVE record
+        if (el) { const id = i.id, key = i.sessionKey; el.style.cursor = 'pointer'; el.onclick = () => jump(key, byId(id)); }
         btn.classList.remove('ut-blink'); void btn.offsetWidth; btn.classList.add('ut-blink');
       }
     }
     knownIds = new Set([...todos.open, ...todos.resolved].map((i) => i.id));
+    // A TOAST ON SCREEN IS A SURFACE TOO (lane-redact verify r5): an arrival toast keyed on its item is re-worded from the
+    // CURRENT record on every snapshot — a cleared item's toast reads the sentence for the rest of its life (≤ 60 s)
+    for (const el of document.querySelectorAll('#global-toasts > .global-toast[data-todo-id]')) {
+      const it = byId(el.dataset.todoId);
+      const b = el.querySelector('.global-toast-body');
+      if (!it || !b || typeof el.dataset.todoHead !== 'string') continue;
+      const want = `${el.dataset.todoHead} · ${nameFor(it.sessionKey, [it])}: ${wordsOf(it)}`;
+      if (b.textContent !== want) b.textContent = want;
+    }
     renderBtn(); renderPanel(); renderMini(); scheduleBadges();
   };
 

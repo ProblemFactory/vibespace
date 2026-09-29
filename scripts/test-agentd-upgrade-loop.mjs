@@ -56,5 +56,80 @@ try {
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
+
+// ── verify-r1 C1 (2026-09-28): THE LEDGER — the breaker's count must outlive the DeviceManager instance, because the
+// dial path REBUILDS the instance on every fresh stream (measured on a real daemon: 180 upgrades in 45 s once the
+// handshake ran on every dial-in). A fake daemon over the REAL Mux that never moves its reported version; four
+// "dial-ins", each a fresh DeviceManager the way deviceForDial rebuilds one; ONE ledger shared ⇒ ≤ 3 upgrades and
+// the fourth link is KEPT. Control: the same four without a ledger ⇒ four upgrades (the pre-fix shape). ──
+console.log('— the ledger across rebuilt instances (a fake never-converging daemon over the real Mux) —');
+{
+  const net = await import('node:net');
+  const { Mux, PROTO_VERSION } = require('../src/agentd/mux.js');
+  const { create } = require('../src/server/dial-pairing.js');
+  const t2 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-upg-ledger-'));
+  const bundle = path.join(t2, 'agentd.js');
+  // the marker PAST 400 000 bytes — where the real bundle has it (byte 1 076 247 of 1.6 MB); the reader must find it
+  fs.writeFileSync(bundle, '/*' + 'x'.repeat(450000) + '*/\nmodule.exports = { VERSION: "9.9.9" };\n');
+  let upgrades = 0; const upgradeVersions = [];
+  const srv = net.createServer((sock) => {
+    let expect = 0, got = 0;
+    const mux = new Mux(sock, {
+      onControl: (m) => {
+        if (m.op === 'hello') mux.control({ op: 'hello-ack', protoVersion: PROTO_VERSION, daemonVersion: '0.0.1', capabilities: [] });
+        if (m.op === 'upgrade') { upgrades++; upgradeVersions.push(m.version); expect = m.size; got = 0; }
+      },
+      onData: (chan, buf) => { got += buf.length; mux.credit(chan, buf.length); if (expect && got >= expect) { mux.control({ op: 'upgrade-done' }); expect = 0; setTimeout(() => sock.destroy(), 50); } },
+      onDead: () => {},
+    });
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const port = srv.address().port;
+  const dialIn = () => new Promise((res, rej) => { const s = net.connect(port, '127.0.0.1'); s.on('connect', () => res(s)); s.on('error', rej); });
+  const run = async (ledger, tag) => {
+    upgrades = 0; upgradeVersions.length = 0;
+    const outcomes = [];
+    for (let i = 0; i < 4; i++) {
+      const stream = await dialIn();
+      let live = stream;
+      // an upgrading instance's link ENDS (the fake daemon destroys it after upgrade-done) — `pending` is judged on
+      // that close, the 1.5 s cap is only the never-closes guard (a fixed 1.5 s wait × 7 instances was 10.5 s)
+      const ended = new Promise((res) => stream.on('close', () => { live = null; setTimeout(() => res('pending'), 30); }));
+      const dm = new DeviceManager({ dataDir: t2, bundlePath: bundle, version: '1.1.1', log: () => {}, transport: { kind: 'stream', hostToken: 'vsht_x', getStream: () => live }, ...(ledger ? { upgradeLedger: ledger } : {}) });
+      const r = await Promise.race([dm.connect().then(() => 'connected'), ended, new Promise((res) => setTimeout(() => res('pending'), 1500))]);
+      outcomes.push(r);
+      dm.stop(); // deviceForDial's stale-stream rebuild: the next dial-in gets a NEW instance
+      try { stream.destroy(); } catch { }
+    }
+    return { upgrades, outcomes, versions: [...upgradeVersions] };
+  };
+  const ledger = create({ rootDir: t2, AGENTD_DIR: t2, agentdHostToken: () => 'x', getHosts: () => null, getMounts: () => null, getMachineMounts: () => null, getPortForwards: () => null, getExitProxy: () => null }).upgradeLedgerFor('devL');
+  const withLedger = await run(ledger, 'ledger');
+  ok(withLedger.upgrades === 3 && withLedger.outcomes[3] === 'connected', `WITH the per-device ledger four rebuilt instances make 3 upgrade attempts, then the fourth link is KEPT (${JSON.stringify(withLedger)})`);
+  ok(withLedger.versions.every((v) => v === '9.9.9'), `the upgrade op names the BUNDLE's version (9.9.9 — what the re-exec'd daemon will report), never the package's 1.1.1 (${JSON.stringify(withLedger.versions)})`);
+  const control = await run(null, 'noledger');
+  ok(control.upgrades === 4, `CONTROL: the same four instances WITHOUT a ledger upgrade four times — the unbounded pre-fix shape (${control.upgrades})`);
+  // the marker past 400 000 bytes is what `expected` reads (the whole file), so 9.9.9 — not the package version
+  const dmv = new DeviceManager({ dataDir: t2, bundlePath: bundle, version: '1.1.1', log: () => {} });
+  ok(dmv._expectedVersion() === '9.9.9', 'the marker is found wherever esbuild put it (past the first 400 000 bytes)');
+  // a given-up device is retried only after the stated window (the ledger's decay), and a rebuilt bundle starts over
+  const DP2 = create({ rootDir: t2, AGENTD_DIR: t2, agentdHostToken: () => 'x', getHosts: () => null, getMounts: () => null, getMachineMounts: () => null, getPortForwards: () => null, getExitProxy: () => null });
+  let clock = 1000; const L2 = DP2.upgradeLedgerFor('devD', () => clock);
+  L2.set('9.9.9', { tries: 3, gaveUp: true });
+  ok(L2.get('9.9.9')?.gaveUp === true && L2.get('9.9.10') === null, 'the ledger answers for ITS bundle version only (a rebuilt bundle starts over)');
+  clock += DP2.UPGRADE_RETRY_AFTER_MS - 1;
+  ok(L2.get('9.9.9')?.gaveUp === true, 'a given-up device stays given up inside the retry window');
+  clock += 1;
+  ok(L2.get('9.9.9') === null, `after UPGRADE_RETRY_AFTER_MS (${DP2.UPGRADE_RETRY_AFTER_MS / 60000} min) it gets another bounded run`);
+  // WIRING PIN (feedback: a pure fix whose call site is not staged is dead for 24 versions): deviceForDial builds
+  // its DeviceManager WITH the per-device ledger, and the loop breaker reads through the ledger accessors
+  const dpSrc = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '../src/server/dial-pairing.js'), 'utf8');
+  const clSrc = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '../src/agentd/client.js'), 'utf8');
+  ok(/upgradeLedger: upgradeLedgerFor\(deviceId\)/.test(dpSrc), 'WIRING: deviceForDial constructs its DeviceManager with upgradeLedgerFor(deviceId)');
+  ok(/const led = this\._ledgerRead\(expected\);/.test(clSrc) && /led\.tries \+= 1; this\._ledgerWrite\(expected, led\);/.test(clSrc), 'WIRING: the hello-ack loop breaker counts through _ledgerRead / _ledgerWrite (never the bare instance field)');
+  ok(/op: 'upgrade', version: this\._expectedVersion\(\)/.test(clSrc), 'WIRING: the upgrade op carries _expectedVersion() (the bundle\'s), not this._version');
+  srv.close();
+  fs.rmSync(t2, { recursive: true, force: true });
+}
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

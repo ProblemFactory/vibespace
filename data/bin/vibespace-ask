@@ -45,6 +45,8 @@ const USAGE = [
   '  vibespace-ask list                    print this session\'s open items',
   '  vibespace-ask resolve <id|text>       the user answered (in chat counts)? resolve it YOURSELF immediately',
   '  vibespace-ask show <id>               print one item of this session in full (any status, with the user\'s inbox reply)',
+  '  vibespace-ask clear <id>              CLEAR an item this session filed: it stays in the tray with its time, its words become',
+  '                                        "[cleared at the user\'s request]" (the user clears any item from the For you window)',
   '  a reply from the inbox arrives as a user message opening with [For you reply #<id>] and a quote of your item',
   '  (whenever you ask in chat, ALSO file it here — both channels, always; the FULL content goes in your CHAT reply, the For you tray only notifies; your own working steps still belong in your todo list)',
 ].join('\n');
@@ -92,6 +94,13 @@ async function main() {
     const ref = rest.join(' ').trim();
     if (!ref) { console.error('vibespace-ask: show needs an item id\n' + USAGE); process.exit(1); }
     printOne((await call({ show: ref })).item);
+    return;
+  }
+  if (cmd === 'clear') {
+    const ref = rest.join(' ').trim();
+    if (!ref) { console.error('vibespace-ask: clear needs an item id (vibespace-ask list prints them)\n' + USAGE); process.exit(1); }
+    const r = await call({ clear: ref });
+    console.log(r.cleared ? 'cleared ' + ref + ' — it keeps its place and time in the user\'s tray; its words now read "[cleared at the user\'s request]"' : 'already cleared: ' + ref);
     return;
   }
   if (cmd === 'resolve' || cmd === 'done') {

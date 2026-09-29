@@ -191,6 +191,26 @@ function hitRoute(method, path, { query = {}, body = {} } = {}) {
   check('legacy task-plan still answers 410 with backlog pointer', r5.code === 410 && /backlog-add/.test(r5.out.error), JSON.stringify(r5.out));
 }
 
+// "Clear content…" (2026-09-28): an entry cleared AFTER a session saw it — the next prompt carries NO update
+// block (a clear is not news), and a fresh session's FULL injection shows the sentence, never the words
+{
+  const gC = tasks.create({ title: 'clearing', objective: 'obj c', folders: [path.join(tmp, 'clearing')] });
+  const sC = { agentToken: 'vsst_clear', backend: 'claude', cwd: path.join(tmp, 'clearing'), name: 'c' };
+  activeSessions.set('sessC', sC);
+  const callAs = (tok) => { let out; const res = { json: (o) => { out = o; }, status: () => res }; routes['GET /api/agent/prompt-context']({ headers: { authorization: 'Bearer ' + tok }, query: {}, body: {} }, res); return (out && out.context) || ''; };
+  await sleep(3);
+  tasks.addProgress(gC.id, { note: 'MAILBOX-WORDS pasted here', detail: 'more MAILBOX-WORDS', session: 'claude:sessC' });
+  const first = callAs('vsst_clear');
+  check('setup: the session\'s first prompt injects the words', first.includes('MAILBOX-WORDS'), first.slice(-300));
+  await sleep(3);
+  const r = tasks.clearProgress(gC.id, [tasks.get(gC.id).progress[0].id], { by: 'owner' });
+  const next = callAs('vsst_clear');
+  check('after the clear the next prompt carries NO update block and no words', r.cleared.length === 1 && !next.includes('task-update') && !next.includes('MAILBOX-WORDS'), next);
+  activeSessions.set('sessC2', { agentToken: 'vsst_clear2', backend: 'claude', cwd: sC.cwd, name: 'c2' }); // a session that never saw the group
+  const fresh = callAs('vsst_clear2');
+  check('a fresh session\'s FULL injection shows the cleared sentence, never the words', fresh.includes('<vibespace-task-context>') && fresh.includes("[cleared at the user's request]") && !fresh.includes('MAILBOX-WORDS'), fresh.slice(-400));
+}
+
 fs.rmSync(tmp, { recursive: true, force: true });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nall prompt-context smoke tests passed');

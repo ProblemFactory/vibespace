@@ -20,6 +20,7 @@ vibespace-ask "Run the migration now?" --options "run now|wait for backup"
 vibespace-ask list                     # your session's open items
 vibespace-ask resolve <id|text-match>  # the MOMENT they answer (a chat answer counts)
 vibespace-ask show <id>                # one item of yours in full, any status, with the user's reply
+vibespace-ask clear <id>               # an item YOU filed: it stays in the tray with its time, its words become "[cleared at the user's request]"
 ```
 
 - `--options "A|B|C"` = up to 6 one-click answers (≤ 40 chars each, distinct,

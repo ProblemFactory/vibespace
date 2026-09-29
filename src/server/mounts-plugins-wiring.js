@@ -17,7 +17,7 @@ const { mk } = require('./lazy.js');
 
 function create({ app, server, rootDir, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES,
   auth, wss, WS_OPEN, bcastAll, serverSetting, mountTokens, persistenceRouter, instanceUrl,
-  hosts, agentdDials, agentdHostToken, agentdMintDialPair, deviceForDial,
+  hosts, agentdDials, agentdHostToken, agentdMintDialPair, deviceForDial, lockOutDialHolder = () => false,
   ensureAgentdOnHost, getPortForwards, onMountsUpdated, activeSessions, getTelemetry = null, serverNotice = null, broadcastActiveSessions = null,
   // agent browser P1 second half (§3.2.5 / §3.8): the Task-Group default rung, the
   // zero-billed notice queue and the session-meta writer the pin persists through
@@ -103,19 +103,23 @@ async function graduateHostToDial(h, { serverUrl, viaRelay } = {}) {
     const dialHost = (new URL(base).hostname || 'dial').replace(/[^A-Za-z0-9.-]/g, '');
     const root = `$HOME/.vibespace/device@${dialHost || 'dial'}`;
     hosts.graduateDial(h.id, { dialRoot: root });
-    const pair = agentdMintDialPair(hosts.get(h.id).deviceId);
-    const dialUrl = `${base.replace(/^http/, 'ws')}/api/device-dial?device=${pair.deviceId}`;
-    // ship + run the installer over ssh stdin (never argv — 2.126.0 rule is
-    // about secrets; tokens ride the arg list INSIDE the remote bash, same
-    // exposure class as the pairing dialog's copy-paste command)
+    const gradDevice = hosts.get(h.id).deviceId;
+    const dialUrl = `${base.replace(/^http/, 'ws')}/api/device-dial?device=${gradDevice}`;
+    const pair = agentdMintDialPair(gradDevice, { host: require('../dial-facts.js').hostOf(dialUrl), base });
+    // ship + run the installer over ssh STDIN — the installer AND its arguments (verify-r3 B-grad): the tokens used to
+    // ride `ssh … -- 'bash -s -- … --dial-token vsdt_… --host-token vsht_…'`, i.e. the argv of the LOCAL ssh (readable
+    // by every user of this machine through /proc/<pid>/cmdline for the whole install, ≤ 300 s) and the remote shell's
+    // command line (the same on the machine). Now the remote command is the bare `bash -s` and the arguments are a
+    // `set -- …` line bash reads from stdin before the installer's own text — the installer parses "$@" unchanged.
     const installer = fs.readFileSync(path.join(rootDir, 'scripts', 'vibespace-agentd-install.sh'), 'utf-8');
     const args = `--bundle-url ${JSON.stringify(base + '/vibespace-device.js')} --dial ${JSON.stringify(dialUrl)} --dial-token ${pair.dialToken} --host-token ${pair.hostToken}`;
+    const inv = require('../dial-facts.js').sshInstallInvocation({ args, installer });
     const inst = await new Promise((resolve) => {
       const { execFile } = require('child_process');
-      const child = execFile('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', `bash -s -- ${args}`],
+      const child = execFile('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', inv.remote],
         { timeout: 300000, maxBuffer: 8 * 1024 * 1024 }, (err, so, se) => resolve({ ok: !err, out: String(so || '').slice(-3000), err: String(se || err?.message || '').slice(-1500) }));
       child.stdin.on('error', () => { });
-      child.stdin.end(installer);
+      child.stdin.end(inv.stdin);
     });
     if (!inst.ok) { hosts.ungraduateDial(h.id); bcastAll({ type: 'hosts-updated' }); throw new Error('installer failed on the host — rolled back: ' + (inst.err || inst.out).slice(-600)); }
     // wait for the dial-in (installer verifies the daemon started; the dial
@@ -151,62 +155,136 @@ app.post('/api/hosts/:id/graduate-dial', async (req, res) => {
       bcastAll({ type: 'hosts-updated' });
       return res.json({ success: true, removed: true });
     }
-    const out = await graduateHostToDial(h, { serverUrl: req.body?.serverUrl, viaRelay: req.body?.viaRelay });
+    // lane-pairing ①: the chosen address (the pairing dialog's list) — judged by the ONE verdict before anything runs
+    let serverUrl = req.body?.base ?? req.body?.serverUrl;
+    if (serverUrl && !req.body?.viaRelay) { const v = require('../dial-facts.js').dialBaseVerdict(serverUrl); if (!v.ok) return res.status(400).json({ error: `not an address the machine can dial (${v.code})`, code: 'bad_base', why: v.code }); serverUrl = v.base; }
+    const out = await graduateHostToDial(h, { serverUrl, viaRelay: req.body?.viaRelay });
     res.json(out);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// ── PAIRING (lane-pairing ①②③, B-7007; the owner's MacBook 2026-09-27) ──
+// ① the address list: every address the SERVER can name for itself — the browser's origin, the relay, this
+//    host's Tailscale / LAN / public interface IPs, its hostname, IPv6 (PURE src/dial-facts.js). Read-only.
+app.get('/api/device/dial-addresses', (req, res) => {
+  try {
+    const DF = require('../dial-facts.js');
+    const deviceId = DF.deviceIdOf(req.query.device); // THE one name rule
+    const origin = req.headers.origin || `${String(req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim()}://${req.headers.host || ''}`;
+    let relay = null, relayPublishable = false;
+    try { const st = instanceUrl?.status?.() || {}; relay = st.effectiveUrl || null; relayPublishable = !!(st.frpConfigured && !st.published && !relay); } catch { }
+    // verify-r4 F3: the address this server's SOCKET is bound to (not the addresses the machine has) decides which
+    // interface rows a device can reach — HOST=127.0.0.1 ("local-only", README) used to list four addresses that all
+    // refused the connection, the tailnet one checked
+    const bind = (() => { try { const a = server && typeof server.address === 'function' ? server.address() : null; return a && typeof a === 'object' && a.address ? a.address : (HOST || null); } catch { return HOST || null; } })();
+    const candidates = DF.dialAddressCandidates({ origin, relay, hostname: os.hostname(), interfaces: os.networkInterfaces(), port: PORT, deviceId: deviceId || 'DEVICE', bind });
+    res.json({ candidates, deviceId, relayPublishable, listen: { address: bind, loopbackOnly: DF.bindAdmits(bind).loopbackOnly } });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+// ② THE ONLY MINTER, called by two buttons ("Create pairing", "Generate a new command") — opening a dialog never
+//    mints (test-architecture's mint census). The chosen `base` builds BOTH urls of the command; a custom one is
+//    re-judged here (a client is not trusted) BEFORE anything is minted.
 app.post(['/api/device/dial-pair', '/api/agentd/dial-pair'], async (req, res) => {
   try {
-    const deviceId = String(req.body?.deviceId || ('dev-' + require('crypto').randomBytes(4).toString('hex'))).replace(/[^\w-]/g, '').slice(0, 32);
-    // minting for an EXISTING deviceId is a RE-PAIR: setDialToken rotates the
-    // hash on the existing record (mounts/forwards/history kept, host token
-    // file untouched) — no unpair needed (userW lesson: unpair-first deleted
-    // the record and orphaned the still-running device daemon)
-    const existed = !!hosts.findByDeviceId(deviceId);
-    const pair = agentdMintDialPair(deviceId);
-    bcastAll({ type: 'hosts-updated' });
-    // Double-NAT pairing (B-5c1e): when THIS instance is itself behind NAT
-    // (a local/home VibeSpace), the browser's origin is unreachable from the
-    // device's network. viaRelay publishes the instance's OWN http port
-    // through the frp relay and hands the device a public subdomain to dial —
-    // the relay bridges both NATs. Persisted (stable sub) so reconnects hold.
-    let base = String(req.body?.serverUrl || '').replace(/\/$/, '') || null;
+    const DF = require('../dial-facts.js');
+    const deviceId = DF.deviceIdOf(req.body?.deviceId || ('dev-' + require('crypto').randomBytes(4).toString('hex'))); // THE one name rule (the dialog judges a collision with it — verify-r4 F6)
+    if (!deviceId) return res.status(400).json({ error: 'the device name has no letters, digits, - or _ left', code: 'bad_name' });
+    // verify-r5 A1: THE NAME VERDICT, here, before anything is published, minted or cut — the dialog's note judged its
+    // own copy of the list (two windows / a device that came online raced it)
+    const nv = DF.pairRequestVerdict({ deviceId, expect: req.body?.expect === 'new' ? 'new' : req.body?.expect === 'existing' ? 'existing' : null, hosts: hosts.list() });
+    if (!nv.ok) return res.status(409).json({ error: nv.error, code: nv.code, deviceId, ...(nv.code === 'already_paired' ? { online: !!nv.online } : {}), ...(nv.twin ? { twin: nv.twin } : {}) }); // verify-r5 A3: + name_case_taken {twin}
+    // Double-NAT pairing (B-5c1e): when THIS instance is itself behind NAT, viaRelay publishes the instance's OWN
+    // http port through the frp relay and hands the device a public subdomain to dial — BEFORE the mint (a failed
+    // publish mints nothing).
+    let base = null;
     let relayUrl = null;
     if (req.body?.viaRelay) {
       try {
         relayUrl = String(await instanceUrl.ensurePublished()).replace(/\/$/, '');
         base = relayUrl;
-      } catch (e) { return res.status(400).json({ error: 'could not publish this instance to the relay: ' + e.message + ' — is the frp plugin installed + started (⚙ → Plugins → Public URLs)?' }); }
+      } catch (e) { return res.status(400).json({ error: 'could not publish this instance to the relay: ' + e.message + ' — is the frp plugin installed + started (⚙ → Plugins → Public URLs)?', code: 'relay_unpublished' }); }
+    } else {
+      const v = DF.dialBaseVerdict(req.body?.base ?? req.body?.serverUrl);
+      if (!v.ok) return res.status(400).json({ error: `not an address the device can dial (${v.code})`, code: 'bad_base', why: v.code });
+      base = v.base;
     }
-    const dialUrl = base ? `${base.replace(/^http/, 'ws')}/api/device-dial?device=${deviceId}` : null;
-    // RE-PAIR of a device that is dialed-in RIGHT NOW: push the rotated dial
-    // config over the live link — the daemon re-reads dial.json per attempt
-    // (2.170.0), so nothing needs to run on the device. Best-effort; the
-    // command below is the universal fallback.
+    const dialUrl = DF.dialUrlOf(base, deviceId);
+    // minting for an EXISTING deviceId is a RE-PAIR: setDialToken rotates the hash on the existing record
+    // (mounts/forwards/history kept, host token file untouched) — no unpair needed (userW lesson: unpair-first
+    // deleted the record and orphaned the still-running device daemon)
+    // verify-r5 A1: …and AGAIN here, synchronous with the mint — the relay publish above awaited, and a second window's
+    // Create could have minted this name meanwhile
+    const nv2 = DF.pairRequestVerdict({ deviceId, expect: req.body?.expect === 'new' ? 'new' : req.body?.expect === 'existing' ? 'existing' : null, hosts: hosts.list() });
+    if (!nv2.ok) return res.status(409).json({ error: nv2.error, code: nv2.code, deviceId, ...(nv2.code === 'already_paired' ? { online: !!nv2.online } : {}), ...(nv2.twin ? { twin: nv2.twin } : {}) });
+    const existed = !!hosts.findByDeviceId(deviceId);
+    // RE-PAIR of a device that is dialed-in RIGHT NOW: push the rotated dial config over the live link — the
+    // daemon re-reads dial.json per attempt (2.170.0), so nothing needs to run on the device. Best-effort; the
+    // command is the universal fallback. ONLY WHEN ASKED (verify-r1 B8, PURE inPlacePushVerdict): a rotation is also
+    // how a leaked command is retired, and the push handed the new token to whoever held the old one.
+    // verify-r2 B8-r2: the verdict is asked BEFORE the mint because the mint ENDS the holder's link unless the push
+    // wants it (`keepLink`) — r1 left the holder connected "until its next dial", i.e. until it chose to drop, and B9
+    // then refused the owner's device on the new command as the holder's duplicate. A push that does not land cuts
+    // the link as well: the device holds a command that is no longer the pairing.
+    const holderConnected = !!agentdDials.get(deviceId);
+    // verify-r6 P1: a requested push names the link the sheet SHOWED (`keepLinkSince` = its lastConnectAt); a link that
+    // is gone or is another one ⇒ refused by name before anything is minted, cut or published further
+    const liveRec = existed ? hosts.findByDeviceId(deviceId) : null;
+    const pushV = DF.inPlacePushVerdict({ existed, live: holderConnected, requested: req.body?.updateInPlace === true, shownSince: req.body?.keepLinkSince === undefined ? undefined : req.body.keepLinkSince, liveSince: liveRec && liveRec.dial ? liveRec.dial.lastConnectAt : null });
+    if (pushV.refuse) return res.status(409).json({ code: pushV.refuse, deviceId, error: pushV.refuse === 'link_gone' ? `"${deviceId}" is no longer connected — nothing was changed; its new command cannot be sent over its link` : `"${deviceId}" reconnected after the sheet was opened (or another device dialed in under its name) — nothing was changed; reopen the sheet` });
+    let pair;
+    try { pair = agentdMintDialPair(deviceId, { host: DF.hostOf(dialUrl), base, keepLink: pushV.push }); }
+    catch (e) { return res.status(400).json({ error: e.message, code: /collides/.test(e.message) ? 'collision' : 'mint_failed' }); }
+    bcastAll({ type: 'hosts-updated' });
     let updatedInPlace = false;
-    if (existed && dialUrl && agentdDials.get(deviceId)) {
+    let lockedOut = !!pair.lockedOut;
+    if (pushV.push) {
       try {
         const dm = await deviceForDial(deviceId);
         const root = String((await dm.runCmd('sh', ['-c', 'printf %s "${VIBESPACE_DEVICE_ROOT:-$VIBESPACE_AGENTD_ROOT}"'], { timeoutMs: 8000 })).stdout || '').trim();
         if (root && path.isAbsolute(root)) {
-          await dm.fsWrite(root + '/state/dial.json', Buffer.from(JSON.stringify({ url: dialUrl, token: pair.dialToken })));
-          await dm.runCmd('chmod', ['600', root + '/state/dial.json'], { timeoutMs: 5000 }).catch(() => {});
+          // verify-r3 (the dial-token door census): a token written onto a device goes through the device's ONE secret
+          // door, `place-secret` — 0600 at open, tmp + rename (the fsWrite-then-chmod pair it replaced left a window at
+          // the umask's mode, and a chmod that failed was swallowed). A daemon without the op, or a root outside its
+          // $HOME (the op's own fence), keeps the old pair (the device's state dir is 0700 — the window is its owner's).
+          const body = Buffer.from(JSON.stringify({ url: dialUrl, token: pair.dialToken }));
+          let via = 'place-secret';
+          try { await dm.placeSecret(root + '/state/dial.json', body); }
+          catch {
+            via = 'fs-write';
+            await dm.fsWrite(root + '/state/dial.json', body);
+            await dm.runCmd('chmod', ['600', root + '/state/dial.json'], { timeoutMs: 5000 }).catch(() => {});
+          }
           updatedInPlace = true;
+          console.log(`[device] '${deviceId}': the rotated dial config pushed in place (${via})`);
         }
       } catch { /* offline mid-flight / old bundle — the command covers it */ }
+      if (!updatedInPlace) lockedOut = lockOutDialHolder(deviceId) || lockedOut; // the push did not land: the holder keeps a retired command
     }
     res.json({
       ...pair,
+      dialUrl, httpBase: base,
       repair: existed,
-      updatedInPlace,
+      updatedInPlace, holderConnected, lockedOut, inPlace: pushV.why, // a connected holder NOT updated is DISCONNECTED now and refused at its next dial (the row says `refused (token mismatch)`)
       relayUrl, // the public subdomain the device dials (double-NAT mode)
-      command: base
-        ? `node vibespace-device.js --dial ${dialUrl} --dial-token ${pair.dialToken}`
-        : null,
+      command: `VIBESPACE_DIAL_TOKEN=${pair.dialToken} node vibespace-device.js --dial ${dialUrl}`, // verify-r3 B-inst: the token in the environment (the daemon reads it once and removes it), never an argv
       note: 'install the device daemon bundle on the device, write the hostToken to <root>/state/token (0600), then run with --dial',
     });
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+// ③ the DEVICE's own record of its dials (the `dial-status` agentd op — THREE-TOUCH, capability-gated: an old
+//    daemon is never asked). Human-triggered (the Machines card's "Dial history…"), never on render.
+app.get('/api/hosts/:id/dial-status', async (req, res) => {
+  let h;
+  try { h = hosts.get(req.params.id); } catch { return res.status(404).json({ error: 'no such machine', code: 'not-found' }); }
+  if (!h.deviceId) return res.status(404).json({ error: 'this machine does not dial in', code: 'not-found' });
+  if (!agentdDials.get(h.deviceId)) return res.status(503).json({ error: `"${h.name || h.id}" is offline — its daemon is not dialed in`, code: 'offline' });
+  try {
+    const dm = await deviceForDial(h.deviceId);
+    res.json({ status: await dm.dialStatus() });
+  } catch (e) {
+    if (e && e.code === 'host_needs_daemon') return res.status(409).json({ error: e.message, code: 'host_needs_daemon' });
+    res.status(503).json({ error: e.message, code: 'offline' });
+  }
 });
 // (the /api/agentd/devices roster/test/unpair routes retired in B-f3e8 —
 // machines are listed by /api/hosts, tested by /api/hosts/:id/test, unpaired
@@ -627,6 +705,7 @@ function createSessionMessages(session, sessionId) {
   // its tick. The spawn env it hands a browser is the sanitised base env.
   let browserKeeper = null;
   let browserKeys = null; // B-f7ab: the late browser key (src/server/browser-key.js)
+  let browserDialogs = null; // lane browser-stuck: the page-dialog watch (src/server/browser-dialogs.js)
   let browserHandback = null;
   let browserAccess = null;
   let egressProxy = null;
@@ -761,8 +840,39 @@ function createSessionMessages(session, sessionId) {
       onLiveFactsChanged: () => { try { broadcastActiveSessions?.(); } catch (e) { console.warn('[browser] live facts not re-published — ' + (e && e.message)); } },
     });
     const { router: browserRouter, setup: setupBrowserRoutes } = require('../routes/browser');
+    // lane browser-stuck (2026-09-28): THE DIALOG WATCH — one Page-enabled CDP socket per live local browser, armed before
+    // a verb runs; a page dialog becomes a fact of the agent's verb, the live view and the browser fact (src/server/browser-dialogs.js)
+    try {
+      // the .197 integration (browse-yourself × browser-stuck): the USER browsing a profile himself is a holder of its browser
+      // too — his row (no session: never told, never woken) makes the browser SHARED, so a conversation whose tab the watch
+      // cannot attribute is told of no dialog (a dialog on HIS tab is his), and while he drives an alert is held for him
+      const holdersOf = (profileId) => { try { const out = (browserKeeper.list().leases || []).filter((l) => l && l.profileId === profileId && l.browserKey).map((l) => ({ browserKey: l.browserKey, sessionId: l.sessionId || null, ephemeral: !!l.ephemeral })); const h = typeof browserKeeper.humanOf === 'function' ? browserKeeper.humanOf(profileId) : null; if (h && h.browserKey) out.push({ browserKey: h.browserKey, sessionId: null, ephemeral: false, human: true, input: h.input === 'user' ? 'user' : 'agent' }); return out; } catch { return []; } };
+      browserDialogs = require('./browser-dialogs').create({
+        keeper: browserKeeper, holdersOf,
+        leaseCountOf: (profileId) => new Set(holdersOf(profileId).map((h) => h.browserKey)).size,
+        labelOf: (profileId) => { try { const p = browserKeeper.profile(profileId); return p ? p.label : null; } catch { return null; } },
+        // rule 6: a dialog that opened while the conversation ran no browser verb ⇒ ONE free next-turn line (never a wake)
+        // verify r1: ONE pending dialog notice per conversation (`replaceKind` — a page answered ten times queued ten and
+        // evicted the takeover notice), withdrawn when its dialog closes before the agent's turn
+        notice: (sessionId, n) => { const st = getSessionStatus ? getSessionStatus() : null; const s = activeSessions.get(sessionId); if (st && sessionStatusKey && s) st.pushNotice(sessionStatusKey(s, sessionId), n, { replaceKind: true }); },
+        withdraw: (sessionId, dialogId) => { const st = getSessionStatus ? getSessionStatus() : null; const s = activeSessions.get(sessionId); if (st && sessionStatusKey && s && typeof st.dropNotices === 'function') st.dropNotices(sessionStatusKey(s, sessionId), (x) => x && x.kind === 'browser-dialog' && x.dialog && x.dialog.id === dialogId); },
+      });
+      browserKeeper.setStuckSource((bk) => browserDialogs.stuckForKey(bk));
+      // the Agent browser panel's row: the digest carries `pageStuck` (kinds only), re-broadcast when a dialog / verdict moves
+      // NAMED profiles only: the digest also reaches agents, and another conversation's ephemeral record is never named to them
+      browserKeeper.addDigest(() => ({ pageStuck: Object.fromEntries(Object.entries(browserDialogs.pageStuckMap()).filter(([pid]) => { try { return !browserKeeper.isEphemeral(pid); } catch { return false; } })) }));
+      let digestTimer = null;
+      browserDialogs.onChange((ev) => {
+        if (!ev || !['open', 'closed', 'stuck', 'held', 'held-cleared', 'down'].includes(ev.kind) || digestTimer) return;
+        digestTimer = setTimeout(() => { digestTimer = null; try { bcastAll({ type: 'browser-profiles-updated', ...browserKeeper.list() }); } catch (e) { console.warn('[browser-dialog] the digest was not re-published — ' + (e && e.message)); } }, 300);
+        if (digestTimer.unref) digestTimer.unref();
+      });
+    } catch (e) { browserDialogs = null; console.warn('[browser-dialog] the dialog watch is unavailable — ' + (e && e.message)); }
     setupBrowserRoutes({
       keeper: browserKeeper, activeSessions,
+      dialogs: browserDialogs,
+      // lane browser-stuck: the agent's `dialog accept|dismiss` is a page act on the trace like any other (the stream mirror's own shape)
+      traceDialogAct: (act) => browserStream?.tapDialogAct?.(act),
       // the agent's `new --adopt <dir>` may register a directory ONLY under these roots (browser-profiles.adoptDirVerdict)
       adoptRoots: { homeDir: os.homedir(), dataDir: path.join(rootDir, 'data') },
       // P4: the providers route's cloakserve plan (or its typed refusal) + the live CDP forwards
@@ -829,7 +939,9 @@ function createSessionMessages(session, sessionId) {
         for (const id of [...lastFactDigest.keys()]) if (!activeSessions.has(id)) lastFactDigest.delete(id);
         if (moved) { try { broadcastActiveSessions?.(); } catch (e) { console.warn('[browser] browser facts not re-published — ' + (e && e.message)); } }
       };
-      browserKeeper.onChange(() => { if (factTimer) return; factTimer = setTimeout(republishIfMoved, 250); if (factTimer.unref) factTimer.unref(); });
+      const kickFacts = () => { if (factTimer) return; factTimer = setTimeout(republishIfMoved, 250); if (factTimer.unref) factTimer.unref(); };
+      browserKeeper.onChange(kickFacts);
+      browserDialogs?.onChange(kickFacts); // lane browser-stuck: a dialog opening / closing / an unresponsive verdict moves the fact (the chip)
     }
     // P3 (§4.3.1): the handback announcer — hangs on the keeper's input/confirmation
     // seams; an explicit handback is delivered through the gated ladder under
@@ -886,7 +998,9 @@ function createSessionMessages(session, sessionId) {
    *  server.js dispatches `/api/browser/stream` upgrades here. */
   let browserStream = null;
   try {
-    browserStream = require('./browser-stream').create({ keeper: browserKeeper, activeSessions, requestAuthed: (req) => auth.requestAuthed(req), getTelemetry });
+    browserStream = require('./browser-stream').create({ keeper: browserKeeper, activeSessions, requestAuthed: (req) => auth.requestAuthed(req), getTelemetry, dialogs: browserDialogs });
+    // lane browser-stuck: a conversation's dialog is on the tab its live view's relay shows as active (the stream's own `tabs` record)
+    if (browserDialogs && browserStream && typeof browserStream.activeTargetsFor === 'function') browserDialogs.setTabsOf((q) => browserStream.activeTargetsFor(q));
   } catch (e) { console.warn('[browser-live] stream bridge unavailable — ' + (e && e.message)); }
 
   /** P5 (§4.5 / D7 / D35): the action-trace recorder, the per-profile
@@ -938,6 +1052,6 @@ function createSessionMessages(session, sessionId) {
     } catch (e) { console.warn('[browser-trace] boot failed:', e && e.message); }
   };
 
-  return { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader, browserKeeper, bootBrowserKeeper: () => { bootBrowserKeeper(bootBrowserTrace); }, browserStream, browserHandback, browserTrace, browserKeys };
+  return { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader, browserKeeper, bootBrowserKeeper: () => { bootBrowserKeeper(bootBrowserTrace); }, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs };
 }
 module.exports = { create };

@@ -39,6 +39,7 @@ const REPLY_WHY = Object.freeze({
   no_session: 'Not from an agent session — nothing to reply to',
   job_item: 'Background Work item — answer it in the job panel',
   card_item: 'Answer it on the helper’s card — click the item to go there',
+  exit_ask: 'Answer it with Allow or Deny — a typed reply does not answer it',
   no_live_session: 'Agent not running — open the session, then reply',
   not_chat: 'Terminal session — reply in its window',
   host_unreachable: 'Host unreachable — reconnect, then reply',
@@ -49,7 +50,13 @@ const REPLY_WHY = Object.freeze({
 // (a `control_response` on stdin) — a typed reply can never approve it, and it
 // used to resolve the item while the helper still waited (the pointer gone, the
 // user believing they had approved).
-const REPLY_HIDDEN_CODES = Object.freeze(['no_session', 'job_item', 'card_item']);
+// `exit_ask` (lane-pairing verify-r4 F5): an agent's "run this command on <machine>?" is answered by Allow / Deny on
+// the item itself — a typed reply resolved the item, and an item leaving 'open' settles the ask as NOT allowed
+// (exit-proxy's one-state rule): "yes, allow it" typed as a reply DENIED the command (reproduced: 403 ask_denied,
+// audit why item-done-by-reply) while the agent read the "yes" as a new message.
+const REPLY_HIDDEN_CODES = Object.freeze(['no_session', 'job_item', 'card_item', 'exit_ask']);
+// The action kinds answered by their own buttons on the item (Allow / Deny), never by a typed reply.
+const ANSWER_ACTION_TYPES = Object.freeze(['exit-run-ask']);
 // The action kinds that are answered on a card, never by a typed reply.
 const CARD_ACTION_TYPES = Object.freeze(['helper-ask']);
 // lane S1 verify r3: what a typed reply DOES to a helper's ask is the ask's own transition table's
@@ -160,6 +167,7 @@ function replyVerdict({ item, session } = {}) {
   const no = (code) => ({ ok: false, code, why: REPLY_WHY[code] });
   if (it.jobId) return no('job_item');
   if (it.action && typeof it.action === 'object' && CARD_ACTION_TYPES.includes(it.action.type) && cardReplyRefused()) return no('card_item');
+  if (it.action && typeof it.action === 'object' && ANSWER_ACTION_TYPES.includes(it.action.type)) return no('exit_ask');
   const key = typeof it.sessionKey === 'string' ? it.sessionKey : '';
   if (!key || SERVER_KEYS.includes(key) || !key.includes(':')) return no('no_session');
   if (!session || session.live === false) return no('no_live_session');
@@ -170,6 +178,6 @@ function replyVerdict({ item, session } = {}) {
 
 module.exports = {
   REPLY_MARKER_RE, DETAIL_QUOTE_CAP, REPLY_MAX, OPTIONS_MAX, OPTION_MAX_CHARS, SERVER_KEYS,
-  REPLY_WHY, REPLY_HIDDEN_CODES, CARD_ACTION_TYPES,
+  REPLY_WHY, REPLY_HIDDEN_CODES, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES,
   checkReplyText, normalizeOptions, composeReply, parseReply, replyVerdict,
 };

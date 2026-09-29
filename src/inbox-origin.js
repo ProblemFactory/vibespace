@@ -17,6 +17,8 @@
  *              (src/server/mounts-plugins-wiring.js wires the browser routes)
  *              + src/server/browser-keeper.js (a profile's browser keeps
  *              closing: the heal budget's ONE notice, lane H verify r5)
+ *   machines — src/exit-proxy.js (lane-pairing ⑥: an exit's "ask me each time" — Allow / Deny a command an
+ *              agent wants to run ON a paired machine, 60 s)
  *   agent    — src/agent-routes.js (`vibespace-ask`, an agent's own item)
  *              + src/server/helper-asks.js (a helper's permission ask left
  *              unanswered for 60 s — lane S1)
@@ -35,7 +37,7 @@
  * legacy rung, `originOf` in src/lib/user-todos-layout.js — no migration.
  */
 
-const INBOX_ORIGINS = Object.freeze(['spend', 'login', 'pool', 'jobs', 'channels', 'browser', 'agent']);
+const INBOX_ORIGINS = Object.freeze(['spend', 'login', 'pool', 'jobs', 'channels', 'browser', 'machines', 'agent']);
 
 // The group / chip words — English t() keys (the panel words them per device;
 // i18nKey is the extraction marker scripts/i18n-extract.mjs reads).
@@ -47,6 +49,7 @@ const ORIGIN_LABELS = Object.freeze({
   jobs: i18nKey('Background Work'),
   channels: i18nKey('Channels'),
   browser: i18nKey('Agent browser'), // the agent-browser face's name (2.369.168 faces rename — the bare word is retired)
+  machines: i18nKey('Machines'), // lane-pairing ⑥: "Allow <conversation> to run a command on <machine>?" (src/exit-proxy.js)
   agent: i18nKey('Agents'),
 });
 

@@ -421,6 +421,9 @@ const SETTINGS_SCHEMA = {
       // NOT in the default set: a sub-agent's report is the answer the user is
       // reading, not orchestration noise (B-7473 integration 2026-09-06)
       { value: 'report', label: t('Sub-agent reports (a child agent’s written answer)') },
+      // NOT in the default set (lane group-report-card): a group message handed to this agent is what the owner
+      // asked to SEE in the conversation — it folds only when the user ticks it
+      { value: 'group', label: t('Group messages delivered to this agent (vibespace-msg)') },
       // NOT in the default set (2.369.120, owner): an Unknown event — a harness
       // record VibeSpace does not recognize — is the fall-back card and must
       // stay visible until the user decides it is noise.
@@ -478,12 +481,35 @@ const SETTINGS_SCHEMA = {
     label: t('Show the agent browser window'),
     description: t('Whether an agent\'s browser draws a real window on this machine\'s desktop. Unset (default): whatever your own ~/.agent-browser/config.json says. A visible window per session is one framebuffer per session and, on the installed CLI, is also exempt from the idle timeout above.'),
     category: t('Agent browser'), liveApply: true,
+    // lane headless-fallback (2026-09-28): a PREFERENCE — the row also shows the FACT (this machine's display now, read-only):
+    // a window asked of a machine with no desktop session runs headless instead of failing
+    fact: 'browser-display',
+  },
+  // lane headless-fallback addendum (2026-09-29): what a browser that asks for a window does on a machine with NO desktop
+  // session — `auto` (default): a normal window on an invisible display when Xvfb is installed there (it looks like the
+  // browser a person uses to sign-in pages), else headless; `headless`: always headless. Read at every launch.
+  'browser.noDisplayMode': {
+    type: 'enum', default: 'auto', options: [
+      { value: 'auto', label: t('A hidden window when Xvfb is installed, else headless') },
+      { value: 'headless', label: t('Always headless') },
+    ],
+    label: t('When this machine has no desktop session'),
+    description: t('What an agent\'s browser does when it asks for a window but nobody is logged in to this machine\'s desktop. A hidden window (default, when Xvfb is installed) is a normal browser on an invisible screen — sign-in pages see an ordinary browser; headless has no screen at all and some sign-in pages refuse it. Either way the pages work and you can watch and take over in the live view. Applies to the next browser that starts.'),
+    category: t('Agent browser'), liveApply: true,
   },
   // ── AGENT BROWSER P3 (design-agent-browser-v2 §4.3 / §4.3.1) ──────────
   'browser.takeoverIdleMs': {
     type: 'number', default: 600000, min: 0, max: 86400000,
     label: t('Hand the browser back to the agent after this long without input (ms)'),
     description: t('When you take over an agent\'s browser in the live view and then walk away, control goes back to the agent by itself after this many milliseconds without your input, so an abandoned takeover never parks an agent for ever. 0 = never (only an explicit Hand back or closing the live view returns control). Anything under 30 s is raised to 30 s.'),
+    category: t('Agent browser'), liveApply: true,
+  },
+  // ── BROWSE YOURSELF (B-6ae8, the owner 2026-09-28 ruling 8): how long the user's OWN tab is kept after his browsing
+  //    window closes, when HE launched the browser (a tab in a browser an agent launched keeps the takeover idle above) ──
+  'browser.humanKeepMs': {
+    type: 'number', default: 43200000, min: 0, max: 604800000,
+    label: t('Keep your own browsing tab after its window closes (ms)'),
+    description: t('When you open a profile\'s browser yourself (Browse yourself) and close its window without pressing Close, your tab stays open this long so you can continue where you were, and the browser keeps running for it. 12 hours by default. When you joined a browser an agent had started, your tab is kept as long as the takeover time above instead. 0 = keep it until you press Close or the browser stops; anything under 1 minute is raised to 1 minute.'),
     category: t('Agent browser'), liveApply: true,
   },
   // ── (verify S2 r4's `browser.fenceScriptsWhileDriven` was RETIRED 2026-09-27 by the owner's ruling — "直接打断所有脚本和agent操作":
@@ -500,29 +526,35 @@ const SETTINGS_SCHEMA = {
     category: t('Agent browser'), liveApply: true,
   },
   // ── AGENT BROWSER P4 (design-agent-browser-v2 §7.2 / §7.2.1) ──────────
-  // CloakBrowser is OPT-IN on the free tier, self-hosted as `cloakserve` on
-  // this machine's loopback, and it may not start before its §7.2.1 egress
-  // measurement is recorded (src/browser-profiles.CLOAK_EGRESS_PROOF) — so
-  // turning this on changes nothing but the wording of the refusal until then.
+  // The CONTAINER form of CloakBrowser (`cloakserve` on this machine's
+  // loopback, free tier) — a plan only (src/browser-profiles.cloakservePlan).
+  // lane-cloak (2026-09-28): the §7.2.1 record is a measurement, and cloak as a
+  // PROFILE's browser is opt-in by the user's own acts instead — the install
+  // (Manage agents) and the switch (the profile's browser dialog).
   'browser.cloak.enabled': {
     type: 'boolean', default: false,
-    label: t('Allow CloakBrowser (cloakserve on loopback, free tier)'),
-    description: t('OFF (default): the "cloak" provider is refused by name. ON: once its egress measurement is recorded on this build, a cloakserve container may be started on this machine\'s loopback (free tier, one session), on an internal docker network whose only way out is the allowlisting egress proxy below. Nothing is downloaded or started by turning this on — the pinned package is installed by you, after the measurement.'),
+    label: t('Allow the CloakBrowser container (cloakserve on loopback, free tier)'),
+    description: t('Only the container form of CloakBrowser (cloakserve in docker). OFF (default): no container is planned. ON: a cloakserve container may be planned on this machine\'s loopback, on an internal docker network whose only way out is the allowlisting proxy below. CloakBrowser as a profile\'s browser does not need this: install it from Manage agents and choose it in the profile\'s browser dialog.'),
     category: t('Agent browser'), liveApply: true,
   },
   // P4 second half (§7.4): the in-place switch opens the SAME profile directory
-  // with the cloakbrowser binary (+ `--fingerprint=<seed>`); this names where
-  // that binary is when it is not on PATH. Never downloaded by us.
+  // with the CloakBrowser Chromium (+ `--fingerprint=<seed>`); this names that
+  // program when it was installed some other way. Empty = the one Manage
+  // agents installed (lane-cloak: the pinned, measured build — never a PATH
+  // guess: the `cloakbrowser` command is the vendor's management CLI).
   'browser.cloak.executablePath': {
     type: 'string', default: '',
     label: t('CloakBrowser program file'),
-    description: t("Where CloakBrowser is installed, for when VibeSpace can't find it by itself. Leave it empty to look on this computer. VibeSpace never downloads it for you."),
+    description: t('The CloakBrowser browser program (its chrome file), for when it was installed some other way. Leave it empty to use the one installed from Manage agents.'),
     category: t('Agent browser'), liveApply: true,
   },
+  // lane-cloak: THE SITES a running cloak browser may reach — the keeper's
+  // egress proxy admits exactly the §7.2.1 record's run hosts (measured: none)
+  // + these (src/browser-profiles cloakRunAllowlist); the container plan too
   'browser.cloak.egressAllowlist': {
     type: 'string', default: '',
-    label: t('CloakBrowser egress allowlist (hosts, comma-separated)'),
-    description: t('The only hosts a cloakserve container may reach, through this instance\'s allowlisting proxy: exact hostnames, or ".example.com" for a domain and every sub-domain. Empty (default) admits nothing. Loopback and link-local targets are never admitted. Name the sites a profile is actually for — a measurement is a snapshot of one binary; the allowlist is a property of the deployment.'),
+    label: t('Sites CloakBrowser may open (hosts, comma-separated)'),
+    description: t('The only sites a CloakBrowser browser may reach, through this instance\'s allowlisting proxy: exact hostnames, or ".example.com" for a domain and every sub-domain. Empty (default): it opens no site at all. Measured: CloakBrowser itself needs no site of its own, so this list is all it can reach — its maker\'s download and update hosts are refused. Loopback and link-local addresses are never admitted.'),
     category: t('Agent browser'), liveApply: true,
   },
   'browser.actionTrace': {
@@ -906,6 +938,51 @@ const SETTINGS_SCHEMA = {
     type: 'number', default: 5, min: 1, max: 50, step: 1,
     label: t('Lark: requests per second per account'),
     description: t('Requests are spread evenly: at most this many a second, and never faster than the per-minute budget above allows. Lark allows 50 a second per API for the whole app across every instance and user that shares it.'),
+    category: t('Channels'), liveApply: true,
+  },
+  // ── lane channel-threads (2026-09-28, spec §3.7, drain rule 20): reactions + threads ──
+  'channels.reactionsPerMin': {
+    type: 'number', default: 20, min: 0, max: 600, step: 5,
+    label: t('Reactions: list calls per minute per account'),
+    description: t('Reactions are read only for the messages an open window shows, one call per message, at most this many a minute per account (0 = never list — reactions arrive only as live events). Checked before the per-minute budget above, so reading reactions never takes the budget new messages need.'),
+    category: t('Channels'), liveApply: true,
+  },
+  'channels.reactionsTtlMin': {
+    type: 'number', default: 10, min: 1, max: 1440, step: 1,
+    label: t('Reactions: minutes a fetched list stays fresh'),
+    description: t('A visible message whose reactions were read within this many minutes is not read again; the chips show the stored count and their tooltip says how old it is.'),
+    category: t('Channels'), liveApply: true,
+  },
+  'channels.threadFloorSec': {
+    type: 'number', default: 60, min: 10, max: 3600, step: 10,
+    label: t('Threads: seconds between two loads of one thread'),
+    description: t('Opening a thread loads its replies from the vendor (where they are not listed with the conversation — Lark topics); the same thread is loaded again at most this often.'),
+    category: t('Channels'), liveApply: true,
+  },
+  // lane lark-search-poll (B-5aab, design §8 + owner decision 4): THE CHANGE FEED — one account-wide search per tick
+  // names every conversation with a new message (Lark: groups, single chats, thread replies)
+  'channels.feedEverySec': {
+    type: 'number', default: 30, min: 10, max: 300, step: 5,
+    label: t('New-message search: seconds between two searches'),
+    description: t('An account that offers a new-message search (Lark) asks it this often which conversations have new messages — one request finds them all, including single chats and thread replies.'),
+    category: t('Channels'), liveApply: true,
+  },
+  'channels.feedOverlapSec': {
+    type: 'number', default: 60, min: 30, max: 600, step: 10,
+    label: t('New-message search: seconds each search re-reads'),
+    description: t('Each search also covers the last seconds of the previous one, so a message the vendor indexes late is still found. At least 30.'),
+    category: t('Channels'), liveApply: true,
+  },
+  'channels.feedBackfillDays': {
+    type: 'number', default: 7, min: 0, max: 30, step: 1,
+    label: t('New-message search: days of single chats found at first'),
+    description: t('The first search after an account is connected (or re-authorized) also lists the single chats of this many days — as read, waking nobody. 0 = only new ones.'),
+    category: t('Channels'), liveApply: true,
+  },
+  'channels.relaxedPollSec': {
+    type: 'number', default: 300, min: 60, max: 900, step: 30,
+    label: t('Once the search finds everything: seconds between checks of each chat'),
+    description: t('When the search has been measured to find every new message (at most 2 % missed over 200), each conversation is still checked on its own at least this often — an open window stays at the fast cadence. If the search starts missing messages, the normal cadence returns by itself.'),
     category: t('Channels'), liveApply: true,
   },
   // ── Channels outbox GUARDS (design §9.1, decision 9, P3): they stack on

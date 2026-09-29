@@ -273,6 +273,189 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
   ok(pausedReturns === 1 && /if \(cad\.paused\) return \{ kind: 'within', state: 'paused'/.test(pillSrc), 'the row pill\'s "paused" has ONE producer — the owner\'s own override (cadenceFor) — so a vendor\'s rate wait can never read "refresh paused"');
 }
 
+// ── ⑩ THREADS + REACTIONS (lane channel-threads, spec §2): four controls × {declared, narrowed, unknown, stale},
+// the two rows through validateCaps (every refusal named), Lark's scope verdict, the new words ──
+{
+  const CH = require(path.join(REPO, 'src/channels/index.js'));
+  const lark = require(path.join(REPO, 'src/channels/lark.js'));
+  const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const TH = { read: 'vendor', replyInto: true, listing: 'separate' };
+  const RX = { read: 'list', add: true, remove: 'own', vocabulary: 'names', custom: 'none', perMessageMax: null };
+  const full = { ...pollCaps, threads: TH, reactions: RX };
+  const fresh = (extra = {}) => ({ read: 'yes', sendAs: ['user'], why: null, at: NOW - 1000, threads: { replyInto: true, mode: 'chat', why: null }, reactions: { read: true, add: true, why: null }, ...extra });
+  const o = (caps, cc, what) => C.offers(caps, cc, what, NOW);
+  ok(['thread-reply', 'react', 'unreact', 'read-reactions'].every((w) => C.OFFER_WHAT.includes(w)), 'OFFER_WHAT learns the four controls');
+  // declared + resolved ⇒ offered
+  ok(['thread-reply', 'react', 'unreact', 'read-reactions'].every((w) => o(full, fresh(), w).offered), 'declared AND resolved ⇒ every control offered');
+  // NOT declared ⇒ never offered whatever the resolution says (the NARROW law)
+  ok(o(pollCaps, fresh(), 'thread-reply').why === 'no-threads' && o(pollCaps, fresh(), 'react').why === 'no-reactions' && o(pollCaps, fresh(), 'read-reactions').why === 'no-reactions', 'an adapter that declares no row offers nothing — the resolution cannot widen it');
+  ok(o({ ...full, reactions: { ...RX, remove: 'none' } }, fresh(), 'unreact').why === 'react-not-declared', 'remove none ⇒ unreact not offered by name');
+  // narrowed
+  ok(o(full, fresh({ threads: { replyInto: false, mode: 'chat', why: 'topic-forbidden' } }), 'thread-reply').why === 'topic-forbidden', 'a group that refused replies in threads (230071, remembered) narrows thread-reply with its reason');
+  ok(o(full, fresh({ reactions: { read: false, add: true, why: 'reactions-scope-not-granted' } }), 'read-reactions').why === 'reactions-scope-not-granted' && o(full, fresh({ reactions: { read: false, add: true, why: 'reactions-scope-not-granted' } }), 'react').offered, 'reading needs its scope (not held ⇒ named), adding does not (im:message is held)');
+  ok(o(full, fresh({ sendAs: [], why: 'send-scope-not-granted' }), 'thread-reply').why === 'send-scope-not-granted', 'replying into a thread is a SEND — no send identity ⇒ not offered with the send reason');
+  ok(o(full, fresh({ read: 'no', why: 'not-a-member', reactions: { read: false, add: false, why: 'not-a-member' } }), 'react').why === 'not-a-member', 'not a member ⇒ no reaction control, the reason named');
+  // unknown / stale / predating the rows
+  ok(!o(full, null, 'react').offered && o(full, null, 'react').why === 'unknown' && o(full, null, 'thread-reply').why === 'unknown', 'no convCaps at all ⇒ `unknown`, never allowed');
+  ok(o(full, fresh({ at: NOW - C.CONV_CAPS_TTL_MS - 1 }), 'read-reactions').why === 'stale', 'a stale cache ⇒ `stale`');
+  const old = fresh(); delete old.threads; delete old.reactions;
+  ok(o(full, old, 'thread-reply').why === 'unknown' && o(full, old, 'react').why === 'unknown', 'a fresh cache that PREDATES the rows (resolved before this lane) ⇒ not offered (the migration re-resolves it)');
+  ok(C.convCapsState(fresh(), NOW).threads.replyInto === true && C.convCapsState(old, NOW).threads === null && C.convCapsState(null, NOW).reactions === null, 'convCapsState carries the narrowed rows (null when unknown)');
+  // validateCaps: the two rows, every refusal named
+  const good = { receive: 'poll', history: 'page', sendAs: ['user'], identityMarking: 'none' };
+  const refuse = (caps, re, name) => { let m = null; try { CH.validateCaps('x', caps); } catch (e) { m = e.message; } ok(m && re.test(m), name, m); };
+  ok(CH.validateCaps('x', { ...good, threads: TH, reactions: RX }) === true, 'a complete threads + reactions declaration validates');
+  refuse({ ...good, sendAs: [], threads: TH }, /replyInto on a read-only adapter/, 'threads.replyInto on a sendAs:[] adapter is refused (replying into a thread is a send)');
+  refuse({ ...good, reactions: { ...RX, read: 'none' } }, /add with read 'none'/, 'reactions.add with read none is refused (a control whose result can never be shown)');
+  refuse({ ...good, threads: { ...TH, read: 'maybe' } }, /threads\.read must be one of/, 'an unknown threads.read is refused');
+  refuse({ ...good, threads: { ...TH, listing: 'sometimes' } }, /threads\.listing must be one of/, 'an unknown threads.listing is refused');
+  refuse({ ...good, reactions: { ...RX, vocabulary: 'klingon' } }, /vocabulary must be one of/, 'an unknown vocabulary is refused');
+  refuse({ ...good, reactions: { ...RX, perMessageMax: 0 } }, /perMessageMax/, 'perMessageMax must be a positive integer or null');
+  refuse({ ...good, reactions: { ...RX, add: false } }, /remove 'own' without add/, "remove 'own' without add is refused");
+  ok(CH.METHOD_GATES.threadHistory({ threads: TH }) && !CH.METHOD_GATES.threadHistory({ threads: { ...TH, listing: 'inline' } }) && CH.METHOD_GATES.reactions({ reactions: RX }) && CH.METHOD_GATES.react({ reactions: RX }) && CH.METHOD_GATES.unreact({ reactions: RX }) && !CH.METHOD_GATES.emojiImage({ reactions: RX }) && CH.METHOD_GATES.reactionSet({ reactions: RX }) && !CH.METHOD_GATES.reactions({}), 'the six METHOD_GATES rows follow the capability rows (spec §2.1); a module with no row declares none');
+  // Lark's scope verdict (capsOfScopes) — the credential-change re-judge narrows reactions like sending
+  const v0 = lark.capsOfScopes(lark.SCOPES);
+  ok(eq(v0.sendAs, ['user']) && v0.reactions.add === true && v0.reactions.read === false && v0.reactions.why === 'reactions-scope-not-granted', 'Lark with today\'s consent: send + ADD a reaction (im:message), READ not granted (by name)');
+  const v1 = lark.capsOfScopes([...lark.SCOPES, 'im:message.reactions:read']);
+  ok(v1.reactions.read && v1.reactions.add && v1.reactions.why === null, '…with im:message.reactions:read held: read + add');
+  const v2 = lark.capsOfScopes(['im:chat:readonly']);
+  ok(eq(v2.sendAs, []) && !v2.reactions.add && !v2.reactions.read, 'a read-only consent: neither');
+  ok(lark.REACTIONS_GRANT.scopes.join() === 'im:message.reactions:read' && lark.REACTIONS_GRANT.console === true, 'the reactions grant names the scope and the console step (like sendGrant)');
+  // the words
+  ok(C.threadWhyText('topic-forbidden') === 'This group does not allow replies in threads' && C.reactWhyText('reactions-scope-not-granted', { scopes: ['im:message.reactions:read'] }) === 'Reactions can be read after one Re-authorize (im:message.reactions:read)' && C.reactWhyText('policy-off') === 'agent reactions are turned off for this account' && C.reactWhyText('not-a-member') === C.sendWhyText('not-a-member'), 'every new reason has words (a shared reason reuses the send sentence)');
+  // owner ruling (2026-09-28): the account card's / the window's / the chips' ONE sentence for a sign-in that cannot read reactions
+  {
+    const S = 'im:message.reactions:read';
+    const rows = [
+      [{ scopes: [S], missing: [S], refused: [], wanted: true }, `Reactions can be read after one Re-authorize (${S})`],
+      [{ scopes: [S], missing: [S], refused: [S], wanted: true }, `Lark refused ${S} — enable it in the app console and Re-authorize`],
+      [{ scopes: [S], missing: [S], refused: [], wanted: false }, ''],
+      [{ scopes: [S], missing: [], refused: [S], wanted: true }, ''],
+      [null, ''],
+    ];
+    const got = rows.map(([g]) => C.reactReadText(g, { vendor: 'Lark' }));
+    ok(rows.every(([, want], i) => got[i] === want), 'reactReadText: missing ⇒ "can be read after one Re-authorize (scope)"; refused ⇒ the vendor\'s refusal by name; the option off or nothing missing ⇒ silent', JSON.stringify(got));
+    ok(C.reactWhyText('reactions-scope-not-granted', { refused: [S] }) === `The vendor refused ${S} — enable it in the app console and Re-authorize` && C.reactWhyText('reactions-scope-not-granted') === 'Reactions can be read after one Re-authorize', 'reactWhyText without a vendor / without scopes still says a whole sentence');
+  }
+}
+
+// ── ⑧b THE CHANGE FEED (lane lark-search-poll, B-5aab — design §27): the ONE lane answer, its precedence, the
+// relaxed cadence, the claim and the words ──
+{
+  const F = require(path.join(REPO, 'src/channel-feed.js'));
+  const DECL = { via: 'search', scope: 'search:message', option: 'search', pageSize: 30, pagesPerPass: 5, perMin: 10, maxWindowSec: 3600, catchUp: { chatType: 'p2p', pagesMax: 20 }, describes: true };
+  const feedCaps = { ...pushCaps, changeFeed: DECL };
+  const HELD = ['im:message', 'search:message'];
+  const acct = (o = {}) => ({ enabled: true, options: {}, auth: { scopes: HELD, scopesAt: NOW - 3600e3 }, lastAuthAt: NOW - 3600e3, push: { enabled: true, state: 'stopped', lastEventAt: null, claimedExclusive: 'unknown' }, ...o, feed: { lastOkAt: NOW - 10e3, mode: 'carrying', ...(o.feed || {}) } });
+  const rows = [
+    ['not declared', pushCaps, acct(), { state: 'off', why: 'not-declared', on: false, carrying: false }],
+    ['the account disabled', feedCaps, acct({ enabled: false }), { state: 'off', why: 'adapter-disabled', on: false }],
+    ['the owner turned the option off', feedCaps, acct({ options: { search: 'off' } }), { state: 'off', why: 'option-off', on: false }],
+    ['the HELD sign-in lacks search:message (zero search requests)', feedCaps, acct({ auth: { scopes: ['im:message'] } }), { state: 'off', why: 'scope-not-granted', on: false }],
+    ['the vendor refused the search scope (parked)', feedCaps, acct({ feed: { refused: { at: NOW - 60e3, code: 'forbidden', requiredScopes: ['search:message'] } } }), { state: 'refused', why: 'forbidden', on: false }],
+    ['…lifted by a credential change after the refusal (a Re-authorize)', feedCaps, acct({ lastAuthAt: NOW - 1000, feed: { refused: { at: NOW - 60e3, code: 'forbidden' } } }), { state: 'carrying', on: true, carrying: true }],
+    ['an ignored time window parks for 24 h…', feedCaps, acct({ feed: { refused: { at: NOW - 3600e3, code: 'time-range-ignored', retryAt: NOW + 23 * 3600e3 } } }), { state: 'refused', why: 'time-range-ignored' }],
+    ['…and retries after it', feedCaps, acct({ feed: { refused: { at: NOW - 25 * 3600e3, code: 'time-range-ignored', retryAt: NOW - 3600e3 } } }), { state: 'carrying', carrying: true }],
+    ['the vendor limiting the search (a back-off carries nothing)', feedCaps, acct({ feed: { backoffUntil: NOW + 30e3 } }), { state: 'backoff', why: 'rate-limited', on: true, carrying: false }],
+    ['verify r1: the search NOT ANSWERING (a 5xx / a timeout — the feed\'s own failure ladder) says so', feedCaps, acct({ feed: { backoffUntil: NOW + 30e3, backoffWhy: 'failed' } }), { state: 'backoff', why: 'failed', on: true, carrying: false }],
+    ['never ran', feedCaps, acct({ feed: { lastOkAt: null } }), { state: 'never', on: true, carrying: false }],
+    ['behind (its last good page older than the fresh bound)', feedCaps, acct({ feed: { lastOkAt: NOW - 181e3 } }), { state: 'behind', on: true, carrying: false }],
+    ['measuring', feedCaps, acct({ feed: { mode: 'measuring' } }), { state: 'measuring', on: true, carrying: false, fresh: true }],
+    ['carrying (fresh + measured complete)', feedCaps, acct(), { state: 'carrying', on: true, carrying: true, fresh: true }],
+    ['demoted', feedCaps, acct({ feed: { mode: 'demoted' } }), { state: 'demoted', on: true, carrying: false }],
+  ];
+  for (const [label, c, r, want] of rows) {
+    const got = C.feedState(c, r, NOW);
+    const bad = Object.entries(want).filter(([k, v]) => got[k] !== v);
+    ok(!bad.length, `feedState: ${label} ⇒ ${want.state}${want.why ? ` (${want.why})` : ''}`, JSON.stringify(got));
+  }
+  ok(C.feedFreshMs({ everySec: 30, overlapSec: 60 }) === F.freshMs(30, 60) && C.feedFreshMs({ everySec: 120, overlapSec: 90 }) === F.freshMs(120, 90) && JSON.stringify(C.FEED_MODES) === JSON.stringify(F.MODES), 'the resolver\'s restated numbers equal the PURE feed module\'s (fresh bound, modes)');
+  ok(C.credentialChangedAt({ auth: { scopesAt: 5, updatedAt: 99 }, lastAuthAt: 7 }) === 7, 'credentialChangedAt = max(scopesAt, lastAuthAt) — never the hourly refresh\'s updatedAt');
+  // THE LANE PRECEDENCE: push exclusive + live > a carrying feed > today's answer
+  const exclusive = acct({ push: { enabled: true, state: 'live', lastEventAt: NOW - 1000, claimedExclusive: 'exclusive' } });
+  const kick = acct({ push: { enabled: true, state: 'live', lastEventAt: NOW - 1000, claimedExclusive: 'unknown' } });
+  const l1 = C.laneState(feedCaps, exclusive, {}, NOW);
+  const l2 = C.laneState(feedCaps, kick, {}, NOW);
+  const l3 = C.laneState(feedCaps, acct({ feed: { mode: 'measuring' } }), {}, NOW);
+  const l4 = C.laneState({ ...pollCaps, changeFeed: DECL }, acct(), {}, NOW, { feed: { everySec: 60, overlapSec: 90 } });
+  ok(l1.pollCadence === 'reconcile' && l1.why === 'exclusive', 'laneState: a live EXCLUSIVE push lane still wins over a carrying feed (reconcile)', JSON.stringify(l1));
+  ok(l2.via === 'poll' && l2.pollCadence === 'feed' && l2.why === 'feed' && l2.carryContent === false && l2.feedSeconds === 90, 'laneState: a carrying feed beats a kick-mode push lane — the poll lane at the feed cadence, claiming every + overlap (90 s)', JSON.stringify(l2));
+  ok(l3.pollCadence === 'fast' && l3.why !== 'feed', 'laneState: a MEASURING feed relaxes nothing (positive evidence only)', JSON.stringify(l3));
+  ok(l4.pollCadence === 'feed' && l4.feedSeconds === 150, 'laneState on a poll adapter with a feed: the settings reach the claim (60 + 90 = 150 s)', JSON.stringify(l4));
+  // THE CADENCE (owner decision 4: 5 minutes; watched keeps hot; a cold row never polls MORE)
+  const T = { ...C.TIER_DEFAULTS, relaxedSec: 300 };
+  const hotEn = { key: 'k', lastAt: NOW - 60e3 }, warmEn = { key: 'k', lastAt: NOW - 3 * 3600e3 }, coldEn = { key: 'k', lastAt: NOW - 3 * 86400e3 };
+  const c1 = C.cadenceFor(feedCaps, l2, hotEn, NOW, { tiers: T });
+  const c2 = C.cadenceFor(feedCaps, l2, hotEn, NOW, { tiers: T, watched: true });
+  const c3 = C.cadenceFor(feedCaps, l2, coldEn, NOW, { tiers: T });
+  const c4 = C.cadenceFor(feedCaps, l2, warmEn, NOW, { tiers: { ...T, relaxedSec: 600 } });
+  const c5 = C.cadenceFor(feedCaps, l2, { ...hotEn, refresh: { every: 60 } }, NOW, { tiers: T });
+  const c6 = C.cadenceFor(feedCaps, l2, { ...hotEn, refresh: { every: 'paused' } }, NOW, { tiers: T, watched: true });
+  ok(c1.seconds === 300 && c1.source === 'feed-safety', 'cadenceFor(feed): a hot row relaxes to the 5-min safety net', JSON.stringify(c1));
+  ok(c2.seconds === 30 && c2.source === 'tier', 'cadenceFor(feed): an OPEN window keeps the hot 30 s (the index lag never slows what the owner reads)', JSON.stringify(c2));
+  ok(c3.seconds === 900 && c4.seconds === 600, 'cadenceFor(feed): a cold row stays at 900 (never polled MORE); the setting moves the net (600)', JSON.stringify([c3, c4]));
+  ok(c5.source === 'override' && c5.seconds === 60 && c6.paused === true, 'cadenceFor(feed): the owner\'s override and pause still win');
+  // THE CLAIM
+  const f1 = C.freshnessClaim(feedCaps, l2, hotEn, NOW, { tiers: T });
+  const f2 = C.freshnessClaim(feedCaps, l2, hotEn, NOW, { tiers: T, watched: true });
+  ok(f1.state === 'bound' && f1.seconds === 90 && f1.source === 'feed' && f2.seconds === 30, 'freshnessClaim(feed): "within 90 s" (the feed\'s bound, source feed), never the 5-min net it no longer depends on; an open window claims its 30 s', JSON.stringify([f1, f2]));
+  // THE WORDS
+  const w = (v) => C.feedText(v, { vendor: 'Lark', now: NOW });
+  const W1 = {
+    optOff: w({ state: 'off', why: 'option-off' }), scope: w({ state: 'off', why: 'scope-not-granted' }), none: w({ state: 'off', why: 'not-declared' }),
+    forbidden: w({ state: 'refused', why: 'forbidden', requiredScopes: ['search:message'] }), ignored: w({ state: 'refused', why: 'time-range-ignored' }), shape: w({ state: 'refused', why: 'contract' }),
+    backoff: w({ state: 'backoff', until: NOW + 12e3 }), down: w({ state: 'backoff', why: 'failed', until: NOW + 30e3 }), never: w({ state: 'never' }), behind: w({ state: 'behind' }),
+    measuring: w({ state: 'measuring', everySec: 30, measured: { total: 57 } }), carrying: w({ state: 'carrying', everySec: 30, relaxedSec: 300 }),
+    measuringMiss: w({ state: 'measuring', everySec: 30, promoteMin: 200, measured: { total: 760, missed: 76, rate: 0.1 } }), measuringFull: w({ state: 'measuring', everySec: 30, promoteMin: 200, measured: { total: 300, missed: 3, rate: 0.01 } }),
+    demoted: w({ state: 'demoted', measured: { missed: 5, total: 60, rate: 5 / 60 } }),
+  };
+  const WANT = {
+    optOff: 'New-message search is off — each chat is checked on its own', scope: '', none: '',
+    forbidden: 'Search is off: Lark refused search:message — enable it in the app console, publish a version, then Re-authorize',
+    ignored: 'Search is off: Lark ignored its time window — each chat is checked on its own',
+    shape: 'Search is off: Lark answered in a shape this version does not read — each chat is checked on its own',
+    backoff: 'Lark is limiting the search · resuming in 12 s', never: 'New messages: searching for the first time',
+    down: 'Lark search is not answering — each chat is checked on its own · retrying in 30 s',
+    behind: 'Search is behind — each chat is checked on its own until it catches up',
+    measuring: 'New messages: a search every 30 s · each chat is still checked on its own until 200 messages show it finds everything (57/200)',
+    carrying: 'New messages come from a search every 30 s; each chat is also checked every 5 min',
+    measuringMiss: 'Search misses 76 of 760 messages (10%) — each chat is checked on its own',
+    measuringFull: 'New messages: a search every 30 s · 3 of 300 messages missed — each chat is still checked on its own until one full polling cycle confirms it',
+    demoted: 'Search missed 5 of 60 messages (8.3%) — each chat is checked on its own again',
+  };
+  const badW = Object.keys(WANT).filter((k) => W1[k] !== WANT[k]);
+  ok(!badW.length, 'feedText: every state says one sentence (a missing scope says nothing here — the grants line does)', badW.map((k) => `${k}: ${JSON.stringify(W1[k])}`).join(' | '));
+  // verify r3 (the revert table: r2's quiet-feed sentences lost their zh / ja entries and no gate noticed — i18n-check only
+  // WARNS on a gap, the chrome census is heavy): EVERY word this module says — each `t('…')` literal in its source,
+  // grep-derived — has its zh AND ja entry. CONTROL: the same judge over a dictionary missing one of them flags it.
+  {
+    const fsx = require('node:fs');
+    const ZHd = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, JAd = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
+    const csrc = fsx.readFileSync(path.join(REPO, 'src/channel-caps.js'), 'utf-8');
+    const keys = new Set([...csrc.matchAll(/\bt\(\s*'((?:[^'\\]|\\.)*)'/g)].map((m) => m[1].replace(/\\'/g, "'")));
+    const gaps = (zh, ja) => [...keys].filter((k) => !zh[k] || !ja[k]);
+    const k0 = 'New messages: a search every {s} s · {missed} of {total} messages missed — each chat is still checked on its own until one full polling cycle confirms it';
+    ok(keys.size >= 100 && keys.has(k0) && !gaps(ZHd, JAd).length, `every word channel-caps says (${keys.size} t() keys, grep-derived) has its zh AND ja entry`, gaps(ZHd, JAd).join(' | '));
+    const { [k0]: _drop, ...zhLess } = ZHd;
+    ok(gaps(zhLess, JAd).join('|') === k0, 'CONTROL: the judge flags a dictionary missing the quiet feed\'s sentence');
+  }
+  const cu = [C.feedCatchUpText({ done: false, days: 7 }), C.feedCatchUpText({ done: true, found: 4, days: 7 }), C.feedCatchUpText({ done: true, found: 20, days: 7, bounded: true }), C.feedCatchUpText({ done: true, found: 0 })];
+  ok(cu[0] === 'Looking for single chats from the last 7 days…' && cu[1] === 'Found 4 single chats from the last 7 days' && cu[2] === 'Found 20 single chats from the last 7 days — quieter ones appear with their next message' && cu[3] === '', 'feedCatchUpText: in progress / found / bounded / nothing found (silent)', JSON.stringify(cu));
+  const RX = 'im:message.reactions:read', S = 'search:message', P2P = 'im:message.p2p_msg:get_as_user';
+  const g = (o) => C.grantsText(o, { vendor: 'Lark' });
+  const G = {
+    both: g([{ what: 'reactions', missing: [RX], refused: [], wanted: true }, { what: 'feed', missing: [S, P2P], refused: [], wanted: true }]),
+    one: g([{ what: 'reactions', missing: [], refused: [], wanted: true }, { what: 'feed', missing: [S], refused: [], wanted: true }]),
+    off: g([{ what: 'reactions', missing: [RX], refused: [], wanted: false }, { what: 'feed', missing: [S], refused: [], wanted: false }]),
+    refused: g([{ what: 'reactions', missing: [RX], refused: [RX], wanted: true }, { what: 'feed', missing: [S], refused: [], wanted: true }]),
+    none: g([]),
+  };
+  ok(G.both.text === 'One Re-authorize adds: reading reactions · new-message search and single chats' && !G.both.warn, 'grantsText: an account predating both lanes says ONE line with ONE Re-authorize', JSON.stringify(G.both));
+  ok(G.one.text === 'One Re-authorize adds: new-message search and single chats' && G.off.text === '' && G.none.text === '', 'grantsText: only what is missing and WANTED (an option switched off says nothing)', JSON.stringify([G.one, G.off]));
+  ok(G.refused.text === `Lark refused ${RX} — enable it in the app console and Re-authorize · One Re-authorize adds: new-message search and single chats` && G.refused.warn, 'grantsText: a scope the vendor refused at the consent is named with the console step, the rest still one Re-authorize', JSON.stringify(G.refused));
+  ok(C.untitledText('dm') === 'Single chat' && C.untitledText('group') === 'New conversation' && C.laneWhyText('feed') === 'new-message search', 'a born conversation without a title is worded ("Single chat"), never its raw id; the lane reason "feed" has words');
+}
+
 // ── ⑦ the module is PURE ──
 {
   const src = require('node:fs').readFileSync(path.join(REPO, 'src/channel-caps.js'), 'utf-8');

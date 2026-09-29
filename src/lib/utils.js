@@ -89,7 +89,12 @@ export function showInputDialog({ title = t('Input'), label = '', value = '', pl
   });
 }
 
-export function showConfirmDialog({ title = t('Confirm'), message = '', confirmText = t('OK'), danger = false } = {}) {
+export function showConfirmDialog(opts = {}, legacyMessage) {
+  // verify-r6 D1: a confirm that shows NOTHING of what OK does is no confirm — two call sites passed (title, message) as
+  // strings and rendered a blank "Confirm / OK" (setup-flows' layout restore, then plugins-ui's Stop frp / Tailscale).
+  // A string first argument is read as that pair; the approval census (test-approval-census) also refuses the form
+  if (typeof opts === 'string') opts = { title: opts, message: typeof legacyMessage === 'string' ? legacyMessage : '' };
+  const { title = t('Confirm'), message = '', confirmText = t('OK'), danger = false } = opts || {};
   return new Promise((resolve) => {
     const { overlay, body, okBtn, cancelBtn, closeBtn } = _modalShell(title);
     okBtn.textContent = confirmText;
@@ -127,18 +132,44 @@ export function configureToasts(cfg) { _toastCfg = cfg || {}; }
 export function getToastHistory() {
   try { return JSON.parse(localStorage.getItem('vibespace.toastHistory') || '[]'); } catch { return []; }
 }
-function _recordToast(message, type) {
+// A TOAST ABOUT A RECORD keeps no words in the history (lane-redact verify r4, reproduced): a For-you item's arrival toast
+// carried the item's text, and this history is localStorage — a copy on every device that was open when the item arrived,
+// shown by the popup's Notifications tab after the owner had cleared the item ("Clear content…" cannot reach a device's
+// storage). The caller passes `history: {m, ref}`: `m` = what the history keeps (a head, never the record's words), `ref`
+// = `{kind, id}` the Notifications tab words from the LIVE store at render time (a cleared record reads the sentence).
+function _recordToast(message, type, ref = null) {
   try {
     const h = getToastHistory();
-    h.unshift({ m: String(message).slice(0, 500), type, ts: Date.now() });
+    h.unshift({ m: String(message).slice(0, 500), type, ts: Date.now(), ...(ref && ref.kind && ref.id ? { ref: { kind: String(ref.kind), id: String(ref.id) } } : {}) });
     localStorage.setItem('vibespace.toastHistory', JSON.stringify(h.slice(0, 100)));
   } catch {}
   try { window.dispatchEvent(new CustomEvent('vs-toast')); } catch {}
 }
+/** The words an older build kept in a record's arrival toast (`<head> · <label>: <the record's words>`), cut back to
+ *  `<head>` — every load, idempotent (an entry with a `ref` was written by this build and holds neither). The LABEL goes
+ *  too (lane-redact verify r5): a Background Work ask's label is the job's name, and an old entry has no ref to tell.
+ *  `heads` = the toast heads that name a record (e.g. "Added to For you", in any language the device used).
+ *  @returns how many entries were cut */
+export function stripLegacyRecordToasts(heads) {
+  try {
+    const hs = (Array.isArray(heads) ? heads : []).filter((x) => typeof x === 'string' && x);
+    const h = getToastHistory();
+    let n = 0;
+    for (const e of h) {
+      if (!e || e.ref || typeof e.m !== 'string' || !hs.some((hd) => e.m.startsWith(hd))) continue;
+      const cut = e.m.indexOf(' · ');
+      if (cut < 0) continue;
+      e.m = e.m.slice(0, cut);
+      n++;
+    }
+    if (n) localStorage.setItem('vibespace.toastHistory', JSON.stringify(h));
+    return n;
+  } catch { return 0; }
+}
 // `action: { label, run }` (split UX R5, 2026-09-23) = ONE button inside the
 // toast (Undo / Show side by side): a click runs it and dismisses the toast; an
 // action toast lives 5 s unless the user's toast-seconds setting says otherwise.
-export function showToast(message, { type = 'info', duration, action, actions } = {}) {
+export function showToast(message, { type = 'info', duration, action, actions, history = null } = {}) {
   let stack = document.getElementById('global-toasts');
   if (!stack) {
     stack = document.createElement('div');
@@ -183,7 +214,7 @@ export function showToast(message, { type = 'info', duration, action, actions } 
   }
   el.append(x);
   stack.appendChild(el);
-  _recordToast(message, type);
+  _recordToast(history && typeof history.m === 'string' ? history.m : message, type, history && history.ref);   // a record's toast keeps its head + a ref, never its words (above)
   // Cap the stack so a burst of errors doesn't fill the screen
   while (stack.children.length > 4) stack.firstChild.remove();
   const secs = Number(_toastCfg.getSeconds?.());
@@ -471,8 +502,14 @@ export function showContextMenu(x, y, items, className = 'context-menu') {
     el.className = className + '-item' + (item.disabled ? ' disabled' : '');
     if (item.style) el.style.cssText = item.style;
     if (item.children?.length) {
-      // Submenu item: hover to expand
-      el.textContent = item.label + ' \u25B8';
+      // Submenu item: hover to expand. Since 2026-09-28 a parent may carry the same
+      // OPT-IN `labelHtml` (caller escHtml's every part \u2014 the billing switcher's pool row
+      // with its usage cluster), a `title`, and its OWN `action`: a MOUSE click on the row
+      // runs it (the pool row itself = "automatic"), a TOUCH tap only opens the submenu
+      // (the first child row offers the same act \u2014 no touch path is lost).
+      if (item.labelHtml != null) { el.innerHTML = item.labelHtml; const arrow = document.createElement('span'); arrow.className = className + '-arrow'; arrow.textContent = ' \u25B8'; el.appendChild(arrow); }
+      else el.textContent = item.label + ' \u25B8';
+      if (item.title) el.title = item.title;
       el.style.position = 'relative';
       const sub = document.createElement('div');
       sub.className = className;
@@ -510,9 +547,12 @@ export function showContextMenu(x, y, items, className = 'context-menu') {
       // Touch: no hover exists — tap the parent row to open the submenu.
       // Only opens (never toggles closed): emulated mouseenter on tap may have
       // already shown it, and a toggle would immediately re-hide it.
+      let lastPointer = 'mouse';
+      el.addEventListener('pointerdown', (e) => { lastPointer = e.pointerType || 'mouse'; });
       el.addEventListener('click', (e) => {
-        if (e.target !== el) return; // child item clicks handle themselves
+        if (sub.contains(e.target)) return; // child item clicks handle themselves
         e.stopPropagation();
+        if (item.action && !item.disabled && lastPointer === 'mouse') { pop.remove(); item.action(); return; }
         showSub();
       });
     } else {

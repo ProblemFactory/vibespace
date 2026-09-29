@@ -1,0 +1,6821 @@
+{
+ "browser": "Chrome/154.0.8037.57",
+ "protocolVersion": "1.3",
+ "fetchedAt": "2026-09-29T03:50:31.758Z",
+ "how": "GET /json/protocol of a scratch headless Chrome (scripts/cdp-protocol-fetch.mjs); schemas dropped — method, parameter and event NAMES, deprecated + experimental flags only",
+ "domains": [
+  {
+   "domain": "Accessibility",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "enable",
+     "params": []
+    },
+    {
+     "name": "getPartialAXTree",
+     "experimental": true,
+     "params": [
+      "nodeId?",
+      "backendNodeId?",
+      "objectId?",
+      "fetchRelatives?"
+     ]
+    },
+    {
+     "name": "getFullAXTree",
+     "experimental": true,
+     "params": [
+      "depth?",
+      "frameId?"
+     ]
+    },
+    {
+     "name": "getRootAXNode",
+     "experimental": true,
+     "params": [
+      "frameId?"
+     ]
+    },
+    {
+     "name": "getAXNodeAndAncestors",
+     "experimental": true,
+     "params": [
+      "nodeId?",
+      "backendNodeId?",
+      "objectId?"
+     ]
+    },
+    {
+     "name": "getChildAXNodes",
+     "experimental": true,
+     "params": [
+      "id",
+      "frameId?"
+     ]
+    },
+    {
+     "name": "queryAXTree",
+     "experimental": true,
+     "params": [
+      "nodeId?",
+      "backendNodeId?",
+      "objectId?",
+      "accessibleName?",
+      "role?"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "loadComplete",
+     "experimental": true,
+     "params": [
+      "root"
+     ]
+    },
+    {
+     "name": "nodesUpdated",
+     "experimental": true,
+     "params": [
+      "nodes"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "Ads",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "getAdMetrics",
+     "params": []
+    },
+    {
+     "name": "getAdScripts",
+     "params": []
+    }
+   ],
+   "events": []
+  },
+  {
+   "domain": "Animation",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "enable",
+     "params": []
+    },
+    {
+     "name": "getCurrentTime",
+     "params": [
+      "id"
+     ]
+    },
+    {
+     "name": "getPlaybackRate",
+     "params": []
+    },
+    {
+     "name": "releaseAnimations",
+     "params": [
+      "animations"
+     ]
+    },
+    {
+     "name": "resolveAnimation",
+     "params": [
+      "animationId"
+     ]
+    },
+    {
+     "name": "seekAnimations",
+     "params": [
+      "animations",
+      "currentTime"
+     ]
+    },
+    {
+     "name": "setPaused",
+     "params": [
+      "animations",
+      "paused"
+     ]
+    },
+    {
+     "name": "setPlaybackRate",
+     "params": [
+      "playbackRate"
+     ]
+    },
+    {
+     "name": "setTiming",
+     "params": [
+      "animationId",
+      "duration",
+      "delay"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "animationCanceled",
+     "params": [
+      "id"
+     ]
+    },
+    {
+     "name": "animationCreated",
+     "params": [
+      "id"
+     ]
+    },
+    {
+     "name": "animationStarted",
+     "params": [
+      "animation"
+     ]
+    },
+    {
+     "name": "animationUpdated",
+     "params": [
+      "animation"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "Audits",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "getEncodedResponse",
+     "params": [
+      "requestId",
+      "encoding",
+      "quality?",
+      "sizeOnly?"
+     ]
+    },
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "enable",
+     "params": []
+    },
+    {
+     "name": "checkFormsIssues",
+     "params": []
+    }
+   ],
+   "events": [
+    {
+     "name": "issueAdded",
+     "params": [
+      "issue"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "Autofill",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "trigger",
+     "params": [
+      "fieldId",
+      "frameId?",
+      "card?",
+      "address?"
+     ]
+    },
+    {
+     "name": "setAddresses",
+     "params": [
+      "addresses"
+     ]
+    },
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "enable",
+     "params": []
+    }
+   ],
+   "events": [
+    {
+     "name": "addressFormFilled",
+     "params": [
+      "filledFields",
+      "addressUi"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "BackgroundService",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "startObserving",
+     "params": [
+      "service"
+     ]
+    },
+    {
+     "name": "stopObserving",
+     "params": [
+      "service"
+     ]
+    },
+    {
+     "name": "setRecording",
+     "params": [
+      "shouldRecord",
+      "service"
+     ]
+    },
+    {
+     "name": "clearEvents",
+     "params": [
+      "service"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "recordingStateChanged",
+     "params": [
+      "isRecording",
+      "service"
+     ]
+    },
+    {
+     "name": "backgroundServiceEventReceived",
+     "params": [
+      "backgroundServiceEvent"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "BluetoothEmulation",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "enable",
+     "params": [
+      "state",
+      "leSupported"
+     ]
+    },
+    {
+     "name": "setSimulatedCentralState",
+     "params": [
+      "state"
+     ]
+    },
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "simulatePreconnectedPeripheral",
+     "params": [
+      "address",
+      "name",
+      "manufacturerData",
+      "knownServiceUuids"
+     ]
+    },
+    {
+     "name": "simulateAdvertisement",
+     "params": [
+      "entry"
+     ]
+    },
+    {
+     "name": "simulateGATTOperationResponse",
+     "params": [
+      "address",
+      "type",
+      "code"
+     ]
+    },
+    {
+     "name": "simulateCharacteristicOperationResponse",
+     "params": [
+      "characteristicId",
+      "type",
+      "code",
+      "data?"
+     ]
+    },
+    {
+     "name": "simulateDescriptorOperationResponse",
+     "params": [
+      "descriptorId",
+      "type",
+      "code",
+      "data?"
+     ]
+    },
+    {
+     "name": "addService",
+     "params": [
+      "address",
+      "serviceUuid"
+     ]
+    },
+    {
+     "name": "removeService",
+     "params": [
+      "serviceId"
+     ]
+    },
+    {
+     "name": "addCharacteristic",
+     "params": [
+      "serviceId",
+      "characteristicUuid",
+      "properties"
+     ]
+    },
+    {
+     "name": "removeCharacteristic",
+     "params": [
+      "characteristicId"
+     ]
+    },
+    {
+     "name": "addDescriptor",
+     "params": [
+      "characteristicId",
+      "descriptorUuid"
+     ]
+    },
+    {
+     "name": "removeDescriptor",
+     "params": [
+      "descriptorId"
+     ]
+    },
+    {
+     "name": "simulateGATTDisconnection",
+     "params": [
+      "address"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "gattOperationReceived",
+     "params": [
+      "address",
+      "type"
+     ]
+    },
+    {
+     "name": "characteristicOperationReceived",
+     "params": [
+      "characteristicId",
+      "type",
+      "data?",
+      "writeType?"
+     ]
+    },
+    {
+     "name": "descriptorOperationReceived",
+     "params": [
+      "descriptorId",
+      "type",
+      "data?"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "Browser",
+   "commands": [
+    {
+     "name": "setPermission",
+     "experimental": true,
+     "params": [
+      "permission",
+      "setting",
+      "origin?",
+      "embeddedOrigin?",
+      "browserContextId?"
+     ]
+    },
+    {
+     "name": "grantPermissions",
+     "deprecated": true,
+     "experimental": true,
+     "params": [
+      "permissions",
+      "origin?",
+      "browserContextId?"
+     ]
+    },
+    {
+     "name": "resetPermissions",
+     "params": [
+      "browserContextId?"
+     ]
+    },
+    {
+     "name": "setDownloadBehavior",
+     "experimental": true,
+     "params": [
+      "behavior",
+      "browserContextId?",
+      "downloadPath?",
+      "eventsEnabled?"
+     ]
+    },
+    {
+     "name": "cancelDownload",
+     "experimental": true,
+     "params": [
+      "guid",
+      "browserContextId?"
+     ]
+    },
+    {
+     "name": "close",
+     "params": []
+    },
+    {
+     "name": "crash",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "crashGpuProcess",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "getVersion",
+     "params": []
+    },
+    {
+     "name": "getBrowserCommandLine",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "addMockCamera",
+     "experimental": true,
+     "params": [
+      "deviceId"
+     ]
+    },
+    {
+     "name": "getHistograms",
+     "experimental": true,
+     "params": [
+      "query?",
+      "delta?"
+     ]
+    },
+    {
+     "name": "getHistogram",
+     "experimental": true,
+     "params": [
+      "name",
+      "delta?"
+     ]
+    },
+    {
+     "name": "getWindowBounds",
+     "experimental": true,
+     "params": [
+      "windowId"
+     ]
+    },
+    {
+     "name": "getWindowForTarget",
+     "experimental": true,
+     "params": [
+      "targetId?"
+     ]
+    },
+    {
+     "name": "setWindowBounds",
+     "experimental": true,
+     "params": [
+      "windowId",
+      "bounds"
+     ]
+    },
+    {
+     "name": "setContentsSize",
+     "experimental": true,
+     "params": [
+      "windowId",
+      "width?",
+      "height?"
+     ]
+    },
+    {
+     "name": "setDockTile",
+     "experimental": true,
+     "params": [
+      "badgeLabel?",
+      "image?"
+     ]
+    },
+    {
+     "name": "executeBrowserCommand",
+     "experimental": true,
+     "params": [
+      "commandId"
+     ]
+    },
+    {
+     "name": "addPrivacySandboxEnrollmentOverride",
+     "params": [
+      "url"
+     ]
+    },
+    {
+     "name": "getGlobalPrivacyControl",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "setGlobalPrivacyControl",
+     "experimental": true,
+     "params": [
+      "gpc"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "downloadWillBegin",
+     "experimental": true,
+     "params": [
+      "frameId",
+      "guid",
+      "url",
+      "suggestedFilename"
+     ]
+    },
+    {
+     "name": "downloadProgress",
+     "experimental": true,
+     "params": [
+      "guid",
+      "totalBytes",
+      "receivedBytes",
+      "state",
+      "filePath?"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "CSS",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "addRule",
+     "params": [
+      "styleSheetId",
+      "ruleText",
+      "location",
+      "nodeForPropertySyntaxValidation?"
+     ]
+    },
+    {
+     "name": "collectClassNames",
+     "params": [
+      "styleSheetId"
+     ]
+    },
+    {
+     "name": "createStyleSheet",
+     "params": [
+      "frameId",
+      "force?"
+     ]
+    },
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "enable",
+     "params": []
+    },
+    {
+     "name": "forcePseudoState",
+     "params": [
+      "nodeId",
+      "forcedPseudoClasses"
+     ]
+    },
+    {
+     "name": "forceStartingStyle",
+     "params": [
+      "nodeId",
+      "forced"
+     ]
+    },
+    {
+     "name": "getBackgroundColors",
+     "params": [
+      "nodeId"
+     ]
+    },
+    {
+     "name": "getComputedStyleForNode",
+     "params": [
+      "nodeId"
+     ]
+    },
+    {
+     "name": "resolveValues",
+     "experimental": true,
+     "params": [
+      "values",
+      "nodeId",
+      "propertyName?",
+      "pseudoType?",
+      "pseudoIdentifier?"
+     ]
+    },
+    {
+     "name": "getLonghandProperties",
+     "experimental": true,
+     "params": [
+      "shorthandName",
+      "value"
+     ]
+    },
+    {
+     "name": "getInlineStylesForNode",
+     "params": [
+      "nodeId"
+     ]
+    },
+    {
+     "name": "getAnimatedStylesForNode",
+     "experimental": true,
+     "params": [
+      "nodeId"
+     ]
+    },
+    {
+     "name": "getMatchedStylesForNode",
+     "params": [
+      "nodeId"
+     ]
+    },
+    {
+     "name": "getEnvironmentVariables",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "getMediaQueries",
+     "params": []
+    },
+    {
+     "name": "getPlatformFontsForNode",
+     "params": [
+      "nodeId"
+     ]
+    },
+    {
+     "name": "getStyleSheetText",
+     "params": [
+      "styleSheetId"
+     ]
+    },
+    {
+     "name": "getLayersForNode",
+     "experimental": true,
+     "params": [
+      "nodeId"
+     ]
+    },
+    {
+     "name": "getLocationForSelector",
+     "experimental": true,
+     "params": [
+      "styleSheetId",
+      "selectorText"
+     ]
+    },
+    {
+     "name": "trackComputedStyleUpdatesForNode",
+     "experimental": true,
+     "params": [
+      "nodeId?"
+     ]
+    },
+    {
+     "name": "trackComputedStyleUpdates",
+     "experimental": true,
+     "params": [
+      "propertiesToTrack"
+     ]
+    },
+    {
+     "name": "takeComputedStyleUpdates",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "setEffectivePropertyValueForNode",
+     "params": [
+      "nodeId",
+      "propertyName",
+      "value"
+     ]
+    },
+    {
+     "name": "setPropertyRulePropertyName",
+     "params": [
+      "styleSheetId",
+      "range",
+      "propertyName"
+     ]
+    },
+    {
+     "name": "setKeyframeKey",
+     "params": [
+      "styleSheetId",
+      "range",
+      "keyText"
+     ]
+    },
+    {
+     "name": "setMediaText",
+     "params": [
+      "styleSheetId",
+      "range",
+      "text"
+     ]
+    },
+    {
+     "name": "setContainerQueryText",
+     "deprecated": true,
+     "experimental": true,
+     "params": [
+      "styleSheetId",
+      "range",
+      "text"
+     ]
+    },
+    {
+     "name": "setContainerQueryConditionText",
+     "experimental": true,
+     "params": [
+      "styleSheetId",
+      "range",
+      "text"
+     ]
+    },
+    {
+     "name": "setSupportsText",
+     "experimental": true,
+     "params": [
+      "styleSheetId",
+      "range",
+      "text"
+     ]
+    },
+    {
+     "name": "setNavigationText",
+     "experimental": true,
+     "params": [
+      "styleSheetId",
+      "range",
+      "text"
+     ]
+    },
+    {
+     "name": "setScopeText",
+     "experimental": true,
+     "params": [
+      "styleSheetId",
+      "range",
+      "text"
+     ]
+    },
+    {
+     "name": "setRuleSelector",
+     "params": [
+      "styleSheetId",
+      "range",
+      "selector"
+     ]
+    },
+    {
+     "name": "setStyleSheetText",
+     "params": [
+      "styleSheetId",
+      "text"
+     ]
+    },
+    {
+     "name": "setStyleTexts",
+     "params": [
+      "edits",
+      "nodeForPropertySyntaxValidation?"
+     ]
+    },
+    {
+     "name": "startRuleUsageTracking",
+     "params": []
+    },
+    {
+     "name": "stopRuleUsageTracking",
+     "params": []
+    },
+    {
+     "name": "takeCoverageDelta",
+     "params": []
+    },
+    {
+     "name": "setLocalFontsEnabled",
+     "experimental": true,
+     "params": [
+      "enabled"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "fontsUpdated",
+     "params": [
+      "font?"
+     ]
+    },
+    {
+     "name": "mediaQueryResultChanged",
+     "params": []
+    },
+    {
+     "name": "styleSheetAdded",
+     "params": [
+      "header"
+     ]
+    },
+    {
+     "name": "styleSheetChanged",
+     "params": [
+      "styleSheetId"
+     ]
+    },
+    {
+     "name": "styleSheetRemoved",
+     "params": [
+      "styleSheetId"
+     ]
+    },
+    {
+     "name": "computedStyleUpdated",
+     "experimental": true,
+     "params": [
+      "nodeId"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "CacheStorage",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "deleteCache",
+     "params": [
+      "cacheId"
+     ]
+    },
+    {
+     "name": "deleteEntry",
+     "params": [
+      "cacheId",
+      "request"
+     ]
+    },
+    {
+     "name": "requestCacheNames",
+     "params": [
+      "securityOrigin?",
+      "storageKey?",
+      "storageBucket?"
+     ]
+    },
+    {
+     "name": "requestCachedResponse",
+     "params": [
+      "cacheId",
+      "requestURL",
+      "requestHeaders"
+     ]
+    },
+    {
+     "name": "requestEntries",
+     "params": [
+      "cacheId",
+      "skipCount?",
+      "pageSize?",
+      "pathFilter?"
+     ]
+    }
+   ],
+   "events": []
+  },
+  {
+   "domain": "Cast",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "enable",
+     "params": [
+      "presentationUrl?"
+     ]
+    },
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "setSinkToUse",
+     "params": [
+      "sinkName"
+     ]
+    },
+    {
+     "name": "startDesktopMirroring",
+     "params": [
+      "sinkName"
+     ]
+    },
+    {
+     "name": "startTabMirroring",
+     "params": [
+      "sinkName"
+     ]
+    },
+    {
+     "name": "stopCasting",
+     "params": [
+      "sinkName"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "sinksUpdated",
+     "params": [
+      "sinks"
+     ]
+    },
+    {
+     "name": "issueUpdated",
+     "params": [
+      "issueMessage"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "CrashReportContext",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "getEntries",
+     "params": []
+    }
+   ],
+   "events": []
+  },
+  {
+   "domain": "DOM",
+   "commands": [
+    {
+     "name": "collectClassNamesFromSubtree",
+     "experimental": true,
+     "params": [
+      "nodeId"
+     ]
+    },
+    {
+     "name": "copyTo",
+     "experimental": true,
+     "params": [
+      "nodeId",
+      "targetNodeId",
+      "insertBeforeNodeId?"
+     ]
+    },
+    {
+     "name": "describeNode",
+     "params": [
+      "nodeId?",
+      "backendNodeId?",
+      "objectId?",
+      "depth?",
+      "pierce?"
+     ]
+    },
+    {
+     "name": "scrollIntoViewIfNeeded",
+     "params": [
+      "nodeId?",
+      "backendNodeId?",
+      "objectId?",
+      "rect?"
+     ]
+    },
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "discardSearchResults",
+     "experimental": true,
+     "params": [
+      "searchId"
+     ]
+    },
+    {
+     "name": "enable",
+     "params": [
+      "includeWhitespace?"
+     ]
+    },
+    {
+     "name": "focus",
+     "params": [
+      "nodeId?",
+      "backendNodeId?",
+      "objectId?"
+     ]
+    },
+    {
+     "name": "getAttributes",
+     "params": [
+      "nodeId"
+     ]
+    },
+    {
+     "name": "getBoxModel",
+     "params": [
+      "nodeId?",
+      "backendNodeId?",
+      "objectId?"
+     ]
+    },
+    {
+     "name": "getContentQuads",
+     "experimental": true,
+     "params": [
+      "nodeId?",
+      "backendNodeId?",
+      "objectId?"
+     ]
+    },
+    {
+     "name": "getDocument",
+     "params": [
+      "depth?",
+      "pierce?"
+     ]
+    },
+    {
+     "name": "getFlattenedDocument",
+     "deprecated": true,
+     "params": [
+      "depth?",
+      "pierce?"
+     ]
+    },
+    {
+     "name": "getNodesForSubtreeByStyle",
+     "experimental": true,
+     "params": [
+      "nodeId",
+      "computedStyles",
+      "pierce?"
+     ]
+    },
+    {
+     "name": "getNodeForLocation",
+     "params": [
+      "x",
+      "y",
+      "includeUserAgentShadowDOM?",
+      "ignorePointerEventsNone?"
+     ]
+    },
+    {
+     "name": "getOuterHTML",
+     "params": [
+      "nodeId?",
+      "backendNodeId?",
+      "objectId?",
+      "includeShadowDOM?"
+     ]
+    },
+    {
+     "name": "getRelayoutBoundary",
+     "experimental": true,
+     "params": [
+      "nodeId"
+     ]
+    },
+    {
+     "name": "getSearchResults",
+     "experimental": true,
+     "params": [
+      "searchId",
+      "fromIndex",
+      "toIndex"
+     ]
+    },
+    {
+     "name": "hideHighlight",
+     "params": []
+    },
+    {
+     "name": "highlightNode",
+     "params": []
+    },
+    {
+     "name": "highlightRect",
+     "params": []
+    },
+    {
+     "name": "markUndoableState",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "moveTo",
+     "params": [
+      "nodeId",
+      "targetNodeId",
+      "insertBeforeNodeId?"
+     ]
+    },
+    {
+     "name": "performSearch",
+     "experimental": true,
+     "params": [
+      "query",
+      "includeUserAgentShadowDOM?"
+     ]
+    },
+    {
+     "name": "pushNodeByPathToFrontend",
+     "experimental": true,
+     "params": [
+      "path"
+     ]
+    },
+    {
+     "name": "pushNodesByBackendIdsToFrontend",
+     "experimental": true,
+     "params": [
+      "backendNodeIds"
+     ]
+    },
+    {
+     "name": "querySelector",
+     "params": [
+      "nodeId",
+      "selector"
+     ]
+    },
+    {
+     "name": "querySelectorAll",
+     "params": [
+      "nodeId",
+      "selector"
+     ]
+    },
+    {
+     "name": "getTopLayerElements",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "getElementByRelation",
+     "experimental": true,
+     "params": [
+      "nodeId",
+      "relation"
+     ]
+    },
+    {
+     "name": "redo",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "removeAttribute",
+     "params": [
+      "nodeId",
+      "name"
+     ]
+    },
+    {
+     "name": "removeNode",
+     "params": [
+      "nodeId"
+     ]
+    },
+    {
+     "name": "requestChildNodes",
+     "params": [
+      "nodeId",
+      "depth?",
+      "pierce?"
+     ]
+    },
+    {
+     "name": "requestNode",
+     "params": [
+      "objectId"
+     ]
+    },
+    {
+     "name": "resolveNode",
+     "params": [
+      "nodeId?",
+      "backendNodeId?",
+      "objectGroup?",
+      "executionContextId?"
+     ]
+    },
+    {
+     "name": "setAttributeValue",
+     "params": [
+      "nodeId",
+      "name",
+      "value"
+     ]
+    },
+    {
+     "name": "setAttributesAsText",
+     "params": [
+      "nodeId",
+      "text",
+      "name?"
+     ]
+    },
+    {
+     "name": "setFileInputFiles",
+     "params": [
+      "files",
+      "nodeId?",
+      "backendNodeId?",
+      "objectId?"
+     ]
+    },
+    {
+     "name": "setNodeStackTracesEnabled",
+     "experimental": true,
+     "params": [
+      "enable"
+     ]
+    },
+    {
+     "name": "getNodeStackTraces",
+     "experimental": true,
+     "params": [
+      "nodeId"
+     ]
+    },
+    {
+     "name": "getFileInfo",
+     "experimental": true,
+     "params": [
+      "objectId"
+     ]
+    },
+    {
+     "name": "getDetachedDomNodes",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "setInspectedNode",
+     "experimental": true,
+     "params": [
+      "nodeId"
+     ]
+    },
+    {
+     "name": "setNodeName",
+     "params": [
+      "nodeId",
+      "name"
+     ]
+    },
+    {
+     "name": "setNodeValue",
+     "params": [
+      "nodeId",
+      "value"
+     ]
+    },
+    {
+     "name": "setOuterHTML",
+     "params": [
+      "nodeId",
+      "outerHTML"
+     ]
+    },
+    {
+     "name": "undo",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "getFrameOwner",
+     "experimental": true,
+     "params": [
+      "frameId"
+     ]
+    },
+    {
+     "name": "getContainerForNode",
+     "experimental": true,
+     "params": [
+      "nodeId",
+      "containerName?",
+      "physicalAxes?",
+      "logicalAxes?",
+      "queriesScrollState?",
+      "queriesAnchored?"
+     ]
+    },
+    {
+     "name": "getQueryingDescendantsForContainer",
+     "experimental": true,
+     "params": [
+      "nodeId"
+     ]
+    },
+    {
+     "name": "getAnchorElement",
+     "experimental": true,
+     "params": [
+      "nodeId",
+      "anchorSpecifier?"
+     ]
+    },
+    {
+     "name": "forceShowPopover",
+     "experimental": true,
+     "params": [
+      "nodeId",
+      "enable",
+      "invokerNodeId?"
+     ]
+    },
+    {
+     "name": "forceShowInterest",
+     "experimental": true,
+     "params": [
+      "nodeId",
+      "enable"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "attributeModified",
+     "params": [
+      "nodeId",
+      "name",
+      "value"
+     ]
+    },
+    {
+     "name": "adoptedStyleSheetsModified",
+     "experimental": true,
+     "params": [
+      "nodeId",
+      "adoptedStyleSheets"
+     ]
+    },
+    {
+     "name": "attributeRemoved",
+     "params": [
+      "nodeId",
+      "name"
+     ]
+    },
+    {
+     "name": "characterDataModified",
+     "params": [
+      "nodeId",
+      "characterData"
+     ]
+    },
+    {
+     "name": "childNodeCountUpdated",
+     "params": [
+      "nodeId",
+      "childNodeCount"
+     ]
+    },
+    {
+     "name": "childNodeInserted",
+     "params": [
+      "parentNodeId",
+      "previousNodeId",
+      "node"
+     ]
+    },
+    {
+     "name": "childNodeRemoved",
+     "params": [
+      "parentNodeId",
+      "nodeId"
+     ]
+    },
+    {
+     "name": "distributedNodesUpdated",
+     "experimental": true,
+     "params": [
+      "insertionPointId",
+      "distributedNodes"
+     ]
+    },
+    {
+     "name": "documentUpdated",
+     "params": []
+    },
+    {
+     "name": "inlineStyleInvalidated",
+     "experimental": true,
+     "params": [
+      "nodeIds"
+     ]
+    },
+    {
+     "name": "pseudoElementAdded",
+     "experimental": true,
+     "params": [
+      "parentId",
+      "pseudoElement"
+     ]
+    },
+    {
+     "name": "topLayerElementsUpdated",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "scrollableFlagUpdated",
+     "experimental": true,
+     "params": [
+      "nodeId",
+      "isScrollable"
+     ]
+    },
+    {
+     "name": "adRelatedStateUpdated",
+     "experimental": true,
+     "params": [
+      "nodeId",
+      "adProvenance?"
+     ]
+    },
+    {
+     "name": "affectedByStartingStylesFlagUpdated",
+     "experimental": true,
+     "params": [
+      "nodeId",
+      "affectedByStartingStyles"
+     ]
+    },
+    {
+     "name": "pseudoElementRemoved",
+     "experimental": true,
+     "params": [
+      "parentId",
+      "pseudoElementId"
+     ]
+    },
+    {
+     "name": "setChildNodes",
+     "params": [
+      "parentId",
+      "nodes"
+     ]
+    },
+    {
+     "name": "shadowRootPopped",
+     "experimental": true,
+     "params": [
+      "hostId",
+      "rootId"
+     ]
+    },
+    {
+     "name": "shadowRootPushed",
+     "experimental": true,
+     "params": [
+      "hostId",
+      "root"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "DOMDebugger",
+   "commands": [
+    {
+     "name": "getEventListeners",
+     "params": [
+      "objectId",
+      "depth?",
+      "pierce?"
+     ]
+    },
+    {
+     "name": "removeDOMBreakpoint",
+     "params": [
+      "nodeId",
+      "type"
+     ]
+    },
+    {
+     "name": "removeEventListenerBreakpoint",
+     "params": [
+      "eventName",
+      "targetName?"
+     ]
+    },
+    {
+     "name": "removeInstrumentationBreakpoint",
+     "deprecated": true,
+     "experimental": true,
+     "params": [
+      "eventName"
+     ]
+    },
+    {
+     "name": "removeXHRBreakpoint",
+     "params": [
+      "url"
+     ]
+    },
+    {
+     "name": "setBreakOnCSPViolation",
+     "experimental": true,
+     "params": [
+      "violationTypes"
+     ]
+    },
+    {
+     "name": "setDOMBreakpoint",
+     "params": [
+      "nodeId",
+      "type"
+     ]
+    },
+    {
+     "name": "setEventListenerBreakpoint",
+     "params": [
+      "eventName",
+      "targetName?"
+     ]
+    },
+    {
+     "name": "setInstrumentationBreakpoint",
+     "deprecated": true,
+     "experimental": true,
+     "params": [
+      "eventName"
+     ]
+    },
+    {
+     "name": "setXHRBreakpoint",
+     "params": [
+      "url"
+     ]
+    }
+   ],
+   "events": []
+  },
+  {
+   "domain": "DOMSnapshot",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "enable",
+     "params": []
+    },
+    {
+     "name": "getSnapshot",
+     "deprecated": true,
+     "params": [
+      "computedStyleWhitelist",
+      "includeEventListeners?",
+      "includePaintOrder?",
+      "includeUserAgentShadowTree?"
+     ]
+    },
+    {
+     "name": "captureSnapshot",
+     "params": [
+      "computedStyles",
+      "includePaintOrder?",
+      "includeDOMRects?",
+      "includeBlendedBackgroundColors?",
+      "includeTextColorOpacities?"
+     ]
+    }
+   ],
+   "events": []
+  },
+  {
+   "domain": "DOMStorage",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "clear",
+     "params": [
+      "storageId"
+     ]
+    },
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "enable",
+     "params": []
+    },
+    {
+     "name": "getDOMStorageItems",
+     "params": [
+      "storageId"
+     ]
+    },
+    {
+     "name": "removeDOMStorageItem",
+     "params": [
+      "storageId",
+      "key"
+     ]
+    },
+    {
+     "name": "setDOMStorageItem",
+     "params": [
+      "storageId",
+      "key",
+      "value"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "domStorageItemAdded",
+     "params": [
+      "storageId",
+      "key",
+      "newValue"
+     ]
+    },
+    {
+     "name": "domStorageItemRemoved",
+     "params": [
+      "storageId",
+      "key"
+     ]
+    },
+    {
+     "name": "domStorageItemUpdated",
+     "params": [
+      "storageId",
+      "key",
+      "oldValue",
+      "newValue"
+     ]
+    },
+    {
+     "name": "domStorageItemsCleared",
+     "params": [
+      "storageId"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "DeviceAccess",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "enable",
+     "params": []
+    },
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "selectPrompt",
+     "params": [
+      "id",
+      "deviceId"
+     ]
+    },
+    {
+     "name": "cancelPrompt",
+     "params": [
+      "id"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "deviceRequestPrompted",
+     "params": [
+      "id",
+      "devices"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "DeviceOrientation",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "clearDeviceOrientationOverride",
+     "params": []
+    },
+    {
+     "name": "setDeviceOrientationOverride",
+     "params": [
+      "alpha",
+      "beta",
+      "gamma"
+     ]
+    }
+   ],
+   "events": []
+  },
+  {
+   "domain": "DigitalCredentials",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "setVirtualWalletBehavior",
+     "params": [
+      "action",
+      "protocol?",
+      "response?",
+      "frameId?"
+     ]
+    }
+   ],
+   "events": []
+  },
+  {
+   "domain": "Emulation",
+   "commands": [
+    {
+     "name": "canEmulate",
+     "deprecated": true,
+     "params": []
+    },
+    {
+     "name": "clearDeviceMetricsOverride",
+     "params": []
+    },
+    {
+     "name": "clearGeolocationOverride",
+     "params": []
+    },
+    {
+     "name": "resetPageScaleFactor",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "setFocusEmulationEnabled",
+     "experimental": true,
+     "params": [
+      "enabled"
+     ]
+    },
+    {
+     "name": "setAutoDarkModeOverride",
+     "experimental": true,
+     "params": [
+      "enabled?"
+     ]
+    },
+    {
+     "name": "setCPUThrottlingRate",
+     "params": [
+      "rate"
+     ]
+    },
+    {
+     "name": "setDefaultBackgroundColorOverride",
+     "params": [
+      "color?"
+     ]
+    },
+    {
+     "name": "setSafeAreaInsetsOverride",
+     "experimental": true,
+     "params": [
+      "insets"
+     ]
+    },
+    {
+     "name": "setVirtualKeyboardGeometryOverride",
+     "experimental": true,
+     "params": [
+      "keyboardRect?"
+     ]
+    },
+    {
+     "name": "setDeviceMetricsOverride",
+     "params": [
+      "width",
+      "height",
+      "deviceScaleFactor",
+      "mobile",
+      "scale?",
+      "screenWidth?",
+      "screenHeight?",
+      "positionX?",
+      "positionY?",
+      "dontSetVisibleSize?",
+      "screenOrientation?",
+      "viewport?",
+      "displayFeature?",
+      "devicePosture?",
+      "scrollbarType?",
+      "screenOrientationLockEmulation?"
+     ]
+    },
+    {
+     "name": "setDevicePostureOverride",
+     "experimental": true,
+     "params": [
+      "posture"
+     ]
+    },
+    {
+     "name": "clearDevicePostureOverride",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "setDisplayFeaturesOverride",
+     "experimental": true,
+     "params": [
+      "features"
+     ]
+    },
+    {
+     "name": "clearDisplayFeaturesOverride",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "setScrollbarsHidden",
+     "experimental": true,
+     "params": [
+      "hidden"
+     ]
+    },
+    {
+     "name": "setDocumentCookieDisabled",
+     "experimental": true,
+     "params": [
+      "disabled"
+     ]
+    },
+    {
+     "name": "setEmitTouchEventsForMouse",
+     "experimental": true,
+     "params": [
+      "enabled",
+      "configuration?"
+     ]
+    },
+    {
+     "name": "setEmulatedMedia",
+     "params": [
+      "media?",
+      "features?"
+     ]
+    },
+    {
+     "name": "setEmulatedVisionDeficiency",
+     "params": [
+      "type"
+     ]
+    },
+    {
+     "name": "setEmulatedOSTextScale",
+     "params": [
+      "scale?"
+     ]
+    },
+    {
+     "name": "setGeolocationOverride",
+     "params": [
+      "latitude?",
+      "longitude?",
+      "accuracy?",
+      "altitude?",
+      "altitudeAccuracy?",
+      "heading?",
+      "speed?"
+     ]
+    },
+    {
+     "name": "getOverriddenSensorInformation",
+     "experimental": true,
+     "params": [
+      "type"
+     ]
+    },
+    {
+     "name": "setSensorOverrideEnabled",
+     "experimental": true,
+     "params": [
+      "enabled",
+      "type",
+      "metadata?"
+     ]
+    },
+    {
+     "name": "setSensorOverrideReadings",
+     "experimental": true,
+     "params": [
+      "type",
+      "reading"
+     ]
+    },
+    {
+     "name": "setPressureSourceOverrideEnabled",
+     "experimental": true,
+     "params": [
+      "enabled",
+      "source",
+      "metadata?"
+     ]
+    },
+    {
+     "name": "setPressureStateOverride",
+     "experimental": true,
+     "params": [
+      "source",
+      "state"
+     ]
+    },
+    {
+     "name": "setIdleOverride",
+     "params": [
+      "isUserActive",
+      "isScreenUnlocked"
+     ]
+    },
+    {
+     "name": "clearIdleOverride",
+     "params": []
+    },
+    {
+     "name": "setNavigatorOverrides",
+     "deprecated": true,
+     "experimental": true,
+     "params": [
+      "platform"
+     ]
+    },
+    {
+     "name": "setPageScaleFactor",
+     "experimental": true,
+     "params": [
+      "pageScaleFactor"
+     ]
+    },
+    {
+     "name": "setScriptExecutionDisabled",
+     "params": [
+      "value"
+     ]
+    },
+    {
+     "name": "setTouchEmulationEnabled",
+     "params": [
+      "enabled",
+      "maxTouchPoints?"
+     ]
+    },
+    {
+     "name": "setVirtualTimePolicy",
+     "experimental": true,
+     "params": [
+      "policy",
+      "budget?",
+      "maxVirtualTimeTaskStarvationCount?",
+      "initialVirtualTime?"
+     ]
+    },
+    {
+     "name": "setLocaleOverride",
+     "experimental": true,
+     "params": [
+      "locale?"
+     ]
+    },
+    {
+     "name": "setTimezoneOverride",
+     "params": [
+      "timezoneId"
+     ]
+    },
+    {
+     "name": "setVisibleSize",
+     "deprecated": true,
+     "experimental": true,
+     "params": [
+      "width",
+      "height"
+     ]
+    },
+    {
+     "name": "setDisabledImageTypes",
+     "experimental": true,
+     "params": [
+      "imageTypes"
+     ]
+    },
+    {
+     "name": "setDataSaverOverride",
+     "experimental": true,
+     "params": [
+      "dataSaverEnabled?"
+     ]
+    },
+    {
+     "name": "setHardwareConcurrencyOverride",
+     "experimental": true,
+     "params": [
+      "hardwareConcurrency"
+     ]
+    },
+    {
+     "name": "setCPUPerformanceOverride",
+     "experimental": true,
+     "params": [
+      "performanceTier?"
+     ]
+    },
+    {
+     "name": "setUserAgentOverride",
+     "params": [
+      "userAgent",
+      "acceptLanguage?",
+      "platform?",
+      "userAgentMetadata?"
+     ]
+    },
+    {
+     "name": "setAutomationOverride",
+     "experimental": true,
+     "params": [
+      "enabled"
+     ]
+    },
+    {
+     "name": "setSmallViewportHeightDifferenceOverride",
+     "experimental": true,
+     "params": [
+      "difference"
+     ]
+    },
+    {
+     "name": "getScreenInfos",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "addScreen",
+     "experimental": true,
+     "params": [
+      "left",
+      "top",
+      "width",
+      "height",
+      "workAreaInsets?",
+      "devicePixelRatio?",
+      "rotation?",
+      "colorDepth?",
+      "label?",
+      "isInternal?"
+     ]
+    },
+    {
+     "name": "updateScreen",
+     "experimental": true,
+     "params": [
+      "screenId",
+      "left?",
+      "top?",
+      "width?",
+      "height?",
+      "workAreaInsets?",
+      "devicePixelRatio?",
+      "rotation?",
+      "colorDepth?",
+      "label?",
+      "isInternal?"
+     ]
+    },
+    {
+     "name": "removeScreen",
+     "experimental": true,
+     "params": [
+      "screenId"
+     ]
+    },
+    {
+     "name": "setPrimaryScreen",
+     "experimental": true,
+     "params": [
+      "screenId"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "virtualTimeBudgetExpired",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "screenOrientationLockChanged",
+     "experimental": true,
+     "params": [
+      "locked",
+      "orientation?"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "EventBreakpoints",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "setInstrumentationBreakpoint",
+     "params": [
+      "eventName"
+     ]
+    },
+    {
+     "name": "removeInstrumentationBreakpoint",
+     "params": [
+      "eventName"
+     ]
+    },
+    {
+     "name": "disable",
+     "params": []
+    }
+   ],
+   "events": []
+  },
+  {
+   "domain": "Extensions",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "triggerAction",
+     "params": [
+      "id",
+      "targetId"
+     ]
+    },
+    {
+     "name": "loadUnpacked",
+     "params": [
+      "path",
+      "enableInIncognito?"
+     ]
+    },
+    {
+     "name": "getExtensions",
+     "params": []
+    },
+    {
+     "name": "uninstall",
+     "params": [
+      "id"
+     ]
+    },
+    {
+     "name": "getStorageItems",
+     "params": [
+      "id",
+      "storageArea",
+      "keys?"
+     ]
+    },
+    {
+     "name": "removeStorageItems",
+     "params": [
+      "id",
+      "storageArea",
+      "keys"
+     ]
+    },
+    {
+     "name": "clearStorageItems",
+     "params": [
+      "id",
+      "storageArea"
+     ]
+    },
+    {
+     "name": "setStorageItems",
+     "params": [
+      "id",
+      "storageArea",
+      "values"
+     ]
+    }
+   ],
+   "events": []
+  },
+  {
+   "domain": "FedCm",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "enable",
+     "params": [
+      "disableRejectionDelay?"
+     ]
+    },
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "selectAccount",
+     "params": [
+      "dialogId",
+      "accountIndex"
+     ]
+    },
+    {
+     "name": "clickDialogButton",
+     "params": [
+      "dialogId",
+      "dialogButton"
+     ]
+    },
+    {
+     "name": "openUrl",
+     "params": [
+      "dialogId",
+      "accountIndex",
+      "accountUrlType"
+     ]
+    },
+    {
+     "name": "dismissDialog",
+     "params": [
+      "dialogId",
+      "triggerCooldown?"
+     ]
+    },
+    {
+     "name": "resetCooldown",
+     "params": []
+    }
+   ],
+   "events": [
+    {
+     "name": "dialogShown",
+     "params": [
+      "dialogId",
+      "dialogType",
+      "accounts",
+      "title",
+      "subtitle?"
+     ]
+    },
+    {
+     "name": "dialogClosed",
+     "params": [
+      "dialogId"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "Fetch",
+   "commands": [
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "enable",
+     "params": [
+      "patterns?",
+      "handleAuthRequests?"
+     ]
+    },
+    {
+     "name": "failRequest",
+     "params": [
+      "requestId",
+      "errorReason"
+     ]
+    },
+    {
+     "name": "fulfillRequest",
+     "params": [
+      "requestId",
+      "responseCode",
+      "responseHeaders?",
+      "binaryResponseHeaders?",
+      "body?",
+      "responsePhrase?"
+     ]
+    },
+    {
+     "name": "continueRequest",
+     "params": [
+      "requestId",
+      "url?",
+      "method?",
+      "postData?",
+      "headers?",
+      "interceptResponse?"
+     ]
+    },
+    {
+     "name": "continueWithAuth",
+     "params": [
+      "requestId",
+      "authChallengeResponse"
+     ]
+    },
+    {
+     "name": "continueResponse",
+     "experimental": true,
+     "params": [
+      "requestId",
+      "responseCode?",
+      "responsePhrase?",
+      "responseHeaders?",
+      "binaryResponseHeaders?"
+     ]
+    },
+    {
+     "name": "getResponseBody",
+     "params": [
+      "requestId"
+     ]
+    },
+    {
+     "name": "takeResponseBodyAsStream",
+     "params": [
+      "requestId"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "requestPaused",
+     "params": [
+      "requestId",
+      "request",
+      "frameId",
+      "resourceType",
+      "responseErrorReason?",
+      "responseStatusCode?",
+      "responseStatusText?",
+      "responseHeaders?",
+      "networkId?",
+      "redirectedRequestId?"
+     ]
+    },
+    {
+     "name": "authRequired",
+     "params": [
+      "requestId",
+      "request",
+      "frameId",
+      "resourceType",
+      "authChallenge"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "FileSystem",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "getDirectory",
+     "params": [
+      "bucketFileSystemLocator"
+     ]
+    }
+   ],
+   "events": []
+  },
+  {
+   "domain": "HeadlessExperimental",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "beginFrame",
+     "params": [
+      "frameTimeTicks?",
+      "interval?",
+      "noDisplayUpdates?",
+      "screenshot?"
+     ]
+    },
+    {
+     "name": "disable",
+     "deprecated": true,
+     "params": []
+    },
+    {
+     "name": "enable",
+     "deprecated": true,
+     "params": []
+    }
+   ],
+   "events": []
+  },
+  {
+   "domain": "IO",
+   "commands": [
+    {
+     "name": "close",
+     "params": [
+      "handle"
+     ]
+    },
+    {
+     "name": "read",
+     "params": [
+      "handle",
+      "offset?",
+      "size?"
+     ]
+    },
+    {
+     "name": "resolveBlob",
+     "params": [
+      "objectId"
+     ]
+    }
+   ],
+   "events": []
+  },
+  {
+   "domain": "IndexedDB",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "clearObjectStore",
+     "params": [
+      "securityOrigin?",
+      "storageKey?",
+      "storageBucket?",
+      "databaseName",
+      "objectStoreName"
+     ]
+    },
+    {
+     "name": "deleteDatabase",
+     "params": [
+      "securityOrigin?",
+      "storageKey?",
+      "storageBucket?",
+      "databaseName"
+     ]
+    },
+    {
+     "name": "deleteObjectStoreEntries",
+     "params": [
+      "securityOrigin?",
+      "storageKey?",
+      "storageBucket?",
+      "databaseName",
+      "objectStoreName",
+      "keyRange"
+     ]
+    },
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "enable",
+     "params": []
+    },
+    {
+     "name": "requestData",
+     "params": [
+      "securityOrigin?",
+      "storageKey?",
+      "storageBucket?",
+      "databaseName",
+      "objectStoreName",
+      "indexName?",
+      "skipCount",
+      "pageSize",
+      "keyRange?"
+     ]
+    },
+    {
+     "name": "getMetadata",
+     "params": [
+      "securityOrigin?",
+      "storageKey?",
+      "storageBucket?",
+      "databaseName",
+      "objectStoreName"
+     ]
+    },
+    {
+     "name": "requestDatabase",
+     "params": [
+      "securityOrigin?",
+      "storageKey?",
+      "storageBucket?",
+      "databaseName"
+     ]
+    },
+    {
+     "name": "requestDatabaseNames",
+     "params": [
+      "securityOrigin?",
+      "storageKey?",
+      "storageBucket?"
+     ]
+    }
+   ],
+   "events": []
+  },
+  {
+   "domain": "Input",
+   "commands": [
+    {
+     "name": "dispatchDragEvent",
+     "experimental": true,
+     "params": [
+      "type",
+      "x",
+      "y",
+      "data",
+      "modifiers?"
+     ]
+    },
+    {
+     "name": "dispatchKeyEvent",
+     "params": [
+      "type",
+      "modifiers?",
+      "timestamp?",
+      "text?",
+      "unmodifiedText?",
+      "keyIdentifier?",
+      "code?",
+      "key?",
+      "windowsVirtualKeyCode?",
+      "nativeVirtualKeyCode?",
+      "autoRepeat?",
+      "isKeypad?",
+      "isSystemKey?",
+      "location?",
+      "commands?"
+     ]
+    },
+    {
+     "name": "insertText",
+     "experimental": true,
+     "params": [
+      "text"
+     ]
+    },
+    {
+     "name": "imeSetComposition",
+     "experimental": true,
+     "params": [
+      "text",
+      "selectionStart",
+      "selectionEnd",
+      "replacementStart?",
+      "replacementEnd?"
+     ]
+    },
+    {
+     "name": "dispatchMouseEvent",
+     "params": [
+      "type",
+      "x",
+      "y",
+      "modifiers?",
+      "timestamp?",
+      "button?",
+      "buttons?",
+      "clickCount?",
+      "force?",
+      "tangentialPressure?",
+      "tiltX?",
+      "tiltY?",
+      "twist?",
+      "deltaX?",
+      "deltaY?",
+      "pointerType?"
+     ]
+    },
+    {
+     "name": "dispatchTouchEvent",
+     "params": [
+      "type",
+      "touchPoints",
+      "modifiers?",
+      "timestamp?"
+     ]
+    },
+    {
+     "name": "cancelDragging",
+     "params": []
+    },
+    {
+     "name": "emulateTouchFromMouseEvent",
+     "experimental": true,
+     "params": [
+      "type",
+      "x",
+      "y",
+      "button",
+      "timestamp?",
+      "deltaX?",
+      "deltaY?",
+      "modifiers?",
+      "clickCount?"
+     ]
+    },
+    {
+     "name": "setIgnoreInputEvents",
+     "params": [
+      "ignore"
+     ]
+    },
+    {
+     "name": "setInterceptDrags",
+     "experimental": true,
+     "params": [
+      "enabled"
+     ]
+    },
+    {
+     "name": "synthesizePinchGesture",
+     "experimental": true,
+     "params": [
+      "x",
+      "y",
+      "scaleFactor",
+      "relativeSpeed?",
+      "gestureSourceType?"
+     ]
+    },
+    {
+     "name": "synthesizeScrollGesture",
+     "experimental": true,
+     "params": [
+      "x",
+      "y",
+      "xDistance?",
+      "yDistance?",
+      "xOverscroll?",
+      "yOverscroll?",
+      "preventFling?",
+      "speed?",
+      "gestureSourceType?",
+      "repeatCount?",
+      "repeatDelayMs?",
+      "interactionMarkerName?"
+     ]
+    },
+    {
+     "name": "synthesizeTapGesture",
+     "experimental": true,
+     "params": [
+      "x",
+      "y",
+      "duration?",
+      "tapCount?",
+      "gestureSourceType?"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "dragIntercepted",
+     "experimental": true,
+     "params": [
+      "data"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "Inspector",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "enable",
+     "params": []
+    }
+   ],
+   "events": [
+    {
+     "name": "detached",
+     "params": [
+      "reason"
+     ]
+    },
+    {
+     "name": "targetCrashed",
+     "params": []
+    },
+    {
+     "name": "targetReloadedAfterCrash",
+     "params": []
+    },
+    {
+     "name": "workerScriptLoaded",
+     "experimental": true,
+     "params": []
+    }
+   ]
+  },
+  {
+   "domain": "LayerTree",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "compositingReasons",
+     "params": [
+      "layerId"
+     ]
+    },
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "enable",
+     "params": []
+    },
+    {
+     "name": "loadSnapshot",
+     "params": [
+      "tiles"
+     ]
+    },
+    {
+     "name": "makeSnapshot",
+     "params": [
+      "layerId"
+     ]
+    },
+    {
+     "name": "profileSnapshot",
+     "params": [
+      "snapshotId",
+      "minRepeatCount?",
+      "minDuration?",
+      "clipRect?"
+     ]
+    },
+    {
+     "name": "releaseSnapshot",
+     "params": [
+      "snapshotId"
+     ]
+    },
+    {
+     "name": "replaySnapshot",
+     "params": [
+      "snapshotId",
+      "fromStep?",
+      "toStep?",
+      "scale?"
+     ]
+    },
+    {
+     "name": "snapshotCommandLog",
+     "params": [
+      "snapshotId"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "layerPainted",
+     "params": [
+      "layerId",
+      "clip"
+     ]
+    },
+    {
+     "name": "layerTreeDidChange",
+     "params": [
+      "layers?"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "Log",
+   "commands": [
+    {
+     "name": "clear",
+     "params": []
+    },
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "enable",
+     "params": []
+    },
+    {
+     "name": "startViolationsReport",
+     "params": [
+      "config"
+     ]
+    },
+    {
+     "name": "stopViolationsReport",
+     "params": []
+    }
+   ],
+   "events": [
+    {
+     "name": "entryAdded",
+     "params": [
+      "entry"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "Media",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "enable",
+     "params": []
+    },
+    {
+     "name": "disable",
+     "params": []
+    }
+   ],
+   "events": [
+    {
+     "name": "playerPropertiesChanged",
+     "params": [
+      "playerId",
+      "properties"
+     ]
+    },
+    {
+     "name": "playerEventsAdded",
+     "params": [
+      "playerId",
+      "events"
+     ]
+    },
+    {
+     "name": "playerMessagesLogged",
+     "params": [
+      "playerId",
+      "messages"
+     ]
+    },
+    {
+     "name": "playerErrorsRaised",
+     "params": [
+      "playerId",
+      "errors"
+     ]
+    },
+    {
+     "name": "playerCreated",
+     "params": [
+      "player"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "Memory",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "getDOMCounters",
+     "params": []
+    },
+    {
+     "name": "getDOMCountersForLeakDetection",
+     "params": []
+    },
+    {
+     "name": "prepareForLeakDetection",
+     "params": []
+    },
+    {
+     "name": "forciblyPurgeJavaScriptMemory",
+     "params": []
+    },
+    {
+     "name": "setPressureNotificationsSuppressed",
+     "params": [
+      "suppressed"
+     ]
+    },
+    {
+     "name": "simulatePressureNotification",
+     "params": [
+      "level"
+     ]
+    },
+    {
+     "name": "startSampling",
+     "params": [
+      "samplingInterval?",
+      "suppressRandomness?"
+     ]
+    },
+    {
+     "name": "stopSampling",
+     "params": []
+    },
+    {
+     "name": "getAllTimeSamplingProfile",
+     "params": []
+    },
+    {
+     "name": "getBrowserSamplingProfile",
+     "params": []
+    },
+    {
+     "name": "getSamplingProfile",
+     "params": []
+    }
+   ],
+   "events": []
+  },
+  {
+   "domain": "Network",
+   "commands": [
+    {
+     "name": "canClearBrowserCache",
+     "deprecated": true,
+     "params": []
+    },
+    {
+     "name": "canClearBrowserCookies",
+     "deprecated": true,
+     "params": []
+    },
+    {
+     "name": "canEmulateNetworkConditions",
+     "deprecated": true,
+     "params": []
+    },
+    {
+     "name": "clearBrowserCache",
+     "params": []
+    },
+    {
+     "name": "clearBrowserCookies",
+     "params": []
+    },
+    {
+     "name": "deleteCookies",
+     "params": [
+      "name",
+      "url?",
+      "domain?",
+      "path?",
+      "partitionKey?"
+     ]
+    },
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "emulateNetworkConditions",
+     "deprecated": true,
+     "params": [
+      "offline",
+      "latency",
+      "downloadThroughput",
+      "uploadThroughput",
+      "connectionType?",
+      "packetLoss?",
+      "packetQueueLength?",
+      "packetReordering?"
+     ]
+    },
+    {
+     "name": "emulateNetworkConditionsByRule",
+     "experimental": true,
+     "params": [
+      "offline?",
+      "emulateOfflineServiceWorker?",
+      "matchedNetworkConditions"
+     ]
+    },
+    {
+     "name": "overrideNetworkState",
+     "experimental": true,
+     "params": [
+      "offline",
+      "latency",
+      "downloadThroughput",
+      "uploadThroughput",
+      "connectionType?"
+     ]
+    },
+    {
+     "name": "enable",
+     "params": [
+      "maxTotalBufferSize?",
+      "maxResourceBufferSize?",
+      "maxPostDataSize?",
+      "reportDirectSocketTraffic?",
+      "enableDurableMessages?"
+     ]
+    },
+    {
+     "name": "configureDurableMessages",
+     "experimental": true,
+     "params": [
+      "maxTotalBufferSize?",
+      "maxResourceBufferSize?"
+     ]
+    },
+    {
+     "name": "getAllCookies",
+     "deprecated": true,
+     "params": []
+    },
+    {
+     "name": "getCertificate",
+     "experimental": true,
+     "params": [
+      "origin"
+     ]
+    },
+    {
+     "name": "getCookies",
+     "params": [
+      "urls?"
+     ]
+    },
+    {
+     "name": "getResponseBody",
+     "params": [
+      "requestId"
+     ]
+    },
+    {
+     "name": "getRequestPostData",
+     "params": [
+      "requestId"
+     ]
+    },
+    {
+     "name": "replayXHR",
+     "experimental": true,
+     "params": [
+      "requestId"
+     ]
+    },
+    {
+     "name": "searchInResponseBody",
+     "experimental": true,
+     "params": [
+      "requestId",
+      "query",
+      "caseSensitive?",
+      "isRegex?"
+     ]
+    },
+    {
+     "name": "setBlockedURLs",
+     "experimental": true,
+     "params": [
+      "urlPatterns?",
+      "urls?"
+     ]
+    },
+    {
+     "name": "setBypassServiceWorker",
+     "params": [
+      "bypass"
+     ]
+    },
+    {
+     "name": "setCacheDisabled",
+     "params": [
+      "cacheDisabled"
+     ]
+    },
+    {
+     "name": "setCookie",
+     "params": [
+      "name",
+      "value",
+      "url?",
+      "domain?",
+      "path?",
+      "secure?",
+      "httpOnly?",
+      "sameSite?",
+      "expires?",
+      "priority?",
+      "sourceScheme?",
+      "sourcePort?",
+      "partitionKey?"
+     ]
+    },
+    {
+     "name": "setCookies",
+     "params": [
+      "cookies"
+     ]
+    },
+    {
+     "name": "setExtraHTTPHeaders",
+     "params": [
+      "headers"
+     ]
+    },
+    {
+     "name": "setAttachDebugStack",
+     "experimental": true,
+     "params": [
+      "enabled"
+     ]
+    },
+    {
+     "name": "setUserAgentOverride",
+     "params": [
+      "userAgent",
+      "acceptLanguage?",
+      "platform?",
+      "userAgentMetadata?"
+     ]
+    },
+    {
+     "name": "streamResourceContent",
+     "experimental": true,
+     "params": [
+      "requestId"
+     ]
+    },
+    {
+     "name": "getSecurityIsolationStatus",
+     "experimental": true,
+     "params": [
+      "frameId?"
+     ]
+    },
+    {
+     "name": "enableReportingApi",
+     "experimental": true,
+     "params": [
+      "enable"
+     ]
+    },
+    {
+     "name": "enableDeviceBoundSessions",
+     "experimental": true,
+     "params": [
+      "enable"
+     ]
+    },
+    {
+     "name": "deleteDeviceBoundSession",
+     "experimental": true,
+     "params": [
+      "key"
+     ]
+    },
+    {
+     "name": "fetchSchemefulSite",
+     "experimental": true,
+     "params": [
+      "origin"
+     ]
+    },
+    {
+     "name": "loadNetworkResource",
+     "experimental": true,
+     "params": [
+      "frameId?",
+      "url",
+      "options"
+     ]
+    },
+    {
+     "name": "setCookieControls",
+     "experimental": true,
+     "params": [
+      "enableThirdPartyCookieRestriction"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "dataReceived",
+     "params": [
+      "requestId",
+      "timestamp",
+      "dataLength",
+      "encodedDataLength",
+      "data?"
+     ]
+    },
+    {
+     "name": "eventSourceMessageReceived",
+     "params": [
+      "requestId",
+      "timestamp",
+      "eventName",
+      "eventId",
+      "data"
+     ]
+    },
+    {
+     "name": "loadingFailed",
+     "params": [
+      "requestId",
+      "timestamp",
+      "type",
+      "errorText",
+      "canceled?",
+      "blockedReason?",
+      "corsErrorStatus?"
+     ]
+    },
+    {
+     "name": "loadingFinished",
+     "params": [
+      "requestId",
+      "timestamp",
+      "encodedDataLength"
+     ]
+    },
+    {
+     "name": "requestServedFromCache",
+     "params": [
+      "requestId"
+     ]
+    },
+    {
+     "name": "requestWillBeSent",
+     "params": [
+      "requestId",
+      "loaderId",
+      "documentURL",
+      "request",
+      "timestamp",
+      "wallTime",
+      "initiator",
+      "redirectHasExtraInfo",
+      "redirectResponse?",
+      "type?",
+      "frameId?",
+      "hasUserGesture?",
+      "renderBlockingBehavior?"
+     ]
+    },
+    {
+     "name": "resourceChangedPriority",
+     "experimental": true,
+     "params": [
+      "requestId",
+      "newPriority",
+      "timestamp"
+     ]
+    },
+    {
+     "name": "signedExchangeReceived",
+     "experimental": true,
+     "params": [
+      "requestId",
+      "info"
+     ]
+    },
+    {
+     "name": "responseReceived",
+     "params": [
+      "requestId",
+      "loaderId",
+      "timestamp",
+      "type",
+      "response",
+      "hasExtraInfo",
+      "frameId?"
+     ]
+    },
+    {
+     "name": "webSocketClosed",
+     "params": [
+      "requestId",
+      "timestamp"
+     ]
+    },
+    {
+     "name": "webSocketCreated",
+     "params": [
+      "requestId",
+      "url",
+      "initiator?"
+     ]
+    },
+    {
+     "name": "webSocketFrameError",
+     "params": [
+      "requestId",
+      "timestamp",
+      "errorMessage"
+     ]
+    },
+    {
+     "name": "webSocketFrameReceived",
+     "params": [
+      "requestId",
+      "timestamp",
+      "response"
+     ]
+    },
+    {
+     "name": "webSocketFrameSent",
+     "params": [
+      "requestId",
+      "timestamp",
+      "response"
+     ]
+    },
+    {
+     "name": "webSocketHandshakeResponseReceived",
+     "params": [
+      "requestId",
+      "timestamp",
+      "response"
+     ]
+    },
+    {
+     "name": "webSocketWillSendHandshakeRequest",
+     "params": [
+      "requestId",
+      "timestamp",
+      "wallTime",
+      "request"
+     ]
+    },
+    {
+     "name": "webTransportCreated",
+     "params": [
+      "transportId",
+      "url",
+      "timestamp",
+      "initiator?"
+     ]
+    },
+    {
+     "name": "webTransportConnectionEstablished",
+     "params": [
+      "transportId",
+      "timestamp"
+     ]
+    },
+    {
+     "name": "webTransportClosed",
+     "params": [
+      "transportId",
+      "timestamp"
+     ]
+    },
+    {
+     "name": "directTCPSocketCreated",
+     "experimental": true,
+     "params": [
+      "identifier",
+      "remoteAddr",
+      "remotePort",
+      "options",
+      "timestamp",
+      "initiator?"
+     ]
+    },
+    {
+     "name": "directTCPSocketOpened",
+     "experimental": true,
+     "params": [
+      "identifier",
+      "remoteAddr",
+      "remotePort",
+      "timestamp",
+      "localAddr?",
+      "localPort?"
+     ]
+    },
+    {
+     "name": "directTCPSocketAborted",
+     "experimental": true,
+     "params": [
+      "identifier",
+      "errorMessage",
+      "timestamp"
+     ]
+    },
+    {
+     "name": "directTCPSocketClosed",
+     "experimental": true,
+     "params": [
+      "identifier",
+      "timestamp"
+     ]
+    },
+    {
+     "name": "directTCPSocketChunkSent",
+     "experimental": true,
+     "params": [
+      "identifier",
+      "data",
+      "timestamp"
+     ]
+    },
+    {
+     "name": "directTCPSocketChunkReceived",
+     "experimental": true,
+     "params": [
+      "identifier",
+      "data",
+      "timestamp"
+     ]
+    },
+    {
+     "name": "directUDPSocketJoinedMulticastGroup",
+     "experimental": true,
+     "params": [
+      "identifier",
+      "IPAddress"
+     ]
+    },
+    {
+     "name": "directUDPSocketLeftMulticastGroup",
+     "experimental": true,
+     "params": [
+      "identifier",
+      "IPAddress"
+     ]
+    },
+    {
+     "name": "directUDPSocketCreated",
+     "experimental": true,
+     "params": [
+      "identifier",
+      "options",
+      "timestamp",
+      "initiator?"
+     ]
+    },
+    {
+     "name": "directUDPSocketOpened",
+     "experimental": true,
+     "params": [
+      "identifier",
+      "localAddr",
+      "localPort",
+      "timestamp",
+      "remoteAddr?",
+      "remotePort?"
+     ]
+    },
+    {
+     "name": "directUDPSocketAborted",
+     "experimental": true,
+     "params": [
+      "identifier",
+      "errorMessage",
+      "timestamp"
+     ]
+    },
+    {
+     "name": "directUDPSocketClosed",
+     "experimental": true,
+     "params": [
+      "identifier",
+      "timestamp"
+     ]
+    },
+    {
+     "name": "directUDPSocketChunkSent",
+     "experimental": true,
+     "params": [
+      "identifier",
+      "message",
+      "timestamp"
+     ]
+    },
+    {
+     "name": "directUDPSocketChunkReceived",
+     "experimental": true,
+     "params": [
+      "identifier",
+      "message",
+      "timestamp"
+     ]
+    },
+    {
+     "name": "requestWillBeSentExtraInfo",
+     "experimental": true,
+     "params": [
+      "requestId",
+      "associatedCookies",
+      "headers",
+      "connectTiming",
+      "deviceBoundSessionUsages?",
+      "clientSecurityState?",
+      "siteHasCookieInOtherPartition?",
+      "appliedNetworkConditionsId?"
+     ]
+    },
+    {
+     "name": "responseReceivedExtraInfo",
+     "experimental": true,
+     "params": [
+      "requestId",
+      "blockedCookies",
+      "headers",
+      "resourceIPAddressSpace",
+      "statusCode",
+      "headersText?",
+      "cookiePartitionKey?",
+      "cookiePartitionKeyOpaque?",
+      "exemptedCookies?"
+     ]
+    },
+    {
+     "name": "responseReceivedEarlyHints",
+     "experimental": true,
+     "params": [
+      "requestId",
+      "headers"
+     ]
+    },
+    {
+     "name": "trustTokenOperationDone",
+     "experimental": true,
+     "params": [
+      "status",
+      "type",
+      "requestId",
+      "topLevelOrigin?",
+      "issuerOrigin?",
+      "issuedTokenCount?"
+     ]
+    },
+    {
+     "name": "policyUpdated",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "reportingApiReportAdded",
+     "experimental": true,
+     "params": [
+      "report"
+     ]
+    },
+    {
+     "name": "reportingApiReportUpdated",
+     "experimental": true,
+     "params": [
+      "report"
+     ]
+    },
+    {
+     "name": "reportingApiEndpointsChangedForOrigin",
+     "experimental": true,
+     "params": [
+      "origin",
+      "endpoints"
+     ]
+    },
+    {
+     "name": "deviceBoundSessionsAdded",
+     "experimental": true,
+     "params": [
+      "sessions"
+     ]
+    },
+    {
+     "name": "deviceBoundSessionEventOccurred",
+     "experimental": true,
+     "params": [
+      "eventId",
+      "site",
+      "succeeded",
+      "sessionId?",
+      "creationEventDetails?",
+      "refreshEventDetails?",
+      "terminationEventDetails?",
+      "challengeEventDetails?"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "Overlay",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "enable",
+     "params": []
+    },
+    {
+     "name": "getHighlightObjectForTest",
+     "params": [
+      "nodeId",
+      "includeDistance?",
+      "includeStyle?",
+      "colorFormat?",
+      "showAccessibilityInfo?"
+     ]
+    },
+    {
+     "name": "getGridHighlightObjectsForTest",
+     "params": [
+      "nodeIds"
+     ]
+    },
+    {
+     "name": "getSourceOrderHighlightObjectForTest",
+     "params": [
+      "nodeId"
+     ]
+    },
+    {
+     "name": "hideHighlight",
+     "params": []
+    },
+    {
+     "name": "highlightFrame",
+     "deprecated": true,
+     "params": [
+      "frameId",
+      "contentColor?",
+      "contentOutlineColor?"
+     ]
+    },
+    {
+     "name": "highlightNode",
+     "params": [
+      "highlightConfig",
+      "nodeId?",
+      "backendNodeId?",
+      "objectId?",
+      "selector?"
+     ]
+    },
+    {
+     "name": "highlightQuad",
+     "params": [
+      "quad",
+      "color?",
+      "outlineColor?"
+     ]
+    },
+    {
+     "name": "highlightRect",
+     "params": [
+      "x",
+      "y",
+      "width",
+      "height",
+      "color?",
+      "outlineColor?"
+     ]
+    },
+    {
+     "name": "highlightSourceOrder",
+     "params": [
+      "sourceOrderConfig",
+      "nodeId?",
+      "backendNodeId?",
+      "objectId?"
+     ]
+    },
+    {
+     "name": "setInspectMode",
+     "params": [
+      "mode",
+      "highlightConfig?"
+     ]
+    },
+    {
+     "name": "setShowAdHighlights",
+     "params": [
+      "show"
+     ]
+    },
+    {
+     "name": "setPausedInDebuggerMessage",
+     "params": [
+      "message?"
+     ]
+    },
+    {
+     "name": "setShowDebugBorders",
+     "params": [
+      "show"
+     ]
+    },
+    {
+     "name": "setShowFPSCounter",
+     "params": [
+      "show"
+     ]
+    },
+    {
+     "name": "setShowGridOverlays",
+     "params": [
+      "gridNodeHighlightConfigs"
+     ]
+    },
+    {
+     "name": "setShowFlexOverlays",
+     "params": [
+      "flexNodeHighlightConfigs"
+     ]
+    },
+    {
+     "name": "setShowScrollSnapOverlays",
+     "params": [
+      "scrollSnapHighlightConfigs"
+     ]
+    },
+    {
+     "name": "setShowContainerQueryOverlays",
+     "params": [
+      "containerQueryHighlightConfigs"
+     ]
+    },
+    {
+     "name": "setShowInspectedElementAnchor",
+     "params": [
+      "inspectedElementAnchorConfig"
+     ]
+    },
+    {
+     "name": "setShowPaintRects",
+     "params": [
+      "result"
+     ]
+    },
+    {
+     "name": "setShowLayoutShiftRegions",
+     "params": [
+      "result"
+     ]
+    },
+    {
+     "name": "setShowScrollBottleneckRects",
+     "params": [
+      "show"
+     ]
+    },
+    {
+     "name": "setShowHitTestBorders",
+     "deprecated": true,
+     "params": [
+      "show"
+     ]
+    },
+    {
+     "name": "setShowWebVitals",
+     "deprecated": true,
+     "params": [
+      "show"
+     ]
+    },
+    {
+     "name": "setShowViewportSizeOnResize",
+     "params": [
+      "show"
+     ]
+    },
+    {
+     "name": "setShowHinge",
+     "params": [
+      "hingeConfig?"
+     ]
+    },
+    {
+     "name": "setShowDisplayCutout",
+     "params": [
+      "displayCutoutConfig?"
+     ]
+    },
+    {
+     "name": "setShowIsolatedElements",
+     "params": [
+      "isolatedElementHighlightConfigs"
+     ]
+    },
+    {
+     "name": "setShowWindowControlsOverlay",
+     "params": [
+      "windowControlsOverlayConfig?"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "inspectNodeRequested",
+     "params": [
+      "backendNodeId"
+     ]
+    },
+    {
+     "name": "nodeHighlightRequested",
+     "params": [
+      "nodeId"
+     ]
+    },
+    {
+     "name": "screenshotRequested",
+     "params": [
+      "viewport"
+     ]
+    },
+    {
+     "name": "inspectPanelShowRequested",
+     "params": [
+      "backendNodeId"
+     ]
+    },
+    {
+     "name": "inspectedElementWindowRestored",
+     "params": [
+      "backendNodeId"
+     ]
+    },
+    {
+     "name": "inspectModeCanceled",
+     "params": []
+    }
+   ]
+  },
+  {
+   "domain": "PWA",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "getOsAppState",
+     "params": [
+      "manifestId"
+     ]
+    },
+    {
+     "name": "install",
+     "params": [
+      "manifestId",
+      "installUrlOrBundleUrl?"
+     ]
+    },
+    {
+     "name": "uninstall",
+     "params": [
+      "manifestId"
+     ]
+    },
+    {
+     "name": "launch",
+     "params": [
+      "manifestId",
+      "url?"
+     ]
+    },
+    {
+     "name": "launchFilesInApp",
+     "params": [
+      "manifestId",
+      "files"
+     ]
+    },
+    {
+     "name": "openCurrentPageInApp",
+     "params": [
+      "manifestId"
+     ]
+    },
+    {
+     "name": "changeAppUserSettings",
+     "params": [
+      "manifestId",
+      "linkCapturing?",
+      "displayMode?"
+     ]
+    }
+   ],
+   "events": []
+  },
+  {
+   "domain": "Page",
+   "commands": [
+    {
+     "name": "addScriptToEvaluateOnLoad",
+     "deprecated": true,
+     "experimental": true,
+     "params": [
+      "scriptSource"
+     ]
+    },
+    {
+     "name": "addScriptToEvaluateOnNewDocument",
+     "params": [
+      "source",
+      "worldName?",
+      "includeCommandLineAPI?",
+      "runImmediately?"
+     ]
+    },
+    {
+     "name": "bringToFront",
+     "params": []
+    },
+    {
+     "name": "captureScreenshot",
+     "params": [
+      "format?",
+      "quality?",
+      "clip?",
+      "fromSurface?",
+      "captureBeyondViewport?",
+      "optimizeForSpeed?"
+     ]
+    },
+    {
+     "name": "captureSnapshot",
+     "experimental": true,
+     "params": [
+      "format?"
+     ]
+    },
+    {
+     "name": "clearDeviceMetricsOverride",
+     "deprecated": true,
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "clearDeviceOrientationOverride",
+     "deprecated": true,
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "clearGeolocationOverride",
+     "deprecated": true,
+     "params": []
+    },
+    {
+     "name": "createIsolatedWorld",
+     "params": [
+      "frameId",
+      "worldName?",
+      "grantUniveralAccess?",
+      "contentSecurityPolicy?"
+     ]
+    },
+    {
+     "name": "deleteCookie",
+     "deprecated": true,
+     "experimental": true,
+     "params": [
+      "cookieName",
+      "url"
+     ]
+    },
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "enable",
+     "params": [
+      "enableFileChooserOpenedEvent?"
+     ]
+    },
+    {
+     "name": "getAppManifest",
+     "params": [
+      "manifestId?"
+     ]
+    },
+    {
+     "name": "getInstallabilityErrors",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "getManifestIcons",
+     "deprecated": true,
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "getAppId",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "getAdScriptAncestry",
+     "experimental": true,
+     "params": [
+      "frameId"
+     ]
+    },
+    {
+     "name": "getFrameTree",
+     "params": []
+    },
+    {
+     "name": "getLayoutMetrics",
+     "params": []
+    },
+    {
+     "name": "getNavigationHistory",
+     "params": []
+    },
+    {
+     "name": "resetNavigationHistory",
+     "params": []
+    },
+    {
+     "name": "getResourceContent",
+     "experimental": true,
+     "params": [
+      "frameId",
+      "url"
+     ]
+    },
+    {
+     "name": "getResourceTree",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "handleJavaScriptDialog",
+     "params": [
+      "accept",
+      "promptText?"
+     ]
+    },
+    {
+     "name": "navigate",
+     "params": [
+      "url",
+      "referrer?",
+      "transitionType?",
+      "frameId?",
+      "referrerPolicy?"
+     ]
+    },
+    {
+     "name": "navigateToHistoryEntry",
+     "params": [
+      "entryId"
+     ]
+    },
+    {
+     "name": "printToPDF",
+     "params": [
+      "landscape?",
+      "displayHeaderFooter?",
+      "printBackground?",
+      "scale?",
+      "paperWidth?",
+      "paperHeight?",
+      "marginTop?",
+      "marginBottom?",
+      "marginLeft?",
+      "marginRight?",
+      "pageRanges?",
+      "headerTemplate?",
+      "footerTemplate?",
+      "preferCSSPageSize?",
+      "transferMode?",
+      "generateTaggedPDF?",
+      "generateDocumentOutline?"
+     ]
+    },
+    {
+     "name": "reload",
+     "params": [
+      "ignoreCache?",
+      "scriptToEvaluateOnLoad?",
+      "loaderId?"
+     ]
+    },
+    {
+     "name": "removeScriptToEvaluateOnLoad",
+     "deprecated": true,
+     "experimental": true,
+     "params": [
+      "identifier"
+     ]
+    },
+    {
+     "name": "removeScriptToEvaluateOnNewDocument",
+     "params": [
+      "identifier"
+     ]
+    },
+    {
+     "name": "screencastFrameAck",
+     "experimental": true,
+     "params": [
+      "sessionId"
+     ]
+    },
+    {
+     "name": "searchInResource",
+     "experimental": true,
+     "params": [
+      "frameId",
+      "url",
+      "query",
+      "caseSensitive?",
+      "isRegex?"
+     ]
+    },
+    {
+     "name": "setAdBlockingEnabled",
+     "experimental": true,
+     "params": [
+      "enabled"
+     ]
+    },
+    {
+     "name": "setBypassCSP",
+     "params": [
+      "enabled"
+     ]
+    },
+    {
+     "name": "getPermissionsPolicyState",
+     "experimental": true,
+     "params": [
+      "frameId"
+     ]
+    },
+    {
+     "name": "getOriginTrials",
+     "experimental": true,
+     "params": [
+      "frameId"
+     ]
+    },
+    {
+     "name": "setDeviceMetricsOverride",
+     "deprecated": true,
+     "experimental": true,
+     "params": [
+      "width",
+      "height",
+      "deviceScaleFactor",
+      "mobile",
+      "scale?",
+      "screenWidth?",
+      "screenHeight?",
+      "positionX?",
+      "positionY?",
+      "dontSetVisibleSize?",
+      "screenOrientation?",
+      "viewport?"
+     ]
+    },
+    {
+     "name": "setDeviceOrientationOverride",
+     "deprecated": true,
+     "experimental": true,
+     "params": [
+      "alpha",
+      "beta",
+      "gamma"
+     ]
+    },
+    {
+     "name": "setFontFamilies",
+     "experimental": true,
+     "params": [
+      "fontFamilies",
+      "forScripts?"
+     ]
+    },
+    {
+     "name": "setFontSizes",
+     "experimental": true,
+     "params": [
+      "fontSizes"
+     ]
+    },
+    {
+     "name": "setDocumentContent",
+     "params": [
+      "frameId",
+      "html"
+     ]
+    },
+    {
+     "name": "setDownloadBehavior",
+     "deprecated": true,
+     "experimental": true,
+     "params": [
+      "behavior",
+      "downloadPath?"
+     ]
+    },
+    {
+     "name": "setGeolocationOverride",
+     "deprecated": true,
+     "params": [
+      "latitude?",
+      "longitude?",
+      "accuracy?"
+     ]
+    },
+    {
+     "name": "setLifecycleEventsEnabled",
+     "params": [
+      "enabled"
+     ]
+    },
+    {
+     "name": "setTouchEmulationEnabled",
+     "deprecated": true,
+     "experimental": true,
+     "params": [
+      "enabled",
+      "configuration?"
+     ]
+    },
+    {
+     "name": "startScreencast",
+     "experimental": true,
+     "params": [
+      "format?",
+      "quality?",
+      "maxWidth?",
+      "maxHeight?",
+      "everyNthFrame?",
+      "maxFramesInFlight?",
+      "sendLastFrame?"
+     ]
+    },
+    {
+     "name": "startScreenRecording",
+     "experimental": true,
+     "params": [
+      "audio?",
+      "maxWidth?",
+      "maxHeight?",
+      "frameRate?"
+     ]
+    },
+    {
+     "name": "stopScreenRecording",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "stopLoading",
+     "params": []
+    },
+    {
+     "name": "crash",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "close",
+     "params": []
+    },
+    {
+     "name": "setWebLifecycleState",
+     "experimental": true,
+     "params": [
+      "state"
+     ]
+    },
+    {
+     "name": "stopScreencast",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "produceCompilationCache",
+     "experimental": true,
+     "params": [
+      "scripts"
+     ]
+    },
+    {
+     "name": "addCompilationCache",
+     "experimental": true,
+     "params": [
+      "url",
+      "data"
+     ]
+    },
+    {
+     "name": "clearCompilationCache",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "setSPCTransactionMode",
+     "experimental": true,
+     "params": [
+      "mode"
+     ]
+    },
+    {
+     "name": "setRPHRegistrationMode",
+     "experimental": true,
+     "params": [
+      "mode"
+     ]
+    },
+    {
+     "name": "generateTestReport",
+     "experimental": true,
+     "params": [
+      "message",
+      "group?"
+     ]
+    },
+    {
+     "name": "waitForDebugger",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "setInterceptFileChooserDialog",
+     "params": [
+      "enabled",
+      "cancel?"
+     ]
+    },
+    {
+     "name": "setPrerenderingAllowed",
+     "experimental": true,
+     "params": [
+      "isAllowed"
+     ]
+    },
+    {
+     "name": "getAnnotatedPageContent",
+     "experimental": true,
+     "params": [
+      "includeActionableInformation?"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "domContentEventFired",
+     "params": [
+      "timestamp"
+     ]
+    },
+    {
+     "name": "fileChooserOpened",
+     "params": [
+      "frameId",
+      "mode",
+      "backendNodeId?"
+     ]
+    },
+    {
+     "name": "frameAttached",
+     "params": [
+      "frameId",
+      "parentFrameId",
+      "stack?"
+     ]
+    },
+    {
+     "name": "frameClearedScheduledNavigation",
+     "deprecated": true,
+     "params": [
+      "frameId"
+     ]
+    },
+    {
+     "name": "frameDetached",
+     "params": [
+      "frameId",
+      "reason"
+     ]
+    },
+    {
+     "name": "frameSubtreeWillBeDetached",
+     "experimental": true,
+     "params": [
+      "frameId"
+     ]
+    },
+    {
+     "name": "frameNavigated",
+     "params": [
+      "frame",
+      "type"
+     ]
+    },
+    {
+     "name": "documentOpened",
+     "experimental": true,
+     "params": [
+      "frame"
+     ]
+    },
+    {
+     "name": "frameResized",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "frameStartedNavigating",
+     "experimental": true,
+     "params": [
+      "frameId",
+      "url",
+      "loaderId",
+      "navigationType"
+     ]
+    },
+    {
+     "name": "frameRequestedNavigation",
+     "experimental": true,
+     "params": [
+      "frameId",
+      "reason",
+      "url",
+      "disposition"
+     ]
+    },
+    {
+     "name": "frameScheduledNavigation",
+     "deprecated": true,
+     "params": [
+      "frameId",
+      "delay",
+      "reason",
+      "url"
+     ]
+    },
+    {
+     "name": "frameStartedLoading",
+     "experimental": true,
+     "params": [
+      "frameId"
+     ]
+    },
+    {
+     "name": "frameStoppedLoading",
+     "experimental": true,
+     "params": [
+      "frameId"
+     ]
+    },
+    {
+     "name": "downloadWillBegin",
+     "deprecated": true,
+     "experimental": true,
+     "params": [
+      "frameId",
+      "guid",
+      "url",
+      "suggestedFilename"
+     ]
+    },
+    {
+     "name": "downloadProgress",
+     "deprecated": true,
+     "experimental": true,
+     "params": [
+      "guid",
+      "totalBytes",
+      "receivedBytes",
+      "state"
+     ]
+    },
+    {
+     "name": "interstitialHidden",
+     "params": []
+    },
+    {
+     "name": "interstitialShown",
+     "params": []
+    },
+    {
+     "name": "javascriptDialogClosed",
+     "params": [
+      "frameId",
+      "result",
+      "userInput"
+     ]
+    },
+    {
+     "name": "javascriptDialogOpening",
+     "params": [
+      "url",
+      "frameId",
+      "message",
+      "type",
+      "hasBrowserHandler",
+      "defaultPrompt?"
+     ]
+    },
+    {
+     "name": "lifecycleEvent",
+     "params": [
+      "frameId",
+      "loaderId",
+      "name",
+      "timestamp"
+     ]
+    },
+    {
+     "name": "backForwardCacheNotUsed",
+     "experimental": true,
+     "params": [
+      "loaderId",
+      "frameId",
+      "notRestoredExplanations",
+      "notRestoredExplanationsTree?"
+     ]
+    },
+    {
+     "name": "loadEventFired",
+     "params": [
+      "timestamp"
+     ]
+    },
+    {
+     "name": "navigatedWithinDocument",
+     "experimental": true,
+     "params": [
+      "frameId",
+      "url",
+      "navigationType"
+     ]
+    },
+    {
+     "name": "screencastFrame",
+     "experimental": true,
+     "params": [
+      "data",
+      "metadata",
+      "sessionId"
+     ]
+    },
+    {
+     "name": "screencastVisibilityChanged",
+     "experimental": true,
+     "params": [
+      "visible"
+     ]
+    },
+    {
+     "name": "windowOpen",
+     "params": [
+      "url",
+      "windowName",
+      "windowFeatures",
+      "userGesture"
+     ]
+    },
+    {
+     "name": "compilationCacheProduced",
+     "experimental": true,
+     "params": [
+      "url",
+      "data"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "Performance",
+   "commands": [
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "enable",
+     "params": [
+      "timeDomain?"
+     ]
+    },
+    {
+     "name": "setTimeDomain",
+     "deprecated": true,
+     "experimental": true,
+     "params": [
+      "timeDomain"
+     ]
+    },
+    {
+     "name": "getMetrics",
+     "params": []
+    }
+   ],
+   "events": [
+    {
+     "name": "metrics",
+     "params": [
+      "metrics",
+      "title"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "PerformanceTimeline",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "enable",
+     "params": [
+      "eventTypes"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "timelineEventAdded",
+     "params": [
+      "event"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "Preload",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "enable",
+     "params": []
+    },
+    {
+     "name": "disable",
+     "params": []
+    }
+   ],
+   "events": [
+    {
+     "name": "ruleSetUpdated",
+     "params": [
+      "ruleSet"
+     ]
+    },
+    {
+     "name": "ruleSetRemoved",
+     "params": [
+      "id"
+     ]
+    },
+    {
+     "name": "preloadEnabledStateUpdated",
+     "params": [
+      "disabledByPreference",
+      "disabledByDataSaver",
+      "disabledByBatterySaver",
+      "disabledByHoldbackPrefetchSpeculationRules",
+      "disabledByHoldbackPrerenderSpeculationRules"
+     ]
+    },
+    {
+     "name": "prefetchStatusUpdated",
+     "params": [
+      "key",
+      "pipelineId",
+      "initiatingFrameId",
+      "prefetchUrl",
+      "status",
+      "prefetchStatus",
+      "requestId"
+     ]
+    },
+    {
+     "name": "prerenderStatusUpdated",
+     "params": [
+      "key",
+      "pipelineId",
+      "status",
+      "prerenderStatus?",
+      "disallowedMojoInterface?",
+      "mismatchedHeaders?"
+     ]
+    },
+    {
+     "name": "preloadingAttemptSourcesUpdated",
+     "params": [
+      "loaderId",
+      "preloadingAttemptSources"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "Security",
+   "commands": [
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "enable",
+     "params": []
+    },
+    {
+     "name": "setIgnoreCertificateErrors",
+     "params": [
+      "ignore"
+     ]
+    },
+    {
+     "name": "handleCertificateError",
+     "deprecated": true,
+     "params": [
+      "eventId",
+      "action"
+     ]
+    },
+    {
+     "name": "setOverrideCertificateErrors",
+     "deprecated": true,
+     "params": [
+      "override"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "certificateError",
+     "deprecated": true,
+     "params": [
+      "eventId",
+      "errorType",
+      "requestURL"
+     ]
+    },
+    {
+     "name": "visibleSecurityStateChanged",
+     "experimental": true,
+     "params": [
+      "visibleSecurityState"
+     ]
+    },
+    {
+     "name": "securityStateChanged",
+     "deprecated": true,
+     "params": [
+      "securityState",
+      "schemeIsCryptographic",
+      "explanations",
+      "insecureContentStatus",
+      "summary?"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "ServiceWorker",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "deliverPushMessage",
+     "params": [
+      "origin",
+      "registrationId",
+      "data"
+     ]
+    },
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "dispatchSyncEvent",
+     "params": [
+      "origin",
+      "registrationId",
+      "tag",
+      "lastChance"
+     ]
+    },
+    {
+     "name": "dispatchPeriodicSyncEvent",
+     "params": [
+      "origin",
+      "registrationId",
+      "tag"
+     ]
+    },
+    {
+     "name": "enable",
+     "params": []
+    },
+    {
+     "name": "setForceUpdateOnPageLoad",
+     "params": [
+      "forceUpdateOnPageLoad"
+     ]
+    },
+    {
+     "name": "skipWaiting",
+     "params": [
+      "scopeURL"
+     ]
+    },
+    {
+     "name": "startWorker",
+     "params": [
+      "scopeURL"
+     ]
+    },
+    {
+     "name": "stopAllWorkers",
+     "params": []
+    },
+    {
+     "name": "stopWorker",
+     "params": [
+      "versionId"
+     ]
+    },
+    {
+     "name": "unregister",
+     "params": [
+      "scopeURL"
+     ]
+    },
+    {
+     "name": "updateRegistration",
+     "params": [
+      "scopeURL"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "workerErrorReported",
+     "params": [
+      "errorMessage"
+     ]
+    },
+    {
+     "name": "workerRegistrationUpdated",
+     "params": [
+      "registrations"
+     ]
+    },
+    {
+     "name": "workerVersionUpdated",
+     "params": [
+      "versions"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "SmartCardEmulation",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "enable",
+     "params": []
+    },
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "reportEstablishContextResult",
+     "params": [
+      "requestId",
+      "contextId"
+     ]
+    },
+    {
+     "name": "reportReleaseContextResult",
+     "params": [
+      "requestId"
+     ]
+    },
+    {
+     "name": "reportListReadersResult",
+     "params": [
+      "requestId",
+      "readers"
+     ]
+    },
+    {
+     "name": "reportGetStatusChangeResult",
+     "params": [
+      "requestId",
+      "readerStates"
+     ]
+    },
+    {
+     "name": "reportBeginTransactionResult",
+     "params": [
+      "requestId",
+      "handle"
+     ]
+    },
+    {
+     "name": "reportPlainResult",
+     "params": [
+      "requestId"
+     ]
+    },
+    {
+     "name": "reportConnectResult",
+     "params": [
+      "requestId",
+      "handle",
+      "activeProtocol?"
+     ]
+    },
+    {
+     "name": "reportDataResult",
+     "params": [
+      "requestId",
+      "data"
+     ]
+    },
+    {
+     "name": "reportStatusResult",
+     "params": [
+      "requestId",
+      "readerName",
+      "state",
+      "atr",
+      "protocol?"
+     ]
+    },
+    {
+     "name": "reportError",
+     "params": [
+      "requestId",
+      "resultCode"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "establishContextRequested",
+     "params": [
+      "requestId"
+     ]
+    },
+    {
+     "name": "releaseContextRequested",
+     "params": [
+      "requestId",
+      "contextId"
+     ]
+    },
+    {
+     "name": "listReadersRequested",
+     "params": [
+      "requestId",
+      "contextId"
+     ]
+    },
+    {
+     "name": "getStatusChangeRequested",
+     "params": [
+      "requestId",
+      "contextId",
+      "readerStates",
+      "timeout?"
+     ]
+    },
+    {
+     "name": "cancelRequested",
+     "params": [
+      "requestId",
+      "contextId"
+     ]
+    },
+    {
+     "name": "connectRequested",
+     "params": [
+      "requestId",
+      "contextId",
+      "reader",
+      "shareMode",
+      "preferredProtocols"
+     ]
+    },
+    {
+     "name": "disconnectRequested",
+     "params": [
+      "requestId",
+      "handle",
+      "disposition"
+     ]
+    },
+    {
+     "name": "transmitRequested",
+     "params": [
+      "requestId",
+      "handle",
+      "data",
+      "protocol?"
+     ]
+    },
+    {
+     "name": "controlRequested",
+     "params": [
+      "requestId",
+      "handle",
+      "controlCode",
+      "data"
+     ]
+    },
+    {
+     "name": "getAttribRequested",
+     "params": [
+      "requestId",
+      "handle",
+      "attribId"
+     ]
+    },
+    {
+     "name": "setAttribRequested",
+     "params": [
+      "requestId",
+      "handle",
+      "attribId",
+      "data"
+     ]
+    },
+    {
+     "name": "statusRequested",
+     "params": [
+      "requestId",
+      "handle"
+     ]
+    },
+    {
+     "name": "beginTransactionRequested",
+     "params": [
+      "requestId",
+      "handle"
+     ]
+    },
+    {
+     "name": "endTransactionRequested",
+     "params": [
+      "requestId",
+      "handle",
+      "disposition"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "Storage",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "getStorageKeyForFrame",
+     "deprecated": true,
+     "params": [
+      "frameId"
+     ]
+    },
+    {
+     "name": "getStorageKey",
+     "experimental": true,
+     "params": [
+      "frameId?"
+     ]
+    },
+    {
+     "name": "clearDataForOrigin",
+     "params": [
+      "origin",
+      "storageTypes"
+     ]
+    },
+    {
+     "name": "clearDataForStorageKey",
+     "params": [
+      "storageKey",
+      "storageTypes"
+     ]
+    },
+    {
+     "name": "getCookies",
+     "params": [
+      "browserContextId?"
+     ]
+    },
+    {
+     "name": "setCookies",
+     "params": [
+      "cookies",
+      "browserContextId?"
+     ]
+    },
+    {
+     "name": "clearCookies",
+     "params": [
+      "browserContextId?"
+     ]
+    },
+    {
+     "name": "getUsageAndQuota",
+     "params": [
+      "origin"
+     ]
+    },
+    {
+     "name": "overrideQuotaForOrigin",
+     "experimental": true,
+     "params": [
+      "origin",
+      "quotaSize?"
+     ]
+    },
+    {
+     "name": "trackCacheStorageForOrigin",
+     "params": [
+      "origin"
+     ]
+    },
+    {
+     "name": "trackCacheStorageForStorageKey",
+     "params": [
+      "storageKey"
+     ]
+    },
+    {
+     "name": "trackIndexedDBForOrigin",
+     "params": [
+      "origin"
+     ]
+    },
+    {
+     "name": "trackIndexedDBForStorageKey",
+     "params": [
+      "storageKey"
+     ]
+    },
+    {
+     "name": "untrackCacheStorageForOrigin",
+     "params": [
+      "origin"
+     ]
+    },
+    {
+     "name": "untrackCacheStorageForStorageKey",
+     "params": [
+      "storageKey"
+     ]
+    },
+    {
+     "name": "untrackIndexedDBForOrigin",
+     "params": [
+      "origin"
+     ]
+    },
+    {
+     "name": "untrackIndexedDBForStorageKey",
+     "params": [
+      "storageKey"
+     ]
+    },
+    {
+     "name": "getTrustTokens",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "clearTrustTokens",
+     "experimental": true,
+     "params": [
+      "issuerOrigin"
+     ]
+    },
+    {
+     "name": "setStorageBucketTracking",
+     "experimental": true,
+     "params": [
+      "storageKey",
+      "enable"
+     ]
+    },
+    {
+     "name": "deleteStorageBucket",
+     "experimental": true,
+     "params": [
+      "bucket"
+     ]
+    },
+    {
+     "name": "runBounceTrackingMitigations",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "getRelatedWebsiteSets",
+     "experimental": true,
+     "params": []
+    }
+   ],
+   "events": [
+    {
+     "name": "cacheStorageContentUpdated",
+     "params": [
+      "origin",
+      "storageKey",
+      "bucketId",
+      "cacheName"
+     ]
+    },
+    {
+     "name": "cacheStorageListUpdated",
+     "params": [
+      "origin",
+      "storageKey",
+      "bucketId"
+     ]
+    },
+    {
+     "name": "indexedDBContentUpdated",
+     "params": [
+      "origin",
+      "storageKey",
+      "bucketId",
+      "databaseName",
+      "objectStoreName"
+     ]
+    },
+    {
+     "name": "indexedDBListUpdated",
+     "params": [
+      "origin",
+      "storageKey",
+      "bucketId"
+     ]
+    },
+    {
+     "name": "storageBucketCreatedOrUpdated",
+     "params": [
+      "bucketInfo"
+     ]
+    },
+    {
+     "name": "storageBucketDeleted",
+     "params": [
+      "bucketId"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "SystemInfo",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "getInfo",
+     "params": []
+    },
+    {
+     "name": "getFeatureState",
+     "params": [
+      "featureState"
+     ]
+    },
+    {
+     "name": "getProcessInfo",
+     "params": []
+    }
+   ],
+   "events": []
+  },
+  {
+   "domain": "Target",
+   "commands": [
+    {
+     "name": "activateTarget",
+     "params": [
+      "targetId"
+     ]
+    },
+    {
+     "name": "attachToTarget",
+     "params": [
+      "targetId",
+      "flatten?"
+     ]
+    },
+    {
+     "name": "attachToBrowserTarget",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "closeTarget",
+     "params": [
+      "targetId"
+     ]
+    },
+    {
+     "name": "exposeDevToolsProtocol",
+     "experimental": true,
+     "params": [
+      "targetId",
+      "bindingName?",
+      "inheritPermissions?"
+     ]
+    },
+    {
+     "name": "createBrowserContext",
+     "params": [
+      "disposeOnDetach?",
+      "proxyServer?",
+      "proxyBypassList?",
+      "originsWithUniversalNetworkAccess?"
+     ]
+    },
+    {
+     "name": "getBrowserContexts",
+     "params": []
+    },
+    {
+     "name": "createTarget",
+     "params": [
+      "url",
+      "left?",
+      "top?",
+      "width?",
+      "height?",
+      "windowState?",
+      "browserContextId?",
+      "enableBeginFrameControl?",
+      "newWindow?",
+      "background?",
+      "forTab?",
+      "hidden?",
+      "focus?"
+     ]
+    },
+    {
+     "name": "detachFromTarget",
+     "params": [
+      "sessionId?",
+      "targetId?"
+     ]
+    },
+    {
+     "name": "disposeBrowserContext",
+     "params": [
+      "browserContextId"
+     ]
+    },
+    {
+     "name": "getTargetInfo",
+     "experimental": true,
+     "params": [
+      "targetId?"
+     ]
+    },
+    {
+     "name": "getTargets",
+     "params": [
+      "filter?"
+     ]
+    },
+    {
+     "name": "sendMessageToTarget",
+     "deprecated": true,
+     "params": [
+      "message",
+      "sessionId?",
+      "targetId?"
+     ]
+    },
+    {
+     "name": "setAutoAttach",
+     "params": [
+      "autoAttach",
+      "waitForDebuggerOnStart",
+      "flatten?",
+      "filter?"
+     ]
+    },
+    {
+     "name": "autoAttachRelated",
+     "experimental": true,
+     "params": [
+      "targetId",
+      "waitForDebuggerOnStart",
+      "filter?"
+     ]
+    },
+    {
+     "name": "setDiscoverTargets",
+     "params": [
+      "discover",
+      "filter?"
+     ]
+    },
+    {
+     "name": "setRemoteLocations",
+     "experimental": true,
+     "params": [
+      "locations"
+     ]
+    },
+    {
+     "name": "getDevToolsTarget",
+     "experimental": true,
+     "params": [
+      "targetId"
+     ]
+    },
+    {
+     "name": "openDevTools",
+     "experimental": true,
+     "params": [
+      "targetId",
+      "panelId?"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "attachedToTarget",
+     "experimental": true,
+     "params": [
+      "sessionId",
+      "targetInfo",
+      "waitingForDebugger"
+     ]
+    },
+    {
+     "name": "detachedFromTarget",
+     "experimental": true,
+     "params": [
+      "sessionId",
+      "targetId?"
+     ]
+    },
+    {
+     "name": "receivedMessageFromTarget",
+     "params": [
+      "sessionId",
+      "message",
+      "targetId?"
+     ]
+    },
+    {
+     "name": "targetCreated",
+     "params": [
+      "targetInfo"
+     ]
+    },
+    {
+     "name": "targetDestroyed",
+     "params": [
+      "targetId"
+     ]
+    },
+    {
+     "name": "targetCrashed",
+     "params": [
+      "targetId",
+      "status",
+      "errorCode"
+     ]
+    },
+    {
+     "name": "targetInfoChanged",
+     "params": [
+      "targetInfo"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "Tethering",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "bind",
+     "params": [
+      "port"
+     ]
+    },
+    {
+     "name": "unbind",
+     "params": [
+      "port"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "accepted",
+     "params": [
+      "port",
+      "connectionId"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "Tracing",
+   "commands": [
+    {
+     "name": "end",
+     "params": []
+    },
+    {
+     "name": "getCategories",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "getTrackEventDescriptor",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "recordClockSyncMarker",
+     "experimental": true,
+     "params": [
+      "syncId"
+     ]
+    },
+    {
+     "name": "requestMemoryDump",
+     "experimental": true,
+     "params": [
+      "deterministic?",
+      "levelOfDetail?"
+     ]
+    },
+    {
+     "name": "start",
+     "params": [
+      "categories?",
+      "options?",
+      "bufferUsageReportingInterval?",
+      "transferMode?",
+      "streamFormat?",
+      "streamCompression?",
+      "traceConfig?",
+      "perfettoConfig?",
+      "tracingBackend?",
+      "screenshotMaxSize?",
+      "screenshotMaxCount?"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "bufferUsage",
+     "experimental": true,
+     "params": [
+      "percentFull?",
+      "eventCount?",
+      "value?"
+     ]
+    },
+    {
+     "name": "dataCollected",
+     "experimental": true,
+     "params": [
+      "value"
+     ]
+    },
+    {
+     "name": "tracingComplete",
+     "params": [
+      "dataLossOccurred",
+      "stream?",
+      "traceFormat?",
+      "streamCompression?"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "WebAudio",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "enable",
+     "params": []
+    },
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "getRealtimeData",
+     "params": [
+      "contextId"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "contextCreated",
+     "params": [
+      "context"
+     ]
+    },
+    {
+     "name": "contextWillBeDestroyed",
+     "params": [
+      "contextId"
+     ]
+    },
+    {
+     "name": "contextChanged",
+     "params": [
+      "context"
+     ]
+    },
+    {
+     "name": "audioListenerCreated",
+     "params": [
+      "listener"
+     ]
+    },
+    {
+     "name": "audioListenerWillBeDestroyed",
+     "params": [
+      "contextId",
+      "listenerId"
+     ]
+    },
+    {
+     "name": "audioNodeCreated",
+     "params": [
+      "node"
+     ]
+    },
+    {
+     "name": "audioNodeWillBeDestroyed",
+     "params": [
+      "contextId",
+      "nodeId"
+     ]
+    },
+    {
+     "name": "audioParamCreated",
+     "params": [
+      "param"
+     ]
+    },
+    {
+     "name": "audioParamWillBeDestroyed",
+     "params": [
+      "contextId",
+      "nodeId",
+      "paramId"
+     ]
+    },
+    {
+     "name": "nodesConnected",
+     "params": [
+      "contextId",
+      "sourceId",
+      "destinationId",
+      "sourceOutputIndex?",
+      "destinationInputIndex?"
+     ]
+    },
+    {
+     "name": "nodesDisconnected",
+     "params": [
+      "contextId",
+      "sourceId",
+      "destinationId",
+      "sourceOutputIndex?",
+      "destinationInputIndex?"
+     ]
+    },
+    {
+     "name": "nodeParamConnected",
+     "params": [
+      "contextId",
+      "sourceId",
+      "destinationId",
+      "sourceOutputIndex?"
+     ]
+    },
+    {
+     "name": "nodeParamDisconnected",
+     "params": [
+      "contextId",
+      "sourceId",
+      "destinationId",
+      "sourceOutputIndex?"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "WebAuthn",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "enable",
+     "params": [
+      "enableUI?"
+     ]
+    },
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "addVirtualAuthenticator",
+     "params": [
+      "options"
+     ]
+    },
+    {
+     "name": "setResponseOverrideBits",
+     "params": [
+      "authenticatorId",
+      "isBogusSignature?",
+      "isBadUV?",
+      "isBadUP?"
+     ]
+    },
+    {
+     "name": "removeVirtualAuthenticator",
+     "params": [
+      "authenticatorId"
+     ]
+    },
+    {
+     "name": "addCredential",
+     "params": [
+      "authenticatorId",
+      "credential"
+     ]
+    },
+    {
+     "name": "getCredential",
+     "params": [
+      "authenticatorId",
+      "credentialId"
+     ]
+    },
+    {
+     "name": "getCredentials",
+     "params": [
+      "authenticatorId"
+     ]
+    },
+    {
+     "name": "removeCredential",
+     "params": [
+      "authenticatorId",
+      "credentialId"
+     ]
+    },
+    {
+     "name": "clearCredentials",
+     "params": [
+      "authenticatorId"
+     ]
+    },
+    {
+     "name": "setUserVerified",
+     "params": [
+      "authenticatorId",
+      "isUserVerified"
+     ]
+    },
+    {
+     "name": "setAutomaticPresenceSimulation",
+     "params": [
+      "authenticatorId",
+      "enabled"
+     ]
+    },
+    {
+     "name": "setCredentialProperties",
+     "params": [
+      "authenticatorId",
+      "credentialId",
+      "backupEligibility?",
+      "backupState?",
+      "activeCmtgKeyIndex?",
+      "generateCmtgKeyOnNextOperation?",
+      "signCount?"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "credentialAdded",
+     "params": [
+      "authenticatorId",
+      "credential"
+     ]
+    },
+    {
+     "name": "credentialDeleted",
+     "params": [
+      "authenticatorId",
+      "credentialId"
+     ]
+    },
+    {
+     "name": "credentialUpdated",
+     "params": [
+      "authenticatorId",
+      "credential"
+     ]
+    },
+    {
+     "name": "credentialAsserted",
+     "params": [
+      "authenticatorId",
+      "credential"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "WebMCP",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "enable",
+     "params": []
+    },
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "invokeTool",
+     "params": [
+      "frameId",
+      "toolName",
+      "input"
+     ]
+    },
+    {
+     "name": "cancelInvocation",
+     "params": [
+      "invocationId"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "toolsAdded",
+     "params": [
+      "tools"
+     ]
+    },
+    {
+     "name": "toolsRemoved",
+     "params": [
+      "tools"
+     ]
+    },
+    {
+     "name": "toolInvoked",
+     "params": [
+      "toolName",
+      "frameId",
+      "invocationId",
+      "input"
+     ]
+    },
+    {
+     "name": "toolResponded",
+     "params": [
+      "invocationId",
+      "status",
+      "output?",
+      "errorText?",
+      "exception?"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "Console",
+   "deprecated": true,
+   "commands": [
+    {
+     "name": "clearMessages",
+     "params": []
+    },
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "enable",
+     "params": []
+    }
+   ],
+   "events": [
+    {
+     "name": "messageAdded",
+     "params": [
+      "message"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "Debugger",
+   "commands": [
+    {
+     "name": "continueToLocation",
+     "params": [
+      "location",
+      "targetCallFrames?"
+     ]
+    },
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "enable",
+     "params": [
+      "maxScriptsCacheSize?"
+     ]
+    },
+    {
+     "name": "evaluateOnCallFrame",
+     "params": [
+      "callFrameId",
+      "expression",
+      "objectGroup?",
+      "includeCommandLineAPI?",
+      "silent?",
+      "returnByValue?",
+      "generatePreview?",
+      "throwOnSideEffect?",
+      "timeout?",
+      "scopeNumber?"
+     ]
+    },
+    {
+     "name": "getPossibleBreakpoints",
+     "params": [
+      "start",
+      "end?",
+      "restrictToFunction?"
+     ]
+    },
+    {
+     "name": "getScriptSource",
+     "params": [
+      "scriptId"
+     ]
+    },
+    {
+     "name": "disassembleWasmModule",
+     "experimental": true,
+     "params": [
+      "scriptId"
+     ]
+    },
+    {
+     "name": "nextWasmDisassemblyChunk",
+     "experimental": true,
+     "params": [
+      "streamId"
+     ]
+    },
+    {
+     "name": "getWasmBytecode",
+     "deprecated": true,
+     "params": [
+      "scriptId"
+     ]
+    },
+    {
+     "name": "getStackTrace",
+     "experimental": true,
+     "params": [
+      "stackTraceId"
+     ]
+    },
+    {
+     "name": "pause",
+     "params": []
+    },
+    {
+     "name": "pauseOnAsyncCall",
+     "deprecated": true,
+     "experimental": true,
+     "params": [
+      "parentStackTraceId"
+     ]
+    },
+    {
+     "name": "removeBreakpoint",
+     "params": [
+      "breakpointId"
+     ]
+    },
+    {
+     "name": "restartFrame",
+     "params": [
+      "callFrameId",
+      "mode?"
+     ]
+    },
+    {
+     "name": "resume",
+     "params": [
+      "terminateOnResume?"
+     ]
+    },
+    {
+     "name": "searchInContent",
+     "params": [
+      "scriptId",
+      "query",
+      "caseSensitive?",
+      "isRegex?"
+     ]
+    },
+    {
+     "name": "setAsyncCallStackDepth",
+     "params": [
+      "maxDepth"
+     ]
+    },
+    {
+     "name": "setBlackboxExecutionContexts",
+     "experimental": true,
+     "params": [
+      "uniqueIds"
+     ]
+    },
+    {
+     "name": "setBlackboxPatterns",
+     "experimental": true,
+     "params": [
+      "patterns",
+      "skipAnonymous?"
+     ]
+    },
+    {
+     "name": "setBlackboxedRanges",
+     "experimental": true,
+     "params": [
+      "scriptId",
+      "positions"
+     ]
+    },
+    {
+     "name": "setBreakpoint",
+     "params": [
+      "location",
+      "condition?"
+     ]
+    },
+    {
+     "name": "setInstrumentationBreakpoint",
+     "params": [
+      "instrumentation"
+     ]
+    },
+    {
+     "name": "setBreakpointByUrl",
+     "params": [
+      "lineNumber",
+      "url?",
+      "urlRegex?",
+      "scriptHash?",
+      "columnNumber?",
+      "condition?"
+     ]
+    },
+    {
+     "name": "setBreakpointOnFunctionCall",
+     "experimental": true,
+     "params": [
+      "objectId",
+      "condition?"
+     ]
+    },
+    {
+     "name": "setBreakpointsActive",
+     "params": [
+      "active"
+     ]
+    },
+    {
+     "name": "setPauseOnExceptions",
+     "params": [
+      "state"
+     ]
+    },
+    {
+     "name": "setReturnValue",
+     "experimental": true,
+     "params": [
+      "newValue"
+     ]
+    },
+    {
+     "name": "setScriptSource",
+     "deprecated": true,
+     "params": [
+      "scriptId",
+      "scriptSource",
+      "dryRun?",
+      "allowTopFrameEditing?"
+     ]
+    },
+    {
+     "name": "setSkipAllPauses",
+     "params": [
+      "skip"
+     ]
+    },
+    {
+     "name": "setVariableValue",
+     "params": [
+      "scopeNumber",
+      "variableName",
+      "newValue",
+      "callFrameId"
+     ]
+    },
+    {
+     "name": "stepInto",
+     "params": [
+      "breakOnAsyncCall?",
+      "skipList?"
+     ]
+    },
+    {
+     "name": "stepOut",
+     "params": []
+    },
+    {
+     "name": "stepOver",
+     "params": [
+      "skipList?"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "breakpointResolved",
+     "deprecated": true,
+     "params": [
+      "breakpointId",
+      "location"
+     ]
+    },
+    {
+     "name": "paused",
+     "params": [
+      "callFrames",
+      "reason",
+      "data?",
+      "hitBreakpoints?",
+      "asyncStackTrace?",
+      "asyncStackTraceId?",
+      "asyncCallStackTraceId?"
+     ]
+    },
+    {
+     "name": "resumed",
+     "params": []
+    },
+    {
+     "name": "scriptFailedToParse",
+     "params": [
+      "scriptId",
+      "url",
+      "startLine",
+      "startColumn",
+      "endLine",
+      "endColumn",
+      "executionContextId",
+      "hash",
+      "buildId",
+      "executionContextAuxData?",
+      "sourceMapURL?",
+      "hasSourceURL?",
+      "isModule?",
+      "length?",
+      "stackTrace?",
+      "codeOffset?",
+      "scriptLanguage?",
+      "embedderName?"
+     ]
+    },
+    {
+     "name": "scriptParsed",
+     "params": [
+      "scriptId",
+      "url",
+      "startLine",
+      "startColumn",
+      "endLine",
+      "endColumn",
+      "executionContextId",
+      "hash",
+      "buildId",
+      "executionContextAuxData?",
+      "isLiveEdit?",
+      "sourceMapURL?",
+      "hasSourceURL?",
+      "isModule?",
+      "length?",
+      "stackTrace?",
+      "codeOffset?",
+      "scriptLanguage?",
+      "debugSymbols?",
+      "embedderName?",
+      "resolvedBreakpoints?"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "HeapProfiler",
+   "experimental": true,
+   "commands": [
+    {
+     "name": "addInspectedHeapObject",
+     "params": [
+      "heapObjectId"
+     ]
+    },
+    {
+     "name": "collectGarbage",
+     "params": []
+    },
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "enable",
+     "params": []
+    },
+    {
+     "name": "getHeapObjectId",
+     "params": [
+      "objectId"
+     ]
+    },
+    {
+     "name": "getObjectByHeapObjectId",
+     "params": [
+      "objectId",
+      "objectGroup?"
+     ]
+    },
+    {
+     "name": "getSamplingProfile",
+     "params": []
+    },
+    {
+     "name": "startSampling",
+     "params": [
+      "samplingInterval?",
+      "stackDepth?",
+      "includeObjectsCollectedByMajorGC?",
+      "includeObjectsCollectedByMinorGC?"
+     ]
+    },
+    {
+     "name": "startTrackingHeapObjects",
+     "params": [
+      "trackAllocations?"
+     ]
+    },
+    {
+     "name": "stopSampling",
+     "params": []
+    },
+    {
+     "name": "stopTrackingHeapObjects",
+     "params": [
+      "reportProgress?",
+      "treatGlobalObjectsAsRoots?",
+      "captureNumericValue?",
+      "exposeInternals?"
+     ]
+    },
+    {
+     "name": "takeHeapSnapshot",
+     "params": [
+      "reportProgress?",
+      "treatGlobalObjectsAsRoots?",
+      "captureNumericValue?",
+      "exposeInternals?"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "addHeapSnapshotChunk",
+     "params": [
+      "chunk"
+     ]
+    },
+    {
+     "name": "heapStatsUpdate",
+     "params": [
+      "statsUpdate"
+     ]
+    },
+    {
+     "name": "lastSeenObjectId",
+     "params": [
+      "lastSeenObjectId",
+      "timestamp"
+     ]
+    },
+    {
+     "name": "reportHeapSnapshotProgress",
+     "params": [
+      "done",
+      "total",
+      "finished?"
+     ]
+    },
+    {
+     "name": "resetProfiles",
+     "params": []
+    }
+   ]
+  },
+  {
+   "domain": "Profiler",
+   "commands": [
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "enable",
+     "params": []
+    },
+    {
+     "name": "getBestEffortCoverage",
+     "params": []
+    },
+    {
+     "name": "setSamplingInterval",
+     "params": [
+      "interval"
+     ]
+    },
+    {
+     "name": "start",
+     "params": []
+    },
+    {
+     "name": "startPreciseCoverage",
+     "params": [
+      "callCount?",
+      "detailed?",
+      "allowTriggeredUpdates?"
+     ]
+    },
+    {
+     "name": "stop",
+     "params": []
+    },
+    {
+     "name": "stopPreciseCoverage",
+     "params": []
+    },
+    {
+     "name": "takePreciseCoverage",
+     "params": []
+    }
+   ],
+   "events": [
+    {
+     "name": "consoleProfileFinished",
+     "params": [
+      "id",
+      "location",
+      "profile",
+      "title?"
+     ]
+    },
+    {
+     "name": "consoleProfileStarted",
+     "params": [
+      "id",
+      "location",
+      "title?"
+     ]
+    },
+    {
+     "name": "preciseCoverageDeltaUpdate",
+     "experimental": true,
+     "params": [
+      "timestamp",
+      "occasion",
+      "result"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "Runtime",
+   "commands": [
+    {
+     "name": "awaitPromise",
+     "params": [
+      "promiseObjectId",
+      "returnByValue?",
+      "generatePreview?"
+     ]
+    },
+    {
+     "name": "callFunctionOn",
+     "params": [
+      "functionDeclaration",
+      "objectId?",
+      "arguments?",
+      "silent?",
+      "returnByValue?",
+      "generatePreview?",
+      "userGesture?",
+      "awaitPromise?",
+      "executionContextId?",
+      "objectGroup?",
+      "throwOnSideEffect?",
+      "uniqueContextId?",
+      "serializationOptions?"
+     ]
+    },
+    {
+     "name": "compileScript",
+     "params": [
+      "expression",
+      "sourceURL",
+      "persistScript",
+      "executionContextId?"
+     ]
+    },
+    {
+     "name": "disable",
+     "params": []
+    },
+    {
+     "name": "discardConsoleEntries",
+     "params": []
+    },
+    {
+     "name": "enable",
+     "params": []
+    },
+    {
+     "name": "evaluate",
+     "params": [
+      "expression",
+      "objectGroup?",
+      "includeCommandLineAPI?",
+      "silent?",
+      "contextId?",
+      "returnByValue?",
+      "generatePreview?",
+      "userGesture?",
+      "awaitPromise?",
+      "throwOnSideEffect?",
+      "timeout?",
+      "disableBreaks?",
+      "replMode?",
+      "allowUnsafeEvalBlockedByCSP?",
+      "uniqueContextId?",
+      "serializationOptions?"
+     ]
+    },
+    {
+     "name": "getIsolateId",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "getHeapUsage",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "getProperties",
+     "params": [
+      "objectId",
+      "ownProperties?",
+      "accessorPropertiesOnly?",
+      "generatePreview?",
+      "nonIndexedPropertiesOnly?"
+     ]
+    },
+    {
+     "name": "globalLexicalScopeNames",
+     "params": [
+      "executionContextId?"
+     ]
+    },
+    {
+     "name": "queryObjects",
+     "params": [
+      "prototypeObjectId",
+      "objectGroup?"
+     ]
+    },
+    {
+     "name": "releaseObject",
+     "params": [
+      "objectId"
+     ]
+    },
+    {
+     "name": "releaseObjectGroup",
+     "params": [
+      "objectGroup"
+     ]
+    },
+    {
+     "name": "runIfWaitingForDebugger",
+     "params": []
+    },
+    {
+     "name": "runScript",
+     "params": [
+      "scriptId",
+      "executionContextId?",
+      "objectGroup?",
+      "silent?",
+      "includeCommandLineAPI?",
+      "returnByValue?",
+      "generatePreview?",
+      "awaitPromise?"
+     ]
+    },
+    {
+     "name": "setAsyncCallStackDepth",
+     "params": [
+      "maxDepth"
+     ]
+    },
+    {
+     "name": "setCustomObjectFormatterEnabled",
+     "experimental": true,
+     "params": [
+      "enabled"
+     ]
+    },
+    {
+     "name": "setMaxCallStackSizeToCapture",
+     "experimental": true,
+     "params": [
+      "size"
+     ]
+    },
+    {
+     "name": "terminateExecution",
+     "experimental": true,
+     "params": []
+    },
+    {
+     "name": "addBinding",
+     "params": [
+      "name",
+      "executionContextId?",
+      "executionContextName?"
+     ]
+    },
+    {
+     "name": "removeBinding",
+     "params": [
+      "name"
+     ]
+    },
+    {
+     "name": "getExceptionDetails",
+     "experimental": true,
+     "params": [
+      "errorObjectId"
+     ]
+    }
+   ],
+   "events": [
+    {
+     "name": "bindingCalled",
+     "experimental": true,
+     "params": [
+      "name",
+      "payload",
+      "executionContextId"
+     ]
+    },
+    {
+     "name": "consoleAPICalled",
+     "params": [
+      "type",
+      "args",
+      "executionContextId",
+      "timestamp",
+      "stackTrace?",
+      "context?"
+     ]
+    },
+    {
+     "name": "exceptionRevoked",
+     "params": [
+      "reason",
+      "exceptionId"
+     ]
+    },
+    {
+     "name": "exceptionThrown",
+     "params": [
+      "timestamp",
+      "exceptionDetails"
+     ]
+    },
+    {
+     "name": "executionContextCreated",
+     "params": [
+      "context"
+     ]
+    },
+    {
+     "name": "executionContextDestroyed",
+     "params": [
+      "executionContextId",
+      "executionContextUniqueId"
+     ]
+    },
+    {
+     "name": "executionContextsCleared",
+     "params": []
+    },
+    {
+     "name": "inspectRequested",
+     "params": [
+      "object",
+      "hints",
+      "executionContextId?"
+     ]
+    }
+   ]
+  },
+  {
+   "domain": "Schema",
+   "deprecated": true,
+   "commands": [
+    {
+     "name": "getDomains",
+     "params": []
+    }
+   ],
+   "events": []
+  }
+ ]
+}
