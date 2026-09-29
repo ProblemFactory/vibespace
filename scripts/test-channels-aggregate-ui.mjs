@@ -844,6 +844,11 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
 // and the phone width; a bot's line wears the bot mark.
 {
   const MF = require(path.join(repo, 'src/mail-frame.js'));
+  // WIRING PIN (lane-mirror-197, 2026-09-29): the DOM half re-judges the live set after every APPLIED height — a row that
+  // slides into the visible band because a frame above shrank crosses no observer threshold and fires no scroll, the two
+  // triggers the reconcile had; the runner saw the 7th of 7 short mails on screen as a blank box
+  { const cmf = fs.readFileSync(path.join(repo, 'src/lib/channel-mail-frame.js'), 'utf8'); const APPLY = "s.h = hv.h; s.frame.style.height = hv.h + 'px'; s.box.dataset.h = String(hv.h);"; const at = cmf.indexOf(APPLY); const fnEnd = cmf.indexOf('\n  }\n', at); const nextLater = cmf.indexOf('later();', at);
+    ok(at > 0 && cmf.split(APPLY).length === 2 && nextLater > at && nextLater < fnEnd, 'WIRING PIN: an APPLIED height re-judges the live set — `later()` follows the apply inside applyHeight (channel-mail-frame.js)'); }
   const MAIL = 'fake-push-mail';
   let n = 0;
   for (let i = 0; i < 160; i++) { const d = await api('GET', `/api/channels/fake-push/${MAIL}/messages?limit=60`); n = (d.json.records || []).length; if (n >= MAIL_N + 6) break; await sleep(250); }
@@ -908,6 +913,10 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
     const r = ${ROW(`${MAIL}-pictures`)};
     const f = r.querySelector('iframe.chanmail-frame');
     const tok = (f.srcdoc.match(/var T="([^"]+)"/) || [])[1];
+    // the frame's OWN height must have settled before the spoof is judged against it (lane-mirror-197: under the runner's
+    // CPU the first read was the 24 px the frame posted before its content loaded, the second its real 327 px — a
+    // legitimate growth read as the spoof's): two reads 300 ms apart agree, bounded at 5 s
+    { const t0 = Date.now(); let prev = null; while (Date.now() - t0 < 5000) { const h = f.style.height; if (h === prev) break; prev = h; await new Promise((res) => setTimeout(res, 300)); } }
     const h0 = f.style.height;
     const evil = document.createElement('iframe');
     evil.setAttribute('sandbox', 'allow-scripts');
@@ -1094,22 +1103,46 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
   // A VISIBLE MAIL IS NEVER A BLANK BOX (security verify r2, continued): the attack room is mostly SHORT mails, so
   // more than LIVE_FRAME_CAP of them sit on screen at once — around five of them, every formatted row on screen is
   // live (the round-1 cap left the rest blank placeholders, their text hidden: run6's `custom-elements: timeout`)
-  const shortView = await p1.evaljs(`(async () => { const w = window.__atkW; const list = w.content.querySelector('.chanwin-list'); const out = { maxOnScreen: 0, blank: [] };
+  // THE FRAMES' OWN EVIDENCE, with a deadline — never a fixed sample (lane-mirror-197, 2026-09-29: two naps of 2.5 s + 1.2 s
+  // judged the runner's picture while six frames above were still shrinking from their 140 px placeholders; the product
+  // re-judges the live set after every applied height now, and the judge waits until every formatted row on screen holds a
+  // live, measured frame AND the picture has stopped moving — two reads 150 ms apart agree — then re-centres the named row
+  // and waits once more; past 8 s it judges what it sees and says so)
+  const shortView = await p1.evaljs(`(async () => { const w = window.__atkW; const list = w.content.querySelector('.chanwin-list'); const out = { maxOnScreen: 0, blank: [], waits: [] };
+    const onScreen = () => { const L = list.getBoundingClientRect(); return [...w.content.querySelectorAll('.chanmsg.chanmail-formatted')].filter((r) => { const b = r.querySelector('.chanmail-box').getBoundingClientRect(); return b.height > 0 && b.bottom > L.top && b.top < L.bottom; }); };
+    const isLive = (r) => !!(r.querySelector('iframe.chanmail-frame') && r.querySelector('.chanmail-box').dataset.h);
+    const settle = async (t0) => { let prev = null; while (Date.now() - t0 < 8000) { const on = onScreen(); const sig = on.map((r) => r.dataset.vid + '@' + Math.round(r.getBoundingClientRect().top) + (isLive(r) ? '+' : '-')).join('|'); if (sig === prev && on.every(isLive)) return true; prev = sig; await new Promise((r) => setTimeout(r, 150)); } return false; };
     for (const name of ['script-src', 'svg-onload', 'iframe-src', 'math-mglyph', 'dom-clobber']) {
       const row = [...w.content.querySelectorAll('.chanmsg')].find((r) => r.dataset.vid === '${ATK}-x-' + name); if (!row) { out.blank.push('no-row:' + name); continue; }
-      row.scrollIntoView({ block: 'center' }); await new Promise((r) => setTimeout(r, 2500)); row.scrollIntoView({ block: 'center' }); await new Promise((r) => setTimeout(r, 1200));
-      const L = list.getBoundingClientRect(); const on = [...w.content.querySelectorAll('.chanmsg.chanmail-formatted')].filter((r) => { const b = r.querySelector('.chanmail-box').getBoundingClientRect(); return b.height > 0 && b.bottom > L.top && b.top < L.bottom; });
+      const t0 = Date.now();
+      row.scrollIntoView({ block: 'center' }); const s1 = await settle(t0);
+      row.scrollIntoView({ block: 'center' }); const s2 = await settle(t0);
+      out.waits.push(name + ':' + (Date.now() - t0) + 'ms' + (s1 && s2 ? '' : ':deadline'));
+      const on = onScreen();
       out.maxOnScreen = Math.max(out.maxOnScreen, on.length);
-      for (const r of on) if (!r.querySelector('iframe.chanmail-frame')) out.blank.push(name + ':' + r.dataset.vid.replace(/.*-x-/, ''));
+      for (const r of on) if (!isLive(r)) out.blank.push(name + ':' + r.dataset.vid.replace(/.*-x-/, ''));
     }
     return out; })()`);
-  ok(shortView.maxOnScreen > MF.LIVE_FRAME_CAP && !shortView.blank.length, `around five short corpus mails up to ${shortView.maxOnScreen} formatted mails are on screen (> the cap ${MF.LIVE_FRAME_CAP}) and EVERY one is live — a visible mail is never a blank box`, JSON.stringify(shortView));
+  ok(shortView.maxOnScreen > MF.LIVE_FRAME_CAP && !shortView.blank.length, `around five short corpus mails up to ${shortView.maxOnScreen} formatted mails are on screen (> the cap ${MF.LIVE_FRAME_CAP}) and EVERY one is live — a visible mail is never a blank box (settled: ${(shortView.waits || []).join(' ')})`, JSON.stringify(shortView));
   const AROW = (vid) => `[...window.__atkW.content.querySelectorAll('.chanmsg')].find((r) => r.dataset.vid === '${vid}')`;
   const waitAtk = async (vid) => p1.evaljs(`(async () => { const t0 = Date.now(); while (Date.now() - t0 < 8000) { const row = ${AROW(vid)}; if (!row) return 'no-row'; const f = row.querySelector('iframe.chanmail-frame'); if (f && row.querySelector('.chanmail-box').dataset.h) return 'ok'; if (row.querySelector('.chanmail-note') && !row.querySelector('.chanmail-note').hidden) return 'note:' + row.querySelector('.chanmail-note').textContent; row.scrollIntoView({ block: 'center' }); await new Promise((r) => setTimeout(r, 120)); } return 'timeout'; })()`);
   /** THE DOM CENSUS of one frame's srcdoc, parsed as the frame parses it. A STYLE is judged by the functions a browser
    *  LOADS from (url / image / image-set / cross-fade / element / src) — a defanged escape (`\75 rl(<beacon>)` → `75 rl(…)`,
-   *  the css-escapes mail) names none, and the beacon count below proves it reaches nothing. */
-  const census = (vid) => p1.evaljs(`(() => { const r = ${AROW(vid)}; const f = r && r.querySelector('iframe.chanmail-frame'); if (!f) return null; const d = f.srcdoc; const pd = new DOMParser().parseFromString(d, 'text/html'); const rect = f.getBoundingClientRect();
+   *  the css-escapes mail) names none, and the beacon count below proves it reaches nothing.
+   *  READ ONLY ONCE THE ROW IS LIVE, MEASURED AND STILL (lane-mirror-197, 2026-09-29): the row is centred, its frame live with
+   *  a posted height, and two reads 150 ms apart put the frame at the same y — a fixed 300 ms sample after `waitAtk` read
+   *  three rows on the runner AFTER a neighbour's late height had pushed them out of the keep zone and the lazy rule had
+   *  dropped their frames ("dropped before the census"). Past 8 s it answers `{timeout}` naming the last state. */
+  const census = (vid) => p1.evaljs(`(async () => { const t0 = Date.now(); let prevY = null, last = 'no-row';
+    while (Date.now() - t0 < 8000) {
+      const r = ${AROW(vid)}; if (!r) return null;
+      const f = r.querySelector('iframe.chanmail-frame'); const box = r.querySelector('.chanmail-box');
+      if (f && box.dataset.h) { const y = Math.round(f.getBoundingClientRect().y); if (prevY === y) return read(r, f); prevY = y; last = 'moving'; }
+      else { prevY = null; last = f ? 'unmeasured' : 'no-frame'; }
+      r.scrollIntoView({ block: 'center' }); await new Promise((res) => setTimeout(res, 150));
+    }
+    return { timeout: last };
+    function read(r, f) { const d = f.srcdoc; const pd = new DOMParser().parseFromString(d, 'text/html'); const rect = f.getBoundingClientRect();
     return { sandbox: f.getAttribute('sandbox'), opaque: f.contentDocument === null, scripts: pd.querySelectorAll('script').length, nonced: pd.querySelectorAll('script[nonce]').length, ourScript: pd.querySelectorAll('script').length === 1 && /vsMail:T/.test(pd.querySelector('script').textContent),
       heads: [...pd.head.children].map((x) => x.tagName.toLowerCase() + ':' + (x.getAttribute('http-equiv') || x.getAttribute('name') || (x.getAttribute('charset') ? 'charset' : ''))),
       danger: [...pd.querySelectorAll('iframe,object,embed,form,input,button,base,link,svg,math,video,audio,picture,source,track,template,noscript,textarea,title,xmp,plaintext,dialog,portal,slot,applet,frame,frameset,select,option,marquee,meta[http-equiv=refresh],meta[name=referrer][content=unsafe-url]')].map((x) => x.tagName.toLowerCase()),
@@ -1118,7 +1151,7 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
       styleReach: [...pd.querySelectorAll('style')].filter((x) => /url\\s*\\(|@import|expression|keyframes|animation|(?:^|[^a-z0-9_-])(?:image|image-set|-webkit-image-set|cross-fade|element|src)\\s*\\(/i.test(x.textContent)).length,
       idsOrNames: [...pd.querySelectorAll('[id],[name]')].map((x) => x.tagName.toLowerCase()), custom: [...pd.querySelectorAll('*')].map((x) => x.tagName.toLowerCase()).filter((t) => t.includes('-') || t === 'x-foo'),
       httpsImgs: (d.match(/src="https:\\/\\/127\\.0\\.0\\.1:${SP}\\//g) || []).length, dataImgs: (d.match(/src="data:image\\//g) || []).length, blocked: (d.match(/data-vs-blocked="1"/g) || []).length, quoteMarks: (d.match(/data-vs-quote="1"/g) || []).length,
-      h: Number(r.querySelector('.chanmail-box').dataset.h), rect: { x: rect.x, y: rect.y }, pics: r.querySelector('.chanmail-pictures').hidden ? null : r.querySelector('.chanmail-pictures').textContent }; })()`);
+      h: Number(r.querySelector('.chanmail-box').dataset.h), rect: { x: rect.x, y: rect.y }, pics: r.querySelector('.chanmail-pictures').hidden ? null : r.querySelector('.chanmail-pictures').textContent }; } })()`);
   const bad = [], noFrame = [];
   const h0 = beaconHits.length, s0 = tlsHits.length, c0 = beaconConns;
   const clickOutcomes = {};
@@ -1126,9 +1159,8 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
     const vid = `${ATK}-x-${c.name}`;
     const st = await waitAtk(vid);
     if (st !== 'ok') { noFrame.push(`${c.name}: ${st}`); continue; }
-    await sleep(300);
     const x = await census(vid);
-    if (!x) { noFrame.push(`${c.name}: dropped before the census`); continue; }
+    if (!x || x.timeout) { noFrame.push(`${c.name}: ${x ? `no live, measured, still frame within 8 s (last: ${x.timeout})` : 'no row'}`); continue; }
     const why = [];
     if (x.sandbox !== 'allow-scripts' || !x.opaque) why.push(`sandbox=${x.sandbox} opaque=${x.opaque}`);
     if (x.scripts !== 1 || x.nonced !== 1 || !x.ourScript) why.push(`scripts=${x.scripts} nonced=${x.nonced} ours=${x.ourScript}`);
@@ -1184,7 +1216,7 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
   const after = tlsHits.slice(u1);
   ok(beaconHits.length === t1 && beaconConns === c1, `after Show pictures the http beacon is still untouched (${beaconHits.length - t1} hits, ${beaconConns - c1} new connections) — the http picture, every CSS url() / link / media / table background`, beaconHits.slice(t1).join(', '));
   ok(after.length >= 2 && after.every((h) => /^\/(pictures-https|img-srcset-lazy|meta-referrer)\/(pic|pic2|lazy|referrer)\.png(\?.*)?$/.test(h.url) && h.ref === null && h.cookie === null), `after Show pictures ONLY the https <img src> pictures loaded (${after.length}: ${[...new Set(after.map((h) => h.url))].join(', ')}), each with NO referer and NO cookie — never a CSS url(), a font, a link rel, a media source, a protocol-relative or a relative path`, JSON.stringify(after));
-  if (BEACON_S) { await waitAtk(`${ATK}-x-css-reach`); await sleep(300); const cx = await census(`${ATK}-x-css-reach`); ok(cx && cx.styleReach === 0 && cx.reach.length === 0, 'the CSS-reach mail with pictures ON: still no url() / @import / image-set in any style (the CSP would allow an https url() — the sanitizer never writes one)', JSON.stringify(cx)); }
+  if (BEACON_S) { await waitAtk(`${ATK}-x-css-reach`); const cx = await census(`${ATK}-x-css-reach`); ok(cx && !cx.timeout && cx.styleReach === 0 && cx.reach.length === 0, 'the CSS-reach mail with pictures ON: still no url() / @import / image-set in any style (the CSP would allow an https url() — the sanitizer never writes one)', JSON.stringify(cx)); }
   // THE ANIMATED MAIL moves nothing: no height message, one row height, one scrollTop over 3 s
   await waitAtk(`${ATK}-x-height-animation`);
   const storm = await p1.evaljs(`(async () => { const w = window.__atkW; const list = w.content.querySelector('.chanwin-list'); const row = ${AROW(`${ATK}-x-height-animation`)}; row.scrollIntoView({ block: 'center' }); await new Promise((r) => setTimeout(r, 2000)); const f = row.querySelector('iframe.chanmail-frame'); if (!f) return { noFrame: true };

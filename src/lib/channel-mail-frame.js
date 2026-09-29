@@ -112,6 +112,12 @@ export function createMailFrames({ list, base, signal = null, modes = new Map() 
     const stick = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
     s.h = hv.h; s.frame.style.height = hv.h + 'px'; s.box.dataset.h = String(hv.h);
     if (stick) list.scrollTop = list.scrollHeight;
+    // THE LIVE SET FOLLOWS THE GEOMETRY IT WAS JUDGED ON (lane-mirror-197, 2026-09-29): an applied height moves every row
+    // below it. A row already inside the keep zone that slides INTO the visible band this way crosses no observer threshold
+    // and fires no scroll — the two triggers above — so it stayed a placeholder on screen (a blank box) until the next
+    // scroll: measured on the Actions runner, 7 short mails on screen, the 7th blank ("svg-onload:table-background") because
+    // six frames above shrank from their 140 px placeholders after the reader's last scroll. Re-judge after every apply.
+    later();
   }
   if (signal) signal.addEventListener('abort', () => { if (io) io.disconnect(); for (const s of slots.values()) drop(s); slots.clear(); });
 

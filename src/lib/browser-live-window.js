@@ -661,9 +661,14 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     kbdChip.style.display = (own || yielded) && st.connected ? '' : 'none';
     kbdChip.classList.toggle('failing', !yielded && !!failing);
     kbdChip.classList.toggle('yielded', yielded);
-    kbdText.textContent = yielded ? yieldChipText(ky.whereNow(document.activeElement)) : failing ? t('Input is not reaching the browser') : sentOnly ? t('Typing is sent to the browser') : t('Typing goes to the browser');
-    kbdChip.title = yielded ? t('You pressed a text box outside the browser, so your keys go there. You still drive the browser — the agent waits. Click the picture to type into the page again; Hand back ends the takeover.')
+    const text = yielded ? yieldChipText(ky.whereNow(document.activeElement)) : failing ? t('Input is not reaching the browser') : sentOnly ? t('Typing is sent to the browser') : t('Typing goes to the browser');
+    const title = yielded ? t('You pressed a text box outside the browser, so your keys go there. You still drive the browser — the agent waits. Click the picture to type into the page again; Hand back ends the takeover.')
       : failing ? receiptWhy(failing) : (sentOnly ? t('This browser streams directly: VibeSpace sees each key written to its stream, not the page’s answer.') + ' ' : '') + t('While you drive, every key goes to the page. Press a chat box or a terminal to type there instead — the browser stays yours; click the picture to come back (Ctrl+Backslash and Ctrl+Alt+Left/Right stay the app’s).');
+    // verify r4: written only on CHANGE — a yielded view re-reads on every focus move (focusout + focusin), and a same-text
+    // write is still a mutation record and an accessibility event (measured on 41312584: 300 focus moves over a list while
+    // yielded ⇒ 1 200 records on the chip, its words never changing)
+    if (kbdText.textContent !== text) kbdText.textContent = text;
+    if (kbdChip.title !== title) kbdChip.title = title;
     root.classList.toggle('kbd-owned', own);
     root.classList.toggle('kbd-yielded', yielded);
     if (!(st.mode === 'takeover' && st.mine)) { echoEl.style.display = 'none'; youEl.style.display = 'none'; }

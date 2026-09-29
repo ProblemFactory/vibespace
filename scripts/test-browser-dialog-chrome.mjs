@@ -42,9 +42,13 @@ const cleanup = () => { if (cleaned) return; cleaned = true; try { endRootedProc
 process.on('exit', cleanup);
 for (const sg of ['SIGINT', 'SIGTERM']) process.on(sg, () => { cleanup(); process.exit(130); });
 
-let ver = null; try { ver = execFileSync('agent-browser', ['--version'], { encoding: 'utf8', timeout: 8000, env: BASE_ENV }).trim(); } catch { }
-if (!ver) { skip('agent-browser is not runnable here (put the real binary first on PATH)'); console.log(`\nALL PASS (${pass}, ${skipped} skipped)`); process.exit(0); }
-console.log(`agent-browser: ${ver}`);
+// 2.369.198: the probe resolves the name the way the PRODUCT does (browser-facts' resolver, past the VibeSpace shim) —
+// the push shell's PATH has data/bin first, where `agent-browser` is the shim (exit 2), so a bare-name probe skipped this
+// whole suite on every post-push heavy run while the keeper under test resolved the real CLI itself
+const REAL_AB = (() => { try { return Ff.binaryResolver('agent-browser', BASE_ENV)(); } catch { return null; } })();
+let ver = null; try { ver = REAL_AB ? execFileSync(REAL_AB, ['--version'], { encoding: 'utf8', timeout: 8000, env: BASE_ENV }).trim() : null; } catch { }
+if (!ver) { skip(`no real agent-browser resolves on PATH past the shim (PATH=${BASE_ENV.PATH || ''})`); console.log(`\nALL PASS (${pass}, ${skipped} skipped)`); process.exit(0); }
+console.log(`agent-browser: ${REAL_AB} (${ver})`);
 
 // the pages (loopback)
 const PORT = await freePort();

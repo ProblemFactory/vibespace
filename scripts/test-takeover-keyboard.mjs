@@ -56,9 +56,9 @@ function makeDom() {
     get isContentEditable() { let n = this; while (n && n.nodeType === 1) { if (n._ce) return true; n = n.parent; } return false; }
     append(...cs) { for (const c of cs) { c.parent = this; this.children.push(c); } return this; }
     contains(o) { let n = o; while (n) { if (n === this) return true; n = n.parent; } return false; }
-    closest(sel) { const wants = String(sel).split(',').map((x) => x.trim().replace(/^\./, '')); let n = this; while (n && n.nodeType === 1) { const cls = String(n.className).split(/\s+/); if (wants.some((w) => cls.includes(w))) return n; n = n.parent; } return null; } // a list of classes (verify r2: INPUT_HOSTS)
+    closest(sel) { const wants = String(sel).split(',').map((x) => x.trim()); let n = this; while (n && n.nodeType === 1) { const cls = String(n.className).split(/\s+/); if (wants.some((w) => (w.startsWith('.') ? cls.includes(w.slice(1)) : n.tagName === w.toUpperCase()))) return n; n = n.parent; } return null; } // a list of classes (verify r2: INPUT_HOSTS) or tags (verify r4: `label`)
     addEventListener(type, fn, opts) { addL(this, type, fn, opts); }
-    get focusable() { return ['TEXTAREA', 'INPUT', 'BUTTON', 'SELECT', 'IFRAME'].includes(this.tagName) || this._ce || this.tabIndex != null; } // verify r3: a <select> and a frame take the focus of a press too
+    get focusable() { return ['TEXTAREA', 'INPUT', 'BUTTON', 'SELECT', 'IFRAME', 'SUMMARY'].includes(this.tagName) || this._ce || this.tabIndex != null; } // verify r3: a <select> and a frame take the focus of a press too; verify r4: a <summary>
     get isConnected() { let n = this; while (n) { if (n === doc) return true; n = n.parent; } return false; }
     checkVisibility() { let n = this; while (n && n.nodeType === 1) { if (n._hidden) return false; n = n.parent; } return true; } // verify r2: a hider (another desktop) on an ancestor
     focus() { doc.focus(this); } // a PROGRAMMATIC focus (a script's .focus())
@@ -182,7 +182,7 @@ async function scenarios(KY) {
         if (v !== 'reclaim' || !iOwn()) return;
         st.reclaims++;
         const taken = e.target; // verify r2 (Q1) / r3 (F2): the view's toast, judged when the reclaim runs
-        queueMicrotask(() => { const say = typeof ky.takeCue === 'function' && ky.takeCue(taken); focusSink(); if (say) st.cues++; });
+        queueMicrotask(() => { const say = typeof ky.takeCue === 'function' && ky.takeCue(taken); focusSink(); if (say) { st.cues++; st.cuedFor = taken; } }); // (verify r4: WHICH box the cue was for)
       }, cap);
       // verify r3: THE SINK'S BLUR (browser-live-window.js): 0 ms after the sink lost the focus while the view owns, the sink
       // takes it back unless PURE sinkBlurVerdict keeps it (a text box — the focusin rule's; a choice control, F1); a frame is
@@ -212,12 +212,15 @@ async function scenarios(KY) {
         hold(key) { if (iOwn()) st.held.add(key); },
         handbackPress() { if (st.claimed) releaseHeld(); this.handback(); },
         stream(on) { st.connected = !!on; sync(); },
+        /** verify r4: the view's `ws.onclose` — the stream down (a transition), then the takeover ended locally as the server
+         *  ends it (viewer-left): `st.mine` ⇒ mode watch + renderMode, which releases the claim (and the yield with it) */
+        close() { st.connected = false; sync(); if (st.mine) { st.mode = 'watch'; st.mine = false; this.handback(); } },
       };
       V.push(v);
     }
     /** Typing, as the views' document capture keydown routes it: the OWNING view's page gets the key; nobody owns ⇒
      *  the focused text box does. */
-    const type = (text) => { for (const ch of text) { const o = KO.keyboardOwner(); const v = o && V.find((x) => x.id === o.id); if (v) { if (typeof v.ky.caretOutside === 'function' && v.ky.caretOutside(doc.activeElement)) { v.st.strayKeys++; doc.focus(v.kbd); KO.keyboardChanged(); continue; } v.st.page += ch; } else if (KY.isEditable(doc.activeElement)) doc.activeElement.value += ch; } }; // verify r2 (H1): the view's BELT — the owner's key while a text box outside holds the caret goes nowhere, the caret moves
+    const type = (text) => { for (const ch of text) { const o = KO.keyboardOwner(); const v = o && V.find((x) => x.id === o.id); if (v) { if (typeof v.ky.caretOutside === 'function' && v.ky.caretOutside(doc.activeElement)) { v.st.strayKeys++; doc.focus(v.kbd); KO.keyboardChanged(); continue; } v.st.page += ch; if (doc.activeElement !== v.kbd) doc.focus(v.kbd); } else if (KY.isEditable(doc.activeElement)) doc.activeElement.value += ch; } }; // verify r2 (H1): the view's BELT — the owner's key while a text box outside holds the caret goes nowhere, the caret moves; verify r4: onDocKey ends with focusSink() — after a key the sink holds the caret (a <select> that kept the focus of a press loses it at the first key: measured, the closing key's keyup)
     const at = () => { const a = doc.activeElement; if (a === ta) return 'composer'; if (a === helper) return 'terminal'; for (const v of V) if (a === v.kbd) return 'sink' + (V.length > 1 ? v.id.slice(-1) : ''); if (a === xIme) return 'xpra-ime'; if (a === vCanvas) return 'vnc-canvas'; return a === body ? 'body' : String(a && (a.className || a.tagName)); };
     const ctx = { D, doc, ta, helper, cvs, sidebar, sendBtn, line, chatFocus, V, clock, type, at, xCanvas, xIme, vCanvas, press: (el, o = {}) => D.press(el, { clock, ...o }) };
     try { return await fn(ctx); } finally { for (const v of V) v.dispose(); offLine(); }
@@ -664,6 +667,128 @@ async function scenarios(KY) {
     r.ok = r.focus === 'sink' && r.page === '\n' && JSON.stringify(r.cues) === '[1,1,1]';
     return r;
   });
+  // ── verify r4: ATTACKS ON r3's RULES ──
+  // (attack 1) a CHOICE control INSIDE a dialog: the dialog's own focus at open is taken back and said once (F4); the user's
+  // press on its <select> KEEPS the focus (F1 — the choice rule wins inside a dialog too, silently); the first key hands the
+  // caret to the sink (onDocKey's trailing focusSink — measured: an open list's closing keyup); a press on OK is silent
+  out.dialogSelect = await world(async ({ V: [A], D, press, type, at }) => {
+    A.takeover(); await flush();
+    const item = new D.El('div', { cls: 'context-menu-item' }); D.body.append(item);
+    const ov = new D.El('div', { cls: 'dialog-overlay', tabindex: -1 }); const dlg = new D.El('div', { cls: 'dialog' }); const sel = new D.El('select', { cls: 'dialog-select' }); const okb = new D.El('button', { cls: 'btn-ok' }); ov.append(dlg.append(sel, okb));
+    item.addEventListener('pointerup', () => { D.body.append(ov); setTimeout(() => ov.focus(), 0); setTimeout(() => okb.focus(), 0); });
+    await press(item); await flush(); await flush(); const f1 = at(); const c1 = A.st.dialogCues;
+    await press(sel); await flush(); const f2 = at(); const c2 = A.st.dialogCues; type('k'); const f2k = at();
+    await press(okb); await flush(); await flush(); const f3 = at(); const c3 = A.st.dialogCues;
+    const r = { f1, f2, f2k, f3, cues: [c1, c2, c3], page: A.st.page, yielded: A.ky.yielded };
+    r.ok = r.f1 === 'sink' && r.f2 === 'dialog-select' && r.f2k === 'sink' && r.f3 === 'sink' && JSON.stringify(r.cues) === '[1,1,1]' && r.page === 'k' && !r.yielded;
+    return r;
+  });
+  // (attack 4) a SECOND dialog the user's press opens inside RECLAIM_CUE_MS is not said again (one rate limit with the Q1 cue)
+  // and its Enter is the page's too — declared (LOW): the first said it seconds ago; the words on screen are the same
+  out.dialogTwice = await world(async ({ V: [A], D, press, type, clock }) => {
+    A.takeover(); await flush();
+    const item = new D.El('div', { cls: 'context-menu-item' }); D.body.append(item);
+    let okb = null;
+    item.addEventListener('pointerup', () => { const ov = new D.El('div', { cls: 'dialog-overlay', tabindex: -1 }); const dlg = new D.El('div', { cls: 'dialog' }); okb = new D.El('button', { cls: 'btn-ok' }); ov.append(dlg.append(okb)); D.body.append(ov); setTimeout(() => ov.focus(), 0); setTimeout(() => okb.focus(), 0); });
+    await press(item); await flush(); await flush(); const c1 = A.st.dialogCues; type('\n');
+    await press(okb); await flush(); clock.advance(1500);
+    await press(item); await flush(); await flush(); const c2 = A.st.dialogCues; type('\n');
+    const r = { cues: [c1, c2], page: A.st.page };
+    r.ok = JSON.stringify(r.cues) === '[1,1]' && r.page === '\n\n';
+    return r;
+  });
+  // (attack 2) a box focused, REPLACED and focused again in ONE task (a keyed patch of the For-you row under a broadcast, the
+  // box re-created with its key): two reclaims; the gone box is never said (F2) and the box that STAYED is said once. Before
+  // (41312584): the first reader consumed the one flag the second needed — reclaimed twice, said never
+  out.cueRecreated = await world(async ({ V: [A], D, press, at }) => {
+    A.takeover(); await flush();
+    const row = new D.El('div', { cls: 'ut-row' }); const btn = new D.El('button', { cls: 'ut-reply-btn' }); row.append(btn); D.body.append(row);
+    let b = null;
+    btn.addEventListener('mousedown', () => { queueMicrotask(() => { const a = new D.El('textarea', { cls: 'ut-reply-input' }); row.append(a); a.focus(); row.children.splice(row.children.indexOf(a), 1); a.parent = null; b = new D.El('textarea', { cls: 'ut-reply-input' }); row.append(b); b.focus(); }); });
+    await press(btn); await flush(); await flush();
+    const r = { focus: at(), cues: A.st.cues, forStayed: A.st.cuedFor === b, reclaims: A.st.reclaims };
+    r.ok = r.focus === 'sink' && r.cues === 1 && r.forStayed && r.reclaims === 2;
+    return r;
+  });
+  // (attack 2) the user's press ON the box whose focus lands only after USER_PRESS_MS (a render blocked ≥ 250 ms between the
+  // press and its focus): 'stale press' — reclaimed and NOT said (the cue is for a press elsewhere). Declared: a mouse press
+  // focuses in its own task, a tap re-stamps at its release; the miss needs a blocked main thread
+  out.cueStaleSame = await world(async ({ V: [A], ta, D, type, at, clock }) => {
+    A.takeover(); await flush();
+    D.dispatch(ta, 'pointerdown', { isTrusted: true }); clock.advance(T.USER_PRESS_MS + 100); ta.focus(); await flush(); await flush();
+    const r = { focus: at(), cues: A.st.cues, reclaims: A.st.reclaims }; type('pw'); r.page = A.st.page;
+    r.ok = r.focus === 'sink' && r.cues === 0 && r.reclaims === 1 && r.page === 'pw';
+    return r;
+  });
+  // (attack 2, the label) a press on the box's LABEL — `<label for>` (its `control`) or a label wrapping the box ("Page name",
+  // a passphrase row): the browser focuses the box at the click; that is a press on the box — it YIELDS. Before, 'pressed
+  // elsewhere': reclaimed and told to click the box itself
+  out.labelPress = await world(async ({ V: [A], D, press, type, at }) => {
+    A.takeover(); await flush();
+    const lab = new D.El('label', { cls: 'field-label' }); const box = new D.El('input', { cls: 'field-box', type: 'text' }); D.body.append(lab, box); lab.control = box;
+    lab.addEventListener('pointerup', () => { D.doc.focus(box); }); // the label's activation: its click focuses its control
+    const wrap = new D.El('label', { cls: 'wrap-label' }); const txt = new D.El('span', { cls: 'wrap-text' }); const box2 = new D.El('input', { cls: 'wrap-box', type: 'text' }); wrap.append(txt, box2); D.body.append(wrap);
+    wrap.addEventListener('pointerup', () => { D.doc.focus(box2); });
+    await press(lab); const f1 = at(); type('ab');
+    await press(A.img); await press(txt); const f2 = at(); type('cd');
+    const r = { f1, v1: box.value, f2, v2: box2.value, page: A.st.page, cues: A.st.cues, reclaims: A.st.reclaims };
+    r.ok = r.f1 === 'field-box' && r.v1 === 'ab' && r.f2 === 'wrap-box' && r.v2 === 'cd' && r.page === '' && r.cues === 0 && r.reclaims === 0;
+    return r;
+  });
+  // (attack 3) a FOCUS STORM while yielded — 500 focus moves over rows (a roving list, a drag): the view never moves the focus
+  // (no reclaim, no caret move, no loop), whereNow follows every one, the yield stays
+  out.focusStorm = await world(async ({ V: [A], D, ta, press, at }) => {
+    A.takeover(); await flush();
+    await press(ta);
+    const rows = []; for (let i = 0; i < 500; i++) { const r = new D.El('div', { cls: 'file-item', tabindex: -1 }); D.body.append(r); rows.push(r); }
+    const wheres = new Set(); for (const r of rows) { r.focus(); wheres.add(A.ky.whereNow(D.doc.activeElement)); } await flush();
+    const r = { focus: at(), wheres: [...wheres], reclaims: A.st.reclaims, caretMoves: A.st.caretMoves, yielded: A.ky.yielded, owned: KO.keyboardOwned() };
+    r.ok = r.focus === 'file-item' && JSON.stringify(r.wheres) === '["none"]' && r.reclaims === 0 && r.caretMoves === 0 && r.yielded && !r.owned;
+    return r;
+  });
+  // (attack 7) TWO views yielded to one press; ONE hands back — the other's yield and the composer's line stay (true for it);
+  // the second handback ends everything: no claim is left, the composer focuses as always
+  out.twoViewsEnd = await world(async ({ V: [A, B], D, ta, line, press, chatFocus, at }) => {
+    A.takeover(); B.takeover(); await flush();
+    await press(ta); const both = A.ky.yielded && B.ky.yielded && !line.hidden;
+    B.handbackPress(); const afterB = { a: A.ky.yielded, b: B.ky.yielded, line: !line.hidden, yieldedFact: KO.keyboardYielded(), owner: KO.keyboardOwner() };
+    A.handbackPress(); const afterA = { a: A.ky.yielded, line: !line.hidden, yieldedFact: KO.keyboardYielded(), owner: KO.keyboardOwner() };
+    D.doc.focus(D.body); chatFocus(); const focus = at();
+    const r = { both, afterB, afterA, focus };
+    r.ok = r.both && r.afterB.a && !r.afterB.b && r.afterB.line && r.afterB.yieldedFact && r.afterB.owner === null && !r.afterA.a && !r.afterA.line && !r.afterA.yieldedFact && r.afterA.owner === null && r.focus === 'composer';
+    return r;
+  }, { views: 2 });
+  // (attack 7) the SOCKET closes while yielded: the view ends the takeover as the server does (viewer-left ⇒ a handback) — the
+  // yield ends with the claim, the caret stays where the user put it, the line goes, no claim is left
+  out.socketWhileYielded = await world(async ({ V: [A], ta, line, press, at }) => {
+    A.takeover(); await flush();
+    await press(ta); const before = { yielded: A.ky.yielded, line: !line.hidden };
+    A.close();
+    const after = { yielded: A.ky.yielded, line: !line.hidden, focus: at(), owner: KO.keyboardOwner(), yieldedFact: KO.keyboardYielded(), mode: A.st.mode };
+    const r = { before, after };
+    r.ok = r.before.yielded && r.before.line && !r.after.yielded && !r.after.line && r.after.focus === 'composer' && r.after.owner === null && !r.after.yieldedFact && r.after.mode === 'watch';
+    return r;
+  });
+  // (attack 8, the security class) while yielded NOTHING the stream carries moves the caret: a `mode` record re-applied to a
+  // view already claimed (renderMode: `if (!ky.yielded) focusSink()`), a hello, a frame — the page has no other way in
+  out.streamWhileYielded = await world(async ({ V: [A], ta, press, type, at }) => {
+    A.takeover(); await flush();
+    await press(ta); type('s1');
+    A.takeover(); await flush(); const focus = at(); type('s2'); // the mode record again (still claimed: no reset, no focus)
+    const r = { focus, composer: ta.value, page: A.st.page, yielded: A.ky.yielded };
+    r.ok = r.focus === 'composer' && r.composer === 's1s2' && r.page === '' && r.yielded;
+    return r;
+  });
+  // (the census's control row, verify r4) a <summary>: the press toggles it, the sink takes the focus back, Enter stays the page's
+  out.controlSummary = await world(async ({ V: [A], D, press, type, at }) => {
+    A.takeover(); await flush();
+    const det = new D.El('details', { cls: 'ut-detail-exp' }); const sum = new D.El('summary', { cls: 'ut-sum' }); det.append(sum); D.body.append(det); det.open = false;
+    sum.addEventListener('pointerup', () => { det.open = !det.open; });
+    await press(sum); await flush(); const focus = at(); type('\n');
+    const r = { focus, open: det.open, page: A.st.page, yielded: A.ky.yielded };
+    r.ok = r.focus === 'sink' && r.open === true && r.page === '\n' && !r.yielded;
+    return r;
+  });
   return out;
 }
 
@@ -699,8 +824,8 @@ console.log('§2 patched-copy controls: each rule removed turns exactly its scen
 const M = mutantCopies('tkbd', REPO);
 const KYSRC = fs.readFileSync(path.join(REPO, 'src/lib/keyboard-yield.js'), 'utf8');
 const CONTROLS = [
-  { tag: 'no-press', why: 'the yield ignores the press (every focus reclaimed — userW\'s bug)', from: 'const u = userPressFocus({ press: p, sameInput: !!p && sameInput(p.target, el), focusAt: now() }), byUserPress = u.byUserPress;', to: 'const u = userPressFocus({ press: p, sameInput: !!p && sameInput(p.target, el), focusAt: now() }), byUserPress = false;', red: ['userW', 'picture', 'bar', 'terminal', 'touch', 'twoViews', 'handback', 'follow', 'ownTab', 'hiddenTab', 'h1PressHidden', 'h1Reconnect', 'n1Xpra', 'n1Vnc', 'q1Cue', 'homeGone', 'widgetYielded', 'textSearch', 'textCm'] },
-  { tag: 'any-input', why: 'a same-input check that matches anything (the password guard gone)', from: 'export function sameInput(pressed, focused) {\n  if (!pressed || !focused) return false;', to: 'export function sameInput(pressed, focused) {\n  return true;', red: ['elsewhereThenScript', 'alreadyFocusedGuard', 'q1Cue', 'helperCopy', 'dialogConfirm'] }, // (verify r3: the copy fallback's scratch box would take the keys too; a dialog's own focus reads as pressed) (a press INSIDE the view is never remembered — pictureThenScript stays green by that rule, not this one)
+  { tag: 'no-press', why: 'the yield ignores the press (every focus reclaimed — userW\'s bug)', from: 'const u = userPressFocus({ press: p, sameInput: !!p && sameInput(p.target, el), focusAt: now() }), byUserPress = u.byUserPress;', to: 'const u = userPressFocus({ press: p, sameInput: !!p && sameInput(p.target, el), focusAt: now() }), byUserPress = false;', red: ['userW', 'picture', 'bar', 'terminal', 'touch', 'twoViews', 'handback', 'follow', 'ownTab', 'hiddenTab', 'h1PressHidden', 'h1Reconnect', 'n1Xpra', 'n1Vnc', 'q1Cue', 'homeGone', 'widgetYielded', 'textSearch', 'textCm', 'labelPress', 'focusStorm', 'twoViewsEnd', 'socketWhileYielded', 'streamWhileYielded'] }, // (verify r4: every scenario that needs the yield)
+  { tag: 'any-input', why: 'a same-input check that matches anything (the password guard gone)', from: 'export function sameInput(pressed, focused) {\n  if (!pressed || !focused) return false;', to: 'export function sameInput(pressed, focused) {\n  return true;', red: ['elsewhereThenScript', 'alreadyFocusedGuard', 'q1Cue', 'helperCopy', 'dialogConfirm', 'dialogSelect', 'dialogTwice', 'cueRecreated'] }, // (verify r3: the copy fallback's scratch box would take the keys too; a dialog's own focus reads as pressed) (a press INSIDE the view is never remembered — pictureThenScript stays green by that rule, not this one)
   { tag: 'no-restamp', why: 'the touch tap\'s release does not re-stamp the press', from: '    onPointerUp(e) { if (s.press && e.target === s.press.target && e.isTrusted === true) s.press.at = now(); },', to: '    onPointerUp(e) { },', red: ['touch'] },
   { tag: 'trust-any', why: 'a synthetic press counts as the user\'s', from: 's.press = { target: e.target, at: now(), trusted: e.isTrusted === true };', to: 's.press = { target: e.target, at: now(), trusted: true };', red: ['synthetic', 'alreadyFocusedGuard'] },
   { tag: 'no-chrome', why: 'verify r1 K3 pre-fix: only the view\'s root counts (its tab is "elsewhere")', from: 'const namesView = (el) => { if (inView(el)) return true; try { return !!el && !!ownChrome(el); } catch { return false; } };', to: 'const namesView = (el) => inView(el);', red: ['hiddenTab', 'ownTab'] },
@@ -713,19 +838,22 @@ const CONTROLS = [
   { tag: 'h1-belt-blind', why: 'verify r2 H1: the belt never sees the caret outside', from: '    caretOutside,\n', to: '    caretOutside: () => false,\n', red: ['belt'] },
   // verify r2 (N1)
   { tag: 'home-kept', why: 'verify r2 H1b\' pre-fix: a yield outlives its home', from: '      const v = yieldHomeVerdict({ yielded: s.yielded, drivesNow: !!drives, drovePrev, homeVisible });', to: "      const v = 'keep';", red: ['homeGone', 'homeHidden'] },
-  { tag: 'q1-no-cue', why: 'verify r2 Q1 pre-fix: a reclaim is never said', from: '    takeCue(el) { const c = !!s.cue && !(el && el.isConnected === false); s.cue = false; if (c) s.lastCueAt = now(); return c; },', to: '    takeCue() { return false; },', red: ['q1Cue'] },
-  { tag: 'cue-gone-said', why: 'verify r3 F2 pre-fix: a box already gone at the reclaim is announced', from: '    takeCue(el) { const c = !!s.cue && !(el && el.isConnected === false); s.cue = false; if (c) s.lastCueAt = now(); return c; },', to: '    takeCue() { const c = !!s.cue; s.cue = false; if (c) s.lastCueAt = now(); return c; },', red: ['helperCopy'] },
+  { tag: 'q1-no-cue', why: 'verify r2 Q1 pre-fix: a reclaim is never said', from: '    takeCue(el) { const c = !!el && s.cue === el && el.isConnected !== false; if (s.cue === el) s.cue = null; if (c) s.lastCueAt = now(); return c; },', to: '    takeCue() { return false; },', red: ['q1Cue', 'cueRecreated'] },
+  { tag: 'cue-gone-said', why: 'verify r3 F2 pre-fix: a box already gone at the reclaim is announced', from: '    takeCue(el) { const c = !!el && s.cue === el && el.isConnected !== false; if (s.cue === el) s.cue = null; if (c) s.lastCueAt = now(); return c; },', to: '    takeCue(el) { const c = !!s.cue; s.cue = null; if (c) s.lastCueAt = now(); return c; },', red: ['helperCopy', 'cueRecreated'] }, // (verify r4: the bare flag also says the gone box and drops the one that stayed — two cues where one is due, in the wrong place)
+  // verify r4
+  { tag: 'cue-flag', why: 'verify r4 pre-fix: the cue is one flag any reader consumes (a replaced box\'s reader eats the staying box\'s cue)', from: '    takeCue(el) { const c = !!el && s.cue === el && el.isConnected !== false; if (s.cue === el) s.cue = null; if (c) s.lastCueAt = now(); return c; },', to: '    takeCue(el) { const c = !!s.cue && !(el && el.isConnected === false); s.cue = null; if (c) s.lastCueAt = now(); return c; },', red: ['cueRecreated'] },
+  { tag: 'no-label', why: 'verify r4 pre-fix: a press on the box\'s label is a press elsewhere', from: "  try { const lab = typeof pressed.closest === 'function' ? pressed.closest('label') : null; if (lab && (lab.control === focused || (typeof lab.contains === 'function' && lab.contains(focused)))) return true; } catch { /* detached */ }\n", to: '', red: ['labelPress'] },
   { tag: 'n1-no-host', why: 'verify r2 N1 pre-fix: only xterm\'s screen is one input with its text box', from: "const INPUT_HOSTS = '.xterm, .picture-shell';", to: "const INPUT_HOSTS = '.xterm';", red: ['n1Xpra'] },
   // verify r3 (the input-surface census: a text box's own rules)
   { tag: 'no-xterm-host', why: 'verify r3: a terminal\'s screen is not one input with its helper textarea', from: "const INPUT_HOSTS = '.xterm, .picture-shell';", to: "const INPUT_HOSTS = '.picture-shell';", red: ['terminal'] },
   { tag: 'no-contenteditable', why: 'verify r3: a contenteditable (CodeMirror) is not a text box', from: '  if (el.isContentEditable) return true;\n', to: '', red: ['textCm'] },
   { tag: 'no-search-type', why: 'verify r3: an <input type=search> is not a text box', from: "const TEXT_INPUT_TYPES = new Set(['', 'text', 'search',", to: "const TEXT_INPUT_TYPES = new Set(['', 'text',", red: ['textSearch'] },
   // verify r3 (the sink's blur)
-  { tag: 'no-dialog-cue', why: 'verify r3 F4 pre-fix: a dialog the user opened is taken back silently', from: '    dialogCue(a) {\n', to: '    dialogCue(a) { return false;\n', red: ['dialogConfirm'] },
-  { tag: 'where-kind', why: 'verify r3 (r2\'s held) pre-fix: the chip names the text box the keys were given to, wherever the focus went', from: "      if (active && active !== sink && !inView(active)) { if (takesKeys(active)) return yieldKindOf(active); if (isFrame(active)) return 'other'; }\n      return 'none';", to: '      return s.kind;', red: ['widgetYielded'] },
-  { tag: 'no-choice', why: 'verify r3 F1 pre-fix: a <select> is taken back like any other focus (its list closes)', from: "export function isChoiceControl(el) { try { return !!el && el.nodeType === 1 && el.tagName === 'SELECT' && !el.disabled; } catch { return false; } }", to: 'export function isChoiceControl(el) { return false; }', red: ['choiceSelect'] },
+  { tag: 'no-dialog-cue', why: 'verify r3 F4 pre-fix: a dialog the user opened is taken back silently', from: '    dialogCue(a) {\n', to: '    dialogCue(a) { return false;\n', red: ['dialogConfirm', 'dialogSelect', 'dialogTwice'] },
+  { tag: 'where-kind', why: 'verify r3 (r2\'s held) pre-fix: the chip names the text box the keys were given to, wherever the focus went', from: "      if (active && active !== sink && !inView(active)) { if (takesKeys(active)) return yieldKindOf(active); if (isFrame(active)) return 'other'; }\n      return 'none';", to: '      return s.kind;', red: ['widgetYielded', 'focusStorm'] },
+  { tag: 'no-choice', why: 'verify r3 F1 pre-fix: a <select> is taken back like any other focus (its list closes)', from: "export function isChoiceControl(el) { try { return !!el && el.nodeType === 1 && el.tagName === 'SELECT' && !el.disabled; } catch { return false; } }", to: 'export function isChoiceControl(el) { return false; }', red: ['choiceSelect', 'dialogSelect'] },
   { tag: 'blur-frame-blind', why: 'verify r3: a frame is taken back like any other focus (never said)', from: "  try { if (isFrame(a) && !(root && root.contains(a))) return 'frame'; } catch { /* detached */ }", to: '', red: ['frameSink'] },
-  { tag: 'blur-keeps-all', why: 'verify r3: the sink never takes a focus back (a press on a control / list / frame keeps it)', from: "  if (isEditable(a) || isChoiceControl(a)) return 'keep';", to: "  return 'keep';", red: ['frameSink', 'controlCheckbox', 'widgetList', 'dialogConfirm', 'textCm'] }, // (textCm: the gutter's scroller would keep the focus)
+  { tag: 'blur-keeps-all', why: 'verify r3: the sink never takes a focus back (a press on a control / list / frame keeps it)', from: "  if (isEditable(a) || isChoiceControl(a)) return 'keep';", to: "  return 'keep';", red: ['frameSink', 'controlCheckbox', 'widgetList', 'dialogConfirm', 'textCm', 'controlSummary', 'dialogSelect', 'dialogTwice'] }, // (textCm: the gutter's scroller would keep the focus)
   { tag: 'n1-no-surface', why: 'verify r2 N1 pre-fix: noVNC\'s canvas is not a place keys go', from: "  try { return !!el && el.nodeType === 1 && el.tagName === 'CANVAS' && typeof el.closest === 'function' && !!el.closest('.picture-shell'); } catch { return false; }", to: '  return false;', red: ['n1Vnc', 'n1Script'] },
 ];
 for (const c of CONTROLS) {
@@ -758,7 +886,18 @@ ok(R.dialogConfirm.ok, 'verify r3 (F4): a DIALOG the user\'s own press opened (D
 ok(R.textSearch.ok, 'verify r3 (the census\'s text row): a SEARCH box (<input type=search> — the palette, the pickers) yields to the user\'s own press; "ab" lands in it', J(R.textSearch));
 ok(R.textCm.ok, 'verify r3 (the census\'s text row): the CODE EDITOR — a press on a line yields to CodeMirror\'s .cm-content ("zz" in the doc); a press on its gutter focuses the scroller, the sink takes it back ("g" to the page — without a takeover the gutter takes no typing either)', J(R.textCm));
 ok(R.noneCanvas.ok, 'verify r3 (the census\'s none row): a chart\'s canvas takes no keys — a press on it leaves them the page\'s; only a picture shell\'s canvas is a keyboard surface', J(R.noneCanvas));
-ok(Object.values(R).every((r) => r.ok) && Object.keys(R).length === 41, `…and the real module passes all ${Object.keys(R).length} scenarios under the same harness`);
+// ── verify r4: attacks on r3's rules ──
+ok(R.dialogSelect.ok, 'verify r4 (attack 1): a <select> INSIDE a dialog — the dialog\'s own focus taken back and said once (F4); the press on the select keeps the focus (F1 wins, silently); the first key hands the caret to the sink; OK by a press is silent', J(R.dialogSelect));
+ok(R.dialogTwice.ok, 'verify r4 (attack 4, declared): a second dialog the user opens inside RECLAIM_CUE_MS is not said again (one rate limit with the Q1 cue); its Enter is the page\'s too', J(R.dialogTwice));
+ok(R.cueRecreated.ok, 'verify r4 (attack 2): a box focused, REPLACED and focused again in one task (a keyed patch) — the gone box never said, the box that stayed said ONCE (before: reclaimed twice, said never — the one flag consumed by the wrong reader)', J(R.cueRecreated));
+ok(R.cueStaleSame.ok, 'verify r4 (attack 2, declared): a press ON the box whose focus lands after USER_PRESS_MS (a blocked render) is reclaimed and not said — the cue is for a press elsewhere', J(R.cueStaleSame));
+ok(R.labelPress.ok, 'verify r4 (attack 2): a press on the box\'s LABEL (<label for>, or a label wrapping it) is a press on the box — it YIELDS ("ab" / "cd" land there), nothing said (before: reclaimed, "click the text box itself")', J(R.labelPress));
+ok(R.focusStorm.ok, 'verify r4 (attack 3): 500 focus moves over a list while yielded — the view moves no focus (0 reclaims, 0 caret moves, no loop), whereNow follows, the yield stays', J(R.focusStorm));
+ok(R.twoViewsEnd.ok, 'verify r4 (attack 7): two views yielded to one press; one hands back — the other\'s yield and the composer\'s line stay (true for it); the second handback leaves no claim, the composer focuses as always', J(R.twoViewsEnd));
+ok(R.socketWhileYielded.ok, 'verify r4 (attack 7): the socket closes while yielded — the takeover ends as the server ends it, the yield with it, the caret stays in the composer, the line goes, no claim is left', J(R.socketWhileYielded));
+ok(R.streamWhileYielded.ok, 'verify r4 (attack 8): a mode record re-applied while yielded moves no caret — the stream has no way to the keys (renderMode keeps its hands off while yielded)', J(R.streamWhileYielded));
+ok(R.controlSummary.ok, 'verify r4 (the census\'s control row): a <summary> toggles by the press, the sink takes the focus back, Enter stays the page\'s', J(R.controlSummary));
+ok(Object.values(R).every((r) => r.ok) && Object.keys(R).length === 51, `…and the real module passes all ${Object.keys(R).length} scenarios under the same harness`);
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: CONTROLS.length, label: '§2 ' })) ok(r.pass, r.name, r.detail);
 
 // ═══ §3 WIRING PINS ═══════════════════════════════════════════════════════════
@@ -794,8 +933,28 @@ ok(/const claimRec = \(\) => \(\{ id: winInfo\.id, owns: ownsKeyboard, yielded: 
 // the .197 integration: the three pins below read the MERGED lines (browse-yourself's address-row exemption and first-claim caret, lane-pairing r6's wake count)
 ok(/if \(first\) \{ st\.claimed = true; st\.sent = 0; st\.pressed\.clear\(\); ky\.reset\('claim'\); claimKeyboard\(claimRec\(\)\); \}/.test(LW) && /else if \(!ky\.yielded && !\(H && document\.activeElement === addrInput\)\) focusSink\(\);/.test(LW) && /ky\.reset\('release'\); releaseKeyboard\(winInfo\.id\);/.test(LW) && /ky\.reset\('release'\); keyboardChanged\(\);/.test(LW),
   'a re-render while yielded never pulls the focus back; a fresh claim and the release (and a closed window) clear the yield');
-ok(/const yielded = !own && st\.claimed && yieldedKeyboard\(\);/.test(LW) && /kbdText\.textContent = yielded \? yieldChipText\(ky\.whereNow\(document\.activeElement\)\) :/.test(LW) && /document\.addEventListener\('focusout', \(\) => \{ if \(st\.claimed && ky\.yielded\) setTimeout\(\(\) => \{ if \(!st\.closed\) renderKbd\(\); \}, 0\); \}, capture\);/.test(LW) && /priority: key === 'kbd' && st\.claimed && ky\.yielded \? LIVE_BAR_PRIORITY\.badge : LIVE_BAR_PRIORITY\[key\]/.test(LW),
+ok(/const yielded = !own && st\.claimed && yieldedKeyboard\(\);/.test(LW) && /const text = yielded \? yieldChipText\(ky\.whereNow\(document\.activeElement\)\) :/.test(LW) && /document\.addEventListener\('focusout', \(\) => \{ if \(st\.claimed && ky\.yielded\) setTimeout\(\(\) => \{ if \(!st\.closed\) renderKbd\(\); \}, 0\); \}, capture\);/.test(LW) && /priority: key === 'kbd' && st\.claimed && ky\.yielded \? LIVE_BAR_PRIORITY\.badge : LIVE_BAR_PRIORITY\[key\]/.test(LW),
   'the bar says where the keys are while yielded (the chip patched in place, at the badge\'s fold rank)');
+// verify r4 (attack 3): the chip is WRITTEN only on change — a yielded view re-reads it on every focus move (focusout + focusin), and a
+// same-text write is a mutation record + an accessibility event (measured: 300 focus moves ⇒ 1 200 records, the words never changing)
+ok(/if \(kbdText\.textContent !== text\) kbdText\.textContent = text;\n    if \(kbdChip\.title !== title\) kbdChip\.title = title;/.test(LW), 'verify r4 (attack 3): renderKbd writes the chip\'s words and title only when they CHANGE');
+// verify r4 (attack 1, measured): onDocKey ENDS with focusSink() — after any key the sink holds the caret (a <select> that kept the
+// focus of a press loses it at the closing key's keyup: its list is closed by then, the next keys are the page's)
+ok(/\n    focusSink\(\);\n  \};\n  document\.addEventListener\('keydown', onDocKey, capture\);\n  document\.addEventListener\('keyup', onDocKey, capture\);\n  document\.addEventListener\('keypress', onDocKey, capture\);/.test(LW), 'verify r4 (attack 1): onDocKey ends with focusSink() (keydown / keyup / keypress, capture)');
+// verify r4 (attack 7): the socket closing ends the takeover as the server does (viewer-left) — renderMode releases the claim and the yield
+ok(/st\.connected = false; renderKbd\(\); syncKeyboard\(\);[^\n]*\n[^\n]*\n[^\n]*\n      if \(st\.mine\) \{ st\.mode = 'watch'; st\.mine = false; st\.holder = null; renderMode\(\); \}/.test(LW), 'verify r4 (attack 7): ws.onclose — the stream down (a transition), then the takeover ended locally: mode watch + renderMode (the claim and its yield released)');
+{ // verify r4 (attack 8, the security class): EVERY focusSink() site is guarded — the view owns (iOwn), or not yielded (renderMode), or a
+  // transition (settle / moveCaret), or the user's own press on the picture (driving), or a copy of ours; onMessage (the stream) never
+  // touches focus — the page has no way to the keys while the user gave them to a text box
+  // 2.369.198 integration: the .197 BROWSE YOURSELF rows added four sites the lane's tree never had — his own address box's
+  // Enter / Escape (`if (driving()) focusSink()`: his own key, and only while he drives), the touch Keyboard button and the
+  // H branch of Continue here (his own click on our own button) — each read inside its OWN handler, like every other site
+  const HEADS = ['\n  const onDocKey', '\n  function ', '\n  document.addEventListener(', '\n  kbd.addEventListener(', '\n  img.addEventListener(', '\n  const renderMode', '\n  addrInput.addEventListener(\'keydown\'', '\n  kbdBtn.onclick = ', '\n  takeBtn.onclick = '];
+  const userAct = (ctx) => (/^\n  addrInput\.addEventListener\('keydown'/.test(ctx) && /if \(driving\(\)\) $/.test(ctx)) || /^\n  (kbdBtn|takeBtn)\.onclick = /.test(ctx);
+  const sites = []; let i = -1; while ((i = LW.indexOf('focusSink();', i + 1)) >= 0) { if (/function focusSink\(\)/.test(LW.slice(i - 30, i))) continue; const head = Math.max(...HEADS.map((h) => LW.lastIndexOf(h, i))); const ctx = LW.slice(head, i); sites.push({ at: LW.slice(0, i).split('\n').length, guarded: /iOwn\(\)|!ky\.yielded|!driving\(\)|ky\.settle\(|r\.moveCaret|st\.copying = false/.test(ctx) || userAct(ctx) }); } // (the guard is read inside the site's OWN handler / function)
+  const om = LW.slice(LW.indexOf('  function onMessage(m) {'), LW.indexOf('\n  }\n', LW.indexOf('  function onMessage(m) {')));
+  ok(sites.length === 17 && sites.every((s) => s.guarded) && om.length > 2000 && !/focusSink\(|\.focus\(/.test(om), `verify r4 (attack 8): every focusSink() site (${sites.length}) is guarded by ownership / not-yielded / a transition / the user's press / a copy of ours; onMessage never focuses`, J(sites.filter((s) => !s.guarded)));
+}
 { // verify r2 (H1): the view's transition sync — the same acts as this harness's sync, run on every signal of a transition
   const fnBody = (head) => { const i = LW.indexOf(head); return i < 0 ? '' : LW.slice(i, LW.indexOf('\n  }\n', i) + 4); };
   const sk = fnBody('  function syncKeyboard() {');
@@ -842,17 +1001,17 @@ ok(miss.length === 0 && zh.includes('"键盘在对话框 — 点画面继续操�
 // surface without a row, a row whose construct left its file, a class without a green leg — red.
 console.log('§4 the input-surface census: every element that takes keys, grep-derived, classified, each class proven');
 const SURFACE_CLASSES = {
-  text:    { press: 'YIELDS', focus: 'the box itself (CodeMirror: its .cm-content)', script: 'taken back (said once when the user\'s own press elsewhere caused it — Q1)', legs: ['userW', 'textSearch', 'textCm', 'script', 'q1Cue'], controls: ['no-press', 'no-contenteditable', 'no-search-type'] },
+  text:    { press: 'YIELDS', focus: 'the box itself (CodeMirror: its .cm-content); its <label> is the box (verify r4)', script: 'taken back (said once when the user\'s own press elsewhere caused it — Q1)', legs: ['userW', 'textSearch', 'textCm', 'script', 'q1Cue', 'labelPress'], controls: ['no-press', 'no-contenteditable', 'no-search-type', 'no-label'] },
   host:    { press: 'YIELDS', focus: 'xterm\'s helper textarea (its screen and the textarea are one input)', script: 'taken back', legs: ['terminal'], controls: ['no-xterm-host'] },
   picture: { press: 'YIELDS', focus: 'xpra: the pane\'s IME textarea · noVNC: its canvas', script: 'taken back', legs: ['n1Xpra', 'n1Vnc', 'n1Script'], controls: ['n1-no-host', 'n1-no-surface'] },
   frame:   { press: 'DECLARED — taken back, said', focus: 'the sink (a press inside a frame is the frame document\'s: nothing tells it from the frame\'s own script — verify r2 H5)', script: 'taken back', legs: ['frameSink', 'h1Frame'], controls: ['blur-frame-blind', 'h1-frame-blind'] },
   choice:  { press: 'DECLARED — the pointer picks', focus: 'the <select> keeps it (its list open); its keys stay the page\'s (F1)', script: 'kept (a script cannot open a list)', legs: ['choiceSelect'], controls: ['no-choice'] },
-  control: { press: 'DECLARED — the pointer works', focus: 'the sink takes it back (a checkbox / radio / range / colour / file / read-only field, a role=button chip: its Space / Enter / arrows stay the page\'s)', script: 'taken back', legs: ['controlCheckbox'], controls: ['blur-keeps-all'] },
-  widget:  { press: 'DECLARED — not typing', focus: 'the sink takes it back while the view owns (a list\'s arrows / Enter stay the page\'s); yielded, the keys stay where they were and the chip says "not in a text box" (r2\'s held)', script: 'taken back', legs: ['widgetList', 'widgetYielded'], controls: ['blur-keeps-all', 'where-kind'] },
-  dialog:  { press: 'TAKEN BACK — said', focus: 'the sink (a dialog\'s own focus / default button: its Enter / Escape stay the page\'s; said once when the user\'s own press opened it — F4; its input is a text row)', script: 'taken back, silent', legs: ['dialogConfirm'], controls: ['no-dialog-cue'] },
-  helper:  { press: 'TAKEN BACK — silent', focus: 'the sink (a script-only box: a copy fallback\'s scratch textarea, the terminal\'s paste target — never announced, F2)', script: 'taken back', legs: ['helperCopy'], controls: ['cue-gone-said'] },
+  control: { press: 'DECLARED — the pointer works', focus: 'the sink takes it back (a checkbox / radio / range / colour / file / read-only field, a role=button chip, a <details> fold\'s summary: its Space / Enter / arrows stay the page\'s; verify r4 measured: the colour picker stays open, a summary toggles)', script: 'taken back', legs: ['controlCheckbox', 'controlSummary'], controls: ['blur-keeps-all'] },
+  widget:  { press: 'DECLARED — not typing', focus: 'the sink takes it back while the view owns (a list\'s arrows / Enter stay the page\'s — a listbox / combobox widget of ours too); yielded, the keys stay where they were and the chip says "not in a text box" (r2\'s held)', script: 'taken back', legs: ['widgetList', 'widgetYielded', 'focusStorm'], controls: ['blur-keeps-all', 'where-kind'] },
+  dialog:  { press: 'TAKEN BACK — said', focus: 'the sink (a dialog\'s own focus / default button: its Enter / Escape stay the page\'s; said once when the user\'s own press opened it — F4, once per RECLAIM_CUE_MS; its input is a text row, its select a choice row)', script: 'taken back, silent', legs: ['dialogConfirm', 'dialogSelect', 'dialogTwice'], controls: ['no-dialog-cue'] },
+  helper:  { press: 'TAKEN BACK — silent', focus: 'the sink (a script-only box: a copy fallback\'s scratch textarea and its execCommand, the terminal\'s paste target — never announced, F2)', script: 'taken back', legs: ['helperCopy', 'cueRecreated'], controls: ['cue-gone-said', 'cue-flag'] },
   view:    { press: 'THE VIEW', focus: 'its own sink (the keys go to the page)', script: '—', legs: ['picture', 'bar', 'ownTab'], controls: ['no-chrome'] },
-  none:    { press: 'NOT A KEY SURFACE', focus: 'nothing (a chart, a measuring context)', script: '—', legs: ['noneCanvas'], controls: [] },
+  none:    { press: 'NOT A KEY SURFACE', focus: 'nothing (a chart, a measuring context, a shadow root that holds paper)', script: '—', legs: ['noneCanvas'], controls: [] },
 };
 /** [file under src/lib, construct, classes joined by +, where] */
 const CENSUS = [
@@ -861,6 +1020,7 @@ const CENSUS = [
   ['browser-live-window.js', 'textarea', 'view', 'the live view\'s keyboard sink'],
   ['browser-live-window.js', 'input', 'text', 'BROWSE YOURSELF\'s address row (his own box: the H exemption — never a reclaim nor a yield); a page dialog\'s prompt answer (lane browser-stuck) — the .197 integration'],
   ['browser-live-window.js', 'tabindex', 'view+helper+widget', 'the view\'s root (0), its sink (-1); his Tabs pane rows (0, BROWSE YOURSELF: Enter goes to that tab)'],
+  ['browser-live-window.js', 'inputmode', 'text', 'BROWSE YOURSELF\'s address <input> (`inputmode=url`: the phone keyboard\'s hint on the same text box as the input row) — the .198 integration (r4\'s construct met the .197 row)'],
   ['browser-replay-window.js', 'tabindex', 'widget', 'the replay window (← → Home End Space)'],
   ['browser-trace-view.js', 'input', 'control', 'the Agent browser panel\'s record checkbox'],
   ['browser-who-dialog.js', 'input', 'control', '"Who can use it" radios'],
@@ -975,22 +1135,130 @@ const CENSUS = [
   ['window.js', 'canvas', 'none', 'the chip text measure'],
   ['xpra-view.js', 'textarea', 'picture', 'the xpra pane\'s IME textarea'],
   ['xpra-view.js', 'canvas', 'picture', 'the xpra pane\'s windows'],
+  // ── verify r4 (attack 5): the rows the r3 grep could not see — element helpers, conditional tags, index.html, the new kinds ──
+  ['browser-replay-window.js', 'combobox', 'widget', 'the sessions / actions lists (role=listbox: ← → Home End Space)'],
+  ['channel-filter-editor.js', 'select', 'choice', 'the filter\'s pickers (selectBox — el(\'select\') from channel-chrome.js)'],
+  ['channel-outbox.js', 'details', 'control', 'the proposal\'s "Original text" fold'],
+  ['channel-outbox.js', 'input', 'text', 'the reject reason'],
+  ['channel-outbox.js', 'textarea', 'text', 'THE OUTBOX EDITOR (a proposal edited before approval)'],
+  ['channel-reach-editor.js', 'select', 'choice', 'the sending policy; a grant\'s level'],
+  ['chat-renderers.js', 'details', 'control', 'a diff / media fold, attached pages, a long message'],
+  ['docx-viewer.js', 'shadow', 'none', 'the Word viewer\'s paper: a shadow root holding pages and a stylesheet, no field (the grep reads the JS that fills it)'],
+  ['inbox-window.js', 'combobox', 'widget', 'the For-you list (role=listbox)'],
+  ['inbox-window.js', 'input', 'text', 'the For-you window\'s filter (type=search, mk(\'input\'))'],
+  ['inbox-window.js', 'textarea', 'text', 'THE FOR-YOU WINDOW\'s REPLY BOX (mk(\'textarea\'))'],
+  ['index.html', 'input', 'text+control', 'the sidebar search box; the New Session dialog\'s cwd / name / custom model / extra args, its worktree checkbox; the fork title; grid rows / columns; a preset name'],
+  ['index.html', 'select', 'choice', 'the New Session dialog\'s backend / host / task / mode / model / permission / effort / account / browser profile'],
+  ['index.html', 'textarea', 'text', 'the fork dialog\'s first message'],
+  ['integrations-window.js', 'input', 'text+control', 'a key\'s fields (text / password); the source radios'],
+  ['integrations-window.js', 'select', 'choice', 'the default-for-new-accounts preset'],
+  ['jobs-panel.js', 'textarea', 'text', 'a job panel\'s multi-line field (a panel schema block: createElement(b.type === \'input\' ? \'input\' : \'textarea\'))'],
+  ['manage-agents.js', 'details', 'control', 'a member\'s fold'],
+  ['mounts-dialog.js', 'details', 'control', 'the Advanced fields fold'],
+  ['picture-shell.js', 'execcommand', 'helper', 'copyViaSelection\'s copy command (the scratch box\'s companion)'],
+  ['principal-picker.js', 'combobox', 'widget', 'the picker\'s box wears role=combobox (its list rows by arrows); the box itself is its text row'],
+  ['session-props.js', 'details', 'control', 'a fold in the properties'],
+  ['setup-flows.js', 'details', 'control', 'the diagnostics report\'s per-error folds'],
+  ['sidebar-mounts.js', 'details', 'control', 'the bootstrap log fold'],
+  ['task-detail.js', 'details', 'control', 'a progress entry\'s fold'],
+  ['task-log.js', 'details', 'control', 'a backlog item with detail (its row: createElement(isExp ? \'details\' : \'div\'))'],
+  ['terminal.js', 'execcommand', 'helper', 'the Ctrl+C copy fallback\'s command'],
+  ['user-todos-row.js', 'details', 'control', 'an item\'s detail fold'],
+  ['utils.js', 'execcommand', 'helper', 'copyText\'s fallback command'],
+  ['utils.js', 'input', 'text', 'THE INPUT DIALOG\'s single-line box (showInputDialog: createElement(multiline ? \'textarea\' : \'input\'))'],
+  ['workflow-detail.js', 'details', 'control', 'the Error / Result folds'],
 ];
-const SURFACE_KINDS = {
-  input: /createElement\(['"]input['"]\)|<input\b/,
-  textarea: /createElement\(['"]textarea['"]\)|<textarea\b/,
-  select: /createElement\(['"]select['"]\)|<select\b/,
-  iframe: /createElement\(['"]iframe['"]\)|<iframe\b/,
-  canvas: /createElement\(['"]canvas['"]\)|<canvas\b/,
-  contenteditable: /\.contentEditable\s*=|\bcontenteditable\s*=/i,
-  codemirror: /new EditorView\(/,
-  xterm: /new Terminal\(/,
-  novnc: /new RFB\(/,
+/** verify r4 (attack 5): THE GREP READS CODE — a scanner, not a line filter. Every comment is dropped (a line comment; a block
+ *  comment wherever it sits — before code on its line, or spanning lines: the old filter dropped a whole line that began with
+ *  `*` or `/*` and kept a `/*` inside a string), while strings, template literals and regex literals stay whole (an
+ *  `'image/*'`, a `/'/g` open or close nothing). Newlines are kept. */
+function codeOnly(src) {
+  const s = String(src), n = s.length; let out = '', i = 0;
+  const KW = ['return', 'typeof', 'case', 'in', 'of', 'do', 'else', 'instanceof', 'void', 'delete', 'throw', 'new', 'yield', 'await'];
+  const regexMayStart = (j) => { let k = j - 1; while (k >= 0 && (s[k] === ' ' || s[k] === '\t')) k--; if (k < 0) return true; if ('(,=:[!&|?{};+-*%<>~^\n'.includes(s[k])) return true; const m = /([A-Za-z_$][\w$]*)$/.exec(s.slice(Math.max(0, k - 12), k + 1)); return !!m && KW.includes(m[1]); };
+  while (i < n) {
+    const c = s[i], d = s[i + 1];
+    if (c === '/' && d === '/') { while (i < n && s[i] !== '\n') i++; continue; }
+    if (c === '/' && d === '*') { const e = s.indexOf('*/', i + 2); const stop = e < 0 ? n : e + 2; out += s.slice(i, stop).replace(/[^\n]/g, ' '); i = stop; continue; }
+    if (c === "'" || c === '"' || c === '`') { let j = i + 1; while (j < n && s[j] !== c && (c === '`' || s[j] !== '\n')) { if (s[j] === '\\') j++; j++; } out += s.slice(i, j + 1); i = j + 1; continue; }
+    if (c === '/' && regexMayStart(i)) { let j = i + 1, cls = false; while (j < n && s[j] !== '\n' && (cls || s[j] !== '/')) { if (s[j] === '\\') j++; else if (s[j] === '[') cls = true; else if (s[j] === ']') cls = false; j++; } out += s.slice(i, j + 1); i = j + 1; continue; }
+    out += c; i++;
+  }
+  return out;
+}
+/** verify r4 (attack 5): ELEMENT HELPERS — a function forwarding a parameter to `document.createElement` (`const el = (tag, cls) =>
+ *  …`, `export function el(tag …`) and called as `el('textarea', …)`; an EXPORTED one reaches its importers under their local
+ *  name (`import { el as chanEl } from './channel-chrome.js'`). The r3 census missed every surface made this way — the outbox
+ *  editor, the For-you window's reply box and filter, the integrations window's fields, the reach / filter editors' selects —
+ *  and every one made with a conditional tag (`createElement(multiline ? 'textarea' : 'input')`: THE INPUT DIALOG's single-line
+ *  box; the jobs panel's textarea). → Map name → exported? */
+function helperNames(code) {
+  const own = new Map();
+  for (const m of code.matchAll(/(export\s+)?(?:function\s+([A-Za-z_$][\w$]*)\s*\(\s*([A-Za-z_$][\w$]*)\b|(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:\(\s*([A-Za-z_$][\w$]*)\b[^)]*\)|([A-Za-z_$][\w$]*))\s*=>)/g)) {
+    const name = m[2] || m[4], param = m[3] || m[5] || m[6];
+    if (!name || !param) continue;
+    if (new RegExp('document\\.createElement\\(\\s*' + param + '\\s*\\)').test(code.slice(m.index, m.index + 600))) own.set(name, !!m[1]);
+  }
+  return own;
+}
+function importedHelpers(code, exportedOf) {
+  const out = [];
+  for (const m of code.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"]\.\/([\w.-]+)['"]/g)) {
+    const ex = exportedOf.get(m[2]); if (!ex) continue;
+    for (const part of m[1].split(',')) { const p = part.trim().split(/\s+as\s+/); const orig = p[0].trim(), local = (p[1] || p[0]).trim(); if (orig && ex.has(orig)) out.push(local); }
+  }
+  return out;
+}
+const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** the constructs by TAG: a template `<tag`, `createElement(…'tag'…)` with any expression inside (a conditional tag), a helper call
+ *  with the literal as any argument */
+const TAG_KINDS = { input: ['input'], textarea: ['textarea'], select: ['select'], iframe: ['iframe'], canvas: ['canvas'], details: ['details', 'summary'], datalist: ['datalist'] };
+/** the constructs by PATTERN (verify r4 adds the ones the r3 grep could not see: an ARIA text box, a combobox / listbox widget of
+ *  ours, `inputmode`, `designMode`, `execCommand` (a copy fallback's companion), a shadow root and `delegatesFocus`) */
+const RE_KINDS = {
+  contenteditable: /\.contentEditable\s*=|\bcontenteditable\s*=|setAttribute\(['"]contenteditable['"]/i,
+  textbox: /role=\\?["']?textbox|['"]role['"]\s*,\s*['"]textbox['"]/i,
+  combobox: /role=\\?["']?(?:combobox|listbox)|['"]role['"]\s*,\s*['"](?:combobox|listbox)['"]/i,
+  inputmode: /\binputmode\s*=|\.inputMode\s*=|setAttribute\(['"]inputmode['"]/i,
+  designmode: /\.designMode\s*=/,
+  execcommand: /\bexecCommand\(/,
+  shadow: /\battachShadow\(/,
+  delegatesfocus: /delegatesFocus\s*:\s*true/,
   tabindex: /\.tabIndex\s*=\s*-?\d|\btabindex\s*=\s*\\?["']?-?\d|setAttribute\(['"]tabindex['"]/i,
 };
-/** comment lines and trailing `// …` comments out (a comment naming "<select>" is no surface; a URL's `://` stays) */
-const codeOnly = (src) => src.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).map((l) => l.replace(/(^|[\s;,)])\/\/\s.*$/, '$1')).join('\n');
-function surfaceHits(files) { const out = new Set(); for (const [f, text] of files) { const code = codeOnly(text); for (const [k, re] of Object.entries(SURFACE_KINDS)) if (re.test(code)) out.add(f + ' ' + k); } return out; }
+/** the LIBRARY constructors: `new EditorView(` / `new Terminal(` / `new RFB(` — and the same under an import ALIAS
+ *  (`import { EditorView as EV } from 'codemirror'`, a default import of noVNC under any name) */
+const LIB_CTORS = [
+  { kind: 'codemirror', name: 'EditorView', from: /^(?:codemirror|@codemirror\/view)$/ },
+  { kind: 'xterm', name: 'Terminal', from: /^@?xterm(?:\/xterm)?$/ },
+  { kind: 'novnc', name: 'RFB', from: /novnc/, dflt: true },
+];
+function surfaceHits(files) {
+  const codes = files.map(([f, t]) => [f, codeOnly(t)]);
+  const exportedOf = new Map(), ownOf = new Map();
+  for (const [f, c] of codes) { const h = helperNames(c); ownOf.set(f, [...h.keys()]); exportedOf.set(f, new Set([...h].filter(([, ex]) => ex).map(([k]) => k))); }
+  const out = new Set();
+  for (const [f, c] of codes) {
+    const helpers = [...new Set([...ownOf.get(f), ...importedHelpers(c, exportedOf)])];
+    for (const [k, tags] of Object.entries(TAG_KINDS)) {
+      const lit = '[\'"](?:' + tags.join('|') + ')[\'"]';
+      const res = [new RegExp('<(?:' + tags.join('|') + ')\\b'), new RegExp('createElement\\([^)\\n]*' + lit)];
+      if (helpers.length) res.push(new RegExp('\\b(?:' + helpers.map(esc).join('|') + ')\\([^;\\n]*?' + lit));
+      if (res.some((re) => re.test(c))) out.add(f + ' ' + k);
+    }
+    for (const [k, re] of Object.entries(RE_KINDS)) if (re.test(c)) out.add(f + ' ' + k);
+    for (const L of LIB_CTORS) {
+      const names = [L.name];
+      for (const m of c.matchAll(/import\s+(?:([A-Za-z_$][\w$]*)|\{([^}]*)\})\s*from\s*['"]([^'"]+)['"]/g)) {
+        if (!L.from.test(m[3])) continue;
+        if (m[1] && L.dflt) names.push(m[1]);
+        if (m[2]) for (const part of m[2].split(',')) { const p = part.trim().split(/\s+as\s+/); if (p[0].trim() === L.name) names.push((p[1] || p[0]).trim()); }
+      }
+      if (new RegExp('new\\s+(?:' + names.map(esc).join('|') + ')\\(').test(c)) out.add(f + ' ' + L.kind);
+    }
+  }
+  return out;
+}
 function censusVerdict(hits, rows) {
   const keys = rows.map((r) => r[0] + ' ' + r[1]);
   const dup = keys.filter((k, i) => keys.indexOf(k) !== i);
@@ -999,10 +1267,12 @@ function censusVerdict(hits, rows) {
   const badClass = rows.filter((r) => !String(r[2]).split('+').every((c) => SURFACE_CLASSES[c])).map((r) => r[0] + ' ' + r[1] + ' → ' + r[2]);
   return { unclassified, dead, dup, badClass, ok: !unclassified.length && !dead.length && !dup.length && !badClass.length };
 }
-const LIB = (() => { const walk = (d) => fs.readdirSync(path.join(REPO, d), { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]); return walk('src/lib').filter((f) => f.endsWith('.js')).map((f) => [f.replace(/^src\/lib\//, ''), fs.readFileSync(path.join(REPO, f), 'utf8')]); })();
+// verify r4: the census reads src/lib/** AND public/index.html (the sidebar search box, the New Session / fork / grid dialogs —
+// surfaces born in the markup, never in src/lib)
+const LIB = (() => { const walk = (d) => fs.readdirSync(path.join(REPO, d), { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]); return [...walk('src/lib').filter((f) => f.endsWith('.js')).map((f) => [f.replace(/^src\/lib\//, ''), fs.readFileSync(path.join(REPO, f), 'utf8')]), ['index.html', fs.readFileSync(path.join(REPO, 'public/index.html'), 'utf8')]]; })();
 const HITS = surfaceHits(LIB);
 const CV = censusVerdict(HITS, CENSUS);
-ok(CV.ok && HITS.size === CENSUS.length && HITS.size >= 100, `the census: ${HITS.size} (file, construct) surfaces in ${LIB.length} src/lib files — every one classified, no dead row, no duplicate, every class known`, J(CV));
+ok(CV.ok && HITS.size === CENSUS.length && HITS.size >= 120, `the census: ${HITS.size} (file, construct) surfaces in ${LIB.length} files (src/lib/** + index.html) — every one classified, no dead row, no duplicate, every class known`, J(CV));
 { const byClass = {}; for (const r of CENSUS) for (const c of r[2].split('+')) (byClass[c] ||= []).push(r[0].replace(/\.js$/, '') + ':' + r[1]);
   const unused = Object.keys(SURFACE_CLASSES).filter((c) => !byClass[c]);
   ok(!unused.length, `every class has rows (${Object.entries(byClass).map(([c, l]) => c + ' ' + l.length).join(' · ')})`, unused.join(', '));
@@ -1025,8 +1295,27 @@ ok(CV.ok && HITS.size === CENSUS.length && HITS.size >= 100, `the census: ${HITS
   ok(!g.ok && J(g.dead) === J(['window.js canvas']), 'NEGATIVE CONTROL (window.js\'s canvas gone): its row is named DEAD', J(g));
   const bad = censusVerdict(HITS, CENSUS.map((r) => r[0] === 'chat-input.js' && r[1] === 'textarea' ? [r[0], r[1], 'texty', r[3]] : r));
   ok(!bad.ok && bad.badClass.length === 1, 'NEGATIVE CONTROL (a row with an unknown class): named', J(bad.badClass));
-  const commented = surfaceHits([['x.js', "// a <select> in a comment\n * <iframe> in a doc comment\nconst u = 'https://x'; // <textarea> trailing\n"]]);
-  ok(commented.size === 0, 'the grep reads CODE: a surface named only in a comment (line, doc, trailing) is no surface; a URL\'s :// keeps its line', J([...commented])); }
+  const commented = surfaceHits([['x.js', "// a <select> in a comment\n/**\n * <iframe> in a doc comment\n */\nconst u = 'https://x'; // <textarea> trailing\n/* <input> in a block */\n/*\n * <canvas> in a\n * doc block */\n"]]);
+  ok(commented.size === 0, 'the grep reads CODE: a surface named only in a comment (line, doc block, trailing, a block on its own line) is no surface; a URL\'s :// keeps its line', J([...commented])); }
+// verify r4 (attack 5): THE BELT'S OWN OMISSIONS — each construct that slipped past the r3 grep is now named, on a synthetic file
+// (the census's controls stay red on a REAL omission, never on a comment): a block comment BEFORE code on its line, a `/*` inside a
+// string, a regex with a quote, a surface in a template literal whose line begins with ` * `, a conditional tag, an element helper (own,
+// and imported under an alias from a file that exports it), a library constructor under an alias, and every pattern kind
+{ const probe = (name, text, want) => { const h = surfaceHits([...LIB, [name, text]]); const got = [...h].filter((x) => x.startsWith(name + ' ')).map((x) => x.slice(name.length + 1)).sort(); ok(J(got) === J([...want].sort()), `NEGATIVE CONTROL (the belt sees ${want.length ? want.join(' + ') : 'nothing'} in: ${text.replace(/\n/g, '⏎').slice(0, 96)})`, J(got)); };
+  probe('p1.js', "/* a note */ const i = document.createElement('input');\n", ['input']);
+  probe('p2.js', "const a = 'image/*'; const s = document.createElement('select'); const b = 'x';\n", ['select']);
+  probe('p3.js', "const r = /'/g; const t = document.createElement('textarea');\n", ['textarea']);
+  probe('p4.js', "const html = `\n * <input type=text>\n`;\n", ['input']);
+  probe('p5.js', "const i = document.createElement(multi ? 'textarea' : 'input');\n", ['input', 'textarea']);
+  probe('p6.js', "const mk = (tag, cls) => { const e = document.createElement(tag); e.className = cls; return e; };\nconst t = mk('textarea', 'box'); const s = mk('div', 'x', mk('select'));\n", ['select', 'textarea']);
+  probe('p7.js', "import { el as z } from './channel-chrome.js';\nconst f = z('iframe');\n", ['iframe']);
+  probe('p8.js', "import { el } from './hex-viewer.js';\nconst f = el('iframe');\n", []); // hex-viewer exports no element helper: `el` there is nobody's
+  probe('p9.js', "import { EditorView as EV } from 'codemirror';\nconst v = new EV({});\n", ['codemirror']);
+  probe('p10.js', "import Rfb from '../../public/novnc.js';\nconst v = new Rfb(el, url);\n", ['novnc']);
+  probe('p11.js', "const d = document.createElement('div'); d.setAttribute('role', 'textbox'); d.inputMode = 'numeric'; document.designMode = 'on'; const s = h.attachShadow({ mode: 'open', delegatesFocus: true }); document.execCommand('copy'); const l = '<datalist id=x>'; const c = '<div role=\"combobox\">';\n", ['textbox', 'inputmode', 'designmode', 'shadow', 'delegatesfocus', 'execcommand', 'datalist', 'combobox']);
+  probe('p12.js', "const d = document.createElement(exp ? 'details' : 'div'); const s = '<summary>x</summary>'; d.setAttribute('contenteditable', 'true'); d.setAttribute('tabindex', '0');\n", ['details', 'contenteditable', 'tabindex']);
+  probe('p13.js', "// <input> here\n/* <textarea> */ const x = 1; /* <select>\n<iframe> */\nconst re = /<canvas>/; const s = \"// <details>\";\n", ['canvas', 'details']); // a regex literal and a string are code; the comments are not
+}
 
 console.log(`\n(${Date.now() - t0} ms)`);
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

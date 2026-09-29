@@ -11,6 +11,24 @@ const { bucketRemaining, accountRemaining, weeklyDeadline, decidePoolSwitch, poo
 
 let pass = 0, fail = 0;
 const ck = (n, c) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n); } };
+/** THE PRE-FIX COPY a byte-identity sweep compares against (lane-mirror-197, 2026-09-29): `git show <ref>:<file>` needs the ref
+ *  IN THIS CLONE, and the Actions mirror is a depth-1 checkout (the pushed commit alone) — the ref is absent there BY CONSTRUCTION
+ *  (the fast job printed `fatal: invalid object name 'b970f16d'` three times and went red on six legs a full clone passes). The
+ *  answer names the world: `{mod}` when the ref is here; `{mod: null, why: 'shallow'}` on a shallow clone — the caller SKIPS the
+ *  historical rung with evidence, its ref-free sweep carries the leg, and the copies census keys on whether this control RAN
+ *  (the 2.369.164 r2 rule: count the producers that ran); `why` naming the ref on a FULL clone = a real failure, never a skip.
+ *  Git runs under the sanitized env (a pre-push hook exports GIT_DIR) with the checkout as cwd. */
+async function preFixCopy(M, ref, rel, tag = 'master') {
+  const { execFileSync } = await import('node:child_process');
+  const { gitEnvFrom } = await import('./git-env.mjs');
+  const git = (args) => execFileSync('git', args, { encoding: 'utf8', cwd: path.resolve('.'), env: gitEnvFrom(process.env), stdio: ['ignore', 'pipe', 'ignore'] });
+  let has = false; try { git(['cat-file', '-e', `${ref}^{commit}`]); has = true; } catch { has = false; }
+  if (has) { try { return { mod: M.load(rel, git(['show', `${ref}:${rel}`]), tag), why: null }; } catch (e) { return { mod: null, why: `git show ${ref}:${rel} failed: ${String(e && e.message).slice(0, 120)}` }; } }
+  let shallow = false; try { shallow = git(['rev-parse', '--is-shallow-repository']).trim() === 'true'; } catch { shallow = false; }
+  return { mod: null, why: shallow ? 'shallow' : `the ref ${ref} is not in this clone, which is NOT shallow` };
+}
+/** The one sentence a skipped historical rung prints (the census below expects one copy fewer). */
+const skipPreFix = (label, ref) => console.log(`  ⊘ SKIP ${label}the byte-identity sweep against ${ref} — the ref is not in this SHALLOW clone (the mirror's depth-1 checkout); the ref-free sweep carries the leg`);
 const NOW = 1800000000; // unix seconds
 const H = 3600, D = 86400;
 const fut = NOW + H, past = NOW - H;
@@ -695,11 +713,15 @@ await (async () => {
   const lo = { a: { state: 'logged-out' }, b: { state: 'ok' }, c: { state: 'ok' } };
   const r6 = dm({ membership: ['a', 'b', 'c'], readLogin: (id) => lo[id] });
   ck('member: a signed-out member the pool still lists keeps its own verdict (login-expired) — membership is the configured list, never the logged-in one', r6.to === 'b' && r6.reason === 'login-expired');
-  // (3) membership unchanged ⇒ byte-identical: a seeded sweep against the master copy
-  let master = null;
-  try { master = M.load('src/account-pool-auto.js', execFileSync('git', ['show', 'b970f16d:src/account-pool-auto.js'], { encoding: 'utf8', cwd: REPO }), 'master'); } catch (e) { master = null; }
-  ck('member: the master copy (b970f16d) loaded for the byte-identity sweep', !!master && typeof master.decidePoolSwitch === 'function');
-  if (master) {
+  // (3) membership unchanged ⇒ byte-identical: a seeded sweep against the master copy (the ref-free half — the three
+  //     membership shapes decide alike — runs everywhere; the historical rung only where the ref is, mirror-197)
+  const pre = await preFixCopy(M, 'b970f16d', 'src/account-pool-auto.js');
+  const master = pre.mod;
+  if (!master && pre.why === 'shallow') skipPreFix('member: ', 'b970f16d');
+  else ck(`member: the master copy (b970f16d) loaded for the byte-identity sweep${pre.why ? ` — ${pre.why}` : ''}`, !!master && typeof master.decidePoolSwitch === 'function');
+  // CONTROL (mirror-197): a ref that is NOT here is a skip only on a SHALLOW clone — on a full clone it is a failure by name
+  { const gone = await preFixCopy(M, '0123456789abcdef0123456789abcdef01234567', 'src/account-pool-auto.js', 'gone'); ck(`preFixCopy CONTROL: an absent ref answers ${master ? '"NOT shallow" (a failure, never a skip) on this full clone' : "'shallow' on this shallow clone"} — the helper tells the two worlds apart`, gone.mod === null && (master ? /NOT shallow/.test(gone.why) : gone.why === 'shallow')); }
+  {
     let seed = 7; const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
     const ids = ['a', 'b', 'c', 'd'];
     let same = 0, n = 0, diff = null;
@@ -710,14 +732,14 @@ await (async () => {
       const proactive = rnd() < 0.5;
       const w = rnd() < 0.3 ? { warm: rnd() < 0.5, agoSec: 10, ttlSec: 300, inTurn: rnd() < 0.5 } : null;
       const base = { currentId: cur, members: mem, readCache: (id) => caches[id] ?? null, nowSec: NOW, proactive, hot: proactive, exclude: rnd() < 0.2 ? ['b'] : null, warm: w, explain: true };
-      const want = JSON.stringify(master.decidePoolSwitch(base));
+      const want = JSON.stringify((master || { decidePoolSwitch }).decidePoolSwitch(base));
       for (const extra of [{}, { membership: [...ids] }, { membership: new Set([cur, ...mem.map((m) => m.id)]) }]) {
         n++;
         const got = JSON.stringify(decidePoolSwitch({ ...base, ...extra }));
         if (got === want) same++; else if (!diff) diff = { i, extra: Object.keys(extra), want, got };
       }
     }
-    ck(`member: ${n} seeded verdicts with the current member LISTED (or membership omitted) are byte-identical to master`, same === n, JSON.stringify(diff));
+    ck(`member: ${n} seeded verdicts with the current member LISTED (or membership omitted) are byte-identical to ${master ? 'master' : 'the verdict with membership omitted (ref-free)'}`, same === n, JSON.stringify(diff));
   }
   // (4) CONTROL: the membership check removed ⇒ the removed member with quota left keeps serving (the incident)
   const src = fs.readFileSync(path.resolve('src/account-pool-auto.js'), 'utf8');
@@ -830,7 +852,7 @@ await (async () => {
     quietly(() => wm.eng.maybePoolAutoSwitchForPool(wm.P, { force: true }));
     ck('engine CONTROL: without the membership fact the pass leaves all three on the removed member (the incident, reproduced)', ['s-warm', 's-cold', 's-idle'].every((sid) => wm.on(sid) === 'martin'), ['s-warm', 's-cold', 's-idle'].map(wm.on).join(','));
   }
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 3, label: 'member: ' })) ck(r.name, r.pass);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: master ? 3 : 2, label: 'member: ' })) ck(r.name, r.pass);   // the master copy counts only where it was made
   fs.rmSync(scr, { recursive: true, force: true });
 })();
 
@@ -885,10 +907,14 @@ await (async () => {
   ck('priority: …and a hard-dead #2 still escapes onto the scraps exactly as automatic does', d({ currentId: 'b', priority: P, caches: { a: acct(0.99, 4 * D), b: acct(0.99, 5 * D), c: acct(0.1, 2 * D) }, readLogin: (id) => ({ c: { state: 'expiring', msLeft: 10 * 60e3 } })[id] || { state: 'ok' } }).to === 'c');
   // (6) the sealed-orders snapshot walks the order too
   ck('rankPoolMembers: the snapshot follows the order (A, B, C) — automatic follows EDF (C first)', JSON.stringify(rankPoolMembers({ members: mem, readCache: (id) => good[id], nowSec: NOW, priority: P }).map((r) => r.id)) === '["a","b","c"]' && rankPoolMembers({ members: mem, readCache: (id) => good[id], nowSec: NOW })[0].id === 'c');
-  // (7) empty priority ⇒ byte-identical to master (a seeded sweep)
-  let master = null;
-  try { master = M.load('src/account-pool-auto.js', execFileSync('git', ['show', 'b970f16d:src/account-pool-auto.js'], { encoding: 'utf8', cwd: REPO }), 'master'); } catch { master = null; }
-  if (master) {
+  // (7) empty priority ⇒ byte-identical to master (a seeded sweep; the ref-free half — null / [] / omitted decide alike, and
+  //     the snapshot with an empty priority is the snapshot without one — runs everywhere; mirror-197)
+  const pre = await preFixCopy(M, 'b970f16d', 'src/account-pool-auto.js');
+  const master = pre.mod;
+  if (!master && pre.why === 'shallow') skipPreFix('priority: ', 'b970f16d');
+  else ck(`priority: the master copy loaded${pre.why ? ` — ${pre.why}` : ''}`, !!master);
+  {
+    const ref = master || { decidePoolSwitch, rankPoolMembers };
     let seed = 11; const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
     const ids = ['a', 'b', 'c', 'd'];
     let n = 0, same = 0, diff = null;
@@ -897,13 +923,13 @@ await (async () => {
       const ms = ids.filter(() => rnd() < 0.8).map((id) => ({ id, name: id.toUpperCase() }));
       const base = { currentId: ids[Math.floor(rnd() * 4)], members: ms, readCache: (id) => caches[id] ?? null, nowSec: NOW, proactive: rnd() < 0.5, explain: true, warm: rnd() < 0.3 ? { warm: rnd() < 0.5, agoSec: 5, ttlSec: 300, inTurn: rnd() < 0.5 } : null };
       base.hot = base.proactive;
-      const want = JSON.stringify(master.decidePoolSwitch(base));
+      const want = JSON.stringify(ref.decidePoolSwitch(base));
       for (const pr of [null, [], undefined]) { n++; const got = JSON.stringify(decidePoolSwitch({ ...base, priority: pr })); if (got === want) same++; else if (!diff) diff = { i, pr, want, got }; }
-      const wantR = JSON.stringify(master.rankPoolMembers({ members: ms, readCache: base.readCache, nowSec: NOW }));
+      const wantR = JSON.stringify(ref.rankPoolMembers({ members: ms, readCache: base.readCache, nowSec: NOW }));
       n++; if (JSON.stringify(rankPoolMembers({ members: ms, readCache: base.readCache, nowSec: NOW, priority: [] })) === wantR) same++; else if (!diff) diff = { i, rank: true };
     }
-    ck(`priority: ${n} seeded verdicts + snapshots with an EMPTY priority are byte-identical to master`, same === n, JSON.stringify(diff));
-  } else ck('priority: the master copy loaded', false);
+    ck(`priority: ${n} seeded verdicts + snapshots with an EMPTY priority are byte-identical to ${master ? 'master' : 'the verdicts without one (ref-free)'}`, same === n, JSON.stringify(diff));
+  }
   // (8) CONTROLS — one patched copy per rule
   const src = fs.readFileSync(path.resolve('src/account-pool-auto.js'), 'utf8');
   const ctl = (tag, from, to) => { if (!src.includes(from)) return null; return M.load('src/account-pool-auto.js', src.replace(from, to), tag); };
@@ -915,7 +941,7 @@ await (async () => {
   ck('priority CONTROL: without the order an exhausted #1 goes to EDF\'s pick (C), not #2', noOrder && noOrder.decidePoolSwitch({ currentId: 'a', members: mem, readCache: (id) => ex[id], nowSec: NOW, explain: true, proactive: true, hot: true, priority: P }).to === 'c');
   const noEq = ctl('noequal', ' && (!prioRank || prioRank(bestSettle.id) === prioRank(currentId))) {', ') { // PATCHED: EDF across ranks');
   ck('priority CONTROL: without the equal-rank rule EDF drags a conversation OFF its listed member', noEq && noEq.decidePoolSwitch({ currentId: 'a', members: mem, readCache: (id) => good[id], nowSec: NOW, explain: true, proactive: true, hot: true, priority: ['a'] }).to === 'c');
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 5, label: 'priority: ' })) ck(r.name, r.pass);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: master ? 5 : 4, label: 'priority: ' })) ck(r.name, r.pass);   // the master copy counts only where it was made
 })();
 
 
@@ -1068,10 +1094,13 @@ await (async () => {
   ck('PRECEDENCE: pin > pool priority order — on #1 of the order (c), a usable pin (a) still takes it back', r7.to === 'a' && r7.reason === 'pin-return');
   const r8 = pp({ pin: 'a', currentId: 'a', caches: ex, priority: ['c', 'b'] });
   ck('PRECEDENCE: …and when the pin cannot serve, the ORDER decides next (c, not EDF\'s b)', r8.to === 'c' && r8.autoReason === 'exhausted' && r8.placedBy === 'priority', JSON.stringify(r8));
-  // no pin ⇒ the caller's verdict IS master's: a seeded sweep
-  let master = null;
-  try { master = M.load('src/account-pool-auto.js', execFileSync('git', ['show', 'b970f16d:src/account-pool-auto.js'], { encoding: 'utf8', cwd: REPO }), 'master'); } catch { master = null; }
-  if (master) {
+  // no pin ⇒ the caller's verdict IS master's: a seeded sweep (the ref-free half — the pin path answers null for every
+  //     no-pin world — runs everywhere; the historical rung only where the ref is, mirror-197)
+  const pre = await preFixCopy(M, 'b970f16d', 'src/account-pool-auto.js');
+  const master = pre.mod;
+  if (!master && pre.why === 'shallow') skipPreFix('pin: ', 'b970f16d');
+  else ck(`pin: the master copy loaded${pre.why ? ` — ${pre.why}` : ''}`, !!master);
+  {
     let seed = 23; const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
     const ids = ['a', 'b', 'c', 'd'];
     let n = 0, same = 0, diff = null;
@@ -1083,10 +1112,10 @@ await (async () => {
       n++;
       const dp = decidePinnedPlacement({ ...base, pin: null });
       const got = dp === null ? JSON.stringify(decidePoolSwitch(base)) : 'pinned!';
-      if (got === JSON.stringify(master.decidePoolSwitch(base))) same++; else if (!diff) diff = { i, got };
+      if (got === JSON.stringify((master || { decidePoolSwitch }).decidePoolSwitch(base))) same++; else if (!diff) diff = { i, got };
     }
-    ck(`pin: ${n} seeded worlds with NO pin decide byte-identically to master (the pin path returns null, the pool verdict is master's)`, same === n, JSON.stringify(diff));
-  } else ck('pin: the master copy loaded', false);
+    ck(`pin: ${n} seeded worlds with NO pin decide byte-identically to ${master ? 'master' : 'the pool verdict (ref-free)'} (the pin path returns null, the pool verdict is ${master ? "master's" : 'untouched'})`, same === n, JSON.stringify(diff));
+  }
   // CONTROLS — one patched copy per rule
   const src = fs.readFileSync(path.resolve('src/account-pool-auto.js'), 'utf8');
   const ctl = (tag, from, to) => (src.includes(from) ? M.load('src/account-pool-auto.js', src.replace(from, to), tag) : null);
@@ -1096,7 +1125,7 @@ await (async () => {
   ck('pin CONTROL: without the settle bar a pin barely back over the hard line pulls the conversation back (the flap)', noSettle && noSettle.decidePinnedPlacement({ pin: 'a', currentId: 'b', members: mem, readCache: (id) => softA[id], nowSec: NOW, proactive: true, hot: true }).reason === 'pin-return');
   const noHold = ctl('nohold', "if (warm && warm.inTurn) return { to: null, reason: 'pin-hold',", "if (false) return { to: null, reason: 'pin-hold',");
   ck('pin CONTROL: without the mid-turn hold the return cuts a turn in half', noHold && noHold.decidePinnedPlacement({ pin: 'a', currentId: 'b', members: mem, readCache: (id) => good[id], nowSec: NOW, proactive: true, hot: true, warm: hotW }).reason === 'pin-return');
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 4, label: 'pin: ' })) ck(r.name, r.pass);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: master ? 4 : 3, label: 'pin: ' })) ck(r.name, r.pass);   // the master copy counts only where it was made
 })();
 
 

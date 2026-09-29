@@ -1397,13 +1397,16 @@ console.log('\n⑱ AGENT_BROWSER_SOCKET_DIR when the CLI\'s own root is over 103
 console.log('\n⑨ the installed binary (skips with evidence when absent)');
 {
   const { spawnSync } = await import('node:child_process');
-  const v = spawnSync('agent-browser', ['--version'], { encoding: 'utf8', timeout: 10000 });
+  // 2.369.198: resolved the way the PRODUCT resolves it (browser-facts, past the VibeSpace shim) — the push shell's PATH
+  // has data/bin first, where the bare name is the shim (exit 2): this leg skipped on every post-push heavy run
+  const AB9 = (() => { try { return require('../src/browser-facts.js').binaryResolver('agent-browser', process.env)(); } catch { return null; } })() || 'agent-browser';
+  const v = spawnSync(AB9, ['--version'], { encoding: 'utf8', timeout: 10000 });
   if (v.error || v.status !== 0) {
     skip(`agent-browser not runnable here (${v.error ? v.error.code || v.error.message : 'exit ' + v.status}) — the floor verdict and the four variable NAMES are asserted above against a fake binary; what cannot be checked without it is that this build still accepts these names, and that its own socket-root reader honours AGENT_BROWSER_SOCKET_DIR`);
   } else {
     const out = String(v.stdout || '').trim();
     ok(/\d+\.\d+\.\d+/.test(out), `installed: ${out}`);
-    const help = spawnSync('agent-browser', ['--help'], { encoding: 'utf8', timeout: 20000 });
+    const help = spawnSync(AB9, ['--help'], { encoding: 'utf8', timeout: 20000 });
     const h = String(help.stdout || '') + String(help.stderr || '');
     for (const name of ['AGENT_BROWSER_SESSION', 'AGENT_BROWSER_NAMESPACE', 'AGENT_BROWSER_IDLE_TIMEOUT_MS', 'AGENT_BROWSER_CONFIG', 'AGENT_BROWSER_PROFILE']) {
       ok(h.includes(name), `the installed build documents ${name} (the P0 environment is not aspirational)`);
@@ -1432,12 +1435,12 @@ console.log('\n⑨ the installed binary (skips with evidence when absent)');
     for (const p of r9.pairs) { const i = p.indexOf('='); env9[p.slice(0, i)] = p.slice(i + 1); }
     const sdir = path.join(SOCKBASE, `vs-ab-${uid}`);
     if (ok(H9.length > 38 && env9.AGENT_BROWSER_SOCKET_DIR === sdir, `setup: a ${H9.length}-char HOME made the resolver emit AGENT_BROWSER_SOCKET_DIR (a mutant must go RED, not crash)`)) {
-      const info = spawnSync('agent-browser', ['session', 'info', '--json'], { env: env9, encoding: 'utf8', timeout: 20000 });
+      const info = spawnSync(AB9, ['session', 'info', '--json'], { env: env9, encoding: 'utf8', timeout: 20000 });
       let data = null; try { data = JSON.parse(String(info.stdout || '')).data; } catch { }
       ok(!!data && typeof data.socketDir === 'string' && data.socketDir.startsWith(sdir + '/') && data.active === false,
         `the installed CLI resolves its socket root to OUR directory — session info --json: ${data ? data.socketDir : String(info.stdout || info.stderr || '').slice(0, 80)} (launch-free: active:false)`);
       const env9x = { ...env9 }; delete env9x.AGENT_BROWSER_SOCKET_DIR;
-      const tl = spawnSync('agent-browser', ['tab', 'list'], { env: env9x, encoding: 'utf8', timeout: 20000 });
+      const tl = spawnSync(AB9, ['tab', 'list'], { env: env9x, encoding: 'utf8', timeout: 20000 });
       const tlo = String(tl.stdout || '') + String(tl.stderr || '');
       ok(/is too long/.test(tlo) && /\(max 103\)/.test(tlo), `PRE-FIX CONTROL: the same session WITHOUT the fifth variable is refused at its first command — "${tlo.trim().split('\n')[0].slice(0, 90)}" (round 3's regression on a long home)`);
       ok(/AGENT_BROWSER_SOCKET_DIR/.test(tlo), 'and the CLI\'s own refusal names AGENT_BROWSER_SOCKET_DIR as the remedy — the variable the product now sets');

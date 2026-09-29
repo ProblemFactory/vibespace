@@ -70,17 +70,29 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { clean
 // THE PATH the browser launches with decides the no-display RUNG (addendum): NOX = every tool of the shell's PATH but
 // Xvfb (a symlink farm — Chrome's wrapper script needs coreutils) ⇒ the headless rung; XV = a PRIVATE dir holding only
 // an Xvfb symlink, put first ⇒ the hidden-window rung (0.38.1 starts its own Xvfb, -displayfd — no fixed number)
+// THE FARM IS BUILT FROM RESOLVED BINARIES (2.369.198, the .197 heavy red): "the first dir on PATH wins" linked whatever
+// name came first — a DANGLING target too (symlinkSync checks nothing) and, on a box whose PATH puts the VibeSpace shim
+// before the real CLI (the push shell's: data/bin first), the SHIM as `agent-browser` ⇒ the product answered
+// binary_absent on every leg while this suite had resolved the real CLI a few lines up. Now `agent-browser` is REAL
+// (the resolver's own answer, whatever the PATH order), every other name links its first EXISTING regular file on
+// PATH, and the header prints what was linked — the farm is the same on every PATH order.
 const NOX = path.join(ROOT, 'nox'), XV = path.join(ROOT, 'xv');
 fs.mkdirSync(NOX, { recursive: true }); fs.mkdirSync(XV, { recursive: true });
 let XVFB_BIN = null;
+const linked = new Map();
+fs.symlinkSync(REAL, path.join(NOX, 'agent-browser')); linked.set('agent-browser', REAL);
+const isFile = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } }; // stat follows links: a dangling one is NOT a file
 for (const d of String(BASE_ENV.PATH || '').split(':').filter((x) => x.startsWith('/'))) {
   let names = []; try { names = fs.readdirSync(d); } catch { continue; }
   for (const n of names) {
-    if (/^(Xvfb|xvfb-run)$/.test(n)) { if (n === 'Xvfb' && !XVFB_BIN) XVFB_BIN = path.join(d, n); continue; }
-    try { fs.symlinkSync(path.join(d, n), path.join(NOX, n)); } catch { /* the first one on PATH wins */ }
+    const t = path.join(d, n);
+    if (/^(Xvfb|xvfb-run)$/.test(n)) { if (n === 'Xvfb' && !XVFB_BIN && isFile(t)) XVFB_BIN = t; continue; }
+    if (linked.has(n) || !isFile(t)) continue;
+    try { fs.symlinkSync(t, path.join(NOX, n)); linked.set(n, t); } catch { /* a name that cannot be linked is left out, never linked dangling */ }
   }
 }
 if (XVFB_BIN) fs.symlinkSync(XVFB_BIN, path.join(XV, 'Xvfb'));
+console.log(`— the launch PATH farm: ${linked.size} names linked to their resolved targets — agent-browser → ${REAL}; Xvfb kept out of it (${XVFB_BIN || 'none on PATH'})`);
 
 // the owner's config SHAPE (the args and headed of the incident; no profile)
 const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,--ozone-platform=wayland';

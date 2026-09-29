@@ -349,7 +349,9 @@ await (async () => {
   ok(stackCtl.shown >= 2 && stackCtl.activeTop > stackCtl.wsTop, `CONTROL: the pre-fix rule displays ${stackCtl.shown} windows and pushes the active one to y = ${stackCtl.activeTop} (the workspace top is ${stackCtl.wsTop}) — the second conversation's live view off the screen`, JSON.stringify(stackCtl));
   ok(auto && /Back to the chat/.test(toast), `the live view OPENED BY ITSELF on the first browse, full screen (${shown && shown.w}×${shown && shown.h}, the chat behind it) — the toast: "${toast.slice(0, 110)}"`, JSON.stringify({ auto, toast, shown }));
   const f4 = await fitted(L2, 'p1', 20000);
-  ok(f4.good && f4.last.cw >= 380 && f4.last.cw <= 390, `the page renders at the PHONE's width: the pane ${f4.last && f4.last.cw}×${f4.last && f4.last.ch}, the page ${f4.page && f4.page.w}×${f4.page && f4.page.h} (the study: 1280 wide in a 260 px strip)`, JSON.stringify(f4));
+  // 2.369.198: on a failure the bridge's own fit lines ride the evidence (the .197 heavy red said `why: headed-floor` on a headless browser and nothing else)
+  const fitLines = () => journal.split('\n').filter((l) => /\[browser-live\].*(fit|floor|picture|viewport)/i.test(l)).slice(-12).join('\n');
+  ok(f4.good && f4.last.cw >= 380 && f4.last.cw <= 390, `the page renders at the PHONE's width: the pane ${f4.last && f4.last.cw}×${f4.last && f4.last.ch}, the page ${f4.page && f4.page.w}×${f4.page && f4.page.h} (the study: 1280 wide in a 260 px strip)`, JSON.stringify(f4) + '\n    bridge: ' + fitLines().replace(/\n/g, '\n    bridge: '));
   ok(tb && tb.w >= 150, `the auto-open toast is legible on the phone (its words ${tb ? tb.w + '×' + tb.h : 'never measured'} px in a ${tb && tb.toast} px toast — a left:50% stack squeezed them into one word per line)`, JSON.stringify(tb));
   // the toast is transient chrome over the picture, not the picture: cleared before the census
   await Ph.evaluate(`(() => { for (const t of document.querySelectorAll('.global-toast')) t.remove(); return true; })()`);

@@ -516,6 +516,44 @@ console.log('— ②b MULTIVIEW: a helper\'s browser through the real bridge (it
 
 console.log('— ③ the browser-live window in headless chrome (worktree server, fake claude + fake agent-browser)');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
+/**
+ * THE ONE CHROME LAUNCH of this suite (lane-mirror-197, 2026-09-29). The three `CONTROL (naive study 2)` legs went red once on
+ * the Actions mirror (green on the gate's retry): the control leg's record ended at `chrome: "<dbus noise>"` — the one path that
+ * writes it: Chrome's /json showed no page target within 120 × 250 ms. Two orders were possible and neither was named:
+ *   (A) `freePort()` → [worktree copy + esbuild --minify rebuild + server boot ≤ 40 s + create + env ≤ 15 s] → Chrome binds the
+ *       port it was told — the pick and the bind 20–60 s apart on a runner whose other lane picks ports the same way;
+ *   (B) the same window, another process binds that port first ⇒ Chrome's DevTools server never starts on it (or a foreign
+ *       server answers /json) ⇒ 30 s of nothing, whatever the CPU.
+ * Plus a fixed 30 s budget on a throttled 4-vCPU box. Now Chrome PICKS ITS OWN PORT (`--remote-debugging-port=0`) and says it
+ * in `DevToolsActivePort` under its user-data-dir — the port cannot be taken between pick and bind (order B is gone by
+ * construction) — the wait reads that file (Chrome's own evidence) and the /json page target behind it, with a deadline scaled
+ * to THIS machine (`chromeDeadline`: × the slowest Chrome start seen this run and × the leg's own rebuild time), and the answer
+ * carries the start time, the port, an early exit and the stderr TAIL (the head was dbus noise).
+ */
+let chromeMsSeen = 0;
+const chromeDeadline = (rebuildMs = 0) => Math.max(30000, 6 * chromeMsSeen, 4 * (Number(rebuildMs) || 0));
+async function launchChrome({ userDataDir, args = [], deadlineMs = 30000, stdio = ['ignore', 'ignore', 'pipe'] } = {}) {
+  fs.mkdirSync(userDataDir, { recursive: true });
+  const apf = path.join(userDataDir, 'DevToolsActivePort');
+  try { fs.unlinkSync(apf); } catch { }
+  const proc = spawn(CHROME, ['--headless=new', '--remote-debugging-port=0', '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${userDataDir}`, ...args, 'about:blank'], { stdio });
+  const tail = []; let tailLen = 0;
+  if (proc.stderr) proc.stderr.on('data', (d) => { const s = d.toString(); tail.push(s); tailLen += s.length; while (tail.length > 1 && tailLen > 4000) tailLen -= tail.shift().length; });
+  let exited = null; proc.on('exit', (code, signal) => { exited = { code, signal }; });
+  const t0 = Date.now();
+  const stderr = () => tail.join('').slice(-800);
+  while (Date.now() - t0 < deadlineMs && !exited) {
+    try {
+      const port = Number(fs.readFileSync(apf, 'utf8').split('\n')[0]);
+      if (port > 0) {
+        const target = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find((t) => t.type === 'page');
+        if (target) { const ms = Date.now() - t0; chromeMsSeen = Math.max(chromeMsSeen, ms); return { proc, port, target, ms, exited: null, stderr }; }
+      }
+    } catch { }
+    await sleep(100);
+  }
+  return { proc, port: null, target: null, ms: Date.now() - t0, exited, deadlineMs, stderr };
+}
 let dtachOk = false; try { execFileSync('/usr/bin/which', ['dtach'], { stdio: 'ignore' }); dtachOk = true; } catch { }
 if (!CHROME) skip('no chrome/chromium on this box — the window leg needs one');
 else if (!dtachOk) skip('dtach is not installed — a local session cannot be created here');
@@ -533,13 +571,13 @@ else await (async () => {
   fs.writeFileSync(path.join(BIN, 'claude'), `#!/bin/sh\ncase " $* " in *" --output-format "*) sleep 1; printf '%s\\n%s\\n' '${hookLine}' '${initLine}';; esac\nexec sleep 600\n`, { mode: 0o755 });
   // the fake agent-browser: the P1 suites' shape + `stream status --json` naming the fake upstream of THIS namespace
   fs.writeFileSync(path.join(BIN, 'agent-browser'), FAKE_AB_SOURCE(), { mode: 0o755 });
-  const PORT = await freePort(), CDP = await freePort();
   execFileSync('git', ['-C', repo, 'worktree', 'add', '--detach', wt, 'HEAD'], { stdio: 'ignore' }); worktrees.add(wt);
   for (const f of ['src', 'public', 'server.js', 'package.json']) { execFileSync('rm', ['-rf', path.join(wt, f)]); execFileSync('cp', ['-r', path.join(repo, f), path.join(wt, f)]); }
   fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
   const baseEnv = { ...process.env, PATH: BIN + ':' + (process.env.PATH || ''), CLAUDE_CMD: path.join(BIN, 'claude'), FAKE_AB_STATE: AB_STATE };
   for (const k of Object.keys(baseEnv)) if (k.startsWith('AGENT_BROWSER_')) delete baseEnv[k];
   let journal = '';
+  const PORT = await freePort();   // picked right before the bind (mirror-197: a port held free across a copy + boot is a race)
   const srv = spawn('node', ['server.js'], { cwd: wt, env: { ...baseEnv, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
   procs.add(srv);
   srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
@@ -599,14 +637,11 @@ else await (async () => {
   await j('POST', '/api/browser/pin', { sessionId, profile: 'Work' });
   // pin Work ⇒ the default; the strip shows both
 
-  // headless chrome
-  const chromeLog = [];
-  const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(ROOT, 'chrome')}`, '--window-size=1280,900', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
-  procs.add(chrome);
-  chrome.stderr.on('data', (d) => { if (chromeLog.length < 40) chromeLog.push(d.toString()); });
-  let target = null;
-  for (let i = 0; i < 120 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDP}/json`)).json()).find((t) => t.type === 'page'); } catch { } if (!target) await sleep(250); }
-  if (!ok(!!target, 'chrome exposed a CDP page target', chromeLog.join('').slice(0, 800))) return;
+  // headless chrome (its port its own, its readiness its own file — launchChrome)
+  const ch = await launchChrome({ userDataDir: path.join(ROOT, 'chrome'), args: ['--window-size=1280,900'] });
+  const chrome = ch.proc; procs.add(chrome);
+  const target = ch.target;
+  if (!ok(!!target, `chrome exposed a CDP page target (DevToolsActivePort ${ch.port}, ${ch.ms} ms)`, JSON.stringify({ ms: ch.ms, exited: ch.exited, stderr: ch.stderr() }))) return;
   const cdp = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => cdp.on('open', r));
   let seq = 0; const pend = new Map();
@@ -753,7 +788,6 @@ async function ephemeralLeg({ tag, mutate = false, clientPrefix = false }) {
   fs.writeFileSync(path.join(BIN2, 'claude'), `#!/bin/sh\ncase " $* " in *" --version "*) echo '2.1.281 (Claude Code)'; exit 0;; esac\ncase " $* " in *" --output-format "*) sleep 1; printf '%s\\n%s\\n' '${hook2}' '${init2}';; esac\nenv > "$FAKE_AB_STATE/claude-env-$$"\ni=0; while [ $i -lt 3000 ]; do for f in "$FAKE_AB_STATE"/emit-$$-*; do [ -f "$f" ] || continue; cat "$f"; rm -f "$f"; done; sleep 0.2; i=$((i+1)); done\n`, { mode: 0o755 });
   fs.writeFileSync(path.join(BIN2, 'agent-browser'), FAKE_AB_SOURCE(), { mode: 0o755 });
   fs.writeFileSync(path.join(AB2, 'ports.json'), '{}');
-  const PORT2 = await freePort(), CDP2 = await freePort();
   execFileSync('git', ['-C', repo, 'worktree', 'add', '--detach', wt2, 'HEAD'], { stdio: 'ignore' }); worktrees.add(wt2);
   for (const f of ['src', 'public', 'server.js', 'package.json']) { execFileSync('rm', ['-rf', path.join(wt2, f)]); execFileSync('cp', ['-r', path.join(repo, f), path.join(wt2, f)]); }
   fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt2, 'node_modules'));
@@ -772,15 +806,19 @@ async function ephemeralLeg({ tag, mutate = false, clientPrefix = false }) {
     const cmut = csrc.replace('  const plan = liveViewPlan({ views, sessionId, profileId, syncId: syncId || null });', "  const plan = { act: 'create', syncId: syncId || null };").replace("        if (m.state === 'error' && m.code === 'browser_stopped') {", '        if (false) {');
     obs.clientMutated = cmut !== csrc && (cmut.match(/if \(false\) \{/g) || []).length >= 1 && cmut.includes("const plan = { act: 'create'");
     fs.writeFileSync(cf, cmut);
-    try { execFileSync(path.join(wt2, 'node_modules/.bin/esbuild'), ['src/client.js', '--bundle', '--outfile=public/bundle.js', '--format=iife', '--platform=browser', '--target=es2020', '--loader:.css=css', '--minify'], { cwd: wt2, stdio: 'ignore', timeout: 120000 }); obs.rebuilt = true; } catch (e) { obs.rebuilt = false; obs.rebuildErr = String(e && e.message).slice(0, 300); }
+    // the rebuild's own evidence: exit 0 AND a bundle written after the mutation — and its wall time, which scales the
+    // deadline of the Chrome start that follows it (mirror-197)
+    const tb = Date.now(); const bundle = path.join(wt2, 'public/bundle.js'); const sizeBefore = (() => { try { return fs.statSync(bundle).size; } catch { return -1; } })();
+    try { execFileSync(path.join(wt2, 'node_modules/.bin/esbuild'), ['src/client.js', '--bundle', '--outfile=public/bundle.js', '--format=iife', '--platform=browser', '--target=es2020', '--loader:.css=css', '--minify'], { cwd: wt2, stdio: 'ignore', timeout: 120000 }); obs.rebuilt = fs.statSync(bundle).mtimeMs >= tb - 1000; } catch (e) { obs.rebuilt = false; obs.rebuildErr = String(e && e.message).slice(0, 300); }
+    obs.rebuildMs = Date.now() - tb; obs.bundleBytes = [sizeBefore, (() => { try { return fs.statSync(bundle).size; } catch { return -1; } })()];
   }
   const env2 = { ...process.env, PATH: BIN2 + ':' + (process.env.PATH || ''), CLAUDE_CMD: path.join(BIN2, 'claude'), FAKE_AB_STATE: AB2 };
   for (const k of Object.keys(env2)) if (k.startsWith('AGENT_BROWSER_')) delete env2[k];
   let journal2 = '';
+  const PORT2 = await freePort();   // picked right before the bind — after the copy and the rebuild (mirror-197)
   const srv2 = spawn('node', ['server.js'], { cwd: wt2, env: { ...env2, ...VNC_ENV, PORT: String(PORT2), HOME: home, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
   procs.add(srv2);
   srv2.stdout.on('data', (d) => { journal2 += d; }); srv2.stderr.on('data', (d) => { journal2 += d; });
-  const chromeLog2 = [];
   let chrome2 = null, cdp2 = null, wsMain2 = null;
   try {
     obs.booted = await until(() => journal2.includes('Ready.'), 40000, 100);
@@ -809,13 +847,13 @@ async function ephemeralLeg({ tag, mutate = false, clientPrefix = false }) {
     const bk = agentEnv.AGENT_BROWSER_SESSION.slice(3);
     obs.browserKey = bk;
     fs.writeFileSync(path.join(AB2, 'ports.json'), JSON.stringify({ ['vs-' + bk]: up.port }));
-    // headless chrome on the app, the chat window open on the desktop you are looking at
-    chrome2 = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP2}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(R2, 'chrome')}`, '--window-size=1280,900', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
-    procs.add(chrome2);
-    chrome2.stderr.on('data', (d) => { if (chromeLog2.length < 40) chromeLog2.push(d.toString()); });
-    let target = null;
-    for (let i = 0; i < 120 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDP2}/json`)).json()).find((t) => t.type === 'page'); } catch { } if (!target) await sleep(250); }
-    if (!target) { obs.chrome = chromeLog2.join('').slice(0, 400); return obs; }
+    // headless chrome on the app, the chat window open on the desktop you are looking at — its own port, its own readiness
+    // file, a deadline scaled to this machine's measured times (mirror-197)
+    const ch2 = await launchChrome({ userDataDir: path.join(R2, 'chrome'), args: ['--window-size=1280,900'], deadlineMs: chromeDeadline(obs.rebuildMs) });
+    chrome2 = ch2.proc; procs.add(chrome2);
+    obs.chromeMs = ch2.ms; obs.cdpPort = ch2.port;
+    const target = ch2.target;
+    if (!target) { obs.chrome = { deadlineMs: ch2.deadlineMs, exited: ch2.exited, stderrTail: ch2.stderr() }; return obs; }
     cdp2 = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
     await new Promise((r) => cdp2.on('open', r));
     let seq2 = 0; const pend2 = new Map();
@@ -963,7 +1001,7 @@ else await (async () => {
   ok((c.entries || []).length === 0 && !c.thumb, 'CONTROL: …and NOTHING is recorded (the recorder arms only on a holder row) — the trace leg can go red', JSON.stringify(c.entries).slice(0, 200));
   ok(!c.cardChip, 'CONTROL: …and the card has no Agent browser chip (browserLive comes from the same rows)', String(c.cardChip));
   const u = await ephemeralLeg({ tag: 'ui', clientPrefix: true });
-  ok(u.clientMutated && u.rebuilt && u.booted && u.chatUp && u.bound, 'CONTROL (naive study 2): the same world with the PRE-FIX live-view client (a manual open always creates; no stopped state), its bundle rebuilt in the leg\'s own worktree', JSON.stringify(u).slice(0, 600));
+  ok(u.clientMutated && u.rebuilt && u.booted && u.chatUp && u.bound, `CONTROL (naive study 2): the same world with the PRE-FIX live-view client (a manual open always creates; no stopped state), its bundle rebuilt in the leg's own worktree (rebuild ${u.rebuildMs} ms, chrome up in ${u.chromeMs} ms on DevToolsActivePort ${u.cdpPort}, deadline ${chromeDeadline(u.rebuildMs)} ms)`, JSON.stringify(u).slice(0, 600));
   ok(u.menuFound && u.liveAfterOpens >= 3, `CONTROL: …"Open live view" twice opens ${u.liveAfterOpens} windows (the auto-bound one + one per click) — the finding-2 leg can go red`);
   ok(u.stoppedView && u.stoppedView.badge === 'Agent is driving' && !u.stoppedView.stopped, `CONTROL: …and the stopped browser's view says "${u.stoppedView && u.stoppedView.badge}" — the finding-3 leg can go red`, JSON.stringify(u.stoppedView));
 })().catch((e) => ok(false, 'the lane H leg threw', e && (e.stack || e.message)));
@@ -1248,7 +1286,7 @@ await (async () => {
     const baseEnv = {}; for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('AGENT_BROWSER_') && k !== 'WAYLAND_DISPLAY') baseEnv[k] = v;
     Object.assign(baseEnv, { PATH: PATH5, CLAUDE_CMD: path.join(BIN5, 'claude'), HOME: HOME5, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' });
     if (DISPLAY_N !== null) baseEnv.DISPLAY = `:${DISPLAY_N}`; else delete baseEnv.DISPLAY;
-    const PORT5 = await freePort(), CDP5 = await freePort();
+    const PORT5 = await freePort();
     let journal = '';
     const srv = spawn('node', ['server.js'], { cwd: wt, env: { ...baseEnv, ...VNC_ENV, PORT: String(PORT5) }, stdio: ['ignore', 'pipe', 'pipe'] });
     procs.add(srv); procs5.push(srv);
@@ -1262,12 +1300,11 @@ await (async () => {
     const msgs = []; wsMain.on('message', (d) => { try { msgs.push(JSON.parse(d)); } catch { } });
     await new Promise((r, e) => { wsMain.on('open', r); wsMain.on('error', e); });
     wsKill = wsMain;
-    // the client: headless chrome as the owner's Mac (1920×963, DPR 2)
-    const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP5}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(D5, 'client')}`, '--window-size=1920,1080', 'about:blank'], { stdio: 'ignore' });
-    procs.add(chrome); procs5.push(chrome);
-    let target = null;
-    for (let i = 0; i < 120 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDP5}/json`)).json()).find((t) => t.type === 'page'); } catch { } if (!target) await sleep(250); }
-    if (!ok(!!target, '⑤ the client chrome exposed a page target')) return;
+    // the client: headless chrome as the owner's Mac (1920×963, DPR 2) — its own port, its own readiness file (launchChrome)
+    const ch5 = await launchChrome({ userDataDir: path.join(D5, 'client'), args: ['--window-size=1920,1080'], deadlineMs: chromeDeadline() });
+    const chrome = ch5.proc; procs.add(chrome); procs5.push(chrome);
+    const target = ch5.target;
+    if (!ok(!!target, `⑤ the client chrome exposed a page target (DevToolsActivePort ${ch5.port}, ${ch5.ms} ms)`, JSON.stringify({ ms: ch5.ms, exited: ch5.exited, stderr: ch5.stderr() }))) return;
     const cdp = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
     await new Promise((r) => cdp.on('open', r));
     let seq = 0; const pend = new Map();

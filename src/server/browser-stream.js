@@ -704,11 +704,12 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       if (!own.own) continue;
       if (own.learnId) { p.id = own.learnId; p.seq = relay.ordSeq; }
       if (msg.type === 'result' && p.id && msg.id === p.id) {
+        p.doneSeq = relay.ordSeq; // 2.369.198: where the daemon's echo of OUR set landed — every frame read before it shows the page BEFORE the set (checkFit)
         fs[slot] = null;
         tapOwnSet(relay, p, msg); // F6: the resize is in the action trace (never a viewer's "Running a command")
         // ownDone: where OUR command sat in the daemon's order (judged after our CLI call returns); a mirror that lands AFTER
         // the return was not in that judgement — it is judged now (never for a put-back: it IS the agent's size)
-        if (slot === 'pending') { fs.ownDone = { seq: p.seq }; if (!p.inFlight && !p.putBack) lateJudge(relay, fs); }
+        if (slot === 'pending') { fs.ownDone = { seq: p.seq, doneSeq: p.doneSeq }; if (!p.inFlight && !p.putBack) lateJudge(relay, fs); }
       }
       relay.stats.own++;
       return true;
@@ -798,7 +799,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     } else if (outcome === 'fitted') {
       fs.failed = null;
       fs.applied = { width: v.width, height: v.height, viewerId: v.viewerId, rule: v.rule, at: now() };
-      relay.fitCheck = { width: v.width, height: v.height, at: now(), frames: 0 };
+      relay.fitCheck = { width: v.width, height: v.height, at: now(), frames: 0, own: fs.pending || fs.ownDone || null }; // own: this set's own record — its `doneSeq` says when the daemon echoed it (2.369.198)
       relay.fitWarned = false;
       persistFit(fs);
       if (relays.get(relay.key) === relay) broadcastFit(relay, { state: 'fitted', width: v.width, height: v.height, viewerId: v.viewerId, rule: v.rule, drawScale: v.drawScale, floor: fs.floorW > FIT.FIT_MIN_W ? fs.floorW : null, why, place: placeOf(v.viewerId) });
@@ -820,7 +821,13 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   }
   /** verify r1 (continuation): a NEW set of ours begins. An earlier one whose result mirror has not landed yet moves to
    *  `prevOwn` (still recognised as ours when it lands); `setAsideOwn` does the same when an outcome ends our set. */
-  function beginOwn(fs, p) { if (fs.pending) fs.prevOwn = fs.pending; fs.pending = { ...p, at: now(), inFlight: true, id: null, seq: null }; fs.ownDone = null; }
+  function beginOwn(fs, p) {
+    if (fs.pending) fs.prevOwn = fs.pending;
+    fs.pending = { ...p, at: now(), inFlight: true, id: null, seq: null };
+    fs.ownDone = null;
+    // 2.369.198: the sizes we asked for lately — a later frame AT one of them is that ask's answer arriving late, never a newer fit's (frameJudgeVerdict)
+    if (p && p.width && p.height) { fs.asked = [...(fs.asked || []).slice(-7), { width: p.width, height: p.height, at: now() }]; }
+  }
   function setAsideOwn(fs) { if (fs.pending) fs.prevOwn = fs.pending; fs.pending = null; }
   /** verify r1 F6: OUR resize landed (its result mirror) — the recorder's taps get ONE `viewer-fit` pair (src/browser-trace.js
    *  traces it as kind 'viewport'), so the trace shows the page reflowing between two agent actions. The viewers never
@@ -889,6 +896,15 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   function checkFit(relay) {
     const c = relay.fitCheck;
     if (!c || !relay.picture) return;
+    // 2.369.198 (the .197 heavy red): is this picture THIS fit's answer? An earlier fit's frame arriving late (its size one
+    // we asked for) or a frame read before the daemon echoed this set shows the page BEFORE the set — on the loaded gate
+    // machine it read as "a headed window that cannot be 390 px wide" and re-fitted a phone's HEADLESS page at 500 px.
+    const jv = FIT.frameJudgeVerdict({ fit: c, picture: relay.picture, asked: fitStateOf(relay).asked || [], mirrored: !!(c.own && c.own.doneSeq != null), ageMs: now() - c.at, now: now() });
+    if (jv === 'stale-own') {
+      if (!c.staleSaid) { c.staleSaid = true; log.log?.(`[browser-live] ${relay.key}: a ${relay.picture.width}×${relay.picture.height} picture after the ${c.width}×${c.height} fit is an earlier fit's frame arriving late — not this fit's answer`); }
+      return;
+    }
+    if (jv === 'unmirrored') return;
     const h = FIT.fitHonored({ fit: c, picture: relay.picture });
     c.frames++;
     if (h === 'exact') { relay.fitCheck = null; return; }

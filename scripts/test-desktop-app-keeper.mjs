@@ -844,7 +844,8 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   k.shutdown();
 }
 { // (e) the shared desktop is RE-ASKED before a record on it is judged
-  const rfb = net.createServer((sock) => { sock.write('RFB 003.008\n'); }); await new Promise((r) => rfb.listen(0, '127.0.0.1', r));
+  const rfbSocks = new Set(); // 2.369.198: every connection the fake picture server accepted — named if its close ever waits on one
+  const rfb = net.createServer((sock) => { rfbSocks.add(sock); sock.on('close', () => rfbSocks.delete(sock)); sock.on('error', () => { }); sock.write('RFB 003.008\n'); }); await new Promise((r) => rfb.listen(0, '127.0.0.1', r));
   const mkShared = (dataDir, id) => {
     const app = spawn('sleep', ['3600'], { detached: true, stdio: 'ignore', env: { PATH: process.env.PATH, [K.SESSION_ENV]: id } }); app.unref(); children.push(app);
     return app;
@@ -878,7 +879,20 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   const r1 = k1.get('da-shared2');
   ok(r1.state === 'exited' && /X display gone/.test(r1.lastError) && !alive(app2.pid), 'CONTROL: judged by the cached `running:false`, the pre-fix adoption REAPS a live app on the shared desktop at every boot');
   k1.shutdown();
-  await new Promise((r) => rfb.close(r));
+  // 2.369.198 — HELD WITH THE EVIDENCE: the .197 gate's first run of this suite ended HERE (44.7 s) with node's
+  // "unsettled top-level await" (exit 13): `rfb.close(cb)` never called back and nothing else kept the loop alive — a
+  // connection still counted on the fake picture server whose handle was no longer active. The gate's retry, and every
+  // run since (alone and under a 4-suite load, this diagnostic printing 0 connections at the close), closed clean; the
+  // keeper's own probes (`rfbBanner`) destroy their socket on the banner, so the straggler's origin is unknown. A close
+  // that does not answer within 3 s is now FAILED BY NAME with the connections it was waiting for (peer port, reading,
+  // pending) and they are destroyed so the rest of the suite still judges the box — the next recurrence names itself
+  // instead of exiting silently.
+  {
+    const closed = await Promise.race([new Promise((r) => rfb.close(() => r(true))), new Promise((r) => setTimeout(() => r(false), 3000))]);
+    const left = [...rfbSocks].map((s) => `${s.remoteAddress}:${s.remotePort} readable=${s.readable} writable=${s.writable} pending=${s.pending} reading=${!!(s._handle && s._handle.reading)}`);
+    ok(closed, closed ? `the fake picture server closed with no connection left behind (${rfbSocks.size} open at the close; the keeper's probes hung up)` : `the fake picture server's close did not answer in 3 s — ${rfb._connections} connection(s) still counted: ${left.join(' | ') || 'none tracked'} (the .197 gate's exit-13 shape, now named)`, left.join(' | '));
+    if (!closed) for (const s of rfbSocks) s.destroy();
+  }
 }
 { // (f) the bring-up is a TABLE LOOKUP: a fourth rung = one row + one recipe, driven end to end with the keeper UNCHANGED
   const src = (fs.readFileSync(path.join(repo, 'src/server/desktop-app-keeper.js'), 'utf8') + '\n' + fs.readFileSync(path.join(repo, 'src/desktop-serve.js'), 'utf8')).replace(/^\s*(\/\/|\*).*$/gm, ''); // lane C1: the keeper = the hub half + the machine half

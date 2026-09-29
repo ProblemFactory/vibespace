@@ -83,6 +83,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // gate is run from, and where the pre-push hook launches the heavy tier) exports its spawn pairs, including
 // AGENT_BROWSER_CONFIG, which REPLACES the binary's config search: every run below read the live instance's
 // generated config until this line
+// 2.369.198: `agent-browser` resolved the way the PRODUCT resolves it (browser-facts, past the VibeSpace shim) and its
+// directory put FIRST on this suite's PATH — every bare `agent-browser` below stands for the CLI itself. The push shell's
+// PATH has data/bin first, where the name is the shim (exit 2): four legs skipped on every post-push heavy run.
+{
+  const real = (() => { try { return require('../src/browser-facts.js').binaryResolver('agent-browser', process.env)(); } catch { return null; } })();
+  if (real) { process.env.PATH = `${path.dirname(real)}:${process.env.PATH || ''}`; console.log(`agent-browser: ${real} (its directory first on this suite's PATH)`); }
+}
 const BASE_ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('AGENT_BROWSER_')));
 const ROOT = scratch('browser-mediation-chrome');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });

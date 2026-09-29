@@ -538,18 +538,33 @@ console.log('(g) the phone (360 × 740, touch)');
   ok(ja.length >= 4 && ja.every((x) => x.ok) && ja.some((x) => x.what === 'chip' && /件の返信/.test(x.text)) && ja.some((x) => x.what === 'placeholder' && x.text === 'スレッドで返信…'), `ja: every chip / tag / pane word drawn whole (${ja.length}: ${[...new Set(ja.map((x) => x.text))].slice(0, 5).join(' | ')})`, J(ja.filter((x) => !x.ok)));
   await p4.shot('h-ja.png');
   // naive-user pass ⑥ CONTROL: the pre-fix composer line (nowrap + ellipsis, the main composer's rule) in ja at 360 px CUTS
-  // the "sent at once, as you" half — the leg above would read it red
+  // the "sent at once, as you" half — the leg above would read it red.
+  // FONT-INDEPENDENT (lane-mirror-197, 2026-09-29): the premise "the one-line text is wider than its box at 360 px" is a fact
+  // about the FONT — the Actions runner has no CJK family and DejaVu's fallback boxes are narrower than the glyphs a ja user
+  // sees, so there the line FITS and the pre-fix rule has nothing to cut (`cutNow:false`, red twice on the mirror, green here).
+  // The control measures the one-line width; when it fits, the box is narrowed BY CONSTRUCTION to 60 % of that width and the
+  // RULE's effect is judged there: the pre-fix rule cuts, the product rule wraps it whole — under any font.
   const cut = await p4.evaljs(`(async () => {
     const w = window.__w.big; const chip = [...w.content.querySelectorAll('.chanwin-main .chanmsg-thread-chip')].pop(); chip.click();
     const pane = w.content.querySelector('.chanthread'); for (let i = 0; i < 100 && pane.hidden; i++) await new Promise((r) => setTimeout(r, 50)); await new Promise((r) => setTimeout(r, 400));
     const n = pane.querySelector('.chanthread-foot .chanwin-note-text'); if (!n) return null;
-    const whole = n.scrollWidth <= n.clientWidth + 1;
+    const raf2 = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const whole = n.scrollWidth <= n.clientWidth + 1;                                  // the product rule at 360 px, this font
     const st = document.createElement('style'); st.textContent = '.chanthread-composer .chanwin-note-text { white-space: nowrap !important; overflow: hidden !important; }'; document.head.appendChild(st);
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    const cutNow = n.scrollWidth > n.clientWidth + 1; st.remove();
-    return { whole, cutNow, text: n.textContent };
+    await raf2();
+    const lineW = n.scrollWidth, boxW = n.clientWidth;                                  // the line on ONE line vs its box
+    const cutAt360 = lineW > boxW + 1;                                                  // the finding as reported (needs CJK glyph widths)
+    let narrowed = null;
+    if (!cutAt360) { narrowed = Math.floor(lineW * 0.6); n.style.maxWidth = narrowed + 'px'; await raf2(); }
+    const cutNow = n.scrollWidth > n.clientWidth + 1;                                   // the pre-fix rule at a box the line cannot fit
+    const oneLineH = n.getBoundingClientRect().height;
+    st.remove(); await raf2();
+    const wholeAtBox = n.scrollWidth <= n.clientWidth + 1;                              // the product rule at the SAME box: nothing cut…
+    const wrapped = narrowed === null || n.getBoundingClientRect().height > oneLineH + 1;   // …because it wrapped
+    n.style.maxWidth = '';
+    return { whole, cutAt360, narrowed, lineW, boxW, cutNow, wholeAtBox, wrapped, font: getComputedStyle(n).fontFamily.slice(0, 60), text: n.textContent };
   })()`);
-  ok(cut && cut.whole && cut.cutNow && /すぐに送信/.test(cut.text), `CONTROL (naive-user ⑥): the pane's composer line "${cut && cut.text}" is whole in ja at 360 px, and the pre-fix nowrap rule cuts it`, J(cut));
+  ok(cut && cut.whole && cut.cutNow && cut.wholeAtBox && cut.wrapped && /すぐに送信/.test(cut.text), `CONTROL (naive-user ⑥): the pane's composer line "${cut && cut.text}" is whole in ja at 360 px, and the pre-fix nowrap rule cuts it${cut && cut.narrowed !== null ? ` (this machine's font draws the line ${cut.lineW} px, narrower than its ${cut.boxW} px box — the rule judged at a ${cut.narrowed} px box: pre-fix cut, product wrapped whole)` : ' (at the natural 360 px box)'}`, J(cut));
   p4.close();
 }
 

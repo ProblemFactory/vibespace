@@ -82,6 +82,11 @@ const markerSweep = () => {
 };
 let chrome = null;
 const CHROME_DIR = scratch('deskapp-snap-chrome');
+// 2.369.198: the witness for the runtime-dir rule below — the invoking user's accessibility-bus socket file (when there is
+// one) is the SAME file at the end of the run (inode + ctime), never one this suite's private session re-created
+const OWNER_A11Y = process.env.XDG_RUNTIME_DIR ? path.join(process.env.XDG_RUNTIME_DIR, 'at-spi', 'bus') : null;
+const a11yStamp = () => { try { const st = fs.statSync(OWNER_A11Y); return `${st.ino}:${st.ctimeMs}`; } catch { return null; } };
+const OWNER_A11Y_AT_START = OWNER_A11Y ? a11yStamp() : null;
 let cleaned = false;
 const cleanup = () => {
   if (cleaned) return; cleaned = true;
@@ -102,8 +107,16 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { clean
 const bootServer = async (wt, name) => {
   const [port] = await freePorts(1);
   const home = scratchHome(name, fs); homes.push(home);
+  // 2.369.198: the private session gets its OWN runtime dir. Its apps activate a second org.a11y.Bus launcher on the private
+  // bus, and that launcher binds `$XDG_RUNTIME_DIR/at-spi/bus` — with the owner's runtime dir inherited it REPLACED the
+  // desktop's accessibility-bus socket file (measured: the owner's /run/user/<uid>/at-spi/bus re-created mid-run, left
+  // dead when this suite killed the group ⇒ every later a11y client on the real desktop, test-browser-tier3-chrome
+  // included, refused "Connection refused" until the next login). Same rule as test-window-target's lane-E child.
+  const rt = path.join(home, 'run'); fs.mkdirSync(rt, { recursive: true }); fs.chmodSync(rt, 0o700);
   const log = [];
-  const s = spawn(DBUS, ['--', process.execPath, 'server.js'], { cwd: wt, detached: true, env: { ...process.env, ...(await vncEnv()), PORT: String(port), HOME: home, VIBESPACE_SKIP_AGENT_HOOKS: '1', NO_AUTO_UPDATE: '1', CLAUDE_CMD: '/bin/false', CODEX_CMD: '/bin/false', DBUS_SESSION_BUS_ADDRESS: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const benv = { ...process.env, ...(await vncEnv()), PORT: String(port), HOME: home, XDG_RUNTIME_DIR: rt, VIBESPACE_SKIP_AGENT_HOOKS: '1', NO_AUTO_UPDATE: '1', CLAUDE_CMD: '/bin/false', CODEX_CMD: '/bin/false', DBUS_SESSION_BUS_ADDRESS: '' };
+  delete benv.AT_SPI_BUS_ADDRESS;
+  const s = spawn(DBUS, ['--', process.execPath, 'server.js'], { cwd: wt, detached: true, env: benv, stdio: ['ignore', 'pipe', 'pipe'] });
   s.stdout.on('data', (d) => log.push(String(d))); s.stderr.on('data', (d) => log.push(String(d)));
   servers.push(s);
   let up = false; for (let i = 0; i < 160 && !up; i++) { try { await fetch(`http://127.0.0.1:${port}/api/home`); up = true; } catch { await sleep(250); } }
@@ -457,6 +470,7 @@ try {
   }
 } catch (e) { if (e && e.narrowed) console.log('  (the control copy skipped: SNAP_CONTROL=0)'); else { failed++; console.error('  ✗ threw:', e.stack || e.message); console.error('  server log tail:', S.log.join('').split('\n').filter((l) => /desktop|xpra|error/i.test(l)).slice(-15).join('\n  ')); } }
 finally { P.close(); }
+if (OWNER_A11Y_AT_START) check(`the owner's accessibility-bus socket ${OWNER_A11Y} is the file it was at the start (no private session of this suite re-created it)`, a11yStamp() === OWNER_A11Y_AT_START, { start: OWNER_A11Y_AT_START, end: a11yStamp() });
 const narrowed = ONLY.length || NO_CONTROL;
 console.log(failed ? `\n${failed} FAILED${skipped ? ` (${skipped} skipped)` : ''}` : narrowed ? `\nNARROWED RUN (SNAP_ONLY / SNAP_CONTROL) — its checks passed, but a narrowed run is never a verdict` : `\ndesktop-app snap test passed${skipped ? ` (${skipped} skipped)` : ''}`);
 process.exit(failed || narrowed ? 1 : 0);

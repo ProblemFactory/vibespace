@@ -88,11 +88,15 @@ export function sinkBlurVerdict(a, { sink = null, root = null, body = null } = {
 }
 /** Is the element rendered (not on a hidden desktop / a minimized window / content-visibility hidden)? */
 function isVisible(el) { try { if (!el.isConnected) return false; return typeof el.checkVisibility === 'function' ? el.checkVisibility({ visibilityProperty: true }) : true; } catch { return false; } }
-/** Is the pressed element the focused editable's own input — the editable itself, inside it, or in its input host? */
+/** Is the pressed element the focused editable's own input — the editable itself, inside it, its LABEL, or in its input host?
+ *  verify r4: a press on the box's <label> (its `control` is the box, or it wraps the box — "Page name", a passphrase row) is a
+ *  press on the box: the label's whole purpose is to focus it. Before, it was 'pressed elsewhere' — reclaimed and told to click
+ *  the box itself. */
 export function sameInput(pressed, focused) {
   if (!pressed || !focused) return false;
   if (pressed === focused) return true;
   try { if (typeof focused.contains === 'function' && focused.contains(pressed)) return true; } catch { /* detached */ }
+  try { const lab = typeof pressed.closest === 'function' ? pressed.closest('label') : null; if (lab && (lab.control === focused || (typeof lab.contains === 'function' && lab.contains(focused)))) return true; } catch { /* detached */ }
   const host = inputHostOf(focused);
   try { return host !== focused && !!host && typeof host.contains === 'function' && host.contains(pressed); } catch { return false; }
 }
@@ -117,7 +121,7 @@ export function yieldKindOf(el) {
  * judged (absent ⇒ never: the view's press rules only while it drives, as before).
  */
 export function createKeyboardYield({ root, sink, drives, mine = () => false, now = () => Date.now(), ownChrome = () => false }) {
-  const s = { yielded: false, kind: null, press: null, last: null, cue: false, lastCueAt: null, drove: null };
+  const s = { yielded: false, kind: null, press: null, last: null, cue: null, lastCueAt: null, drove: null };
   const inView = (el) => { try { return !!el && !!root && (el === root || root.contains(el)); } catch { return false; } };
   const namesView = (el) => { if (inView(el)) return true; try { return !!el && !!ownChrome(el); } catch { return false; } };
   const driving = () => { try { return !!drives(); } catch { return false; } };
@@ -151,8 +155,12 @@ export function createKeyboardYield({ root, sink, drives, mine = () => false, no
       const p = s.press;
       const u = userPressFocus({ press: p, sameInput: !!p && sameInput(p.target, el), focusAt: now() }), byUserPress = u.byUserPress;
       const v = focusVerdict({ owns: driving(), mine: isMine(), editable, insideView, byUserPress });
-      // verify r2 (Q1): a reclaim the user's own press elsewhere caused (a button of his focusing a box) is said, rate-limited
-      s.cue = v === 'reclaim' && reclaimCue({ why: u.why, press: p, focusAt: now(), lastCueAt: s.lastCueAt }); // (stamped when SAID — takeCue)
+      // verify r2 (Q1): a reclaim the user's own press elsewhere caused (a button of his focusing a box) is said, rate-limited.
+      // verify r4: armed FOR THE BOX (`s.cue = el`) by a RECLAIM only, never a bare flag any focusin resets — a box focused,
+      // replaced and focused again in one task (a keyed patch under a broadcast) armed two cues, and the first reader (the
+      // gone box: never said, F2) consumed the flag — then its own focusSink's focusin reset it — before the second reader
+      // (the box that stayed) ran: reclaimed twice, said never (measured on 41312584)
+      if (v === 'reclaim') s.cue = reclaimCue({ why: u.why, press: p, focusAt: now(), lastCueAt: s.lastCueAt }) ? el : null; // (stamped when SAID — takeCue)
       if (v === 'yield') { s.press = null; s.yielded = yieldAfter(s.yielded, 'yield'); s.kind = yieldKindOf(el); }
       return v;
     },
@@ -216,6 +224,6 @@ export function createKeyboardYield({ root, sink, drives, mine = () => false, no
      *  where the reclaim RUNS, with the element taken back from — a box already gone is no box to click: never said, and the
      *  rate limit not spent. Measured on 46462c3d: "Copy Path" on plain http (utils.js copyText's fallback appends a scratch
      *  textarea, selects — focuses — it, copies and removes it in one task) said "click the text box itself to type there". */
-    takeCue(el) { const c = !!s.cue && !(el && el.isConnected === false); s.cue = false; if (c) s.lastCueAt = now(); return c; },
+    takeCue(el) { const c = !!el && s.cue === el && el.isConnected !== false; if (s.cue === el) s.cue = null; if (c) s.lastCueAt = now(); return c; },
   };
 }

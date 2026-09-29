@@ -53,6 +53,17 @@ jobs:
           node-version: 22
       - name: Install dtach (session persistence layer the boot smokes need)
         run: sudo apt-get update && sudo apt-get install -y dtach
+      # CJK fonts (lane-mirror-197, 2.369.198): the runner image ships DejaVu +
+      # Liberation and NO CJK family, so every zh / ja glyph the chrome suites
+      # measure was DejaVu's fallback box — narrower than the glyph a Chinese or
+      # Japanese user sees. The zh / ja "drawn whole" censuses were blind here
+      # (a box that fits under tofu can be cut under Noto Sans CJK, what users
+      # and this project's own machine render), and a control whose premise was
+      # "the pre-fix rule cuts this ja line at 360 px" went red for the font
+      # alone. Users have CJK fonts; the runner gets the same family. The
+      # controls stay font-independent regardless (test-channel-threads-ui ⑥).
+      - name: Install CJK fonts (the runner measures zh / ja text as users see it)
+        run: sudo apt-get install -y fonts-noto-cjk
       - name: Install claude CLI
         run: npm i -g @anthropic-ai/claude-code
       - run: npm ci

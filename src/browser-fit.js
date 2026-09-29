@@ -88,6 +88,8 @@ const FIT_MAX_W = 3840;
 const FIT_MAX_H = 2400;
 /** A headed Chrome window's narrowest honest viewport (measured: 480 ⇒ scaled 0.96, 500 ⇒ exact). */
 const HEADED_MIN_W = 500;
+const FIT_MIRROR_WAIT_MS = 3000; // 2.369.198: how long a frame waits for the daemon's echo of its own set before it is judged anyway
+const FIT_STALE_ASK_MS = 10000; // 2.369.198: a size we asked for this recently shields its late frame from `fitHonored`
 /** A size within this many px of the applied one is the same size (a pane's sub-pixel wobble never re-fits). */
 const FIT_SLACK_PX = 2;
 /** The client reports a settled pane (ResizeObserver, debounced) — a drag of the divider is one report, not fifty. */
@@ -315,6 +317,31 @@ function fitHonored({ fit = null, picture = null } = {}) {
 }
 
 /**
+ * Is this picture THIS fit's answer at all — may `fitHonored` read it? (2.369.198, the .197 heavy red: a phone's page
+ * re-fitted at 500 px on a HEADLESS browser.) The bridge set 390×700 for the pane's first report and 390×737 for its
+ * settled one; on the loaded gate machine the daemon's frame of the FIRST set arrived after the second CLI call had
+ * returned — same width, a smaller height — and `fitHonored` read it as a headed window that cannot be that narrow.
+ * Two facts tell an earlier frame apart:
+ *   'stale-own'  — the picture is a size WE asked for within `staleWindowMs` before this fit (±FIT_SLACK_PX): that
+ *                  earlier fit's frame, late (the window bounds the shield: a headed floor that happens to equal an
+ *                  old pane is judged once the old ask is that far behind)
+ *   'unmirrored' — the daemon has not yet echoed this fit's own `set viewport` (the stream is ONE ordered channel: every
+ *                  frame read before the mirror shows the page BEFORE the set); waited at most `mirrorWaitMs`, so a
+ *                  daemon that never mirrors still gets judged
+ *   'judge'      — otherwise (a picture AT the fit's size is always judged: it is the exact answer)
+ */
+function frameJudgeVerdict({ fit = null, picture = null, asked = [], mirrored = false, ageMs = 0, mirrorWaitMs = FIT_MIRROR_WAIT_MS, staleWindowMs = FIT_STALE_ASK_MS, now = null } = {}) {
+  const fw = posNum(fit && fit.width), fh = posNum(fit && fit.height), pw = posNum(picture && picture.width), ph = posNum(picture && picture.height);
+  if (!fw || !fh || !pw || !ph) return 'judge';
+  const isPicture = (a) => Math.abs(posNum(a && a.width) - pw) <= FIT_SLACK_PX && Math.abs(posNum(a && a.height) - ph) <= FIT_SLACK_PX;
+  if (isPicture(fit)) return 'judge';
+  const t = Number.isFinite(now) ? now : null;
+  if ((Array.isArray(asked) ? asked : []).some((a) => a && isPicture(a) && (t === null || !Number.isFinite(a.at) || t - a.at <= staleWindowMs))) return 'stale-own';
+  if (!mirrored && ageMs < mirrorWaitMs) return 'unmirrored';
+  return 'judge';
+}
+
+/**
  * The bar's fit chip for THIS viewer (`you`) — shown only when the page is NOT
  * sized for this pane (a fitted page needs no words). `fit` = the bridge's last
  * `{type:'fit'}` record. → { show, kind: 'agent'|'other'|'floor'|'unavailable'|null, width, height, act }
@@ -489,6 +516,7 @@ module.exports = {
   FIT_SCALE, FIT_MIN_W, FIT_MIN_H, FIT_MAX_W, FIT_MAX_H, HEADED_MIN_W, FIT_SLACK_PX, FIT_REPORT_MS, FIT_DEBOUNCE_MS, RESTORE_AFTER_MS, OWN_WINDOW_MS,
   FRESH_FRAME_MS, REFRESH_EVERY_MS, WAIT_PICTURE_MS, NO_PICTURE_MS, ZOOM_MIN, ZOOM_MAX, ZOOM_DOUBLE_TAP, ZOOM_NONE, FIT_RULES, FIT_STATES,
   fitReport, paneViewport, fitTarget, fitVerdict, viewportArgv, agentViewportOf, deviceSizeOf, ownViewportRecord, fitHonored, fitChipState, pictureState,
+  FIT_MIRROR_WAIT_MS, FIT_STALE_ASK_MS, frameJudgeVerdict, // 2.369.198: is this picture THIS fit's answer (an earlier fit's late frame / a frame before the daemon's mirror is not)
   fitChipWords, PLACE_TAG_RE, buttonStep, fitHoldVerdict, // lane live-input (+ builder r2: the driver's held buttons hold a resize): the chip's words (where the page's size comes from + what a click does); a view's place tags
   agentSetArgs, ownSetOutcome, restoreDeferred, fitNoteOf, fitStateFromNote, // verify r1: the order-judged outcome of our own set, the deferred restore, the persisted note
   zoomClamp, isZoomed, zoomAt, pinchStep, panStep, zoomedRect, transformCss,

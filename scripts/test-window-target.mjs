@@ -44,6 +44,10 @@ import { scratch, freePort } from './scratch.mjs';
 import { windowLiveMode, windowModeBadge, leaseTransition, newViewerId } from '../src/lib/window-live-mode.js';
 
 const require = createRequire(import.meta.url);
+/** The accessibility env a shell may carry into a launch — Chromium reads the first three at start-up (any set ⇒ its
+ *  application registers on the AT-SPI bus), GTK3 loads the bridge from the fourth. The lane-E child runs without them
+ *  (2.369.198): the product's own switch is then the ONLY a11y input a launch carries. */
+const A11Y_ENV = Object.freeze(['ACCESSIBILITY_ENABLED', 'GNOME_ACCESSIBILITY', 'QT_ACCESSIBILITY', 'GTK_MODULES']);
 let pass = 0, fail = 0, skipped = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : ''}`); } };
 const skip = (why) => { skipped++; console.log(`  ⚠ SKIP: ${why}`); };
@@ -487,6 +491,13 @@ console.log('§4 LANE E REAL: reach + the share mode + the pixel road on the xpr
     const home = path.join(dir, 'lane-e', 'home'), rt = path.join(dir, 'lane-e', 'run');
     fs.mkdirSync(home, { recursive: true }); fs.mkdirSync(rt, { recursive: true }); fs.chmodSync(rt, 0o700);
     const env = { ...base, HOME: home, XDG_RUNTIME_DIR: rt }; delete env.WAYLAND_DISPLAY; delete env.DISPLAY; delete env.DBUS_SESSION_BUS_ADDRESS; delete env.AT_SPI_BUS_ADDRESS;
+    // 2.369.198 (the .197 heavy red): the owner's shell carries an accessibility env (this box: QT_ACCESSIBILITY=1 and
+    // GTK_MODULES=gail:atk-bridge) and it reached the child's keeper, so the switch-less control Chrome 154 REGISTERED
+    // a closed 4-node tree ("closed") where the integrator's `env -i` run saw none ("no accessibility tree") — measured
+    // by the integrator: any of these set ⇒ 154 is on the bus, none ⇒ never. The child runs WITHOUT them: the product's
+    // switch (--force-renderer-accessibility + ACCESSIBILITY_ENABLED=1, desktop-apps CHROMIUM_A11Y_ENV) is then the
+    // only a11y input any launch carries, and the control's reason is decided by the code, not by whose shell ran it.
+    for (const k of A11Y_ENV) delete env[k];
     const child = spawn('dbus-run-session', ['--', process.execPath, new URL(import.meta.url).pathname, '--lane-e-child'], { env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
     children.add(child);
     let buf = '', summary = null;
@@ -698,14 +709,26 @@ async function laneE() {
       let cj = null;
       await sleep(3000);
       const sn = ctl.ready ? await cli('vsst_bbbb', 'snapshot', ctl.id) : { code: -1, err: '' };
-      // WHY auto says pixels without the switch is a fact of the Chrome major (the .197 integration, MEASURED): ≤ 153 put
-      // its application on the bus with a CLOSED tree; 154 (2026-09-29, 154.0.8037.57) is not on the bus at all without
-      // an accessibility env (the product's switch is the flag + ACCESSIBILITY_ENABLED=1 — desktop-apps CHROMIUM_A11Y_ENV).
-      // An unmeasured major is RED, naming the measurement to take.
-      const CTL_WHY = { 153: /mode: auto → pixels — its accessibility tree is closed/, 154: /mode: auto → pixels — no accessibility tree/ };
+      // WHY auto says pixels without the switch is a fact of the Chrome major AND of the launch env (the .197 integration +
+      // the .197 heavy red, MEASURED): ≤ 153 puts its application on the bus with a CLOSED tree either way; 154
+      // (154.0.8037.57) is not on the bus at all without an accessibility env, and registers a CLOSED 4-node tree when
+      // the shell's a11y env reaches the launch (QT_ACCESSIBILITY=1 / GTK_MODULES on this box — the .197 gate's two runs
+      // read "closed", the integrator's `env -i` runs "no accessibility tree"). EVERY reason observed per major is a row;
+      // the assertion accepts any row (the substance: PIXELS, no page) and SAYS which one was seen; the child scrubs
+      // A11Y_ENV so the first row is the one expected here. An unmeasured major is RED, naming the measurement to take.
+      const CLOSED = /mode: auto → pixels — its accessibility tree is closed/, ABSENT = /mode: auto → pixels — no accessibility tree/;
+      const CTL_WHY = {
+        153: [{ re: CLOSED, when: 'a closed tree (153 registers with or without an a11y env)' }],
+        154: [{ re: ABSENT, when: 'not on the bus (no a11y env in the launch — the scrubbed child)' }, { re: CLOSED, when: 'a closed 4-node tree (an a11y env reached the launch)' }],
+      };
       let chromeMajor = null; try { chromeMajor = Number((/(\d+)\./.exec(execFileSync(chromeBin, ['--version'], { encoding: 'utf8', timeout: 10000 })) || [])[1]) || null; } catch { chromeMajor = null; }
-      ok(!!CTL_WHY[chromeMajor], `Chrome ${chromeMajor}: why a switch-less launch reads as pixels is a MEASURED row (${CTL_WHY[chromeMajor] ? 'yes' : 'none — launch it without the switch and record the mode line'})`);
-      ok(ctl.ready && !ctl.rec.args.includes('--force-renderer-accessibility') && !(ctl.rec.env && ctl.rec.env.ACCESSIBILITY_ENABLED) && !!CTL_WHY[chromeMajor] && CTL_WHY[chromeMajor].test(acl.out) && sn.code === 1 && /mode_pixels/.test(sn.err), `NEGATIVE CONTROL: Chrome launched WITHOUT the switch exposes no page — auto resolves to pixels (Chrome ${chromeMajor}'s measured reason) and a snapshot is refused (${(acl.out.match(/mode: .*/) || [''])[0]})`, acl.err + sn.err);
+      const rows = CTL_WHY[chromeMajor] || [];
+      const seen = rows.find((r) => r.re.test(acl.out)) || null;
+      const modeLine = (acl.out.match(/mode: .*/) || [''])[0];
+      const a11yCarried = A11Y_ENV.filter((k) => process.env[k] !== undefined);
+      ok(rows.length > 0, `Chrome ${chromeMajor}: why a switch-less launch reads as pixels is a MEASURED row (${rows.length ? rows.length + ' observed reason(s)' : 'none — launch it without the switch and record the mode line'})`);
+      ok(a11yCarried.length === 0, `the control's launch carries no accessibility env of the shell's (${A11Y_ENV.join(' / ')} all unset in the child) — the reason is the code's, not the caller's shell`, a11yCarried.join(', '));
+      ok(ctl.ready && !ctl.rec.args.includes('--force-renderer-accessibility') && !(ctl.rec.env && ctl.rec.env.ACCESSIBILITY_ENABLED) && !!seen && sn.code === 1 && /mode_pixels/.test(sn.err), `NEGATIVE CONTROL: Chrome launched WITHOUT the switch exposes no page — auto resolves to pixels and a snapshot is refused; Chrome ${chromeMajor}'s reason seen: ${seen ? seen.when : `NOT A MEASURED ROW — "${modeLine}"`}`, JSON.stringify({ modeLine, rows: rows.map((r) => r.when), snapshot: (sn.err || '').slice(0, 200) }));
       void cj;
       pageSrv.close();
     }

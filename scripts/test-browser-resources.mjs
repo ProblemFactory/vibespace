@@ -65,6 +65,15 @@ const done = () => {
 };
 
 // ── is the tool here at all? SKIP WITH EVIDENCE, never a silent pass ────────
+// 2.369.198: resolved the way the PRODUCT resolves it (browser-facts, past the VibeSpace shim), and that binary's
+// directory goes FIRST on this suite's PATH — every bare `agent-browser` below (and each `sh -c` "host" line) stands for
+// the CLI itself. The push shell's PATH has data/bin first, where the name is the shim (exit 2): the bare-name probe
+// skipped this whole suite on every post-push heavy run.
+{
+  const F = require('../src/browser-facts.js');
+  const real = (() => { try { return F.binaryResolver('agent-browser', process.env)(); } catch { return null; } })();
+  if (real) { process.env.PATH = `${path.dirname(real)}:${process.env.PATH || ''}`; console.log(`agent-browser: ${real} (its directory first on this suite's PATH)`); }
+}
 const v = spawnSync('agent-browser', ['--version'], { encoding: 'utf8', timeout: 15000 });
 if (v.error || v.status !== 0) {
   console.log('\nagent-browser (real binary)');

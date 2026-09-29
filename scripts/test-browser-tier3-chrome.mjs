@@ -32,6 +32,28 @@ const DESK = require('../src/window-desktop.js');
 const WT = require('../src/window-targets.js');
 const D = require('../src/desktop-display.js');
 const ENGINE = require('../src/server/window-targets-engine.js');
+// 2.369.198: the suite runs under its OWN session bus with a scratch runtime dir (test-window-target's lane-E rule), never
+// on the invoking desktop's. The accessibility bus it needs is then activated for it, in scratch — measured: every
+// post-push heavy run skipped here ("Couldn't connect to accessibility bus … Connection refused") because an earlier
+// suite's private session had re-created the desktop's /run/user/<uid>/at-spi/bus and left it dead (test-desktop-app-snap,
+// fixed in the same release); and on a live desktop this suite's Chrome no longer lands in the owner's own a11y tree.
+if (!process.argv.includes('--private-bus')) {
+  const dbus = D.binOnPath('dbus-run-session', { env: process.env });
+  if (dbus) {
+    const base = scratch('browser-tier3-bus'), rt = path.join(base, 'run');
+    fs.mkdirSync(rt, { recursive: true }); fs.chmodSync(rt, 0o700);
+    const env = { ...process.env, XDG_RUNTIME_DIR: rt };
+    for (const k of ['DBUS_SESSION_BUS_ADDRESS', 'AT_SPI_BUS_ADDRESS', 'WAYLAND_DISPLAY', 'DISPLAY']) delete env[k];
+    const child = spawn(dbus, ['--', process.execPath, new URL(import.meta.url).pathname, '--private-bus'], { env, stdio: 'inherit' });
+    for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { try { child.kill(sig); } catch { } });
+    const code = await new Promise((res) => child.on('exit', (c, s) => res(c ?? (s ? 1 : 0))));
+    // the private session's services (the a11y launcher, dconf, the portals) wind down AFTER dbus-run-session returns
+    // and may still write under `rt` — measured: one rm left the tree whole — so the removal retries for up to 3 s
+    for (let i = 0; i < 15 && fs.existsSync(base); i++) { try { fs.rmSync(base, { recursive: true, force: true }); } catch { } if (fs.existsSync(base)) await sleep(200); }
+    process.exit(code);
+  }
+  console.log('  (dbus-run-session not on PATH — the suite runs on the invoking session bus)');
+}
 const dir = scratch('browser-tier3-chrome');
 fs.mkdirSync(dir, { recursive: true });
 const children = new Set();

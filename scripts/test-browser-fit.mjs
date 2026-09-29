@@ -134,6 +134,16 @@ console.log('— ① the PURE rules (src/browser-fit.js) over the measured 0.38.
   ok(agd && agd.kind === 'device' && agd.device === 'iPhone 12' && dsz && dsz.width === 390 && dsz.height === 844 && dsz.scale === 3, 'an agent\'s `set device "iPhone 12"` is a flag too; its result names 390×844 @3 (measured)');
   ok(FIT.agentViewportOf(launchCmd) === null && FIT.agentViewportOf({ type: 'command', action: 'click' }) === null && FIT.agentViewportOf(vpRes) === null, 'anything else is not a viewport choice');
 
+  // 2.369.198: is a picture this fit's answer at all — an earlier fit's late frame / a frame before the daemon's mirror is not
+  {
+    const J = (o) => FIT.frameJudgeVerdict({ fit: { width: 390, height: 737 }, mirrored: true, ageMs: 100, now: 10000, ...o });
+    ok(J({ picture: { width: 390, height: 737 } }) === 'judge' && J({ picture: { width: 390, height: 737 }, mirrored: false, asked: [{ width: 390, height: 737, at: 9900 }] }) === 'judge'
+      && J({ picture: { width: 390, height: 700 }, asked: [{ width: 390, height: 700, at: 9800 }] }) === 'stale-own' && J({ picture: { width: 390, height: 700 }, asked: [{ width: 390, height: 700, at: 9800 }, { width: 390, height: 737, at: 9900 }] }) === 'stale-own'
+      && J({ picture: { width: 390, height: 700 }, asked: [{ width: 390, height: 700, at: 10000 - FIT.FIT_STALE_ASK_MS - 1 }] }) === 'judge'
+      && J({ picture: { width: 390, height: 620 }, mirrored: false }) === 'unmirrored' && J({ picture: { width: 390, height: 620 }, mirrored: false, ageMs: FIT.FIT_MIRROR_WAIT_MS }) === 'judge'
+      && J({ picture: { width: 390, height: 593 } }) === 'judge' && J({ picture: { width: 1280, height: 577 } }) === 'judge',
+    `frameJudgeVerdict: the fit's own size is always judged; a size asked within ${FIT.FIT_STALE_ASK_MS / 1000} s is that ask's late frame (stale-own), older than that it is judged; a frame before the daemon's mirror waits (unmirrored) at most ${FIT.FIT_MIRROR_WAIT_MS / 1000} s; a foreign size after the mirror is judged (the headed floor stays alive)`);
+  }
   // the headed floor, off the picture
   ok(FIT.fitHonored({ fit: { width: 700, height: 900 }, picture: { width: 700, height: 900 } }) === 'exact' && FIT.fitHonored({ fit: { width: 390, height: 760 }, picture: { width: 390, height: 593 } }) === 'scaled' && FIT.fitHonored({ fit: { width: 700, height: 900 }, picture: { width: 1280, height: 577 } }) === 'other' && FIT.fitHonored({ fit: { width: 700, height: 900 }, picture: { width: 700, height: 600 } }) === 'other', 'fitHonored: exact / scaled (the measured headed 390×593) / other (an old frame, a wide page)');
 
@@ -206,14 +216,14 @@ async function fakeUpstream() {
   U.frame = (tag = 'f') => { const h = U.headed && U.page.w < 500 ? Math.round(U.page.h * 0.78) : U.page.h; U.emit({ type: 'frame', seq: ++U.seq, data: jpegOf(U.page.w, h, tag + U.seq), metadata: { deviceWidth: U.page.w, deviceHeight: U.page.h, timestamp: 0 } }); };
   let rid = 1000;
   /** What the real daemon mirrors for ONE `set viewport` CLI call (fixture order), then the repaint. */
-  U.mirrorSet = (w, h, { agent = false } = {}) => {
+  U.mirrorSet = (w, h, { agent = false, frame = true } = {}) => { // frame:false = the set's repaint is withheld (2.369.198: the leg emits frames by hand, out of order)
     const lid = 'r' + (++rid), vid = 'r' + (++rid);
     U.emit({ type: 'command', action: 'launch', id: lid, params: { action: 'launch', id: lid }, timestamp: 0 });
     U.emit({ type: 'result', action: 'launch', id: lid, success: false, data: { launched: true }, timestamp: 0 });
     U.emit({ type: 'command', action: 'viewport', id: vid, params: { action: 'viewport', width: w, height: h, id: vid }, timestamp: 0 });
     U.emit({ type: 'result', action: 'viewport', id: vid, success: false, data: { width: w, height: h }, timestamp: 0 });
     U.page = { w, h };
-    setTimeout(() => U.frame(agent ? 'agent' : 'fit'), 15);
+    if (frame) setTimeout(() => U.frame(agent ? 'agent' : 'fit'), 15);
   };
   wss.on('connection', (ws) => {
     clients.add(ws); ws.on('close', () => clients.delete(ws));
@@ -769,6 +779,47 @@ console.log('— ⑥ verify r1 (continuation): late mirrors, a size the page did
     await V.close(); await B.close(); await U.close();
     return out;
   };
+  // 2.369.198 (the .197 heavy red): a HEADLESS phone re-fitted at 500 px. (a) the pane's first report 390×700 is fitted;
+  // the settled 390×737 is set and echoed, and the EARLIER fit's 390×700 frame arrives after that — same width, smaller
+  // height, the headed-floor shape; (b) a set whose echo lands late (a busy stream): a smaller frame read before the
+  // echo. Neither is this fit's answer. Returns the sets + the fit record at each point.
+  const lateFrameLeg = async (BSmod) => {
+    const U = await fakeUpstream(); cleanups.push(() => U.close());
+    const { k, calls } = stubKeeper(U);
+    let mode = 'normal';
+    k.setViewportFor = async (target, { width, height }) => {
+      calls.set.push([width, height]); await sleep(5);
+      if (mode === 'late-mirror') { setTimeout(() => U.mirrorSet(width, height), 250); return { ok: true }; } // the CLI returns before the daemon's echo
+      U.mirrorSet(width, height, { frame: mode !== 'hold-frame' }); await sleep(5); return { ok: true };
+    };
+    const B = await bridgeOn(BSmod, k);
+    const P = viewer(B.P); await P.ready();
+    const out = { sets: () => calls.set.map((c) => c.join()) };
+    P.send({ type: 'fit', width: 390, height: 700, dpr: 3, visible: true });
+    await until(() => P.lastFit() && P.lastFit().state === 'fitted' && P.lastFit().height === 700, 4000);
+    mode = 'hold-frame';
+    P.send({ type: 'fit', width: 390, height: 737, dpr: 3, visible: true });
+    await until(() => calls.set.at(-1).join() === '390,737' && U.sent.some((m) => m.type === 'result' && m.data && m.data.height === 737), 4000);
+    await sleep(80); // the CLI returned, the check is armed, the echo has landed
+    U.page = { w: 390, h: 700 }; U.frame('late'); // the earlier fit's frame, late
+    await sleep(400);
+    out.stale = { sets: out.sets(), fit: P.lastFit() };
+    U.page = { w: 390, h: 737 }; U.frame('fit'); // this fit's own answer
+    await until(() => P.lastFit() && P.lastFit().state === 'fitted' && P.lastFit().height === 737 && !P.lastFit().floor, 3000);
+    out.staleAfter = P.lastFit();
+    mode = 'late-mirror';
+    P.send({ type: 'fit', width: 390, height: 800, dpr: 3, visible: true });
+    await until(() => calls.set.at(-1).join() === '390,800', 4000);
+    await sleep(40); // the CLI returned; the echo is 250 ms away
+    U.page = { w: 390, h: 620 }; U.frame('early'); // a frame that predates the set (a size of nobody's)
+    await sleep(120);
+    out.unmirrored = { sets: out.sets(), fit: P.lastFit() };
+    await until(() => P.lastFit() && P.lastFit().state === 'fitted' && P.lastFit().height === 800 && !P.lastFit().floor, 3000); // the echo lands, its frame follows
+    out.unmirroredAfter = P.lastFit();
+    out.logs = B.logs.filter((l) => /arriving late/.test(l));
+    await P.close(); await B.close(); await U.close();
+    return { stale: out.stale, staleAfter: out.staleAfter, unmirrored: out.unmirrored, unmirroredAfter: out.unmirroredAfter, logs: out.logs };
+  };
   const hl = await headedLeg(BS);
   ok(hl.sets.length === 0 && hl.agent && hl.agent.join() === '390,844' && hl.last === 'agent' && hl.noteAgent === 390, `a noted agent choice of 390×844 on a HEADED browser (the first picture 390×658, the floor's scaling): still the agent's — letterboxed, never fitted over (sets ${hl.sets.length})`, JSON.stringify(hl));
 
@@ -839,10 +890,22 @@ console.log('— ⑥ verify r1 (continuation): late mirrors, a size the page did
   ok(src.split(T11).length === 2, 'control setup: the F6 tap of our own resize is found once');
   const c11 = await traceLeg(M.load('src/server/browser-stream.js', src.replace(T11, '// F6'), 'no-trace-row'));
   ok(c11.traced.length === 0 && c11.ownRaw === 0, `NEGATIVE CONTROL: without the F6 tap the resize never reaches the trace (${c11.traced.length} traced rows) — the agent's clicks before and after it look alike`, JSON.stringify(c11));
-  const c10 = await headedLeg(M.load('src/server/browser-stream.js', src.replace(T10, "FIT.fitHonored({ fit: f.agent, picture: sz }) !== 'exact') {"), 'agent-exact-only'));
+  // 2.369.198: the late frame of an earlier fit and the frame before the daemon's echo — each fence with its control
+  const T12 = "if (jv === 'stale-own') {";
+  const T13 = "if (jv === 'unmirrored') return;";
+  ok(src.split(T12).length === 2 && src.split(T13).length === 2, 'control setup (2.369.198): the stale-own and the unmirrored fences are each found once');
+  const lf = await lateFrameLeg(BS);
+  const noFloor = (s) => Array.isArray(s) && !s.some((x) => /^500,/.test(x));
+  ok(noFloor(lf.stale.sets) && lf.staleAfter && lf.staleAfter.height === 737 && !lf.staleAfter.floor && noFloor(lf.unmirrored.sets) && lf.unmirroredAfter && lf.unmirroredAfter.height === 800 && !lf.unmirroredAfter.floor && lf.logs.length === 1,
+    `the earlier fit's 390×700 frame arriving after the 390×737 set, and a 390×620 frame read before the daemon echoed the 390×800 set, are not judged — no headed floor on a headless phone (sets ${JSON.stringify(lf.unmirrored.sets)}; the log says why once)`, JSON.stringify(lf));
+  const c12 = await lateFrameLeg(M.load('src/server/browser-stream.js', src.replace(T12, 'if (false) {'), 'no-stale-own'));
+  ok(!noFloor(c12.stale.sets) && c12.stale.fit && c12.stale.fit.floor === 500, `NEGATIVE CONTROL: without the stale-own fence the earlier fit's late 390×700 frame reads as a headed floor — the phone's page re-fitted at ${(c12.stale.sets.find((x) => /^500,/.test(x)) || '?')} (the .197 heavy red)`, JSON.stringify(c12.stale));
+  const c13 = await lateFrameLeg(M.load('src/server/browser-stream.js', src.replace(T13, ''), 'no-unmirrored'));
+  ok(!noFloor(c13.unmirrored.sets) && c13.unmirrored.fit && c13.unmirrored.fit.floor === 500, `NEGATIVE CONTROL: without the unmirrored fence a frame read before the daemon's echo of our set is judged against it — floored at 500 (sets ${JSON.stringify(c13.unmirrored.sets)})`, JSON.stringify(c13.unmirrored));
+  const c10 = await headedLeg(M.load('src/server/browser-stream.js', src.replace(T10,"FIT.fitHonored({ fit: f.agent, picture: sz }) !== 'exact') {"), 'agent-exact-only'));
   ok(c10.sets.length >= 1 && c10.agent === null, `NEGATIVE CONTROL: forgetting any agent choice that is not EXACTLY on the first picture drops a headed 390×844 and fits over it (sets ${JSON.stringify(c10.sets)})`, JSON.stringify(c10));
 }
 
-for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 13, label: 'browser-fit controls: ' })) ok(c.pass, c.name, c.detail);
+for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 15, label: 'browser-fit controls: ' })) ok(c.pass, c.name, c.detail);
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
