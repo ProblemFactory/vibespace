@@ -165,6 +165,9 @@ console.log('— ① the input side, the three moments, the refusal, the confirm
   ok(T.announceVerdict({ cause: 'restart', announceIdle: true }).deliver === false && T.announceVerdict({ cause: 'detach', announceIdle: true }).deliver === false, 'restart / detach are state changes only, whatever the setting');
   // LANE H VERIFY r6 LOW 3: a panel Stop while the user drives ends the browser the takeover was on — a handback cause of its own
   ok(T.HANDBACK_CAUSES.includes('stop') && T.decideHandback({ state: t0.state, cause: 'stop', now: 200 }).cause === 'stop' && T.announceVerdict({ cause: 'stop', announceIdle: true }).deliver === false, 'r6 LOW 3: `stop` is a handback cause (a Stop while the user drives) — a state change, never a delivered turn, whatever the setting');
+  // lane browser-resume B (§3.9, the owner's ruling 2): "Hand back and continue" — the between-turns twin: its stash entry
+  // is the ONE carrier (never a delivered turn, never the notice beside it), whatever the setting
+  ok(T.HANDBACK_CAUSES.includes('continue') && T.decideHandback({ state: t0.state, cause: 'continue', now: 200 }).cause === 'continue' && T.announceVerdict({ cause: 'continue', announceIdle: true }).deliver === false && T.announceVerdict({ cause: 'continue' }).notice === false && T.handbackWakes({ own: true, ownRerun: ['click'] }) === 1, 'lane browser-resume B: `continue` is a handback cause — never delivered, no notice beside the stash (the explicit Hand back still wakes 1)');
   const stopText = T.handbackText({ cause: 'stop', label: 'Work', url: 'https://x.test/p' });
   ok(/stopped the "Work" browser/.test(stopText) && /control is back with you/.test(stopText) && /next browser command starts it again/.test(stopText) && /https:\/\/x\.test\/p/.test(stopText) && !/Re-orient/.test(stopText), 'r6 LOW 3: …its words: the user stopped the browser, control is back, its pages are gone and the next command starts it again (the page they were on named)', stopText);
   const paused = T.browserPausedRefusal({ state: t0.state, label: 'Work', handles: ['work'], now: 60100, idleMs: 600000 });
@@ -952,6 +955,11 @@ console.log('— ⑦ lane J r2: keyboard ownership, the key routes, text records
     [{ was: { owns: true }, now: { owns: true }, caretOutside: true }, { changed: false, moveCaret: false, release: false }, 'no transition: nothing (the belt\'s case, not this one)'],
     [{ was: { owns: false, yielded: true }, now: { owns: false, yielded: true } }, { changed: false, moveCaret: false, release: false }, 'no transition while yielded'],
     [{}, { changed: true, moveCaret: false, release: false }, 'nothing given'],
+    // lane dialog-keys: a dialog the user opened takes the keys / gives them back — a transition like any other
+    [{ was: { owns: true }, now: { owns: false, dialog: true }, caretOutside: false }, { changed: true, moveCaret: false, release: true }, 'a dialog he opened takes the keys: redrawn, the keys held in the page let go'],
+    [{ was: { owns: false, yielded: true }, now: { owns: false, yielded: true, dialog: true } }, { changed: true, moveCaret: false, release: false }, 'a dialog opened from a yield: redrawn (the chip says the dialog)'],
+    [{ was: { owns: false, dialog: true }, now: { owns: true, dialog: false }, caretOutside: false }, { changed: true, moveCaret: false, release: false }, 'the dialog closed: the keys are the page\'s again, redrawn'],
+    [{ was: { owns: false, dialog: true }, now: { owns: false, dialog: true } }, { changed: false, moveCaret: false, release: false }, 'no transition while a dialog holds'],
   ];
   // verify r2 (Q1): a reclaim the user's OWN press elsewhere caused is SAID (rate-limited); a script's focus never is
   const RC_ROWS = [
@@ -988,8 +996,9 @@ console.log('— ⑦ lane J r2: keyboard ownership, the key routes, text records
     const TS3 = fs.readFileSync(path.join(REPO, 'src/browser-takeover.js'), 'utf8');
     const TCTL = [
       { tag: 'kt-no-move', from: 'moveCaret: n.owns && !w.owns && !!caretOutside,', to: 'moveCaret: false,', red: ['the first judgement, owning, a caret outside', 'restored with a SCRIPT\'s caret in the composer (H1b): the caret moves'] },
-      { tag: 'kt-owns-only', from: '  const changed = !was || w.owns !== n.owns || w.yielded !== n.yielded;', to: '  const changed = !was || w.owns !== n.owns;', red: ['restored while yielded (H1a): redrawn, the caret stays the user\'s'] },
-      { tag: 'kt-no-release', from: 'release: w.owns && !n.owns };', to: 'release: false };', red: ['hidden: redrawn, the keys held in the page let go (H3)', 'a yield: the keys held in the page let go (r1 K4, now also here)'] }, // verify r2 (H3)
+      { tag: 'kt-owns-only', from: '  const changed = !was || w.owns !== n.owns || w.yielded !== n.yielded || w.dialog !== n.dialog;', to: '  const changed = !was || w.owns !== n.owns;', red: ['restored while yielded (H1a): redrawn, the caret stays the user\'s', 'a dialog opened from a yield: redrawn (the chip says the dialog)'] },
+      { tag: 'kt-no-dialog', from: ' || w.dialog !== n.dialog;', to: ';', red: ['a dialog opened from a yield: redrawn (the chip says the dialog)'] }, // lane dialog-keys
+      { tag: 'kt-no-release', from: 'release: w.owns && !n.owns };', to: 'release: false };', red: ['hidden: redrawn, the keys held in the page let go (H3)', 'a yield: the keys held in the page let go (r1 K4, now also here)', 'a dialog he opened takes the keys: redrawn, the keys held in the page let go'] }, // verify r2 (H3); lane dialog-keys: a dialog taking the keys lets go too
     ];
     for (const c of TCTL) {
       const found = TS3.split(c.from).length === 2;
@@ -998,6 +1007,90 @@ console.log('— ⑦ lane J r2: keyboard ownership, the key routes, text records
       ok(found && JSON.stringify(bad) === JSON.stringify(c.red), `NEGATIVE CONTROL (${c.tag}): the patched copy fails exactly ${c.red.join(' · ')}`, JSON.stringify({ found, bad }));
     }
     for (const r of copiesCensus(MT.files, MT.dir, REPO, { minCopies: TCTL.length, label: '⑦ transitions ' })) ok(r.pass, r.name, r.detail);
+  }
+  // ── lane dialog-keys (the owner's "ok", 2026-09-30, on takeover-keyboard r4's proposal): A DIALOG YOUR OWN ACT OPENED TAKES
+  // THE KEYS; one that opens by itself never does (before: verify r3 F4 — Delete → the confirm → Enter put a line break into the
+  // PAGE, the file kept). The PURE tables + a patched copy per rule; the DOM-mini is test-takeover-keyboard, the real rung
+  // test-browser-live-input ⑦. ──
+  ok(T.keyboardOwnership({ mode: 'takeover', mine: true, dialog: true }).why === 'dialog' && !own({ mode: 'takeover', mine: true, dialog: true }) && T.keyboardOwnership({ mode: 'takeover', mine: true, dialog: true, yielded: true }).why === 'dialog'
+    && T.keyboardOwnership({ mode: 'takeover', mine: true, connected: false, dialog: true }).why === 'disconnected' && own({ mode: 'takeover', mine: true, dialog: false }),
+    'keyboardOwnership: while a dialog the user opened HOLDS the keys the view owns none (why "dialog", over a yield); the older refusals keep their names first');
+  const DV_ROWS = [
+    [{ owns: true, byUserPress: true }, 'take', 'THE RULE: his own fresh act opened it while the keys are the page\'s (Delete → the confirm)'],
+    [{ owns: true, byUserPress: false }, 'reclaim', 'THE PASSWORD GUARD: it opened by itself while the keys are the page\'s'],
+    [{ owns: true }, 'reclaim', 'no opener fact at all (fails closed)'],
+    [{ owns: false, yielded: true, byUserPress: true }, 'take', 'yielded to the composer, his press opened it (the keys return to the composer)'],
+    [{ owns: false, yielded: true, byUserPress: false }, 'allow', 'yielded, it opened by itself — the keys are not the page\'s'],
+    [{ owns: false, held: true, byUserPress: true }, 'take', 'a dialog he opened holds the keys, his act there opens another (the newest holds)'],
+    [{ owns: false, held: true, byUserPress: false }, 'allow', 'a dialog holds the keys, another opens by itself — not the page\'s keys'],
+    [{ owns: true, held: true, byUserPress: false }, 'allow', 'a held dialog wins over an owns fact'],
+    [{ owns: false, byUserPress: true }, 'take', 'his press, the view off screen (the dialog holds the keys when it comes back)'],
+    [{ owns: false, byUserPress: false }, 'allow', 'off screen, by itself — not the view\'s to decide'],
+    [{ owns: true, byUserPress: true, opener: 'page' }, 'allow', 'the agent\'s PAGE dialog on the view\'s own bar — never an app modal'],
+    [{ owns: true, byUserPress: false, opener: 'page' }, 'allow', 'the page\'s dialog, by itself'],
+    [{ owns: true, byUserPress: true, opener: 'nonsense' }, 'allow', 'an unknown opener is no app modal'],
+    [{}, 'allow', 'nothing given'],
+  ];
+  const dvBad = (TT) => DV_ROWS.filter(([a, want]) => { let got; try { got = TT.dialogVerdict(a); } catch { return true; } return got !== want; }).map((r) => r[2]);
+  ok(typeof T.dialogVerdict === 'function' && JSON.stringify(T.DIALOG_OPENERS) === '["app","page"]' && dvBad(T).length === 0, `dialogVerdict (lane dialog-keys): the user's own act ⇒ 'take'; a modal that opens by itself while the keys are the page's ⇒ 'reclaim' (the password guard); the page's own dialog never an app modal (${DV_ROWS.length} rows)`, dvBad(T).join(' | '));
+  const DO_ROWS = [
+    [{ press: { at: 1000, trusted: true }, openAt: 1000 }, true, 'pressed', 'opened in the press\'s own task'],
+    [{ press: { at: 1000, trusted: true }, openAt: 1000 + T.USER_PRESS_MS }, true, 'pressed', 'at the window\'s edge'],
+    [{ press: { at: 1000, trusted: true }, openAt: 1001 + T.USER_PRESS_MS }, false, 'stale press', 'one ms past the window (a slow fetch)'],
+    [{ press: { at: 1000, trusted: true }, openAt: 999 }, false, 'stale press', 'opened BEFORE the press'],
+    [{ press: { at: NaN, trusted: true }, openAt: 5 }, false, 'stale press', 'an unreadable press time'],
+    [{ press: { at: 1000, trusted: false }, openAt: 1001 }, false, 'synthetic press', 'a script-dispatched pointerdown (isTrusted false)'],
+    [{ press: { at: 1000 }, openAt: 1001 }, false, 'synthetic press', 'trust not proven'],
+    [{ press: { at: 1000, trusted: true, picture: true }, openAt: 1050 }, false, 'pressed the page', 'a press on the picture went to the page'],
+    [{ press: null, openAt: 1001 }, false, 'no press', 'nothing pressed (a broadcast, a timer)'],
+    [{}, false, 'no press', 'nothing given'],
+  ];
+  const doBad = (TT) => DO_ROWS.filter(([a, by, why]) => { let got; try { got = TT.dialogOpener(a); } catch { return true; } return !got || got.byUserPress !== by || got.why !== why; }).map((r) => r[3]);
+  ok(doBad(T).length === 0, `dialogOpener (lane dialog-keys): ONLY the user's own TRUSTED act on the app within ${T.USER_PRESS_MS} ms of the open — a synthetic press, a press on the picture (the page's), a stale one, none: not his, each named (${DO_ROWS.length} rows)`, doBad(T).join(' | '));
+  const DR_ROWS = [
+    [{ left: 0, base: { to: 'sink' } }, 'sink', 'the only dialog closed, the view owned the keys: the page'],
+    [{ left: 0, base: { to: 'yield', valid: true } }, 'yield', 'opened from a yield: back to the composer'],
+    [{ left: 0, base: { to: 'yield', valid: false } }, 'stay', 'the composer gone / hidden: move nothing (the yield\'s home rule answers)'],
+    [{ left: 1, back: { valid: true }, base: { to: 'sink' } }, 'back', 'the newest closed: back to the older dialog\'s field'],
+    [{ left: 1, back: { valid: false }, base: { to: 'sink' } }, 'older', 'the newest closed, the older\'s field went (re-rendered / in a removed dialog): the older dialog\'s OWN field, never <body> (verify r1)'],
+    [{ left: 0, back: { valid: true }, base: { to: 'sink' } }, 'sink', 'the last one closed: the base, whatever its back'],
+    [{ left: 0 }, 'stay', 'no base (released)'],
+    [{}, 'stay', 'nothing given'],
+  ];
+  const drBad = (TT) => DR_ROWS.filter(([a, want]) => { let got; try { got = TT.dialogReturn(a); } catch { return true; } return got !== want; }).map((r) => r[2]);
+  ok(drBad(T).length === 0, `dialogReturn (lane dialog-keys): a close gives the keys back where they were — the page, the composer, the older dialog — never an orphan (${DR_ROWS.length} rows)`, drBad(T).join(' | '));
+  const DC_ROWS = [
+    [{ verdict: 'reclaim', at: 10000 }, true, 'a dialog that opened by itself, first time'],
+    [{ verdict: 'reclaim', at: 10000, lastCueAt: 10000 - T.RECLAIM_CUE_MS + 1 }, false, 'said less than RECLAIM_CUE_MS ago (one limiter with the Q1 cue)'],
+    [{ verdict: 'reclaim', at: 10000, lastCueAt: 10000 - T.RECLAIM_CUE_MS }, true, 'said exactly RECLAIM_CUE_MS ago'],
+    [{ verdict: 'take', at: 10000 }, false, 'a dialog he opened is never told typing still goes to the browser'],
+    [{ verdict: 'allow', at: 10000 }, false, 'allowed — nothing to say'],
+    [{}, false, 'nothing given'],
+  ];
+  const dcBad = (TT) => DC_ROWS.filter(([a, want]) => { let got; try { got = TT.dialogReclaimCue(a); } catch { return true; } return got !== want; }).map((r) => r[2]);
+  ok(dcBad(T).length === 0, `dialogReclaimCue (lane dialog-keys): a modal that opened by itself and was taken back is said once per ${T.RECLAIM_CUE_MS} ms; a dialog he opened never (${DC_ROWS.length} rows)`, dcBad(T).join(' | '));
+  {
+    const MD = mutantCopies('browser-takeover-dialog', REPO);
+    const TSD = fs.readFileSync(path.join(REPO, 'src/browser-takeover.js'), 'utf8');
+    const DCTL = [
+      { tag: 'dv-no-take', from: "  if (byUserPress) return 'take';\n", to: '', bad: dvBad, red: ['THE RULE: his own fresh act opened it while the keys are the page\'s (Delete → the confirm)', 'yielded to the composer, his press opened it (the keys return to the composer)', 'a dialog he opened holds the keys, his act there opens another (the newest holds)', 'his press, the view off screen (the dialog holds the keys when it comes back)'] },
+      { tag: 'dv-script-takes', from: "  return owns && !yielded && !held ? 'reclaim' : 'allow';", to: "  return 'take';", bad: dvBad, red: ['THE PASSWORD GUARD: it opened by itself while the keys are the page\'s', 'no opener fact at all (fails closed)', 'yielded, it opened by itself — the keys are not the page\'s', 'a dialog holds the keys, another opens by itself — not the page\'s keys', 'a held dialog wins over an owns fact', 'off screen, by itself — not the view\'s to decide', 'nothing given'] },
+      { tag: 'dv-page-taken', from: "  if (opener !== 'app') return 'allow';\n", to: '', bad: dvBad, red: ['the agent\'s PAGE dialog on the view\'s own bar — never an app modal', 'the page\'s dialog, by itself', 'an unknown opener is no app modal'] },
+      { tag: 'do-no-trust', from: "    : p.trusted !== true ? 'synthetic press'      // the browser's own isTrusted, never a flag a script could set\n", to: '', bad: doBad, red: ['a script-dispatched pointerdown (isTrusted false)', 'trust not proven'] },
+      { tag: 'do-no-picture', from: "      : p.picture ? 'pressed the page'\n", to: '', bad: doBad, red: ['a press on the picture went to the page'] },
+      { tag: 'do-no-window', from: "        : !(Number.isFinite(since) && since >= 0 && since <= windowMs) ? 'stale press'\n", to: '', bad: doBad, red: ['one ms past the window (a slow fetch)', 'opened BEFORE the press', 'an unreadable press time'] },
+      { tag: 'dr-no-back', from: "  if (Number(left) > 0) return back && back.valid ? 'back' : 'older';", to: "  if (Number(left) > 0) return 'stay';", bad: drBad, red: ['the newest closed: back to the older dialog\'s field', 'the newest closed, the older\'s field went (re-rendered / in a removed dialog): the older dialog\'s OWN field, never <body> (verify r1)'] },
+      { tag: 'dr-yield-blind', from: "  return base.to === 'yield' && base.valid ? 'yield' : 'stay';", to: "  return base.to === 'yield' ? 'yield' : 'stay';", bad: drBad, red: ['the composer gone / hidden: move nothing (the yield\'s home rule answers)'] },
+      { tag: 'dc-no-limit', from: '  return !(lastCueAt != null && Number(at) - Number(lastCueAt) < everyMs);', to: '  return true;', bad: dcBad, red: ['said less than RECLAIM_CUE_MS ago (one limiter with the Q1 cue)'] },
+      { tag: 'dc-any-verdict', from: "  if (verdict !== 'reclaim') return false;\n", to: '', bad: dcBad, red: ['a dialog he opened is never told typing still goes to the browser', 'allowed — nothing to say', 'nothing given'] },
+    ];
+    for (const c of DCTL) {
+      const found = TSD.split(c.from).length === 2;
+      const Tm = found ? MD.load('src/browser-takeover.js', TSD.replace(c.from, c.to), c.tag) : null;
+      const got = Tm ? c.bad(Tm) : null;
+      ok(found && JSON.stringify(got) === JSON.stringify(c.red), `NEGATIVE CONTROL (${c.tag}): the patched copy fails exactly ${c.red.join(' · ')}`, JSON.stringify({ found, got }));
+    }
+    for (const r of copiesCensus(MD.files, MD.dir, REPO, { minCopies: DCTL.length, label: '⑦ dialog-keys ' })) ok(r.pass, r.name, r.detail);
   }
   // the client registry: keyboardYielded + the change signal
   {

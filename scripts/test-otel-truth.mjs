@@ -114,7 +114,7 @@ const PAYLOAD = (recs) => ({
   ok(ingest.observedOrgForRid('req_011TESTTRUTH000000000001') === 'sub-true', 'rid → resolved observed org (DIAGNOSTIC since 2026-09-07 — the map is kept, it just decides nothing)');
   ok(ingest.observedOrgForRid('req_unknown') === undefined, 'no observation → undefined');
   ok(attribCalls.length === 0, 'REFUTED AND REMOVED: a mismatch writes NO corrective attribution record — organization.id is the identity the CLI cached at SPAWN, so the correction booked a hot-switched session\'s spend to the account it started on forever', JSON.stringify(attribCalls));
-  ok(JSON.parse(fs.readFileSync(path.join(dir, 'usage-history', 'otel-truth.ndjson'), 'utf-8').trim().split('\n')[0]).agreed === false, 'the stash row RECORDS the disagreement (offline-forever evidence) instead of acting on it');
+  ok((() => { const r0 = JSON.parse(fs.readFileSync(path.join(dir, 'usage-history', 'otel-truth.ndjson'), 'utf-8').trim().split('\n')[0]); return r0.labelMatchesSlot === false && !('agreed' in r0); })(), 'the stash row RECORDS the label beside the walk\'s slot (`labelMatchesSlot` — a coincidence metric; the old `agreed` read as identity) instead of acting on it');
   await post(PAYLOAD([REC()]));
   ok(attribCalls.length === 0, 'duplicate rid → still nothing written, no re-append');
   const stash = fs.readFileSync(path.join(dir, 'usage-history', 'otel-truth.ndjson'), 'utf-8').trim().split('\n');
@@ -157,30 +157,25 @@ const PAYLOAD = (recs) => ({
   await post(PAYLOAD([REC({ 'organization.id': { stringValue: orgT }, request_id: { stringValue: 'req_agree1' } })]));
   const afterAgree = attribCalls.length;
   ok(afterAgree === before2, 'agreement phase writes nothing');
-  const disagreedBefore = ingest.stats().disagreed;
+  const disagreedBefore = ingest.stats().labelDiffers;
   curAcct = 'sub-B'; // pool hot-switch: the link (and the credentials) are B now
   curLastTs = T_MS + 60000;
   await post(PAYLOAD([REC({ 'organization.id': { stringValue: orgT }, request_id: { stringValue: 'req_stale1' } })]));
   ok(attribCalls.length === afterAgree, 'the headline scenario writes NOTHING — the walk (credential link) keeps the attribution');
-  ok(ingest.stats().disagreed === disagreedBefore + 1, '…and the divergence is COUNTED (visible, investigable, never authoritative)');
+  ok(ingest.stats().labelDiffers === disagreedBefore + 1, '…and the difference is COUNTED (stats().labelDiffers) — and NOT journalled: the label is machine-wide, so "≠ attributed" was the normal state of most rows and its log line read as proof of the opposite (lane-hot-switch)');
   const lastStash = () => JSON.parse(fs.readFileSync(path.join(dir, 'usage-history', 'otel-truth.ndjson'), 'utf-8').trim().split('\n').pop());
-  ok(lastStash().attributed === 'sub-B' && lastStash().agreed === false, 'the stash row carries BOTH identities so the refutation stays analyzable offline', JSON.stringify(lastStash()));
+  ok(lastStash().attributed === 'sub-B' && lastStash().labelMatchesSlot === false, 'the stash row carries the walk\'s slot AND the label, so the rows stay analyzable offline', JSON.stringify(lastStash()));
   curAcct = 'sub-C'; // second switch while the CLI still reports A
   await post(PAYLOAD([REC({ 'organization.id': { stringValue: orgT }, request_id: { stringValue: 'req_stale2' } })]));
-  ok(attribCalls.length === afterAgree && ingest.stats().disagreed === disagreedBefore + 2, 'a SECOND switch reports a NEW pair (pair-keyed dedup kept: an acct-only marker would hide the next switch)');
+  ok(attribCalls.length === afterAgree && ingest.stats().labelDiffers === disagreedBefore + 2, 'a SECOND switch is counted too, and still writes nothing');
   await post(PAYLOAD([REC({ 'organization.id': { stringValue: orgT }, request_id: { stringValue: 'req_stale3' } })]));
-  ok(ingest.stats().disagreed === disagreedBefore + 2, 'the same (observed→attributed) pair repeating is one fact, logged once');
+  ok(ingest.stats().labelDiffers === disagreedBefore + 3, 'every row whose label differs from its slot is counted (a count of rows, not of transitions: nothing is logged per row any more)');
   curAcct = 'sub-configured'; curLastTs = 0;
-  // ④ observedOrgFor (B-b3cd): rate_limit_event capture verifies a reading's
-  // org against the session's OBSERVED billing org before writing it into an
-  // account's usage cache — the query must reflect the LATEST observation.
-  const SID = '4ad31ec3-0e5b-40e2-a953-77f121ce7eee'; // REC()'s session.id
-  const obs1 = ingest.observedOrgFor(SID);
-  ok(obs1 && obs1.acct === 'sub-A' && obs1.orgUuid === orgT, 'observedOrgFor: latest observation wins (sid → org + resolved acct)', JSON.stringify(obs1));
-  ok(ingest.observedOrgFor('no-such-sid') === null, 'unknown sid → null (capture falls back to link attribution)');
-  await post(PAYLOAD([REC({ 'organization.id': { stringValue: 'ffffffff-9999-9999-9999-999999999999' }, request_id: { stringValue: 'req_unkobs' } })]));
-  const obs2 = ingest.observedOrgFor(SID);
-  ok(obs2 && obs2.known === false && obs2.acct === null, 'an UNMAPPED org observation reports known:false, acct null — capture must then keep link attribution, never re-attribute to nothing', JSON.stringify(obs2));
+  // ④ observedOrgFor (B-b3cd) — RETIRED 2026-09-30 (lane-hot-switch): the
+  // per-session "observed org" was the engine's corroboration query, and the
+  // org is a machine-wide LABEL (scripts/fixtures/claude-cred-read-2.1.281.json)
+  // — nothing may ask it which member a session is on.
+  ok(typeof ingest.observedOrgFor === 'undefined', 'observedOrgFor is gone: no module can ask the label which member a session bills');
   // envFor honesty
   const env = ingest.envFor();
   ok(env.OTEL_EXPORTER_OTLP_ENDPOINT === 'http://127.0.0.1:0/otel' && env.OTEL_LOGS_EXPORTER === 'otlp' && env.OTEL_METRICS_EXPORTER === 'none' && env.CLAUDE_CODE_ENABLE_TELEMETRY === '1', 'envFor: loopback endpoint, logs-only export', JSON.stringify(env));

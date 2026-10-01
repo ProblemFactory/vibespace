@@ -191,7 +191,9 @@ export function itemView(item, ctx = {}) {
     ? { type: 'reset-credit', accountKey: i.action.accountKey, sessionId: i.action.sessionId || null } : null;
   // lane-pairing ⑥: an exit's "ask me each time" item is answered HERE — Allow / Deny first (never a producer button)
   const exitAsk = !resolved && i.action && i.action.type === 'exit-run-ask' && i.action.askId ? { askId: i.action.askId, cmd: String(i.action.cmd || '') } : null;
-  const actions = resolved ? ['reopen', 'copy'] : [...(exitAsk ? ['exit-allow', 'exit-deny'] : []), ...(reply.show ? ['reply'] : []), 'done', 'dismiss', 'copy', ...(producer ? ['producer'] : [])];
+  // lane browser-propose: the agent's browser proposal is answered HERE too — Approve / Reject first (the plan is the detail)
+  const proposal = !resolved && i.action && i.action.type === 'browser-proposal' && i.action.id ? { id: i.action.id, shown: String(i.action.shown || '') } : null;
+  const actions = resolved ? ['reopen', 'copy'] : [...(exitAsk ? ['exit-allow', 'exit-deny'] : []), ...(proposal ? ['proposal-approve', 'proposal-reject'] : []), ...(reply.show ? ['reply'] : []), 'done', 'dismiss', 'copy', ...(producer ? ['producer'] : [])];
   const title = String(ctx.words != null ? ctx.words : (i.text || ''));
   const detail = String(ctx.detail != null ? ctx.detail : (i.detail || ''));
   const replied = i.reply && typeof i.reply.text === 'string' && i.reply.text ? i.reply.text : null;
@@ -205,6 +207,6 @@ export function itemView(item, ctx = {}) {
   return {
     id: i.id || null, sessionKey: i.sessionKey || null, title, detail, name: String(ctx.name || ''),
     urgency: resolved || notice ? '' : urgency, notice, resolved, status: resolved ? (i.status === 'dismissed' ? 'dismissed' : 'done') : 'open',
-    meta, replied, options, reply, actions, producer, exitAsk, copy, cut,
+    meta, replied, options, reply, actions, producer, exitAsk, proposal, copy, cut,
   };
 }

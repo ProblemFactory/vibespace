@@ -658,7 +658,10 @@ console.log('— version marker');
     'src/codex-thread-read.js', 'src/lib/chat-status-bar.js', 'src/lib/session-props.js',
     'src/ws-handler.js', 'docs/kb-file-structure.md', 'docs/kb-features.md', 'docs/kb-api.md'];
   for (const f of SITES) ok(read(f).includes(MARK), `${f} carries the marker ${MARK} (all sites name ONE version)`);
-  const changelog = read('CHANGELOG.md');
+  // The engineering log holds every release's full entry (CHANGELOG.md became
+  // the user's one-line-per-change file on 2026-09-30; the old record moved
+  // verbatim), so a release's topic is read there.
+  const changelog = read('docs/changelog-engineering.md');
   // The section for that number, header line to the next `## ` (plain slicing:
   // a lazy regex with a multiline `$` lookahead stops at the end of the HEADER
   // and reads the body as empty, which passes any content check vacuously).

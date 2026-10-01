@@ -396,7 +396,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     img.src = dataUrl; // the .src PROPERTY — the image-overlay law
     winInfo.iconSpan.replaceChildren(img);
     winInfo._typeIcon = `<img class="window-app-icon" alt="" src="${dataUrl}">`; // the tab bar re-renders from _typeIcon; the url's alphabet was validated above
-    if (winInfo._tabChain) app.wm.setTitleMeta(winInfo.id, {});
+    if (winInfo._tabChain) { app.wm._renderTabBar(winInfo._tabChain); app.wm._notify(); } // the strip re-draws the tab's icon from _typeIcon (setTitleMeta is a no-op for an unchanged meta since lane badge-stale)
   };
   const ensureView = (kind) => {
     if (view) return view;
@@ -920,6 +920,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     const act = windowStateAction(changed, { maximized: !!winInfo.isMaximized, minimized: !!winInfo.isMinimized });
     (winInfo._desktopStateLog ||= []).push({ changed: { ...changed }, act, at: Date.now() });
     if (mainMeta) Object.assign(mainMeta, 'maximized' in changed ? { maximized: changed.maximized } : {}, 'iconic' in changed ? { iconic: changed.iconic } : {});
+    if (act) app.wm.witnessGeometry?.(winInfo.id); // the app's own □ / ▁ is the user's act on THIS window — the app's state is the machine's truth, never undone by another page's older record (lane desktop-move verify r5 ③)
     if (act === 'maximize' || act === 'restore') app.wm.toggleMaximize(winInfo.id);
     else if (act === 'minimize') { appIconified = true; app.wm.minimize(winInfo.id); }
   }

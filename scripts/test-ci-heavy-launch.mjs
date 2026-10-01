@@ -42,6 +42,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { SUITES, machineGlobalFixtures } from './ci.mjs';
 import { gitEnvFrom } from './git-env.mjs';
+import { stampScratchRun } from './scratch-run.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const GIT_ENV = gitEnvFrom(process.env);
@@ -60,6 +61,7 @@ const SHA = head.stdout.trim();
 // reasons that have nothing to do with the launcher.
 const SLICE = 'test-eml';
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ci-heavy-e2e-'));
+stampScratchRun(dir);   // this suite owns its scratch root: the fake process table (6) hands the stub tier sits under it, and a seam is a LIVE test's (verify r2 R1)
 // Our OWN machine lock, so this never queues behind (or blocks) the box's real
 // heavy tier, and a 5 s wait budget so a leftover from a previous run of THIS
 // suite fails loudly instead of hanging.
@@ -77,6 +79,7 @@ function stubGateRepo(tag, { ciSource, suites, commits = 1 }) {
   fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
   fs.writeFileSync(path.join(root, 'scripts', 'ci.mjs'), ciSource);
   fs.copyFileSync(path.join(REPO, 'scripts', 'git-env.mjs'), path.join(root, 'scripts', 'git-env.mjs'));
+  fs.copyFileSync(path.join(REPO, 'scripts', 'scratch-run.mjs'), path.join(root, 'scripts', 'scratch-run.mjs')); // ci.mjs's other sibling (B-1d08: the run record its reaper reads)
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'x', version: '0.0.0', private: true, scripts: { build: 'node -e "0"' } }) + '\n');
   for (const [name, src] of Object.entries(suites)) fs.writeFileSync(path.join(root, 'scripts', name + '.mjs'), src);
   const genv = { ...GIT_ENV, ...GIT_ID };
@@ -797,32 +800,52 @@ try {
   //     scratch dir it then removes (the exact leak shape: 504 device daemons)
   //     and a second one under a scratch dir that STAYS — the control that the
   //     lanes' sweep is the evidence-based rule, not "kill what the suite spawned".
+  //     B-1d08 (2026-09-29): the leak is judged OLD (past the stale floor) and the
+  //     stray a suite plants must never be one another run's sweep could take — so the
+  //     two real processes are named nowhere as scratch on the machine (cwd /, no scratch
+  //     env) and the stub SUITE writes their rows into a FAKE process table the stub
+  //     tier's lanes judge (`VIBESPACE_CI_REAP_PROCFS`), under its own sweep lock
+  //     (`VIBESPACE_CI_REAPER_LOCK`): the leak 30 min old under a removed dir, the
+  //     control seconds old under a dir that stays. VERIFY r2 (R2): a seam LISTS and
+  //     never signals (a table's word about a pid is not the kernel's), so the leg reads
+  //     the lanes' verdict off the log and finds the leak still alive; the kill itself is
+  //     gated in-process by test-scratch-reaper (§5/§5b, the `procRoot` option).
   {
     const heavyNames = SUITES.filter((s) => s.tier === 'heavy' && s.name !== SLICE).map((s) => s.name);
     const [R1] = heavyNames;
     const CI_SRC_R = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
     const pidsFile = path.join(dir, 'orphans.json');
-    const ORPHAN_STUB = `import fs from 'node:fs'; import { spawn } from 'node:child_process';
-const mint = (tag) => fs.mkdtempSync('/tmp/vs-reapstub-' + tag + '-' + process.pid + '-');
-const leave = (d) => { const c = spawn(process.execPath, ['-e', 'setTimeout(()=>{},120000)'], { cwd: d, detached: true, stdio: 'ignore', env: { ...process.env, HOME: d } }); c.unref(); return c.pid; };
-const gone = mint('gone'), kept = mint('kept');
-const out = { gone: leave(gone), kept: leave(kept), keptDir: kept };
-fs.rmSync(gone, { recursive: true, force: true });
+    const procfs = path.join(dir, 'reap-procfs'), reapLock = path.join(dir, 'reap.lock');
+    const ORPHAN_STUB = `import fs from 'node:fs'; import path from 'node:path'; import { spawn } from 'node:child_process';
+const PROCFS = process.env.VIBESPACE_CI_REAP_PROCFS;
+const leave = () => { const c = spawn(process.execPath, ['-e', 'setTimeout(()=>{},120000)'], { cwd: '/', detached: true, stdio: 'ignore', env: { PATH: process.env.PATH } }); c.unref(); return c.pid; };
+const row = (pid, name, ppid, cwd, bornMs) => { const d = path.join(PROCFS, String(pid)); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'stat'), pid + ' (' + name + ') S ' + ppid + ' ' + pid + ' ' + pid + ' 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 12345 0 0'); fs.writeFileSync(path.join(d, 'cmdline'), name + '\\0leaked.js\\0'); fs.writeFileSync(path.join(d, 'environ'), ''); fs.symlinkSync(cwd, path.join(d, 'cwd')); fs.utimesSync(d, bornMs / 1000, bornMs / 1000); };
+const goneDir = path.join('/tmp', 'vs-reapstub-gone-' + process.pid + '-nowhere'), kept = fs.mkdtempSync(path.join('/tmp', 'vs-reapstub-kept-' + process.pid + '-'));
+const st = (pid) => { try { const t = fs.readFileSync('/proc/' + pid + '/stat', 'latin1'); return Number(t.slice(t.lastIndexOf(')') + 2).split(' ')[19]); } catch { return 0; } };
+const out = { gone: leave(), kept: leave(), keptDir: kept }; out.goneStart = st(out.gone); out.keptStart = st(out.kept);
+row(1, 'systemd', 0, '/', Date.now());
+row(out.gone, 'node', 1, goneDir, Date.now() - 30 * 60 * 1000);
+row(out.kept, 'node', 1, kept, Date.now());
 fs.writeFileSync(process.env.VS_TEST_ORPHAN_PIDS, JSON.stringify(out));
 console.log('ALL PASS (1)');
 `;
     const s = stubGateRepo('reap', { ciSource: CI_SRC_R, suites: { [R1]: ORPHAN_STUB } });
     const r = spawnSync(process.execPath, [path.join(s.root, 'scripts', 'ci.mjs'), '--heavy', '--sha=' + s.sha, '--isolate',
       '--only=' + R1, '--lock=' + s.lock, '--lock-wait-ms=20000'],
-      { cwd: s.root, encoding: 'utf-8', env: { ...GIT_ENV, VIBESPACE_CI_LANES: '2', VS_TEST_ORPHAN_PIDS: pidsFile }, timeout: 180000 });
+      { cwd: s.root, encoding: 'utf-8', env: { ...GIT_ENV, VIBESPACE_CI_LANES: '2', VS_TEST_ORPHAN_PIDS: pidsFile, VIBESPACE_CI_REAP_PROCFS: procfs, VIBESPACE_CI_REAPER_LOCK: reapLock }, timeout: 180000 });
     const out = (r.stdout || '') + (r.stderr || '');
     let o = null; try { o = JSON.parse(fs.readFileSync(pidsFile, 'utf-8')); } catch { }
     const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
     ok(r.status === 0 && !!o && o.gone > 0 && o.kept > 0, `the stub tier ran GREEN over the lanes and left two detached processes behind (exit ${r.status})`);
-    ok(!!o && !alive(o.gone), `the orphan whose scratch dir is GONE is dead when the tier ends (pid ${o && o.gone}) — the lanes reaped it`);
+    // verify r2 (R2, 2026-09-29): a test seam LISTS and never signals — the lanes JUDGE the leak between suites and print it
+    // with its evidence; the real process the stub left is still alive (this suite ends it below, by pid + starttime)
+    ok(!!o && alive(o.gone) && /\[ci\] scratch reaper: 1 victim\(s\) listed under the test seam, none signalled/.test(out), `the orphan whose scratch dir is GONE (30 min old) is judged by the lanes between suites and printed — and NOT signalled: a seam is dry (pid ${o && o.gone} alive)`);
     ok(/\[ci\] reaping 1 scratch orphan process\(es\) from 1 finished scratch dir\(s\): \/tmp\/vs-reapstub-gone-/.test(out), '…and the log says so, naming the dir (the sync runner\'s exact line)');
     ok(!!o && alive(o.kept), `CONTROL: the detached process whose scratch dir STAYS (young, a possible run in flight) is spared (pid ${o && o.kept})`);
-    if (o) { try { process.kill(o.kept, 'SIGKILL'); } catch { } try { fs.rmSync(o.keptDir, { recursive: true, force: true }); } catch { } }
+    // end what the stub planted — by pid AND the starttime it recorded (a recycled number is somebody else's)
+    const startOf = (pid) => { try { const t = fs.readFileSync(`/proc/${pid}/stat`, 'latin1'); return Number(t.slice(t.lastIndexOf(')') + 2).split(' ')[19]); } catch { return 0; } };
+    if (o) { for (const [pid, st0] of [[o.kept, o.keptStart], [o.gone, o.goneStart]]) { if (pid > 0 && st0 && startOf(pid) === st0) { try { process.kill(pid, 'SIGKILL'); } catch { } } } try { fs.rmSync(o.keptDir, { recursive: true, force: true }); } catch { } }
+    try { fs.rmSync(procfs, { recursive: true, force: true }); } catch { }
     try { fs.rmSync(s.root, { recursive: true, force: true }); } catch { }
   }
 

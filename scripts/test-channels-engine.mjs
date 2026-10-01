@@ -4564,7 +4564,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     const recOf = (A, conv, m) => makeRecord({ adapterId: A, convId: conv, vendorId: m.vendorId, at: m.at, author: { id: m.author.id, name: m.author.name, isSelf: false, isBot: false }, text: m.text, threadKey: m.threadKey || null, raw: { msg_type: 'text' } });
     return {
       kind,
-      caps: { receive: 'poll', pollInterval: { hot: 30, cold: 300, floor: 10 }, history: 'page', listConversations: true, sendAs: [], identityMarking: 'none', budget: { unit: 'request', default: 600, settingKey: null, metered: true }, changeFeed: FD, threads: { read: 'vendor', replyInto: false, listing: 'separate' } },
+      caps: { receive: 'poll', pollInterval: { hot: 30, cold: 300, floor: 10 }, history: 'page', listConversations: true, sendAs: [], identityMarking: 'none', budget: { unit: 'request', default: 600, settingKey: null, metered: true }, changeFeed: W.fd || FD, threads: { read: 'vendor', replyInto: false, listing: 'separate' } },
       create(record, deps) {
         const A = record.id;
         const meter = typeof deps.meter === 'function' ? deps.meter : () => {};
@@ -4589,6 +4589,16 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
             meter(1); W.calls.changes.push({ from, to, pageToken, chatType, at: clock });
             if (W.failAlways) throw W.failAlways();
             if (W.fail) { const f = W.fail; W.fail = null; throw f; }
+            // lane lark-p2p: a scripted run of answers (false) and 504s (true), one per search
+            if (Array.isArray(W.failSeq) && W.failSeq.length && W.failSeq.shift()) throw new CH.ChannelError('transport', 'lark message search: Gateway timeout (504)', { retryable: true, detail: { status: 504 } });
+            // verify r2: a per-call page shape (null = the knobs below decide)
+            if (typeof W.pageOn === 'function') { const p = W.pageOn({ pageToken, chatType, from, to, pageSize }); if (p) return p; }
+            // lane lark-p2p: THE PRODUCTION SHAPE MISMATCH — every item unreadable (named), a full page, always more
+            if (W.unreadable) return { hits: [], malformed: pageSize, malformedFields: [['meta_data.create_time']], more: true, pageToken: `u-${(W.uSeq = (W.uSeq || 0) + 1)}`, total: null };
+            // lane lark-p2p verify r1: a QUIET account whose page holds N stray items this reader cannot read, and nothing else
+            if (W.stray > 0 && chatType !== 'p2p') return { hits: [], malformed: W.stray, malformedFields: [['meta_data.chat_id']], more: false, pageToken: null, total: W.stray };
+            // lane lark-p2p verify r1: `has_more` for ever — a fresh token and FRESH in-window ids every page, `total` absent (or as given)
+            if (W.endless && chatType !== 'p2p') return { hits: Array.from({ length: pageSize }, (_, i) => ({ convId: 'g-ops', vendorId: `e-${(W.eSeq = (W.eSeq || 0) + 1)}`, at: Number(to) - 1000 - i, updatedAt: null, threadKey: null, isP2p: false, fromId: 'ou_x' })), more: true, pageToken: `e-tok-${W.eSeq}`, total: W.endlessTotal === undefined ? null : W.endlessTotal };
             const hits = [];
             const scan = (conv, list) => {
               const p2p = !!W.dms[conv];
@@ -4761,6 +4771,323 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   await I.eng.pass('feedy');
   ok(Wi.calls.changes.length === 1, 'parked: the next pass sends no search (retried in 24 h — a vendor fix)');
 
+  // ── lane lark-p2p (2026-09-30, production 2.369.198: 241 260 hits read as malformed, 8 043 pages, 0 single chats born,
+  //    strikes 7, the card silent) ─────────────────────────────────────────────────────────────────────────────────────
+  const clkE = (ms) => `@${new Date(ms).toISOString().slice(11, 16)}`;
+  const Cw = require(path.join(REPO, 'src/channel-caps.js'));
+  // (p2p-a) AN UNREADABLE SHAPE PARKS BY NAME: every hit malformed (named `meta_data.create_time`), a full page, always
+  //         more — ONE page, parked `shape` with the field, the card says it, no search after; the groups are still
+  //         polled. CONTROL: the copy whose feed never parks pages on (the production's ten hours in miniature).
+  const unreadable = async (EM, tag) => {
+    const Wu = mkWorld(); Wu.unreadable = true;
+    addMsg(Wu, 'g-ops', 'u-ops-0', clock - 86400e3);
+    const dd = path.join(ROOT, `feed-unreadable-${tag}`);
+    writeRec(dd, ['search:message'], clock - 3600e3);
+    const U = mkFeedEng(dd, Wu, { EM });
+    await U.eng.pass('feedy', { force: true });
+    addMsg(Wu, 'g-ops', 'u-ops-1', clock + 1000);
+    for (let k = 0; k < 20; k++) { clock += 31e3; await U.eng.pass('feedy', { force: k === 19 }); }
+    const rec = U.eng.adapterRecords().adapters[0];
+    const v = U.eng.adapterView(rec).feed;
+    const out = { searches: Wu.calls.changes.length, state: v.state, why: v.why, fields: v.fields, words: Cw.feedText(v, { vendor: 'Lark', now: clock }), malformed: v.counters.malformed, polled: logHas(U.eng, 'g-ops', 'u-ops-1') };
+    U.eng.stop();
+    return out;
+  };
+  const un1 = await unreadable(ENG, 'real');
+  ok(un1.searches === 1 && un1.state === 'refused' && un1.why === 'shape' && JSON.stringify(un1.fields) === JSON.stringify([['meta_data.create_time']]) && un1.malformed === 30 && un1.polled, `lark-p2p: a search whose every hit is unreadable is parked after ONE page (${un1.searches}) by name, with the field — no search after; the group is still polled`, JSON.stringify(un1));
+  ok(un1.words === "Lark's search answers, but its hits have a shape this version does not read (missing or unreadable: meta_data.create_time) — the single-chat feed is off until an update; each chat is checked on its own", 'lark-p2p: …and the account card SAYS it (the owner\'s card said nothing for 241 260 hits)', un1.words);
+  const PARKL = '    if (sv.park) {';
+  ok(esrcF.split(PARKL).length === 2, 'CONTROL setup: the shape park is spelled once');
+  const un0 = await unreadable(MUTE.load('src/server/channels-engine.js', esrcF.replace(PARKL, '    if (false) {'), 'feed-shape-unparked'), 'mut');
+  // (verify r1: the count's ceiling is a SECOND belt — it stops the copy too, later, as an ignored range: never the shape's park)
+  ok(un0.searches >= 20 && un0.why !== 'shape' && un0.malformed >= 600, `CONTROL: the copy whose feed never parks on the shape pages the unreadable search on (${un0.searches} searches, ${un0.malformed} hits dropped, the card "${un0.words}") — the production, in miniature, until the count's ceiling`, JSON.stringify(un0).slice(0, 300));
+
+  // (p2p-b) THE 504 PATH: three 504s in a row ⇒ the back-off SAYS its count and its end ("did not answer 3× in a row …
+  //         until HH:MM"); after it the feed retries by itself; an ANSWERED page ends the run (strikes 0) even while its
+  //         window is still in flight, so the next lone 504 waits 30 s — never the ladder's 15 min. CONTROL: the copy
+  //         whose strikes end only with a completed window (the .197 rule) sends that lone 504 to the 15-minute top.
+  const gateway = async (EM, tag) => {
+    const Wg = mkWorld(); Wg.dms = {};
+    addMsg(Wg, 'g-ops', 'gw-ops-0', clock - 86400e3);
+    const dd = path.join(ROOT, `feed-504-${tag}`);
+    writeRec(dd, ['search:message'], clock - 3600e3);
+    const G = mkFeedEng(dd, Wg, { EM });
+    await G.eng.pass('feedy', { force: true });
+    const view = () => G.eng.adapterView(G.eng.adapterRecords().adapters[0]).feed;
+    // a burst the next window needs seven pages for — the window stays IN FLIGHT across every 504 (the production's
+    // window never completed): its first page answers, three 504s in a row, then (after the back-off) an answered page,
+    // then a lone 504
+    for (let j = 0; j < 200; j++) addMsg(Wg, 'g-ops', `gw-b-${j}`, clock + 1000 + j);
+    clock += 31e3;
+    Wg.failSeq = [false, true, true, true, false, true];
+    const out = { three: null, retried: 0 };
+    let s3 = null;
+    for (let k = 0; k < 600 && Wg.failSeq.length; k++) {
+      clock += 5e3; G.eng.tick(); await G.eng.idle('feedy');
+      const v = view();
+      if (!out.three && v.state === 'backoff' && v.strikes === 3) { out.three = { state: v.state, why: v.why, strikes: v.strikes, kind: v.strikeWhy, words: Cw.feedText(v, { vendor: 'Lark', now: clock, clock: clkE }), until: v.until }; s3 = Wg.calls.changes.length; }
+    }
+    out.retried = s3 === null ? 0 : Wg.calls.changes.length - s3;
+    const rec = G.eng.adapterRecords().adapters[0];
+    out.after = { left: Wg.failSeq.length, inFlight: !!rec.feed.window, strikes: rec.feed.strikes, waitSec: Math.round((Number(rec.feed.backoffUntil) - clock) / 1000) };
+    G.eng.stop();
+    return out;
+  };
+  const gw1 = await gateway(ENG, 'real');
+  ok(gw1.three && gw1.three.state === 'backoff' && gw1.three.why === 'failed' && gw1.three.strikes === 3 && gw1.three.kind === 'transport' && gw1.three.words === `Lark's search did not answer 3× in a row — each chat is checked on its own until ${clkE(gw1.three.until)}`, `lark-p2p: three 504s in a row ⇒ the card says the count and the END: "${gw1.three.words}"`, JSON.stringify(gw1.three));
+  ok(gw1.three && gw1.retried === 2, `lark-p2p: after the back-off the feed retries by itself (${gw1.retried} search(es): an answer, then the lone 504) — never silenced`, JSON.stringify(gw1));
+  ok(gw1.after.left === 0 && gw1.after.inFlight && gw1.after.strikes === 1 && gw1.after.waitSec > 0 && gw1.after.waitSec <= 30, `lark-p2p: an ANSWERED page ends the run while its window is still in flight — the next lone 504 is strike 1, a ${gw1.after.waitSec} s wait (never the 15-minute top)`, JSON.stringify(gw1.after));
+  const RESETL = "    if (f.strikeWhy !== 'token' && (Number(f.strikes) > 0 || f.strikeWhy)) { f.strikes = 0; f.strikeWhy = null; }";
+  ok(esrcF.split(RESETL).length === 2, 'CONTROL setup: the answered-page reset is spelled once');
+  const gw0 = await gateway(MUTE.load('src/server/channels-engine.js', esrcF.replace(RESETL, ''), 'feed-504-noreset'), 'mut');
+  ok(gw0.after.left === 0 && gw0.after.strikes === 4 && gw0.after.waitSec > 5 * 60, `CONTROL: the copy whose strikes end only with a completed window counts the lone 504 as strike ${gw0.after.strikes} — a ${Math.round(gw0.after.waitSec / 60)}-minute wait (the production's strikes 7)`, JSON.stringify(gw0.after));
+
+  // (p2p-c) A FEED ROW THE OLD READER WROTE STARTS OVER: the production row (no reader revision, a stale window in flight
+  //         after 8 043 pages, a catch-up that never ran, strikes 7, a 90-minute back-off, 241 260 malformed) + an adapter
+  //         whose reader is revision 2 ⇒ at boot the row restarts as a FIRST RUN: the steady window + the 7-day
+  //         single-chat catch-up, both single chats BORN (read — backlog, zero wakes), the old counters gone. CONTROL: the
+  //         copy without the heal waits out the old back-off and births nothing.
+  const readerHeal = async (EM, tag) => {
+    const Wr = mkWorld(); Wr.fd = { ...FD, reader: 2 };
+    Wr.dms = { 'dm-p1': { id: 'ou_p1', name: 'Pat' }, 'dm-p2': { id: 'ou_p2', name: 'Quinn' } };
+    addMsg(Wr, 'g-ops', 'rh-ops-0', clock - 4 * 86400e3);   // before the account was linked (a group's first walk is not the subject)
+    addMsg(Wr, 'dm-p1', 'rh-p1', clock - 2 * 86400e3, { author: { id: 'ou_p1', name: 'Pat' } });
+    addMsg(Wr, 'dm-p2', 'rh-p2', clock - 5 * 3600e3, { author: { id: 'ou_p2', name: 'Quinn' } });   // after the OLD first run: news under the old backlog line
+    const dd = path.join(ROOT, `feed-reader-${tag}`);
+    writeRec(dd, ['search:message'], clock - 3 * 86400e3);
+    const A = JSON.parse(fs.readFileSync(path.join(dd, 'channels', 'adapters.json'), 'utf-8'));
+    const old = clock - 20 * 3600e3;
+    // verify r3: the OLD reader's last-hour ring rides the row too (a minute-old page of 30 it could not read)
+    A.adapters[0].feed = { mode: 'measuring', strikes: 7, backoffUntil: clock + 90 * 60e3, backoffWhy: 'failed', lastOkAt: old, lastRunAt: old, cursorAt: old, firstRunAt: old, backlogUntil: old, window: { from: old - 60e3, to: old, pages: 8043 }, catchUp: { from: old - 7 * 86400e3, to: old - 60e3, pages: 0, found: 0, done: false, bounded: false, days: 7, gap: false }, samples: [], counters: { malformed: 241260, births: 0, pages: 8043, unlistedHits: 0, stripped: 0, describeFailed: 0, threadOwedDropped: 0, missedTypes: {}, malformedFields: [['meta_data.create_time']], unreadableRecent: [[clock - 60e3, 30]] } };
+    fs.writeFileSync(path.join(dd, 'channels', 'adapters.json'), JSON.stringify(A, null, 1));
+    const Lr = { calls: [], stash: [], async deliverToConversation(cid, text) { Lr.calls.push({ cid, text }); return { ok: true, lane: 'message' }; }, stashFor(cid, env) { Lr.stash.push({ cid, ...env }); } };
+    const lines = [];
+    const X = mkFeedEng(dd, Wr, { EM, deliver: Lr, log: { log: (m) => lines.push(String(m)), warn: (m) => lines.push(String(m)), error() {} } });
+    await X.eng.setScopeAssignment('feedy', { kind: 'account' }, { principal: { kind: 'agent', id: 'agent-1', name: 'Worker 1' }, mode: 'all', notify: 'wake', dailyWakeCap: 100 });
+    X.eng.start();
+    for (let k = 0; k < 4; k++) { clock += 31e3; X.eng.tick(); await X.eng.idle('feedy'); }
+    await X.eng.settleWakes();
+    const f = X.eng.adapterRecords().adapters[0].feed;
+    const p1 = en(X.eng, 'dm-p1'), p2 = en(X.eng, 'dm-p2');
+    const vw = X.eng.adapterView(X.eng.adapterRecords().adapters[0]).feed;
+    const out = { rev: f.readerRev, malformed: f.counters.malformed, strikes: f.strikes, searches: Wr.calls.changes.length, catchUp: !!(f.catchUp && f.catchUp.done && f.catchUp.found === 2), born: [p1, p2].filter((x) => x && x.bornBy === 'feed' && x.kind === 'dm').length, read: [p1, p2].every((x) => x && (x.unread || 0) === 0 && x.readAt >= clock - 5 * 60e3), woken: Lr.calls.length + Lr.stash.length, said: lines.some((l) => /hit reader changed \(revision 1 → 2\)/.test(l)), titles: [p1 && p1.title, p2 && p2.title], recent: vw.counters.malformedRecent, unreadableLine: Cw.feedUnreadableText(vw) };
+    X.eng.stop();
+    return out;
+  };
+  const rh1 = await readerHeal(ENG, 'real');
+  ok(rh1.rev === 2 && rh1.malformed === 0 && rh1.strikes === 0 && rh1.catchUp && rh1.born === 2 && rh1.said, `lark-p2p: the production row, under a reader of revision 2, starts over at boot (said once in the log): the catch-up finds both single chats (the 2-day-old one and the one from 5 hours ago — inside the stale gap), both BORN (${JSON.stringify(rh1.titles)}), the old reader's counters and strikes gone`, JSON.stringify(rh1));
+  ok(rh1.read && rh1.woken === 0, 'lark-p2p: …born READ — the first run of a reader that works is now: backlog, never news, zero wakes (the account grain is granted to an agent)', JSON.stringify(rh1));
+  // verify r3 (the revert table): the heal also drops the OLD reader's last-hour ring — its unreadable hits were the old
+  // reader's, and the card's "N search hits could not be read in the last hour" would otherwise blame the new reader for an
+  // hour after the update. CONTROL: the copy whose heal keeps the ring says 30.
+  ok(rh1.recent === 0 && rh1.unreadableLine === '', `lark-p2p (verify r3): the heal drops the old reader's last-hour ring — the card's unreadable line is silent right after the update (recent ${rh1.recent})`, JSON.stringify({ recent: rh1.recent, line: rh1.unreadableLine }));
+  const HEALC = "f.counters = { ...c, malformed: 0, malformedFields: [], missedTypes: {}, unreadableRecent: [] };";
+  ok(esrcF.split(HEALC).length === 2, 'CONTROL setup: the heal\'s counter reset is spelled once');
+  const rh9 = await readerHeal(MUTE.load('src/server/channels-engine.js', esrcF.replace(HEALC, "f.counters = { ...c, malformed: 0, malformedFields: [], missedTypes: {} };"), 'feed-reader-ringkept'), 'mut-ring');
+  ok(rh9.born === 2 && rh9.recent === 30 && /^30 search hits could not be read in the last hour/.test(rh9.unreadableLine), `CONTROL: the copy whose heal keeps the ring still heals the row (${rh9.born} born) but the card says "${rh9.unreadableLine}" for the OLD reader's hits — the leg above would be red`, JSON.stringify({ recent: rh9.recent, line: rh9.unreadableLine }));
+  const HEALL = '    feedReaderHeal(rec);   // lane lark-p2p: an old reader\'s back-off / park never holds the new reader off';
+  const HEALB = '      for (const rec of adapterRecords().adapters) if (feedReaderHeal(rec)) healed++;';
+  const HEALR = '    else feedReaderHeal(rec);';
+  ok([HEALL, HEALB, HEALR].every((x) => esrcF.split(x).length === 2), 'CONTROL setup: the heal\'s three call sites are spelled once');
+  const rh0 = await readerHeal(MUTE.load('src/server/channels-engine.js', esrcF.replace(HEALL, '').replace(HEALB, '').replace(HEALR, ''), 'feed-reader-noheal'), 'mut');
+  ok(rh0.searches === 0 && rh0.born === 0, `CONTROL: the copy without the heal waits out the old reader's 90-minute back-off — ${rh0.searches} searches, ${rh0.born} single chats born`, JSON.stringify(rh0));
+
+  // (p2p-d) A GAP WHILE A CATCH-UP IS PENDING WIDENS IT: a shape park lifted after a day (its catch-up never ran), the
+  //         cursor a day old ⇒ the steady window covers the last hour, the older span joins the pending catch-up — a
+  //         single chat whose only message is 5 hours old is BORN. CONTROL: the copy that drops the gap misses it.
+  const gapWiden = async (EM, tag) => {
+    const Wd = mkWorld(); Wd.dms = { 'dm-gap': { id: 'ou_gap', name: 'Gale' } };
+    addMsg(Wd, 'g-ops', 'gd-ops-0', clock - 4 * 86400e3);
+    addMsg(Wd, 'dm-gap', 'gd-1', clock - 5 * 3600e3, { author: { id: 'ou_gap', name: 'Gale' } });
+    const dd = path.join(ROOT, `feed-gapwiden-${tag}`);
+    writeRec(dd, ['search:message'], clock - 3 * 86400e3);
+    const A = JSON.parse(fs.readFileSync(path.join(dd, 'channels', 'adapters.json'), 'utf-8'));
+    const day = clock - 86400e3;
+    A.adapters[0].feed = { readerRev: 1, mode: 'measuring', strikes: 0, lastOkAt: day, lastRunAt: day, cursorAt: day, firstRunAt: day, backlogUntil: day, window: null, refused: { at: day, code: 'shape', requiredScopes: [], retryAt: clock - 1000, fields: [['meta_data.create_time']] }, catchUp: { from: day - 7 * 86400e3, to: day - 60e3, pages: 0, found: 0, done: false, bounded: false, days: 7, gap: false }, samples: [], counters: { malformed: 30, births: 0, pages: 1, unlistedHits: 0, stripped: 0, describeFailed: 0, threadOwedDropped: 0, missedTypes: {} } };
+    fs.writeFileSync(path.join(dd, 'channels', 'adapters.json'), JSON.stringify(A, null, 1));
+    const X = mkFeedEng(dd, Wd, { EM });
+    for (let k = 0; k < 4; k++) { clock += 31e3; X.eng.tick(); await X.eng.idle('feedy'); }
+    const g = en(X.eng, 'dm-gap');
+    const f = X.eng.adapterRecords().adapters[0].feed;
+    const out = { born: !!(g && g.bornBy === 'feed'), cu: f.catchUp && { done: f.catchUp.done, found: f.catchUp.found, gap: f.catchUp.gap, toAgo: Math.round((clock - f.catchUp.to) / 60e3) } };
+    X.eng.stop();
+    return out;
+  };
+  const gd1 = await gapWiden(ENG, 'real');
+  ok(gd1.born && gd1.cu && gd1.cu.done && gd1.cu.found === 1 && gd1.cu.gap, 'lark-p2p: a park lifted after a day widens its PENDING catch-up by the gap — the single chat whose only message is 5 hours old is born (it was in neither span)', JSON.stringify(gd1));
+  const WIDENL = "      } else if (w.gap && decl.catchUp && f.catchUp && !f.catchUp.done && Number(w.gap.to) > Number(f.catchUp.to)) {";
+  ok(esrcF.split(WIDENL).length === 2, 'CONTROL setup: the widening is spelled once');
+  const gd0 = await gapWiden(MUTE.load('src/server/channels-engine.js', esrcF.replace(WIDENL, '      } else if (false) {'), 'feed-gap-dropped'), 'mut');
+  ok(!gd0.born, 'CONTROL: the copy that drops a gap while a catch-up is pending never finds that single chat', JSON.stringify(gd0));
+
+  // (p2p-e, verify r1) A WINDOW THAT NEVER ENDS: `has_more` for ever with fresh in-window ids and `total: 0` (a finite
+  //         number the claim rule trusts) — the steady window is PARKED by name at the count's ceiling (a 90 s window holds
+  //         at most 4 500 hits: 151 pages, 15 minutes at the feed's 10/min), the per-conversation polling carries on.
+  //         CONTROL: the copy without the ceiling pages the whole 40 minutes (400 pages — the production's 8 043 in miniature).
+  const endless = async (EM, tag) => {
+    const We = mkWorld(); We.endless = true; We.endlessTotal = 0;
+    addMsg(We, 'g-ops', 'en-ops-0', clock - 86400e3);
+    const dd = path.join(ROOT, `feed-endless-${tag}`);
+    writeRec(dd, ['search:message'], clock - 3600e3);
+    const E = mkFeedEng(dd, We, { EM });
+    We.endless = false;
+    await E.eng.pass('feedy', { force: true });   // the first run over a quiet world
+    We.endless = true;
+    const n0 = We.calls.changes.length;
+    clock += 31e3;
+    for (let k = 0; k < 40 * 12; k++) { clock += 5e3; E.eng.tick(); await E.eng.idle('feedy'); }
+    const rec = E.eng.adapterRecords().adapters[0];
+    const v = E.eng.adapterView(rec).feed;
+    const w0 = We.calls.changes[n0];
+    const lenS = (Number(w0.to) - Number(w0.from)) / 1000;
+    const out = { searches: We.calls.changes.length - n0, lenS, expected: Math.floor(lenS * 50 / 30) + 1, state: v.state, why: v.why, inFlight: !!rec.feed.window, words: Cw.feedText(v, { vendor: 'Lark', now: clock }) };
+    E.eng.stop();
+    return out;
+  };
+  const el1 = await endless(ENG, 'real');
+  ok(el1.searches === el1.expected && el1.state === 'refused' && el1.why === 'time-range-ignored' && !el1.inFlight && /ignored its time window/.test(el1.words), `lark-p2p (verify r1): a search that answers has_more for ever (fresh ids, total 0) is parked by name at the count's ceiling — ${el1.searches} pages of one ${el1.lenS} s window (${el1.lenS} × 50 / 30 + 1), then no search for 24 h: "${el1.words}"`, JSON.stringify(el1));
+  const CEILL = "    if (paged > most) return { ok: false, park: 'time-range-ignored', why: `the window has run to";
+  const fsrcF = fs.readFileSync(path.join(REPO, 'src/channel-feed.js'), 'utf-8');
+  ok(fsrcF.split(CEILL).length === 2, 'CONTROL setup: the count\'s ceiling is spelled once');
+  {
+    // the copy of the PURE module without the ceiling, under the real engine (the engine copy re-bound to it)
+    const feedNoCeil = MUTE.pathFor('feed-no-ceiling', '.js');
+    fs.writeFileSync(feedNoCeil, fsrcF.replace(CEILL, "    if (false) return { ok: false, park: 'time-range-ignored', why: `the window has run to"));
+    const engOnCopy = MUTE.load('src/server/channels-engine.js', esrcF.replace("require('../channel-feed.js')", `require(${JSON.stringify(feedNoCeil)})`), 'feed-engine-no-ceiling');
+    const el0 = await endless(engOnCopy, 'mut');
+    ok(el0.searches >= 380 && el0.state !== 'refused' && el0.inFlight, `CONTROL: the copy without the ceiling pages the endless window for the whole 40 minutes (${el0.searches} pages, still in flight, the card "${el0.words}") — the production's 8 043 pages`, JSON.stringify(el0));
+  }
+
+  // (p2p-f, verify r1) TWO STRAY UNREADABLE ITEMS IN A QUIET MINUTE: the 60 s overlap on a 30 s tick reads them on ~3
+  //         windows each — a run that outlived windows counted 2, 4, 6 and PARKED the feed for 24 h at the third tick. The
+  //         run is now one window's: never a park; the two items are counted (the card's unreadable line says them).
+  //         CONTROL: the copy whose run outlives windows parks at the third tick.
+  const stray = async (EM, tag) => {
+    const Ws = mkWorld(); Ws.dms = {};
+    addMsg(Ws, 'g-ops', 'st-ops-0', clock - 86400e3);
+    const dd = path.join(ROOT, `feed-stray-${tag}`);
+    writeRec(dd, ['search:message'], clock - 3600e3);
+    const S = mkFeedEng(dd, Ws, { EM });
+    await S.eng.pass('feedy', { force: true });
+    Ws.stray = 2;
+    const trail = [];
+    for (let k = 0; k < 6; k++) {
+      clock += 31e3; S.eng.tick(); await S.eng.idle('feedy');
+      const rec = S.eng.adapterRecords().adapters[0];
+      trail.push({ run: rec.feed.shapeRun ? rec.feed.shapeRun.items : null, state: S.eng.adapterView(rec).feed.state });
+    }
+    const rec = S.eng.adapterRecords().adapters[0];
+    const v = S.eng.adapterView(rec).feed;
+    const out = { trail, state: v.state, why: v.why, malformed: v.counters.malformed, runMax: Math.max(...trail.map((x) => x.run || 0)), words: Cw.feedUnreadableText(v) };
+    // verify r2: nothing unreadable for the next 61 minutes (the quiet account's clean pages) — what the card says THEN
+    Ws.stray = 0;
+    for (let k = 0; k < 61 * 2; k++) { clock += 30e3; S.eng.tick(); await S.eng.idle('feedy'); }
+    const v2 = S.eng.adapterView(S.eng.adapterRecords().adapters[0]).feed;
+    out.after = { words: Cw.feedUnreadableText(v2), malformed: v2.counters.malformed, recent: v2.counters.malformedRecent, pages: v2.counters.pages };
+    S.eng.stop();
+    return out;
+  };
+  const st1 = await stray(ENG, 'real');
+  ok(st1.state !== 'refused' && st1.runMax === 2 && st1.malformed === 12, `lark-p2p (verify r1): two stray unreadable items on a quiet account never park the feed — the run is one window's (never above ${st1.runMax}); the 12 counts (2 × 6 windows) are said on the card's unreadable line`, JSON.stringify(st1));
+  // (verify r1, the revert table) THE WIRING of the field names below the park: the engine's counter → the view → the words.
+  // The PURE `feedUnreadableText` was gated on a hand-made view only; the engine line that fills the counter had no gate.
+  ok(st1.words === '12 search hits could not be read in the last hour (missing or unreadable: meta_data.chat_id)', `lark-p2p (verify r1): the card's unreadable line names the FIELD from the engine's own counter: "${st1.words}"`, st1.words);
+  // (verify r2) THE LINE IS ABOUT NOW: an hour of clean pages later the card says nothing (the ring emptied), while the
+  // cumulative counter still holds the 12 for diagnostics. CONTROLS: the engine copy that never fills the ring says nothing
+  // even while hits are dropped (the wiring); the feed-module copy that never trims the ring keeps saying 12 after the hour.
+  ok(st1.after.words === '' && st1.after.malformed === 12 && st1.after.recent === 0 && st1.after.pages > 100, `lark-p2p (verify r2): 61 minutes of clean pages later the card's unreadable line is gone (recent ${st1.after.recent}, ${st1.after.pages} pages since) while the cumulative counter keeps its ${st1.after.malformed} — it used to say "4 search hits could not be read" for ever`, JSON.stringify(st1.after));
+  const MFL = '    if (Array.isArray(page.malformedFields) && page.malformedFields.length) f.counters.malformedFields = Feed.mergeFieldLists(f.counters.malformedFields, page.malformedFields);';
+  ok(esrcF.split(MFL).length === 2, 'CONTROL setup: the counter\'s field-list merge is spelled once');
+  const stM = await stray(MUTE.load('src/server/channels-engine.js', esrcF.replace(MFL, ''), 'feed-fields-unwired'), 'mutf');
+  ok(stM.words === '12 search hits could not be read in the last hour', `CONTROL: the copy that never fills the counter's field lists counts the hits but names no field ("${stM.words}") — the wiring pin above goes red`, stM.words);
+  const RINGL = '    if (verdict.malformed > 0) f.counters.unreadableRecent = Feed.recentUnreadable(f.counters.unreadableRecent, t, verdict.malformed);';
+  ok(esrcF.split(RINGL).length === 2, 'CONTROL setup: the ring\'s fill is spelled once');
+  const stR = await stray(MUTE.load('src/server/channels-engine.js', esrcF.replace(RINGL, ''), 'feed-ring-unwired'), 'mutr');
+  ok(stR.words === '' && stR.malformed === 12, `CONTROL: the copy that never fills the ring drops 12 hits and says NOTHING on the card ("${stR.words}") — the line above would be red`, JSON.stringify({ words: stR.words, malformed: stR.malformed }));
+  {
+    const TRIML = 't - Number(e[0]) <= UNREADABLE_RECENT_MS && Number(e[0]) <= t)';
+    ok(fsrcF.split(TRIML).length === 2, 'CONTROL setup: the ring\'s hour is spelled once');
+    const feedNoTrim = MUTE.pathFor('feed-ring-no-trim', '.js');
+    fs.writeFileSync(feedNoTrim, fsrcF.replace(TRIML, 'true)').replace('if (a > t || t - a > UNREADABLE_RECENT_MS) continue;', ''));
+    const stT = await stray(MUTE.load('src/server/channels-engine.js', esrcF.replace("require('../channel-feed.js')", `require(${JSON.stringify(feedNoTrim)})`), 'feed-engine-ring-no-trim'), 'mutt');
+    ok(stT.after.words === '12 search hits could not be read in the last hour (missing or unreadable: meta_data.chat_id)', `CONTROL: the copy whose ring never forgets still says "${stT.after.words}" an hour of clean pages later — the r2 line above would be red`, JSON.stringify(stT.after));
+  }
+  const RUNL = '    if (f.shapeRun && (f.shapeRun.key !== wkey || pagesBefore === 0)) f.shapeRun = null;';
+  ok(esrcF.split(RUNL).length === 2, 'CONTROL setup: the per-window reset is spelled once');
+  const st0 = await stray(MUTE.load('src/server/channels-engine.js', esrcF.replace(RUNL, ''), 'feed-shape-run-forever'), 'mut');
+  ok(st0.state === 'refused' && st0.why === 'shape' && st0.trail.findIndex((x) => x.state === 'refused') === 2, `CONTROL: the copy whose run outlives windows parks the quiet account at the third tick (2, 4, then 6 ≥ 5) for 24 h`, JSON.stringify(st0));
+
+  // (p2p-f2, verify r2 — the revert table) THE RUN ACCUMULATES WITHIN ITS WINDOW: a vendor whose page 1 is readable and
+  //         whose every continuation page holds 4 unreadable of 4 (each below the 5-item park on its own) is parked `shape`
+  //         at page 3 (4 + 4 ≥ 5 inside one window). The run's KEY (4eead163's other half) had no gate: the copy that drops
+  //         it resets the run on every page and never parks by shape — it pages on to the count's ceiling instead.
+  const accumulate = async (EM, tag) => {
+    const Wc = mkWorld(); Wc.dms = {};
+    addMsg(Wc, 'g-ops', 'ac-ops-0', clock - 86400e3);
+    const dd = path.join(ROOT, `feed-accumulate-${tag}`);
+    writeRec(dd, ['search:message'], clock - 3600e3);
+    const C2 = mkFeedEng(dd, Wc, { EM });
+    await C2.eng.pass('feedy', { force: true });
+    let seq = 0;
+    Wc.pageOn = ({ pageToken, chatType, to, pageSize }) => {
+      if (chatType === 'p2p') return null;
+      if (!pageToken) return { hits: Array.from({ length: pageSize }, (_, i) => ({ convId: 'g-ops', vendorId: `ac-${seq++}`, at: Number(to) - 1000 - i, updatedAt: null, threadKey: null, isP2p: false, fromId: 'ou_x' })), more: true, pageToken: `ac-tk-${seq}`, total: null };
+      return { hits: [], malformed: 4, malformedFields: [['meta_data.create_time']], more: true, pageToken: `ac-tk-${++seq}`, total: null };
+    };
+    const n0 = Wc.calls.changes.length;
+    for (let k = 0; k < 10 * 12; k++) { clock += 5e3; C2.eng.tick(); await C2.eng.idle('feedy'); }
+    const rec = C2.eng.adapterRecords().adapters[0];
+    const v = C2.eng.adapterView(rec).feed;
+    const out = { searches: Wc.calls.changes.length - n0, state: v.state, why: v.why, inFlight: !!rec.feed.window };
+    C2.eng.stop();
+    return out;
+  };
+  const ac1 = await accumulate(ENG, 'real');
+  ok(ac1.searches === 3 && ac1.state === 'refused' && ac1.why === 'shape', `lark-p2p (verify r2): 4 unreadable of 4 on every continuation page — the run accumulates within the window and parks \`shape\` at page 3 (${ac1.searches} searches, ${ac1.state}/${ac1.why})`, JSON.stringify(ac1));
+  const KEYL = '    f.shapeRun = sv.run ? { ...sv.run, key: wkey } : null;';
+  ok(esrcF.split(KEYL).length === 2, 'CONTROL setup: the run\'s key is spelled once');
+  const ac0 = await accumulate(MUTE.load('src/server/channels-engine.js', esrcF.replace(KEYL, '    f.shapeRun = sv.run;'), 'feed-run-keyless'), 'mut');
+  ok(ac0.searches >= 50 && ac0.why !== 'shape', `CONTROL: the copy whose run carries no key resets it on every page and never parks by shape — ${ac0.searches} pages in 10 minutes (${ac0.state}/${ac0.why || 'in flight'})`, JSON.stringify(ac0));
+
+  // (p2p-g, verify r1) 504 / 200 / 504 / 200 … for ten minutes: the cost is bounded (every 200 completes a window and
+  //         the lone 504's 30 s wait is the tick's own length — 2 pages per 30 s, 4/min against the 10/min ceiling) and the
+  //         card is HONEST: a lone missed answer while the last page is fresh keeps the mode's line (it used to read "is
+  //         not answering — until" on 98 % of ticks while a window completed every 30 s). CONTROL: the copy of channel-caps
+  //         without the lone-miss rule says "not answering" on most ticks.
+  const alternate = async (EM, tag, CapsMod = Cw) => {
+    const Wa = mkWorld(); Wa.dms = {};
+    addMsg(Wa, 'g-ops', 'al-ops-0', clock - 86400e3);
+    const dd = path.join(ROOT, `feed-alternate-${tag}`);
+    writeRec(dd, ['search:message'], clock - 3600e3);
+    const A2 = mkFeedEng(dd, Wa, { EM });
+    await A2.eng.pass('feedy', { force: true });
+    const n0 = Wa.calls.changes.length;
+    Wa.failSeq = Array.from({ length: 200 }, (_, i) => i % 2 === 0);
+    let down = 0, ticks = 0, maxStrikes = 0;
+    for (let k = 0; k < 10 * 12; k++) {
+      clock += 5e3; A2.eng.tick(); await A2.eng.idle('feedy');
+      const rec = A2.eng.adapterRecords().adapters[0];
+      const v = CapsMod.feedState(FD_CAPS, rec, clock, { everySec: 30, overlapSec: 60 });
+      ticks++; if (v.state === 'backoff') down++; maxStrikes = Math.max(maxStrikes, rec.feed.strikes || 0);
+    }
+    const f = A2.eng.adapterRecords().adapters[0].feed;
+    const out = { searches: Wa.calls.changes.length - n0, failed: 100 - Wa.failSeq.filter(Boolean).length, maxStrikes, downShare: Math.round(down / ticks * 100), lastOkAgoS: Math.round((clock - f.lastOkAt) / 1000) };
+    A2.eng.stop();
+    return out;
+  };
+  const FD_CAPS = { changeFeed: FD };
+  const al1 = await alternate(ENG, 'real');
+  ok(al1.searches <= 42 && al1.failed >= 18 && al1.maxStrikes === 1 && al1.lastOkAgoS <= 60, `lark-p2p (verify r1): 504/200 alternation for 10 min — ${al1.searches} pages (${al1.failed} missed), never above strike 1, the last good page ≤ ${al1.lastOkAgoS} s old: the cost is 2 pages a tick, inside the minute`, JSON.stringify(al1));
+  ok(al1.downShare <= 5, `lark-p2p (verify r1): …and the card keeps the mode's line — "not answering" on ${al1.downShare} % of ticks (a lone miss with a fresh last page is not an outage)`, JSON.stringify(al1));
+  {
+    const csrc = fs.readFileSync(path.join(REPO, 'src/channel-caps.js'), 'utf-8');
+    const LONEL = "  const lone = f.backoffWhy === 'failed' && (Number(f.strikes) || 0) < FEED_LOUD_STRIKES && freshOk;";
+    ok(csrc.split(LONEL).length === 2 && /const FAILURES_BEFORE_LOUD = 3;/.test(esrcF) && Cw.FEED_LOUD_STRIKES === 3, 'CONTROL setup: the lone-miss rule is spelled once; channel-caps\' FEED_LOUD_STRIKES is the engine\'s FAILURES_BEFORE_LOUD');
+    const capsNoLone = MUTE.load('src/channel-caps.js', csrc.replace(LONEL, '  const lone = false;'), 'caps-no-lone-miss');
+    const al0 = await alternate(ENG, 'mut', capsNoLone);
+    ok(al0.downShare >= 90, `CONTROL: the caps copy without the lone-miss rule reads "not answering" on ${al0.downShare} % of ticks while a window completes every 30 s`, JSON.stringify(al0));
+  }
+
   // ── (I) THE MEASUREMENT: the feed finds everything ⇒ CARRYING (the 5-min net, an open window hot); then it MISSES ⇒ demoted
   const Wm = mkWorld();
   addMsg(Wm, 'g-ops', 'm-ops-0', clock - 86400e3); addMsg(Wm, 'g-dev', 'm-dev-0', clock - 86400e3);
@@ -4832,7 +5159,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   };
   const o1 = await outage(ENG, 'real');
   ok(o1.arrived && o1.reads > 0 && o1.failures === 0 && !o1.backoff, `a 20-minute SEARCH outage: the per-conversation polling carries on (${o1.reads} reads, the message arrived), the account records no failure and is not backed off`, JSON.stringify(o1).slice(0, 400));
-  ok(o1.feed.state === 'backoff' && o1.feed.why === 'failed' && o1.searches <= 6 && /not answering/.test(o1.words), `…the feed waits on its own failure ladder (${o1.searches} searches in 20 min) and the card says the search is not answering: "${o1.words}"`, JSON.stringify(o1.feed).slice(0, 300));
+  ok(o1.feed.state === 'backoff' && o1.feed.why === 'failed' && o1.searches <= 6 && /did not answer \d+× in a row/.test(o1.words), `…the feed waits on its own failure ladder (${o1.searches} searches in 20 min) and the card says the search is not answering: "${o1.words}"`, JSON.stringify(o1.feed).slice(0, 300));
   const OUTAGE = "if (code === 'auth-expired' || (err && err.detail && err.detail.paceAborted)) throw err;";
   ok(esrcF.split(OUTAGE).length === 2, 'CONTROL setup: the feed-local transport line is spelled once');
   const o0 = await outage(MUTE.load('src/server/channels-engine.js', esrcF.replace(OUTAGE, "if (code === 'auth-expired' || code === 'transport') throw err;"), 'feed-transport-account'), 'mut');
@@ -4870,23 +5197,112 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     for (let s = 0; s < 60 && !(view().state === 'backoff'); s++) { clock += 5e3; X.eng.tick(); await X.eng.idle('feedy'); }
     out.token = `${view().state}/${view().why}`;
     Ww.failToken = null; await settle(1200);
-    // L4: an unparseable page (a vendor-error with no contract detail)
-    Ww.fail = new CH.ChannelError('vendor-error', 'lark message search: an answer this version cannot read', { retryable: false });
+    // L4: an unparseable page (a vendor-error with no contract detail) — ONE, with the last good page fresh, keeps the mode's
+    // state (lark-p2p verify r1: a lone miss is not an outage); the third in a row is the search FAILING
+    Ww.failAlways = () => new CH.ChannelError('vendor-error', 'lark message search: an answer this version cannot read', { retryable: false });
     await settle(30);
+    out.unparseableOnce = `${view().state}/${view().why}`;
+    await settle(270);
     out.unparseable = `${view().state}/${view().why}`;
+    Ww.failAlways = null;
     X.eng.stop();
     return out;
   };
   const ww1 = await waitWords(ENG, 'real');
   ok(ww1.outageLines === 1 && ww1.recovered !== 'backoff', `(L5) a 20-minute search outage is said ONCE in the log (${ww1.outageLines} line(s)), and the feed comes back by itself (${ww1.recovered})`, JSON.stringify(ww1));
   ok(ww1.rate === 'backoff/rate-limited', `(L2) a 429 after an outage that recovered is the vendor LIMITING the search (${ww1.rate}), never "not answering"`, JSON.stringify(ww1));
-  ok(ww1.token === 'backoff/failed' && ww1.unparseable === 'backoff/failed', `(L3) a page token refused three times (${ww1.token}) and (L4) an unparseable page (${ww1.unparseable}) wait as the search FAILING, never "limiting"`, JSON.stringify(ww1));
-  const WHYS = ["      f.backoffWhy = 'rate-limited';\n", " f.backoffWhy = 'failed'; }\n      skip = 'token';", "      f.backoffUntil = t + BACKOFF_MS[Math.min(f.strikes, BACKOFF_MS.length - 1)];\n      f.backoffWhy = 'failed';\n    } else {", "      if (f.strikes === FAILURES_BEFORE_LOUD) log.warn("];
+  ok(ww1.token === 'backoff/failed' && ww1.unparseableOnce === 'measuring/null' && ww1.unparseable === 'backoff/failed', `(L3) a page token refused three times (${ww1.token}) and (L4) an unparseable page three times in a row (${ww1.unparseable}) wait as the search FAILING, never "limiting"; ONE unparseable page after a fresh good page keeps the mode (${ww1.unparseableOnce} — verify r1)`, JSON.stringify(ww1));
+  // verify r3: the needles end at the branch's own words (three ladders now write a loud line each — the outage's, the
+  // continuation's, the vendor-error's — so the bare `log.warn(` head is no longer spelled once)
+  const WHYS = ["      f.backoffWhy = 'rate-limited';\n", " f.backoffWhy = 'failed'; }\n      // verify r3: said ONCE", "      f.backoffUntil = t + BACKOFF_MS[Math.min(f.strikes, BACKOFF_MS.length - 1)];\n      f.backoffWhy = 'failed';\n      if (f.strikes === FAILURES_BEFORE_LOUD) log.warn(`[channels] ${rec.id}: the change feed's search answered", "      if (f.strikes === FAILURES_BEFORE_LOUD) log.warn(`[channels] ${rec.id}: the change feed's search did not answer"];
   ok(WHYS.every((x) => esrcF.split(x).length === 2), 'CONTROL setup: each back-off kind and the outage line are spelled once');
-  const ww0 = await waitWords(MUTE.load('src/server/channels-engine.js', esrcF.replace(WHYS[0], '').replace(WHYS[3], '      if (f.strikes >= FAILURES_BEFORE_LOUD) log.warn('), 'feed-wait-unmarked-rate'), 'mut-a');
+  const ww0 = await waitWords(MUTE.load('src/server/channels-engine.js', esrcF.replace(WHYS[0], '').replace(WHYS[3], "      if (f.strikes >= FAILURES_BEFORE_LOUD) log.warn(`[channels] ${rec.id}: the change feed's search did not answer"), 'feed-wait-unmarked-rate'), 'mut-a');
   ok(ww0.rate !== 'backoff/rate-limited' && ww0.outageLines > 1, `CONTROL: the copy whose 429 marks no kind says the search is not answering (${ww0.rate}) and the copy that logs per search says the outage ${ww0.outageLines} times — (L2) (L5) would be red`, JSON.stringify(ww0));
-  const ww9 = await waitWords(MUTE.load('src/server/channels-engine.js', esrcF.replace(WHYS[1], " }\n      skip = 'token';").replace(WHYS[2], "      f.backoffUntil = t + BACKOFF_MS[Math.min(f.strikes, BACKOFF_MS.length - 1)];\n    } else {"), 'feed-wait-unmarked-fail'), 'mut-b');
+  const ww9 = await waitWords(MUTE.load('src/server/channels-engine.js', esrcF.replace(WHYS[1], " }\n      // verify r3: said ONCE").replace(WHYS[2], "      f.backoffUntil = t + BACKOFF_MS[Math.min(f.strikes, BACKOFF_MS.length - 1)];\n      if (f.strikes === FAILURES_BEFORE_LOUD) log.warn(`[channels] ${rec.id}: the change feed's search answered"), 'feed-wait-unmarked-fail'), 'mut-b');
   ok(ww9.token !== 'backoff/failed' && ww9.unparseable !== 'backoff/failed', `CONTROL: the copy whose token and unparseable waits mark no kind says "limiting" for both (${ww9.token}, ${ww9.unparseable}) — (L3) (L4) would be red`, JSON.stringify(ww9));
+
+  // (p2p-h, verify r3) A SEARCH THAT ANSWERS SOMETHING THAT IS NOT A SEARCH PAGE, FOR EVER (r2's envelope judge: {}, no
+  //         has_more, has_more with no token — a changed API, a proxy page, a captive portal): the ladder bounds it (30 s → 15
+  //         min: 7 searches in an hour) and it is SAID — the card "answered 3× in a row with something that is not a search
+  //         page … until HH:MM" (never "is not answering": it answers), the journal ONCE with the missing field. It used to
+  //         climb the ladder as "failed N× in a row" with not one journal line (measured: 15 searches in 3 h, "not a search
+  //         page" nowhere — the judge's own reason discarded). CONTROLS: the copy whose vendor-error branch strikes no kind of
+  //         its own (the card reads "failed"); the copy without the loud line (the journal silent).
+  const envelopeForever = async (EM, tag) => {
+    const We = mkWorld(); We.dms = {};
+    addMsg(We, 'g-ops', 'ev-ops-0', clock - 86400e3);
+    const dd = path.join(ROOT, `feed-envelope-${tag}`);
+    writeRec(dd, ['search:message'], clock - 3600e3);
+    const lines = [];
+    const X = mkFeedEng(dd, We, { EM, log: { log() {}, warn: (m) => lines.push(String(m)), error() {} } });
+    await X.eng.pass('feedy', { force: true });
+    const view = () => X.eng.adapterView(X.eng.adapterRecords().adapters[0]).feed;
+    clock += 31e3;
+    We.failAlways = () => new CH.ChannelError('vendor-error', 'lark message search: the answer carries no has_more (the page contract) — not a search page', { retryable: true, detail: { envelope: 'has_more' } });
+    const c0 = We.calls.changes.length;
+    const out = { three: null, one: null };
+    for (let k = 0; k < 12 * 60; k++) {
+      clock += 5e3; X.eng.tick(); await X.eng.idle('feedy');
+      const v = view();
+      if (!out.one && v.strikes === 1) out.one = { state: v.state, kind: v.strikeWhy };
+      if (!out.three && v.state === 'backoff' && v.strikes === 3) out.three = { why: v.why, kind: v.strikeWhy, words: Cw.feedText(v, { vendor: 'Lark', now: clock, clock: clkE }), until: v.until };
+    }
+    const v = view();
+    out.searches = We.calls.changes.length - c0;
+    out.final = { state: v.state, kind: v.strikeWhy, strikes: v.strikes, inFlight: !!X.eng.adapterRecords().adapters[0].feed.window };
+    out.said = lines.filter((l) => /answered 3 times in a row with something that is not a search page \(no has_more\)/.test(l)).length;
+    out.otherLines = lines.filter((l) => /did not answer|cannot read|continuation page/.test(l)).length;
+    X.eng.stop();
+    return out;
+  };
+  const ev1 = await envelopeForever(ENG, 'real');
+  ok(ev1.one && ev1.one.state === 'measuring' && ev1.one.kind === 'envelope' && ev1.three && ev1.three.why === 'failed' && ev1.three.kind === 'envelope' && ev1.three.words === `Lark's search answered 3× in a row with something that is not a search page — each chat is checked on its own until ${clkE(ev1.three.until)}`, `lark-p2p (verify r3): a search answering non-pages — the first strike keeps the mode's line (the last page fresh), the third says WHAT it is on the card: "${ev1.three && ev1.three.words}"`, JSON.stringify(ev1));
+  ok(ev1.searches >= 6 && ev1.searches <= 8 && ev1.final.kind === 'envelope' && ev1.final.state === 'backoff' && ev1.final.inFlight && ev1.said === 1 && ev1.otherLines === 0, `lark-p2p (verify r3): …bounded by the ladder (${ev1.searches} searches in an hour, the window held in flight — the cursor never moves past what was not read) and said ONCE in the journal with the missing field (${ev1.said} line(s))`, JSON.stringify(ev1));
+  const ENVK = "      strike(envelope ? 'envelope' : 'vendor-error');";
+  const ENVL = "      if (f.strikes === FAILURES_BEFORE_LOUD) log.warn(`[channels] ${rec.id}: the change feed's search answered ${f.strikes} times in a row with ${envelope ? `something that is not a search page (no ${envelope})` : 'a page this version cannot read'} (${String((err && err.message) || err).slice(0, 200)}) — each conversation is polled on its own; the search is retried by itself`);\n";
+  ok(esrcF.split(ENVK).length === 2 && esrcF.split(ENVL).length === 2, 'CONTROL setup: the envelope strike kind and its loud line are spelled once');
+  const ev0 = await envelopeForever(MUTE.load('src/server/channels-engine.js', esrcF.replace(ENVK, "      strike('vendor-error');"), 'feed-envelope-unkinded'), 'mut-a');
+  ok(ev0.three && ev0.three.kind === 'vendor-error' && /^Lark's search failed 3× in a row/.test(ev0.three.words) && ev0.searches === ev1.searches, `CONTROL: the copy whose vendor-error branch strikes no kind of its own reads "${ev0.three && ev0.three.words}" (the same ${ev0.searches} searches) — the card leg above would be red`, JSON.stringify(ev0));
+  const ev9 = await envelopeForever(MUTE.load('src/server/channels-engine.js', esrcF.replace(ENVL, ''), 'feed-envelope-silent'), 'mut-b');
+  ok(ev9.three && ev9.three.kind === 'envelope' && ev9.said === 0, `CONTROL: the copy without the loud line keeps the card's words and writes nothing to the journal (${ev9.said} line(s)) — the journal leg above would be red`, JSON.stringify(ev9));
+
+  // (p2p-i, verify r3) A VENDOR LOOP OF PERIOD TWO: page 1 → token A; page(A) → hits B + token B; page(B) → hits A + token A …
+  //         with has_more for ever. The token guard (e) judged the PREVIOUS page only, so nothing repeated: 161 pages in 77
+  //         minutes (every DM born, nothing lost) until the count's ceiling parked it as "ignored its time window" — the
+  //         wrong name for a pagination loop. Judged against every page of the window now: parked `contract` at its third
+  //         page. CONTROL: the copy that keeps the previous page's signature alone pages on to the ceiling.
+  const loopVendor = async (EM, tag) => {
+    const Wl = mkWorld(); Wl.dms = {};
+    addMsg(Wl, 'g-ops', 'lp-ops-0', clock - 86400e3);
+    const dd = path.join(ROOT, `feed-loop-${tag}`);
+    writeRec(dd, ['search:message'], clock - 3600e3);
+    const X = mkFeedEng(dd, Wl, { EM });
+    await X.eng.pass('feedy', { force: true });
+    const view = () => X.eng.adapterView(X.eng.adapterRecords().adapters[0]).feed;
+    clock += 31e3;
+    const hitsOf = (label, to) => Array.from({ length: 30 }, (_, i) => ({ convId: 'g-ops', vendorId: `${label}-${i}`, at: Number(to) - 1000 - i, updatedAt: null, threadKey: null, isP2p: false, fromId: 'ou_x' }));
+    Wl.pageOn = ({ pageToken, chatType, to }) => {
+      if (chatType === 'p2p') return null;
+      if (pageToken === 'tok-A') return { hits: hitsOf('B', to), more: true, pageToken: 'tok-B', total: null };
+      return { hits: hitsOf('A', to), more: true, pageToken: 'tok-A', total: null };
+    };
+    const c0 = Wl.calls.changes.length;
+    let parked = null;
+    for (let k = 0; k < 12 * 10; k++) {
+      clock += 5e3; X.eng.tick(); await X.eng.idle('feedy');
+      const v = view();
+      if (!parked && v.state === 'refused') parked = { why: v.why, pages: Wl.calls.changes.length - c0 };
+    }
+    const out = { parked, searches: Wl.calls.changes.length - c0 };
+    X.eng.stop();
+    return out;
+  };
+  const lv1 = await loopVendor(ENG, 'real');
+  ok(lv1.parked && lv1.parked.why === 'contract' && lv1.parked.pages === 3 && lv1.searches === 3, `lark-p2p (verify r3): a period-two vendor loop is parked by name (${lv1.parked && lv1.parked.why}) at its third page — ${lv1.searches} searches, not 161`, JSON.stringify(lv1));
+  const SIGS = "    if (verdict.ok) e.feedPrevSig = { key: wkey, sigs: (sigList || []).concat([verdict.sig || '']).slice(-Feed.PAGE_SIGS_MAX) };";
+  ok(esrcF.split(SIGS).length === 2, 'CONTROL setup: the window\'s signature list is spelled once');
+  const lv0 = await loopVendor(MUTE.load('src/server/channels-engine.js', esrcF.replace(SIGS, "    if (verdict.ok) e.feedPrevSig = { key: wkey, sigs: [verdict.sig || ''] };"), 'feed-loop-lastsig'), 'mut');
+  ok(!(lv0.parked && lv0.parked.why === 'contract') && lv0.searches >= 50, `CONTROL: the copy that keeps the previous page's signature alone pages on — ${lv0.searches} searches in ten minutes (${lv0.parked ? lv0.parked.why : 'in flight'}) — the leg above would be red`, JSON.stringify(lv0));
 
   // ── (M) verify r1 (PEER CONTENT): a single chat's NAME is the other person's own display name — the agent's list /
   //       read carry it through the peerText door (frame-inert), its bidi override and invisible characters removed.
@@ -4907,17 +5323,20 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     const it = e2.listFor(AGh).conversations.find((c) => c.id === 'dm-bob');
     const rd = e2.readFor(AGh, 'feedy', 'dm-bob', {});
     e2.stop();
-    return { listTitle: it && it.title, readTitle: rd.conversation && rd.conversation.title };
+    const stored = (Object.values(e2.store.index.live()).find((en) => en && en.id === 'dm-bob') || {}).title;   // lane peer-census verify r1: the title AS WRITTEN (the read-time belt judges every answer on its way out now — the control below judges the STORE)
+    return { listTitle: it && it.title, readTitle: rd.conversation && rd.conversation.title, stored };
   };
   const { carriesFrame } = require(path.join(REPO, 'src/channel-record.js'));
   const hn = await hostileName(CH, 'real');
-  ok(hn.listTitle && hn.listTitle.startsWith('Bob ') && !carriesFrame(hn.listTitle) && !carriesFrame(hn.readTitle) && !/[‪-‮​]/.test(hn.listTitle), 'a single chat named by a hostile display name: the agent\'s list and read carry it frame-inert, its bidi override and invisible characters removed', JSON.stringify(hn));
+  ok(hn.listTitle && hn.listTitle.startsWith('Bob ') && !carriesFrame(hn.listTitle) && !carriesFrame(hn.readTitle) && !carriesFrame(hn.stored) && !/[‪-‮​]/.test(hn.listTitle), 'a single chat named by a hostile display name: the agent\'s list and read carry it frame-inert, its bidi override and invisible characters removed — and the INDEX holds it inert too (judged at ingest)', JSON.stringify(hn));
   const isrc = fs.readFileSync(path.join(REPO, 'src/channels/index.js'), 'utf-8');
   const NAMEL = '        const title = peerName(r.title, TITLE_MAX);';
   ok(isrc.split(NAMEL).length === 2, 'CONTROL setup: the describe title line is spelled once');
   const CHpre = MUTE.load('src/channels/index.js', isrc.replace(NAMEL, "        const title = typeof r.title === 'string' && r.title.trim() ? r.title.trim().slice(0, TITLE_MAX) : null;"), 'describe-name-unguarded');
   const hn0 = await hostileName(CHpre, 'mut');
-  ok(carriesFrame(hn0.listTitle), 'CONTROL: the registry copy that only trimmed + bounded a described name hands the agent\'s list a LIVE frame tag — the leg above would be red', JSON.stringify(hn0));
+  // lane peer-census verify r1 (F2): the agent's list and read judge every title on the way OUT now (agentTitle), so a
+  // registry copy that skips the ingest door no longer shows in the answers — the control judges what the copy WROTE
+  ok(carriesFrame(hn0.stored) && !carriesFrame(hn0.listTitle) && !carriesFrame(hn0.readTitle), 'CONTROL: the registry copy that only trimmed + bounded a described name writes a LIVE frame tag into the INDEX (the ingest door skipped) — the read-time belt still hands the agent\'s list and read an inert one', JSON.stringify(hn0));
 
   // ── (N) verify r1 (completeness): a person who wrote THREE messages inside one steady window to a single chat nobody
   //       knew — all three unread and all three in the wake (the line is the window's start). CONTROL: the engine copy
@@ -4969,10 +5388,11 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   };
   const ti1 = await tokenIgnored(ENG, 'real');
   ok(ti1.pages <= 2 && ti1.state === 'refused' && ti1.why === 'contract', `a vendor that ignores the page token: parked by name after ${ti1.pages} pages (the card: "answered in a shape this version does not read")`, JSON.stringify(ti1));
-  const TOKL = "const verdict = Feed.pageVerdict(page, win, { pageSize: decl.pageSize, now: t, sent: token, prevSig: token && e.feedPrevSig && e.feedPrevSig.key === wkey ? e.feedPrevSig.sig : null });";
+  const TOKL = "const verdict = Feed.pageVerdict(page, win, { pageSize: decl.pageSize, now: t, sent: token, prevSig: sigList, pages: pagesBefore });";   // verify r3: the signature LIST
   ok(esrcF.split(TOKL).length === 2, 'CONTROL setup: the verdict call is spelled once');
-  const ti0 = await tokenIgnored(MUTE.load('src/server/channels-engine.js', esrcF.replace(TOKL, 'const verdict = Feed.pageVerdict(page, win, { pageSize: decl.pageSize, now: t });'), 'feed-token-unjudged'), 'mut');
-  ok(ti0.pages >= 100 && ti0.state !== 'refused', `CONTROL: the copy that never hands the verdict the token it sent pages the same first page ${ti0.pages} times in 30 minutes — the leg above would be red`, JSON.stringify(ti0));
+  const ti0 = await tokenIgnored(MUTE.load('src/server/channels-engine.js', esrcF.replace(TOKL, 'const verdict = Feed.pageVerdict(page, win, { pageSize: decl.pageSize, now: t, pages: pagesBefore });'), 'feed-token-unjudged'), 'mut');
+  // (verify r1: the count's ceiling may park the copy later as an ignored range — never as the token's `contract`)
+  ok(ti0.pages >= 100 && ti0.why !== 'contract', `CONTROL: the copy that never hands the verdict the token it sent pages the same first page ${ti0.pages} times in 30 minutes — the leg above would be red`, JSON.stringify(ti0));
   // verify r2 (the revert table: the previous page's signature was never needed by the leg above — its vendor echoed the
   // very token it was sent): a vendor that ignores the token it is sent but MINTS a fresh one each page repeats the page,
   // never the token — only the window's previous-page signature sees it. CONTROL: the copy that never stores it.
@@ -4993,10 +5413,10 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   };
   const tf1 = await tokenFresh(ENG, 'real');
   ok(tf1.pages <= 2 && tf1.state === 'refused' && tf1.why === 'contract', `a vendor that ignores the token but mints a fresh one: parked by name after ${tf1.pages} pages (the page repeats, the token does not)`, JSON.stringify(tf1));
-  const SIGL = "    if (verdict.ok) e.feedPrevSig = { key: wkey, sig: verdict.sig || '' };\n";
-  ok(esrcF.split(SIGL).length === 2, 'CONTROL setup: the previous page\'s signature is stored once');
+  const SIGL = "    if (verdict.ok) e.feedPrevSig = { key: wkey, sigs: (sigList || []).concat([verdict.sig || '']).slice(-Feed.PAGE_SIGS_MAX) };\n";   // verify r3: the window's signature list
+  ok(esrcF.split(SIGL).length === 2, 'CONTROL setup: the page signatures are stored once');
   const tf0 = await tokenFresh(MUTE.load('src/server/channels-engine.js', esrcF.replace(SIGL, ''), 'feed-token-nosig'), 'mut');
-  ok(tf0.pages >= 100 && tf0.state !== 'refused', `CONTROL: the copy that never stores the previous page's signature pages the same page ${tf0.pages} times in 30 minutes`, JSON.stringify(tf0));
+  ok(tf0.pages >= 100 && tf0.why !== 'contract', `CONTROL: the copy that never stores the previous page's signature pages the same page ${tf0.pages} times in 30 minutes (verify r1: the count's ceiling stops it later, as an ignored range — never as the token's own park)`, JSON.stringify(tf0));
 
   // ── (P) verify r1 (M4 — relaxed polling only on MEASURED completeness): a search that never indexes two of twenty
   //       busy chats (10 % of the traffic). The feed's own owed fetches only read the chats it FOUND; the two it misses
@@ -5342,7 +5762,10 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   ok(lg1.found && !lg1.text && !lg1.author && !lg1.mention && !lg1.search && lg1.words, 'a record stored before the fold reaches the agent\'s read and search INERT — text, author, mention; the words kept', JSON.stringify(lg1));
   ok(lg1.found && !lg1.cut, 'the search\'s 400-character cut leaves no dangling opener at the end of a result (a later `>` could complete it)', JSON.stringify(lg1));
   const AGC = '    const base = agent ? viewsOf(rec, records).map(agentCopy) : withBlocks(rec, records);';   // the .197 integration: over lane channel-rich's read-time view
-  const SRC = "author: ax.author || null, text: inertFrameLine(String(ax.text || '').slice(0, 400)),";
+  // lane peer-census (verify r1 F4): the search result is judged by THE belt now (src/peer-text.js, bound → fold → the
+  // frame rule per line) — the builder's 55e6f48c re-spelled this line without re-spelling the pin, and this heavy
+  // suite went red on the builder's own head; the control keeps replacing it with the raw slice
+  const SRC = "author: ax.author || null, text: agentText(ax.text, { kind: 'block', max: 400 }),";
   ok(esrcF.split(AGC).length === 2 && esrcF.split(SRC).length === 2, 'CONTROL setup: the agent copy and the search result are each judged once');
   const lg0 = await legacyRead(MUTE.load('src/server/channels-engine.js', esrcF.replace(AGC, '    const base = agent ? viewsOf(rec, records).map(withoutBlocks) : withBlocks(rec, records);').replace(SRC, "author: x.author || null, text: String(x.text || '').slice(0, 400),"), 'feed-legacy-raw'), 'mut');
   ok(lg0.found && lg0.text && lg0.author && lg0.mention && lg0.search && lg0.cut, 'CONTROL: the copy whose agent copy only drops the tree hands the split tag over live (read and search) and cuts a result to a dangling opener', JSON.stringify(lg0));

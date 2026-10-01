@@ -148,9 +148,13 @@ ok('resume returns a pinned view to the LIVE tail — behind-the-tail windows ta
 ok('all four paging entries gate on _suspended (extendTop/extendBottom/scroll decisions/short-view rescue)',
   (cv.match(/this\._suspended(?: \|\| this\._disposed)?\) return(?: false)?;/g) || []).length >= 4);
 const dm = fs.readFileSync(path.join(REPO, 'src/lib/desktop-manager.js'), 'utf8');
-ok('desktop hide/show wires the suspend flag', (dm.match(/setSuspended\?\.\((true|false)\)/g) || []).length === 2);
-ok("hidden chat windows get content-visibility:hidden (state-preserving render skip — the switch-jank render leg, inc-mtd54h45)", /contentVisibility = 'hidden'/.test(dm) && /win\.type === 'chat'/.test(dm));
-ok('stage un-hide paths resume too (direct _hiddenByDesktop writers)', (fs.readFileSync(path.join(REPO, 'src/lib/stage-manager.js'), 'utf8').match(/setSuspended\?\.\(false\)/g) || []).length === 2);
+// inc-munl8jkl-gaih: the hiders no longer write the flag or the marks — they add / remove their REASON through the one
+// door (WindowManager.setWindowHidden) and the ONE derivation (WindowManager._deriveHiders) drives the view's per-reason
+// setHidden ('desktop' / 'stage' included) and the marks (PURE view-visibility windowMarks); test-stage-visibility holds it
+const wjs = fs.readFileSync(path.join(REPO, 'src/lib/window.js'), 'utf8'), vvs = fs.readFileSync(path.join(REPO, 'src/lib/view-visibility.js'), 'utf8');
+ok('desktop hide/show wires the suspend flag (through the one door: the derivation sets the desktop reason on the view)', /_hideWin\(win\) \{\n\s+this\.app\.wm\.setWindowHidden\(win, \{ desktop: true \}\);/.test(dm) && /_showWin\(win\) \{\n\s+this\.app\.wm\.setWindowHidden\(win, \{ desktop: false \}\);/.test(dm) && /desktop: !!top\._hiddenByDesktop,/.test(wjs) && /for \(const r of HIDE_REASONS\) \{ try \{ sess\.setHidden\(r, reasons\[r\]\); \} catch \{ \} \}/.test(wjs));
+ok("hidden chat windows get content-visibility:hidden (state-preserving render skip — the switch-jank render leg, inc-mtd54h45) — DERIVED (PURE windowMarks), applied by the one derivation", /contentVisibility: box && type === 'chat' \? 'hidden' : ''/.test(vvs) && /el\.style\.contentVisibility = m\.contentVisibility;/.test(wjs));
+ok('stage un-hide paths resume too (the borrow clears every reason of the frame through the door — the view resumes from the derivation)', /for \(const m of this\._frameOf\(win\)\) this\.app\.wm\.setWindowHidden\(m, \{ desktop: false, stage: false \}\);/.test(fs.readFileSync(path.join(REPO, 'src/lib/stage-manager.js'), 'utf8')));
 const ap = fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8');
 ok('the legacy dialog overlay closes only when the interaction STARTED on it (inc-mtd1c2sd select-drag)', /_downOnOverlay = e\.target === overlay/.test(ap) && /e\.target === overlay && _downOnOverlay/.test(ap));
 
@@ -630,8 +634,8 @@ if (typeof globalThis.requestAnimationFrame !== 'function') globalThis.requestAn
 
 // ── WIRING PIN: the desktop show/hide path must keep flowing the flag (a new
 // hide/show writer that forgets it re-opens the whole class)
-ok('desktop _showWin resumes the ChatView (the resume settle is armed from there)',
-  /_showWin\(win\) \{[\s\S]{0,500}setSuspended\?\.\(false\)/.test(dm));
+ok('desktop _showWin resumes the ChatView (the resume settle is armed from there — the door re-derives, the view\'s desktop reason clears)',
+  /_showWin\(win\) \{\n\s+this\.app\.wm\.setWindowHidden\(win, \{ desktop: false \}\);/.test(dm) && /setWindowHidden\(win, reasons = \{\}\) \{[\s\S]{0,400}this\.syncFrameHiders\(win\);/.test(fs.readFileSync(path.join(REPO, 'src/lib/window.js'), 'utf8')));
 
 // ── THE KEEP ZONE, EXECUTED (inc-mubvu3a4-x8sb). _trimEdge reads only the list's
 // geometry (children, offsetTop/offsetHeight/offsetParent, scrollTop/Height,

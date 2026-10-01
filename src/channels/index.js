@@ -152,8 +152,10 @@ const PACE_COSTS = Object.freeze(['fetch', 'discover', 'scanHost', 'feed']);
  *   changeFeed { via: 'search' (FEED_VIA), scope: the HELD scope that turns it on (null = none needed),
  *                option: the account option that switches it off (null = none), pageSize, pagesPerPass, perMin (pages
  *                per sliding minute), maxWindowSec, catchUp: {chatType, pagesMax} | null, describes: bool,
- *                timeUnit: 'ms' | 's' (THE ONE declared unit a hit's instant is read in — never guessed) }
- * `changes(opts)` answers ONE page: `{hits, more, pageToken, total, malformed}` — a hit is a MARK
+ *                timeUnit: 'ms' | 's' | 'iso' (THE ONE declared form a hit's instant is read in — never guessed),
+ *                reader?: the hit reader's revision (lane lark-p2p — a bump restarts a feed row the old reader wrote) }
+ * `changes(opts)` answers ONE page: `{hits, more, pageToken, total, malformed, malformedFields}` — a hit is a MARK
+ * (`malformedFields` = ≤ 3 lists of the field NAMES the adapter could not read — never a value; the card says them)
  * (`Feed.HIT_FIELDS`), never words: this wrapper refuses a page larger than `pageSize` and STRIPS every field outside
  * the closed list (a snippet reaching the engine is a contract violation it names: `stripped`). `describe(convId,
  * {peerIds})` names a conversation the feed found (a title, a kind) — declared by `describes: true`.
@@ -366,6 +368,9 @@ function validateCaps(kind, caps) {
     }
     if (typeof f.describes !== 'boolean') bad('caps.changeFeed.describes must be a boolean');
     if (!Feed.TIME_UNITS.includes(f.timeUnit)) bad(`caps.changeFeed.timeUnit must be one of ${Feed.TIME_UNITS.join('|')} — ONE declared unit, never guessed from a value's size`);
+    // lane lark-p2p: the adapter's HIT-READER revision (optional, default 1) — a reader fix that makes hits readable which
+    // the previous reader refused bumps it, and a feed row the old reader wrote starts over (the engine's `feedReaderHeal`)
+    if (f.reader !== undefined && !(Number.isInteger(f.reader) && f.reader > 0 && f.reader <= 1000)) bad('caps.changeFeed.reader must be a positive integer (the hit reader\'s revision) or absent');
     if (c.listConversations === false) bad('caps.changeFeed on an adapter that cannot list its conversations — a group the feed finds is born by discovery');
   }
   if (c.receive === 'push') {
@@ -683,7 +688,9 @@ function createChannelRegistry() {
         const tok = typeof r.pageToken === 'string' && r.pageToken && r.pageToken.length <= PAGE_TOKEN_MAX && !/[\u0000-\u001f]/.test(r.pageToken) ? r.pageToken : null;
         const total = Number.isFinite(Number(r.total)) && r.total !== null && r.total !== '' ? Math.max(0, Number(r.total)) : null;
         const fieldNames = Array.isArray(r.fieldNames) ? r.fieldNames.filter((x) => typeof x === 'string' && /^[A-Za-z0-9_.]{1,64}$/.test(x)).slice(0, 40) : undefined;
-        return { hits, more: r.more === true && tok !== null, pageToken: tok, total, malformed, stripped, requests: Math.max(1, Math.floor(Number(r.requests) || 1)), ...(fieldNames ? { fieldNames } : {}) };
+        // lane lark-p2p: WHAT was unreadable — field NAMES only, bounded (≤ 3 lists × ≤ 6 names in the field alphabet)
+        const malformedFields = Feed.mergeFieldLists([], Array.isArray(r.malformedFields) ? r.malformedFields.slice(0, 16) : []);
+        return { hits, more: r.more === true && tok !== null, pageToken: tok, total, malformed, malformedFields, stripped, requests: Math.max(1, Math.floor(Number(r.requests) || 1)), ...(fieldNames ? { fieldNames } : {}) };
       },
       /** A conversation the feed found, NAMED (`{title|null, kind|null, peers:[{id, name}]}`, every string bounded). */
       async describe(convId, opts = {}) {

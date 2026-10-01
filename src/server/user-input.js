@@ -160,7 +160,14 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
         if (!activeSessions.has(sessionId)) return;
         if (session._stdinAckReceived) return;
         if (!ptyQuietSince(session, sentAt)) return; // bytes came back — the pty is working (old wrapper without ack)
-        reattachLocalPty(sessionId, session, 'Broken pty stdin detected', { resend: inputPayload });
+        // RE-SEND ONLY THROUGH A BRIDGE THAT NEVER SPOKE (lane-dead-bridge verify r1, reproduced on raw dtach): a dtach
+        // client that spoke its attach preamble CONNECTED to a live master, and the input it forwarded sits in that
+        // master's socket queue — read (attach, then every push) even after the client is killed. Re-sending through
+        // the new attach then delivered the owner's message TWICE (the 15:05 shape: a stuck master, a connected but
+        // never-attached client). A bridge that never spoke since it was opened (the device channel never opened, a
+        // stale socket) has nothing queued — that is the one case the re-send exists for.
+        const neverSpoke = ptyQuietSince(session, Number(session._ptyOpenedAt) || 0);
+        reattachLocalPty(sessionId, session, `Broken pty stdin detected (${neverSpoke ? 'this bridge never spoke — re-sending the input' : 'this bridge had spoken — its queued input rides the re-attach, nothing re-sent'})`, { resend: neverSpoke ? inputPayload : null });
       }, 5000);
     }
     return { ok: true, msgId };

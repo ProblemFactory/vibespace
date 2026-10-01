@@ -32,6 +32,14 @@
  *  · a time is read in ONE declared unit and a value outside [2010, now + 1 d]
  *    is malformed — never rescaled by guessing from its magnitude (the
  *    inc-mu3giy8t-7k36 lesson: a unit guessed from the value read 1 % as 100 %);
+ *  · a page whose hits this reader cannot read proves nothing (every guard
+ *    above judges READABLE hits): a run of pages ≥ 90 % unreadable parks the
+ *    feed BY NAME with the fields it could not read (`shapeVerdict` — lane
+ *    lark-p2p: 241 260 unreadable hits paged the vendor's whole history for
+ *    ten hours, silently); the run is ONE WINDOW's (the engine restarts it at
+ *    every page 1 — verify r1: a run that outlived windows counted the same
+ *    stray item on each of the ~3 overlapping ticks, and two odd items in a
+ *    quiet minute parked the feed for a day);
  *  · a hit is a MARK, never a record: the snippet never leaves the adapter and
  *    nothing here produces text (test-channel-feed ⑤, the census);
  *  · an owed mark is cleared only by a COMPLETE walk that STARTED after the
@@ -62,16 +70,36 @@ const OVERLAP_MIN_SEC = 30;
 const OVERLAP_DEFAULT_SEC = 60;
 /** A page token lives this long (U8 — the adapter's own WALK_TTL_MS); older ⇒ the window restarts from page 1. */
 const PAGE_TOKEN_TTL_MS = 5 * 60e3;
+/** Page signatures the engine keeps per window in flight (verify r3 — the loop guard judges a continuation against every
+ *  page since page 1; the count's ceiling ends any window long before this). */
+const PAGE_SIGS_MAX = 256;
 /** Records the measurement holds while their instant is not yet covered by a complete window. */
 const PENDING_SAMPLES_MAX = 2000;
 /** The closed set of feed readings (`caps.changeFeed.via`). */
 const FEED_VIA = Object.freeze(['search']);
-/** The two time units a feed may declare — ONE per adapter, never guessed. */
-const TIME_UNITS = Object.freeze(['ms', 's']);
+/** The time FORMS a feed may declare — ONE per adapter, never guessed: an integer of milliseconds, an integer of
+ *  seconds, or an ISO 8601 string (lane lark-p2p, 2026-09-30: Lark's message search answers `create_time` as
+ *  `2026-03-21T16:15:30+08:00` — its own doc and its own answer; the .197 declaration `ms` read every hit malformed). */
+const TIME_UNITS = Object.freeze(['ms', 's', 'iso']);
+/** THE SHAPE VERDICT (lane lark-p2p): a RUN of pages whose items are ≥ this share unreadable, holding ≥ SHAPE_MIN_ITEMS
+ *  items, is a vendor shape this reader does not read — the feed parks by name. At most SHAPE_FIELDS_MAX offending field
+ *  lists are kept (each ≤ SHAPE_FIELD_NAMES_MAX names in the field alphabet). */
+const SHAPE_BAD_SHARE = 0.9;
+const SHAPE_MIN_ITEMS = 5;
+const SHAPE_FIELDS_MAX = 3;
+const SHAPE_FIELD_NAMES_MAX = 6;
+const FIELD_NAME_RE = /^[A-Za-z0-9_.]{1,64}$/;
+/** THE UNREADABLE-HITS RING (verify r2): the card's "N search hits could not be read" is about NOW — the pages of the last
+ *  UNREADABLE_RECENT_MS that held an unreadable hit, `[at, n]` each, at most UNREADABLE_RING_MAX (the oldest dropped;
+ *  the feed's own minute bounds it far below that). The cumulative counter stays for diagnostics; the words read the ring
+ *  (two stray items in one minute used to be "4 search hits could not be read" on the card for ever — a day and 2 884
+ *  clean pages later). */
+const UNREADABLE_RECENT_MS = 3600e3;
+const UNREADABLE_RING_MAX = 200;
 /** The fields a hit may carry past the registry — everything else (a snippet, markup) is stripped. */
 const HIT_FIELDS = Object.freeze(['convId', 'vendorId', 'at', 'updatedAt', 'threadKey', 'isP2p', 'fromId']);
 /** The page's park codes (a feed-LOCAL refusal: the per-conversation polling carries on). */
-const PARK_CODES = Object.freeze(['time-range-ignored', 'contract', 'forbidden', 'vendor-error', 'rate-limited']);
+const PARK_CODES = Object.freeze(['time-range-ignored', 'contract', 'forbidden', 'vendor-error', 'rate-limited', 'shape']);
 /** The modes the measurement moves between. */
 const MODES = Object.freeze(['measuring', 'carrying', 'demoted']);
 /** 2010-01-01 — an instant before it is not a message of this century's chat vendors. */
@@ -123,9 +151,49 @@ function window(feed, now, decl = {}, { overlapSec = OVERLAP_DEFAULT_SEC, tokenA
 /** ISO 8601, whole seconds, UTC (`2026-09-28T12:00:00Z`) — the vendor's `time_range` spelling. */
 function isoSec(ms) { return new Date(floorSec(ms)).toISOString().replace(/\.\d{3}Z$/, 'Z'); }
 
+/** THE ISO 8601 FORM a declared `iso` unit reads — the vendor doc's own pattern (`2026-03-21T16:15:30+08:00`, `Z`, an
+ *  offset with or without its colon) plus optional fractional seconds. Bounded (≤ 64 characters) BEFORE the pattern;
+ *  the calendar date is proved by a round trip (Feb 30 is refused, never rolled over into March); never `Date.parse`
+ *  (its legacy fallbacks read forms nobody declared). → epoch ms | null */
+const ISO_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(?:Z|([+-])(\d{2}):?(\d{2}))$/;
+function isoMs(v) {
+  if (typeof v !== 'string' || v.length > 64) return null;
+  const m = ISO_RE.exec(v);
+  if (!m) return null;
+  const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]), h = Number(m[4]), mi = Number(m[5]), s = Number(m[6]);
+  if (mo < 1 || mo > 12 || d < 1 || h > 23 || mi > 59 || s > 59) return null;
+  const day = new Date(Date.UTC(y, mo - 1, d));
+  if (day.getUTCFullYear() !== y || day.getUTCMonth() !== mo - 1 || day.getUTCDate() !== d) return null;
+  let off = 0;
+  if (m[8]) {
+    const oh = Number(m[9]), om = Number(m[10]);
+    if (oh > 23 || om > 59) return null;
+    off = (oh * 60 + om) * 60e3 * (m[8] === '-' ? -1 : 1);
+  }
+  const frac = m[7] ? Math.floor(Number(`0.${m[7]}`) * 1000) : 0;
+  return Date.UTC(y, mo - 1, d, h, mi, s, frac) - off;
+}
 /**
- * ONE vendor item → ONE hit, or a malformed verdict (§2.6 d). `unit` is the adapter's DECLARATION ('ms' | 's') —
- * a value is read in it and judged against [2010, now + 1 day]; never rescaled by its magnitude.
+ * AN INSTANT in the adapter's DECLARED form (`ms` | `s` | `iso`), judged against [2010, now + 1 day] — never read in
+ * another form, never rescaled by its magnitude (inc-mu3giy8t-7k36). → epoch ms | null
+ */
+function readTime(v, unit, now) {
+  if (!TIME_UNITS.includes(unit)) return null;
+  let at;
+  if (unit === 'iso') at = isoMs(v);
+  else {
+    const raw = num(v);
+    if (raw === null || !/^\d+$/.test(String(v).trim())) return null;
+    at = raw * (unit === 's' ? 1000 : 1);
+  }
+  if (at === null || !Number.isFinite(at)) return null;
+  return at >= EPOCH_MIN_MS && at <= Number(now) + 86400e3 ? at : null;
+}
+
+/**
+ * ONE vendor item → ONE hit, or a malformed verdict (§2.6 d). `unit` is the adapter's DECLARATION ('ms' | 's' | 'iso')
+ * — a value is read in it and judged against [2010, now + 1 day]; never rescaled by its magnitude, never read in a
+ * form nobody declared.
  *   meta = { convId, vendorId, createTime, updateTime, threadKey, isP2p, fromId } (the adapter has read its own
  *   field names into these; everything else — a snippet — is never handed here)
  * → { ok: true, hit } | { ok: false, why }
@@ -137,14 +205,19 @@ function normalizeHit(meta, { unit = 'ms', now = 0 } = {}) {
   if (!convId) return { ok: false, why: 'no-conversation' };
   const vendorId = idOf(m.vendorId);
   if (!vendorId) return { ok: false, why: 'no-message-id' };
-  const raw = num(m.createTime);
-  if (raw === null || !/^\d+$/.test(String(m.createTime).trim())) return { ok: false, why: 'no-time' };
-  const scale = unit === 's' ? 1000 : 1;
-  const at = raw * scale;
+  let at;
+  if (unit === 'iso') {
+    at = isoMs(m.createTime);
+    if (at === null) return { ok: false, why: 'no-time' };
+  } else {
+    const raw = num(m.createTime);
+    if (raw === null || !/^\d+$/.test(String(m.createTime).trim())) return { ok: false, why: 'no-time' };
+    const scale = unit === 's' ? 1000 : 1;
+    at = raw * scale;
+  }
   const hi = Number(now) + 86400e3;
   if (at < EPOCH_MIN_MS || at > hi) return { ok: false, why: 'time-out-of-range' };
-  const u = num(m.updateTime);
-  const updatedAt = u !== null && /^\d+$/.test(String(m.updateTime).trim()) && u * scale >= EPOCH_MIN_MS && u * scale <= hi ? u * scale : null;
+  const updatedAt = m.updateTime === null || m.updateTime === undefined || m.updateTime === '' ? null : readTime(m.updateTime, unit, now);
   const threadKey = m.threadKey === null || m.threadKey === undefined || m.threadKey === '' ? null : idOf(m.threadKey);
   if ((m.threadKey !== null && m.threadKey !== undefined && m.threadKey !== '') && !threadKey) return { ok: false, why: 'bad-thread' };
   const fromId = m.fromId === null || m.fromId === undefined || m.fromId === '' ? null : idOf(m.fromId);
@@ -167,19 +240,32 @@ function cleanHit(h, { now = 0 } = {}) {
  * THE PAGE'S TRUST VERDICT (§2.6) — run on EVERY page before a hit is used.
  *   page  { hits: [...], total, more, malformed }   (the registry's answer)
  *   win   { from, to }
+ *   pages the pages of THIS window already read before this one (lane lark-p2p verify r1 — the count's own ceiling)
  * → { ok: true, hits, malformed } | { ok: false, park: 'contract' | 'time-range-ignored', why, outside }
  * (a) more hits than asked ⇒ contract; (b) ANY hit whose creation AND update BOTH lie outside the window ± the slack ⇒
  * the range was ignored (an edited OLD message is judged by its update — it is news again, inside the window; a message
  * created inside the window and edited AFTER its end is inside by its creation — verify r1: `max(at, updatedAt)` read
  * that ordinary edit as "outside" and parked the feed for 24 h, e.g. a multi-page window whose later page was read after
  * a typo fix, or a window re-read after a restart);
- * (c) a `total` no window of this length can hold ⇒ ignored; (d) a malformed hit is dropped and counted.
+ * (c) a `total` no window of this length can hold ⇒ ignored; (d) a malformed hit is dropped and counted;
+ * (f) THE COUNT'S CEILING (lane lark-p2p verify r1): the pages this window has read, the same rule as (c) applied to
+ * what was PAGED rather than what the vendor CLAIMED — `has_more` for ever with a fresh token and fresh in-window ids
+ * and no `total` (or `total: 0`, a finite number the claim rule trusts) paged one steady window at the feed's whole
+ * minute for ever (measured: 300 pages in 30 minutes, the card "behind"; production's 8 043 pages proved the claim rule
+ * alone never stops it). A window of S seconds may page at most S × TOTAL_PER_SEC_MAX hits; past that it is parked by
+ * name like an ignored range, and the per-conversation polling carries on.
  */
-function pageVerdict(page, win, { pageSize = 30, now = 0, sent = null, prevSig = null } = {}) {
+function pageVerdict(page, win, { pageSize = 30, now = 0, sent = null, prevSig = null, pages = 0 } = {}) {
   const p = page && typeof page === 'object' ? page : {};
   const raw = Array.isArray(p.hits) ? p.hits : [];
   if (raw.length > Math.max(1, Number(pageSize) || 30)) return { ok: false, park: 'contract', why: `the page carried ${raw.length} hits for a page size of ${pageSize}` };
   const from = Number(win && win.from), to = Number(win && win.to);
+  const before = Math.max(0, Math.floor(Number(pages) || 0));
+  if (before > 0 && Number.isFinite(from) && Number.isFinite(to)) {
+    const paged = before * Math.max(1, Number(pageSize) || 30) + raw.length;
+    const most = Math.max(1, (to - from) / 1000) * TOTAL_PER_SEC_MAX;
+    if (paged > most) return { ok: false, park: 'time-range-ignored', why: `the window has run to ${before + 1} pages (${paged} hits at the page size) for a ${Math.round((to - from) / 1000)} s window — no window of that length holds that many (the search never ends)`, outside: 0, paged };
+  }
   let malformed = Math.max(0, Math.floor(Number(p.malformed) || 0));
   const hits = [];
   let outside = 0;
@@ -198,13 +284,90 @@ function pageVerdict(page, win, { pageSize = 30, now = 0, sent = null, prevSig =
   // (`prevSig`), means the vendor did not read the token — its window never completes (the same page for ever, the
   // cursor never moves: measured 300 pages in 30 minutes, the card "searching for the first time"). Parked by name.
   const sig = pageSig(hits);
-  if (sent !== null && sent !== undefined && sent !== '' && ((typeof p.pageToken === 'string' && p.pageToken === String(sent)) || (prevSig && sig && sig === prevSig))) {
+  // verify r3: `prevSig` = the previous page's signature, or (a list) the signatures of EVERY page of this window since its
+  // page 1 — a vendor looping with a period of two (A → B → A → B …, fresh tokens) repeats nothing the previous page held:
+  // measured 161 pages in 77 minutes before the count's ceiling parked it under the wrong name ("ignored its time window")
+  const seenSigs = Array.isArray(prevSig) ? prevSig.filter((s) => typeof s === 'string' && s) : (typeof prevSig === 'string' && prevSig ? [prevSig] : []);
+  if (sent !== null && sent !== undefined && sent !== '' && ((typeof p.pageToken === 'string' && p.pageToken === String(sent)) || (sig && seenSigs.includes(sig)))) {
     return { ok: false, park: 'contract', why: 'the vendor answered a continuation page with the page it had already sent — it ignores the page token (pagination)', paging: true };
   }
   return { ok: true, hits, malformed, sig };
 }
 /** A page's identity: its message ids, order-free (a continuation that repeats a page repeats this). */
 function pageSig(hits) { return (Array.isArray(hits) ? hits : []).map((h) => String(h && h.vendorId)).sort().join('\n'); }
+
+/** ONE offending field list, cleaned: names in the field alphabet only, unique, sorted, ≤ SHAPE_FIELD_NAMES_MAX. */
+function fieldList(list) {
+  if (!Array.isArray(list)) return [];
+  return [...new Set(list.slice(0, 32).filter((x) => typeof x === 'string' && x.length <= 64 && FIELD_NAME_RE.test(x)))].sort().slice(0, SHAPE_FIELD_NAMES_MAX);
+}
+/** Offending field lists merged: the FIRST ≤ SHAPE_FIELDS_MAX distinct lists kept (a list already held is not added). */
+function mergeFieldLists(prev, add) {
+  const out = [];
+  const seen = new Set();
+  for (const l of [...(Array.isArray(prev) ? prev : []), ...(Array.isArray(add) ? add : [])]) {
+    const c = fieldList(l);
+    const k = c.join(',');
+    if (!c.length || seen.has(k)) continue;
+    seen.add(k);
+    out.push(c);
+    if (out.length >= SHAPE_FIELDS_MAX) break;
+  }
+  return out;
+}
+/**
+ * THE SHAPE VERDICT (lane lark-p2p, 2026-09-30 — the owner's production: 241 260 search hits read as malformed, every one,
+ * for ten hours; no single chat born, the feed "measuring", the card silent). Every other guard of the page (the time
+ * window, the `total`, the page token) judges READABLE hits only — a page nobody can read proves nothing, and a feed
+ * that pages it on pages the vendor's whole history. So a RUN of pages whose items are ≥ SHAPE_BAD_SHARE unreadable,
+ * holding ≥ SHAPE_MIN_ITEMS items, PARKS the feed by name with the fields it could not read; a page mostly readable
+ * ends the run (a stray odd hit is dropped and counted, never a park). The run belongs to ONE window: the caller hands
+ * `null` at every page 1 (verify r1 — across windows the overlap re-reads a stray item ~3 times, so a run that outlived
+ * windows parked a quiet account for a day on two odd items).
+ *   run   the previous run {items, malformed, fields} | null
+ *   page  {items (every item the vendor sent), malformed, fields: [[name…]…]}
+ * → { run, park, fields }
+ */
+function shapeVerdict(run, page) {
+  const p = page && typeof page === 'object' ? page : {};
+  const r0 = run && typeof run === 'object' && Number(run.items) > 0 ? run : null;
+  const items = Math.max(0, Math.floor(Number(p.items) || 0));
+  const bad = Math.min(items, Math.max(0, Math.floor(Number(p.malformed) || 0)));
+  if (!items) return { run: r0, park: false, fields: r0 ? mergeFieldLists(r0.fields, []) : [] };
+  if (bad / items < SHAPE_BAD_SHARE) return { run: null, park: false, fields: [] };
+  const fields = mergeFieldLists(r0 ? r0.fields : [], p.fields);
+  const r = { items: (r0 ? Number(r0.items) : 0) + items, malformed: (r0 ? Number(r0.malformed) || 0 : 0) + bad, fields };
+  return { run: r, park: r.items >= SHAPE_MIN_ITEMS, fields };
+}
+
+/** The ring after a page with `n` unreadable hits at `now`: appended, trimmed to the last UNREADABLE_RECENT_MS, bounded.
+ *  Verify r3: ONE ENTRY PER MINUTE — `[the minute's newest instant, its sum]` — so an hour is at most 61 entries and the
+ *  count is exact; a per-page entry at the feed's 10 pages a minute filled the 200-entry bound in 20 minutes and the
+ *  "last hour" then said a third of the truth (5 200 for 15 600 dropped), as a count, not a floor. */
+function recentUnreadable(ring, now, n) {
+  const t = Number(now) || 0;
+  const add = Math.max(0, Math.floor(Number(n) || 0));
+  const kept = (Array.isArray(ring) ? ring : []).filter((e) => Array.isArray(e) && num(e[0]) !== null && Number(e[1]) > 0 && t - Number(e[0]) <= UNREADABLE_RECENT_MS && Number(e[0]) <= t).map((e) => [Number(e[0]), Math.floor(Number(e[1]))]);
+  if (add > 0) {
+    const last = kept[kept.length - 1];
+    if (last && Math.floor(last[0] / 60e3) === Math.floor(t / 60e3)) kept[kept.length - 1] = [t, last[1] + add];
+    else kept.push([t, add]);
+  }
+  return kept.length > UNREADABLE_RING_MAX ? kept.slice(kept.length - UNREADABLE_RING_MAX) : kept;
+}
+/** What the ring says at `now`: the unreadable hits of the last UNREADABLE_RECENT_MS and the instant of the newest. → { n, at } */
+function recentUnreadableCount(ring, now) {
+  const t = Number(now) || 0;
+  let n = 0, at = null;
+  for (const e of Array.isArray(ring) ? ring : []) {
+    if (!Array.isArray(e) || num(e[0]) === null || !(Number(e[1]) > 0)) continue;
+    const a = Number(e[0]);
+    if (a > t || t - a > UNREADABLE_RECENT_MS) continue;
+    n += Math.floor(Number(e[1]));
+    if (at === null || a > at) at = a;
+  }
+  return { n, at };
+}
 
 /**
  * THE FOLD of a page's hits (§2.4, §3.1) — what the engine writes, in the order it must (owed marks first).
@@ -408,8 +571,10 @@ function freshMs(everySec, overlapSec) { return Math.max(180e3, (3 * (Number(eve
 
 module.exports = {
   FEED_SEEN_MAX, FEED_SEEN_TTL_MS, FEED_SKEW_MS, THREAD_OWED_MAX, DESCRIBE_MAX, RANGE_SLACK_MS, TOTAL_PER_SEC_MAX,
-  PROMOTE_MIN, DEMOTE_MIN, MISS_THRESHOLD, OVERLAP_MIN_SEC, OVERLAP_DEFAULT_SEC, PAGE_TOKEN_TTL_MS, PENDING_SAMPLES_MAX,
+  PROMOTE_MIN, DEMOTE_MIN, MISS_THRESHOLD, OVERLAP_MIN_SEC, OVERLAP_DEFAULT_SEC, PAGE_TOKEN_TTL_MS, PAGE_SIGS_MAX, PENDING_SAMPLES_MAX,
   FEED_VIA, TIME_UNITS, HIT_FIELDS, PARK_CODES, MODES, EPOCH_MIN_MS, ID_MAX, THREAD_KEY_SEP,
-  window, isoSec, normalizeHit, cleanHit, pageVerdict, pageSig, foldHits, mergeThreadOwed, mergeThreadReach, owedSatisfied, birthFacts,
+  SHAPE_BAD_SHARE, SHAPE_MIN_ITEMS, SHAPE_FIELDS_MAX, SHAPE_FIELD_NAMES_MAX, UNREADABLE_RECENT_MS, UNREADABLE_RING_MAX,
+  window, isoSec, isoMs, readTime, normalizeHit, cleanHit, pageVerdict, pageSig, foldHits, mergeThreadOwed, mergeThreadReach, owedSatisfied, birthFacts,
   sample, minuteAt, pagesLeft, modeVerdict, trimSeen, threadDueKey, splitThreadDueKey, freshMs, idOf,
+  fieldList, mergeFieldLists, shapeVerdict, recentUnreadable, recentUnreadableCount,
 };

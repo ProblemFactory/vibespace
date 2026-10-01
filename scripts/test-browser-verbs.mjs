@@ -3,7 +3,7 @@
 // test-browser-verbs row). FAST tier: no real browser, no port claimed by name
 // (the fake server listens on 0), scratch dirs only, ~3 s.
 //
-//   ① the PURE router (src/browser-verbs.js): the 12 OURS words; the collision
+//   ① the PURE router (src/browser-verbs.js): the 13 OURS words; the collision
 //      set COMPUTED from the checked-in --help census (+ the `skills get core
 //      --full` extras) == {profiles}; every census word is classified; each
 //      page verb → page, each refused verb → its code + a non-empty remedy;
@@ -75,7 +75,7 @@ const FIX = path.join(REPO, 'scripts/fixtures/browser-verbs');
 // ═══ ① the PURE router ═══
 console.log('① the PURE router');
 {
-  ok(V.OURS.length === 12 && ['profiles', 'new', 'providers', 'use', 'detach', 'status', 'pin', 'watch', 'backend', 'blocked', 'new-child', 'help'].every((w) => V.OURS.includes(w)), 'OURS is exactly the 12 VibeSpace words');
+  ok(V.OURS.length === 13 && ['profiles', 'new', 'providers', 'use', 'detach', 'status', 'pin', 'watch', 'backend', 'blocked', 'new-child', 'help', 'resume'].every((w) => V.OURS.includes(w)), 'OURS is exactly the 13 VibeSpace words (lane browser-resume B: + `resume`)');
   for (const w of V.OURS) ok(V.classify([w, 'x']).kind === 'ours', `\`${w}\` is ours`);
   ok(V.classify([]).kind === 'ours' && V.classify([]).verb === 'help' && V.classify(['--help']).verb === 'help', 'no args / --help ⇒ help');
 
@@ -687,6 +687,7 @@ if (process.argv.includes('batch') && !process.argv.slice(process.argv.indexOf('
 const ab = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith('AGENT_BROWSER_')));
 fs.appendFileSync(${JSON.stringify(LOG)}, JSON.stringify({ argv: process.argv.slice(2), session: process.env.AGENT_BROWSER_SESSION || null, env: ab, xdg: Object.prototype.hasOwnProperty.call(process.env, 'XDG_RUNTIME_DIR') ? process.env.XDG_RUNTIME_DIR : null, input, batchJson, cwd: process.cwd() }) + '\\n');
 if (process.argv[2] === 'open') console.log('✓ opened ' + process.argv[3]);
+if (process.env.FAKE_AB_OUT) console.log(process.env.FAKE_AB_OUT); // lane browser-resume C: the binary's own words (a tab_gone)
 if (process.env.FAKE_AB_EXIT) process.exit(Number(process.env.FAKE_AB_EXIT)); // verify r6: a binary that exits non-zero (a refused first call)
 process.exit(0);
 `, { mode: 0o755 });
@@ -695,6 +696,7 @@ const realCalls = () => { try { return fs.readFileSync(LOG, 'utf8').trim().split
 const calls = [];
 let resolveAnswer = { ok: true, kind: 'none', handle: null, env: [], handles: [], pinTab: false };
 let auditAnswer = { ok: true }; // the owner's ruling (2026-09-27): the audit may answer `interrupted`
+let tabAnswer = { ok: true, passthrough: true }; // lane browser-resume C: the server's own `tab` verbs on a shared profile
 const server = http.createServer((req, res) => {
   let body = '';
   req.on('data', (d) => { body += d; });
@@ -704,6 +706,7 @@ const server = http.createServer((req, res) => {
     const send = (code, o) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); };
     if (req.url === '/api/agent/browser/resolve') return send(resolveAnswer._status || 200, resolveAnswer);
     if (req.url === '/api/agent/browser/audit') return send(200, auditAnswer);
+    if (req.url === '/api/agent/browser/tab') return send(tabAnswer._status || 200, tabAnswer);
     if (req.url === '/api/agent/browser/new-child') return send(200, { handle: 'bk-0000000a.1', env: ['AGENT_BROWSER_SESSION=vs-bk-0000000a.1', 'AGENT_BROWSER_NAMESPACE=vs-bk-0000000a.1'], unset: [], handles: [] });
     if (req.url === '/api/agent/browser/use') return send(200, { profile: { id: 'bp-00000001', label: 'Work' }, lease: { since: Date.now() }, others: 0, alias: 'work', created: true, env: ['AGENT_BROWSER_SESSION=vs-bk-0000000a'], attachments: [{}] });
     send(404, { error: 'no such route', code: 'not-found' });
@@ -1347,6 +1350,39 @@ try {
   c = await cli(['snapshot'], { ...baseEnv, PATH: `${SHIMDIR}:${NODE_DIR}:/usr/bin:/bin`.split(':').filter((d) => !fs.existsSync(path.join(d, 'agent-browser')) || d === SHIMDIR).join(':') });
   ok(c.status === 1 && /\[binary_absent\]/.test(c.stderr) && calls.length === n1, 'with only the shim on PATH ⇒ binary_absent, no server call (the shim is never "the binary")', c.stderr);
 
+  // ═══ lane browser-resume C (§3.9, the owner's ruling 3): on a SHARED profile's browser the `tab` verbs are the SERVER's ═══
+  {
+    const KX = path.join(ROOT, 'keeper-xdg-tabs'); fs.mkdirSync(path.join(KX, 'agent-browser'), { recursive: true, mode: 0o700 });
+    const att = (x = {}) => ({ ok: true, kind: 'attachment', mediated: false, handle: 'work', env: ['AGENT_BROWSER_SESSION=vs-bk-0000000a', 'AGENT_BROWSER_NAMESPACE=vs-bp-00000001', 'AGENT_BROWSER_CDP=ws://127.0.0.1:4444/devtools/browser/x'], socketDir: path.join(KX, 'agent-browser'), runtimeDir: KX, profile: { id: 'bp-00000001', label: 'Work' }, lease: { since: Date.now() }, others: 1, handles: [], isDefault: true, pinTab: true, ...x });
+    const tabCalls = () => calls.filter((x) => x.path === '/api/agent/browser/tab');
+    resolveAnswer = att();
+    tabAnswer = { ok: true, act: 'list', view: { tabs: [{ id: 't3', targetId: 'A'.repeat(32), title: 'Mine', url: 'https://a.example/', current: true }], others: 2 }, lines: ['t3  Mine — https://a.example/  [current]', '2 other tabs in this browser are not yours (another conversation\'s, or the user\'s) — never listed, switched to or closed from here'] };
+    const r0 = realCalls().length, t0 = tabCalls().length;
+    let c2 = await cli(['tab', 'list']);
+    ok(c2.status === 0 && realCalls().length === r0 && tabCalls().length === t0 + 1 && JSON.stringify(tabCalls().at(-1).body.argv) === JSON.stringify(['tab', 'list']) && /^t3  Mine — https:\/\/a\.example\/  \[current\]$/m.test(c2.stdout) && /2 other tabs/.test(c2.stdout) && calls.at(-1).path === '/api/agent/browser/audit' && calls.at(-1).body.verb === 'tab',
+      'a `tab` verb on a shared profile\'s browser NEVER spawns the binary: ONE /tab call (the words as typed), its own tabs printed, the audit names `tab`', JSON.stringify([c2.status, c2.stdout, c2.stderr.slice(0, 300)]));
+    c2 = await cli(['tab', 'list', '--json']);
+    let jj = null; try { jj = JSON.parse(c2.stdout); } catch { jj = null; }
+    ok(c2.status === 0 && jj && jj.success === true && jj.data.tabs.length === 1 && jj.data.others === 2, '`--json`: ONE object — its own tabs + the count', c2.stdout);
+    tabAnswer = { _status: 403, error: 'that tab is not yours — it belongs to another holder of this browser', code: 'not_your_tab' };
+    c2 = await cli(['tab', 'close', 't1']);
+    ok(c2.status === 1 && /\[not_your_tab\]/.test(c2.stderr) && realCalls().length === r0, 'a refusal is printed by name and exits 1 — nothing ran', c2.stderr);
+    tabAnswer = { ok: true, passthrough: true };
+    c2 = await cli(['tab', 'list']);
+    ok(c2.status === 0 && realCalls().length === r0 + 1 && JSON.stringify(realCalls().at(-1).argv) === JSON.stringify(['--pin-tab', 'tab', 'list']), '`passthrough` (a browser that holds only this conversation\'s tabs) ⇒ the binary runs as before', JSON.stringify(realCalls().at(-1)));
+    const t1 = tabCalls().length, r1 = realCalls().length;
+    c2 = await cli(['batch', 'open https://a.example/', 'tab t1']);
+    ok(c2.status === 1 && /\[tab_in_batch\]/.test(c2.stderr) && realCalls().length === r1 && tabCalls().length === t1, 'a batch carrying a `tab` line on a shared profile\'s browser is refused LOCALLY [tab_in_batch] — nothing ran', c2.stderr);
+    c2 = await cli(['batch'], baseEnv, JSON.stringify([['open', 'https://a.example/'], ['--pin-tab', 'tab', 'close', 't1']]));
+    ok(c2.status === 1 && /\[tab_in_batch\]/.test(c2.stderr) && realCalls().length === r1, '…a stdin batch too (JSON form, a flag before the verb)', c2.stderr);
+    resolveAnswer = att({ mediated: true });
+    c2 = await cli(['tab', 'close', 't1']);
+    ok(c2.status === 0 && tabCalls().length === t1 && JSON.stringify(realCalls().at(-1).argv) === JSON.stringify(['--pin-tab', 'tab', 'close', 't1']), 'a MEDIATED ("separate tabs") browser: the binary runs as before — its proxy lists and reaches only this conversation\'s tabs', JSON.stringify(realCalls().at(-1)));
+    resolveAnswer = att();
+    c2 = await cli(['snapshot'], { ...baseEnv, FAKE_AB_OUT: '✗ tab_gone: bound tab is gone (target ' + 'B'.repeat(32) + '). Run `agent-browser tab new <url>` to bind a new tab', FAKE_AB_EXIT: '1' });
+    ok(c2.status === 1 && /\[tab_gone\]/.test(c2.stderr) && /vibespace-browser tab list/.test(c2.stderr), 'a verb on a CLOSED tab: the binary\'s tab_gone, and this tool\'s way out BY NAME (`vibespace-browser tab list` / `tab <id>` / `tab new <url>`)', c2.stderr);
+    resolveAnswer = { ok: true, kind: 'none', handle: null, env: [], handles: [], pinTab: false };
+  }
   // not in a session
   c = await cli(['snapshot'], { HOME, PATH: baseEnv.PATH });
   ok(c.status === 2 && /not inside a VibeSpace session/.test(c.stderr), 'outside a session ⇒ exit 2');

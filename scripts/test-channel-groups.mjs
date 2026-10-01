@@ -277,7 +277,7 @@ console.log('§1d PURE');
 {
   const src = fs.readFileSync(path.join(REPO, 'src/channel-groups.js'), 'utf-8').replace(/^\s*(\*|\/\/).*$/gm, '');
   const reqs = [...src.matchAll(/require\(['"]([^'"]+)['"]\)/g)].map((m) => m[1]);
-  ok(JSON.stringify(reqs) === JSON.stringify(['./channel-record.js']), 'src/channel-groups.js imports ONLY channel-record (PURE)', reqs.join(','));
+  ok(JSON.stringify(reqs) === JSON.stringify(['./channel-record.js', './peer-text.js']), 'src/channel-groups.js imports ONLY channel-record and the peer-text belt (both PURE; lane peer-census)', reqs.join(','));
   ok(!/\bBuffer\b|\bDate\.now\(|\bMath\.random\(/.test(src), 'no Buffer / clock / randomness inside the model (it may ride the browser bundle; instants are handed in)');
 }
 

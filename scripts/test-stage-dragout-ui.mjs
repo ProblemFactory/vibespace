@@ -29,6 +29,14 @@
 //      bar onto a desktop preview marks the preview and puts the refusal's words beside the pointer; the drop puts it
 //      back where it began and a toast says why + what to do (the live view; the hero); the window menu's "Move to
 //      Desktop ▸" holds ONE reason row; a desktop window over the Stage preview says it the other way round
+//   6  A CONVERSATION BROUGHT ONTO THE STAGE IS DRAWN (userW inc-munl8jkl-gaih + inc-munbksgs-k3yz, 2026-09-30, "dynamic
+//      desktop crashed" / "卡死"): read-only chats on two more desktops (Fin, Scra — the incident's names), then C0 the
+//      control (a plain desktop switch draws everything), A on Fin a real click on the Stage preview + go to a window
+//      that lives on Scra, B a real click on Fin's preview (leave) and on the Stage preview again (re-enter), C resume a
+//      stopped conversation whose window lives on Scra while on the Stage, C2 a NEW session on the Stage — each: the
+//      hero's computed content-visibility is `visible`, no aria-hidden, its in-view messages are all RENDERED, a real
+//      click on its title row lands IN the title bar (2.369.196/.198: on the bare div.window), and its screenshot is
+//      not a blank box (distinct colours over a floor). STAGEDRAG_TREE=<a built 2.369.198 tree> shows A and B RED.
 // SKIPs with evidence without chrome / dtach / a built bundle. Free ports, scratch dirs only (/tmp/vs-stagedrag-<pid>).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -78,7 +86,8 @@ else await (async () => {
   // a fake claude: names its own conversation (the fixture family + the shell's pid), then idles
   const hookLine = JSON.stringify({ type: 'system', subtype: 'hook_started', session_id: '%s', hook_name: 'SessionStart' });
   const initLine = JSON.stringify({ type: 'system', subtype: 'init', session_id: '%s', cwd: ROOT, model: 'claude-fable-5', apiKeySource: 'none', tools: [], mcp_servers: [] });
-  fs.writeFileSync(path.join(BIN, 'claude'), `#!/bin/sh\nSID="e2e00000-0000-4000-8000-$(printf '%012d' $$)"\ncase " $* " in *" --output-format "*) sleep 1; printf '${hookLine}\\n${initLine}\\n' "$SID" "$SID";; esac\nexec sleep 600\n`, { mode: 0o755 });
+  // (§ 6 C: a `--resume <id>` names THAT conversation, as the real CLI does)
+  fs.writeFileSync(path.join(BIN, 'claude'), `#!/bin/sh\nSID="e2e00000-0000-4000-8000-$(printf '%012d' $$)"\nprev=""; for a in "$@"; do [ "$prev" = "--resume" ] && SID="$a"; prev="$a"; done\ncase " $* " in *" --output-format "*) sleep 1; printf '${hookLine}\\n${initLine}\\n' "$SID" "$SID";; esac\nexec sleep 600\n`, { mode: 0o755 });
   const PORT = await freePort(), CDP = await freePort();
   const env = { ...process.env, ...VNC_ENV, PATH: BIN + ':' + (process.env.PATH || ''), CLAUDE_CMD: path.join(BIN, 'claude'), PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' };
   let journal = '';
@@ -448,6 +457,378 @@ else await (async () => {
       }
       await ev(`if (wm.windows.get(${S(fx)})) wm.closeWindow(${S(fx)}); return true;`);
       await clearToasts();
+    }
+
+    // ── 6 · A CONVERSATION BROUGHT ONTO THE STAGE IS DRAWN (userW inc-munl8jkl-gaih + inc-munbksgs-k3yz). The forensics'
+    //    reproduction (repro-stage.mjs, 2.369.196 and .198 identical): the Stage's borrow cleared the desktop FLAG and
+    //    ran its own show (visibility + pointer-events only) while the desktop's content-visibility:hidden stayed on the
+    //    element — the renderer skipped the whole window, title bar included: a blank box, every click on the bare
+    //    div.window, no long task. What is asserted is what he saw. ──
+    console.log('— 6 · a conversation brought onto the Stage from another desktop is DRAWN (inc-munl8jkl-gaih)');
+    {
+      const CWD6 = path.join(ROOT, 'workb'); fs.mkdirSync(CWD6, { recursive: true });
+      const pdir = path.join(fakeHome, '.claude', 'projects', CWD6.replace(/[/._]/g, '-')); fs.mkdirSync(pdir, { recursive: true });
+      const SIDS = { fin1: 'e2e00000-0000-4000-8000-0000000f6001', scra1: 'e2e00000-0000-4000-8000-0000000c6001', maj: 'e2e00000-0000-4000-8000-0000000c6002', res: 'e2e00000-0000-4000-8000-0000000c6003' };
+      let k = 0;
+      for (const sid of Object.values(SIDS)) {
+        const lines = []; let t = Date.parse('2026-09-29T20:00:00Z'); let u = 0; k++;
+        const uu = () => `e2e00000-0000-4000-8000-${(k * 10000 + (++u)).toString(16).padStart(12, '0')}`;
+        const base = () => ({ parentUuid: null, isSidechain: false, userType: 'external', cwd: CWD6, sessionId: sid, version: '2.1.274', gitBranch: 'master' });
+        for (let turn = 0; turn < 24; turn++) {
+          const ts = () => new Date(t += 1500).toISOString();
+          lines.push({ ...base(), type: 'user', message: { role: 'user', content: `Turn ${turn}: please check the vendor agreement section ${turn} and summarise what changed since the last draft.` }, uuid: uu(), timestamp: ts() });
+          const tid = `toolu_${sid.slice(-6)}_${turn}`;
+          lines.push({ ...base(), type: 'assistant', message: { model: 'claude-fable-5-1', id: `msg_${sid.slice(-6)}_${turn}a`, type: 'message', role: 'assistant', content: [{ type: 'text', text: `Looking at section ${turn}.` }, { type: 'tool_use', id: tid, name: 'Bash', input: { command: `grep -n "clause ${turn}" contract.md` } }], stop_reason: 'tool_use', usage: { input_tokens: 10, output_tokens: 20 } }, requestId: `req_${turn}`, uuid: uu(), timestamp: ts() });
+          lines.push({ ...base(), type: 'user', message: { role: 'user', content: [{ tool_use_id: tid, type: 'tool_result', content: Array.from({ length: 6 }, (_, j) => `${j + 1}: clause ${turn}.${j} — payment terms net 30, liability cap, renewal`).join('\n') }] }, uuid: uu(), timestamp: ts() });
+          lines.push({ ...base(), type: 'assistant', message: { model: 'claude-fable-5-1', id: `msg_${sid.slice(-6)}_${turn}b`, type: 'message', role: 'assistant', content: [{ type: 'text', text: `**Section ${turn}** changed:\n\n- payment terms moved from net 45 to **net 30**\n- the liability cap is now 12 months of fees\n- renewal is automatic unless either side gives 60 days notice\n\nNothing else differs from the previous draft.` }], stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 80 } }, requestId: `req_${turn}b`, uuid: uu(), timestamp: ts() });
+        }
+        fs.writeFileSync(path.join(pdir, sid + '.jsonl'), lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+      }
+      if (await ev('return st.isActive;')) { await ev('await st.leave(); return true;'); await sleep(900); }
+      // the slot wholly inside the workspace (the legs above resized the hero, which edits the slot) — a screenshot of the
+      // hero then holds only the hero's own pixels, never the taskbar's text below it
+      await ev('st.saveSlot({ left: 0.3, top: 0.04, width: 0.62, height: 0.8 }); return true;');
+      const desks = await ev(`const f = dm.createDesktop(); dm.renameDesktop(f, 'Fin'); const s = dm.createDesktop(); dm.renameDesktop(s, 'Scra'); return { fin: f, scra: s };`);
+      await sleep(400);
+      const open = async (key, name) => {
+        const before = await ev('return [...wm.windows.keys()];');
+        await ev(`app.viewSession(${S(SIDS[key])}, ${S(CWD6)}, ${S(name)}); return true;`);
+        let id = null;
+        await until(async () => { id = await ev(`return [...wm.windows.keys()].find((k) => !${S(before)}.includes(k)) || null;`); return !!id; }, 8000, 150);
+        await until(() => ev(`const v = app.sessions.get(${S(id)}); return !!(v && v._messageList && v._messageList.querySelectorAll('.chat-msg').length >= 8);`), 15000, 200);
+        return id;
+      };
+      await ev(`await dm.switchTo(${S(desks.scra)}); return true;`); await sleep(1100);
+      const W = { scra1: await open('scra1', 'Scra-1'), maj: await open('maj', 'Majordomo'), res: await open('res', 'Resumable') };
+      await ev(`await dm.switchTo(${S(desks.fin)}); return true;`); await sleep(1100);
+      W.fin1 = await open('fin1', 'Fin-1');
+      await sleep(1200);
+      ok(Object.values(W).every(Boolean), '6 four read-only chats open: three on Scra (Majordomo among them), one on Fin', S(W));
+      await ev(`window.__pd6 = []; if (!window.__pd6On) { window.__pd6On = true; document.addEventListener('pointerdown', (e) => { const t = e.target; window.__pd6.push({ inTitlebar: !!(t.closest && t.closest('.window-titlebar')), bareWindow: !!(t.classList && t.classList.contains('window')), win: t.closest && t.closest('.window') ? (t.closest('.window').dataset.winId || t.closest('.window').id || '?') : null, tag: t.tagName + '.' + String(t.className || '').split(' ').slice(0, 2).join('.') }); }, { capture: true }); } return true;`);
+      /** what is on screen for a window: computed marks, what a click would hit, how many in-view messages the browser draws */
+      const probe6 = (winId) => ev(`const w = wm.windows.get(${S(winId)}); if (!w) return { missing: true };
+        const el = w.element, b = el.getBoundingClientRect(), tbEl = el.querySelector(':scope > .window-titlebar'), tb = tbEl && tbEl.getBoundingClientRect();
+        const hit = (x, y) => { const h = document.elementFromPoint(x, y); return h ? { inTitlebar: !!h.closest('.window-titlebar'), inWin: el.contains(h), bareWindow: h === el } : null; };
+        const v = app.sessions.get(w.id), list = v && v._messageList, lr = list && list.getBoundingClientRect();
+        let inView = 0, rendered = 0;
+        if (list) for (const c of list.children) { if (!c.classList.contains('chat-msg')) continue; const r = c.getBoundingClientRect(); if (!r.height || r.bottom <= lr.top || r.top >= lr.bottom) continue; inView++; if (c.checkVisibility({ contentVisibilityAuto: true })) rendered++; }
+        const cs = getComputedStyle(el);
+        return { hero: st._heroWinId === w.id, staged: st.isActive, onStage: !!w._onStage, desk: w._desktopId, cv: cs.contentVisibility, cvStyle: el.style.contentVisibility || '', aria: el.getAttribute('aria-hidden'), visibility: cs.visibility, pe: cs.pointerEvents, hiddenByDesktop: !!w._hiddenByDesktop, hiddenByStage: !!w._hiddenByStage,
+          suspended: v ? !!v._suspended : null, reasons: v && v._hiddenReasons ? [...v._hiddenReasons] : null, readOnly: v ? !!v._readOnly : null,
+          rect: { x: Math.round(b.left), y: Math.round(b.top), w: Math.round(b.width), h: Math.round(b.height) }, title: tb ? { x: tb.left + Math.min(40, tb.width / 3), y: tb.top + tb.height / 2 } : null,
+          titleHit: tb ? hit(tb.left + Math.min(40, tb.width / 3), tb.top + tb.height / 2) : null, middleHit: hit(b.left + b.width / 2, b.top + b.height / 2),
+          titleRendered: tbEl ? tbEl.checkVisibility() : null, inView, rendered };`);
+      /** distinct colours of the window's own pixels (a real compositor screenshot, decoded in the page) — a blank box is its border + background */
+      const colours = async (r, name) => {
+        // the window's rect ∩ the workspace (never a neighbour's pixels: the taskbar's text under a hero that overhangs it)
+        const wsr = await ev(`const w = document.getElementById('workspace'); return w ? rect(w) : { left: 0, top: 0, right: innerWidth, bottom: innerHeight };`);
+        const x0 = Math.max(r.x, wsr.left, 0), y0 = Math.max(r.y, wsr.top, 0), x1 = Math.min(r.x + r.w, wsr.right), y1 = Math.min(r.y + r.h, wsr.bottom);
+        if (x1 - x0 < 20 || y1 - y0 < 20) return -1;
+        const shot = await send('Page.captureScreenshot', { format: 'png', clip: { x: x0, y: y0, width: x1 - x0, height: y1 - y0, scale: 0.5 } });
+        const data = shot.result?.data; if (!data) return -1;
+        if (SHOTS) { try { fs.writeFileSync(path.join(SHOTS, name + '.png'), Buffer.from(data, 'base64')); } catch { } }
+        return ev(`const img = new Image(); img.src = 'data:image/png;base64,' + ${S(data)}; await img.decode(); const c = document.createElement('canvas'); c.width = img.width; c.height = img.height; const x = c.getContext('2d'); x.drawImage(img, 0, 0); const d = x.getImageData(0, 0, c.width, c.height).data; const s = new Set(); for (let i = 0; i < d.length; i += 4) s.add((d[i] << 16) | (d[i + 1] << 8) | d[i + 2]); return s.size;`);
+      };
+      const COLOUR_FLOOR = 300; // the forensics: a drawn chat 2230, the blank hero 64 (its border + background)
+      const drawnOk = (p, c) => p && !p.missing && p.cv === 'visible' && p.aria === null && p.visibility === 'visible' && p.pe !== 'none' && p.titleRendered === true && p.titleHit && p.titleHit.inTitlebar && p.middleHit && p.middleHit.inWin && !p.middleHit.bareWindow && p.inView > 0 && p.rendered === p.inView && c >= COLOUR_FLOOR;
+      const realClickTitle = async (p) => { await clickAt({ x: p.title.x, y: p.title.y }); return ev('return window.__pd6[window.__pd6.length - 1] || null;'); };
+      const stagePreview = () => ev(`const p = document.querySelector('.stage-preview-wrapper'); return p ? rect(p) : null;`);
+      const deskPreview = (id) => ev(`const p = document.querySelector('.desktop-preview[data-desktop-id="' + ${S(id)} + '"]'); return p ? rect(p) : null;`);
+      const clickRect = async (r) => { await clickAt({ x: r.left + r.width / 2, y: r.top + r.height / 2 }); };
+
+      // C0 — the control: a plain desktop switch shows a drawn window
+      {
+        const p = await probe6(W.fin1); const c = await colours(p.rect, '6-C0-control');
+        console.log('    C0 ' + S({ ...p, colours: c }));
+        ok(drawnOk(p, c), `6 C0 control — a plain desktop switch to Fin: its window is drawn (content-visibility visible, the title bar hit, ${p.rendered}/${p.inView} in-view messages rendered, ${c} colours)`, S({ ...p, colours: c }));
+      }
+      // A — on Fin, a real click on the Stage preview, then go to Majordomo (a Scra window) — the reporter at 04:10:21
+      {
+        const sp = await stagePreview();
+        if (ok(!!sp, '6 A the Stage preview is on screen', S(sp))) await clickRect(sp);
+        await sleep(1200);
+        ok(await ev('return st.isActive && dm.activeDesktopId === "__stage__";'), '6 A the click entered the Stage');
+        await ev(`app.goToWinId(${S(W.maj)}); return true;`);
+        await sleep(1800);
+        const p = await probe6(W.maj); const c = await colours(p.rect, '6-A-hero-after-goto');
+        console.log('    A ' + S({ ...p, colours: c }));
+        ok(p.hero && p.onStage, '6 A Majordomo is the Stage\'s hero', S(p));
+        ok(drawnOk(p, c), `6 A THE HERO IS DRAWN — content-visibility ${p.cv}, aria-hidden ${p.aria}, the title bar rendered and hit, ${p.rendered}/${p.inView} in-view messages rendered, ${c} colours (2.369.196/.198: hidden, true, the bare div.window, 0/9, 64)`, S({ ...p, colours: c }));
+        ok(p.suspended === false && p.reasons && p.reasons.length === 0, '6 A …its ChatView runs (no hider reason, not suspended — paging and pinning live)', S(p));
+        const pd = await realClickTitle(p);
+        ok(pd && pd.inTitlebar && !pd.bareWindow, '6 A a REAL click on its title row lands IN the title bar (the incident: the bare div.window)', S(pd));
+      }
+      // B — leave by a real click on Fin's preview, then a real click on the Stage preview — the reporter at 23:40
+      {
+        const fp = await deskPreview(desks.fin);
+        if (ok(!!fp, '6 B Fin\'s preview is on screen', S(fp))) await clickRect(fp);
+        await sleep(1200);
+        const left = await ev(`return { staged: st.isActive, active: dm.activeDesktopId };`);
+        ok(!left.staged && left.active === desks.fin, '6 B the click left the Stage for Fin', S(left));
+        const hb = await probe6(W.maj);
+        ok(hb.hiddenByDesktop && hb.cv === 'hidden' && hb.aria === 'true' && hb.suspended === true, '6 B …where Majordomo is its desktop\'s again: hidden, unrendered, out of the AX tree, suspended (the desktop\'s hiding, derived)', S(hb));
+        const sp = await stagePreview(); if (sp) await clickRect(sp);
+        await sleep(1800);
+        const p = await probe6(W.maj); const c = await colours(p.rect, '6-B-hero-after-reenter');
+        console.log('    B ' + S({ ...p, colours: c }));
+        ok(p.hero && p.staged, '6 B the Stage entered again: Majordomo is the hero again', S(p));
+        ok(drawnOk(p, c), `6 B THE RE-BORROWED HERO IS DRAWN — content-visibility ${p.cv}, ${p.rendered}/${p.inView} rendered, ${c} colours (2.369.196/.198: blank)`, S({ ...p, colours: c }));
+        await clickAt({ x: p.rect.x + p.rect.w / 2, y: p.rect.y + p.rect.h / 2 });
+        const pd = await ev('return window.__pd6[window.__pd6.length - 1] || null;');
+        ok(pd && !pd.bareWindow && pd.win != null, '6 B a real click in its middle lands in its content (the incident: the bare div.window)', S(pd));
+      }
+      // C — while on the Stage, resume the stopped conversation whose window lives on Scra (the resume bar's path:
+      //     the read-only window closes, the resumed one is placed back on its home desktop — session-lifecycle's
+      //     resume placement — unless the Stage holds it)
+      let resHome = null;
+      {
+        const before = await ev('return [...wm.windows.keys()];');
+        resHome = await ev(`const w = wm.windows.get(${S(W.res)}); return w && w.gridBounds ? { ...w.gridBounds } : null;`);
+        await ev(`app.resumeSession(${S(SIDS.res)}, ${S(CWD6)}, 'Resumable', { mode: 'chat', backend: 'claude', backendSessionId: ${S(SIDS.res)} }); return true;`);
+        let rid = null;
+        await until(async () => { rid = await ev(`return [...wm.windows.values()].find((w) => !${S(before)}.includes(w.id) && w.type === 'chat' && w._openSpec && w._openSpec.backendSessionId === ${S(SIDS.res)})?.id || null;`); return !!rid; }, 10000, 200);
+        const live = rid && await until(() => ev(`const v = app.sessions.get(${S(rid)}); return !!(v && v.sessionId && !v._readOnly && v._messageList && v._messageList.querySelectorAll('.chat-msg').length >= 8);`), 20000, 250);
+        await sleep(1500);
+        const p = rid ? await probe6(rid) : { missing: true }; const c = p.missing ? -1 : await colours(p.rect, '6-C-resumed-on-stage');
+        const place = await ev(`const w = wm.windows.get(${S(rid)}); const slot = st.slotBounds(); const gb = w && w.gridBounds; return { oldGone: !wm.windows.has(${S(W.res)}), desk: w && w._desktopId, onStage: !!(w && w._onStage), hero: st._heroWinId === ${S(rid)}, atSlot: !!(gb && ['left', 'top', 'width', 'height'].every((k) => Math.abs((gb[k] ?? 0) - (slot[k] ?? 0)) < 0.01)), gb, slot, ops: (window.__vsOps ? window.__vsOps().filter((o) => o.op === 'resume-place').slice(-1) : null) };`);
+        console.log('    C ' + S({ ...p, colours: c, place }));
+        ok(!!rid && live, '6 C the resume created a LIVE window for the conversation (the read-only one replaced)', S({ rid, live, place }));
+        ok(place.hero && place.onStage && place.desk === desks.scra, '6 C …it is the Stage\'s hero, BORROWED from its home desktop Scra (the Stage is a view, not an owner — 2.369.198: stage-born, its home lost)', S(place));
+        ok(place.atSlot, '6 C …IN THE SLOT like every hero (2.369.198: the resume re-applied its old desktop box over the slot — now that box is its HOME, kept for the hand-back)', S(place));
+        ok(drawnOk(p, c), `6 C THE RESUMED HERO IS DRAWN — content-visibility ${p.cv}, ${p.rendered}/${p.inView} rendered, ${c} colours`, S({ ...p, colours: c }));
+        if (p.title) { const pd = await realClickTitle(p); ok(pd && pd.inTitlebar, '6 C a real click on its title row lands in the title bar', S(pd)); }
+        W.resLive = rid;
+      }
+      // C2 — a NEW session started on the Stage (the reporter: "开新的 session")
+      {
+        const before = await ev('return [...wm.windows.keys()];');
+        await ev(`app.createSession({ cwd: ${S(CWD6)}, mode: 'chat', backend: 'claude', name: 'Fresh' }); return true;`);
+        let nid = null;
+        await until(async () => { nid = await ev(`return [...wm.windows.values()].find((w) => !${S(before)}.includes(w.id) && w.type === 'chat')?.id || null;`); return !!nid; }, 10000, 200);
+        await until(() => ev(`const v = app.sessions.get(${S(nid)}); return !!(v && v.sessionId);`), 15000, 250);
+        await sleep(1500);
+        const p = nid ? await probe6(nid) : { missing: true };
+        console.log('    C2 ' + S(p));
+        ok(!!nid && p.hero && p.cv === 'visible' && p.aria === null && p.titleRendered && p.titleHit && p.titleHit.inTitlebar && p.suspended === false, '6 C2 a NEW session on the Stage is its hero, drawn, its title bar hit, its view running', S(p));
+        W.fresh = nid;
+      }
+      // C3 — leave for Scra (a real click on its preview): the resumed conversation goes HOME — its old desktop, its old
+      //      box, drawn — and the new session stays with the Stage
+      {
+        const scp = await deskPreview(desks.scra);
+        if (ok(!!scp, '6 C3 Scra\'s preview is on screen', S(scp))) await clickRect(scp);
+        await sleep(1500);
+        const back = await ev(`const w = [...wm.windows.values()].find((x) => x.type === 'chat' && x._openSpec && x._openSpec.backendSessionId === ${S(SIDS.res)}); const f = wm.windows.get(${S(W.fresh)}); return { id: w && w.id, desk: w && w._desktopId, gb: w && w.gridBounds, staged: st.isActive, active: dm.activeDesktopId, freshDesk: f && f._desktopId, freshHidden: !!(f && (f._hiddenByStage || f._hiddenByDesktop)) };`);
+        const p = back.id ? await probe6(back.id) : { missing: true }; const c = p.missing ? -1 : await colours(p.rect, '6-C3-resumed-home');
+        console.log('    C3 ' + S({ back, ...p, colours: c }));
+        const near = (a, b) => !!(a && b) && ['left', 'top', 'width', 'height'].every((k) => Math.abs((a[k] ?? 0) - (b[k] ?? 0)) < 0.01);
+        ok(!back.staged && back.active === desks.scra && back.desk === desks.scra, '6 C3 the resumed conversation is on Scra again (handed back to its home, like every borrowed hero)', S(back));
+        ok(near(back.gb, resHome), '6 C3 …at its old box (the geometry the resume carried is its HOME)', S({ gb: back.gb, resHome }));
+        ok(drawnOk(p, c), `6 C3 …and drawn there (${p.rendered}/${p.inView} rendered, ${c} colours)`, S({ ...p, colours: c }));
+        ok(back.freshDesk === '__stage__' && back.freshHidden, '6 C3 the session born on the Stage stays the Stage\'s (parked while the Stage is off screen)', S(back));
+        W.resLive = back.id || W.resLive;
+      }
+      // C4 — THE HERO'S OWN RESUME (verify r1 V4): Scra-1 (read-only) is the hero; its bar's Resume replaces it. The home it
+      //      carries is its OLD box, never the slot its element sat at; leaving to Scra lands it there (c4f17e39: the slot
+      //      became its home, the hand-back left it at slot size on Scra, and the other client's record of Scra took it)
+      {
+        const near6 = (a, b) => !!(a && b) && ['left', 'top', 'width', 'height'].every((k) => Math.abs((a[k] ?? 0) - (b[k] ?? 0)) < 0.01);
+        await clickRect(await stagePreview()); await sleep(1200);
+        await ev(`app.goToWinId(${S(W.scra1)}); return true;`); await sleep(1500);
+        const h = await ev(`const w = wm.windows.get(${S(W.scra1)}); return { hero: st._heroWinId === w.id, home: w._stageHomeBounds || null, gb: w.gridBounds, slot: st.slotBounds() };`);
+        ok(h.hero && h.home && !near6(h.home, h.slot) && near6(h.gb, h.slot), '6 C4 Scra-1 is the hero at the slot, its home box remembered', S(h));
+        const before = await ev('return [...wm.windows.keys()];');
+        await ev(`app.resumeSession(${S(SIDS.scra1)}, ${S(CWD6)}, 'Scra-1', { mode: 'chat', backend: 'claude', backendSessionId: ${S(SIDS.scra1)} }); return true;`);
+        let rid = null;
+        await until(async () => { rid = await ev(`return [...wm.windows.values()].find((w) => !${S(before)}.includes(w.id) && w.type === 'chat' && w._openSpec && w._openSpec.backendSessionId === ${S(SIDS.scra1)})?.id || null;`); return !!rid; }, 10000, 200);
+        const live = rid && await until(() => ev(`const v = app.sessions.get(${S(rid)}); return !!(v && v.sessionId && !v._readOnly);`), 20000, 250);
+        await sleep(1200);
+        const r = await ev(`const w = wm.windows.get(${S(rid)}); return w ? { hero: st._heroWinId === w.id, desk: w._desktopId, home: w._stageHomeBounds || null, gb: w.gridBounds } : null;`);
+        console.log('    C4 ' + S({ live, r, old: h.home, slot: h.slot }));
+        ok(live && r && r.hero && r.desk === desks.scra, '6 C4 the resumed conversation is the hero, home Scra', S(r));
+        ok(r && near6(r.home, h.home), `6 C4 …the home it carries is the OLD box ${S(r && r.home)} (the slot ${S(h.slot)} is the Stage's, never the window's)`, S({ r, old: h.home, slot: h.slot }));
+        await clickRect(await deskPreview(desks.scra)); await sleep(1500);
+        const a = await ev(`const w = wm.windows.get(${S(rid)}); return w ? { desk: w._desktopId, gb: w.gridBounds, staged: st.isActive } : null;`);
+        ok(a && !a.staged && a.desk === desks.scra && near6(a.gb, h.home), `6 C4 leaving to Scra lands it at its old box ${S(a && a.gb)}, not the slot`, S({ a, old: h.home, slot: h.slot }));
+        W.scra1Live = rid;
+      }
+      // T1 — THE HERO TEARS ITS OWN TAB OFF ITS GROUP (verify r1 V2): on Scra Majordomo joins the resumed Scra-1 as a tab; on
+      //      the Stage the group is the hero's frame; a REAL drag of the hero's tab out of the strip splits it — the promoted
+      //      Majordomo is a session that is not the hero: hidden its way, and it does NOT follow the user to Fin (c4f17e39:
+      //      drawn, unowned, and on Fin after the leave; 2.369.198: invisible)
+      {
+        await ev(`const h = wm.windows.get(${S(W.scra1Live)}), g = wm.windows.get(${S(W.maj)}); if (g._tabChain) wm._detachFromChain(g._tabChain, g.id); if (h._tabChain) wm._detachFromChain(h._tabChain, h.id); wm.createTabChain(h, g); wm.switchTab(h._tabChain, 0); return true;`); await sleep(600);
+        await clickRect(await deskPreview(desks.fin)); await sleep(1200);
+        await clickRect(await stagePreview()); await sleep(1200);
+        await ev(`app.goToWinId(${S(W.scra1Live)}); return true;`); await sleep(1500);
+        const tab = await ev(`const h = wm.windows.get(${S(W.scra1Live)}); const t = h.titleBar.querySelector('.tab-item[data-win-id="' + h.id + '"]'); return t ? rect(t) : null;`);
+        const pre = await probe6(W.scra1Live);
+        if (ok(!!tab && pre.hero && pre.cv === 'visible', '6 T1 the group is the hero\'s frame on the Stage, the hero\'s tab on the strip', S({ tab, pre }))) {
+          await drag({ x: tab.left + tab.width / 2, y: tab.top + tab.height / 2 }, { x: tab.left + tab.width / 2 - 200, y: tab.top + tab.height / 2 + 350 });
+          await sleep(600);
+          const hh = await probe6(W.scra1Live), gg = await probe6(W.maj);
+          const chains = await ev(`return { h: !!wm.windows.get(${S(W.scra1Live)})._tabChain, g: !!wm.windows.get(${S(W.maj)})._tabChain, stageVisible: st._isStageVisible(wm.windows.get(${S(W.maj)})) };`);
+          console.log('    T1 ' + S({ chains, hero: hh.hero, heroCv: hh.cv, maj: { cv: gg.cv, aria: gg.aria, hbd: gg.hiddenByDesktop, hbs: gg.hiddenByStage, susp: gg.suspended } }));
+          ok(!chains.h && !chains.g && hh.hero && hh.cv === 'visible', '6 T1 the drag split the group; the hero stays the hero, drawn', S({ chains, hh }));
+          ok(gg.hiddenByDesktop && gg.cv === 'hidden' && gg.aria === 'true' && gg.suspended === true && !chains.stageVisible, '6 T1 the promoted Majordomo — a session that is not the hero — is hidden its way (its desktop\'s), not a free window on the Stage', S(gg));
+          await clickRect(await deskPreview(desks.fin)); await sleep(1400);
+          const onFin = await probe6(W.maj);
+          ok(!onFin.staged && onFin.desk === desks.scra && onFin.cv === 'hidden' && onFin.hiddenByDesktop, '6 T1 leaving to Fin: Majordomo (home Scra) is NOT on Fin', S(onFin));
+          await clickRect(await deskPreview(desks.scra)); await sleep(1400);
+          const onScra = await probe6(W.maj); const c = await colours(onScra.rect, '6-T1-maj-home');
+          // verify r2: the torn-off hero lands BESIDE the group's home (PURE tornOffBox — an off-Stage tear-off drops the torn
+          // window beside its frame), so the survivor is reachable by its title (the standard cascade), its middle under the hero
+          const reachableOk = (p, cc) => p && !p.missing && p.cv === 'visible' && p.aria === null && p.visibility === 'visible' && p.pe !== 'none' && p.titleRendered === true && p.titleHit && p.titleHit.inTitlebar && p.titleHit.inWin && !p.titleHit.bareWindow && p.inView > 0 && p.rendered === p.inView && cc >= COLOUR_FLOOR;
+          ok(reachableOk(onScra, c), `6 T1 …and on Scra it is drawn where the group stood, its title reachable (the torn-off hero sits one cascade step beside it — never exactly on top, never at the slot; ${onScra.rendered}/${onScra.inView} rendered, ${c} colours)`, S({ ...onScra, colours: c }));
+          const heroScra = await probe6(W.scra1Live);
+          ok(heroScra && !heroScra.missing && heroScra.rect && onScra.rect && (Math.abs(heroScra.rect.x - onScra.rect.x) > 8 || Math.abs(heroScra.rect.y - onScra.rect.y) > 8), `6 T1 …and the torn-off hero is NOT exactly on top of it (hero at ${S(heroScra && heroScra.rect)}, survivor at ${S(onScra.rect)})`, S({ hero: heroScra && heroScra.rect, maj: onScra.rect }));
+        }
+      }
+      // M1 — A MAXIMIZE ON THE STAGE IS A SLOT EDIT (verify r3): the hero maximized ON the Stage (the real toggleMaximize);
+      //      leave to Scra; un-maximize there ⇒ at its HOME (f5635f9d: at the SLOT — the hand-back kept the slot px as prevBounds)
+      {
+        const near6 = (a, b) => !!(a && b) && ['left', 'top', 'width', 'height'].every((k) => Math.abs((a[k] ?? 0) - (b[k] ?? 0)) < 0.01);
+        const SLOT6 = { left: 0.3, top: 0.04, width: 0.62, height: 0.8 };
+        await ev(`st.saveSlot(${S(SLOT6)}); return true;`);
+        await clickRect(await stagePreview()); await sleep(1200);
+        await ev(`app.goToWinId(${S(W.maj)}); return true;`); await sleep(1500);
+        const h = await ev(`const w = wm.windows.get(${S(W.maj)}); return { hero: st._heroWinId === w.id, home: w._stageHomeBounds || null, max: !!w.isMaximized };`);
+        if (ok(h.hero && h.home && !h.max, '6 M1 Majordomo is the hero, un-maximized, its home remembered', S(h))) {
+          await ev(`wm.toggleMaximize(${S(W.maj)}); return true;`); await sleep(400);
+          const m = await ev(`const w = wm.windows.get(${S(W.maj)}); const r = w.element.getBoundingClientRect(); const ws = document.getElementById('workspace').getBoundingClientRect(); return { max: !!w.isMaximized, fills: Math.abs(r.width - ws.width) < 4 && Math.abs(r.height - ws.height) < 4 };`);
+          ok(m.max && m.fills, '6 M1 maximized on the Stage: it fills the workspace', S(m));
+          await clickRect(await deskPreview(desks.scra)); await sleep(1500);
+          const a0 = await ev(`const w = wm.windows.get(${S(W.maj)}); return { max: !!w.isMaximized, gb: w.gridBounds, prev: w.prevBounds || null, staged: st.isActive };`);
+          if (a0.max) { await ev(`wm.toggleMaximize(${S(W.maj)}); return true;`); await sleep(400); }
+          const a = await ev(`const w = wm.windows.get(${S(W.maj)}); const ws = document.getElementById('workspace').getBoundingClientRect(); const r = w.element.getBoundingClientRect(); return { max: !!w.isMaximized, gb: w.gridBounds, fr: { left: (r.left - ws.left) / ws.width, top: (r.top - ws.top) / ws.height, width: r.width / ws.width, height: r.height / ws.height } };`);
+          console.log('    M1 ' + S({ afterLeave: a0, now: a, home: h.home }));
+          ok(!a.max && near6(a.gb, h.home) && near6(a.fr, h.home) && !near6(a.gb, SLOT6), `6 M1 on Scra, un-maximized, Majordomo is at its HOME ${S(h.home)} — never the slot (f5635f9d: ${S(a.gb)})`, S({ a, home: h.home }));
+          await ev(`st.saveSlot(${S(SLOT6)}); return true;`);
+        }
+      }
+      // C1 — THE CORNER (verify r3): group [Scra-1 host, Majordomo] snapped to the bottom-right quadrant; Majordomo's tab
+      //      dragged out on the Stage (a real drag); leave to Scra ⇒ Majordomo NOT exactly on Scra-1, Scra-1's title reachable
+      //      (f5635f9d: tornOffBox clamped both axes onto the home — Scra-1 hidden behind Majordomo, its title clicks landing in it)
+      {
+        await ev(`const h = wm.windows.get(${S(W.scra1Live)}), g = wm.windows.get(${S(W.maj)}); for (const w of [h, g]) { if (w._tabChain) wm._detachFromChain(w._tabChain, w.id); if (w.isMaximized) wm.toggleMaximize(w.id); } h.gridBounds = { left: 0.5, top: 0.5, width: 0.5, height: 0.5 }; wm._applyGridBounds(h); wm._captureGridBounds(h); wm.createTabChain(h, g); wm.switchTab(h._tabChain, 0); return true;`); await sleep(600);
+        const corner = await ev(`return wm.windows.get(${S(W.scra1Live)}).gridBounds;`);
+        await clickRect(await deskPreview(desks.fin)); await sleep(1200);
+        await clickRect(await stagePreview()); await sleep(1200);
+        await ev(`app.goToWinId(${S(W.scra1Live)}); return true;`); await sleep(1500);
+        const tab = await ev(`const h = wm.windows.get(${S(W.scra1Live)}); const t = h.titleBar.querySelector('.tab-item[data-win-id="' + ${S(W.maj)} + '"]'); return t ? rect(t) : null;`);
+        if (ok(!!tab, '6 C1 the corner group is the hero\'s frame, Majordomo\'s tab on the strip', S({ tab, corner }))) {
+          await drag({ x: tab.left + tab.width / 2, y: tab.top + tab.height / 2 }, { x: tab.left + tab.width / 2 - 200, y: tab.top + tab.height / 2 + 350 });
+          await sleep(800);
+          const torn = await ev(`return { hero: st._heroWinId, chains: { h: !!wm.windows.get(${S(W.scra1Live)})._tabChain, g: !!wm.windows.get(${S(W.maj)})._tabChain } };`);
+          ok(torn.hero === W.maj && !torn.chains.h && !torn.chains.g, '6 C1 the drag split the group; the torn-off Majordomo is the hero', S(torn));
+          await clickRect(await deskPreview(desks.scra)); await sleep(1500);
+          const hh = await probe6(W.scra1Live), gg = await probe6(W.maj);
+          const boxes = await ev(`return { h: wm.windows.get(${S(W.scra1Live)}).gridBounds, g: wm.windows.get(${S(W.maj)}).gridBounds };`);
+          console.log('    C1 ' + S({ boxes, h: { rect: hh.rect, title: hh.titleHit }, g: { rect: gg.rect } }));
+          ok(hh.rect && gg.rect && (Math.abs(hh.rect.x - gg.rect.x) > 8 || Math.abs(hh.rect.y - gg.rect.y) > 8), `6 C1 on Scra the torn-off Majordomo is NOT exactly on Scra-1 (${S(gg.rect)} vs ${S(hh.rect)}) — a corner home steps the other way (f5635f9d: the same box)`, S({ boxes, h: hh.rect, g: gg.rect }));
+          // a bottom-edge home has room only UP: the torn-off half (on top — the active window) covers the frame's title bar except
+          // its far-right strip, which is what a title-bar probe from the right finds (an interior home's frame peeks out above it)
+          const reach = await ev(`const w = wm.windows.get(${S(W.scra1Live)}); const tb = w.element.querySelector(':scope > .window-titlebar').getBoundingClientRect(); const hits = []; for (let x = tb.right - 8; x > tb.left; x -= 10) { const h = document.elementFromPoint(x, tb.top + tb.height / 2); if (h && w.element.contains(h)) hits.push(Math.round(x - tb.left)); } return { hits: hits.length, probes: Math.ceil(tb.width / 10), width: Math.round(tb.width) };`);
+          ok(reach.hits > 0, `6 C1 …and Scra-1's title bar is reachable beside the hero (${reach.hits} of ${reach.probes} probe points along it hit Scra-1 — the right strip a corner home leaves; f5635f9d: none, the same box)`, S(reach));
+        }
+      }
+      // ═══ 7 A REMOTE TEAR-OFF LANDS WHERE THE RECORD SAYS (stage-blank verify r4, found under the mixed-version leg — no Stage
+      //     involved): this page holds [Scra-1 host, Majordomo]; the real _applyRemoteState is handed the record another device
+      //     sends after tearing Majordomo off and dropping it at X (the same window ids, no tabChain) ⇒ the chain breaks AND
+      //     Majordomo stands at X (before: at its old host's box — the detach copied the host's box over the record's; this
+      //     page's next save then wrote it back there for every client)
+      {
+        await clickRect(await deskPreview(desks.scra)); await sleep(1200);
+        const X = { left: 0.55, top: 0.45, width: 0.4, height: 0.5 }, homeH = { left: 0.05, top: 0.1, width: 0.4, height: 0.5 };
+        await ev(`const h = wm.windows.get(${S(W.scra1Live)}), g = wm.windows.get(${S(W.maj)}); for (const w of [h, g]) { if (w._tabChain) wm._detachFromChain(w._tabChain, w.id); if (w.isMaximized) wm.toggleMaximize(w.id); } h.gridBounds = ${S(homeH)}; wm._applyGridBounds(h); wm._captureGridBounds(h); wm.createTabChain(h, g); wm.switchTab(h._tabChain, 0); wm._captureGridBounds(h); if (app.layoutManager._heldChainActs) app.layoutManager._heldChainActs.clear(); return true;`); await sleep(500); // a group made LONG AGO (a fresh scene): § 6 C1's real tear-off of these two windows is a user act held for a minute (verify r5), and a record that disagrees with the page's chain for them would be refused while it stands
+        const b0 = await ev(`const g = wm.windows.get(${S(W.maj)}); return { chain: g._tabChain ? g._tabChain.tabs : null, gb: g.gridBounds };`);
+        ok(b0.chain && b0.chain.length === 2, '7 this page holds the group [Scra-1 host, Majordomo]', S(b0));
+        const state = await ev(`const s = app.layoutManager.captureState(); for (const rw of s.windows) { const id = rw.winId || rw.id; if (id === ${S(W.maj)}) { rw.gridBounds = ${S(X)}; delete rw.tabChain; delete rw.isTabGuest; } if (id === ${S(W.scra1Live)}) delete rw.tabChain; } return s;`);
+        await ev(`app.layoutManager._applyRemoteState(${S(state)}); return true;`); await sleep(1200);
+        const b1 = await ev(`const g = wm.windows.get(${S(W.maj)}), h = wm.windows.get(${S(W.scra1Live)}); const ws = document.getElementById('workspace').getBoundingClientRect(); const r = g.element.getBoundingClientRect(); return { chain: g._tabChain ? g._tabChain.tabs : null, gb: g.gridBounds, fr: { left: (r.left - ws.left) / ws.width, top: (r.top - ws.top) / ws.height, width: r.width / ws.width, height: r.height / ws.height }, host: h.gridBounds };`);
+        const nearB = (a, b, eps) => !!(a && b) && ['left', 'top', 'width', 'height'].every((k) => Math.abs((a[k] ?? 0) - (b[k] ?? 0)) < eps);
+        ok(!b1.chain, '7 the record broke the group here', S(b1));
+        ok(nearB(b1.gb, X, 0.02) && nearB(b1.fr, X, 0.03), `7 Majordomo stands at X ${S(X)} as the record says (got ${S(b1.gb)}, drawn at ${S(b1.fr)}${nearB(b1.gb, b1.host, 0.02) ? ' — ON ITS OLD HOST' : ''})`, S(b1));
+        ok(nearB(b1.host, homeH, 0.02), '7 …and the host keeps its own box', S(b1));
+      }
+      // ═══ 8 THE HELD CHAIN ACT (stage-blank verify r5, found on the merged tree with lane desktop-move — no Stage involved): this
+      //     page holds [Scra-1 host, Majordomo]; the user TEARS Majordomo off with a real tab drag while a record that still names
+      //     the group lands — (a) DEFERRED under the very drag (§6b guard 3: the suite's own socket sends it while the button is
+      //     held; applied at the pointerup), (b) right after the drop, before the tear's save leaves (the 500 ms debounce). Both
+      //     re-formed the group at the drop (the torn tab back on its old host, the drop point lost, the next save carrying the
+      //     re-formed group to every client; measured on two pages). Now: the tear is held until a record AGREES with it — the
+      //     tab stays torn off where it was dropped, and the page's next save carries the tear.
+      {
+        await clickRect(await deskPreview(desks.scra)); await sleep(1500);
+        const homeH8 = { left: 0.05, top: 0.1, width: 0.4, height: 0.5 };
+        const group8 = async () => {
+          await ev(`const h = wm.windows.get(${S(W.scra1Live)}), g = wm.windows.get(${S(W.maj)}); for (const w of [h, g]) { if (w._tabChain) wm._detachFromChain(w._tabChain, w.id); if (w.isMaximized) wm.toggleMaximize(w.id); } h.gridBounds = ${S(homeH8)}; wm._applyGridBounds(h); wm._captureGridBounds(h); return true;`); await sleep(300);
+          const t = await ev(`return rect(wm.windows.get(${S(W.scra1Live)}).titleBar);`); await clickAt({ x: t.left + Math.min(40, t.width / 4), y: t.top + t.height / 2 }); // a real press: the group is the user's
+          await ev(`const h = wm.windows.get(${S(W.scra1Live)}), g = wm.windows.get(${S(W.maj)}); wm.createTabChain(h, g); wm.switchTab(h._tabChain, 0); wm._captureGridBounds(h); if (app.layoutManager._heldChainActs) app.layoutManager._heldChainActs.clear(); return true;`); await sleep(2500); // the group's save leaves (its own act released: a fresh scene)
+          const stale = await ev(`return app.layoutManager.captureState();`); // the record another device still holds
+          const tab = await ev(`const h = wm.windows.get(${S(W.scra1Live)}); const t = h.titleBar.querySelector('.tab-item[data-win-id="' + ${S(W.maj)} + '"]'); return t ? rect(t) : null;`);
+          return { stale, tab };
+        };
+        const staleOf = (stale) => JSON.stringify({ type: 'layout-sync', state: stale, desktopId: desks.scra });
+        const sendsTap = () => ev(`window.__ls8 = []; if (!window.__ls8tap) { window.__ls8tap = true; const os = app.ws.send.bind(app.ws); app.ws.send = (m) => { try { if (m && m.type === 'layout-sync') window.__ls8.push({ t: Date.now(), chains: (m.state.windows || []).filter((w) => w.tabChain && !w.isTabGuest).map((w) => w.tabChain.tabs), bGb: ((m.state.windows || []).find((w) => (w.winId || w.id) === ${S(W.maj)}) || {}).gridBounds || null }); } catch {} return os(m); }; } return true;`);
+        const after8 = () => ev(`const g = wm.windows.get(${S(W.maj)}), h = wm.windows.get(${S(W.scra1Live)}); const ws = document.getElementById('workspace').getBoundingClientRect(); const r = g.element.getBoundingClientRect(); return { chain: g._tabChain ? g._tabChain.tabs : null, hostChain: h._tabChain ? h._tabChain.tabs : null, gb: g.gridBounds, fr: { left: (r.left - ws.left) / ws.width, top: (r.top - ws.top) / ws.height, width: r.width / ws.width, height: r.height / ws.height }, host: h.gridBounds, held: [...((app.layoutManager._heldChainActs || new Map()).keys())], sends: window.__ls8 };`);
+        const nearB8 = (a, b, eps) => !!(a && b) && ['left', 'top', 'width', 'height'].every((k) => Math.abs((a[k] ?? 0) - (b[k] ?? 0)) < eps);
+        // (a) the record deferred under the drag
+        {
+          const { stale, tab } = await group8();
+          if (ok(!!tab && stale.windows.some((w) => w.tabChain && !w.isTabGuest), '8 (a) this page holds the group [Scra-1 host, Majordomo]; the stale record names it', S({ tab, chains: stale.windows.filter((w) => w.tabChain && !w.isTabGuest).length }))) {
+            await sendsTap();
+            const from = { x: tab.left + tab.width / 2, y: tab.top + tab.height / 2 }, to = { x: Math.min(tab.left + tab.width / 2 + 420, 1500), y: tab.top + tab.height / 2 + 300 };
+            await mouse('mouseMoved', from.x, from.y); await mouse('mousePressed', from.x, from.y, { button: 'left', clickCount: 1 });
+            for (let i = 1; i <= 12; i++) { await mouse('mouseMoved', from.x + (to.x - from.x) * (i / 12), from.y + (to.y - from.y) * (i / 12), { button: 'left', buttons: 1 }); await sleep(35); }
+            const mid = await ev(`const g = wm.windows.get(${S(W.maj)}); const ws = document.getElementById('workspace').getBoundingClientRect(); const r = g.element.getBoundingClientRect(); return { chain: !!g._tabChain, down: !!app.layoutManager._pointerDown, fr: { left: (r.left - ws.left) / ws.width, top: (r.top - ws.top) / ws.height, width: r.width / ws.width, height: r.height / ws.height } };`);
+            ok(!mid.chain && mid.down, '8 (a) mid-drag: the tab is out under the held button', S(mid));
+            ws.send(staleOf(stale)); await sleep(1000); // the other device's record lands under the pointer
+            const pend = await ev(`const p = app.layoutManager._pendingRemote; return p ? (p.size !== undefined ? p.size : 1) : 0;`);
+            ok(pend >= 1, '8 (a) the record is deferred under the drag (§6b guard 3)', S({ pend }));
+            const midSends = await ev('return (window.__ls8 || []).length;');
+            ok(midSends === 0, `8 (a) no save left while the button was held (verify r5 ⑤: the tear's save used to leave at ~690 ms with the torn tab still on its old host's box — ${midSends} left)`);
+            await mouse('mouseReleased', to.x, to.y, { button: 'left', clickCount: 1 }); await sleep(2000); // the pointerup drains it 300 ms later
+            const a = await after8();
+            console.log('    8 (a) ' + S({ chain: a.chain, gb: a.gb, fr: a.fr, held: a.held }));
+            ok(!a.chain && !a.hostChain, '8 (a) Majordomo stays TORN OFF — the deferred record never re-forms the group (the tear is held until a record agrees)', S(a));
+            ok(nearB8(a.gb, mid.fr, 0.04) && nearB8(a.fr, mid.fr, 0.04) && !nearB8(a.gb, a.host, 0.02), `8 (a) …and stands where it was dropped (${S(mid.fr)}; got ${S(a.gb)}${nearB8(a.gb, a.host, 0.02) ? ' — ON ITS OLD HOST' : ''})`, S(a));
+            await until(() => ev(`return (window.__ls8 || []).some((s) => s.chains.length === 0);`), 5000, 200);
+            const b = await after8();
+            ok(b.sends.some((x) => x.chains.length === 0) && !b.sends.some((x, i) => i > 0 && x.chains.length > 0 && b.sends[i - 1].chains.length === 0), `8 (a) …the page's next save carries the tear (${b.sends.length} save(s): ${S(b.sends.map((x) => x.chains))}) and never the re-formed group after it`, S(b.sends));
+            ok(b.sends.length > 0 && nearB8(b.sends[0].bGb, mid.fr, 0.04), `8 (a) …and the FIRST save after the drop carries Majordomo at the drop (${S(b.sends[0] && b.sends[0].bGb)}), never its old host's box (verify r5 ⑤)`, S(b.sends));
+          }
+        }
+        // (b) the record right after the drop, before the tear's save leaves
+        {
+          const { stale, tab } = await group8();
+          if (ok(!!tab, '8 (b) the group again, Majordomo\'s tab on the strip')) {
+            await sendsTap();
+            await drag({ x: tab.left + tab.width / 2, y: tab.top + tab.height / 2 }, { x: Math.min(tab.left + tab.width / 2 + 420, 1500), y: tab.top + tab.height / 2 + 300 }, { steps: 12 });
+            const dropped = await after8();
+            ok(!dropped.chain, '8 (b) the drag tore Majordomo off', S({ chain: dropped.chain }));
+            ws.send(staleOf(stale)); await sleep(2000); // lands before the tear's save (the debounce) — the measured T2
+            const a = await after8();
+            console.log('    8 (b) ' + S({ chain: a.chain, gb: a.gb, fr: a.fr, held: a.held, sends: a.sends.map((x) => x.chains) }));
+            ok(!a.chain && !a.hostChain && nearB8(a.fr, dropped.fr, 0.04), `8 (b) a record landing between the drop and its save does not re-form the group; Majordomo stays at the drop (${S(dropped.fr)}; got ${S(a.fr)})`, S(a));
+            await until(() => ev(`return (window.__ls8 || []).length > 0;`), 4000, 150);
+            const b2 = await after8();
+            ok(b2.sends.length > 0 && nearB8(b2.sends[0].bGb, dropped.fr, 0.04), `8 (b) …a QUICK tear (released before the debounce fired) — its first save still carries the drop (${S(b2.sends[0] && b2.sends[0].bGb)}), never the old host's box (verify r5 ⑤: the drop tells the save to wait for its capture)`, S(b2.sends));
+            // the agreeing record: another device received the tear (Majordomo alone) — applied whole, the hold released
+            const agreeing = await ev(`const s = app.layoutManager.captureState(); for (const rw of s.windows) { if ((rw.winId || rw.id) === ${S(W.maj)}) rw.gridBounds = { left: 0.55, top: 0.45, width: 0.4, height: 0.5 }; } return s;`);
+            ws.send(staleOf(agreeing)); await sleep(1500);
+            const c = await after8();
+            ok(!c.chain && nearB8(c.gb, { left: 0.55, top: 0.45, width: 0.4, height: 0.5 }, 0.02) && c.held.length === 0, '8 (b) a record that AGREES with the tear (Majordomo alone, moved there) is applied whole and releases the hold', S({ chain: c.chain, gb: c.gb, held: c.held }));
+          }
+        }
+      }
+      // the census of the whole scene: every chat window's marks agree with its reasons (nothing hand-written survived)
+      {
+        const agree = await ev(`const bad = []; for (const w of wm.windows.values()) { if (w.type !== 'chat') continue; const box = !!(((w._tabChain && wm.windows.get(w._tabChain.tabs[0])) || w)._hiddenByDesktop || ((w._tabChain && wm.windows.get(w._tabChain.tabs[0])) || w)._hiddenByStage); const cv = w.element.style.contentVisibility || ''; const aria = w.element.getAttribute('aria-hidden') === 'true'; if ((cv === 'hidden') !== box || aria !== box) bad.push({ id: w.id, box, cv, aria }); } return bad;`);
+        ok(agree.length === 0, '6 every chat window\'s marks are exactly its reasons (content-visibility / aria-hidden iff a desktop or the Stage hides it)', S(agree));
+      }
+      for (const id of [W.resLive, W.fresh, W.scra1Live]) { const sid = id && await ev(`return app.sessions.get(${S(id)})?.sessionId || null;`); if (sid) ws.send(JSON.stringify({ type: 'kill', sessionId: sid })); }
+      await sleep(600);
     }
   } finally {
     try { P1?.close(); } catch { }

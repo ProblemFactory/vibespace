@@ -707,6 +707,7 @@ function createSessionMessages(session, sessionId) {
   let browserKeys = null; // B-f7ab: the late browser key (src/server/browser-key.js)
   let browserDialogs = null; // lane browser-stuck: the page-dialog watch (src/server/browser-dialogs.js)
   let browserHandback = null;
+  let browserProposals = null; // lane browser-propose: the proposal runner (src/server/browser-propose.js)
   let browserAccess = null;
   let egressProxy = null;
   try {
@@ -741,8 +742,20 @@ function createSessionMessages(session, sessionId) {
     // instance stays in the pre-P6 world (instance sharing refused by name).
     let cdpMediator = null;
     try { cdpMediator = require('./cdp-mediator').create({ log: console }); } catch (e) { console.warn('[browser] cdp mediator unavailable — instance sharing stays refused: ' + (e && e.message)); }
+    // lane browser-propose (a HEAVY-GATE aid, env-gated like VIBESPACE_CHANNELS_FAKE): `VIBESPACE_TEST_EGRESS_MAP="a.test=127.0.0.1,…"`
+    // points the cloak egress proxy's upstream for RESERVED `.test` hosts (RFC 2606 — never a real site) at loopback, so a
+    // throwaway server's CloakBrowser can open a local fixture page by a name; anything else in the variable is ignored
+    const testEgressMap = new Map(String(process.env.VIBESPACE_TEST_EGRESS_MAP || '').split(',').map((kv) => kv.split('=').map((x) => String(x || '').trim().toLowerCase())).filter(([h, ip]) => /^[a-z0-9-]+(\.[a-z0-9-]+)*\.test$/.test(h || '') && ip === '127.0.0.1'));
+    // lane browser-resume (§3.9, the owner's ruling 1): THE KEPT BROWSERS — a conversation's own browser's logins
+    // directory + its tabs outlive the browser (src/server/browser-kept.js); the keeper is its one feeder, its shutdown
+    // flushes it; `browser-kept-updated` re-loads the Agent browser panel on every client
+    let browserKept = null;
+    try { browserKept = require('./browser-kept').create({ dataDir: path.join(rootDir, 'data'), keeper: () => browserKeeper, serverSetting, broadcast: (m) => bcastAll(m), liveKeys: () => new Set([...activeSessions.values()].map((s) => s && s._browserKey).filter(Boolean)), onChange: () => browserKeeper?.factsMoved?.() }); } // lane B: a kept change moves the browser fact (Resume)
+    catch (e) { browserKept = null; console.warn('[browser] kept browsers unavailable — a conversation\'s browser loses its logins and tabs when it stops: ' + (e && e.message)); }
     browserKeeper = require('./browser-keeper').create({
+      ...(testEgressMap.size ? { egressResolve: (h) => testEgressMap.get(String(h || '').toLowerCase()) || h } : {}),
       dataDir: path.join(rootDir, 'data'), env: () => agentEnv(), broadcast: (m) => bcastAll(m),
+      kept: browserKept, // lane browser-resume (§3.9)
       serverSetting, serverNotice, getTelemetry,
       userTodos, // lane H verify r5: the ONE For-you notice (origin browser) when a profile's browser keeps closing (the heal budget)
       access: browserAccess, hostKnown: (h) => browserAccess.hostKnown(h),
@@ -858,12 +871,17 @@ function createSessionMessages(session, sessionId) {
         withdraw: (sessionId, dialogId) => { const st = getSessionStatus ? getSessionStatus() : null; const s = activeSessions.get(sessionId); if (st && sessionStatusKey && s && typeof st.dropNotices === 'function') st.dropNotices(sessionStatusKey(s, sessionId), (x) => x && x.kind === 'browser-dialog' && x.dialog && x.dialog.id === dialogId); },
       });
       browserKeeper.setStuckSource((bk) => browserDialogs.stuckForKey(bk));
+      // verify r1 (site-reset): a holder's tabs the KEEPER can attribute (its pinned tab, its mediated lease's tabs, the user's
+      // own + adopted ones) — the watch's `tabsOf` from here on; the stream bridge below UNIONS its live view's active target
+      // (before, only the bridge answered: a shared browser with no live view open attributed nothing, and a conversation's
+      // direct `stop` reached every tab of it)
+      browserDialogs.setTabsOf((q) => { try { return browserKeeper.holderTabs(q && q.profileId, q && q.browserKey) || []; } catch { return []; } });
       // the Agent browser panel's row: the digest carries `pageStuck` (kinds only), re-broadcast when a dialog / verdict moves
       // NAMED profiles only: the digest also reaches agents, and another conversation's ephemeral record is never named to them
       browserKeeper.addDigest(() => ({ pageStuck: Object.fromEntries(Object.entries(browserDialogs.pageStuckMap()).filter(([pid]) => { try { return !browserKeeper.isEphemeral(pid); } catch { return false; } })) }));
       let digestTimer = null;
       browserDialogs.onChange((ev) => {
-        if (!ev || !['open', 'closed', 'stuck', 'held', 'held-cleared', 'down'].includes(ev.kind) || digestTimer) return;
+        if (!ev || !['open', 'closed', 'stuck', 'held', 'held-cleared', 'down', 'loop', 'loop-cleared'].includes(ev.kind) || digestTimer) return; // lane site-reset: + a navigation loop begun / ended
         digestTimer = setTimeout(() => { digestTimer = null; try { bcastAll({ type: 'browser-profiles-updated', ...browserKeeper.list() }); } catch (e) { console.warn('[browser-dialog] the digest was not re-published — ' + (e && e.message)); } }, 300);
         if (digestTimer.unref) digestTimer.unref();
       });
@@ -871,6 +889,19 @@ function createSessionMessages(session, sessionId) {
     setupBrowserRoutes({
       keeper: browserKeeper, activeSessions,
       dialogs: browserDialogs,
+      // lane browser-propose step 3: the proposal runner (created below, after the handback announcer it tells through) —
+      // the routes reach it through this delegate: a claim's card + item, the user's Approve / Reject, a rejection told once
+      proposals: {
+        filed: (r) => browserProposals?.filed(r),
+        approve: (id, o) => (browserProposals ? browserProposals.approve(id, o) : { ok: false, code: 'unavailable', error: 'browser proposals are not available on this server' }),
+        reject: (id, o) => (browserProposals ? browserProposals.reject(id, o) : { ok: false, code: 'unavailable', error: 'browser proposals are not available on this server' }),
+        rejectionFor: (q) => (browserProposals ? browserProposals.rejectionFor(q) : null),
+      },
+      // lane site-reset step 3: the agent's `site-reset <host>` on a SHARED profile files ONE proposal (the keeper's record,
+      // the same card / For-you item / routes as a switch proposal) — never run by the agent
+      siteResets: {
+        propose: ({ f, t, host, url = '' }) => (browserProposals ? browserProposals.fileSiteReset({ profileId: t.profileId, host, url, browserKey: f.browserKey, sessionId: f.sessionId }) : null),
+      },
       // lane browser-stuck: the agent's `dialog accept|dismiss` is a page act on the trace like any other (the stream mirror's own shape)
       traceDialogAct: (act) => browserStream?.tapDialogAct?.(act),
       // the agent's `new --adopt <dir>` may register a directory ONLY under these roots (browser-profiles.adoptDirVerdict)
@@ -904,6 +935,8 @@ function createSessionMessages(session, sessionId) {
       browserEnv: browserEnvFn,
       // B-f7ab: THE late key — every route that reads a session's browser key asks it for a session that has none
       ensureBrowserKey: (session, o) => browserKeys.ensureBrowserKey(session, o),
+      // lane browser-resume B: "Hand back and continue" — the handback announcer's stash + card half (built below: read lazily)
+      continueHandBack: (args) => (browserHandback && typeof browserHandback.continueFor === 'function' ? browserHandback.continueFor(args) : Promise.resolve({ ok: false, code: 'unavailable', error: 'the handback announcer is not available on this server' })),
     });
     app.use(browserRouter);
     // lane H (2026-09-25): the session card's + status chip's `browserLive` fact moves when a browser STARTS or
@@ -972,6 +1005,39 @@ function createSessionMessages(session, sessionId) {
       });
       browserHandback.install();
     } catch (e) { console.warn('[browser] handback announcer unavailable — ' + (e && e.message)); }
+    // lane browser-propose step 3 (the owner, 2026-09-30: the agent PROPOSES the switch, the user approves with one click):
+    // a tier-2 claim's ONE card (in the chat, patched in place) + ONE For-you item; the user's Approve runs exactly the
+    // frozen proposal — install, the one site, the switch / a new CloakBrowser profile — and the agent is told through the
+    // handback's ONE ladder site, for free (never a wake)
+    try {
+      const N = require('../normalizers');
+      browserProposals = require('./browser-propose').create({
+        keeper: browserKeeper, activeSessions, userTodos, serverSetting,
+        sessionKeyFor: (s, id) => (sessionStatusKey ? sessionStatusKey(s, id) : null),
+        feedCard: (session, block) => N.feedProposalCard(session, block),
+        patchSettings: (patch) => persistenceRouter.patchSettings(patch),
+        tell: (o) => (browserHandback ? browserHandback.tellProposal(o) : { told: 'failed' }),
+        pinConversation: ({ sessionId, profileId }) => {
+          const RB = require('../routes/browser');
+          const f = RB.sessionFacts(sessionId);
+          if (!f || !f.browserKey) throw Object.assign(new Error('the conversation is not running any more'), { code: 'session-gone' });
+          return RB.pinAnswer(browserKeeper, f, profileId, { by: 'user', quiet: true }); // the user's pin; the approved message is its telling
+        },
+        broadcast: (m) => bcastAll(m),
+        // lane site-reset: the Approve of a site-reset proposal clears through the dialog watch's own socket — the profile's
+        // browser started first when it does not run (a profile's cookies live in its running Chrome's store)
+        clearSite: require('./browser-propose').siteResetClearer({ dialogs: browserDialogs, keeper: browserKeeper }),
+      });
+      // the chat's card source: a rebuild / a view-only history places each proposal card by time (the bindings name a
+      // stopped conversation's key)
+      let pBindings = null; try { pBindings = require('./browser-bindings').create({ dataDir: path.join(rootDir, 'data') }); } catch { pBindings = null; }
+      N.setProposalCardSource(({ session = null, conversationId = null } = {}) => {
+        let key = session && /^bk-[0-9a-f]{8}$/.test(String(session._browserKey || '')) ? session._browserKey : null;
+        const cid = conversationId || (session && (session.claudeSessionId || session.backendSessionId)) || null;
+        if (!key && cid && pBindings && typeof pBindings.lookup === 'function') { try { key = pBindings.lookup(cid) || null; } catch { key = null; } }
+        return key ? browserProposals.cardsFor(key) : [];
+      });
+    } catch (e) { browserProposals = null; console.warn('[browser] proposal runner unavailable — ' + (e && e.message)); }
   } catch (e) { console.warn('[browser] profile keeper unavailable — ' + (e && e.message)); }
   /** §3.5's boot path — server.js calls it right AFTER restoreSessions() so
    *  the live-key set is final: every persisted lease nobody carries is
@@ -988,7 +1054,8 @@ function createSessionMessages(session, sessionId) {
         // put back on its own browser (the pin stays: it is the default attachment now, opened through the keeper)
         .then(() => { try { const n = require('../routes/browser').convertPinnedDirs(); if (n) console.log(`[browser] boot: ${n} session(s) pinned before owner ruling A no longer hand their own browser the profile's directory`); } catch (e) { console.warn('[browser] pin conversion failed:', e && e.message); } })
         .then(() => { try { const n = require('../routes/browser').healDanglingPins(); if (n) console.log(`[browser] boot: ${n} conversation pin(s) named a deleted profile — cleared`); } catch (e) { console.warn('[browser] dangling-pin heal failed:', e && e.message); } }) // lane S2: no conversation keeps a pin on a profile that is gone
-        .then(() => { try { after?.(); } catch (e) { console.warn('[browser] post-boot step failed:', e && e.message); } }); // P5: the recorder taps only browsers the keeper has judged
+        .then(() => { try { after?.(); } catch (e) { console.warn('[browser] post-boot step failed:', e && e.message); } }) // P5: the recorder taps only browsers the keeper has judged
+        .then(() => { try { const ks = browserKeeper.keptStore?.(); if (ks) ks.boot(); } catch (e) { console.warn('[browser] kept-browser sweep failed:', e && e.message); } }); // lane browser-resume: the kept browsers' boot sweep (ends, the size bound) after every record is judged
     } catch (e) { console.warn('[browser] boot reconciliation failed:', e && e.message); }
   }
 
@@ -1000,7 +1067,7 @@ function createSessionMessages(session, sessionId) {
   try {
     browserStream = require('./browser-stream').create({ keeper: browserKeeper, activeSessions, requestAuthed: (req) => auth.requestAuthed(req), getTelemetry, dialogs: browserDialogs });
     // lane browser-stuck: a conversation's dialog is on the tab its live view's relay shows as active (the stream's own `tabs` record)
-    if (browserDialogs && browserStream && typeof browserStream.activeTargetsFor === 'function') browserDialogs.setTabsOf((q) => browserStream.activeTargetsFor(q));
+    if (browserDialogs && browserStream && typeof browserStream.activeTargetsFor === 'function') browserDialogs.setTabsOf((q) => { const out = new Set(); try { for (const t of browserStream.activeTargetsFor(q) || []) if (t) out.add(String(t)); } catch { /* no relay */ } try { for (const t of browserKeeper.holderTabs(q && q.profileId, q && q.browserKey) || []) out.add(t); } catch { /* the keeper's own failure */ } return [...out]; }); // verify r1: ∪ the keeper's attributable tabs
   } catch (e) { console.warn('[browser-live] stream bridge unavailable — ' + (e && e.message)); }
 
   /** P5 (§4.5 / D7 / D35): the action-trace recorder, the per-profile

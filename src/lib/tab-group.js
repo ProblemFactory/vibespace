@@ -199,11 +199,23 @@ const tabGroupMethods = {
     document.addEventListener('mouseup', onUp, { signal });
   },
 
+  /** THE CHAIN WITNESS (lane desktop-move verify r5 ②): `win._chainAt` on every member of a group THIS PAGE changed — a merge,
+   *  a side-by-side, an unsplit, a swap, a reorder, a tear-off (the member that left too), an Undo — read by the layout
+   *  manager's chain loop (actHeld): a record older than the change, or one received before a save the server read carried
+   *  it, neither breaks the group nor puts its older layout back (the r2 ⑩ class for the group itself: a merge dissolved
+   *  300 ms after the drop and its save was swallowed). Stamped by the verbs below and ONLY by them — never by the apply
+   *  (applyChainRecord / _detachFromChain / _ungroupLast) or a restore (restoreTabChain). */
+  witnessChain(chain, extra = []) {
+    const t = Date.now();
+    for (const id of [...((chain && chain.tabs) || []), ...extra]) { const w = this.windows.get(id); if (w) w._chainAt = t; }
+  },
+
   createTabChain(hostWin, guestWin) {
     // `recent` (most recent first) = the default side-by-side partner — LOCAL state: never persisted, never in the sync key
     const chain = { tabs: [hostWin.id, guestWin.id], active: 1, layout: 'tabs', recent: [guestWin.id, hostWin.id] };
     hostWin._tabChain = chain;
     guestWin._tabChain = chain;
+    this.witnessChain(chain); // this page's act (verify r5 ②)
     // Enforce same desktop: guest inherits host's desktop
     if (hostWin._desktopId) guestWin._desktopId = hostWin._desktopId;
     // Host content hidden, guest content visible (guest = newly dragged in = active)
@@ -215,6 +227,7 @@ const tabGroupMethods = {
     this._normalizeChain(chain);
     this._applyChainLayout(chain);
     this._renderTabBar(chain);
+    try { this._app?.stage?.onChainJoined?.(chain); } catch (err) { console.warn('[tab-group] stage onChainJoined failed', err); } // the FRAME is the hero (verify r2)
     this._notify();
   },
 
@@ -231,6 +244,7 @@ const tabGroupMethods = {
     if (!hostWin) return;
     const where = typeof placement === 'number' ? { afterId: chain.tabs[placement] ?? null } : (placement || {});
     insertTab(chain, guestWin.id, where);
+    this.witnessChain(chain); // this page's act (verify r5 ②)
     guestWin.content.classList.add('tab-hidden');
     hostWin.element.appendChild(guestWin.content);
     guestWin.element.style.display = 'none';
@@ -249,6 +263,7 @@ const tabGroupMethods = {
     // Activate the tab that was just dropped — not the last one (dropping
     // between tabs used to light up an unrelated trailing tab)
     this.switchTab(chain, chain.tabs.indexOf(guestWin.id));
+    try { this._app?.stage?.onChainJoined?.(chain); } catch (err) { console.warn('[tab-group] stage onChainJoined failed', err); } // the FRAME is the hero (verify r2)
     this._notify();
   },
 
@@ -435,6 +450,7 @@ const tabGroupMethods = {
     if (!chain) return null;
     this._withdrawMergeToast(chain); // the bridge's offer is taken — by this act, whichever entry made it
     enterSplit(chain, { anchorId: anchorWin.id, guestId: guestWin.id, side });
+    this.witnessChain(chain); // this page's act (verify r5 ②)
     const focusWin = focus === 'anchor' ? anchorWin : guestWin;
     chain.active = Math.max(0, chain.tabs.indexOf(focusWin.id));
     this._normalizeChain(chain);
@@ -442,6 +458,7 @@ const tabGroupMethods = {
     this._renderTabBar(chain);
     this.activeWindowId = focusWin.id;
     requestAnimationFrame(() => this._resizePanes(chain));
+    this._noteChainAct([...chain.tabs]); // THE HELD CHAIN ACT (verify r5): a record that predates the split never undoes it
     this._notify();
     if (snap && chain.layout === 'split') {
       snap.chain = chain; snap.pairAfter = [...chain.split.pair];
@@ -463,11 +480,13 @@ const tabGroupMethods = {
   unbindSplit(chain, { order = null } = {}) {
     if (!chain || chain.layout !== 'split') return;
     chain.layout = 'tabs'; delete chain.split;
+    this.witnessChain(chain); // this page's act (verify r5 ②)
     if (Array.isArray(order)) chain.order = order.map(String); // normalize keeps it only as a permutation of the members
     this._normalizeChain(chain);
     this._applyChainLayout(chain);
     this._renderTabBar(chain);
     requestAnimationFrame(() => this._resizePanes(chain));
+    this._noteChainAct([...chain.tabs]); // THE HELD CHAIN ACT (verify r5)
     this._notify();
   },
 
@@ -477,10 +496,12 @@ const tabGroupMethods = {
   swapSplit(chain) {
     if (!chain || chain.layout !== 'split') return;
     swapSides(chain);
+    this.witnessChain(chain); // this page's act (verify r5 ②)
     this._normalizeChain(chain);
     this._applyChainLayout(chain);
     this._renderTabBar(chain);
     requestAnimationFrame(() => this._resizePanes(chain));
+    this._noteChainAct([...chain.tabs]); // THE HELD CHAIN ACT (verify r5)
     this._notify();
   },
 
@@ -495,10 +516,12 @@ const tabGroupMethods = {
     moveTab(chain, id, { side, index });
     this._normalizeChain(chain);
     if (chainSyncKey(chain) === before) return false;
+    this.witnessChain(chain); // this page's act (verify r5 ②)
     this._applyChainLayout(chain);
     this._renderTabBar(chain);
     if (this.activeWindowId && !chain.tabs.includes(this.activeWindowId)) this.activeWindowId = chain.tabs[chain.active];
     requestAnimationFrame(() => this._resizePanes(chain));
+    this._noteChainAct([...chain.tabs]); // THE HELD CHAIN ACT (verify r5)
     this._notify();
     return true;
   },
@@ -563,6 +586,7 @@ const tabGroupMethods = {
     } else {
       this._restoreChainLayout(chain, snap.chainBefore || { layout: 'tabs' });
     }
+    this._noteChainAct([...chain.tabs, snap.guestId]); // THE HELD CHAIN ACT (verify r5)
     this._notify();
     return true;
   },
@@ -570,6 +594,7 @@ const tabGroupMethods = {
   /** Put a chain back to a `_chainLayoutSnap` (the undo snapshots): layout, strip order, sides + pair + ratio,
    *  the active tab — over the SAME members. */
   _restoreChainLayout(chain, b) {
+    this.witnessChain(chain); // the Undo is this page's act (verify r5 ②)
     chain.layout = b.layout === 'split' && b.split ? 'split' : 'tabs';
     if (Array.isArray(b.order)) chain.order = [...b.order];
     if (chain.layout === 'split') chain.split = { pair: [...b.split.pair], ratio: b.split.ratio, dir: 'row', left: [...(b.split.left || [])], right: [...(b.split.right || [])] }; else delete chain.split;
@@ -642,6 +667,7 @@ const tabGroupMethods = {
     const before = tc ? this._chainLayoutSnap(tc) : null;
     if (tc) this.addToTabChain(tc, win, this._dropSlot(targetWin, x, y)); // the strip slot under the pointer (in a split: its half)
     else this.createTabChain(targetWin, win);
+    this._noteChainAct(win._tabChain ? [...win._tabChain.tabs] : [win.id]); // THE HELD CHAIN ACT (verify r5): a record that predates the merge never breaks it
     this._afterUserMerge(win._tabChain, { dragged: win, from, before }); // never from restore / sync; F3 may land it side by side
   },
 
@@ -734,6 +760,16 @@ const tabGroupMethods = {
   /** A window entered / left a chain (or its chain was re-rendered): `winInfo.onChainChanged` lets it re-decide what
    *  it shows — a seamless desktop-app window PAUSES in a chain (the tab bar lives in the title bar it would fold;
    *  docs/design-desktop-apps-seamless §3.3). Deferred a microtask so the chain's own bookkeeping has settled. */
+  /** THE HELD CHAIN ACT's door (stage-blank verify r5): a chain the USER changed here — a tab torn off, a merge drop, a
+   *  strip move, a split verb — is told to the layout manager, which holds it against a record that predates it
+   *  (layout.js noteChainAct). Never from a restore, an apply or a close (those have their own ways). */
+  _noteChainAct(ids) {
+    const list = (ids || []).filter(Boolean).map(String);
+    if (!list.length) return;
+    const first = this.windows.get(list[0]);
+    try { this._app?.layoutManager?.noteChainAct?.(list, first ? first._desktopId : null); } catch (err) { console.warn('[tab-group] noteChainAct failed', err); }
+  },
+
   _notifyChainChange(ids) {
     queueMicrotask(() => { for (const id of ids) { const w = this.windows.get(id); if (w && typeof w.onChainChanged === 'function') { try { w.onChainChanged(); } catch (e) { console.warn('[tab-group] onChainChanged threw:', e); } } } });
   },
@@ -1160,6 +1196,8 @@ const tabGroupMethods = {
         // on the Stage the torn-off window belongs to the workspace of the frame it left (inc-muly2izg-cks3: an unbound
         // one was hidden by the next leave and never shown again by the enter)
         try { this._app?.stage?.onTornOff?.(win, frame); } catch (err) { console.warn('[tab-group] stage onTornOff failed', err); }
+        this.witnessChain(chain, [winId]); // the tear-off is this page's act — the group it left AND the window that left (verify r5 ②: an older record re-grouped it)
+        this._noteChainAct([winId, frame && frame.id]); // THE HELD CHAIN ACT (stage-blank verify r5): a record that predates the tear never re-forms the group
         // Raise to front so the detached window isn't hidden behind others
         // (especially the original tab chain host it came from).
         this.focusWindow(winId);
@@ -1252,6 +1290,7 @@ const tabGroupMethods = {
       if (!detached) return;
       const win = this.windows.get(winId);
       if (!win) return;
+      this._app?.layoutManager?.noteDrop?.(); // THE DROP (stage-blank verify r5 ⑤): the save waits for this drop's own capture (250 ms below) — the detach's notify had already armed it
       win.element.classList.remove('dragging');
       this.snapIndicator.style.display = 'none';
       this.gridOverlay.classList.remove('dragging');
@@ -1290,6 +1329,7 @@ const tabGroupMethods = {
       }
       savedBounds = null;
 
+      this.witnessGeometry(winId); // the tear-off's drop is the user's act: its snap / grid cell / free place is held over an older record (verify r5 ③)
       let snapped = false;
       if (!e.altKey) {
         if (this.grid) { this._snapToGrid(winId, e.clientX, e.clientY); snapped = true; }
@@ -1316,6 +1356,7 @@ const tabGroupMethods = {
     this._clearSplitDom(win);
     if (hostWin && hostWin !== win) this._clearSplitDom(hostWin);
 
+    let promoted = null; // the guest that becomes the host when the host leaves
     if (isHost && chain.tabs.length > 1) {
       const newHostId = chain.tabs[1];
       const newHost = this.windows.get(newHostId);
@@ -1336,6 +1377,7 @@ const tabGroupMethods = {
       newHost.gridBounds = hostWin.gridBounds ? { ...hostWin.gridBounds } : null;
       newHost.isMaximized = hostWin.isMaximized;
       newHost.prevBounds = hostWin.prevBounds;
+      promoted = newHost;
     } else if (hostWin && hostWin.element.contains(win.content)) {
       hostWin.element.removeChild(win.content);
       win.element.appendChild(win.content);
@@ -1363,6 +1405,13 @@ const tabGroupMethods = {
     // On the Stage a leave hid the guest (visibility:hidden + pointer-events:none), the re-enter re-showed the host
     // only, and the tab pulled out of the bar became an INVISIBLE window (its taskbar button toggled, nothing showed).
     if (hostWin && hostWin !== win) this._matchFrameVisibility(win, hostWin);
+    // …and a PROMOTED host (the host left) now draws the frame with its own element: it carries the frame's reasons, and
+    // the one derivation re-marks the group with it on top (inc-munl8jkl-gaih — its own element was display:none until now)
+    if (promoted) this._matchFrameVisibility(promoted, hostWin);
+    // THE STAGE (verify r1 of inc-munl8jkl-gaih): a session left standing by the split that is neither the hero nor
+    // bound — the one that left, or the frame that stays — is handed back (hidden its way); the drag's own focus then
+    // materializes the dragged one. Every detach passes here (the drag, a close, a remote regroup): the ONE hook.
+    try { this._app?.stage?.onChainSplit?.(win, promoted || (hostWin && hostWin !== win ? hostWin : null)); } catch (err) { console.warn('[tab-group] stage onChainSplit failed', err); }
     const standaloneIcon = win.titleBar.querySelector(':scope > .window-icon-stack');
     if (standaloneIcon) standaloneIcon.style.display = '';
     win.titleSpan.style.display = '';
@@ -1391,19 +1440,14 @@ const tabGroupMethods = {
     this._notify();
   },
 
-  /** A window leaving a chain takes its FRAME's visibility (inc-muly2izg-cks3): the frame hidden by a desktop / the
-   *  Stage ⇒ the window is hidden the same way; the frame SHOWN ⇒ every hider's mark on the window goes — both flags,
-   *  the inline visibility / pointer-events, the accessibility hide, a chat's content-visibility, a suspended view. */
+  /** A window leaving a chain takes its FRAME's visibility (inc-muly2izg-cks3): it carries exactly the frame's desktop
+   *  and Stage reasons, through the ONE door (setWindowHidden) — the marks (inline visibility / pointer-events, the
+   *  accessibility hide, a chat's content-visibility) and the view's suspension are DERIVED there, never written here
+   *  (inc-munl8jkl-gaih: a mark written by two owners is the bug). A hidden frame ⇒ hidden the same way; a shown frame
+   *  ⇒ every hider's mark goes. */
   _matchFrameVisibility(win, frame) {
     if (!win || !frame || win === frame || !win.element) return;
-    if (frame._hiddenByDesktop) { if (!win._hiddenByDesktop) this._app?.desktopManager?._hideWin?.(win); return; }
-    if (frame._hiddenByStage) { if (!win._hiddenByStage) this._app?.stage?._hideStage?.(win); return; }
-    const el = win.element;
-    win._hiddenByStage = false; win._hiddenByDesktop = false;
-    el.style.visibility = ''; el.style.pointerEvents = '';
-    try { el.removeAttribute('aria-hidden'); } catch { }
-    if (win.type === 'chat') el.style.contentVisibility = '';
-    try { this._app?.sessions?.get(win.id)?.setSuspended?.(false); } catch { }
+    this.setWindowHidden(win, { desktop: !!frame._hiddenByDesktop, stage: !!frame._hiddenByStage });
   },
 
   removeFromTabChain(chain, winId) {
@@ -1445,6 +1489,10 @@ const tabGroupMethods = {
     this._notifyChainChange([lastWin.id]);
     this._clearSplitDom(lastWin);
     lastWin.content.classList.remove('tab-hidden');
+    // its tab just came on show: the ONE derivation re-reads it (verify r2 of inc-munl8jkl-gaih — the survivor of a
+    // 2-tab group whose tab was not the shown one kept its view SUSPENDED by a stale `tab` reason until some later
+    // focus / tab switch derived again: drawn, but paging and pinning off)
+    this.syncFrameHiders?.(lastWin);
     const standaloneIcon = lastWin.titleBar.querySelector(':scope > .window-icon-stack');
     if (standaloneIcon) standaloneIcon.style.display = '';
     lastWin.titleSpan.style.display = '';
@@ -1507,6 +1555,10 @@ const tabGroupMethods = {
       if (!guestWin) continue;
       chain.tabs.push(guestWin.id);
       guestWin._tabChain = chain;
+      // a chain lives on ONE desktop — createTabChain / addToTabChain enforce it at creation; a restored record must too
+      // (verify r3 of inc-munl8jkl-gaih: a record whose guest this page held on another desktop spanned two, and the next
+      // detach copied the FRAME's desktop reason onto a window living on the desktop on show — hidden there for good)
+      if (hostWin._desktopId && guestWin._desktopId !== hostWin._desktopId) guestWin._desktopId = hostWin._desktopId;
       guestWin.content.classList.add('tab-hidden');
       hostWin.element.appendChild(guestWin.content);
       guestWin.element.style.display = 'none';
@@ -1517,6 +1569,7 @@ const tabGroupMethods = {
     if (chain.active !== 0) hostWin.content.classList.add('tab-hidden');
     this._normalizeChain(chain); // a persisted pair whose member did not come back ⇒ tabs
     this._applyChainLayout(chain);
+    try { this._app?.stage?.onChainJoined?.(chain, { restored: true }); } catch (err) { console.warn('[tab-group] stage onChainJoined failed', err); } // the FRAME is the hero (verify r2): a remote record that groups the hero under another session's host; `restored` (verify r3): a record re-forming the hero's own frame keeps the frame's home
     this._renderTabBar(chain);
     // like every other chain mutation: the taskbar (one GROUPED button, the
     // guests off it) re-derives now — a reload used to show the restored group

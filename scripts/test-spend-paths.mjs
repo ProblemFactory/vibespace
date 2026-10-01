@@ -581,6 +581,15 @@ function trackedServerSource() {
         bh.length === 1 && bh[0].prim === 'deliver-ladder' && tbody.length > 400 && !/deliverToConversation|stashFor|authorizeSpend|spendReason/.test(tbody) && /const card = \{ fromName: FROM_NAME, text, kind: 'notification' \};/.test(tbody) && /emitCard\(sess\.s, card\)/.test(tbody) && /deliver\.emitPeerCard\(cid, card\)/.test(tbody) && /queueNotice\(sess, T\.takeoverNotice\(/.test(tbody)
           && /emitCard: \(session, card\) => require\('\.\.\/normalizers'\)\.feedPeerCard\(session, card\)/.test(read('src/server/mounts-plugins-wiring.js')),
         JSON.stringify(bh.map((h) => h.file + ':' + h.line + ' ' + h.prim)));
+      // lane browser-resume B (§3.9, the owner's ruling 2): "Hand back and continue" — the between-turns hand-back files ONE
+      // stash entry + ONE display-only card and NEVER opens a turn: no rung, no authorizer, no spend reason in its body; the
+      // announcer's handback listener RETURNS before announce() for cause `continue` (no turn, no notice); the census above
+      // still counts ONE ladder site in this file (the explicit handback)
+      const cbody = bsrc.slice(bsrc.indexOf('  async function continueFor('), bsrc.indexOf('  let unsubInput = null'));
+      ok('§2 LANE BROWSER-RESUME: "Hand back and continue" is FREE — continueFor holds no rung, no authorizer, no spend reason (only the stash + the display-only card), the announcer returns before announce() for `continue`, and browser-handback.js still has exactly ONE ladder site',
+        bh.length === 1 && cbody.length > 400 && !/deliverToConversation|authorizeSpend|spendReason/.test(cbody) && /deliver\.stashFor\(cid, \{ source: 'agent', kind: 'notification', fromName: FROM_NAME, ref: id, text \}\)/.test(cbody) && /emitCard\(sess\.s, card\)/.test(cbody)
+          && /if \(ev\.cause === 'continue'\) return;\n      announce\(ev\)/.test(bsrc) && require(path.join(REPO, 'src/browser-takeover.js')).announceVerdict({ cause: 'continue', announceIdle: true }).deliver === false,
+        JSON.stringify({ sites: bh.length, body: cbody.length }));
     }
 
     // NEGATIVE CONTROL: a synthetic producer in a scratch tree.

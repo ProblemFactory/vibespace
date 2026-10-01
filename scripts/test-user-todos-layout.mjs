@@ -400,6 +400,7 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
     'src/server/browser-handback.js': 'browser',
     'src/server/browser-keeper.js': 'browser', // lane H verify r5: the ONE notice when a profile's browser keeps closing (the heal budget)
     'src/server/mounts-plugins-wiring.js': 'browser', // the browser routes' switch PROPOSAL (this file only wires them)
+    'src/server/browser-propose.js': 'browser', // lane browser-propose: the agent's proposal (Approve / Reject), one item per proposal
     'src/agent-routes.js': 'agent',
     'src/server/helper-asks.js': 'agent', // lane S1: a helper's permission ask left unanswered for 60 s
     'src/exit-proxy.js': 'machines', // lane-pairing ⑥: "Allow <conversation> to run a command on <machine>?" (Allow / Deny, 60 s)
@@ -504,7 +505,7 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
   console.log('     sites: ' + C.sites.map((x) => `${x.rel.replace(/^src\//, '')}:${x.line}=${x.origin}`).join(' · '));
   ok(C.sites.length >= 12, `the census scope is non-vacuous (${C.sites.length} sites; 12 when this shipped)`);
   ok(C.problems.length === 0, 'every site declares a literal origin of the closed set, the one its file produces; every origin has a producer; every PRODUCERS row files', C.problems);
-  eq(C.sites.length, 18, 'the widened match finds exactly the 18 declared sites (every classList.add(a, b) excluded, no other two-argument add in the tree; lane H verify r5 added the browser keeper\'s keeps-closing notice; lane S1 the helper-ask item; R4 (B-6acc) the channels engine\'s composed-message approval pointer; lane R5 verify r6 the channels engine\'s unsaved-sign-in item; lane-pairing ⑥ the exit ask; lane-pool-pin r2 the pool engine\'s removed-member hold notice — the owner\'s 全B)');
+  eq(C.sites.length, 19, 'the widened match finds exactly the 19 declared sites (every classList.add(a, b) excluded, no other two-argument add in the tree; lane H verify r5 added the browser keeper\'s keeps-closing notice; lane S1 the helper-ask item; R4 (B-6acc) the channels engine\'s composed-message approval pointer; lane R5 verify r6 the channels engine\'s unsaved-sign-in item; lane-pairing ⑥ the exit ask; lane-pool-pin r2 the pool engine\'s removed-member hold notice — the owner\'s 全B; lane browser-propose the agent\'s proposal)');
   eq(C.sites.filter((x) => x.rel === 'src/server/channels-engine.js').length, 7, 'channels-engine files from seven sites — all seven declared (R4: + composePointerSync, origin channels; R5 verify r6: the unsaved-sign-in item)');
   console.log('   negative controls (the census must be able to go red)');
   const drop = { ...files, 'src/server/spend-guard.js': files['src/server/spend-guard.js'].split("origin: 'spend', ").join('') };

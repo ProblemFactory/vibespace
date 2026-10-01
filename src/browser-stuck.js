@@ -77,9 +77,34 @@ const FRAME_NAMES = `${FRAME_TAGS.map(lookThrough).join('|')}|${lookThrough('vib
 const FRAME_HEAD = `<(?:${FOLD}*\\/)?[\\s${FRAME_FOLD}]*`;
 const FRAME_TAIL = `(?:(?!\\s)${FOLD})*`;
 const FRAME_TAG_RE = new RegExp(`${FRAME_HEAD}(${FRAME_NAMES})${FRAME_TAIL}(\\s[^<>]*)?>`, 'giu');
-const FRAME_OPEN_RE = new RegExp(`<(${FRAME_HEAD.slice(1)}(?:${FRAME_NAMES}))(?=${FRAME_TAIL}(?:\\s[^<>]*)?$)`, 'giu');
+const FRAME_OPEN_RE = new RegExp(`<(${FRAME_HEAD.slice(1)}(?:${FRAME_NAMES}))(?=${FRAME_TAIL}(?:\\s|$))`, 'iuy');
 /** VibeSpace's own notice head (src/notification-senders.js VIBESPACE_NOTICE_HEAD) — a page never speaks under it. */
 const NOTICE_HEAD_RE = /VibeSpace \(this workspace, not another agent\) reports:/gi;
+/** THE DANGLING OPENERS of ONE line whose complete tags are already inert — judged RIGHT TO LEFT (lane peer-census verify r6
+ *  F1): one `replace` from the left judged every opener's lookahead against the ORIGINAL line, so of `x <system-reminder
+ *  </system-reminder` only the second (dangling) opener was neutered and the first was LEFT dangling behind it —
+ *  `<system-reminder [/system-reminder` — for the next line's `>` (a quote mark, a list bullet) to complete, by this
+ *  module's own predicate, at every door (the belt's line and block forms, a name, a label, a page's words). An opener can
+ *  only dangle AFTER the line's last `>` (before it, that `>` or the `<` of a later tag ends the run a join could
+ *  continue; a complete tag is inert already), so the walk starts at the last `<` and moves left: each opener is judged
+ *  with every opener after it ALREADY neutered, and the first `<` that is no opener blocks every one before it (its run
+ *  can never reach a later `>`). One sticky match per `<`, the edits applied in one pass: linear. Idempotent. */
+function inertOpeners(t) {
+  const g = t.lastIndexOf('>');
+  let i = t.lastIndexOf('<');
+  if (i <= g) return t;
+  const edits = [];
+  for (; i > g; i = i > 0 ? t.lastIndexOf('<', i - 1) : -1) {   // (a negative fromIndex is read as 0: the walk ends at the line's first character)
+    FRAME_OPEN_RE.lastIndex = i;
+    const m = FRAME_OPEN_RE.exec(t);
+    if (!m) break;
+    edits.push([i, i + m[0].length, '[' + m[1].replace(FOLD_G, '')]);
+  }
+  if (!edits.length) return t;
+  let out = '', at = 0;
+  for (const [s, e, r] of edits.reverse()) { out += t.slice(at, s) + r; at = e; }
+  return out + t.slice(at);
+}
 /** Zero-width / bidi controls: invisible, and they can reorder what a reader sees — out of page text. verify r2 #1: EVERY
  *  format character (\p{Cf}: the zero-width and bidi controls, U+061C, U+180E, U+FEFF, and the TAG characters
  *  U+E0000–E007F — an ASCII copy the live view shows as nothing and the agent reads: a confirm the user saw as "Save
@@ -91,7 +116,7 @@ const INVISIBLE_RE = /[\p{Cf}\u034F\u115F\u1160\u17B4\u17B5\u180B-\u180F\u3164\u
  *  Idempotent; never longer than `max`. */
 function pageText(s, max = MESSAGE_MAX) {
   const t = clean(str(s).replace(INVISIBLE_RE, ''), max);
-  return t.replace(FRAME_TAG_RE, (m, name) => '[' + String(name).replace(FOLD_G, '').trim() + ']').replace(FRAME_OPEN_RE, (m, name) => '[' + name.replace(FOLD_G, ''))
+  return inertOpeners(t.replace(FRAME_TAG_RE, (m, name) => '[' + String(name).replace(FOLD_G, '').trim() + ']'))
     .replace(NOTICE_HEAD_RE, '[a VibeSpace notice head, written by the page]').slice(0, max);
 }
 /** Page text inside a sentence: ONE delimited string (JSON quoting — a `"` in it can never close the quote). */
@@ -305,13 +330,15 @@ function stuckAgentText(v) {
  * The CONVERSATION's stuck fact (what `factFor` / the chip / the profile row read): a dialog open on its tab, else
  * the unresponsive verdict, else nothing.
  */
-function stuckFact({ dialog = null, verdict = null, now = 0 } = {}) {
+function stuckFact({ dialog = null, verdict = null, loop = null, now = 0 } = {}) {
   if (dialog) return { state: 'dialog', dialog: dialogBlock(dialog, { now }), since: dialog.openedAt || 0 };
+  // lane site-reset: a navigation loop explains the timeouts — it is said before (and instead of) "not responding"
+  if (loop) return { state: 'loop', loop: loopBlock(loop), since: Number(loop.runStart) || 0 };
   if (verdict && verdict.state === 'unresponsive') return { state: 'unresponsive', why: verdict.why || 'timeouts', count: verdict.count || 0, since: verdict.since || 0 };
   return null;
 }
-/** The fact's digest part (moves with every printed field, never a clock). */
-function stuckDigest(f) { return f ? [f.state, f.dialog ? f.dialog.id : '', f.why || '', f.count || 0].join(':') : ''; }
+/** The fact's digest part (moves with every printed field, never a clock — a loop's cycle, never its hop count). */
+function stuckDigest(f) { return f ? [f.state, f.dialog ? f.dialog.id : '', f.why || '', f.count || 0, f.loop ? (f.loop.urls || []).join(' ') : ''].join(':') : ''; }
 
 // ── the UI's words (t = the client's i18n; every key a literal t('…')) ──
 function fill(s, p) { return String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m)); }
@@ -340,15 +367,309 @@ function stuckWords(f, tIn) {
   const t = typeof tIn === 'function' ? (s, p) => tIn(s, p) : fill;
   if (f.state === 'dialog') return { chip: t('page dialog open'), line: t('The page is waiting on a dialog — answer it in the live view'), action: null };
   if (f.state === 'unresponsive') return { chip: t('page not responding'), line: t('The page is not responding — Restart'), action: t('Restart'), tooltip: t('Restart stops this browser and starts it again; open tabs close, logins in a saved profile stay') };
+  // lane site-reset: the loop (with its cycle where the fact carries it; the panel row's digest carries kinds only)
+  if (f.state === 'loop') { const w = f.loop ? loopWords(f.loop, tIn) : null; return { chip: w ? w.chip : t('page keeps reloading'), line: w ? w.line : t('The page keeps reloading by itself (a navigation loop) — its stored login may be stale'), action: null, loop: w }; } // verify r4 #4: the chip follows the shape (a self-refreshing page says its period)
   return null;
+}
+
+// ── lane site-reset (2026-09-30, userW's pod: a bank's login page read "Log In | …" for a few seconds, then the app's own
+// title, then EVERY verb timed out and screenshots failed): A PAGE THAT WILL NOT SETTLE IS A NAMED FACT — the NAVIGATION
+// LOOP. The dialog watch's per-browser socket already receives every main-frame navigation of every tab; it keeps the last
+// LOOP_KEEP per tab (`{at, url, reason, same?, stop?}`) and asks this verdict at every hop.
+//
+// MEASURED on agent-browser 0.38.1 + its Chrome (scripts/measure-navigation-loop.mjs, local fixture pages only — the
+// table lives in docs/kb-file-structure.md under this file): a page loop's every hop after the first is RENDERER-
+// initiated — `Page.frameRequestedNavigation` names it `scriptInitiated` (location.replace / .href), `metaTagRefresh`
+// (<meta refresh>) or `reload` (location.reload()) just before `frameStartedNavigating` — while the agent's own `open` /
+// `reload` / `back` is browser-initiated (no request event: `reason` null). A loop whose every page moves on BEFORE its
+// load event (each page answered after 0.3–1.5 s) is exactly the incident: `open` ends after 25 s ("Operation timed out.
+// The page may still be loading"), `snapshot` answers "(empty page)" after 2–8 s, and on the never-painting shape the
+// CLI's `screenshot` AND the raw `Page.captureScreenshot` both time out (there is no frame to take). A fast loop (each page
+// loads, then moves on) leaves every verb answering in ms — the loop is still the fact worth telling (the stale login).
+// `Page.stopLoading` answers in ≤ 6 ms and ends every measured loop (0 further commits in 3 s); `tab close` / `tab new` /
+// `tab <ref>` / `tab list` answer in ≤ 80 ms on every shape (0.38.1 waits for nothing there).
+
+/** The window a loop is judged over, the hops it takes, the most distinct addresses a cycle has. */
+const LOOP_WINDOW_MS = 30 * 1000;
+const LOOP_MIN_HOPS = 6;
+const LOOP_MAX_URLS = 3;
+/** verify r2: a run of this many page hops in the window is a loop EVEN WITHOUT A REPEAT — a page that moved itself twelve
+ *  times in 30 s and settled on none of them (a path-carried nonce: `/login/<n>` → `/app/<n>`, `;jsessionid=…` rewritten on
+ *  every hop) is the incident's shape with every address spelled differently; the repeat rule read it as a hand-off and the
+ *  agent sat out the 25 s timeout again. Twice the repeat floor: a real sign-in hand-off is 4–6 hops. */
+const LOOP_CHAIN_HOPS = 2 * LOOP_MIN_HOPS;
+/** A run with no hop for this long has ended (a loop hops every 0.01–5 s; 6 in 30 s is one per 5 s at the slowest). */
+const LOOP_QUIET_MS = 8 * 1000;
+/** verify r3 #3: a SLOW run — one page hop every few seconds, each address new — never reaches LOOP_CHAIN_HOPS inside the
+ *  30 s window (3 s a hop = 10 a window), so a page that moved itself forty times in two minutes was never judged and every
+ *  verb sat the timeout for good. A second, longer span: LOOP_LONG_CHAIN_HOPS hops of ONE run (no quiet gap, no agent or
+ *  user hop between them) within LOOP_LONG_WINDOW_MS is a loop too, repeat or not — a page that moves itself twenty times in
+ *  under three minutes without settling is not a hand-off. */
+const LOOP_LONG_CHAIN_HOPS = 20;
+const LOOP_LONG_WINDOW_MS = LOOP_LONG_CHAIN_HOPS * LOOP_QUIET_MS; // 160 s: every run the quiet rule holds together (a hop under LOOP_QUIET_MS after the last) reaches the floor inside it
+/** A renderer-initiated hop requested this soon after one of the AGENT's page-acting commands is the agent's (a click on
+ *  "Next" is anchorClick / a form / a script — its page turn is never the page's own loop). */
+const LOOP_ATTRIB_MS = 1500;
+/** Main-frame navigations kept per tab (a <meta refresh=0> loop commits ~100 a second — measured). */
+const LOOP_KEEP = 64;
+/** The CLI's verbs that never wait for the page to settle, and so still run on a looping tab (the way out): stop it, close
+ *  or leave the tab, navigate it elsewhere (the agent's own hop restarts the judgement), clear the site, answer a dialog. */
+const LOOP_PASS_VERBS = Object.freeze(['stop', 'site-reset', 'tab', 'close', 'screenshot', 'dialog', 'open', 'goto', 'navigate', 'nav', 'back', 'forward', 'reload']);
+/** Verbs whose running command is the agent ACTING on the page (a navigation soon after one is the agent's, not the loop's). */
+const LOOP_ACTING_VERBS = Object.freeze(['click', 'dblclick', 'tap', 'press', 'keyboard', 'keydown', 'keyup', 'type', 'fill', 'select', 'check', 'uncheck', 'find', 'eval', 'mouse', 'drag', 'upload', 'batch', 'scroll', 'pushstate', 'set']);
+/** verify r4 #4: the verbs that READ a page without waiting for it to settle (measured on 0.38.1: 70–230 ms on a page that
+ *  reloads itself every second) — on a loop whose pages LOAD between hops (`readable`) they still run, the loop told beside
+ *  their answer; on one whose pages never load (the incident's pending shape: "(empty page)" after seconds) they are
+ *  answered with the loop at once, as before. */
+const LOOP_READ_VERBS = Object.freeze(['snapshot', 'get', 'is', 'console', 'errors']);
+/** A self-refreshing page's period is said when its hops are regular and at least this far apart. */
+const LOOP_PERIOD_MIN_MS = 1000;
+/** A screenshot of a looping tab is bounded (measured: on the never-painting shape there is no frame to take — the CLI
+ *  sat 30 s, a raw capture too); a loop in a fast shape answers in ms. */
+const LOOP_SCREENSHOT_MS = 4000;
+/** 0.38.1's own action timeout (measured 25.3 s; AGENT_BROWSER_DEFAULT_TIMEOUT's default): a verb the loop cut keeps its
+ *  session's daemon waiting this long from its start — page commands queue behind it (Page.stopLoading and
+ *  Target.closeTarget do not shorten it, measured), so the ways out go through VibeSpace's own socket. */
+const CLI_ACTION_TIMEOUT_MS = 25 * 1000;
+/** The line the agent reads while its session still finishes a cut verb's wait. */
+function busyText(leftMs) { const s = Math.max(1, Math.ceil(Number(leftMs) / 1000) || 1); return `your browser session is still finishing the command the loop cut short (about ${s} s more): page commands queue behind it — \`stop\`, \`tab close\`, \`screenshot\` and \`site-reset\` answer now`; }
+
+/** A main-frame URL as the loop judges and shows it: scheme://host[:port]/path — the query and the fragment DROPPED (a
+ *  nonce or a sign-in `state` parameter changes on every hop of a real loop; a fragment is not a navigation). '' for a
+ *  URL that does not parse, or one with no host (about:blank, data:). Bounded, lower-cased host. */
+function loopUrlKey(u) {
+  const s = str(u).slice(0, 4096);
+  let x = null; try { x = new URL(s); } catch { return ''; }
+  if (!/^https?:$/.test(x.protocol) || !x.host) return '';
+  return `${x.protocol}//${x.host.toLowerCase()}${x.pathname || '/'}`.slice(0, URL_MAX);
+}
+/** The host of a URL ('' when none) — lower-case, the port dropped. */
+function hostOf(u) { let x = null; try { x = new URL(str(u).slice(0, 4096)); } catch { return ''; } return /^https?:$/.test(x.protocol) ? String(x.hostname || '').toLowerCase().replace(/^\[|\]$/g, '') : ''; }
+const pathOf = (k) => { const i = k.indexOf('/', k.indexOf('//') + 2); return i < 0 ? '/' : k.slice(i); };
+
+/**
+ * THE VERDICT. `events` = one tab's main-frame navigations, oldest first: `{at, url, reason, same, stop}` — `reason` is the
+ * renderer's own request reason (`scriptInitiated` / `metaTagRefresh` / `reload` / `anchorClick` / `formSubmission…`),
+ * null for a browser-initiated navigation (the agent's open / reload / back, the user's address bar) — never the page's;
+ * `same` = a same-document navigation (history.pushState): it counts only when it changes the PATH (a hash or a query
+ * ticking on one path is a slideshow / a paginated list, not a loop); `stop` = a marker: the page was stopped.
+ * `commands` = the instants the AGENT's page-acting commands started: a renderer-initiated hop requested within
+ * `attribMs` after one is the agent's; `user` = the hop happened while the USER drove the browser (a takeover — the watch
+ * stamps it): their own clicks between two pages are never the page's loop (verify r1: seven clicks between an inbox and a
+ * message read as a loop — the chip said "page keeps reloading" under the user's hands and the agent's first verb after a
+ * quick handback was refused).
+ * THE RUN = the page's own hops since the last agent / user navigation, stop marker, or quiet gap (> quietMs). A LOOP =
+ * the run's hops in the last `windowMs` number ≥ `minHops` and REPEAT — every address of the run was visited twice on
+ * average (distinct addresses × 2 ≤ hops: a cycle, however long — one address reloading itself counts; a hand-off chain of
+ * distinct addresses never) — and the last one is at most `quietMs` old. `maxUrls` bounds only what the fact SHOWS (verify
+ * r1: a four-station sign-in cycle — sign-in → authorize → callback → app → sign-in … — was never judged under a hard
+ * "≤ 3 addresses" rule and the agent sat out the 25 s timeout again; the fact is the HOPS, the address list a display).
+ * → null, or `{kind: 'navigation_loop', urls (≤ maxUrls shown, query/fragment dropped, page text), more (addresses of the
+ * cycle beyond the shown), hosts (every host of the cycle, ≤ maxUrls), hops, sinceMs, runStart, lastAt, host}`.
+ */
+function navigationLoopVerdict(events, { windowMs = LOOP_WINDOW_MS, minHops = LOOP_MIN_HOPS, maxUrls = LOOP_MAX_URLS, chainHops = LOOP_CHAIN_HOPS, longWindowMs = LOOP_LONG_WINDOW_MS, longChainHops = LOOP_LONG_CHAIN_HOPS, quietMs = LOOP_QUIET_MS, attribMs = LOOP_ATTRIB_MS, commands = [], now = 0 } = {}) {
+  const list = Array.isArray(events) ? events : [];
+  const cmds = (Array.isArray(commands) ? commands : []).map(Number).filter((x) => x > 0);
+  const agentsHop = (e) => {
+    if (!e.same && (e.reason == null || e.reason === '')) return true; // browser-initiated: never the page's own
+    if (e.user) return true; // verify r1: the user drove the browser at this hop (a takeover) — their click, not the page's loop
+    const at = Number(e.reqAt || e.at) || 0;
+    return cmds.some((c) => at >= c && at - c <= attribMs);
+  };
+  let run = [], runStart = 0, lastPath = '';
+  for (const e of list) {
+    if (!e || !(Number(e.at) > 0)) continue;
+    const at = Number(e.at);
+    if (e.stop) { run = []; runStart = at; lastPath = ''; continue; }
+    const key = loopUrlKey(e.url);
+    if (agentsHop(e)) { run = []; runStart = at; lastPath = key ? pathOf(key) : ''; continue; }
+    if (e.same && key && pathOf(key) === lastPath) continue; // a hash / a query on the same path: not a hop
+    if (key) lastPath = pathOf(key);
+    if (!key) continue; // about:blank / data: — a hop the loop never shows (a page cannot loop through it by itself here)
+    if (run.length && at - run[run.length - 1].at > quietMs) { run = []; runStart = at; }
+    if (!run.length && !runStart) runStart = at;
+    if (!run.length && runStart < at && at - runStart > quietMs) runStart = at;
+    run.push({ at, key, loaded: !!e.loaded }); // verify r4 #4: did this page LOAD before the next hop (the watch's frameStoppedLoading)
+  }
+  const t = Number(now) || (run.length ? run[run.length - 1].at : 0);
+  if (!run.length || t - run[run.length - 1].at > quietMs) return null;
+  const shown = Math.max(1, Number(maxUrls) || LOOP_MAX_URLS);
+  /** The hops in one span judged: a REPEAT (distinct × 2 ≤ hops), or a chain of at least `chainFloor` hops settling on none. */
+  const judge = (hs, chainFloor) => {
+    const urls = [];
+    for (const h of hs) if (!urls.includes(h.key)) urls.push(h.key);
+    // no repeat: a chain of distinct addresses (a sign-in hand-off), not a cycle — unless the chain itself is the loop (verify r2:
+    // `chainHops` page hops that settled on none of them, every address spelled anew)
+    const chain = urls.length * 2 > hs.length;
+    if (chain && hs.length < chainFloor) return null;
+    const hosts = [];
+    for (const u of urls) { const h = hostOf(u); if (h && !hosts.includes(h)) hosts.push(h); }
+    // verify r4 #4: READABLE = the pages load between hops (at least half of them, the newest excused — it may not have had
+    // time); PERIOD = one address, regular gaps (max ≤ 2 × median, min ≥ median / 2) at least LOOP_PERIOD_MIN_MS apart
+    const loaded = hs.filter((h) => h.loaded).length;
+    const readable = hs.length >= 2 && loaded >= Math.ceil((hs.length - 1) / 2);
+    let period = 0;
+    if (urls.length === 1 && hs.length >= 4) { const gaps = hs.slice(1).map((h, i) => h.at - hs[i].at).sort((a, b) => a - b); const med = gaps[Math.floor(gaps.length / 2)]; if (med >= LOOP_PERIOD_MIN_MS && gaps[gaps.length - 1] <= 2 * med && gaps[0] * 2 >= med) period = Math.round(med / 100) * 100; }
+    return { kind: 'navigation_loop', urls: urls.slice(0, shown).map((u) => pageText(u, URL_MAX)), more: Math.max(0, urls.length - shown), hosts: hosts.slice(0, shown), hops: hs.length, sinceMs: Math.max(0, t - hs[0].at), runStart: runStart || hs[0].at, lastAt: hs[hs.length - 1].at, host: hostOf(hs[hs.length - 1].key) || hostOf(hs[0].key), readable, ...(period ? { period } : {}), ...(chain ? { chain: true } : {}) };
+  };
+  const recent = run.filter((h) => t - h.at <= windowMs);
+  const v = recent.length >= minHops ? judge(recent, Math.max(Number(chainHops) || LOOP_CHAIN_HOPS, minHops)) : null;
+  if (v) return v;
+  // verify r3 #3: the longer span — a slow run (every few seconds a hop, settling on none) that never fills the 30 s window
+  const long = run.filter((h) => t - h.at <= (Number(longWindowMs) || LOOP_LONG_WINDOW_MS));
+  const longFloor = Math.max(Number(longChainHops) || LOOP_LONG_CHAIN_HOPS, minHops);
+  return long.length >= longFloor ? judge(long, longFloor) : null;
+}
+/** A host as a command word: [a-z0-9.-] only (an IDN is punycode in a URL), bounded; '' otherwise. */
+function hostWord(h) { const s = str(h).toLowerCase().slice(0, 253); return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(s) ? s : ''; }
+function secondsText(ms) { const s = Math.max(1, Math.round(Number(ms) / 1000) || 0); return `${s} s`; }
+/** THE SENTENCE the verb that ran into a loop (and every page-waiting verb after it, while it stands) prints FIRST. The
+ *  addresses are page content (quoted, frame-inert); the ways out are the three verbs that never wait for the page. */
+function loopText(l) {
+  if (!l) return '';
+  const urls = (Array.isArray(l.urls) ? l.urls : []).map((u) => quoted(pageText(u, URL_MAX)));
+  const more = Number(l.more) > 0 ? ` and ${Number(l.more)} more address${Number(l.more) === 1 ? '' : 'es'}` : '';
+  const listed = urls.length <= 2 ? urls.join(' and ') : `${urls.slice(0, -1).join(', ')} and ${urls[urls.length - 1]}`;
+  const cycle = l.chain ? `${l.hops} loads moving through ${listed}${more}, settling on none` : urls.length === 1 && !more ? `${l.hops} loads of ${urls[0]}` : `${l.hops} loads cycling between ${listed}${more}`;
+  // verify r4 #4: a SELF-REFRESHING page (one address, a regular period) is readable between reloads — said so, with the
+  // reading verbs that answer and `stop` to end the refresh before acting; no stale-login story for it
+  if (Number(l.period) > 0) return `The page reloads itself every ${secondsText(l.period)} — ${cycle} in ${secondsText(l.sinceMs)} (a self-refreshing page: a <meta refresh> or a timer, not a stale login). It can be read between reloads — \`snapshot\`, \`get\`, \`is\`, \`console\` and \`errors\` answer, with this note beside the result; a command that waits for it to settle (\`click\`, \`fill\`, \`wait\` …) would only time out. To act on it, stop the refresh first: \`vibespace-browser stop\` (it stays where it stopped); \`vibespace-browser tab close\` closes it. Tell the user in one sentence; never restart the browser or open another one to get out of it.`;
+  const reads = l.readable ? ' The page loads between hops, so `snapshot` / `get` read it (whichever page is up at that moment).' : '';
+  // the stale login may sit on ANY site of the cycle (a sign-in host and its app's): `site-reset` is named for each
+  const hs = [...new Set([...(Array.isArray(l.hosts) ? l.hosts : []), l.host].map(hostWord).filter(Boolean))].slice(0, LOOP_MAX_URLS);
+  const resets = hs.length ? hs.map((h) => `\`vibespace-browser site-reset ${h}\``).join(hs.length === 2 ? ' and ' : ', ') : '`vibespace-browser site-reset <host>`';
+  return `The page keeps navigating by itself and will not settle — ${cycle} in ${secondsText(l.sinceMs)} (a navigation loop); a command that waits for the page would only time out.${reads} The site's stored login may be stale — ${resets}. Stop the page: \`vibespace-browser stop\`; close it: \`vibespace-browser tab close\`. Tell the user in one sentence; never restart the browser or open another one to get out of it.`;
+}
+/** The machine-readable block beside the sentence (`--json`, the routes' answers, the fact). */
+function loopBlock(l) {
+  if (!l) return null;
+  return { kind: 'navigation_loop', urls: (Array.isArray(l.urls) ? l.urls : []).slice(0, LOOP_MAX_URLS).map((u) => pageText(u, URL_MAX)), more: Math.max(0, Number(l.more) || 0), hosts: (Array.isArray(l.hosts) ? l.hosts : []).map(hostWord).filter(Boolean).slice(0, LOOP_MAX_URLS), hops: Number(l.hops) || 0, sinceMs: Number(l.sinceMs) || 0, host: hostWord(l.host) || null, readable: !!l.readable, ...(Number(l.period) > 0 ? { period: Number(l.period) } : {}), ...(l.chain ? { chain: true } : {}), ...(l.targetId ? { targetId: str(l.targetId).slice(0, 64) } : {}) }; // verify r4 #4: readable / period ride every carrier
+}
+/** Does this verb still run on a looping tab (the way out), or is it answered at once with the loop? */
+function loopPasses(verb) { return LOOP_PASS_VERBS.includes(str(verb)); }
+/** verify r4 #4: a READING verb (runs on a loop whose pages load between hops; answered with the loop on one whose pages never load). */
+function loopReads(verb) { return LOOP_READ_VERBS.includes(str(verb)); }
+/** A page-acting command (its navigation soon after is the agent's). */
+function loopActing(verb) { return LOOP_ACTING_VERBS.includes(str(verb)); }
+/** `stop`'s answer. `was` = the loop that stood on the tab (null = none), `url` / `title` = the tab's own (page text);
+ *  `nothing` = no tab of the agent's was loading; `busyMs` = how long its session still finishes a cut verb. */
+function stopText({ url = '', title = '', was = null, nothing = false, busyMs = 0 } = {}) {
+  const busy = Number(busyMs) > 0 ? ` Note: ${busyText(busyMs)}.` : '';
+  if (nothing) return `nothing of yours was loading — no page was stopped.${busy}`;
+  const where = `${title ? quoted(pageText(title, 120)) + ' — ' : ''}${pageText(url, URL_MAX) || 'the tab'}`;
+  return (was ? `stopped the page (it was in a navigation loop) — ${where}. It stays where it stopped; \`snapshot\` reads it, \`tab close\` closes it, \`site-reset ${hostWord(was.host) || '<host>'}\` clears the stale login before you open it again.` : `stopped loading — ${where}.`) + busy;
+}
+/** `tab close`'s answer while a loop stood (closed through VibeSpace's own socket, never the browser CLI's queue). */
+function closeText({ url = '', title = '', was = null, opened = false, busyMs = 0 } = {}) {
+  const where = `${title ? quoted(pageText(title, 120)) + ' — ' : ''}${pageText(url, URL_MAX) || 'the tab'}`;
+  return `closed the looping tab — ${where}.${opened ? ' It was the browser\'s only tab, so a blank one was opened in its place.' : ''} Your next page command needs a tab of yours: \`vibespace-browser tab new <url>\` (after \`site-reset ${hostWord(was && was.host) || '<host>'}\` if the stale login should go first).${Number(busyMs) > 0 ? ` Note: ${busyText(busyMs)}.` : ''}`;
+}
+/** verify r1: a loop stands on a tab of a SHARED browser this conversation's own tab cannot be told from (no live view of it
+ *  open, no tab pinned, no mediated lease) — said WITHOUT the page's addresses (another conversation's content, maybe the
+ *  user's own) and with the way out; before, the verb's only word was the browser CLI's own timeout line. */
+function loopSharedText() { return 'a tab of this shared browser is in a navigation loop (a page navigating by itself, never settling) and VibeSpace cannot tell whether it is yours — that tab is named to no conversation (it appeared while two commands ran at once, or before VibeSpace watched this browser) and no live view of this conversation shows it. If your page keeps bouncing: `vibespace-browser tab close` closes your current tab, `vibespace-browser tab new <url>` opens afresh, `vibespace-browser site-reset --host <host>` clears a stale stored login; a command that waits for a looping page only times out'; }
+/** A screenshot a looping tab could not give within LOOP_SCREENSHOT_MS (measured: the never-painting shape has no frame). */
+function noPictureText(l) {
+  return `no picture: the page never drew a frame within ${LOOP_SCREENSHOT_MS / 1000} s — it navigates away before it paints (${l && l.urls && l.urls.length ? 'a navigation loop between ' + l.urls.map((u) => quoted(u)).join(' and ') : 'a navigation loop'}). Stop it first (\`vibespace-browser stop\`) and read it with \`snapshot\`, or close the tab.`;
+}
+
+// ── lane site-reset: CLEARING ONE SITE'S STORED LOGIN ──
+// No public-suffix list (browser-switch.js's rule: a second source of truth that expires). What is cleared is judged by
+// the COOKIE JAR ITSELF: every cookie the site at <host> RECEIVES — its host-only cookies and the domain cookies of <host>
+// and of each parent domain (`.bank.example`); Chrome never stores a cookie on a public suffix, so the parent rule stops at
+// the registrable domain by construction. A sibling host's own cookies (login.x vs app.x) are not touched — it has its own
+// `site-reset`. Storage (local storage, IndexedDB, Cache Storage, service workers, file systems) is cleared for the
+// ORIGINS of <host> (https and http). The HTTP cache is shared by every site in Chrome and holds no login — it is left.
+/** Does cookie `c` ({domain, …}) reach `host`? `.x.com` reaches x.com and a.x.com; `x.com` (host-only) reaches x.com only. */
+function cookieReaches(c, host) {
+  const h = str(host).toLowerCase(); const d = str(c && c.domain).toLowerCase();
+  if (!h || !d) return false;
+  if (d.startsWith('.')) { const base = d.slice(1); return !!base && (h === base || h.endsWith('.' + base)); }
+  return h === d;
+}
+/** The origins whose storage is cleared for `host`. */
+function originsOf(host) { const h = hostWord(host) || (/^[0-9.]+$|^[0-9a-f:]+$/i.test(str(host)) ? str(host) : ''); return h ? [`https://${h}`, `http://${h}`] : []; }
+/** A heuristic SITE of a host, used ONLY to judge the agent's `site-reset <host>` against its current tab (at worst it asks
+ *  for `--host`): the last two labels, three when the second-to-last is a common second level under a country code
+ *  (co.uk, com.au, co.jp …); an IP address is its own site. Never what is cleared. */
+const SECOND_LEVELS = new Set(['co', 'com', 'net', 'org', 'gov', 'edu', 'ac', 'ne', 'or', 'go', 'gv', 'mil', 'nic', 'ltd', 'plc', 'sch']);
+function siteOfHost(host) {
+  const h = str(host).toLowerCase().replace(/\.$/, '');
+  if (!h) return '';
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h) || h.includes(':')) return h;
+  const p = h.split('.');
+  if (p.length <= 2) return h;
+  const n = p.length >= 3 && p[p.length - 1].length === 2 && SECOND_LEVELS.has(p[p.length - 2]) ? 3 : 2;
+  return p.slice(-n).join('.');
+}
+/**
+ * THE VERB's scope / refusal table (the agent's `site-reset <host> [--host]`), first match wins:
+ *   · a remote session (its browser runs on another machine — no watch here)     ⇒ `remote_session`
+ *   · no browser VibeSpace watches (the shared rung, an unmanaged one)            ⇒ `not_watched`
+ *   · no valid host                                                              ⇒ `bad-host`
+ *   · not the current tab's site and no explicit `--host`                        ⇒ `host_not_current` (the way out named)
+ *   · a named profile another conversation (or the user's own browsing tab) uses ⇒ `shared_profile` → a PROPOSAL
+ *   · else (the conversation's own browser)                                       ⇒ clear now
+ * `current` = the current tab's URL ('' unknown). → `{ok, code?, error?, remedy?, host, site, proposal?}`.
+ */
+function siteResetVerdict({ host = '', explicit = false, current = '', remote = false, watched = true, shared = false } = {}) {
+  const h = hostWord(host);
+  if (remote) return { ok: false, code: 'remote_session', error: 'this conversation runs on another machine — its browser is that machine\'s, and VibeSpace cannot clear a site in it from here', remedy: 'tell the user which site\'s login looks stale; they can clear it in that browser' };
+  if (!watched) return { ok: false, code: 'not_watched', error: 'this browser is not one VibeSpace manages here (the machine\'s shared browser, or one it does not watch) — nothing was cleared', remedy: 'tell the user which site\'s login looks stale' };
+  if (!h) return { ok: false, code: 'bad-host', error: `\`site-reset\` takes a host name (like login.example.com)${str(host) ? ' — not ' + quoted(pageText(host, 80)) : ''}`, remedy: 'vibespace-browser site-reset <host>' };
+  // `current` = the URL(s) of the conversation's own open tabs (the looping one first) — the host must be one of their sites
+  const curs = (Array.isArray(current) ? current : [current]).map(hostOf).filter(Boolean);
+  if (!explicit && !curs.some((c) => siteOfHost(c) === siteOfHost(h))) return { ok: false, code: 'host_not_current', error: curs.length ? `${h} is not the site of your current tab (${curs[0]}) — nothing was cleared` : `VibeSpace could not read your current tab's address, so ${h} cannot be checked against it — nothing was cleared`, remedy: `open the site first, or name it on purpose: vibespace-browser site-reset --host ${h}`, host: h };
+  if (shared) return { ok: true, proposal: true, host: h, site: siteOfHost(h) };
+  return { ok: true, proposal: false, host: h, site: siteOfHost(h) };
+}
+/** Is this browser the conversation's OWN for `site-reset` (cleared now) or shared (a proposal the user approves)? Its own
+ *  ephemeral browser (rung D, a helper's) — or a named profile ONLY this conversation may use, no other conversation holds
+ *  and the user does not browse in. `use` = browser-profiles' whoMayUse(profile); `me` = the conversation's parent key. */
+function siteResetOwn({ ephemeral = false, use = null, me = '', others = 0, human = false } = {}) {
+  if (ephemeral) return true;
+  if (!use || use.mode !== 'only' || !Array.isArray(use.who) || use.who.length !== 1) return false;
+  const w = use.who[0] || {};
+  return w.kind === 'session' && str(w.id || w.key) === str(me) && !(Number(others) > 0) && !human;
+}
+/** What the verb says it cleared (counts, and which cookie domains). `r` = the clearing's own report. */
+function siteResetText(r) {
+  const x = r || {};
+  const doms = Array.isArray(x.cookieDomains) ? x.cookieDomains.filter(Boolean) : [];
+  const ck = Number(x.cookies) || 0;
+  const cookies = ck ? `${ck} cookie${ck === 1 ? '' : 's'} (${doms.map((d) => `${d.domain}: ${d.count}`).join(', ')})` : 'no cookies (none reached it)';
+  const origins = (Array.isArray(x.origins) ? x.origins : []).join(', ');
+  const tabs = Number(x.sessionTabs) || 0;
+  const left = Number(x.remaining) || 0;
+  return `cleared ${x.host}'s stored login: ${cookies}; local storage, IndexedDB, Cache Storage and service workers of ${origins || 'its origins'}${tabs ? `; session storage in ${tabs} open tab${tabs === 1 ? '' : 's'}` : ''}. The HTTP cache is shared by every site and was left (it holds no login).${left ? ` ${left} cookie${left === 1 ? '' : 's'} reaching it could not be deleted.` : ''}${Array.isArray(x.storageFailed) && x.storageFailed.length ? ` The storage of ${x.storageFailed.join(', ')} could not be cleared.` : ''} Open the site again — you will likely need to sign in (that is the user's).`;
+}
+
+// ── the UI's words for the loop (t = the client's i18n) ──
+function loopWords(l, tIn) {
+  if (!l) return null;
+  const t = typeof tIn === 'function' ? (s, p) => tIn(s, p) : fill;
+  const urls = (Array.isArray(l.urls) ? l.urls : []).map((u) => pageText(u, URL_MAX));
+  const period = Number(l.period) > 0 ? Math.max(1, Math.round(Number(l.period) / 1000)) : 0; // verify r4 #4: a self-refreshing page is said as such
+  return {
+    chip: period ? t('page refreshes itself every {s} s', { s: period }) : t('page keeps reloading'),
+    line: period ? t('The page refreshes itself every {s} s ({url}) — it can be read between reloads', { s: period, url: urls[0] || '' }) : urls.length === 1 && !(Number(l.more) > 0) ? t('The page keeps reloading {url} — its stored login may be stale', { url: urls[0] }) : t('The page keeps bouncing between {urls} — its stored login may be stale', { urls: urls.join(' ↔ ') + (Number(l.more) > 0 ? ` (+${Number(l.more)})` : '') }),
+    title: t('Navigation loop'),
+    hint: t('The agent is told, with the ways out: stop the page, close the tab, or clear the site\'s stored login'),
+    urls,
+    hops: t('{n} loads in {s} s', { n: Number(l.hops) || 0, s: Math.max(1, Math.round((Number(l.sinceMs) || 0) / 1000)) }),
+  };
 }
 
 module.exports = {
   DIALOG_OPEN_CODE, DIALOG_TYPES, MESSAGE_MAX, BEFOREUNLOAD_TEXT, STUCK_AFTER, COMMAND_TIMEOUT_MS, ENABLE_TIMEOUT_MS, NO_DIALOG_TEXT,
-  FRAME_TAGS, FRAME_TAG_RE, FRAME_OPEN_RE, pageText, quoted, // verify r1 A2: page text is frame-inert, delimited, bounded
+  FRAME_TAGS, FRAME_TAG_RE, FRAME_OPEN_RE, inertOpeners, pageText, quoted, // verify r1 A2: page text is frame-inert, delimited, bounded
   AUTO_ACCEPT_MAX, AUTO_ACCEPT_WINDOW_MS, ALERT_NOTES_MAX, alertsNote, // verify r1 A3: an alert storm is bounded and told as one line
   LOADING_GRACE_MS, loadingText, // verify r1 A7: a timeout during a navigation the site has not answered is the network's (+ r2 #5: said, with the time so far)
   clean, dialogFromCdp, autoAnswerVerdict, messageOf, openForText, answerMeaning, dialogText, dialogBlock, answeredNote, answerDoneText,
   renderDialogNotice, daemonDialogLine, stripDaemonDialogLines, timedOutText, navigateOutcome, stuckVerdict, stuckAgentText,
   stuckFact, stuckDigest, dialogWords, answeredWords, stuckWords,
+  // lane site-reset: the navigation loop (a page that will not settle is a named fact) + clearing one site's stored login
+  LOOP_WINDOW_MS, LOOP_MIN_HOPS, LOOP_MAX_URLS, LOOP_CHAIN_HOPS, LOOP_LONG_WINDOW_MS, LOOP_LONG_CHAIN_HOPS, LOOP_QUIET_MS, LOOP_ATTRIB_MS, LOOP_KEEP, LOOP_PASS_VERBS, LOOP_ACTING_VERBS, LOOP_READ_VERBS, LOOP_PERIOD_MIN_MS, LOOP_SCREENSHOT_MS, CLI_ACTION_TIMEOUT_MS, busyText,
+  loopUrlKey, hostOf, hostWord, navigationLoopVerdict, loopText, loopBlock, loopPasses, loopActing, loopReads, stopText, closeText, noPictureText, loopSharedText, loopWords,
+  cookieReaches, originsOf, siteOfHost, siteResetVerdict, siteResetOwn, siteResetText,
 };

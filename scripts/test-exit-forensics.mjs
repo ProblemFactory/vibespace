@@ -990,8 +990,8 @@ console.log('— §5 wiring: the line, the event and the tomb are built from exi
   ok(/__vsEvent\?\.\('session-exited', .*\$\{facts\.eventSuffix\}`\)/.test(s), 'the session-exited event carries ${facts.eventSuffix}');
   ok(/wrapperFate: facts\.wrapperFate/.test(s) && /socketFate: facts\.socketFate/.test(s), 'the tomb carries the same facts');
   for (const [f, src] of KINDS.map((k) => [path.basename(REL[k]), SRC[k]])) {
-    ok(!/require\((?!['"](fs|path|os|child_process)['"])[^)]*\)/.test(src.replace(/require\(path\.join\(__dirname, '\.\.\/\.\.\/node_modules\/node-pty'\)\)/, '')),
-      `${f}: node builtins only (a STATIC file shipped to remote hosts; node-pty is its one pre-existing dependency)`);
+    ok(!/require\((?!['"](fs|path|os|child_process|crypto)['"])[^)]*\)/.test(src.replace(/require\(path\.join\(__dirname, '\.\.\/\.\.\/node_modules\/node-pty'\)\)/, '')),
+      `${f}: node builtins only (a STATIC file shipped to remote hosts; node-pty is its one pre-existing dependency; crypto since lane codex-0159: the reset-credit consume's idempotencyKey)`);
     const body = src.slice(src.indexOf('function onWrapperSignal'), src.indexOf('for (const sig of Object.keys(WRAPPER_SIGNO))'));
     ok(body.length > 0 && !/await|setTimeout|setImmediate|\.write\(|\.end\(|Promise/.test(body.replace(/fs\.writeFileSync|clearTimeout/g, '')),
       `${f}: the signal handler is synchronous (no await/timer/stream write)`);

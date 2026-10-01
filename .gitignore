@@ -2,6 +2,9 @@ node_modules/
 node_modules
 public/bundle.js
 public/novnc.js
+# a scratch root's run record (scripts/scratch-run.mjs, B-1d08): ci.mjs stamps its isolated worktree AFTER
+# `git worktree add`, so the record sits in a checkout of this repository and must never read as a change
+.vs-run.json
 # ── ALL of data/ is runtime state — NEVER track — EXCEPT data/bin/ (the static
 # tools the server ships). Belt-and-suspenders over the explicit list below so a
 # NEW data file (e.g. data/telemetry/) can never be committed by accident. ──

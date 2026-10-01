@@ -156,6 +156,21 @@ export function inboxModel(app) {
       showToast(w, { type: 'error' });
       return false;
     }
+    if (rec && rec.action && rec.action.type === 'browser-proposal') {
+      // lane browser-propose: THE person's answer to an agent's proposal, where it appears — the same route the chat card
+      // presses, with the digest of what this row showed (`shown`); the proposal's card patches itself, the runner answers
+      // this item. A refusal is said by name, never swallowed.
+      const id = encodeURIComponent(rec.action.id);
+      const r = answer === 'reject'
+        ? await fetchJson(`/api/browser/proposals/${id}/reject`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+        : await fetchJson(`/api/browser/proposals/${id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shown: rec.action.shown }) });
+      if (r && r.ok) { showToast(answer === 'reject' ? t('Rejected — the agent is told the next time it opens that site') : t('Approved — the card in the conversation shows how it goes')); return true; }
+      const code = r && r.code;
+      const w = code === 'proposal_changed' ? t('That card changed after it was shown — nothing ran; read it again') : code === 'proposal_state' ? t('That proposal was already decided')
+        : code === 'proposal_unavailable' ? t('Nothing can be approved here — the card says why') : (r && r.error) || t('server unreachable');
+      showToast(w, { type: 'error' });
+      return false;
+    }
     if (!rec || !rec.action || rec.action.type !== 'reset-credit') return false;
     openResetCreditDialog(app, { accountKey: rec.action.accountKey, sessionId: rec.action.sessionId || null, todoId: rec.id });
     return true;

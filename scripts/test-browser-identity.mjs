@@ -247,18 +247,41 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     U.W2 = await withUpstream(WORK2);
     r = await j('POST', '/api/browser/attach', { sessionId: SID.P, profile: 'work' });
     ok(r.status === 200 && WORK2.id !== WORK1.id, `a NEW "work" (${WORK2.id}) is attached — the old one was ${WORK1.id}`);
+    const tFollow0 = Date.now();
     const followed = await until(() => ev(`const L = live(${S(SID.P)}); const st = L._browserLive.state(); return st.target && st.target.profileId === ${S(WORK2.id)} && st.connected && !st.error;`), 15000);
+    const followMs = Date.now() - tFollow0; // how long THIS machine takes to resolve a retarget (the Reconnect deadline scales on it)
     const f2 = await ev(`const L = live(${S(SID.P)}); const st = L._browserLive.state(); const se = L._browserLive.el().querySelector('.browser-live-status'); return { target: st.target, error: st.error, followed: st.followed, statusShown: se.style.display !== 'none', statusText: se.textContent, statusError: se.classList.contains('error') };`);
     ok(followed && U.W2.connections >= 1 && !(f2.statusShown && f2.statusError), 'the open live view RETARGETED to the new work by itself — its stream connected, no red overlay (the study: "stays on the old browser, red not-attached overlay")', S(f2));
     ok(await until(() => ev(`return live(${S(SID.P)})._browserLive.state().frames >= 1 && live(${S(SID.P)})._browserLive.state().target.profileId === ${S(WORK2.id)};`), 6000), '…and draws the new browser\'s frames');
     // a view forced onto the OLD id shows the refusal; a REAL click on Reconnect re-resolves it
     await ev(`live(${S(SID.P)})._browserLive.switchTo(${S(WORK1.id)}); return true;`);
     const stale = await until(() => ev(`const st = live(${S(SID.P)})._browserLive.state(); return !!(st.error && st.error.code === 'not_attached');`), 8000);
-    const re = await ev(`const b = live(${S(SID.P)})._browserLive.el().querySelector('.browser-live-reconnect'); return b && b.style.display !== 'none' ? rect(b) : null;`);
-    ok(stale && !!re, 'a view on the OLD work id is refused not_attached and offers Reconnect (the study\'s overlay)');
+    // lane-mirror-198 (the Actions mirror of 2.369.198, red once): the click was aimed at the button's rect READ THE
+    // MOMENT the refusal appeared — but Reconnect's appearance schedules the bar's fold (bar-fold.js: MutationObserver →
+    // rAF → layoutNow), and under the runner's DejaVu widths eight lower-priority items fold, moving the button 126 px
+    // left ONE FRAME LATER (measured here: x 774.8 → 648.8). Two orders: (A) read + click land before that frame — hit;
+    // (B) the frame lands between them (a loaded runner's CDP round trips) — the click hits the bar, "Reconnect does
+    // nothing". The judge now reads the button's rect only once it has SETTLED (the same rect across two animation
+    // frames and elementFromPoint at its centre IS the button — the fold's own evidence), and waits on the re-resolve's
+    // own evidence (`followed` incremented + the new target) with a deadline scaled to this machine's measured follow.
+    const settledRect = async (sel, ms) => {
+      let last = null, out = null;
+      await until(async () => {
+        const x = await ev(`const b = live(${S(SID.P)})._browserLive.el().querySelector(${S(sel)}); if (!b || b.style.display === 'none') return null; await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); const r = rect(b); const h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return { r, hit: !!(h && (h === b || b.contains(h))) };`);
+        if (!x || !x.hit) { last = null; return false; }
+        const k = JSON.stringify(x.r);
+        if (last === k) { out = x.r; return true; }
+        last = k; return false;
+      }, ms, 40);
+      return out;
+    };
+    const re = await settledRect('.browser-live-reconnect', 8000);
+    ok(stale && !!re, 'a view on the OLD work id is refused not_attached and offers Reconnect (the study\'s overlay) — its button settled after the bar\'s fold', S({ stale, re }));
+    const reBefore = await ev(`const st = live(${S(SID.P)})._browserLive.state(); return { followed: st.followed, profileRef: st.profileRef };`);
     if (re) await click(centre(re));
-    const back = await until(() => ev(`const st = live(${S(SID.P)})._browserLive.state(); return st.target && st.target.profileId === ${S(WORK2.id)} && st.connected && !st.error;`), 10000);
-    ok(back, 'a REAL click on Reconnect RE-RESOLVED the target — the view is on the new work (the study: "Reconnect does nothing")', S(await ev(`const st = live(${S(SID.P)})._browserLive.state(); return { target: st.target, error: st.error };`)));
+    const reDeadline = Math.max(10000, 5 * followMs);
+    const back = await until(() => ev(`const st = live(${S(SID.P)})._browserLive.state(); return st.followed > ${reBefore.followed} && st.target && st.target.profileId === ${S(WORK2.id)} && st.connected && !st.error;`), reDeadline);
+    ok(back, `a REAL click on Reconnect RE-RESOLVED the target — the view is on the new work (the study: "Reconnect does nothing"; deadline ${reDeadline} ms = 5× the ${followMs} ms follow)`, S({ state: await ev(`const L = live(${S(SID.P)}); const st = L._browserLive.state(); const b = L._browserLive.el().querySelector('.browser-live-reconnect'); return { target: st.target, error: st.error, followed: st.followed, profileRef: st.profileRef, rectNow: b ? rect(b) : null, folded: st.folded }; `), rectClicked: re, before: reBefore }));
 
     // ── 3 · delete a pinned profile from the panel ──
     console.log('— 3 · Set aside a PINNED profile: the dialog asks, one click unpins, no dangling id anywhere');

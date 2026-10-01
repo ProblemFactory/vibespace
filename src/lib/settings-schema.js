@@ -333,6 +333,13 @@ const SETTINGS_SCHEMA = {
     description: t('Default mode for new sessions and single-click resume from sidebar'),
     category: t('Session'), liveApply: true,
   },
+  // lane-dead-bridge (2026-09-30): read by the server's dead-bridge watch (src/server/bridge-watch.js via serverSetting)
+  'session.deadBridgeMinutes': {
+    type: 'number', default: 3, min: 0, max: 60, step: 1,
+    label: t('Reconnect a silent conversation after (minutes)'),
+    description: t('When a conversation has sent VibeSpace nothing for this long while its agent is still working (its output file or its API requests say so), VibeSpace reconnects to its output by itself and shows what it missed as caught up — nothing is re-run. 0 turns this off.'),
+    category: t('Session'), liveApply: true,
+  },
   'accounts.shipSubscriptionToRemote': {
     type: 'boolean', default: false,
     label: t('Ship subscription logins to remote hosts'),
@@ -497,6 +504,15 @@ const SETTINGS_SCHEMA = {
     description: t('What an agent\'s browser does when it asks for a window but nobody is logged in to this machine\'s desktop. A hidden window (default, when Xvfb is installed) is a normal browser on an invisible screen — sign-in pages see an ordinary browser; headless has no screen at all and some sign-in pages refuse it. Either way the pages work and you can watch and take over in the live view. Applies to the next browser that starts.'),
     category: t('Agent browser'), liveApply: true,
   },
+  // lane browser-propose (step 1, 2026-09-30): the ONE launch flag that stops the agent's Chromium announcing automation
+  // (`navigator.webdriver` — measured false with it, headed and headless, on agent-browser 0.38.1). Read at every launch
+  // of a chromium browser VibeSpace composes the config for; a user's own AutomationControlled value always wins.
+  'browser.automationFlag': {
+    type: 'boolean', default: true,
+    label: t('Do not announce the agent browser as automated'),
+    description: t('ON (default): the agent\'s browser starts with --disable-blink-features=AutomationControlled, so pages no longer read it as an automated browser (navigator.webdriver is false). It hides that one signal only — a site that still refuses the browser makes the agent propose a switch to CloakBrowser, which you approve. If your own ~/.agent-browser/config.json already names an AutomationControlled value, yours is kept. Applies to the next browser that starts; CloakBrowser is not affected.'),
+    category: t('Agent browser'), liveApply: true,
+  },
   // ── AGENT BROWSER P3 (design-agent-browser-v2 §4.3 / §4.3.1) ──────────
   'browser.takeoverIdleMs': {
     type: 'number', default: 600000, min: 0, max: 86400000,
@@ -574,6 +590,27 @@ const SETTINGS_SCHEMA = {
     type: 'number', default: 1024, min: 64, max: 102400, step: 64,
     label: t('Browser records kept per profile (MB)'),
     description: t('How much each profile\'s browser records may take — the before/after screenshots and the list of actions. Over it, the screenshots of the oldest sessions are removed first; the list of what the agent did is always kept. Records are never removed for being old. Default 1024 MB (1 GB), at least 64 MB.'),
+    category: t('Agent browser'), liveApply: true,
+  },
+  // lane browser-resume (§3.9, the owner's ruling 1, 2026-09-30: "state survives the process"): a conversation's own
+  // browser keeps its logins + its tabs after it closes, until the conversation ends or these bounds (src/browser-kept.js
+  // reads all three — keptLimits; the floors are enforced there too). Never by a short timer; a running browser is never trimmed.
+  'browser.keepConversationBrowser': {
+    type: 'boolean', default: true,
+    label: t('Keep each conversation\'s own browser'),
+    description: t('ON (default): when the agent\'s own browser for a conversation closes — after its turn ends, when it idles out, when you stop it, or when VibeSpace restarts — its logins and its open tabs are kept for that conversation, and its next browser command starts it again with them. They go when the conversation ends, when you press Forget in the Agent browser panel, or when the kept browsers pass the sizes below (the least recently used first). A conversation fenced to allowed domains keeps its tabs only. OFF: each browser starts empty again (for conversations started or resumed from now on).'),
+    category: t('Agent browser'), liveApply: true,
+  },
+  'browser.keptBytesPerConversation': {
+    type: 'number', default: 512, min: 64, max: 102400, step: 64,
+    label: t('Kept browser size per conversation (MB)'),
+    description: t('How much one conversation\'s kept browser may take on disk. Over it, its caches are removed first (the browser rebuilds them); its logins are never removed for this. Default 512 MB, at least 64 MB.'),
+    category: t('Agent browser'), liveApply: true,
+  },
+  'browser.keptBytesTotal': {
+    type: 'number', default: 4096, min: 256, max: 1048576, step: 256,
+    label: t('Kept browsers, total (MB)'),
+    description: t('How much all kept conversation browsers may take together. Over it, whole kept browsers are removed, the one used longest ago first. A browser that is running is never removed. Default 4096 MB (4 GB), at least 256 MB.'),
     category: t('Agent browser'), liveApply: true,
   },
   'browser.autoBindLiveView': {

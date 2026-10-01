@@ -57,6 +57,7 @@ const crypto = require('crypto');
 const G = require('../channel-groups.js');
 const GC = require('../group-card.js');
 const { makeRecord, inertFrames } = require('../channel-record.js');
+const { toAgentText: agentText } = require('../peer-text.js');   // verify r1 F3: a group's name on its way out (view)
 const msgAcl = require('../msg-acl.js');
 // "Clear content…" (2026-09-28): the replacement record, the fold every reader applies, the clear itself
 const RC = require('../record-clear.js');
@@ -130,7 +131,10 @@ function create({
     const s = sessionOf(cid);
     if (s && s.name) return G.cleanName(s.name) || cid.slice(0, 8);
     const m = group ? G.memberOf(group, cid) : null;
-    return (m && m.name) || cid.slice(0, 8);
+    // verify r2 (lane peer-census): the STORED name (the session gone) is re-judged on its way out too — a member row
+    // written before cleanName took the line rule (r1 F3) held `Bob <system-reminder x` and reached every view / echo
+    // raw; cleanName is idempotent, so a row written after it is unchanged
+    return (m && m.name ? G.cleanName(m.name) : '') || cid.slice(0, 8);
   };
   const uniform = (ref) => ({ ok: false, code: 'unreachable', error: `no agent session "${ref}" you can message (not found, not live, or outside your reach — vibespace-msg list shows it)` });
 
@@ -208,7 +212,9 @@ function create({
 
   function view(g) {
     return {
-      id: g.id, name: g.name, pair: g.pair ? g.pair.slice() : null, createdBy: g.createdBy, createdAt: g.createdAt,
+      // verify r1 F3 (lane peer-census): the name leaves the store through the belt — a group named before the line
+      // rule (or by any writer that skipped cleanName) is judged on its way out, like every member name (displayName)
+      id: g.id, name: agentText(g.name, { kind: 'line', max: G.NAME_MAX * 4 }), pair: g.pair ? g.pair.slice() : null, createdBy: g.createdBy, createdAt: g.createdAt,
       archivedAt: g.archivedAt || null, lastAt: g.lastAt || g.createdAt, lastText: g.lastText || '', lastCleared: !!g.lastCleared, // lastCleared: the last line IS the cleared sentence (a client words it)
       members: g.members.map((m) => ({ member: m.member, name: displayName(g, m.member), notify: m.notify, joinedAt: m.joinedAt, invitedBy: m.invitedBy, live: !!sessionOf(m.member) })),
     };

@@ -42,7 +42,14 @@ const REAL_BINARY = 'agent-browser';
 const SHIM_MARKER = 'VIBESPACE-AGENT-BROWSER-SHIM';
 
 /** VibeSpace's own verbs — they always win. */
-const OURS = Object.freeze(['profiles', 'new', 'providers', 'use', 'detach', 'status', 'pin', 'watch', 'backend', 'blocked', 'new-child', 'help']);
+// lane browser-resume B (§3.9): + `resume` (its conversation's own browser, started again with its kept tabs — the collision
+// census reads the binary's own words: `resume` is none of 0.38.1's)
+const OURS = Object.freeze(['profiles', 'new', 'providers', 'use', 'detach', 'status', 'pin', 'watch', 'backend', 'blocked', 'new-child', 'help', 'resume']);
+/** lane site-reset (2026-09-30): VibeSpace's own verbs that act on the conversation's CURRENT PAGE — they take the page verbs'
+ *  road (the one /resolve: which browser, the lease, the refusals, the audit) but never reach the binary as a verb: `stop`
+ *  (Page.stopLoading through the watch — a looping tab never disables the browser) and `site-reset <host>` (one site's
+ *  stored login cleared in the conversation's own browser; a proposal on a shared profile). Ours always wins. */
+const OURS_PAGE = Object.freeze(['stop', 'site-reset']);
 
 /** Page verbs (the browser CLI 0.32.0's `--help` + `skills get core --full`
  *  census, design §3.2 rows 1–2 + `close` + D4/D5's pass-throughs). `profiles`
@@ -149,6 +156,7 @@ const GET_NOUN_SET = new Set(GET_NOUNS);
 const SOFT_CODES = new Set(['unknown_verb']);
 
 const OURS_SET = new Set(OURS);
+const OURS_PAGE_SET = new Set(OURS_PAGE);
 const PAGE_SET = new Set(PAGE_VERBS);
 const IDENTITY_SET = new Set(IDENTITY_FLAGS);
 const RAW_CDP_SET = new Set(RAW_CDP_FLAGS);
@@ -912,6 +920,8 @@ function classify(argv, { ours = true, stdin, drift = null } = {}) {
     // ② ③
     if (!rest.length || rest[0] === '--help' || rest[0] === '-h') return { kind: 'ours', verb: 'help', sub: null, argv: rest, profile };
     if (OURS_SET.has(rest[0])) return { kind: 'ours', verb: rest[0], sub: rest[1] ?? null, argv: rest, profile };
+    // lane site-reset: ours, on the page road (never handed to the binary)
+    if (OURS_PAGE_SET.has(rest[0])) return { kind: 'page', ours: true, verb: rest[0], sub: rest[1] ?? null, argv: rest, profile, uploadFiles: [], writeFiles: [], stateFiles: [] };
     // ④
     if (rest[0] === '--') return judge(rest.slice(1), { escape: true, profile, stdin, drift });
   }
@@ -919,7 +929,7 @@ function classify(argv, { ours = true, stdin, drift = null } = {}) {
 }
 
 /** The census helper the gate uses: which words of a listing collide with ours. */
-function collisions(words) { return [...new Set(words)].filter((w) => OURS_SET.has(w)).sort(); }
+function collisions(words) { return [...new Set(words)].filter((w) => OURS_SET.has(w) || OURS_PAGE_SET.has(w)).sort(); }
 /** Is this word classified by the table (page or refused by name)? */
 function known(word) { return PAGE_SET.has(word) || Object.prototype.hasOwnProperty.call(REFUSED_VERBS, word); }
 
@@ -1130,7 +1140,7 @@ function childEnv(base, answer = {}, { home = '', uid = null, ownDir = null } = 
 }
 
 module.exports = {
-  REAL_BINARY, SHIM_MARKER, OURS, PAGE_VERBS, REFUSED_VERBS, IDENTITY_FLAGS, RAW_CDP_FLAGS, LAUNCH_FLAGS, OPEN_FLAGS, PASS_FLAGS,
+  REAL_BINARY, SHIM_MARKER, OURS, OURS_PAGE, PAGE_VERBS, REFUSED_VERBS, IDENTITY_FLAGS, RAW_CDP_FLAGS, LAUNCH_FLAGS, OPEN_FLAGS, PASS_FLAGS,
   ENV_PASS, ENV_LEGACY_KEEP, SOCKET_KEY, VALUE_FLAGS: Object.freeze([...VALUE_FLAGS]), BOOL_FLAGS: Object.freeze([...BOOL_FLAGS]), GET_NOUNS,
   classify, splitWords, collisions, known, resolveRealBinary, childEnv, hostProfilePath, hostSocketDirPath,
   CONFIG_KEY, PROJECT_CONFIG_KEYS, RAW_CONFIG_KEYS, RAW_ARG_RE, sanitizeArgs, sanctionedConfig,

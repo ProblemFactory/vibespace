@@ -124,11 +124,14 @@
 import { t, tc } from './i18n.js';
 import { claimWords, backendName, dismissOutcomeWords } from './browser-switcher-model.js'; // the rebuilt switch dialog: the claim's words, a backend's name, the Dismiss answer (PURE)
 import { btn as textBtn } from './channel-chrome.js'; // the house text button (mounts-btn): the blocked banner's controls say what they do
-import { escHtml, fetchJson, showToast, showContextMenu, createPopover, showConfirmDialog, COUNTER_ZOOM } from './utils.js';
+import { escHtml, fetchJson, showToast, showContextMenu, createPopover, showConfirmDialog, showInputDialog, COUNTER_ZOOM } from './utils.js';
+import { MODAL_OPEN_EVENT } from './utils.js'; // lane dialog-keys: every app modal says it opened (createModalShell, app._showDialog)
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
 import { ownerDots, livePlacement } from './chain-layout.js'; // P7 (§4.6): the per-SESSION owner colour, never the group's; MULTIVIEW D5: where a new live view goes
-import { stripOrder, stripFold, capChip, shortLabel, stoppableRows, rowStateWords } from './live-strip-layout.js'; // MULTIVIEW §2 A1 / D4: the strip's order, fold and own/cap chip (PURE)
+import { stripOrder, stripFold, capChip, shortLabel, stoppableRows, rowStateWords, tabRowFold } from './live-strip-layout.js'; // MULTIVIEW §2 A1 / D4: the strip's order, fold and own/cap chip (PURE); lane browser-resume C: the tab row's fold
+import { tabRowModel, tabRefusalText } from '../browser-tabs.js'; // lane browser-resume C (§3.9, ruling 3): whose tab it is and what this viewer may do to it (PURE)
+import { avatarOf } from './channel-avatar.js'; // lane browser-resume C (D3): a tab's badge = the host's initial on a stable hue (no network — never a favicon fetch)
 import { UI_ICONS } from './icons.js';
 import { STREAM_PATH, MAX_FPS_DEFAULT, EPHEMERAL_REF, pointerToDevice, deviceToViewport, drawnRect, liveTitle, mouseRecord, wheelRecord, keyRecord, touchRecord, modifiersOf, liveViewPlan, viewTargetRunning, browserListFor, clickCountNext } from '../browser-stream.js';
 import { frameGeometry, toLocal } from '../browser-stream.js'; // lane J: the picture vs the page — two sizes, one rect basis
@@ -144,14 +147,17 @@ import { recordingChipWords } from '../browser-trace.js'; // lane live-input: th
 import { claimKeyboard, releaseKeyboard, keyboardOwner, keyboardOwned, keyboardChanged } from './keyboard-owner.js'; // lane J r2: THE one keyboard owner of this client
 import { onKeyboardChange } from './keyboard-owner.js'; // lane takeover-keyboard verify r2 (H1): another view's claim moving is a transition of this one too
 import { createKeyboardYield, isEditable, sinkBlurVerdict } from './keyboard-yield.js'; // lane takeover-keyboard (userW inc-mum339id-1zsb): YOUR press on a text box outside the view gets the keys; a script's focus never does
+import { dialogFocusTarget } from './keyboard-yield.js'; // lane dialog-keys: where a dialog that took the keys gets them when it focuses nothing itself
 import { createTraceTimeline } from './browser-trace-view.js'; // agent browser P5 (§4.5 / D35): the Actions pane
 import { shortModeBadge } from './live-bar-layout.js'; // lane I: the bar's never-fold badge words (the full sentence is its tooltip)
 import { createBarFold } from './bar-fold.js'; // lane I: the bar folds into ⋯ by priority — never wraps, never overlaps
 import { fitChipState, fitChipWords, pictureState, zoomAt, pinchStep, panStep, zoomClamp, isZoomed, transformCss, FIT_REPORT_MS, ZOOM_DOUBLE_TAP, ZOOM_NONE } from '../browser-fit.js'; // lane S4: the page is the pane's size, the picture clocks, the phone's pinch (PURE)
 import { browserFactWords, liveFollowPlan } from '../browser-fact.js'; // lane S2: THE browser fact — the view's names, and a view FOLLOWS its session's browser
+import { ownResumable, keptLineWords } from '../browser-fact.js'; // lane browser-resume B (§3.9): may the user Resume its own browser, and the stopped line's words
 import { receiptBook, noteInputSent, noteInputReceipt, sweepInputReceipts } from '../browser-stream.js'; // lane S2: every input has a receipt
 import { humanEndChoices, humanRefusalText, humanSyncId, addressVerdict, humanShareLine, LAUNCH_CODES } from '../browser-human.js'; // BROWSE YOURSELF (B-6ae8): the user's own browsing — its end buttons, its refusals, the address row (PURE)
 import { dialogWords, answeredWords, stuckWords } from '../browser-stuck.js'; // lane browser-stuck: a page dialog / an unresponsive page in words (PURE)
+import { createLoopBanner } from './browser-loop-banner.js'; // lane site-reset: the navigation loop, keyed + patched in place
 import { displayFactOf, displayFactText } from './browser-display-words.js'; // lane headless-fallback: a headless browser (no desktop session) says so under the bar
 
 const CONSOLE_CAP = 200;
@@ -193,7 +199,9 @@ export const URL_MIN_PX = 120;
 /*  BROWSE YOURSELF (B-6ae8): the user's own browsing window adds its two ends — Close never folds (0: the one act that
    *  matters on that window, like the toggle), Quit the whole browser folds with the chips (3, a ⋯ row of its own words) —
    *  and the touch Keyboard button (3). */
-export const LIVE_BAR_PRIORITY = Object.freeze({ take: 0, handback: 0, reconnect: 0, close: 0, badge: 1, url: 2, open: 2, fit: 2, copy: 2, bind: 3, viewers: 3, rec: 3, kbd: 3, kbdBtn: 3, quit: 3, backend: 4, backendLabel: 4, tabs: 5, console: 5, trace: 5, echo: 5 });
+/*  lane browser-resume B (§3.9, the owner's ruling 2): "Hand back and continue…" folds with the URL (2) — before the badge
+   *  (which folds last); the toggle's own Hand back stays the never-fold act; folded, it is a ⋯ row with its own words and act. */
+export const LIVE_BAR_PRIORITY = Object.freeze({ take: 0, handback: 0, reconnect: 0, close: 0, badge: 1, continue: 2, url: 2, open: 2, fit: 2, copy: 2, bind: 3, viewers: 3, rec: 3, kbd: 3, kbdBtn: 3, quit: 3, backend: 4, backendLabel: 4, tabs: 5, console: 5, trace: 5, echo: 5 });
 /** lane J r2: how long the bar's "input sent · n" stays bright after an act, and a ripple lives. */
 const ECHO_MS = 1600;
 const RIPPLE_MS = 650;
@@ -204,6 +212,7 @@ const RIPPLE_KEEP = 8;
 /** lane takeover-keyboard: the bar's words while the keys are YIELDED — where they are, and how to get them back
  *  (`kind` = src/lib/keyboard-yield.js yieldKindOf: the text box the user pressed). */
 function yieldChipText(kind) {
+  if (kind === 'dialog') return t('Keyboard is in the dialog — it goes back when you answer it'); // lane dialog-keys: a dialog the user opened holds the keys
   if (kind === 'none') return t('Keyboard is not in a text box — click one to type there, or the picture to use the page'); // verify r3 (r2's held): yielded, and nothing that takes keys holds the focus
   if (kind === 'chat') return t('Keyboard is in the chat box — click the picture to keep using the page');
   if (kind === 'terminal') return t('Keyboard is in the terminal — click the picture to keep using the page');
@@ -347,7 +356,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     // lane browser-stuck: the page dialog on show (the bridge's record), the prompt text typed so far, an answer in flight, a Restart in flight
     dialog: null, dialogText: null, dialogAnswering: false, restarting: false,
     // lane J r2: input feedback + the keyboard — acts sent this takeover, the last ripples, the user's mapped pointer, the echo timer
-    sent: 0, ripples: [], youPt: null, echoTimer: null, reclaims: 0, composing: false, claimed: false, caretMoves: 0, strayKeys: 0, cues: 0, dialogCues: 0, frameReclaims: 0, lastFrameCueAt: 0, homeless: 0,
+    sent: 0, ripples: [], youPt: null, echoTimer: null, reclaims: 0, composing: false, claimed: false, caretMoves: 0, strayKeys: 0, cues: 0, dialogCues: 0, dialogTakes: 0, dialogReturns: 0, frameReclaims: 0, lastFrameCueAt: 0, homeless: 0,
     // lane S4: the bridge's last `fit` record, the report last sent, the picture clocks, the pinch transform + its touches
     fit: null, fitSent: null, fitTimer: null, lastFrameAt: 0, navAt: 0, openAt: 0, pictureTimer: null, refreshSent: false, picture: 'ok', pictureStale: false,
     zoom: { ...ZOOM_NONE }, touches: new Map(), pinch: null, pan: null, lastTap: null, lastPinchHintAt: 0,
@@ -356,6 +365,11 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     // lane live-input: the browser's OS (hello), the keys whose keydown went to the page (a keyup is forwarded only for
     // those — an IME commit's Enter / Space keyup never reaches the page alone), the last copy gesture, the copied text
     remotePlatform: null, pressed: new Map(), copyAt: 0, copyTimer: null, copied: null, copying: false, place: placeTags(), click: null, heldButton: 0, // copyAt: the user's own copy chord — the ONE moment a delivered copy may be written by itself (verify: a click is no copy gesture)
+    // lane browser-resume B: the Resume offered in place of Reconnect, one in flight, this view resumed it (the hand-back is
+    // offered), the note dialog open (the keys stay out of the page), the last hand-back from here
+    resumeOffer: false, resuming: false, resumedHere: false, noteOpen: false, handedBack: false,
+    // lane browser-resume C: the bridge's `tab-owners` (targetId → agent|you|other|orphan), the tab row's model + fold, the acts in flight
+    tabOwners: {}, tabMediated: false, tabAdoptable: false, tabRow: null, tabFolded: [], tabRid: 0, tabActs: new Map(), tabError: null, quitAsked: null,
   };
   const row = () => sessionRow(app, sessionId);
   /** lane S2: THE browser fact of this view's session (active-sessions' `browserFact`, carried onto the merged row). */
@@ -371,12 +385,24 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
   const stripMoreBtn = document.createElement('button'); stripMoreBtn.className = 'browser-live-strip-more'; stripMoreBtn.style.display = 'none';
   const capBtn = document.createElement('button'); capBtn.className = 'browser-live-strip-cap';
   strip.append(stripTabs, stripMoreBtn, capBtn);
+  // lane browser-resume C (§3.9, the owner's ruling 3): THE TAB ROW — one keyed chip per tab of the SHOWN browser (whose it
+  // is, and only the controls the PURE verdict allows: the agent's tabs while you drive it, your own always, never another
+  // conversation's), a ▾+N fold, and the row's end "Close all…" = the browser's Stop / Quit, confirmed by name
+  const tabRow = document.createElement('div'); tabRow.className = 'browser-live-tabrow'; tabRow.style.display = 'none';
+  const tabRowList = document.createElement('div'); tabRowList.className = 'browser-live-tabrow-list';
+  const tabRowMore = document.createElement('button'); tabRowMore.className = 'browser-live-tabrow-more'; tabRowMore.style.display = 'none';
+  const tabRowQuit = document.createElement('button'); tabRowQuit.className = 'file-tool-btn browser-live-tabrow-quit'; tabRowQuit.style.display = 'none';
+  tabRowQuit.textContent = t('Close all…'); tabRowQuit.title = t('Close all tabs (quit this browser)…'); tabRowQuit.setAttribute('aria-label', tabRowQuit.title);
+  tabRow.append(tabRowList, tabRowMore, tabRowQuit);
   const bar = document.createElement('div'); bar.className = 'browser-live-bar';
   const modeBadge = document.createElement('span'); modeBadge.className = 'browser-live-mode';
   // lane I: ONE mode toggle — Take over while the agent drives, Hand back while a human does (the retired Watch button
   // was a second Hand back: its click sent `handback` too, and a no-op in Watch)
   const takeBtn = document.createElement('button'); takeBtn.className = 'file-tool-btn browser-live-mode-btn'; takeBtn.textContent = t('Take over'); takeBtn.title = t('Take over the controls — the agent pauses until you hand back');
   const handBtn = document.createElement('button'); handBtn.className = 'file-tool-btn browser-live-handback'; handBtn.textContent = t('Hand back'); handBtn.title = t('Hand the controls back to the agent — it is told the current URL'); handBtn.style.display = 'none';
+  // lane browser-resume B (§3.9, the owner's ruling 2): the BETWEEN-TURNS hand-back — your note + the tabs ride the agent's
+  // NEXT turn (nothing is sent now); shown while you drive this browser or after you resumed it
+  const contBtn = document.createElement('button'); contBtn.className = 'file-tool-btn browser-live-continue'; contBtn.textContent = t('Hand back and continue…'); contBtn.title = t('Hand the browser back for the agent’s next turn, with a note — nothing is sent now'); contBtn.style.display = 'none';
   const urlEl = document.createElement('span'); urlEl.className = 'browser-live-url'; urlEl.textContent = '';
   // the web view's globe (UI_ICONS.globe — the web view's glyph). 2.369.134 spelled the UI set's `web` here, a key only
   // FILE_ICONS has: innerHTML = undefined printed the word "undefined" in every live view (test-architecture §58 census)
@@ -420,7 +446,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
   const closeBtn = document.createElement('button'); closeBtn.className = 'file-tool-btn browser-live-close'; closeBtn.style.display = 'none';
   const quitBtn = document.createElement('button'); quitBtn.className = 'file-tool-btn browser-live-quit'; quitBtn.style.display = 'none';
   const kbdBtn = document.createElement('button'); kbdBtn.className = 'file-tool-btn browser-live-kbd-btn'; kbdBtn.style.display = 'none'; kbdBtn.innerHTML = KBD_SVG; { const s0 = document.createElement('span'); s0.textContent = t('Keyboard'); kbdBtn.appendChild(s0); } kbdBtn.title = t('Show the keyboard to type into the page');
-  bar.append(modeBadge, takeBtn, handBtn, closeBtn, quitBtn, kbdChip, kbdBtn, echoEl, bindBtn, urlEl, openBtn, viewersEl, recEl, fitChip, copyChip, backendBtn, backendLabelEl, tabsBtn, consBtn, traceBtn, reBtn, moreBtn);
+  bar.append(modeBadge, takeBtn, handBtn, contBtn, closeBtn, quitBtn, kbdChip, kbdBtn, echoEl, bindBtn, urlEl, openBtn, viewersEl, recEl, fitChip, copyChip, backendBtn, backendLabelEl, tabsBtn, consBtn, traceBtn, reBtn, moreBtn);
   // BROWSE YOURSELF: THE ADDRESS ROW (his windows only) — Back · Forward · Reload · the address (web addresses only); the
   // daemon's own verbs under HIS session (the screencast has no omnibox: without this a fresh profile is a blank page)
   const addrRow = document.createElement('div'); addrRow.className = 'browser-live-address'; addrRow.style.display = 'none';
@@ -469,7 +495,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
   // lane takeover-keyboard (userW inc-mum339id-1zsb): THE YIELD — the user's OWN press on a text box outside this view
   // gives it the keys while the takeover continues; a press inside the view takes them back (src/lib/keyboard-yield.js
   // decides and remembers; the document capture listeners below act)
-  const ky = createKeyboardYield({ root, sink: kbd, drives: () => drivesKeyboard(), mine: () => !!st.claimed && !st.closed, ownChrome: namesThisView }); // verify r2 (H1): `mine` — a press while the takeover is ours but the view does not drive is judged too
+  const ky = createKeyboardYield({ root, sink: kbd, drives: () => drivesKeyboard(), mine: () => !!st.claimed && !st.closed, ownChrome: namesThisView, picture: canvas }); // verify r2 (H1): `mine` — a press while the takeover is ours but the view does not drive is judged too; lane dialog-keys: `picture` — a press there went to the page and opens no dialog of the app's
   /** verify r1 (K3): what NAMES this view outside its root — its tab in a tab strip, its taskbar button, and its own title
    *  bar while the window stands alone (in a group the title bar is the group's: the chat's tab lives there too). Measured
    *  on cf24cf01: yielded to the composer, a press on the view's own tab (split) or title bar (standalone) left the caret
@@ -494,7 +520,15 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
   // `dialog` record, from the dialog watch): the card says what the page asks, Accept / Dismiss answer it as the USER
   // (the agent's next verb is told); an UNRESPONSIVE page (the browser fact's `stuck`) offers the human Restart
   const dialogBar = document.createElement('div'); dialogBar.className = 'browser-live-dialog'; dialogBar.style.display = 'none'; dialogBar.setAttribute('role', 'alertdialog');
-  root.append(strip, bar, addrRow, shareLine, endLine, blockedBar, displayNote, confirms, dialogBar, body);
+  // lane site-reset (2026-09-30): A NAVIGATION LOOP (the browser fact's `stuck.state === 'loop'`) — the cycle's addresses,
+  // KEYED children patched in place (a banner rebuilt at every fact push would blink under the pointer)
+  const loopBanner = createLoopBanner(document);
+  const loopBar = loopBanner.el;
+  // lane site-reset step 3: ONE line when the user's Approve cleared a site's stored login in THIS profile (every holder's
+  // view — the user's own browsing tab included — says it once; a click hides it)
+  const resetNote = document.createElement('div'); resetNote.className = 'browser-live-display-note browser-live-reset-note'; resetNote.style.display = 'none'; resetNote.setAttribute('role', 'status');
+  resetNote.title = t('Click to hide'); resetNote.onclick = () => { resetNote.style.display = 'none'; };
+  root.append(strip, tabRow, bar, addrRow, shareLine, endLine, blockedBar, displayNote, resetNote, confirms, dialogBar, loopBar, body);
   if (H) { root.classList.add('human'); addrRow.style.display = ''; urlEl.style.display = 'none'; openBtn.style.display = 'none'; bindBtn.style.display = 'none'; titleBind.style.display = 'none'; closeBtn.style.display = ''; quitBtn.style.display = ''; }
   winInfo.content.appendChild(root);
 
@@ -538,7 +572,71 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     statusEl.style.display = hide ? 'none' : '';
     statusEl.classList.toggle('error', !!error);
     reBtn.style.display = reconnect ? '' : 'none';
+    renderResume(); renderCont(); // lane browser-resume B: every status move re-asks the Resume / the hand-back
   };
+  // ── lane browser-resume B (§3.9, the owner's ruling 2): RESUME in place of Reconnect, and "Hand back and continue…" ──
+  /** Is the shown browser idle here (stopped with its last frame / hollow / not started)? */
+  const idleShown = () => !st.connected && (st.stopped === true || st.hollow || !!(st.error && (st.error.browserState === 'not-started' || st.error.code === 'browser_stopped' || st.error.code === 'browser_released')));
+  /** THE Resume offer: the conversation's OWN browser when THE fact says something is kept and it does not run (PURE
+   *  ownResumable — never drawn otherwise: no greyed control), or an attachment's stopped browser (the server judges
+   *  "Who can use it" — a refusal is said by name). Never on a helper's view, never in the user's own browsing window. */
+  function resumeOfferNow() {
+    if (H || !sessionId || st.closed || !idleShown()) return false;
+    const ref = curRef();
+    const f = st.fact || factNow();
+    // a view that never got a hello (the record was retired — a detach, a reconcile: "not started yet") shows the
+    // conversation's default: its OWN browser when THE fact says that is what the conversation uses
+    if (ref === EPHEMERAL_REF || (!ref && !st.target && f && f.using && f.using.kind === 'own')) return ownResumable(f);
+    return !!(st.target && st.target.kind === 'attachment' && st.stopped === true);
+  }
+  function renderResume() {
+    const offer = resumeOfferNow();
+    st.resumeOffer = offer;
+    if (offer) {
+      if (reBtn.dataset.mode !== 'resume') { reBtn.dataset.mode = 'resume'; reBtn.innerHTML = UI_ICONS.play; const sp = document.createElement('span'); sp.textContent = t('Resume'); reBtn.appendChild(sp); }
+      reBtn.title = t('Reopen this browser with its last tabs'); reBtn.setAttribute('aria-label', reBtn.title);
+      reBtn.style.display = st.resuming ? 'none' : '';
+      const words = st.resuming ? t('Resuming the browser…') : (!(st.target && st.target.kind === 'attachment') ? keptLineWords(st.fact || factNow(), t) : t('Stopped — Resume starts it again and reopens its tab'));
+      if (words && statusEl.textContent !== words) statusEl.textContent = words;
+      statusEl.style.display = ''; statusEl.classList.remove('error');
+    } else if (reBtn.dataset.mode === 'resume') { reBtn.dataset.mode = ''; reBtn.textContent = H && H.ended ? t('Browse again') : t('Reconnect'); reBtn.removeAttribute('aria-label'); reBtn.title = ''; }
+  }
+  /** The words of a Resume refusal (its code, in the device's words; the server's own sentence for the rest). */
+  function resumeWhy(r) {
+    const c = r && r.code;
+    if (c === 'not_kept') return t('nothing is kept for this browser');
+    if (c === 'child_not_kept') return t('a helper’s browser is not kept');
+    if (c === 'resume_adopted') return t('it became the profile “{label}” — attach that profile instead', { label: String((r && r.label) || '') });
+    if (c === 'no_live_session') return t('the conversation is not running — resume it first');
+    return String((r && r.error) || t('server unreachable'));
+  }
+  async function doResume() {
+    if (st.resuming || st.closed) return;
+    st.resuming = true; renderResume();
+    const r = await fetchJson(`/api/browser/session/${encodeURIComponent(sessionId)}/resume`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: curRef() || EPHEMERAL_REF }) });
+    st.resuming = false;
+    if (st.closed) return;
+    if (!r || r.error) { renderResume(); showToast(t('Could not resume the browser: {why}', { why: resumeWhy(r) }), { type: 'error', duration: 7000 }); return; }
+    st.resumedHere = !r.already; st.handedBack = false;
+    const n = Number(r.restored) || 0;
+    showToast(r.already ? t('The browser is running — reconnecting') : n ? t('Resumed — {n} tab(s) reopened', { n }) : t('Resumed — the browser runs again'), { duration: 4000 });
+    if (Array.isArray(r.skipped) && r.skipped.length) showToast(t('{n} tab(s) not reopened: {why}', { n: r.skipped.length, why: r.skipped.map((x) => String(x.why || '')).filter(Boolean).slice(0, 3).join('; ') }), { type: 'warn', duration: 8000 });
+    st.error = null; st.stopped = false; st.stoppedHow = null; st.hollow = false; st.reconnects = 0;
+    renderMode(); connect(); refreshSet();
+  }
+  /** "Hand back and continue…" is offered on the conversation's own browser or an attachment it holds, over an open
+   *  stream, while THIS view drives it or after the user resumed it (and not handed back since) — never greyed. */
+  function renderCont() {
+    if (H || !sessionId) { contBtn.style.display = 'none'; return; }
+    const ref = curRef();
+    const kind = st.target && st.target.kind;
+    const f = st.fact || factNow();
+    const kept = f && f.own && f.own.kept;
+    const resumed = st.resumedHere || !!(ref === EPHEMERAL_REF && kept && kept.restoreBy === 'user' && !kept.handedBack && !st.handedBack);
+    const show = (ref === EPHEMERAL_REF || kind === 'attachment') && st.connected && !st.stopped && !st.hollow && ((st.mode === 'takeover' && st.mine) || resumed);
+    const want = show ? '' : 'none';
+    if (contBtn.style.display !== want) contBtn.style.display = want;
+  }
   const renderMode = () => {
     const taken = st.mode === 'takeover';
     // lane I: the SHORT words on the bar (a never-fold item), the full sentence in the tooltip; lane H (naive study 2
@@ -582,16 +680,18 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     // BROWSE YOURSELF: his first claim on a blank page puts the caret in the ADDRESS field (nothing to click yet); the address
     // being typed in is never robbed of focus by a later mode record. lane takeover-keyboard: a fresh claim clears a yield;
     // while the user's keys are YIELDED to a text box he pressed, a re-render never pulls the focus back (the .197 integration: both)
-    if (taken && st.mine) {
+    if (taken && st.mine && !st.noteOpen) { // lane browser-resume B: the hand-back's note dialog holds the keys out of the page
       const first = !st.claimed;
-      if (first) { st.claimed = true; st.sent = 0; st.pressed.clear(); ky.reset('claim'); claimKeyboard(claimRec()); }
+      if (first) { st.claimed = true; st.sent = 0; st.pressed.clear(); ky.reset('claim'); claimKeyboard(claimRec()); watchDialogs(); }
       if (H && first && (!st.url || st.url === 'about:blank')) { try { addrInput.focus({ preventScroll: true }); } catch { /* detached */ } }
-      else if (!ky.yielded && !(H && document.activeElement === addrInput)) focusSink();
+      else if (!ky.yielded && !ky.dialogHolds && !(H && document.activeElement === addrInput)) focusSink(); // lane dialog-keys: …nor while a dialog the user opened holds the keys
     }
-    else if (st.claimed) { st.claimed = false; st.pressed.clear(); ky.reset('release'); releaseKeyboard(winInfo.id); if (document.activeElement === kbd) kbd.blur(); kbd.value = ''; st.youPt = null; hideCopied(); }
+    else if (st.claimed) { st.claimed = false; st.pressed.clear(); ky.reset('release'); releaseKeyboard(winInfo.id); watchDialogs(); if (document.activeElement === kbd) kbd.blur(); kbd.value = ''; st.youPt = null; hideCopied(); }
     renderKbd();
     renderCursor();
     keyboardChanged(); // the composers' "you are typing to the agent" line re-reads (a handback while yielded ends it)
+    renderResume(); renderCont(); // lane browser-resume B
+    renderTabRow(); // lane browser-resume C: taking over / handing back changes which controls the tab row draws
   };
   /** lane J r2: the live facts the PURE ownership reads (re-read every time). */
   function kbFacts() {
@@ -600,7 +700,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
   }
   /** lane J r2: does THIS view own the keyboard now? PURE ownership over the live facts, re-asked every time.
    *  lane takeover-keyboard: a view whose keys the user gave to a text box he pressed (`yielded`) owns none. */
-  function ownsKeyboard() { return keyboardOwnership({ ...kbFacts(), yielded: ky.yielded }).owns; }
+  function ownsKeyboard() { return keyboardOwnership({ ...kbFacts(), yielded: ky.yielded, dialog: ky.dialogHolds }).owns; } // lane dialog-keys: …nor one whose keys a dialog the user opened holds
   /** lane takeover-keyboard: does this view DRIVE a takeover of its own (claimed, the yield not counted)? */
   function drivesKeyboard() { return !!st.claimed && keyboardOwnership(kbFacts()).owns; }
   /** …and did it give the keys to a text box the user pressed (the takeover continues)? verify r2 (H1): also while the view
@@ -625,7 +725,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
       // — the yield ends and the caret comes to the sink, explicitly (measured: back on the view's desktop the keys went
       // nowhere while the chip said "Keyboard is in the chat box")
       if (st.claimed && ky.settle({ drives: drivesKeyboard(), active: document.activeElement }) === 'end') { claimKeyboard(claimRec()); st.homeless++; if (!st.copying) { st.caretMoves++; focusSink(); } }
-      const r = ky.sync({ owns: !!(st.claimed && iOwn()), yielded: !!(st.claimed && yieldedKeyboard()), active: document.activeElement });
+      const r = ky.sync({ owns: !!(st.claimed && iOwn()), yielded: !!(st.claimed && yieldedKeyboard()), dialog: !!(st.claimed && ky.dialogHolds), active: document.activeElement });
       if (!r.changed) return;
       if (r.moveCaret && !st.copying) { st.caretMoves++; focusSink(); }
       if (r.release) releaseHeld(); // verify r2 (H3): the keys left the page — what is still held there is let go while this view can still send it
@@ -638,6 +738,8 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
   const hiderMo = typeof MutationObserver === 'function' ? new MutationObserver((recs) => {
     for (const r of recs) { const n = r.target; if (n === root || (n && typeof n.contains === 'function' && n.contains(root))) { syncKeyboard(); return; } }
   }) : null;
+  // lane dialog-keys: the dialogs' watch (declared with the hiders' — renderMode arms and disarms it; see watchDialogs below)
+  const dialogMo = typeof MutationObserver === 'function' ? new MutationObserver(() => settleDialogs()) : null;
   function watchHiders(on) {
     if (!hiderMo || on === hidersWatched) return;
     hidersWatched = on;
@@ -657,12 +759,16 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     const sentOnly = st.receipts.via === 'stream';
     // lane takeover-keyboard: YIELDED — the user pressed a text box outside the view; the chip (patched in place, never a
     // toast) says where the keys are and how to get them back, and outranks the rest of the bar in the fold
-    const yielded = !own && st.claimed && yieldedKeyboard();
+    // lane dialog-keys: a dialog the user's own act opened HOLDS the keys — the chip says where they are and that they come
+    // back (keyed, written on change only), at the yield's fold rank
+    const dialogHeld = !own && !!st.claimed && ky.dialogHolds && !st.closed;
+    const yielded = !own && st.claimed && (yieldedKeyboard() || dialogHeld);
     kbdChip.style.display = (own || yielded) && st.connected ? '' : 'none';
     kbdChip.classList.toggle('failing', !yielded && !!failing);
     kbdChip.classList.toggle('yielded', yielded);
     const text = yielded ? yieldChipText(ky.whereNow(document.activeElement)) : failing ? t('Input is not reaching the browser') : sentOnly ? t('Typing is sent to the browser') : t('Typing goes to the browser');
-    const title = yielded ? t('You pressed a text box outside the browser, so your keys go there. You still drive the browser — the agent waits. Click the picture to type into the page again; Hand back ends the takeover.')
+    const title = dialogHeld ? t('A dialog you opened has the keyboard: Enter, Escape and typing go to it. When it closes your keys go back where they were — you still drive the browser, the agent waits.')
+      : yielded ? t('You pressed a text box outside the browser, so your keys go there. You still drive the browser — the agent waits. Click the picture to type into the page again; Hand back ends the takeover.')
       : failing ? receiptWhy(failing) : (sentOnly ? t('This browser streams directly: VibeSpace sees each key written to its stream, not the page’s answer.') + ' ' : '') + t('While you drive, every key goes to the page. Press a chat box or a terminal to type there instead — the browser stays yours; click the picture to come back (Ctrl+Backslash and Ctrl+Alt+Left/Right stay the app’s).');
     // verify r4: written only on CHANGE — a yielded view re-reads on every focus move (focusout + focusin), and a same-text
     // write is still a mutation record and an accessibility event (measured on 41312584: 300 focus moves over a list while
@@ -821,8 +927,11 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     send({ type: 'confirm', id, decision, shown: confirmationDigest(c) });
   }
   // ── lane browser-stuck: the dialog card + the unresponsive banner ──
+  /** lane site-reset: the loop banner — the same elements, their words rewritten only where they changed. */
+  const renderLoop = (loop) => loopBanner.render(loop, t);
   const renderDialog = () => {
     const d = st.dialog;
+    renderLoop(!d && st.fact && st.fact.stuck && st.fact.stuck.state === 'loop' ? st.fact.stuck.loop : null);
     const stuck = !d && st.fact && st.fact.stuck && st.fact.stuck.state === 'unresponsive' ? st.fact.stuck : null;
     dialogBar.textContent = '';
     dialogBar.style.display = d || stuck ? '' : 'none';
@@ -900,6 +1009,148 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
       tabsPane.appendChild(d);
     }
   };
+  // ── lane browser-resume C (§3.9, the owner's ruling 3): THE TAB ROW ──
+  /** Is the browser on show stoppable from this view (the row's "Close all…")? His window: his Quit; a conversation's view:
+   *  the strip's own rule (stoppableRows — never a shared profile's, never one he browses himself: those say why elsewhere). */
+  function quitRowOf() {
+    if (H) return H.ended || st.stopped ? null : { human: true };
+    const x = stoppableRows(st.rows && st.rows.length ? st.rows : computeRows(), { browsing: ((app._browserProfiles && app._browserProfiles.leases) || []).filter((l) => l && l.human).map((l) => l.profileId) }).find((r) => r.ref === curRef());
+    return x && !x.shared && !x.yours ? x : null;
+  }
+  let tabRaf = 0;
+  function renderTabRow() {
+    if (st.closed) return;
+    const driving = st.mode === 'takeover' && st.mine;
+    const m = tabRowModel({ tabs: st.tabs, owners: st.tabOwners, viewer: { human: !!H }, driving, mediated: st.tabMediated, adoptable: st.tabAdoptable }, t);
+    st.tabRow = m;
+    const show = m.rows.length > 0 && !st.stopped && !st.hollow && !st.sessionEnded;
+    const want = show ? '' : 'none';
+    if (tabRow.style.display !== want) tabRow.style.display = want;
+    // the take-over toggle names what taking over adds here (a hint on a WORKING control, never on a greyed one)
+    if (!H) { const base = t('Take over the controls — the agent pauses until you hand back'); const tip = m.anyAgent && !driving && !st.tabMediated ? base + '\n' + t('Take over to switch or close the agent’s tabs') : base; if (takeBtn.title !== tip) takeBtn.title = tip; }
+    if (!show) return;
+    // KEYED: one chip per target id, patched in place (a broadcast never rebuilds the chip under the pointer)
+    const have = new Map([...tabRowList.children].map((el) => [el.dataset.target, el]));
+    const keep = new Set();
+    let prev = null;
+    for (const r of m.rows) {
+      keep.add(r.targetId);
+      let el = have.get(r.targetId);
+      if (!el) {
+        el = document.createElement('div'); el.className = 'browser-live-tabchip'; el.dataset.target = r.targetId;
+        const av = document.createElement('span'); av.className = 'chan-av browser-live-tabchip-av'; av.setAttribute('aria-hidden', 'true');
+        const ti = document.createElement('span'); ti.className = 'browser-live-tabchip-title';
+        const mk = document.createElement('span'); mk.className = 'browser-live-tabchip-mark';
+        el.append(av, ti, mk);
+        el.addEventListener('click', (e) => { if (e.target.closest('.browser-live-tabchip-close')) return; const row = (st.tabRow && st.tabRow.rows || []).find((x) => x.targetId === el.dataset.target); if (row && row.canSwitch) tabAct('switch', row); });
+        el.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && el.getAttribute('role') === 'button') { e.preventDefault(); el.click(); } });
+      }
+      const av = el.querySelector('.browser-live-tabchip-av');
+      const a = avatarOf({ name: r.host || r.title, key: r.host || r.url });
+      if (av.textContent !== a.text) av.textContent = a.text;
+      if (av.dataset.hue !== String(a.hue)) av.dataset.hue = String(a.hue);
+      const ti = el.querySelector('.browser-live-tabchip-title'); if (ti.textContent !== r.title) ti.textContent = r.title;
+      const mk = el.querySelector('.browser-live-tabchip-mark'); if (mk.textContent !== r.mark) mk.textContent = r.mark; mk.title = r.markTip;
+      el.classList.toggle('active', r.active);
+      el.dataset.owner = r.owner;
+      const tip = (r.canSwitch ? r.switchTip + '\n' : '') + r.tip + '\n' + r.markTip;
+      if (el.title !== tip) el.title = tip;
+      if (r.canSwitch) { el.setAttribute('role', 'button'); el.tabIndex = 0; } else { el.removeAttribute('role'); el.removeAttribute('tabindex'); }
+      el.classList.toggle('switchable', r.canSwitch);
+      let x = el.querySelector('.browser-live-tabchip-close');
+      if (r.canClose && !x) {
+        x = document.createElement('button'); x.className = 'browser-live-tabchip-close bar-icon-btn'; x.innerHTML = UI_ICONS.close;
+        x.addEventListener('click', (e) => { e.stopPropagation(); const row = (st.tabRow && st.tabRow.rows || []).find((y) => y.targetId === el.dataset.target); if (row && row.canClose) tabAct('close', row); });
+        el.appendChild(x);
+      } else if (!r.canClose && x) { x.remove(); x = null; }
+      if (x) { x.title = r.closeTip; x.setAttribute('aria-label', r.closeTip + ' — ' + r.title); x.disabled = st.tabActs.has(r.targetId); }
+      // order: move a node only when it is out of place
+      const want0 = prev ? prev.nextSibling : tabRowList.firstChild;
+      if (want0 !== el) tabRowList.insertBefore(el, want0);
+      prev = el;
+    }
+    for (const [id, el] of have) if (!keep.has(id)) el.remove();
+    const q = quitRowOf();
+    const qw = q ? '' : 'none'; if (tabRowQuit.style.display !== qw) tabRowQuit.style.display = qw;
+    refoldTabs();
+  }
+  function refoldTabs() {
+    if (tabRaf) return;
+    tabRaf = requestAnimationFrame(() => {
+      tabRaf = 0;
+      if (st.closed || tabRow.style.display === 'none' || !st.tabRow) return;
+      const chips = [...tabRowList.children];
+      for (const c of chips) c.style.display = '';
+      const widths = {}; for (const c of chips) widths[c.dataset.target] = c.offsetWidth + 3;
+      const f = tabRowFold({ rows: st.tabRow.rows, widths, avail: tabRow.clientWidth - 12, endPx: tabRowQuit.style.display === 'none' ? 0 : tabRowQuit.offsetWidth + 6, morePx: 44 });
+      st.tabFolded = f.folded;
+      for (const c of chips) c.style.display = f.folded.includes(c.dataset.target) ? 'none' : '';
+      tabRowMore.style.display = f.folded.length ? '' : 'none';
+      tabRowMore.textContent = '▾+' + f.folded.length;
+      tabRowMore.title = t('{n} more tab(s) of this browser', { n: f.folded.length });
+    });
+  }
+  if (typeof ResizeObserver === 'function') { const ro2 = new ResizeObserver(() => refoldTabs()); ro2.observe(tabRow); winInfo._listenerCtl?.signal?.addEventListener?.('abort', () => ro2.disconnect()); }
+  tabRowMore.onclick = (e) => {
+    e.stopPropagation();
+    const r = tabRowMore.getBoundingClientRect();
+    const rows = (st.tabRow && st.tabRow.rows || []).filter((x) => st.tabFolded.includes(x.targetId));
+    const items = [];
+    for (const x of rows) {
+      items.push({ label: `${x.title} · ${x.mark}`, ...(x.canSwitch ? { action: () => tabAct('switch', x) } : { disabled: true }) });
+      if (x.canClose) items.push({ label: t('Close tab') + ' — ' + x.title, action: () => tabAct('close', x) });
+    }
+    showContextMenu(r.left, r.bottom + 2, items);
+  };
+  /** One switch / ✕ on the row: sent to the bridge (the keeper re-judges every fact), answered by ONE `tab-ack`; a refusal
+   *  or a failure is a toast in the device's words (never silence). */
+  function tabAct(act, row) {
+    if (!st.ws || st.ws.readyState !== 1) { showToast(act === 'close' ? t('Could not close the tab: {why}', { why: t('the live view is not connected') }) : t('Could not switch tabs: {why}', { why: t('the live view is not connected') }), { type: 'error' }); return; }
+    if (st.tabActs.has(row.targetId)) return;
+    const rid = ++st.tabRid;
+    st.tabActs.set(row.targetId, { rid, act, title: row.title, owner: row.owner });
+    send({ type: 'tab-act', act, targetId: row.targetId, rid });
+    renderTabRow();
+  }
+  function onTabAck(m) {
+    let key = null, pend = null;
+    for (const [k, v] of st.tabActs) if (v.rid === m.rid) { key = k; pend = v; break; }
+    if (key) st.tabActs.delete(key);
+    const act = (pend && pend.act) || m.act;
+    if (!m.ok) {
+      const why = ['not_your_tab', 'tabs_unreadable', 'no_such_tab', 'take_over_first', 'last_tab', 'mediated_tabs'].includes(m.code) ? tabRefusalText(m.code, {}, t) : String(m.error || m.code || t('server unreachable'));
+      st.tabError = { act, code: m.code || null, why, at: Date.now() };
+      showToast(act === 'close' ? t('Could not close the tab: {why}', { why }) : t('Could not switch tabs: {why}', { why }), { type: 'error' });
+    } else if (act === 'close' && pend && pend.owner === 'agent') showToast(t('Closed “{title}” — the agent is told when you hand back', { title: pend.title }), { duration: 3500 });
+    renderTabRow();
+  }
+  /** "Close all…" = the browser's own Stop (a conversation's view) / Quit (his window) — ONE confirm naming the browser. */
+  async function closeAllTabs() {
+    const q = quitRowOf();
+    if (!q) return;
+    if (q.human) {
+      const names = othersOnIt();
+      const e = humanEndChoices({ conversations: names.length, names }, t);
+      const label = humanLabel() || String(profileId || '');
+      const title = t('Close all tabs of “{name}”?', { name: label }), message = e.confirm ? e.confirm.message : t('This quits “{name}” — every tab of it closes. Its logins are kept.', { name: label });
+      st.quitAsked = { title, message, at: Date.now() };
+      const yes = await showConfirmDialog({ title, message, confirmText: t('Quit the browser'), danger: true });
+      if (!yes) return;
+      const r = await fetchJson(`/api/browser/browse/${encodeURIComponent(H.key)}/quit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      if (!r || r.error) { showToast(t('Could not quit the browser: {why}', { why: String((r && r.error) || t('server unreachable')) }), { type: 'error' }); return; }
+      showToast(t('Stopped {label}', { label }), { duration: 4000 });
+      return;
+    }
+    const name = rowName((st.rows || []).find((x) => x.ref === q.ref) || q);
+    const title = t('Close all tabs of “{name}”?', { name }), message = t('This quits “{name}” — every tab of it closes. Its logins are kept; the agent’s next browser command starts it again.', { name });
+    st.quitAsked = { title, message, at: Date.now() };
+    const yes = await showConfirmDialog({ title, message, confirmText: t('Quit the browser'), danger: true });
+    if (!yes) return;
+    const r = await fetchJson(`/api/browser/session/${encodeURIComponent(sessionId)}/stop`, { method: 'POST', body: JSON.stringify({ ref: q.ref }), headers: { 'Content-Type': 'application/json' } });
+    if (!r || r.error) { showToast(r && r.code === 'browsing_yourself' ? humanRefusalText('browsing_yourself', { label: name, act: 'stop' }, t) : t('Could not quit the browser: {why}', { why: String((r && r.error) || t('server unreachable')) }), { type: 'error' }); return; }
+    showToast(t('Stopped — the next command starts it again'), { duration: 3000 });
+  }
+  tabRowQuit.onclick = () => { closeAllTabs(); };
   const renderConsole = () => {
     consBtn.textContent = `${t('Console')} (${st.console.length})`;
     consPane.innerHTML = '';
@@ -1032,6 +1283,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     if (H) { strip.style.display = 'none'; return; } // BROWSE YOURSELF: his window shows his tab — no strip of a conversation's browsers
     st.rows = computeRows();
     renderDisplay(); // lane headless-fallback: the shown browser may have changed (a strip switch, a new row)
+    renderTabRow(); // lane browser-resume C: the row's "Close all…" reads the same rows (stoppable, driven, shared)
     const chip = chipNow();
     // ≥2 browsers ⇒ the strip (one browser keeps the single-browser look) — and a conversation AT its cap
     // shows the strip too, so the red own/cap chip the agent's refusal points at is there to click
@@ -1233,10 +1485,10 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
 
   // ── lane I: THE FOLD — every item keeps its words on one line; what the bar has no room for goes into ⋯ by
   // LIVE_BAR_PRIORITY (PURE barLayout; the ruler + observers + rAF live in bar-fold.js, bound to this window's signal) ──
-  const barItems = { badge: modeBadge, take: takeBtn, handback: handBtn, close: closeBtn, quit: quitBtn, kbd: kbdChip, kbdBtn, echo: echoEl, copy: copyChip, bind: bindBtn, url: urlEl, open: openBtn, viewers: viewersEl, rec: recEl, fit: fitChip, backend: backendBtn, backendLabel: backendLabelEl, tabs: tabsBtn, console: consBtn, trace: traceBtn, reconnect: reBtn };
+  const barItems = { badge: modeBadge, take: takeBtn, handback: handBtn, continue: contBtn, close: closeBtn, quit: quitBtn, kbd: kbdChip, kbdBtn, echo: echoEl, copy: copyChip, bind: bindBtn, url: urlEl, open: openBtn, viewers: viewersEl, rec: recEl, fit: fitChip, backend: backendBtn, backendLabel: backendLabelEl, tabs: tabsBtn, console: consBtn, trace: traceBtn, reconnect: reBtn };
   const fold = createBarFold(bar, {
     more: moreBtn,
-    items: () => Object.entries(barItems).map(([key, el]) => ({ key, el, priority: key === 'kbd' && st.claimed && ky.yielded ? LIVE_BAR_PRIORITY.badge : LIVE_BAR_PRIORITY[key], flexMin: key === 'url' ? URL_MIN_PX : undefined })), // lane takeover-keyboard: where the keys went outranks the rest while yielded
+    items: () => Object.entries(barItems).map(([key, el]) => ({ key, el, priority: key === 'kbd' && st.claimed && (ky.yielded || ky.dialogHolds) ? LIVE_BAR_PRIORITY.badge : LIVE_BAR_PRIORITY[key], flexMin: key === 'url' ? URL_MIN_PX : undefined })), // lane takeover-keyboard: where the keys went outranks the rest while yielded
     signal: winInfo._listenerCtl?.signal,
     onLayout: (v) => { renderMore(); floorPane(v); },
   });
@@ -1258,6 +1510,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
       if (key === 'badge') rows.push({ label: modeBadge.title || modeBadge.textContent, title: modeBadge.title, disabled: true }); // who drives, in full (an info row — the toggle is the act)
       else if (key === 'kbd') rows.push({ label: kbdChip.textContent, title: kbdChip.title, disabled: true }); // lane J r2's chip, folded: an info row
       else if (key === 'kbdBtn') rows.push({ label: t('Keyboard'), title: kbdBtn.title, action: () => kbdBtn.onclick() }); // BROWSE YOURSELF: the touch keyboard, folded
+      else if (key === 'continue') rows.push({ label: contBtn.textContent, title: contBtn.title, action: () => contBtn.onclick() }); // lane browser-resume B: the between-turns hand-back, folded
       else if (key === 'quit') rows.push({ label: quitBtn.textContent, title: quitBtn.title, action: () => quitBtn.onclick() }); // BROWSE YOURSELF: "Quit the whole browser", folded on a narrow bar (Close never folds)
       else if (key === 'bind') rows.push({ label: bindLabel(), title: bindTitle(), action: () => toggleBind() });
       else if (key === 'url') rows.push({ label: st.url ? (st.url.length > 90 ? st.url.slice(0, 89) + '…' : st.url) : t('Open this URL in a web view'), title: t('Open this URL in a web view'), disabled: !st.url, action: () => openBtn.onclick() });
@@ -1327,6 +1580,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     if (prev && prev.digest === next.digest) return;
     st.fact = next;
     renderTitle(); renderStrip(); renderDialog(); // lane browser-stuck: the fact's `stuck` = the unresponsive banner
+    renderResume(); renderCont(); // lane browser-resume B: what is kept moved (a Forget, a start) — the Resume follows
     applyFollow(liveFollowPlan({ view: viewFacts(), prev, next }));
   }
   const onGlobal = (msg) => {
@@ -1334,6 +1588,11 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     if (msg.type === 'active-sessions' && Array.isArray(msg.sessions)) { const r = msg.sessions.find((x) => x && x.id === sessionId); if (r && r.browserFact) onFact(r.browserFact); return; }
     // 2026-09-27: a session of this conversation's browser started or ended — the Actions pane's Sessions list re-reads
     if (msg.type === 'browser-sessions-updated') { const r = row(); const bk = timeline.browserKey() || (r && r.browserKey) || null; if (bk && msg.browserKey && (msg.browserKey === bk || String(msg.browserKey).startsWith(bk + '.'))) timeline.onSessions(); return; }
+    if (msg.type === 'browser-site-reset' && msg.profileId && st.target && st.target.profileId === msg.profileId) { // lane site-reset
+      resetNote.textContent = t('{host}\'s stored login was cleared in this profile ({n} cookies) — you approved it; its pages need a new sign-in', { host: String(msg.host || ''), n: Number(msg.cookies) || 0 });
+      resetNote.style.display = '';
+      return;
+    }
     if (msg.type === 'browser-profiles-updated') {
       refreshSet(); renderBackend(); renderRec(); renderOwner();
       if (H) { renderEnds(); renderTitle(); } // BROWSE YOURSELF: who else uses his browser (the line under his two ends) and its name
@@ -1392,12 +1651,16 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
         st.mode = m.mode || 'watch'; st.holder = m.holder || null; st.mine = !!m.mine; st.modeSince = Number(m.since) || 0; st.modeCause = m.cause || null;
         st.wakes = Number.isInteger(m.wakes) ? m.wakes : null; // r6 A-F9: what a Hand back from this view wakes
         renderMode(); renderFit(); // builder r2: the fit chip's words name who drives (a shared browser held while YOU drive)
+        // lane browser-resume C: a takeover / handback moves who drives this browser — the strip's rows (and the tab row's
+        // "Close all…", which is never offered on a browser somebody drives) re-read it now (an own browser's input change is
+        // no digest write: without this they waited for an unrelated broadcast)
+        if (was !== st.mode && !H) refreshSet();
         // the owner's ruling (2026-09-27): the takeover INTERRUPTS the agent and the handback asks it to re-run — both said here
         const rerunList = Array.isArray(m.rerun) ? m.rerun.map(String).filter(Boolean).slice(0, 8).join(', ') : '';
         st.lastRerun = rerunList;
         if (was === 'takeover' && st.mode === 'watch' && wasMine) {
           if (m.cause === 'idle') showToast(rerunList ? t('Your takeover lapsed (no input) — the agent is driving again and was told to re-run: {verbs}', { verbs: rerunList }) : t('Your takeover lapsed (no input) — the agent is driving again'), { duration: 5000 });
-          else if (m.cause !== 'explicit') showToast(t('Control returned to the agent'), { duration: 3500 });
+          else if (m.cause !== 'explicit' && m.cause !== 'continue') showToast(t('Control returned to the agent'), { duration: 3500 }); // lane browser-resume B: the hand-back says its own words
         } else if (st.mode === 'takeover' && st.mine && !wasMine && m.cause !== 'pass') { // a PASS (fold-back) says its own words
           const it = m.interrupted && Number(m.interrupted.n) > 0 ? m.interrupted : null;
           // verify r6: a script running in the page was stopped with the agent's call (Runtime.terminateExecution is page-context) — said to the human
@@ -1489,8 +1752,14 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
         st.tabs = Array.isArray(m.tabs) ? m.tabs.map((x) => ({ tabId: String(x.tabId || ''), targetId: String(x.targetId || ''), title: String(x.title || ''), url: String(x.url || ''), active: !!x.active })) : [];
         if (H) { const act = st.tabs.find((x) => x.active); if (act && act.url && act.url !== st.url) { st.url = act.url; renderUrl(); } } // his tab switched (a popup he opened): the address row follows
         { const act = st.tabs.find((x) => x.active); if (act && act.url && !st.url) { st.url = act.url; renderUrl(); } }
-        renderTabs();
+        renderTabs(); renderTabRow(); // lane browser-resume C: the row follows the browser's tabs
         break;
+      // lane browser-resume C (§3.9, ruling 3): whose each tab is (the keeper's answer, replayed to a late viewer) and one act's answer
+      case 'tab-owners':
+        st.tabOwners = m.owners && typeof m.owners === 'object' ? { ...m.owners } : {}; st.tabMediated = !!m.mediated; st.tabAdoptable = !!m.adoptable;
+        renderTabRow();
+        break;
+      case 'tab-ack': onTabAck(m); break;
       case 'url': { const u = String(m.url || ''); if (u && st.url && u !== st.url && st.frames > 0) { st.navAt = Date.now(); st.refreshSent = false; } st.url = u; renderUrl(); if (st.error && st.connected && !st.stopped && !st.hollow) { st.error = null; setStatus('', { hide: true }); } break; } // lane S4: a navigation starts the picture clock; lane S2: a navigation clears a stale error too
       // lane S4: the page's size and whose pane it follows (the bridge's ruling; replayed to a late viewer)
       case 'fit': st.fit = { state: m.state, width: Number(m.width) || 0, height: Number(m.height) || 0, viewerId: m.viewerId ?? null, rule: m.rule || null, drawScale: Number(m.drawScale) || 1, floor: m.floor || null, device: m.device || null, error: m.error || null, code: m.code || null, why: m.why || null, place: m.place && typeof m.place === 'object' ? { page: m.place.page || null, device: m.place.device || null } : null }; renderFit(); break; // lane live-input: `place` = where the ruling window is (the chip says which)
@@ -1522,11 +1791,11 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     st.profileRef = profileRef || '';
     st.error = null; st.target = null; // the next hello names the pane (MULTIVIEW: a strip tab may name a helper's browser or EPHEMERAL_REF)
     if (st.stopped || st.hollow) { st.stopped = false; st.stoppedHow = null; st.hollow = false; renderMode(); } // a new pane has no last frame to grey
-    st.frames = 0; st.url = ''; st.tabs = []; st.console = []; st.running = false; st.reconnects = 0;
+    st.frames = 0; st.url = ''; st.tabs = []; st.tabOwners = {}; st.tabActs.clear(); st.console = []; st.running = false; st.reconnects = 0;
     st.fit = null; st.fitSent = null; st.navAt = 0; st.lastFrameAt = 0; st.openAt = 0; st.picture = 'ok'; st.pictureStale = false; root.classList.remove('picture-stale'); renderFit(); setZoom(ZOOM_NONE); // lane S4: a new pane has its own size and picture
     img.removeAttribute('src');
     timeline.clear(); renderTraceBtn(); // the next hello names the pane and re-seeds
-    renderUrl(); renderTabs(); renderConsole();
+    renderUrl(); renderTabs(); renderTabRow(); renderConsole();
     try { winInfo._openSpec = { action: 'openBrowserLive', sessionId, profileId: st.profileRef || null }; app.wm._notify?.(); } catch { /* optional */ }
     renderStrip();
     connect();
@@ -1697,6 +1966,8 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     showToast(t('Stopped {label}', { label: humanLabel() || String(profileId || '') }), { duration: 4000 });
   };
   reBtn.onclick = () => {
+    // lane browser-resume B: RESUME — the user's act (a POST): its own browser relaunched on the SAME directory with its tabs
+    if (st.resumeOffer) { doResume(); return; }
     // BROWSE YOURSELF: "Browse again" is a new press (a POST — a user act; a view never starts a browser)
     if (H && H.ended) { if (H.ended !== 'deleted') browseYourself(app, profileId, { label: humanLabel() }); return; }
     st.reconnects = 0; const f = st.fact || factNow(); const plan = liveFollowPlan({ view: viewFacts(), prev: f, next: f, force: true }); if (plan.act === 'retarget') { st.followed++; switchTo(plan.ref); } else connect(); };
@@ -1712,6 +1983,28 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     if (!(st.mode === 'takeover' && st.mine)) send({ type: 'takeover' });
   }; // the `mode` answer claims the keyboard (renderMode)
   handBtn.onclick = () => { if (st.claimed) releaseHeld(); send({ type: 'handback', ...(Number.isInteger(st.wakes) && st.wakes > 0 ? { expectWakes: st.wakes } : {}) }); }; // verify r2 (H3): a key held in the page is let go BEFORE the handback (after it this viewer's input is refused); r6 A-F9: the count the button said
+  // lane browser-resume B: "Hand back and continue…" — the note is TYPED in an app dialog, so while this view drives the keys
+  // are first let go (held keys released in the page, the claim released: a dialog must never type into the page); Cancel
+  // takes them back. The POST ends the takeover (cause `continue`), stashes the note + the tabs for the next turn and shows
+  // a card — nothing is delivered now
+  contBtn.onclick = async () => {
+    if (st.noteOpen || contBtn.disabled) return;
+    st.noteOpen = true;
+    if (st.claimed) { releaseHeld(); st.claimed = false; st.pressed.clear(); ky.reset('release'); releaseKeyboard(winInfo.id); if (document.activeElement === kbd) kbd.blur(); kbd.value = ''; renderKbd(); keyboardChanged(); }
+    const note = await showInputDialog({ title: t('Hand the browser back for the agent’s next turn'), label: t('A note for the agent (optional)'), placeholder: t('e.g. I logged in — continue from the cart'), confirmText: t('Hand back') });
+    st.noteOpen = false;
+    if (note === null || st.closed) { renderMode(); return; }
+    contBtn.disabled = true;
+    const r = await fetchJson(`/api/browser/session/${encodeURIComponent(sessionId)}/hand-back`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: curRef() || EPHEMERAL_REF, note: String(note) }) });
+    contBtn.disabled = false;
+    if (st.closed) return;
+    // verify r2: the previous hand-back still waits for the agent's next turn — this view folds its button like a hand-back of its own
+    if (r && r.code === 'already_handed_back') { st.resumedHere = false; st.handedBack = true; renderMode(); showToast(t('Already handed back — the agent reads it with its next turn'), { duration: 5000 }); return; }
+    if (!r || r.error) { renderMode(); showToast(t('Could not hand the browser back: {why}', { why: String((r && r.error) || t('server unreachable')) }), { type: 'error', duration: 7000 }); return; }
+    st.resumedHere = false; st.handedBack = true;
+    showToast(t('Handed back — the agent reads your note and the tabs with its next turn (nothing is sent now)'), { duration: 5000 });
+    renderMode();
+  };
   winInfo.titleSpan?.addEventListener?.('click', (e) => { const r = row(); if (r && app.showBrowserProfilePicker) app.showBrowserProfilePicker(r, { x: e.clientX, y: e.clientY }); }, { signal: winInfo._listenerCtl?.signal });
   // INPUT FORWARDING — only while THIS viewer drives; every record is the
   // stream server's CDP shape built by src/browser-stream.js, coordinates
@@ -1774,6 +2067,10 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
   const appMode = () => (app._commandMode && app._commandMode._cmdMode ? 'command' : null);
   const onDocKey = (e) => {
     if (H && e.target === addrInput) return; // BROWSE YOURSELF: the address row is typed in, never sent to the page
+    // lane dialog-keys: a key the APP takes — typed into a dialog the user opened (its Enter may open the next one), or a
+    // reserved chord / command mode — is his own act on the app: the opener evidence of a dialog opening right after. Read in
+    // EVERY view before the owner test (each view judges the next dialog by its own record); a key the page gets never is
+    if (st.claimed && e.type === 'keydown' && (ky.dialogHolds || keyRoute(e, { appMode: appMode() }).to === 'app')) ky.onAppKey(e);
     if (!iOwn()) { if (document.activeElement === kbd) { kbd.blur(); kbd.value = ''; } renderKbd(); return; }
     // verify r2 (H1) THE BELT: this view owns the keys while a text box outside it still holds the caret — a transition no
     // signal reported. The same explicit move as every transition (the caret to the sink, the words redrawn), and THIS key
@@ -1912,9 +2209,67 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
         st.frameReclaims++;
         const now = Date.now();
         if (!st.lastFrameCueAt || now - st.lastFrameCueAt >= RECLAIM_CUE_MS) { st.lastFrameCueAt = now; showToast(t('Typing still goes to the browser — to type in another page, hand back first'), { duration: 3500 }); }
-      } else if (ky.dialogCue(a)) { st.dialogCues++; showToast(t('Typing still goes to the browser — click the dialog’s buttons to answer it'), { duration: 3500 }); } // verify r3 (F4): a dialog the user's own press opened — its Enter / Escape are the page's, said once
+      } // (verify r3 F4's cue here is retired by lane dialog-keys: a dialog the user opened TAKES the keys; one that opens by itself is said at its open)
     }, 0);
   }, sig);
+  // ── lane dialog-keys (the owner's "ok", 2026-09-30, on takeover-keyboard r4's proposal): A DIALOG YOUR OWN ACT OPENED TAKES
+  // THE KEYS. Every app modal announces its open (utils.js announceModal — createModalShell, app._showDialog) in the opening
+  // act's own task; the yield judges WHO opened it (PURE dialogOpener over the user's last TRUSTED act → dialogVerdict):
+  //   'take'    — his own fresh press (re-stamped at its release) or a key the app took: the dialog gets Enter, Escape, Tab
+  //               and typing, the takeover goes on (the agent stays refused) and this view owns NO keys while it holds
+  //               (keyboardOwnership's `dialog`: onDocKey / paste / beforeinput stand aside, the sink's blur takes nothing
+  //               back, the focusin rule allows); the keys held in the page are let go (the transition's `release`); a dialog
+  //               that focuses nothing itself gets its first text box, else its overlay, a tick later — never a button (an
+  //               Enter it did not choose would act for him);
+  //   'reclaim' — it opened BY ITSELF while the keys are the page's (a broadcast, a timer, a notification): the old rule — its
+  //               own focus is taken back by the rules above (the password guard) — said once (PURE dialogReclaimCue);
+  // ONE MutationObserver, armed only while a dialog holds (the body's children + each held overlay's class), sees it close —
+  // answered, dismissed, a backdrop press, a script's removal alike: no orphan hold — and PURE dialogReturn gives the keys back
+  // where they were: the sink (the view owned them), the text box they were yielded to, the older dialog's field.
+  function watchDialogs() {
+    if (!dialogMo) return;
+    dialogMo.disconnect();
+    if (st.closed || !ky.dialogHolds) return;
+    dialogMo.observe(document.body, { childList: true });
+    for (const ov of ky.dialogOverlays()) dialogMo.observe(ov, { attributes: true, attributeFilter: ['class', 'hidden'] });
+  }
+  /** a held dialog's OWN field gets the keys: its first visible text box, else its overlay (tabIndex -1 when it has none) —
+   *  never a button (an Enter it did not choose would act for him); verify r1: ONE door for the take's focus tick and the
+   *  'older' return */
+  function focusDialog(ov) {
+    const tgt = dialogFocusTarget(ov);
+    try { if (tgt === ov && (typeof ov.hasAttribute === 'function' ? !ov.hasAttribute('tabindex') : ov.tabIndex == null)) ov.tabIndex = -1; tgt.focus({ preventScroll: true }); } catch { /* gone */ }
+  }
+  function settleDialogs() {
+    const r = ky.settleDialogs({ active: document.activeElement }); // verify r1: the keys fallen to <body> while a dialog holds go back into it
+    if (!r) return;
+    watchDialogs();
+    st.dialogReturns++;
+    if (r.to === 'sink') { if (iOwn() && !st.copying) focusSink(); }
+    else if (r.to === 'older' && r.el) focusDialog(r.el); // verify r1: the older dialog still holds but its element went (re-rendered, or in a dialog a script removed): its own field
+    else if ((r.to === 'back' || r.to === 'yield') && r.el) { try { r.el.focus({ preventScroll: true }); } catch { /* gone */ } }
+    syncKeyboard(); // the chip says where the keys are now (on change only), the composers' line re-reads
+  }
+  document.addEventListener(MODAL_OPEN_EVENT, (e) => {
+    if (!st.claimed || st.closed) return;
+    settleDialogs(); // a dialog replaced by its successor in one task (createModalShell's id) gives its keys back first
+    const ov = e && e.detail ? e.detail.overlay : null;
+    const v = ky.onDialogOpen(ov, { active: document.activeElement });
+    if (v === 'take') {
+      st.dialogTakes++;
+      watchDialogs();
+      syncKeyboard(); // the transition: the chip redrawn at once, the keys held in the page let go
+      // (scheduled inside the announcement — before the dialog's own `setTimeout(focus)` — so the dialog's own choice wins)
+      setTimeout(() => {
+        if (st.closed || !ky.dialogHolds || !ky.dialogOverlays().includes(ov)) return;
+        const a = document.activeElement;
+        if (a && a !== document.body && typeof ov.contains === 'function' && ov.contains(a)) return;
+        focusDialog(ov);
+      }, 0);
+      return;
+    }
+    if (v === 'reclaim' && iOwn() && ky.dialogCue(v)) { st.dialogCues++; showToast(t('Typing still goes to the browser — click the dialog’s buttons to answer it'), { duration: 3500 }); }
+  }, { signal: winInfo._listenerCtl?.signal });
   // ── lane live-input: COPY OUT — what the page copied reaches YOUR clipboard ──
   /** A copy / cut chord went to the page: its copy answers within COPY_ANSWER_MS (else the echo says nothing came). */
   function armCopyAnswer(kind) {
@@ -1968,6 +2323,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     if (st.claimed) releaseHeld(); // verify r2 (H3): a key held in the page is let go before the socket closes
     releaseKeyboard(winInfo.id); st.claimed = false; // lane J r2: a closed view never owns the keyboard (its listeners die with the window's AbortController)
     ky.reset('release'); keyboardChanged(); // lane takeover-keyboard: …nor holds a yield (the composers' line re-reads)
+    if (dialogMo) dialogMo.disconnect(); // lane dialog-keys: …nor watches a dialog
     if (st.echoTimer) { clearTimeout(st.echoTimer); st.echoTimer = null; }
     if (st.pictureTimer) { clearInterval(st.pictureTimer); st.pictureTimer = null; } // lane S4
     if (st.fitTimer) { clearTimeout(st.fitTimer); st.fitTimer = null; }
@@ -2001,13 +2357,15 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     kbd: () => kbd, ownsKeyboard: () => !!(st.claimed && iOwn()), // lane J r2: the sink + the ownership fact (the suite types against both)
     geometry, frameClaim: () => (st.meta ? { ...st.meta } : null), pageReading: () => (st.page ? { ...st.page } : null), // lane J: {picW, picH, cssW, cssH, source}; the metadata's CLAIM and the page's own reading (the suite's control replays both)
     send, // P3: the suite drives the control verbs through the real socket
-    state: () => ({ sessionId, profileId: profileId || null, human: !!H, humanKey: H ? H.key : null, humanEnded: H ? H.ended : null, endLine: H ? endLine.textContent : null, shareLine: H && shareLine.style.display !== 'none' ? shareText.textContent : null, closeText: H ? closeBtn.textContent : null, quitText: H ? quitBtn.textContent : null, address: H ? addrInput.value : null, addrShown: addrRow.style.display !== 'none', takeText: takeBtn.style.display === 'none' ? null : takeBtn.textContent, kbdBtn: kbdBtn.style.display !== 'none', profileRef: st.profileRef, connected: st.connected, stopped: !!st.stopped, frames: st.frames, frameW: st.frameW, frameH: st.frameH, viewers: st.viewers, mode: st.mode, target: st.target, url: st.url, tabs: st.tabs.slice(), console: st.console.length, attachments: st.attachments.slice(), running: st.running, lastCommand: st.lastCommand, error: st.error, lastStatus: st.lastStatus, sidePane: st.sidePane,
+    state: () => ({ sessionId, profileId: profileId || null, human: !!H, tabRow: { shown: tabRow.style.display !== 'none', rows: st.tabRow ? st.tabRow.rows.map((r) => ({ targetId: r.targetId, owner: r.owner, active: r.active, canSwitch: r.canSwitch, canClose: r.canClose, title: r.title, mark: r.mark })) : [], folded: st.tabFolded.slice(), quit: tabRowQuit.style.display !== 'none', quitText: tabRowQuit.textContent, owners: { ...st.tabOwners }, inFlight: st.tabActs.size, error: st.tabError, quitAsked: st.quitAsked }, // lane browser-resume C
+      humanKey: H ? H.key : null, humanEnded: H ? H.ended : null, endLine: H ? endLine.textContent : null, shareLine: H && shareLine.style.display !== 'none' ? shareText.textContent : null, closeText: H ? closeBtn.textContent : null, quitText: H ? quitBtn.textContent : null, address: H ? addrInput.value : null, addrShown: addrRow.style.display !== 'none', takeText: takeBtn.style.display === 'none' ? null : takeBtn.textContent, kbdBtn: kbdBtn.style.display !== 'none', profileRef: st.profileRef, connected: st.connected, stopped: !!st.stopped, frames: st.frames, frameW: st.frameW, frameH: st.frameH, viewers: st.viewers, mode: st.mode, target: st.target, url: st.url, tabs: st.tabs.slice(), console: st.console.length, attachments: st.attachments.slice(), running: st.running, lastCommand: st.lastCommand, error: st.error, lastStatus: st.lastStatus, sidePane: st.sidePane,
       backend: backendBtn.style.display !== 'none' ? backendBtn.textContent : backendLabelEl.style.display !== 'none' ? backendLabelEl.textContent : null, backendIsButton: backendBtn.style.display !== 'none', blockedShown: blockedBar.style.display !== 'none', // P4 + the rebuilt dialog: the name, and whether it opens the dialog
       trace: timeline.state(), traceBtn: traceBtn.textContent, recording: recEl.textContent, recordingOn: recEl.classList.contains('on'), // P5
       bound: isBound(), bindText: bindLabel(), owners: dotsFor(st.target && st.target.profileId ? st.target.profileId : null).map((d) => ({ sessionId: d.sessionId, name: d.name, color: d.color })), // P7
       you: st.you, mine: st.mine, holder: st.holder, modeSince: st.modeSince, modeCause: st.modeCause, cursor: st.cursor ? { ...st.cursor } : null, cursorShown: cursorEl.style.display !== 'none', confirmations: [...st.confirmations.values()].map((c) => ({ ...c })), badge: modeBadge.textContent, badgeFull: modeBadge.title,
       // lane J r2
       ownsKeyboard: !!(st.claimed && iOwn()), kbdChip: kbdChip.style.display !== 'none', sent: st.sent, caretMoves: st.caretMoves, strayKeys: st.strayKeys, cues: st.cues, dialogCues: st.dialogCues, frameReclaims: st.frameReclaims, homeless: st.homeless, // verify r2 (H1 / Q1 / H5)
+      dialogHeld: !!(st.claimed && ky.dialogHolds), dialogTakes: st.dialogTakes, dialogReturns: st.dialogReturns, dialogWhy: ky.dialogWhy, // lane dialog-keys
       kbdYielded: !!(st.claimed && yieldedKeyboard()), yieldKind: ky.kind, yieldWhere: ky.whereNow(document.activeElement), // verify r3: where the yielded keys are NOW // lane takeover-keyboard: the keys given to a text box the user pressed (the takeover continues)
       dialog: st.dialog ? { ...st.dialog } : null, dialogShown: dialogBar.style.display !== 'none', dialogText: dialogBar.textContent, dialogAnswering: !!st.dialogAnswering, // lane browser-stuck
       remotePlatform: st.remotePlatform, pressed: [...st.pressed.keys()], copyChip: copyChip.style.display === 'none' ? null : copyChip.textContent, copiedLength: st.copied == null ? null : st.copied.length, recChip: { state: recEl.dataset.state || null, text: recEl.textContent, title: recEl.title }, fitTitle: fitChip.style.display === 'none' ? null : fitChip.title, // lane live-input
@@ -2018,7 +2376,9 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
       bar: fold.last(), folded: fold.folded(), foldedRows: foldedRows().map((r) => ({ label: r.label, disabled: !!r.disabled })), // lane I: the census re-runs barLayout on `bar`
       // lane S4: the page's size vs this pane, the chip, the picture clocks, the pinch
       fit: st.fit ? { ...st.fit } : null, fitSent: st.fitSent ? { ...st.fitSent } : null, fitChip: fitChip.style.display === 'none' ? null : { kind: fitChip.dataset.kind, text: fitChip.textContent }, pane: paneNow(),
-      picture: st.picture, pictureStale: st.pictureStale, zoom: { ...st.zoom } }),
+      picture: st.picture, pictureStale: st.pictureStale, zoom: { ...st.zoom },
+      // lane browser-resume B: the Resume offered (its words on the reconnect button), one in flight, the hand-back offered
+      resumeOffer: st.resumeOffer, resumeText: reBtn.dataset.mode === 'resume' && reBtn.style.display !== 'none' ? reBtn.textContent : null, resuming: st.resuming, resumedHere: st.resumedHere, contShown: contBtn.style.display !== 'none', contText: contBtn.textContent, noteOpen: st.noteOpen }),
     layoutBar: () => fold.layoutNow(), // lane I: the census asks for the verdict NOW (never waiting a frame)
     reportFit, setZoom, // lane S4: the suite re-reports the pane / sets a zoom through the view's own path
   };

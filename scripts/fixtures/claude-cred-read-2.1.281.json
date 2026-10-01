@@ -1,0 +1,236 @@
+{
+ "measuredAt": "2026-09-30",
+ "cli": "2.1.281 (Claude Code)",
+ "gapMs": 65000,
+ "script": "scripts/measure-claude-cred-read.mjs",
+ "setup": "fake credentials (sk-ant-oat01-FAKE-A/B), a per-session link CLAUDE_SECURESTORAGE_CONFIG_DIR=<pool-links/pool-t/sess-1> -> subs/sub-A, a loopback mock for the API + OAuth + OTLP, a network namespace with only lo (sudo unshare -n); the mock records the Authorization header of every /v1/messages request",
+ "variants": {
+  "baseline": {
+   "change": "none",
+   "requests": {
+    "msg1": [
+     "A:200"
+    ],
+    "msg2": [
+     "A:200"
+    ]
+   },
+   "otelOrg": [
+    "eeeeeeee"
+   ],
+   "oauthCalls": [],
+   "credSyscalls": {
+    "before-change:openat": 6,
+    "before-change:statx": 5,
+    "after-change:openat": 4,
+    "after-change:statx": 1
+   }
+  },
+  "symlink": {
+   "change": "repointPoolSymlink(link\u2192B)+utimes(B)",
+   "requests": {
+    "msg1": [
+     "A:200"
+    ],
+    "msg2": [
+     "B:200"
+    ]
+   },
+   "otelOrg": [
+    "eeeeeeee"
+   ],
+   "oauthCalls": [],
+   "credSyscalls": {
+    "before-change:openat": 6,
+    "before-change:statx": 5,
+    "after-change:openat": 6,
+    "after-change:statx": 1
+   }
+  },
+  "symlink-bare": {
+   "change": "repoint(link\u2192B), no utimes",
+   "requests": {
+    "msg1": [
+     "A:200"
+    ],
+    "msg2": [
+     "B:200"
+    ]
+   },
+   "otelOrg": [
+    "eeeeeeee"
+   ],
+   "oauthCalls": [],
+   "credSyscalls": {
+    "before-change:openat": 6,
+    "before-change:statx": 5,
+    "after-change:openat": 6,
+    "after-change:statx": 1
+   }
+  },
+  "overwrite": {
+   "change": "B bytes written in place into A/.credentials.json (same inode)",
+   "requests": {
+    "msg1": [
+     "A:200"
+    ],
+    "msg2": [
+     "B:200"
+    ]
+   },
+   "otelOrg": [
+    "eeeeeeee"
+   ],
+   "oauthCalls": [],
+   "credSyscalls": {
+    "before-change:openat": 6,
+    "before-change:statx": 5,
+    "after-change:openat": 6,
+    "after-change:statx": 1
+   }
+  },
+  "hardlink-mtime": {
+   "change": "A/.credentials.json := hard link to B (new inode), mtime bumped",
+   "requests": {
+    "msg1": [
+     "A:200"
+    ],
+    "msg2": [
+     "B:200"
+    ]
+   },
+   "otelOrg": [
+    "eeeeeeee"
+   ],
+   "oauthCalls": [],
+   "credSyscalls": {
+    "before-change:openat": 6,
+    "before-change:statx": 5,
+    "after-change:openat": 6,
+    "after-change:statx": 1
+   }
+  },
+  "hardlink-same": {
+   "change": "A/.credentials.json := hard link to B (new inode), mtime = A old mtime",
+   "requests": {
+    "msg1": [
+     "A:200"
+    ],
+    "msg2": [
+     "A:200"
+    ]
+   },
+   "otelOrg": [
+    "eeeeeeee"
+   ],
+   "oauthCalls": [],
+   "credSyscalls": {
+    "before-change:openat": 6,
+    "before-change:statx": 5,
+    "after-change:openat": 4,
+    "after-change:statx": 1
+   }
+  },
+  "utimes": {
+   "change": "utimes(A) only",
+   "requests": {
+    "msg1": [
+     "A:200"
+    ],
+    "msg2": [
+     "A:200"
+    ]
+   },
+   "otelOrg": [
+    "eeeeeeee"
+   ],
+   "oauthCalls": [],
+   "credSyscalls": {
+    "before-change:openat": 6,
+    "before-change:statx": 5,
+    "after-change:openat": 6,
+    "after-change:statx": 1
+   }
+  },
+  "refresh": {
+   "change": "repointPoolSymlink(link\u2192B)+utimes(B)",
+   "requests": {
+    "msg1": [
+     "A:200"
+    ],
+    "msg2": [
+     "B:200"
+    ]
+   },
+   "otelOrg": [
+    "eeeeeeee"
+   ],
+   "oauthCalls": [],
+   "credSyscalls": {
+    "before-change:openat": 6,
+    "before-change:statx": 5,
+    "after-change:openat": 13,
+    "after-change:statx": 3,
+    "after-change:mkdir": 3,
+    "after-change:newfstatat": 1,
+    "after-change:readlink": 1,
+    "after-change:rmdir": 2
+   }
+  },
+  "gate429": {
+   "change": "none yet (msg1 was a 429)",
+   "requests": {
+    "msg1": [
+     "A:429"
+    ],
+    "msg2": [
+     "A:429"
+    ],
+    "msg3": [
+     "B:200"
+    ]
+   },
+   "otelOrg": [
+    "eeeeeeee"
+   ],
+   "oauthCalls": [],
+   "credSyscalls": {
+    "before-change:openat": 6,
+    "before-change:statx": 5,
+    "after-change:openat": 6,
+    "after-change:statx": 2
+   }
+  },
+  "slowstream": {
+   "change": "msg2 streams its one text block for 25 s",
+   "requests": {
+    "msg1": [
+     "A:200"
+    ],
+    "msg2": [
+     "A:200"
+    ]
+   },
+   "otelOrg": [
+    "eeeeeeee"
+   ],
+   "oauthCalls": [],
+   "credSyscalls": {
+    "before-change:openat": 6,
+    "before-change:statx": 5,
+    "after-change:openat": 4,
+    "after-change:statx": 1
+   }
+  }
+ },
+ "findings": {
+  "perTurnCheck": "every turn the CLI statx()es $CLAUDE_SECURESTORAGE_CONFIG_DIR/.credentials.json THROUGH the link and re-reads the file when mtimeMs differs from the last one it saw (decompiled Rd -> QS, lastCredentialsMtimeMs); the next request carries the new token",
+  "followsTheLink": "symlink re-point (with or without the utimes bump), in-place overwrite and a hard-link replacement with a new mtime are all followed on the next turn (B:200)",
+  "blindSpot": "a replacement whose mtime EQUALS the old one (hardlink-same) is NOT seen: the process keeps A -- the utimes bump in repointPoolSymlink is load-bearing",
+  "utimesOnly": "utimes with unchanged content re-reads the file (openat) and keeps the same token",
+  "refresh": "after a re-point the refresh path locks <link>/.oauth_refresh.lock AND the link target resolved via /proc/self/fd (subs/sub-B.lock) and re-reads through the link -- it follows the link; no token POST was made in this setup (the token had 4.5 min left against a 5-min buffer, the CLI declined under the lock), so the refresh WRITE target was not observed directly",
+  "noLocalGate": "after a 429 the next turn makes a real request again (no local gate); after a re-point the next turn is B:200",
+  "otelOrg": "OTel organization.id = ~/.claude.json oauthAccount.organizationUuid (the scratch HOME's eeeeeeee) for BOTH tokens -- a machine-wide label, never the account a request billed; the CLI refetches its own profile at start when profileFetchedAt is older than 24 h (gF=86400000) and rewrites that label machine-wide",
+  "timestamp": "every assistant record (success and API error) carries `timestamp` stamped at EMISSION: a text block streamed for 25 s arrived 2 ms after its stamp"
+ }
+}

@@ -53,6 +53,10 @@ const hist = listLayoutHistory();
 ok(hist.length === 1, 'a shape change (the collapse) writes exactly one rollback point');
 ok(hist[0].totalWindows === 4, 'the rollback point records the window count it holds');
 ok(JSON.stringify(hist[0].summary) === JSON.stringify({ A: 2, B: 1, C: 1 }), 'summary names desktops and their window counts — readable without opening the file');
+// userW inc-mun7qjmw-iksh (lane desktop-move): the point also names WHAT CHANGED right after it — the row a loss follows
+// is the one to restore, and every row used to read the same "N windows — A 2 · B 1 · …"
+ok(JSON.stringify(hist[0].change) === JSON.stringify([['A', 2, 4], ['B', 1, 0], ['C', 1, 0]]), 'the point names the change that FOLLOWED it — per desktop whose window set changed, [name, before, after] ("B 1 → 0")', JSON.stringify(hist[0].change));
+ok(/const change = Array\.isArray\(e\.change\) && e\.change\.length[\s\S]{0,200}`\$\{n \|\| t\('Desktop'\)\} \$\{a\} → \$\{b\}`[\s\S]{0,700}escHtml\(t\('Then: \{changes\}', \{ changes: change \}\)\)/.test(fs.readFileSync(path.join(REPO, 'src/lib/setup-flows.js'), 'utf8')), 'the Restore dialog draws it under the row ("Then: HR 3 → 1"), escaped');
 
 // and it holds the PRE-damage mapping — the exact thing the real incident lacked
 const raw = JSON.parse(fs.readFileSync(path.join(dataDir, 'layout-history', hist[0].id), 'utf8'));

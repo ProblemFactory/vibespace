@@ -2168,7 +2168,11 @@ console.log('— §14 (r4) the reroute a record announces is stamped before it i
 // claude-fallback-block-record.json, copied from the incident's frozen
 // transcript — the owner's cwd/sessionId/branch/slug/parentUuid and the real
 // `usage` block stripped; nothing the consumers read was changed).
-const FROZEN_FALLBACK = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/claude-fallback-block-record.json'), 'utf8'));
+// The capture keeps its own date in the file (2026-09-13); this suite replays it
+// as a LIVE record, so it is re-stamped NOW — the late-record rule (lane-hot-
+// switch, src/record-lateness.js) takes a record the CLI stamped 17 days ago for
+// what it is, a backlog's, and acts on none of it.
+const FROZEN_FALLBACK = { ...JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/claude-fallback-block-record.json'), 'utf8')), timestamp: new Date().toISOString() };
 {
   ok('§14 the fixture is ONE record that both announces the reroute AND is served by its target',
     FROZEN_FALLBACK.type === 'assistant' && FROZEN_FALLBACK.isSidechain === false

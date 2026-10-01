@@ -16,6 +16,9 @@
 //   #6  explorer phone layout: one Name column, no horizontal overflow, the
 //       bookmark strip above the list, long-press → Select… mode
 //   #4  the status-bar magnifier opens the search bar
+//   billing chip (lane billing-chip, 2026-09-30): a stub active-sessions frame
+//       moves the live chat's pool member A → B ⇒ the status-bar chip names B,
+//       on the same node (DOM text + a screenshot, the chip scrolled into view)
 //   #5  the message long-press menu; the hover buttons are display:none
 //   #7  switcher: the "+" desktop tab, tab long-press → Rename/Delete, window
 //       row long-press → the 'window' menu incl. Move to Desktop
@@ -376,6 +379,39 @@ try {
       // r2: the bar's own prev / next / close were 24×17 / 24×17 / 20×20
       const sbBtns = await evalJs(rectsOf('.window-active .chat-view .chat-search-bar button'));
       check(`the search bar's prev / next / close buttons are ≥ 36×36 (${sbBtns.map((r) => r.w + '×' + r.h).join(', ')})`, sbBtns.length === 3 && allAtLeast(sbBtns), sbBtns);
+
+      // ── the billing chip follows the member (lane billing-chip, 2026-09-30) ──
+      // The owner's phone kept the member a conversation STARTED on after the pool moved it to another one: the
+      // phone has no title bars, its billing chip is the status bar's, and its re-render key named the pool only.
+      // The broadcast is a stub of the server's own frame — THIS page's last `active-sessions` list with the live
+      // row's `auth` in server.js poolAuth's shape (a fresh server holds no pool) — fed through the page's real
+      // socket entry point (ws.onmessage ⇒ the sidebar merge ⇒ app.syncSessionIdentity ⇒ the chip), two frames in
+      // ONE evaluation so no real broadcast can land between them; the real list is put back after the look.
+      console.log('billing chip on the phone follows the member');
+      const poolAuth = (member, id, extra = {}) => ({ source: 'pooled', name: '全部', poolTarget: member, poolTargetId: id, placement: 'automatic', priorityRank: null, pinned: null, pinnedId: null, poolDefault: 'Alpha Max', ...extra });
+      const feed = (auth) => `(() => { const base = app.sidebar._webuiSessions || []; if (!base.some((r) => r.id === ${JSON.stringify(sid)})) return false; app.ws.ws.onmessage({ data: JSON.stringify({ type: 'active-sessions', sessions: base.map((r) => (r.id === ${JSON.stringify(sid)} ? { ...r, auth: ${JSON.stringify(auth)} } : r)) }) }); return true; })()`;
+      const chipNow = `(() => { const el = document.querySelector('.window-active .chat-view .chat-status-bar .chat-status-billing'); if (!el) return null; const r = el.getBoundingClientRect(); const cs = getComputedStyle(el); return { text: el.textContent, title: el.getAttribute('title') || '', pooled: el.classList.contains('pooled'), w: Math.round(r.width), l: Math.round(r.left), r: Math.round(r.right), display: cs.display, clipped: el.scrollWidth > el.clientWidth + 1 }; })()`;
+      const realRows = await evalJs(`JSON.stringify(app.sidebar._webuiSessions || [])`);
+      const walk = await evalJs(`(() => {
+        const fed0 = ${feed(poolAuth('Alpha Max', 'acct-a'))};
+        const el0 = document.querySelector('.window-active .chat-view .chat-status-bar .chat-status-billing');
+        const a = ${chipNow};
+        const fed1 = ${feed(poolAuth('Beta Max', 'acct-b'))};
+        const el1 = document.querySelector('.window-active .chat-view .chat-status-bar .chat-status-billing');
+        const b = ${chipNow};
+        return { fed: fed0 && fed1, a, b, same: !!el0 && el0 === el1 };
+      })()`);
+      check(`a stub active-sessions frame through the page's own socket puts the pooled identity on the phone chip (${JSON.stringify(walk.a?.text)})`, walk.fed && walk.a && walk.a.pooled && walk.a.text === '⣿ 全部 → Alpha Max', walk);
+      check(`after a per-session switch (the SAME pool, member B) the chip names B (${JSON.stringify(walk.b?.text)}) — the owner's phone kept A`, walk.b && walk.b.text === '⣿ 全部 → Beta Max' && /currently billing Beta Max/.test(walk.b.title), walk);
+      check('…patched IN PLACE: the same chip node (the keyed-chip law)', walk.same && walk.b.display !== 'none', walk);
+      // the phone's status bar scrolls sideways (chat.css ≤768px): bring the chip into view as a finger would
+      await evalJs(`document.querySelector('.window-active .chat-view .chat-status-bar .chat-status-billing').scrollIntoView({ block: 'nearest', inline: 'nearest' }); true`);
+      await sleep(400); // a frame for the look
+      await shot('billing-chip-member-b.png');
+      const after = await evalJs(chipNow);
+      check(`the screenshot's chip still reads B, inside the ${VW} px viewport (${JSON.stringify(after?.text)} at ${after?.l}–${after?.r}; ${SHOTS}/billing-chip-member-b.png)`, after && after.text === '⣿ 全部 → Beta Max' && after.l >= 0 && after.r <= VW, after);
+      await evalJs(`(() => { const sessions = JSON.parse(${JSON.stringify(realRows)}); app.ws.ws.onmessage({ data: JSON.stringify({ type: 'active-sessions', sessions }) }); return true; })()`);
+      check('the real list put back: the chip no longer claims a pool', await waitFor(`!document.querySelector('.window-active .chat-view .chat-status-billing')?.classList.contains('pooled')`, 3000));
     }
     try { liveWs.close(); } catch {}
   }

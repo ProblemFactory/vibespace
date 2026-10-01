@@ -47,6 +47,11 @@
  * `ERROR_CODES`.
  */
 const { inertFrames } = require('./channel-record.js');
+// lane peer-census (2026-09-29): every line and every inline piece of a REPORT takes THE belt (src/peer-text.js) —
+// the line rule included: a message ending in a dangling `<system-reminder` used to be completed by the NEXT report
+// line when that member's words began with `>` (a quote) — a live frame in the receiver's next turn.
+const { toAgentText } = require('./peer-text.js');
+const piece = (s, max = Infinity) => toAgentText(s, { kind: 'line', max });
 
 const NOTIFY_MODES = Object.freeze(['next-turn', 'mention', 'always', 'mute']);
 const DEFAULT_NOTIFY = 'next-turn';
@@ -121,10 +126,28 @@ function pairKey(a, b) {
 }
 
 /** One line, bounded, frame-inert. '' when nothing is left. */
+// verify r1 F3 (lane peer-census): a group's or a member's NAME is an inline piece every answer writes more after
+// (`posted to group "<name>" (id)` ⏎ `  woke 1: <member>`; `"<name>" — 2 unread` ⏎ `    members: > beta …`) — the
+// complete-tag rule alone left a dangling opener for the next line to close. THE belt (line kind) here, the one
+// place a group or member name is cleaned.
 function cleanName(name, max = NAME_MAX) {
-  const s = inertFrames(String(name == null ? '' : name).replace(/\s+/g, ' ').trim());
-  return s.length > max ? s.slice(0, max).trim() : s;
+  // verify r3 F8: the fold BEFORE the collapse + trim — folded last, an invisible-only name (`U+200B U+FEFF U+2060`: the collapse
+  // read U+FEFF as whitespace, the fold then left that space) or a control-only name (a NUL → a space) came out as `' '`, a
+  // TRUTHY blank that skipped every `|| cid.slice(0, 8)` fallback and validated as a group name of length 1
+  const s = piece(String(name == null ? '' : name)).replace(/\s+/g, ' ').trim();
+  if (s.length <= max) return s;
+  // verify r2 (lane peer-census): the CUT landed AFTER the belt — a name like `… <system-reminder x b < c >` is one the
+  // frame rule leaves alone (a `<` inside the attribute run stops both patterns), and the 80-character cut dropped its
+  // tail into a dangling opener `… <system-reminder x` that the send / create / invite echoes printed beside a member
+  // named `> …` on ONE line (live, reproduced over the real engine). The rule again on what the cut left — bound, THEN
+  // judge, as the belt does; idempotent, so a name the cut left clean is unchanged.
+  // verify r3 F7: the cut never splits a surrogate pair (peer-text's cutText rule) — a lone high surrogate at the 80th
+  // unit was a stored name no reader can address: the CLI's stdout re-encodes it as U+FFFD, so the name the agent SEES
+  // (`…�`) is not the name the store HOLDS, and `send <name>` never resolves it.
+  return piece(s.slice(0, cutAt(s, max)).trim());
 }
+/** the largest cut ≤ n that does not split a surrogate pair (src/peer-text.js cutText's rule, spelled here so this PURE module imports nothing new) */
+const cutAt = (s, n) => (n > 0 && /[\uD800-\uDBFF]/.test(s.charAt(n - 1)) ? n - 1 : n);
 function cleanText(text, max = CONTEXT_MAX) {
   const s = inertFrames(String(text == null ? '' : text)).trim();
   return s.length > max ? s.slice(0, max) : s;
@@ -459,13 +482,13 @@ function clipBytes(s, max) {
 /** One log record's report-line PREFIX (the part before its words) — `lineFor` and the shown lines' card text
  *  (`reportFor` → `lines[].body`) read the same one. */
 function linePrefix(r) {
-  const who = inertFrames((r.author && (r.author.name || r.author.id)) || 'unknown');
+  const who = piece((r.author && (r.author.name || r.author.id)) || 'unknown', 200);
   const k = (r.raw && r.raw.kind) || 'message';
   return k === 'message' ? `- [${stamp(r.at)}] ${who}: ` : `- [${stamp(r.at)}] (${k}) `;
 }
-/** One log record as one report line (agent-facing English, frame-inert). */
+/** One log record as one report line (agent-facing English, frame-inert — the line rule too: no opener dangles). */
 function lineFor(r) {
-  return linePrefix(r) + inertFrames(clipLine(r.text));
+  return linePrefix(r) + piece(clipLine(r.text));
 }
 
 /**
@@ -521,7 +544,7 @@ const REPORT_FORMS = Object.freeze([
 const cutAtLine = (r) => String((r && r.text) || '').replace(/\s+/g, ' ').trim().length > LINE_MAX;
 function buildReport(group, m, recs, invite, rest, budget, lead, form, log) {
   const id = group.id;
-  const gname = form.name === Infinity ? inertFrames(group.name) : clipBytes(inertFrames(group.name), form.name);
+  const gname = form.name === Infinity ? piece(group.name) : piece(clipBytes(piece(group.name), form.name));
   const head = form.head === 'full' ? `#### Group "${gname}" (${id}) — ${recs.length} new since your last report` : `#### Group "${gname}" (${id}) — ${recs.length} new`;
   const foot = form.foot === 'full'
     ? `Reply: vibespace-msg send ${id} "..." — your notify mode here is ${m.notify} (vibespace-msg group notify ${id} <next-turn|mention|always|mute>)`
@@ -535,16 +558,16 @@ function buildReport(group, m, recs, invite, rest, budget, lead, form, log) {
     ? `(${n} message(s) above cut short — the whole text: vibespace-msg read ${id} --before ${hiAt + 1} --limit ${cnt})`
     : `(${n} cut — vibespace-msg read ${id} --before ${hiAt + 1} --limit ${cnt})`);
   const CUT_RESERVE = bytes(cutPointer(9999, 9999999999999, 9999)) + 1;
-  const leadLine = lead ? (form.lead === Infinity ? String(lead) : clipBytes(String(lead), form.lead)) : null;
+  const leadLine = lead ? piece(form.lead === Infinity ? String(lead) : clipBytes(String(lead), form.lead)) : null;   // the engine's lead is its own words today; a caller that names a sender in it is belted like every piece
   let used = bytes(head) + bytes(foot) + 2 + (leadLine ? bytes(leadLine) + 1 : 0);
   // the pointer is budgeted up front (widest form) whenever it COULD appear
   if (rest.length) used += bytes(pointer(rest.length, 9999999999999)) + 1;
   let ctxLine = null;
   if (invite) {
-    const by = clipBytes(inertFrames((invite.author && (invite.author.name || invite.author.id)) || 'someone'), 60);
-    const ctx = inertFrames(String(invite.raw.context || '').trim());
+    const by = piece(clipBytes(piece((invite.author && (invite.author.name || invite.author.id)) || 'someone', 200), 60));
+    const ctx = piece(String(invite.raw.context || '').trim());
     ctxLine = ctx ? `You were added by ${by} — context: ${ctx.replace(/\s+/g, ' ')}` : `You were added by ${by}.`;
-    ctxLine = clipBytes(ctxLine, form.ctx === null ? Math.max(160, Math.floor(budget / 3)) : form.ctx);
+    ctxLine = piece(clipBytes(ctxLine, form.ctx === null ? Math.max(160, Math.floor(budget / 3)) : form.ctx));   // the byte cut can leave an opener dangling — judged again after it
     used += bytes(ctxLine) + 1;
   }
   let cutReserved = false;
@@ -565,7 +588,7 @@ function buildReport(group, m, recs, invite, rest, budget, lead, form, log) {
       if (shown !== 0) break;
       if (!cutReserved) { used += CUT_RESERVE; cutReserved = true; room = budget - used - 1; }
       if (room <= 60) break;
-      l = clipBytes(l, room);
+      l = piece(clipBytes(l, room));   // a byte cut can leave an opener dangling — the line rule again after it
       isCut = true;
     }
     lines.unshift(l);

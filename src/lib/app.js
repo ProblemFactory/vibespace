@@ -1,6 +1,6 @@
 import { ThemeManager, THEMES, BUILTIN_THEMES } from './themes.js';
 import { installPluginClient } from './plugin-client.js';
-import { installKeybindings, registerKeybinding } from './contributions.js';
+import { installKeybindings, registerKeybinding, runCommand } from './contributions.js';
 import { buildGearMenu } from './gear-menu.js';
 import { BUILD_VERSION } from './build-version.js';
 import { track } from './telemetry-client.js';
@@ -15,8 +15,8 @@ import { LayoutManager } from './layout.js';
 import { ChatView } from './chat-view.js';
 import { createReconnectQueue } from './reconnect-queue.js';
 import { Resizer } from './resizer.js';
-import { anchorFixedPopup, api, configureToasts, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl } from './utils.js';
-import { t, tc } from './i18n.js';
+import { anchorFixedPopup, api, configureToasts, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl, announceModal } from './utils.js';
+import { t, tc, resolveLang } from './i18n.js';
 import { installManageAgents } from './manage-agents.js';
 import { installPluginsUI } from './plugins-ui.js';
 import { installUsageMeter } from './usage-meter.js';
@@ -51,6 +51,7 @@ import { DesktopManager } from './desktop-manager.js';
 import { StageManager, STAGE_ID } from './stage-manager.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { CustomizeMode, applyArrangement } from './customize-mode.js';
+import { installToolbarFold } from './toolbar-fold.js'; // lane toolbar-fold: the toolbar never overlaps — words go first, then a ⋯
 import { installSessionPalette } from './session-palette.js';
 import { installUserTodos } from './user-todos-panel.js';
 import { openInboxWindow } from './inbox-window.js'; // design-user-inbox-reply §9: THE For-you window (the popup's / a row's / the mini inbox's ⤢, ⚙ Communication ▸ For you…)
@@ -573,23 +574,14 @@ class App {
 
   _setupToolbar() {
     document.querySelectorAll('.layout-btn[data-layout]').forEach(btn => btn.addEventListener('click', () => this.wm.applyLayout(btn.dataset.layout)));
-    document.getElementById('btn-new-session').addEventListener('click', () => this.showNewSessionDialog());
-    document.getElementById('btn-file-explorer').addEventListener('click', () => this.openFileExplorer());
-    document.getElementById('btn-terminal').addEventListener('click', async (e) => {
-      // Host-aware (like Files): with remote hosts registered, pick where the
-      // shell runs; with none, open a local shell directly (zero friction).
-      const btn = e.currentTarget;
-      let hostsList = [];
-      try { const d = await fetchJson('/api/hosts'); hostsList = d?.hosts || []; } catch {}
-      if (!hostsList.length) return this.openShellTerminal();
-      const r = btn.getBoundingClientRect();
-      showContextMenu(r.left, r.bottom + 4, [
-        { label: t('Local'), action: () => this.openShellTerminal() },
-        ...hostsList.map(h => ({ label: h.name, action: () => this.openShellTerminal(undefined, { hostId: h.id }) })),
-      ]);
-    });
-    document.getElementById('btn-browser').addEventListener('click', () => this.openBrowser());
-    document.getElementById('btn-desktop').addEventListener('click', () => this.openDesktop());
+    // lane toolbar-fold: every toolbar button runs its REGISTERED command — the same one its row in the toolbar's ⋯
+    // runs when the button is folded (src/lib/toolbar-fold-model.js names them; Terminal's host picker lives in
+    // toolbar-fold.js, anchored at whichever control was pressed)
+    document.getElementById('btn-new-session').addEventListener('click', () => runCommand('session.new', { app: this }));
+    document.getElementById('btn-file-explorer').addEventListener('click', () => runCommand('explorer.open', { app: this }));
+    document.getElementById('btn-terminal').addEventListener('click', (e) => runCommand('toolbar.terminal', { app: this, anchor: e.currentTarget }));
+    document.getElementById('btn-browser').addEventListener('click', () => runCommand('browser.open', { app: this }));
+    document.getElementById('btn-desktop').addEventListener('click', () => runCommand('desktop.open', { app: this }));
 
     // Apply toolbar/taskbar/sidebar chrome customization settings.
     // While CustomizeMode is active, hidden elements stay ON the canvas
@@ -659,6 +651,8 @@ class App {
     applyArr();
     this.settings.on('chrome.arrangement', applyArr);
     this.settings.on('chrome.springs', applyArr);
+    // lane toolbar-fold: after the arrangement — the fold reads the zones in their arranged order at every layout
+    this._toolbarFold = installToolbarFold(this);
   }
 
   // Auto-hide taskbar: a thin fixed hotzone on the taskbar's screen edge — the
@@ -1107,7 +1101,9 @@ class App {
   async _showUpdateConfirmDialog() {
     const { body, close } = createModalShell({ id: 'update-confirm-dialog', title: t('Update VibeSpace'), bodyClass: 'update-confirm-body', minWidth: 'min(560px, 92vw)', escapeToClose: true });
     body.innerHTML = `<div class="empty-hint">${t('Checking for updates\u2026')}</div>`;
-    const [v, cl] = await Promise.all([fetchJson('/api/version?fresh=1'), fetchJson('/api/changelog-diff?fresh=1')]);
+    // The changelog in the DEVICE's language (the same value `vibespace.lang`
+    // resolves to); an entry the canonical has not translated comes in English.
+    const [v, cl] = await Promise.all([fetchJson('/api/version?fresh=1'), fetchJson(`/api/changelog-diff?fresh=1&lang=${encodeURIComponent(resolveLang())}`)]);
     if (!body.isConnected) return;
     const cur = v?.version || cl?.current || '?';
     const entries = cl?.entries || [];
@@ -1120,13 +1116,6 @@ class App {
     if (newestEntry && (!latest || this._versionNewer(newestEntry, latest))) latest = newestEntry;
     const newer = latest && this._versionNewer(latest, cur);
     const atLatest = !newer;
-    const list = entries.length
-      ? entries.map((e) => `
-        <div class="ucl-entry">
-          <div class="ucl-ver">v${escHtml(e.version)}</div>
-          <pre class="ucl-body">${escHtml(e.body || '')}</pre>
-        </div>`).join('')
-      : `<div class="empty-hint">${t('No changelog details available.')}</div>`;
     // Already on latest: show the current version's own changelog (server
     // returns it) under a "what's in this version" heading (user request).
     body.innerHTML = `
@@ -1134,11 +1123,18 @@ class App {
         newer ? `<span class="gs-ver-new ucl-newtag">${t('Update available')}</span>`
               : `<span class="ucl-newtag ucl-latesttag">${t('Latest version')}</span>`}</div>
       ${atLatest && entries.length ? `<div class="ucl-sub">${t('What’s in this version:')}</div>` : ''}
-      <div class="ucl-list">${list}</div>
+      <div class="ucl-list"></div>
       <div class="dialog-actions">
         <button type="button" class="mounts-btn" data-act="cancel">${t('Close')}</button>
         <button type="button" class="btn-create" data-act="go">${newer ? t('Update now') : t('Re-run update')}</button>
       </div>`;
+    // Each entry as a list (text nodes only — the file comes off the network):
+    // `v<version> — <date>`, a small heading per
+    // section, a list item per bullet; any other line (an old-format entry, an
+    // intro) a plain paragraph — never a <pre> wall.
+    const listEl = body.querySelector('.ucl-list');
+    if (entries.length) for (const e of entries) listEl.append(changelogEntryEl(e));
+    else { const hint = document.createElement('div'); hint.className = 'empty-hint'; hint.textContent = t('No changelog details available.'); listEl.append(hint); }
     body.querySelector('[data-act=cancel]').onclick = () => close();
     body.querySelector('[data-act=go]').onclick = () => {
       close();
@@ -1332,7 +1328,7 @@ class App {
   // Command mode extracted to CommandMode class (src/lib/command-mode.js)
 
   _setupLayoutManager() {
-    document.getElementById('btn-presets').addEventListener('click', () => this._showPresetsDialog());
+    document.getElementById('btn-presets').addEventListener('click', () => runCommand('layout.savedPresets', { app: this })); // lane toolbar-fold: the ⋯ row runs the same command
     document.getElementById('btn-preset-save').addEventListener('click', () => {
       const input = document.getElementById('preset-save-name');
       const name = input.value.trim();
@@ -1748,6 +1744,7 @@ class App {
     const overlay = document.getElementById('dialog-overlay'); overlay.classList.remove('hidden');
     overlay.querySelectorAll('.dialog').forEach(d => d.classList.add('hidden'));
     document.getElementById(id).classList.remove('hidden');
+    announceModal(overlay); // lane dialog-keys: the static overlay says it opened too (a live view you drive judges who opened it)
   }
 
   showNewSessionDialog({ cwd, backend, hostId, taskId } = {}) {
@@ -2430,6 +2427,7 @@ class App {
         // and opened a BLANK view-only window (real report, remote hosts).
         const realBsid = match.backendSessionId
           || (match.sessionId && match.sessionId !== match.webuiId ? match.sessionId : null);
+        const specWas = JSON.stringify(win._openSpec);
         Object.assign(win._openSpec, {
           backend: match.backend || win._openSpec.backend || 'claude',
           backendSessionId: realBsid || win._openSpec.backendSessionId || null,
@@ -2447,6 +2445,10 @@ class App {
           sourceKind: match.sourceKind || '',
           parentThreadId: match.parentThreadId || null,
         });
+        // the identity it learned (a backend id landing, a host backfilled) is persisted by the layout autosave —
+        // asked HERE, where it changed (lane badge-stale: it used to ride setTitleMeta's per-merge notify, which is
+        // now a no-op for an unchanged meta; the autosave's own gates — user-dirty, unchanged state — still apply)
+        if (JSON.stringify(win._openSpec) !== specWas) this.layoutManager?.scheduleAutoSave?.();
       }
       if (win._openSpec?.action === 'viewSession' || win._openSpec?.action === 'attachSession') {
         const displayName = this.sidebar.getCustomName?.(match) || match.webuiName || match.name || win._openSpec?.name || win.title || t('Session');
@@ -2547,6 +2549,37 @@ class App {
 }
 
 export { App };
+
+/** One changelog entry `{version, head, body, lang}` (GET /api/changelog-diff)
+ *  as DOM: `v<version> — <date>`, then per line of the body a heading
+ *  (`### Section`, the section word already in the file's language), a list
+ *  item (`- bullet`) or a paragraph (anything else: an old-format entry, an
+ *  intro). textContent throughout; `lang` on the box so CJK text gets its own
+ *  font. */
+function changelogEntryEl(e) {
+  const el = (tag, cls) => { const x = document.createElement(tag); if (cls) x.className = cls; return x; };
+  const plain = (s) => s.replace(/\*\*(.+?)\*\*/g, '$1');
+  const box = el('div', 'ucl-entry');
+  if (e.lang) box.lang = e.lang;
+  const ver = el('div', 'ucl-ver');
+  const date = (/^\S+\s+—\s+(\d{4}-\d{2}-\d{2})$/.exec(String(e.head || '').trim()) || [])[1];
+  ver.textContent = `v${e.version}${date ? ` — ${date}` : ''}`;
+  box.append(ver);
+  let ul = null;
+  for (const raw of String(e.body || '').split('\n')) {
+    const line = raw.trim();
+    if (!line) { ul = null; continue; }
+    let m;
+    if ((m = /^#{3,6}\s+(.+)$/.exec(line))) { const h = el('h4', 'ucl-sec'); h.textContent = plain(m[1]); box.append(h); ul = null; continue; }
+    if ((m = /^[-*]\s+(.+)$/.exec(line))) {
+      if (!ul) { ul = el('ul', 'ucl-items'); box.append(ul); }
+      const li = el('li'); li.textContent = plain(m[1]); ul.append(li);
+      continue;
+    }
+    const para = el('p', 'ucl-para'); para.textContent = plain(line); box.append(para); ul = null;
+  }
+  return box;
+}
 
 // Prototype mixins split out of this file (2.82.0 audit) — installed at import time, before any instantiation.
 installManageAgents(App);

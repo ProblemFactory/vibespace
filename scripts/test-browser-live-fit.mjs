@@ -207,7 +207,10 @@ await (async () => {
     return { good, last, page: vps.get(n) };
   };
   const f1 = await fitted(L1, 'd1');
-  ok(f1.good && f1.last.cw >= 690 && f1.last.cw <= 710 && f1.last.ch >= 880 && f1.last.ch <= 920, `the split pane is ${f1.last && f1.last.cw}×${f1.last && f1.last.ch}: the frame is ${f1.last && f1.last.picW}×${f1.last && f1.last.picH} and the page's own viewport ${f1.page && f1.page.w}×${f1.page && f1.page.h} (±2 px) — the picture IS the pane`, JSON.stringify(f1));
+  // lane browser-resume C: the TAB ROW (between the strip and the bar) shows whenever the browser has tabs — its height comes off
+  // the pane's (2.369.199 integration: 856 px measured beside the ~29 px row); the bound is on the pane plus that row
+  const tabRowH = await L1(`const r = L.el().querySelector('.browser-live-tabrow'); return r && getComputedStyle(r).display !== 'none' ? Math.round(r.getBoundingClientRect().height) : 0;`);
+  ok(f1.good && f1.last.cw >= 690 && f1.last.cw <= 710 && f1.last.ch + tabRowH >= 880 && f1.last.ch + tabRowH <= 920, `the split pane is ${f1.last && f1.last.cw}×${f1.last && f1.last.ch} (+ the tab row's ${tabRowH} px): the frame is ${f1.last && f1.last.picW}×${f1.last && f1.last.picH} and the page's own viewport ${f1.page && f1.page.w}×${f1.page && f1.page.h} (±2 px) — the picture IS the pane`, JSON.stringify(f1));
   ok(f1.last && f1.last.fit && f1.last.fit.state === 'fitted' && !f1.last.chip, 'the bridge says "fitted" for THIS pane — and a fitted page needs no chip', JSON.stringify(f1.last && f1.last.fit));
   const c1 = await census(Dk, canvasSel(s1.sessionId), 'desktop-fitted');
   ok(c1.dark < 0.01, `PIXEL CENSUS of the ${c1.W}×${c1.H} pane: ${(c1.dark * 100).toFixed(2)} % dark — no band under the page`, JSON.stringify(c1));

@@ -126,7 +126,7 @@ console.log('\n§3 the route over the real engine');
     const quietly = (fn) => { const o = console.log, w = console.warn; console.log = () => { }; console.warn = () => { }; try { return fn(); } finally { console.log = o; console.warn = w; } };
     if (session && credits != null) quietly(() => eng.recordCodexQuotaSignal(s1, { type: 'rate_limits_updated', onDemand: true, resetCredits: { availableCount: credits }, rateLimits: { primary: { used_percent: 100, window_minutes: 10080, resets_at: nowS + 2 * 86400 }, secondary: null } }));
     const verbs = () => wrote.filter((x) => /"codex-reset-credit"/.test(x)).length;
-    return { eng, A, s1, sessions, call, verbs, notices, arms, quietly, nowS, charged: () => (eng.spendGuard.snapshot().budget.instance || []).length };
+    return { eng, A, s1, sessions, call, verbs, wrote, notices, arms, quietly, nowS, charged: () => (eng.spendGuard.snapshot().budget.instance || []).length };
   };
 
   const w = world();
@@ -149,7 +149,7 @@ console.log('\n§3 the route over the real engine');
   ok('a second POST inside the 10-min floor ⇒ 429 cooldown (with the instant it lifts), no second verb', r2.code === 429 && r2.body.code === 'cooldown' && r2.body.cooldownUntilSec > w.nowS && w.verbs() === 1, JSON.stringify(r2.body));
   // the outcome: a PERSON's failed attempt is reported and never walks the ladder
   w.quietly(() => w.eng.recordCodexQuotaSignal(w.s1, { type: 'reset_credit_result', outcome: 'nothingToReset' }));
-  ok('a failed PERSON\'s attempt ⇒ ONE notice naming the account and the vendor\'s answer', w.notices.some((n) => /Reset credit not used on Cx Alpha — the vendor answered nothingToReset\./.test(n)), JSON.stringify(w.notices));
+  ok('a failed PERSON\'s attempt ⇒ ONE notice naming the account and the vendor\'s answer (in words: codex-cli 0.159.3\'s own outcome description)', w.notices.some((n) => /Reset credit not used on Cx Alpha — no current limit window is eligible for a reset \(nothing was spent\)\./.test(n)), JSON.stringify(w.notices));
   ok('…and NO wait is armed from it (the ladder is not walked a second time)', w.arms.length === 0, JSON.stringify(w.arms));
   ok('…the origin is consumed (one answer per attempt)', w.s1._resetCreditOrigin === null);
   // CONTRAST (the control for the two legs above): an AUTO attempt's failure says nothing and walks the ladder
@@ -164,6 +164,41 @@ console.log('\n§3 the route over the real engine');
     w3.quietly(() => w3.call('POST', w3.A));
     w3.quietly(() => w3.eng.recordCodexQuotaSignal(w3.s1, { type: 'reset_credit_result', outcome: 'reset' }));
     ok('a PERSON\'s successful attempt ⇒ the consumed notice (the same success path as the rung)', w3.notices.some((n) => /reset credit consumed/.test(n)), JSON.stringify(w3.notices));
+  }
+  // lane-codex-0159 — THE PRESS'S IDEMPOTENCY KEY (incident 2026-09-30: codex-cli 0.159.3 answered the keyless consume
+  // "Invalid request: missing field `idempotencyKey`"; its schema: "reuse the same value when retrying that attempt")
+  {
+    const wk = world();
+    const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+    const keyOf = (i) => { const v = wk.wrote.filter((x) => /"codex-reset-credit"/.test(x))[i]; try { return JSON.parse(v).idempotencyKey; } catch { return null; } };
+    wk.quietly(() => wk.call('POST', wk.A, { body: { sessionId: 'cx1' } }));
+    const k1 = keyOf(0);
+    ok('codex-0159: the verb carries a server-minted idempotencyKey (a v4 UUID — the schema\'s recommendation)', UUID.test(String(k1)), String(wk.wrote[0]));
+    ok('codex-0159: …the identity\'s try record holds the SAME key (the press\'s key, one per press)', wk.eng._resetCreditTries.get(wk.A)?.idempotencyKey === k1);
+    wk.quietly(() => wk.eng.recordCodexQuotaSignal(wk.s1, { type: 'reset_credit_result', outcome: 'noCredit', idempotencyKey: k1, attempts: 1 }));
+    ok('codex-0159: 0.159.3\'s new `noCredit` outcome is a failed attempt, said in words', wk.notices.some((n) => /Reset credit not used on Cx Alpha — the account has no reset credits available\./.test(n)), JSON.stringify(wk.notices));
+    wk.eng._resetCreditTries.get(wk.A).at -= 11 * 60e3; // the 10-min floor passed (the _poolAutoLast seam — never a sleep)
+    wk.quietly(() => wk.call('POST', wk.A, { body: { sessionId: 'cx1' } }));
+    const k2 = keyOf(1);
+    ok('codex-0159: a NEW press mints a NEW key (never the previous press\'s)', wk.verbs() === 2 && UUID.test(String(k2)) && k2 !== k1, `${k1} / ${k2}`);
+    wk.quietly(() => wk.eng.recordCodexQuotaSignal(wk.s1, { type: 'reset_credit_result', outcome: 'alreadyRedeemed', idempotencyKey: k2, attempts: 2 }));
+    ok('codex-0159: a KEYED `alreadyRedeemed` (the vendor: "the same idempotency key already completed a reset") = this press\'s own reset ⇒ the consumed path', wk.notices.some((n) => /Codex reset credit consumed/.test(n)) && wk.eng._resetCreditTries.get(wk.A)?.outcome === 'reset', JSON.stringify(wk.notices));
+  }
+  {
+    const wo = world();
+    wo.quietly(() => wo.call('POST', wo.A, { body: { sessionId: 'cx1' } }));
+    wo.quietly(() => wo.eng.recordCodexQuotaSignal(wo.s1, { type: 'reset_credit_result', outcome: 'alreadyRedeemed' }));
+    ok('codex-0159 CONTROL: a KEYLESS `alreadyRedeemed` (a wrapper older than the key — the 0.153 meaning) keeps the superseded path, never "consumed"', !wo.notices.some((n) => /Codex reset credit consumed/.test(n)) && wo.notices.some((n) => /already redeemed/.test(n)), JSON.stringify(wo.notices));
+  }
+  {
+    const ws = world();
+    ws.quietly(() => ws.call('POST', ws.A, { body: { sessionId: 'cx1' } }));
+    ws.quietly(() => ws.eng.recordCodexQuotaSignal(ws.s1, { type: 'reset_credit_result', error: 'Invalid request: missing field `idempotencyKey`' }));
+    ok('codex-0159: an OLD wrapper (no key echoed) refused locally by codex-cli 0.159 ⇒ the notice names the remedy (Terminate + Resume), never the raw vendor text', ws.notices.some((n) => /Reset credit not used on Cx Alpha — this conversation's codex wrapper is older than the codex CLI's reset-credit request \(nothing was spent\) — Terminate \+ Resume/.test(n)) && !ws.notices.some((n) => /missing field/.test(n)), JSON.stringify(ws.notices));
+    const wn = world();
+    wn.quietly(() => wn.call('POST', wn.A, { body: { sessionId: 'cx1' } }));
+    wn.quietly(() => wn.eng.recordCodexQuotaSignal(wn.s1, { type: 'reset_credit_result', error: 'Invalid request: missing field `idempotencyKey`', idempotencyKey: 'k', attempts: 1 }));
+    ok('codex-0159 CONTROL: the same words from a wrapper that SENT a key are a different drift — quoted as the vendor said them', wn.notices.some((n) => /the vendor answered Invalid request: missing field/.test(n)) && !wn.notices.some((n) => /Terminate \+ Resume/.test(n)), JSON.stringify(wn.notices));
   }
   // verify-r6 R1: the POST names the window the dialog SHOWED — a window that reset (or moved) while the dialog stayed
   // open would spend the credit on a FRESH window ("0% discarded" shown): refused by name, nothing spent
@@ -217,7 +252,7 @@ console.log('\n§3 the route over the real engine');
   }
   for (const r of roots) fs.rmSync(r, { recursive: true, force: true });
   const eng = read('src/server/usage-pool-engine.js');
-  ok('ONE writer: the auto rung and the manual use both call writeResetCredit with the CREDIT\'S identity (the verb is spelled once in the engine)', /const wr = writeResetCredit\(session, \{ resetsAtSec: R, lane, origin: 'auto', now, key \}\);/.test(eng) && /const wr = writeResetCredit\(session, \{ resetsAtSec: p\.resetsAtSec \|\| 0, lane: null, origin: 'user', now, key: p\.key \}\);/.test(eng) && (eng.match(/type: 'codex-reset-credit' \}\)/g) || []).length === 1);
+  ok('ONE writer: the auto rung and the manual use both call writeResetCredit with the CREDIT\'S identity (the verb is spelled once in the engine)', /const wr = writeResetCredit\(session, \{ resetsAtSec: R, lane, origin: 'auto', now, key \}\);/.test(eng) && /const wr = writeResetCredit\(session, \{ resetsAtSec: p\.resetsAtSec \|\| 0, lane: null, origin: 'user', now, key: p\.key \}\);/.test(eng) && (eng.match(/type: 'codex-reset-credit', idempotencyKey: idemKey \}\)/g) || []).length === 1);
   ok('the carrier is picked by CAPABILITY (capsOf(s.backend).resetCredit), never a backend id', /capsOf\(s\.backend\)\.resetCredit === true && ids\.has\(codexQuotaKeyFor\(s\)\)/.test(eng) && !/function resetCreditCarriers[\s\S]{0,400}backend === 'codex'/.test(eng));
   ok('the route is wired where the accounts routes live, and server.js hands the engine both functions', /require\('\.\.\/routes\/reset-credit\.js'\)\.registerResetCreditRoutes\(app, \{ engine \}\);/.test(read('src/server/account-usage-routes.js')) && /engine: \{ clearSealedOrders, resetCreditPreview, consumeResetCreditFor(, claimColdRestarts)?(, \w+)* \}/.test(read('server.js')));
 }

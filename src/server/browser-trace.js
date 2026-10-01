@@ -852,8 +852,13 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     const o = await orphans();
     // takeover C3: every managed ephemeral browser — the record, whose conversation, its state (the panel's Stop is the profile stop route)
     const ephemeralBrowsers = keeper && typeof keeper.ephemerals === 'function' ? keeper.ephemerals() : [];
-    return { profiles: rows, ephemeral: eph, ephemeralBrowsers, orphans: o.orphans, orphansBase: o.base, orphansWhy: o.why || null, forgotten: loadForgotten().slice().reverse(), sweep: lastSweep,
-      limits: { bytesPerProfile: bytesLimit(), bytesDefault: T.TRACE_BYTES_PER_PROFILE, bytesFloor: T.TRACE_BYTES_FLOOR, recordingRetentionMs: RR.RECORDING_RETENTION_MS, recordingBytesPerProfile: RR.RECORDING_BYTES_PER_PROFILE, staleDays: T.STALE_PROFILE_DAYS, graceMs: T.INFLIGHT_GRACE_MS, recordingFloor: T.RECORDING_FLOOR },
+    // lane browser-resume (§3.9): the KEPT browsers — a conversation's own browser's logins + tabs after it stopped (the
+    // panel's "Kept browsers" rows: Forget; the route strips the tabs for an agent's token)
+    const ks = keeper && typeof keeper.keptStore === 'function' ? keeper.keptStore() : null;
+    let kept = [], keptLimits = null, keptSweep = null;
+    if (ks) { try { kept = ks.list(); keptLimits = ks.limits(); keptSweep = ks.lastSweep(); } catch (e) { log.warn?.(`[browser-trace] the kept browsers could not be listed: ${e && e.message}`); } }
+    return { profiles: rows, ephemeral: eph, ephemeralBrowsers, kept, keptSweep, orphans: o.orphans, orphansBase: o.base, orphansWhy: o.why || null, forgotten: loadForgotten().slice().reverse(), sweep: lastSweep,
+      limits: { bytesPerProfile: bytesLimit(), bytesDefault: T.TRACE_BYTES_PER_PROFILE, bytesFloor: T.TRACE_BYTES_FLOOR, recordingRetentionMs: RR.RECORDING_RETENTION_MS, recordingBytesPerProfile: RR.RECORDING_BYTES_PER_PROFILE, staleDays: T.STALE_PROFILE_DAYS, graceMs: T.INFLIGHT_GRACE_MS, recordingFloor: T.RECORDING_FLOOR, ...(keptLimits ? { keptOn: keptLimits.on, keptPerConversation: keptLimits.perConversation, keptTotal: keptLimits.total } : {}) },
       traceOn: enabled(), taps: [...taps.values()].map((tp) => ({ sessionId: tp.sessionId, profileId: tp.profileId, entries: tp.entries, pending: tp.pending.size })), version: keeper && keeper._facts ? keeper._facts.lastVersion() ?? null : null };
   }
 

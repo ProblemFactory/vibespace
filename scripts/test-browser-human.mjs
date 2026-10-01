@@ -296,7 +296,7 @@ function pureLegs(H, tag = '') {
   // the WIRING: the window builds ONE keyed chip (never a toast) under the address row and patches its text / visibility
   // from the PURE line on every render of his ends (the digest's broadcast included)
   const wsrc = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
-  ok(/shareLine\.dataset\.key = 'share'/.test(wsrc) && /root\.append\(strip, bar, addrRow, shareLine, endLine,/.test(wsrc) && /const words = H\.ended \|\| st\.stopped \? null : humanShareLine\(profileRowOf\(\), t\);/.test(wsrc) && /endLine\.style\.display = line \? '' : 'none';\n    renderShare\(\);/.test(wsrc) && !/showToast\([^)]*humanShareLine/.test(wsrc) && /if \(H\) \{ renderEnds\(\); renderTitle\(\); \}/.test(wsrc),
+  ok(/shareLine\.dataset\.key = 'share'/.test(wsrc) && /root\.append\(strip, tabRow, bar, addrRow, shareLine, endLine,/.test(wsrc) && /const words = H\.ended \|\| st\.stopped \? null : humanShareLine\(profileRowOf\(\), t\);/.test(wsrc) && /endLine\.style\.display = line \? '' : 'none';\n    renderShare\(\);/.test(wsrc) && !/showToast\([^)]*humanShareLine/.test(wsrc) && /if \(H\) \{ renderEnds\(\); renderTitle\(\); \}/.test(wsrc),
     'PIN: his window carries ONE keyed chip under the address row, patched in place from humanShareLine at every render of his ends (never a toast) — the digest\'s broadcast re-renders them (verify r3: that call reverted stayed green on the fast tier; the heavy leg (a) flips the SAME node)');
 }
 
@@ -1283,10 +1283,23 @@ ok(hs && hs.browserKey === HL && hs.open && hs.recorded === true && hs.count >= 
       // the .197 integration: lane browser-stuck's two human Restart routes refuse a restart under HIS page (`browsing_yourself`) — so they name him and are walked (THE one guard, RESTART_IS_USERS)
       ['POST', '/api/browser/profiles/:id/restart', `/api/browser/profiles/${liveP.id}/restart`, {}],
       ['POST', '/api/browser/session/:sessionId/restart', '/api/browser/session/sess-any/restart', { ref: 'b1' }],
+      // lane browser-resume (§3.9): the KEPT browsers — every conversation's kept tab titles + urls, and their Forget, are the user's
+      ['GET', '/api/browser/kept', '/api/browser/kept'],
+      ['DELETE', '/api/browser/kept/:browserKey', '/api/browser/kept/bk-0000a001'],
+      // lane browser-resume B (ruling 2): Resume (the live view / the end card, the panel's kept row) and "Hand back and
+      // continue" are the user's acts — an agent resumes ITS OWN browser through `/api/agent/browser/resume`
+      ['POST', '/api/browser/session/:sessionId/resume', '/api/browser/session/sess-any/resume', { ref: '~ephemeral' }],
+      ['POST', '/api/browser/kept/:browserKey/resume', '/api/browser/kept/bk-0000a001/resume', {}],
+      ['POST', '/api/browser/session/:sessionId/hand-back', '/api/browser/session/sess-any/hand-back', { ref: '~ephemeral', note: 'continue from the cart' }],
       ['GET', '/api/browser/actions', `/api/browser/actions?browserKey=${HL}`],
       ['GET', '/api/browser/sessions', `/api/browser/sessions?browserKey=${HL}`],
       ['GET', '/api/browser/actions/:id', `/api/browser/actions/${clickE.id}`],
       ['GET', '/api/browser/actions/:id/frame/:which', `/api/browser/actions/${clickE.id}/frame/before`],
+      // lane browser-propose (2026-09-30): the user's Approve / Reject of an agent's browser proposal — THE same guard (an agent
+      // never decides its own proposal; PROPOSAL_IS_USERS), walked like his own browsing
+      ['POST', '/api/browser/proposals/:id/approve', '/api/browser/proposals/bl-0000abcd/approve', { shown: 'pd-00000000' }],
+      ['POST', '/api/browser/proposals/:id/reject', '/api/browser/proposals/bl-0000abcd/reject', {}],
+      ['GET', '/api/browser/proposals/:id', '/api/browser/proposals/bl-0000abcd'],
     ];
     const table = WALK_H.map(([m, p]) => m + ' ' + p).sort();
     ok(J(derived) === J(table), `the human-route census: the routes that serve HIS browsing, derived from the routers (${derived.length}), are exactly the walk's table — a new one is RED until it is walked`, { derived, table });
@@ -1379,8 +1392,22 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
   lines.forEach((l, i) => { if (/^\s*(\*|\/\/|\/\*)/.test(l)) return; const n = (l.replace(/\/\/.*$/, '').match(/reg\.leases/g) || []).length; if (n) { const f = fnAt(i); sites[f] = (sites[f] || 0) + n; } });
   // conversation-only: admission, caps, pins, the takeover's siblings, the re-judge, the ephemeral records, the timers, the
   // log lines that count conversations — each needs a CONVERSATION (his row has no session, no key an agent could hold)
-  const CONVERSATION = { ephEventFields: 1, ephemerals: 1, leasesFor: 1, leasesOn: 1, removeVerdict: 1, updateProfileNow: 1, knownKeysOf: 1, rejudgeLeases: 1, ceilingNow: 1, ownsLive: 1, ownLive: 1, ensureEphemeral: 2, retireEphemeral: 1, attach: 5, detach: 3, stop: 1, releaseAll: 1, browse: 1, endHuman: 1, quitHuman: 1, navigateHuman: 1, mirrorLeaseInput: 1, takeover: 1, siblingLeases: 1, noteLeaseUrl: 1, inputSummaryFor: 1, handBackOnStop: 1, statusFor: 2, liveHoldingFor: 1, setFor: 1, driveHolderFacts: 1, noteDrive: 1, dropChild: 3, switcherView: 1, switchBackend: 1, reconcile: 3, boot: 1, tick: 1, ensureTimer: 1, api: 1,
+  const CONVERSATION = { ephEventFields: 1, ephemerals: 1, leasesFor: 1, leasesOn: 1, removeVerdict: 1, updateProfileNow: 1, knownKeysOf: 1, rejudgeLeases: 1, ceilingNow: 1, ownsLive: 1, ownLive: 1, ensureEphemeral: 2, retireEphemeral: 1, attach: 6 /* lane browser-resume C: + the rebind's new tab as its lease's root */, detach: 3, stop: 1, releaseAll: 1, browse: 1, endHuman: 1, quitHuman: 1, navigateHuman: 1, mirrorLeaseInput: 1, takeover: 1, siblingLeases: 1, noteLeaseUrl: 1, inputSummaryFor: 1, handBackOnStop: 1, statusFor: 2, liveHoldingFor: 1, setFor: 1, driveHolderFacts: 1, noteDrive: 1, dropChild: 3, switcherView: 1, switchBackend: 1, reconcile: 3, boot: 1, tick: 1, ensureTimer: 1, api: 1,
     rejudgeAll: 1, // the .197 integration: identity r4's Task Group re-judge asks "does a CONVERSATION lease this profile" (his row belongs to no Task Group)
+    // lane browser-propose: a proposal's plan counts the OTHER conversations on the profile it would switch; the approved
+    // new profile's page opens in THIS conversation's own lease (his row is no conversation's)
+    proposalTargetFor: 1, openInLease: 1,
+    // lane browser-resume B: a Resume of an attachment needs THIS conversation's lease (never widened; decideAttach judges);
+    // the hand-back names a browser THIS conversation holds (his `hu-` row is never a conversation's to hand back)
+    resumeAttachment: 1, continueState: 1,
+    // lane browser-resume C: whose tab it is — the conversations' tab ROOTS are their leases' (his own tab is added from
+    // `humans`, never a lease); the agent's own tab verbs need ITS lease; the user's row judges a CONVERSATION's tab; the
+    // orphan rule (adoptable) asks whether any conversation leases the browser; the rebind's new tab is its lease's root
+    tabHoldersOf: 1, keepTabRoots: 1, bootstrapTabRoot: 1, agentTabAct: 3, tabOwnersFor: 1, userTabAct: 1,
+    // lane site-reset verify r3 #2: the PERSISTED WITNESS lives on a CONVERSATION's lease (`l.tabs` — the tabs the dialog watch
+    // saw born of its verbs); his row holds no lease — his tabs are his row's own (`ownTab` / `adopted`)
+    noteOwnTab: 1, forgetOwnTab: 1, dropLeaseTabs: 1, pruneOwnTabs: 1, // r4 #3: pruned to the browser's tabs at a watch's connect
+    holderTabs: 1, // lane site-reset verify r1: a CONVERSATION lease's pinned tab (+ r3's persisted witness); his tabs are read off his row, by his key, before this loop
   };
   // holder: "who holds this browser / is it used" — through holdersOn (the conversations' leases + his row)
   const HOLDER = { list: 1, holdersOn: 1 };
@@ -1417,7 +1444,11 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
   const RELEASE_DECLARED = { '(declaration)': 'the empty registry before the first load', load: 'the normalizer drops only a MALFORMED row — a well-formed lease never leaves at load' };
   const FORGETS = { removeProfile: 'the record is gone (removal needs no lease and a stopped browser)', stop: 'the browser stopped — every page went with it (a lease held at the stop is marked tabClosed; a key that left before answers the binary\'s own tab_gone, never another tab)', attach: 'the key is back — it holds a lease on its own tab again', adoptOrphan: 'moved into tabClosed first: every left key is marked', noteLeftTab: 'the bound — an evicted key is marked tabClosed first (fail closed, verify r4)' };
   const ENDS = { closeLeaseSession: 'the tab a narrowing took closes under its session — marked when the close went through', stop: 'every lease of a stopped browser is marked (never a switch: it re-opens each lease\'s own tab under its session)' };
-  const ENDS_DECLARED = { endHuman: 'HIS tabs, each by id — never a conversation\'s' };
+  const ENDS_DECLARED = { endHuman: 'HIS tabs, each by id — never a conversation\'s',
+    // lane browser-resume C (§3.9, the owner's ruling 3) — each judged by PURE src/browser-tabs.js BEFORE it runs:
+    agentTabAct: 'the agent\'s own `tab close` of its OWN tab (the verdict first — another holder\'s tab is not_your_tab, nothing runs); its session answers the binary\'s own tab_gone after its current tab, said in the answer',
+    userTabAct: 'the user\'s ✕ on the viewed agent\'s tab while HE drives it (never its last; its current tab first moves to a neighbour of its own) — recorded on the takeover\'s cycle, said at the handback; never another conversation\'s',
+    closeHumanTab: 'HIS tab by id, never his last (his current tab first moves to another of his) — never a conversation\'s' };
   // the paths the brief names, each walked to the site it releases through (caller → callee, both in the keeper)
   const PATHS = [
     ['the tick\'s drop / a session kill (the carrier grace)', 'tick', 'reconcile'], ['a restore (a restart without the conversation)', 'boot', 'reconcile'],
@@ -1462,10 +1493,11 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
     ['the bound forgetting without the mark', cut('noteLeftTab', '{ reg.tabClosed[`${pd.id}|${x}`] = now(); delete m[x]; }', 'delete m[x];'), /the bound forgets without marking/],
     ['a NEW forget site', judge(ksrc.replace('  function dropChild(handle) {', '  function forgetLeft(id) { delete reg.leftTabs[id]; }\n  function dropChild(handle) {')).bad, /forget in forgetLeft not in the census/],
     ['closeLeaseSession without the mark', cut('closeLeaseSession', '      if (t && t.ok) { reg.tabClosed[`${p.id}|${browserKey}`] = now(); commit(); }', '      if (t && t.ok) { commit(); }'), /closeLeaseSession closes a conversation's tab without the mark/],
+    ['a NEW tab-close site (lane browser-resume C)', judge(ksrc.replace('  function dropChild(handle) {', "  async function closeAnyTab(id) { return rt.exec(null, ['tab', 'close', id]); }\n  function dropChild(handle) {")).bad, /tab close in closeAnyTab not in the census/],
     ['a re-judge that no longer detaches', cut('rejudgeLeases', "      try { detach({ profileId, browserKey: l.browserKey, by: 'user' }); out.detached", "      try { (() => {})({ profileId, browserKey: l.browserKey, by: 'user' }); out.detached"), /path rejudgeLeases → detach gone/],
   ];
   const cbad = controls.filter(([, b, re]) => !(Array.isArray(b) && b.some((x) => re.test(x)))).map(([n, b]) => ({ n, b }));
-  ok(!cbad.length, `CONTROLS (${controls.length}): the census reddens a copy that skips each recorder site (detach, dropChild, the tick), a new release site, the bound that forgets without marking, a new forget site, a closed tab without its mark, a path that no longer reaches its site`, cbad);
+  ok(!cbad.length, `CONTROLS (${controls.length}): the census reddens a copy that skips each recorder site (detach, dropChild, the tick), a new release site, the bound that forgets without marking, a new forget site, a closed tab without its mark, a NEW tab-close site (lane browser-resume C), a path that no longer reaches its site`, cbad);
 
   // …then EACH path, driven over the fake 0.38.1: he takes the page the conversation left (where one stays) and the
   // conversation's return binds a NEW tab first — its next command never runs in his page

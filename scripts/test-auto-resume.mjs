@@ -367,7 +367,7 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   const srv8 = read('server.js');
   ok('WIRING: server.js routes beforeFire → beforeAutoResumeFire and provides the probe', /beforeFire: \(id, s\) => \{ try \{ return beforeAutoResumeFire\(id, s\); \}/.test(srv8) && /getQuotaProbe: \(\) => \{ try \{ return usage\.refreshViaCliPanel; \}/.test(srv8));
   const ss8 = read('src/server/stdout/claude-stream-json.js') + '\n' + read('src/server/stdout/codex-events.js'); // S5: per-protocol consumer modules
-  ok("WIRING: the claude result record IS the turn boundary; codex task_complete too", /if \(msg\.type === 'result'\) \{ try \{ noteTurnEnd\?\.\(session\); \} catch \{ \} \}/.test(ss8) && /task_complete'\) \{\s*\n\s*try \{ noteTurnEnd\?\.\(session\); \} catch \{\}/.test(ss8));
+  ok("WIRING: the claude result record IS the turn boundary; codex task_complete too", /if \(msg\.type === 'result'\) \{ try \{ noteTurnEnd\?\.\(session, msg\); \} catch \{ \} \}/.test(ss8) && /task_complete'\) \{\s*\n\s*try \{ noteTurnEnd\?\.\(session\); \} catch \{\}/.test(ss8));
 
   // the pre-fire VETO, functionally (async gate through a real create())
   const dV = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-veto-'));
@@ -495,11 +495,11 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
       ok('…the user was told (per-session switch notice)', notices.some((t) => /conversation "w1" moved to (Member Q|Member P)/.test(t)), notices.join(' | '));
       ok('…the walled-turn log names the demoted key — the pool verdict is no longer trusted alone', journal.some((l) => /\[wall\] w1: walled turn \(scope pool-\w+, demoted sub-\w+\) → usable via (Member Q|Member P)/.test(l)), journal.filter((l) => /walled turn/.test(l)).join(' | '));
       // (c) OBSERVED-ORG divergence: a session linked to B whose CLI the OTel
-      // stream saw on C. Since 2026-09-07 the observation decides NOTHING —
-      // not blocking (2.369.66) and not values either: it names the identity
-      // the CLI cached at SPAWN, so routing readings by it filed a
-      // hot-switched session's numbers under the account it started on. It
-      // still corroborates a wall on C and still speaks in the journal.
+      // stream labelled C. Since 2026-09-07 the observation decided nothing
+      // for blocking or values; since 2026-09-30 (lane-hot-switch) it is not
+      // read AT ALL — the org is a machine-wide LABEL (measured on 2.1.281:
+      // ~/.claude.json's oauthAccount for every token a process holds), so it
+      // no longer corroborates a wall on C nor speaks in the journal.
       const s3 = mkSess('w3', 'cid-3', B);
       obs.set('cid-3', { orgUuid: 'org-c', acct: C, known: true, ts: Date.now() - 30000 });
       ok('REFUTED AND REMOVED: sessionReadingMember is gone — there is no longer a "reading member" that differs from the billing member', typeof eng.sessionReadingMember === 'undefined');
@@ -507,33 +507,31 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
       ok('readingSlotFor (VALUES): the validated credential slot, NOT the observation', rs.key === B && rs.slotOk === true, JSON.stringify(rs));
       ok('…and it is PINNED for the turn: a mid-turn re-point does not re-key the readings still arriving from the credentials that produced them', (() => { am.ensureSessionPoolLink(P, 'w3', C); const again = eng.readingSlotFor(s3); am.ensureSessionPoolLink(P, 'w3', B); s3._turnReadingSlot = null; return again.key === B && again.slotReason === 'turn-pinned'; })());
       const bm = eng.sessionBillingMember(s3, P);
-      ok('sessionBillingMember (BLOCKING): the LINK is the answer, the observation rides along as corroboration, and the slot VALIDATED', bm.id === B && bm.linkedId === B && bm.observedId === C && bm.divergent === true && bm.slotOk === true, JSON.stringify(bm));
-      ok("…logged once: '[pool] session w3 observed on Member P while linked to Member Q'", journal.filter((l) => l === '[pool] session w3 observed on Member P while linked to Member Q').length === 1, journal.filter((l) => /observed on/.test(l)).join(' | '));
-      eng.sessionBillingMember(s3, P);
-      ok('…and not again inside 10 minutes', journal.filter((l) => /session w3 observed on/.test(l)).length === 1);
+      ok('sessionBillingMember (BLOCKING): the LINK is the answer, the slot VALIDATED, and the label carries nothing (no observedId / divergent)', bm.id === B && bm.linkedId === B && !('observedId' in bm) && !('divergent' in bm) && bm.slotOk === true, JSON.stringify(bm));
+      ok("…and nothing journals the label: no '[pool] session w3 observed on …' line (it read as proof the process held the wrong member)", journal.filter((l) => /observed on/.test(l)).length === 0, journal.filter((l) => /observed on/.test(l)).join(' | '));
       ok('resolveUsageKey follows the CREDENTIAL SLOT (live burn + probe matching + every derived cache key attribute to the link) — B-b3cd\'s routing REFUTED', eng.resolveUsageKey(s3) === B && eng.usageCacheKeyFor(s3) === B);
-      ok('corroborateReading reports the divergence and returns it, but the key is the caller\'s', (() => { const c = eng.corroborateReading(s3, B, 'probe'); return c && c.agree === false && c.observed === C; })());
+      ok('corroborateReading is RETIRED (the label corroborates nothing)', typeof eng.corroborateReading === 'undefined' && typeof eng.observedMemberFor === 'undefined');
       ok('wallKeyFor does NOT (a rejection is a fact about the credential slot) — THE inversion this incident bought', eng.wallKeyFor(s3) === B && eng.fireIdentityFor(s3).key === B, JSON.stringify({ wall: eng.wallKeyFor(s3), fire: eng.fireIdentityFor(s3) }));
       const v = eng.quotaVerdictFor(P, { model: 'claude-fable-5', session: s3 });
-      ok('quotaVerdictFor judges the BILLING member first (on=B, observed=C, divergent) and names the id it would send us to', v.usable === true && v.on === B && v.linked === B && v.observed === C && v.divergent === true && v.viaId === B && v.via === 'Member Q' && /observed on Member P while linked to Member Q/.test(v.reason), JSON.stringify(v));
+      ok('quotaVerdictFor judges the BILLING member first (on=B) and names the id it would send us to — no label in it', v.usable === true && v.on === B && v.linked === B && !('observed' in v) && !('divergent' in v) && v.viaId === B && v.via === 'Member Q' && !/observed on/.test(v.reason || ''), JSON.stringify(v));
       ok('negative control: without a session the pool verdict has no current-member context', eng.quotaVerdictFor(P, { model: 'claude-fable-5' }).on === undefined);
-      // a SINGLE wall on the observed member is still corroborated by the
-      // observation (that rung stands) — but it is no longer the session's
-      // blocking identity, so the pool does not "switch" to where it already is
+      // a SINGLE wall on the LABEL's member is no longer corroborated by the
+      // label (the observed-org rung is retired, lane-hot-switch): C is not
+      // this session's slot, so one wall on it is HELD, never a demotion
       eng._wallRing.clear(); eng._sessionWalls.clear();
       eng.noteWallSignal(s3, { bucket: 'fiveHour', key: C });
       eng.noteTurnEnd(s3);
       const cC = readCache(C);
-      ok('single wall on the OBSERVED member still demotes it (observed-org rung); no signal reset ⇒ the cached future reset is kept', cC.fiveHour.utilization === 1 && cC.source === 'wall' && cC.fiveHour.resetsAt === RESET_5H, JSON.stringify(cC));
-      ok("…journaled as '(1 walls / observed-org)'", journal.some((l) => /\[wall\] demoted Member P 5h until \S+ \(1 walls \/ observed-org\)$/.test(l)), journal.filter((l) => /demoted Personal/.test(l)).join(' | '));
+      ok('single wall on the LABEL\'s member is HELD — the label is not a rung that demotes (it was the observed-org rung until 2026-09-30)', cC.source !== 'wall' && cC.fiveHour.utilization !== 1, JSON.stringify(cC));
+      ok("…journaled as a held single wall, never '(… / observed-org)'", journal.some((l) => /\[wall\] w3: single wall on Member P \(not this session's credential slot\) — holding the demotion/.test(l)) && !journal.some((l) => /observed-org/.test(l)), journal.filter((l) => /\[wall\] w3|observed-org/.test(l)).join(' | '));
       ok('…B (the link, healthy) is NOT touched', readCache(B).fiveHour.utilization === 0.1 && readCache(B).source === 'cli-usage');
       ok('REFUTED AND REMOVED: the per-session pass no longer "switches" a session to the member it is already linked to (740 such re-points in the incident journal, each followed by another billed continue)', !journal.some((l) => /re-point, same target/.test(l)), journal.filter((l) => /per-session switch/.test(l)).join(' | '));
-      ok("…the walled-turn log carries BOTH facts, honestly labelled", journal.some((l) => /\[wall\] w3: walled turn .*\[billing Member Q, OTel observed Member P\]$/.test(l)), journal.filter((l) => /w3: walled turn/.test(l)).join(' | '));
-      // (d) staleness: an observation older than OBSERVED_ORG_RECENT_MS speaks for nothing
+      ok("…the walled-turn log carries no label ('OTel observed' is gone from it)", journal.some((l) => /\[wall\] w3: walled turn /.test(l)) && !journal.some((l) => /OTel observed/.test(l)), journal.filter((l) => /w3: walled turn/.test(l)).join(' | '));
+      // (d) any observation, fresh or stale, speaks for nothing: everything on the link
       const s4 = mkSess('w4', 'cid-4', B);
-      obs.set('cid-4', { orgUuid: 'org-c', acct: C, known: true, ts: Date.now() - eng.OBSERVED_ORG_RECENT_MS - 1000 });
-      ok('a >10min-old observation speaks for nothing (no divergence logged, everything on the link)', eng.sessionBillingMember(s4, P).divergent === false && eng.resolveUsageKey(s4) === B && eng.sessionBillingMember(s4, P).id === B && eng.corroborateReading(s4, B, 'probe') === null);
-      ok('…and a single wall keyed to that stale-observed member is HELD (not this session\'s slot, not verifiably observed)', (eng._wallRing.clear(), eng._sessionWalls.delete('w4'), eng.demoteWalledAccount(s4, [{ key: C, bucket: 'fiveHour', at: Date.now(), resetsAtMs: 0 }]).reason === 'unverified'));
+      obs.set('cid-4', { orgUuid: 'org-c', acct: C, known: true, ts: Date.now() - 1000 });
+      ok('a FRESH label on another member changes nothing (everything on the link)', eng.resolveUsageKey(s4) === B && eng.sessionBillingMember(s4, P).id === B);
+      ok('…and a single wall keyed to the label\'s member is HELD (not this session\'s slot)', (eng._wallRing.clear(), eng._sessionWalls.delete('w4'), eng.demoteWalledAccount(s4, [{ key: C, bucket: 'fiveHour', at: Date.now(), resetsAtMs: 0 }]).reason === 'unverified'));
       // (e) named non-demotions
       const s5 = { backend: 'claude', mode: 'chat', host: null, _webuiId: 'w5', claudeSessionId: 'cid-5', _accountId: A, pty: { write() { } } };
       ok("a non-pooled session's walled turn returns 'not-pooled' (its own cache mark already IS the ground truth)", eng.demoteWalledAccount(s5, [{ key: A, bucket: 'fiveHour' }]).reason === 'not-pooled');
@@ -553,7 +551,7 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
     // window of its own, and clearing it beside the two turn pins (where it
     // looks like it belongs) put the banner's mark back on the member the turn
     // had just proved innocent.
-    ok('PIN: the turn-end proof outlives the demotion and is then dropped on both exits', /try \{ onWalledTurn\(session, sigs\); \}[^\n]*\n\s*clearRefile\(\);\s*\n\s*return;/.test(eng2) && (eng2.match(/\n\s*clearRefile\(\);/g) || []).length === 2 && /const clearRefile = \(\) => \{ session\._turnWallRefile = null; \};\s*\n\s*if \(sigs\.length/.test(eng2));
+    ok('PIN: the turn-end proof outlives the demotion and is then dropped on both exits', /try \{ onWalledTurn\(session, sigs\); \}[^\n]*\n\s*clearRefile\(\);\s*\n\s*return;/.test(eng2) && (eng2.match(/\n\s*clearRefile\(\);/g) || []).length === 2 && /const clearRefile = \(\) => \{ session\._turnWallRefile = null; session\._turnWallRefuted = null; \};\s*\n\s*if \(sigs\.length/.test(eng2));
     // THE MECHANISM, NOT THE LITERAL. This pin exists to stop the demotion
     // growing a SECOND writer; it used to spell the call byte-for-byte, which
     // also froze WHICH member is written — and inc-mttbrtc0-6049 is precisely
@@ -569,7 +567,7 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
     // routes through src/usage-cache-write.js (B-9213) rather than owning a
     // second read-modify-write beside the one the panel and the pool read.
     && /usageWrite\.writeCacheObject\(\{/.test(read('src/rate-limit-capture.js')));
-    ok('PIN: the guard constants (≥2 walls inside a 120s ring, 10min observation recency, 10min session-wall memory) and the ladder itself', /WALL_RING_MS = 120e3/.test(eng2) && /OBSERVED_ORG_RECENT_MS = 10 \* 60e3/.test(eng2) && /SESSION_WALL_MS = 10 \* 60e3/.test(eng2) && /if \(!slotMatch && walls < 2 && !observedMatch\)/.test(eng2));
+    ok('PIN: the guard constants (≥2 walls inside a 120s ring, 10min session-wall memory) and the ladder itself — no observed-org rung (retired 2026-09-30: the OTel org is a machine-wide label)', /WALL_RING_MS = 120e3/.test(eng2) && !/OBSERVED_ORG_RECENT_MS/.test(eng2) && /SESSION_WALL_MS = 10 \* 60e3/.test(eng2) && /if \(!slotMatch && walls < 2\) \{/.test(eng2));
     ok('PIN: the per-session pool pass decides from sessionBillingMember (the credential slot), not from the observation', /const cm = sessionBillingMember\(s2, poolId\);\s*\n\s*const curFor = cm\.id \|\| linkCur;/.test(eng2) && /decidePoolSwitch\(\{ currentId: curFor, members, readCache: viewFor/.test(eng2) && /const viewFor = lead \? \(id\) => projectCacheAhead\(projected\(id\), [^\n]*: projected;/.test(eng2)); // B-f69c ③: `viewFor` = the family projection, advanced by the burn only for a cold conversation
     ok('PIN: resolveUsageKey resolves the CREDENTIAL SLOT for pooled sessions (live odometer, probe matching, derived cache keys) — the observation routes nothing', /function resolveUsageKey\(session\)[\s\S]{0,1200}sessionBillingMember\(session, acct\)\.id/.test(eng2) && !/sessionReadingMember/.test(eng2.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')));
     ok('PIN: both probe targets (wall ladder + pre-fire gate) are the member whose credentials the CLI reads', (eng2.match(/sessionBillingMember\(session, scope\)\.id : scope/g) || []).length === 2);

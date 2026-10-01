@@ -36,6 +36,7 @@ const CONTROL_RECORD_TYPES = new Set(['control_request', 'control_response', 'co
 const { ClaudeCodeAdapter } = require('../../adapters/claude-code.js');
 const { isTurnState, turnStateEffect } = require('../../turn-state.js');
 const { userChannelKind, userChannelRecord, userFilePaths } = require('../../user-channel.js');
+const { nextStampIn } = require('../../record-lateness.js'); // PURE: the late-record rule's look-ahead (lane-hot-switch)
 const { parseSetModelEcho } = require('../../model-echo.js'); // the ONE /model echo parser (shared with the status bar + card label)
 const browserHelpers = require('../../server/browser-helpers.js'); // (spelled from src/ like every require here — suites rebase '../../') MULTIVIEW §4 (B-89d0): a helper's browser is named by WITNESS — the Task that opened it + its `vibespace-browser new-child`
 
@@ -86,7 +87,8 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
   const { _vsuPending, armWorkflowUsageWatcher, kickPoolEval, markLimitBanner,
     maybeRepinLockedModel, maybeStopOnFallback, notePoolAuthFailure,
     modelsMatch, noteSessionProduced, noteTurnEnd, recordRateLimitEvent, resolveUsageKey, usageEstimator,
-    noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane, noteTurnStopped } = engine;
+    noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane, noteTurnStopped,
+    noteStreamRecord, recordIsLate } = engine;
 
   /**
    * IS THIS DIRECTORY A LINKED GIT WORKTREE? (round-4 verifier — the positive
@@ -459,6 +461,13 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
     // called from session-stdout's teardown, never by reaching into the
     // engine's state from there.
     session._settleTurnLane = () => settleTurnLane?.(session);
+    // THE LOOK-AHEAD of the late-record rule (lane-hot-switch): the stamp of the
+    // next STAMPED record already sitting in this attach's buffer. A rejected
+    // turn's `rate_limit_event` precedes its stamped error record by
+    // milliseconds, and a stalled bridge's backlog arrives in big chunks — so an
+    // unstamped record with no stamped neighbour behind it is judged by the one
+    // ahead (bounded in src/record-lateness.js, never a timer).
+    session._peekStamp = () => nextStampIn(lineBuf);
 
     ptyProcess.onData((output) => {
       if (session._reattachAttempts) session._reattachAttempts = 0;
@@ -479,6 +488,13 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
         try {
           const msg = JSON.parse(line);
           parsed = true;
+          // EVERY record shows its stamp to the stream clock FIRST (lane-hot-
+          // switch): the live-fact consumers below ask the engine whether a
+          // record is a backlog's before they act on it.
+          try { noteStreamRecord?.(session, msg); } catch { }
+          // the dead-bridge CATCH-UP (lane-dead-bridge): while a heal's backlog drains, every record is counted through
+          // the same late rule (src/server/bridge-watch.js armCatchUp) — the count and the card; the gate itself is the line above
+          try { session._bridgeCatchUp?.note?.(msg); } catch { }
           // BREADCRUMB for CLI evolution (2.227.8): the claude stream gained
           // `tool_progress` and it silently rode the subagent branch for
           // weeks (2.227.7) — the SECOND time a new upstream record type
@@ -706,7 +722,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
               && msg.message?.model && !String(msg.message.model).startsWith('<')) {
             // main-thread work ⇒ not limit-blocked ⇒ stale armed waits drop
             // (readings-based disarm misses accounts that emit no events)
-            try { noteSessionProduced?.(session); } catch { }
+            try { noteSessionProduced?.(session, msg); } catch { }
             // THE FACT BEFORE ITS READERS (2026-09-13 r4, the round-3 verifier).
             // The incident's FIRST announcement is a `fallback` CONTENT BLOCK on
             // the very record the substitute answered, and the loop that stamps
@@ -788,7 +804,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // harvest is their one ledger path. Account-billed remote
           // sessions keep riding it (their identity is real and global).
           if (msg.type === 'assistant' && msg.message?.usage && (msg.requestId || msg.message?.id)
-              && !(session.host && !session._accountId)) {
+              && !(session.host && !session._accountId) && !recordIsLate?.(session, msg)) { // a backlog's spend is the ledger scan's to book, by time — never the live odometer's (lane-hot-switch)
             try {
               const u = msg.message.usage; const cc = u.cache_creation || {};
               const acctKey = resolveUsageKey(session);
@@ -807,7 +823,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
             for (const b of msg.message.content) {
               if (b?.type === 'text' && typeof b.text === 'string' && /You've (?:reached|hit) your .{0,40} limit/.test(b.text)) {
                 global.__vsEvent?.('cli-usage-limit');
-                markLimitBanner(session, b.text); // passive cache mark (2.260.0); the wall SIGNAL rides noteWallSignal inside it (2.369.0)
+                markLimitBanner(session, b.text, msg); // passive cache mark (2.260.0); the wall SIGNAL rides noteWallSignal inside it (2.369.0); `msg` = its record, judged live-or-late (lane-hot-switch)
               } else if (b?.type === 'fallback') {
                 global.__vsEvent?.('cli-model-fallback', `${b.from?.model || '?'}->${b.to?.model || '?'}`);
                 // main thread only — a SUBAGENT's fallback must not interrupt
@@ -1215,7 +1231,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // TURN BOUNDARY (2.369.0 wall machine): classifies walled/normal,
           // runs the per-turn pool eval, arms/disarms — one owner.
           if (msg.type === 'command_lifecycle' && msg.state === 'started' && typeof msg.command_uuid === 'string' && msg.command_uuid && !session.host) peerCommandCard(msg.command_uuid);
-          if (msg.type === 'result') { try { noteTurnEnd?.(session); } catch { } }
+          if (msg.type === 'result') { try { noteTurnEnd?.(session, msg); } catch { } }
           // error results carry ban/credit/oauth text the retry path never
           // sees (the CLI gives up without a final api_retry record)
           if (msg.type === 'result' && msg.is_error) { try { notePoolAuthFailure?.(session, id, { message: String(msg.result || msg.error || '') }); } catch { } }
@@ -1322,7 +1338,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
             // notification blob, never as a main-stream assistant banner,
             // so the pool switch waited for full exhaustion).
             const lb = /You've (?:reached|hit) your .{0,40}? ?limit/i.exec(notifText.slice(0, 16384));
-            if (lb) { global.__vsEvent?.('cli-usage-limit'); markLimitBanner(session, lb[0]); }
+            if (lb) { global.__vsEvent?.('cli-usage-limit'); markLimitBanner(session, lb[0], msg); }
           }
           // Inactivity sweep (audit round-3): an agent whose turn was
           // interrupted / whose CLI died NEVER emits task_notification — its

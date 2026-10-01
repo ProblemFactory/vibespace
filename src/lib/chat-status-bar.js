@@ -4,6 +4,7 @@ import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, ef
 import { t } from './i18n.js';
 import { shortWorkflowName } from '../workflow-name.js';
 import { waitingChip } from '../helper-ask.js'; // PURE (lane S1): the waiting chip names who waits
+import { billingAuthKey, placementNote } from './pool-priority-model.js'; // PURE: THE ONE billing re-render key + the placement note (the title chip's twin)
 import { chipText as channelChipText, rowName as channelRowName, rowWords as channelRowWords, glyphFor as channelGlyphFor } from '../channel-touch.js'; // PURE (§26, B-099e): the channels chip's words
 
 /** The channels chip's glyph by the PURE glyphFor's closed answer (literal names — test-architecture §58). */
@@ -170,7 +171,10 @@ export class ChatStatusBar {
       title-bar badge's click-to-switch has no home; this is its stand-in). */
   setBilling(auth, onSwitch) {
     if (onSwitch) this._onBillingSwitch = onSwitch;
-    const key = auth ? `${auth.source}:${auth.name || ''}` : '';
+    // THE ONE key (PURE, shared with the title-bar chip, lane billing-chip 2026-09-30): the old
+    // `${source}:${name}` named the POOL only, so a per-session switch / pin / gather changed the
+    // member this chip prints ("⣿ pool → member") and the chip never repainted on the phone
+    const key = billingAuthKey(auth, t);
     if (key === this._billingKey) return;
     this._billingKey = key;
     this._billing = auth;
@@ -803,7 +807,8 @@ export class ChatStatusBar {
         : isPooled ? '⣿ ' + (a.name || t('Pool')) + (a.poolTarget ? ' → ' + a.poolTarget : '')
         : (a.name || (isApi ? (a.source === 'api-console' ? 'Console' : 'API')
           : (a.hostName ? glogin + ' @ ' + a.hostName : glogin)));
-      const tip = (isPooled ? t('Pooled account') + (a.poolTarget ? ' · ' + t('currently billing {name}', { name: a.poolTarget }) : ' · ' + t('no target'))
+      const how = isPooled ? placementNote(a, t) : ''; // WHICH rule placed it — "(pinned)" / "(priority #1)" / "(automatic)", the title chip's words
+      const tip = (isPooled ? t('Pooled account') + (a.poolTarget ? ' · ' + t('currently billing {name}', { name: a.poolTarget }) + (how ? ` (${how})` : '') : ' · ' + t('no target'))
           : isApi ? t('API billing (pay per use)') : (a.hostName && !a.name ? t('"{name}"’s own CLI login', { name: a.hostName }) : t('Subscription account')))
         + (a.hostName && (a.name || isApi) ? ' · ' + t('on "{name}"', { name: a.hostName }) : '')
         + (a.guessed ? ' · ' + t('estimated from the login state at spawn') : '')

@@ -174,26 +174,30 @@ console.log('— §9–§10 THE VANISH (owner correction #2: "他那个拖动出
 async function frameLegs(installTabGroupMixin, { quiet = false } = {}) {
   const failed = [];
   const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
-  const mkWin = (id, o = {}) => { const attrs = new Map(); return { id, type: 'browser-live', ...o, element: { style: { visibility: '', pointerEvents: '', contentVisibility: '' }, setAttribute: (k, v) => attrs.set(k, v), removeAttribute: (k) => attrs.delete(k), attrs } }; };
+  const mkWin = (id, o = {}) => { const attrs = new Map(); return { id, type: 'browser-live', ...o, element: { style: { visibility: '', pointerEvents: '', contentVisibility: '' }, classList: { contains: () => false }, getAttribute: (k) => (attrs.has(k) ? attrs.get(k) : null), setAttribute: (k, v) => attrs.set(k, v), removeAttribute: (k) => attrs.delete(k), attrs } }; };
   const calls = [];
-  const wm = { _app: { sessions: new Map([['live', { setSuspended: (v) => calls.push('suspend:' + v) }]]), stage: { _hideStage: (w) => { calls.push('stage-hide:' + w.id); w._hiddenByStage = true; w.element.style.visibility = 'hidden'; } }, desktopManager: { _hideWin: (w) => { calls.push('desk-hide:' + w.id); w._hiddenByDesktop = true; } } } };
+  // inc-munl8jkl-gaih: the window manager's ONE door + derivation (the real WindowManager prototype) — a leaving window
+  // carries its frame's reasons through setWindowHidden and every mark is derived there
+  const wm = Object.create(WindowManager.prototype);
+  Object.assign(wm, { windows: new Map(), _hideMq: { matches: false }, _app: { sessions: new Map([['live', { setHidden: (r, v) => calls.push(r + ':' + v) }]]) } });
   installTabGroupMixin(wm);
   // the exact state 2.369.196 left on his live view: the Stage's leave-time hide on the guest's own element, the host shown
   const stale = mkWin('live', { _hiddenByStage: true }); stale.element.style.visibility = 'hidden'; stale.element.style.pointerEvents = 'none'; stale.element.attrs.set('aria-hidden', 'true');
   wm._matchFrameVisibility(stale, mkWin('hero', { type: 'chat' }));
-  leg(stale._hiddenByStage === false && stale._hiddenByDesktop === false && stale.element.style.visibility === '' && stale.element.style.pointerEvents === '' && !stale.element.attrs.has('aria-hidden') && calls.includes('suspend:false'), '§9 a guest carrying the Stage\'s hide, leaving a SHOWN frame ⇒ every mark goes (both flags, visibility, pointer-events, aria-hidden, the suspended view) — 2.369.196 kept them: an invisible window', J({ stale: { s: stale._hiddenByStage, v: stale.element.style.visibility, pe: stale.element.style.pointerEvents }, calls }));
+  leg(stale._hiddenByStage === false && stale._hiddenByDesktop === false && stale.element.style.visibility === '' && stale.element.style.pointerEvents === '' && !stale.element.attrs.has('aria-hidden') && calls.includes('stage:false') && calls.includes('desktop:false'), '§9 a guest carrying the Stage\'s hide, leaving a SHOWN frame ⇒ every mark goes (both flags, visibility, pointer-events, aria-hidden, the suspended view) — 2.369.196 kept them: an invisible window', J({ stale: { s: stale._hiddenByStage, v: stale.element.style.visibility, pe: stale.element.style.pointerEvents }, calls }));
   const chatStale = mkWin('c2', { type: 'chat', _hiddenByDesktop: true }); chatStale.element.style.contentVisibility = 'hidden'; chatStale.element.style.visibility = 'hidden';
   wm._matchFrameVisibility(chatStale, mkWin('host2'));
   leg(chatStale._hiddenByDesktop === false && chatStale.element.style.contentVisibility === '' && chatStale.element.style.visibility === '', '§9 …a desktop hider\'s marks too (a chat\'s content-visibility included)');
-  calls.length = 0;
   const g1 = mkWin('g1'); wm._matchFrameVisibility(g1, mkWin('hs', { _hiddenByStage: true }));
   const g2 = mkWin('g2'); wm._matchFrameVisibility(g2, mkWin('hd', { _hiddenByDesktop: true }));
-  leg(J(calls) === J(['stage-hide:g1', 'desk-hide:g2']) && g1._hiddenByStage && g2._hiddenByDesktop, '§9 a HIDDEN frame ⇒ the leaving window is hidden the same way (a programmatic detach on a hidden Stage / desktop never pops a window onto the screen)', J(calls));
+  const hid = (w) => w.element.style.visibility === 'hidden' && w.element.style.pointerEvents === 'none' && w.element.attrs.get('aria-hidden') === 'true';
+  leg(g1._hiddenByStage && !g1._hiddenByDesktop && hid(g1) && g2._hiddenByDesktop && !g2._hiddenByStage && hid(g2), '§9 a HIDDEN frame ⇒ the leaving window is hidden the same way (a programmatic detach on a hidden Stage / desktop never pops a window onto the screen)', J({ g1: [g1._hiddenByStage, g1.element.style.visibility], g2: [g2._hiddenByDesktop, g2.element.style.visibility] }));
   const same = mkWin('x', { _hiddenByStage: true }); same.element.style.visibility = 'hidden';
   wm._matchFrameVisibility(same, same); wm._matchFrameVisibility(same, null);
   leg(same._hiddenByStage === true && same.element.style.visibility === 'hidden', '§9 the host leaving its own chain / no frame ⇒ nothing changes (the host IS the frame)');
   return failed;
 }
+const { WindowManager } = await import('../src/lib/window.js');
 const TG = await import('../src/lib/tab-group.js');
 const frameFailed = await frameLegs(TG.installTabGroupMixin);
 
@@ -201,14 +205,17 @@ const frameFailed = await frameLegs(TG.installTabGroupMixin);
 async function stageFrameLegs(StageMgr, { quiet = false } = {}) {
   const failed = [];
   const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
-  const mk = (id, o = {}) => ({ id, type: 'browser-live', element: { style: {} }, ...o });
+  const mk = (id, o = {}) => { const attrs = new Map(); return { id, type: 'browser-live', element: { style: {}, classList: { contains: () => false }, getAttribute: (k) => (attrs.has(k) ? attrs.get(k) : null), setAttribute: (k, v) => attrs.set(k, v), removeAttribute: (k) => attrs.delete(k) }, ...o }; };
   const chain = { tabs: ['hero', 'live'], active: 0, layout: 'tabs' };
   const hero = mk('hero', { type: 'chat', _tabChain: chain, _desktopId: STAGE_ID, gridBounds: { left: 0.1, top: 0.1, width: 0.5, height: 0.5 } });
   const live = mk('live', { _tabChain: chain, _desktopId: STAGE_ID, _hiddenByStage: true }); live.element.style.visibility = 'hidden'; live.element.style.pointerEvents = 'none';
   const other = mk('other', { _desktopId: STAGE_ID, _hiddenByStage: true }); other.element.style.visibility = 'hidden';
   const wins = new Map([['hero', hero], ['live', live], ['other', other]]);
   const store = new Map();
-  const sm = new StageMgr({ settings: { get: (k) => (k === 'desktop.dynamicEnabled' ? true : undefined), on() {} }, isMobile: false, sessions: new Map(), wm: { windows: wins, _captureGridBounds() {}, _applyGridBounds() {}, toggleMaximize() {} } });
+  const wm = Object.create(WindowManager.prototype); // the real door + derivation (inc-munl8jkl-gaih)
+  Object.assign(wm, { windows: wins, _hideMq: { matches: false }, _captureGridBounds() {}, _applyGridBounds() {}, toggleMaximize() {} });
+  const sm = new StageMgr({ settings: { get: (k) => (k === 'desktop.dynamicEnabled' ? true : undefined), on() {} }, isMobile: false, sessions: new Map(), wm });
+  wm._app = sm.app;
   sm._sync = () => ({ get: (st, k) => store.get(k), set: (st, k, v) => store.set(k, v) });
   sm._borrowHero(hero);
   leg(live._hiddenByStage === false && live.element.style.visibility === '' && live.element.style.pointerEvents === '', '§10 _borrowHero shows the hero\'s WHOLE group — the guest the last leave() hid (unbound: enter() re-shows the hero + its bound aux only) — the root of his invisible window', J({ s: live._hiddenByStage, v: live.element.style.visibility }));
@@ -233,6 +240,64 @@ async function stageFrameLegs(StageMgr, { quiet = false } = {}) {
 }
 const stageFrameFailed = await stageFrameLegs(StageManager);
 
+console.log('— §11 THE GEOMETRY A REPLACED WINDOW CARRIES (verify r1 of inc-munl8jkl-gaih): a borrowed hero\'s home, never the slot');
+{
+  const { carriedGeometry } = require(path.join(REPO, 'src/lib/stage-rules.js'));
+  const slot = { left: 0.3, top: 0.04, width: 0.62, height: 0.8 }, home = { left: 0.1, top: 0.2, width: 0.28, height: 0.39 };
+  const rows = [
+    { f: { gridBounds: home, isMaximized: true, desktopId: 'fin' }, want: { gridBounds: home, preSnapBounds: null, isMaximized: true, desktopId: 'fin' }, n: 'a desktop window: its own box + maximize + desktop' },
+    { f: { gridBounds: slot, onStage: true, stageHomeBounds: home, stageHomeMax: false, desktopId: 'scra' }, want: { gridBounds: home, preSnapBounds: null, isMaximized: false, desktopId: 'scra' }, n: 'a borrowed hero: the remembered HOME, never the slot its element sits at' },
+    { f: { gridBounds: slot, onStage: true, stageHomeBounds: home, stageHomeMax: true, isMaximized: false, desktopId: 'scra' }, want: { gridBounds: home, preSnapBounds: null, isMaximized: true, desktopId: 'scra' }, n: 'a borrowed hero that was maximized at home: maximized again (its element is un-maximized for the slot)' },
+    { f: { gridBounds: slot, onStage: true, stageHomeBounds: null, desktopId: '__stage__' }, want: { gridBounds: null, preSnapBounds: null, isMaximized: false, desktopId: '__stage__' }, n: 'a borrowed window with no remembered home: NO box (the Stage\'s belt decides), its desktop kept' },
+    { f: { gridBounds: home, preSnapBounds: { left: 0, top: 0, width: 0.5, height: 0.5 }, desktopId: null }, want: { gridBounds: home, preSnapBounds: { left: 0, top: 0, width: 0.5, height: 0.5 }, isMaximized: false, desktopId: null }, n: 'a pre-snap box rides along; no desktop ⇒ null' },
+  ];
+  for (const r of rows) ok(J(carriedGeometry(r.f)) === J(r.want), '§11 ' + r.n, J({ got: carriedGeometry(r.f), want: r.want }));
+  ok(J(carriedGeometry()) === J({ gridBounds: null, preSnapBounds: null, isMaximized: false, desktopId: null }), '§11 nothing in ⇒ nothing carried');
+  const g = carriedGeometry({ gridBounds: home }); g.gridBounds.left = 99;
+  ok(home.left === 0.1, '§11 the carried box is a copy');
+}
+
+console.log('— §11b PURE givenHomeOf: the home a half hands back to a frame re-formed around it — only where it still stands (verify r4)');
+{
+  const { givenHomeOf } = require(path.join(REPO, 'src/lib/stage-rules.js'));
+  const home = { left: 0.12, top: 0.22, width: 0.4, height: 0.5 }, beside = { left: 0.16, top: 0.26, width: 0.4, height: 0.5 }, moved = { left: 0.55, top: 0.45, width: 0.4, height: 0.5 };
+  const rows = [
+    { s: { gridBounds: home, isMaximized: false, at: beside }, f: { gridBounds: beside }, want: { gridBounds: home, isMaximized: false }, n: 'the half still at the box the Stage placed it (beside) ⇒ the frame\'s home handed back' },
+    { s: { gridBounds: home, isMaximized: false, at: home }, f: { gridBounds: { ...home, left: home.left + 0.004 } }, want: { gridBounds: home, isMaximized: false }, n: 'a quantization wobble under 0.005 is still the same box' },
+    { s: { gridBounds: home, isMaximized: false, at: beside }, f: { gridBounds: moved }, want: null, n: 'the half MOVED by hand ⇒ nothing handed back (his box is the home)' },
+    { s: { gridBounds: home, isMaximized: false, at: beside }, f: { gridBounds: null }, want: null, n: 'no box on the half ⇒ nothing' },
+    { s: { gridBounds: home, isMaximized: true, at: home }, f: { gridBounds: { left: 0, top: 0, width: 1, height: 1 }, isMaximized: true }, want: { gridBounds: home, isMaximized: true }, n: 'a MAXIMIZED home: held while the half is still maximized (its fractions are the whole workspace)' },
+    { s: { gridBounds: home, isMaximized: true, at: home }, f: { gridBounds: home, isMaximized: false }, want: null, n: 'a maximized home whose half was un-maximized ⇒ nothing' },
+    { s: { gridBounds: home, isMaximized: false }, f: { gridBounds: home }, want: null, n: 'a stamp without the placed box (never written by the product) ⇒ nothing (fail closed)' },
+    { s: null, f: { gridBounds: home }, want: null, n: 'no stamp ⇒ nothing' },
+  ];
+  for (const r of rows) ok(J(givenHomeOf(r.s, r.f)) === J(r.want), '§11b ' + r.n, J({ got: givenHomeOf(r.s, r.f), want: r.want }));
+  const g = givenHomeOf({ gridBounds: home, at: home }, { gridBounds: home }); g.gridBounds.left = 99;
+  ok(home.left === 0.12, '§11b the home handed back is a copy');
+}
+
+console.log('— §11c PURE tornOffStep: the step beside a home nothing occupies (verify r4 — a fact of the desktop, never a count in memory)');
+{
+  const { tornOffStep, tornOffBox } = require(path.join(REPO, 'src/lib/stage-rules.js'));
+  const home = { left: 0.14, top: 0.18, width: 0.4, height: 0.5 }, s = (k) => tornOffBox(home, undefined, k);
+  const corner = { left: 0.5, top: 0.5, width: 0.5, height: 0.5 }, c = (k) => tornOffBox(corner, undefined, k);
+  const rows = [
+    { o: [], want: 0, n: 'nothing beside the home ⇒ the first step' },
+    { o: [home], want: 0, n: 'the home itself (the frame) is no step' },
+    { o: [s(0)], want: 1, n: 'the first step taken (a half torn before a reload) ⇒ the second' },
+    { o: [s(0), s(1)], want: 2, n: 'the first two taken ⇒ the third' },
+    { o: [s(1)], want: 0, n: 'only the second taken ⇒ the first (a close freed it)' },
+    { o: [{ ...s(0), left: s(0).left + 0.004 }], want: 1, n: 'a wobble under 0.005 is the same box: taken' },
+    { o: [{ ...s(0), left: s(0).left + 0.02 }], want: 0, n: 'a box a real move away is free' },
+    { o: [c(0)], want: 1, n: 'a corner home (the steps go backward): the first backward box taken ⇒ the second', home: corner },
+    { o: Array.from({ length: 12 }, (_, k) => s(k)), want: 0, n: 'every step taken ⇒ the first (the cascade\'s own cycle)' },
+    { o: [null, { left: 'x' }, 7], want: 0, n: 'junk in the list is not a box' },
+  ];
+  for (const r of rows) ok(tornOffStep(r.home || home, r.o) === r.want, '§11c ' + r.n, J({ got: tornOffStep(r.home || home, r.o), want: r.want }));
+  ok(tornOffStep(null, [s(0)]) === 0 && tornOffStep(home, 'nope') === 0 && tornOffStep(home) === 0, '§11c no home / no list ⇒ the first step');
+  ok(tornOffStep(home, [s(0), s(1), s(2)], { max: 3 }) === 0 && tornOffStep(home, [s(0)], { step: 0.1 }) === 0, '§11c max and step are honoured (a different step size has a different first box)');
+}
+
 console.log('— §7 wiring: every door asks the one rule and says its refusal');
 {
   const W = read('src/lib/window.js'), D = read('src/lib/desktop-manager.js'), CM = read('src/lib/command-mode.js'), TB = read('src/lib/taskbar.js');
@@ -246,8 +311,8 @@ console.log('— §7 wiring: every door asks the one rule and says its refusal')
   ok(/id: 'window\/move-to-desktop'[^\n]*getDesktopMenuItems\(c\.id\)/.test(TB), '§7 the window menu\'s "Move to Desktop ▸" reads getDesktopMenuItems (so the reason row reaches every window menu)');
   const TGS = read('src/lib/tab-group.js'), SMS = read('src/lib/stage-manager.js');
   ok(/if \(hostWin && hostWin !== win\) this\._matchFrameVisibility\(win, hostWin\);/.test(TGS), '§7 tab-group _detachFromChain: a leaving guest takes its frame\'s visibility (every detach — the drag, a regroup, a re-chain)');
-  ok(/const frame = this\.windows\.get\(chain\.tabs\[0\] === winId \? chain\.tabs\[1\] : chain\.tabs\[0\]\) \|\| null;\s*this\._detachFromChain\(chain, winId\);[\s\S]{0,400}this\._app\?\.stage\?\.onTornOff\?\.\(win, frame\)/.test(TGS), '§7 …the tab drag names the frame BEFORE the detach and hands the torn-off window to the stage');
-  ok(/for \(const id of \(win\._tabChain && Array\.isArray\(win\._tabChain\.tabs\) \? win\._tabChain\.tabs : \[\]\)\) \{[\s\S]{0,160}if \(m && m\._hiddenByStage\) this\._showWin\(m\);/.test(SMS), '§7 stage-manager _borrowHero re-shows the hero\'s whole group');
+  ok(/const frame = this\.windows\.get\(chain\.tabs\[0\] === winId \? chain\.tabs\[1\] : chain\.tabs\[0\]\) \|\| null;\s*this\._detachFromChain\(chain, winId\);[\s\S]{0,800}this\._app\?\.stage\?\.onTornOff\?\.\(win, frame\)/.test(TGS), '§7 …the tab drag names the frame BEFORE the detach and hands the torn-off window to the stage (the span admits the lanes\' witness lines between: desktop-move\'s witnessChain, stage-blank\'s _noteChainAct)');
+  ok(/for \(const m of this\._frameOf\(win\)\) this\.app\.wm\.setWindowHidden\(m, \{ desktop: false, stage: false \}\);/.test(SMS) && /_frameOf\(win\) \{[\s\S]{0,200}win\._tabChain\.tabs/.test(SMS), '§7 stage-manager _borrowHero re-shows the hero\'s whole group (every member\'s reasons cleared through the one door — inc-munl8jkl-gaih)');
   ok(/\.desktop-preview\.stage-refuse \{/.test(read('public/style.css')) && /\.stage-refuse-label \{/.test(read('public/style.css')), '§7 style.css draws the mark and the label (theme vars)');
 }
 
@@ -274,21 +339,22 @@ console.log('— §8 negative controls (patched copies, scripts/mutant-copy.mjs)
     const failed = await dmLegs((await import(f)).DesktopManager, { quiet: true });
     ok(failed.some((n) => /says the refusal in a toast/.test(n)) && failed.some((n) => /TYPED refusal/.test(n)), `control silent-return: the pre-fix silent return turns the typed + spoken legs RED (${failed.length}: ${failed.slice(0, 2).join(' | ').slice(0, 160)})`);
   }
-  // the vanish: a frame-visibility that forgets the inline hide, and a borrow that shows the hero alone (2.369.196)
+  // the vanish: a frame-visibility that copies the reasons without deriving (the inline hide stays), and a borrow that
+  // shows the hero alone (2.369.196)
   const TGSRC = read('src/lib/tab-group.js');
-  const tgFind = "    el.style.visibility = ''; el.style.pointerEvents = '';\n";
+  const tgFind = "    this.setWindowHidden(win, { desktop: !!frame._hiddenByDesktop, stage: !!frame._hiddenByStage });\n";
   ok(TGSRC.includes(tgFind), 'control keeps-inline-hide: the patched line exists in tab-group.js');
   if (TGSRC.includes(tgFind)) {
-    const f = M.write('src/lib/tab-group.js', TGSRC.replace(tgFind, '\n'), 'keeps-inline-hide');
+    const f = M.write('src/lib/tab-group.js', TGSRC.replace(tgFind, '    win._hiddenByDesktop = !!frame._hiddenByDesktop; win._hiddenByStage = !!frame._hiddenByStage;\n'), 'keeps-inline-hide');
     const failed = await frameLegs((await import(f)).installTabGroupMixin, { quiet: true });
     ok(failed.some((n) => /every mark goes/.test(n)), `control keeps-inline-hide: the torn-off window keeps visibility:hidden ⇒ the §9 leg turns RED (${failed.length}: ${failed.slice(0, 1).join(' | ').slice(0, 140)})`);
   }
   const SMSRC = read('src/lib/stage-manager.js');
-  const smFind = '      if (m && m._hiddenByStage) this._showWin(m);\n';
+  const smFind = '    for (const m of this._frameOf(win)) this.app.wm.setWindowHidden(m, { desktop: false, stage: false });\n';
   ok(SMSRC.includes(smFind), 'control hero-alone: the patched line exists in stage-manager.js');
   if (SMSRC.includes(smFind)) {
     // the copy re-evaluates the module: its window-type registration would be a duplicate — the copy drops it (the class is what is judged)
-    const f = M.write('src/lib/stage-manager.js', SMSRC.replace(smFind, '\n').replace(/\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n'), 'hero-alone');
+    const f = M.write('src/lib/stage-manager.js', SMSRC.replace(smFind, '    this.app.wm.setWindowHidden(win, { desktop: false, stage: false });\n').replace(/\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n'), 'hero-alone');
     const failed = await stageFrameLegs((await import(f)).StageManager, { quiet: true });
     ok(failed.some((n) => /WHOLE group/.test(n)), `control hero-alone: the borrow that shows the hero alone (2.369.196) turns the §10 leg RED (${failed.length}: ${failed.slice(0, 1).join(' | ').slice(0, 140)})`);
   }

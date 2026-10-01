@@ -921,6 +921,20 @@ function feedFreshMs(o = {}) {
   const ov = num(o && o.overlapSec) !== null ? Math.max(30, Number(o.overlapSec)) : FEED_DEFAULTS.overlapSec;
   return Math.max(180e3, (3 * every + ov) * 1000);
 }
+/** Missed answers IN A ROW before the feed's wait is said as "not answering" while its last page is still fresh — the
+ *  engine's FAILURES_BEFORE_LOUD (channels-engine.js), spelled here because this module imports nothing (verify r1). */
+const FEED_LOUD_STRIKES = 3;
+/** A shape park's offending field lists (lane lark-p2p), bounded: ≤ 3 lists × ≤ 6 names in the field alphabet. */
+function shapeFields(v) {
+  if (!Array.isArray(v)) return [];
+  return v.slice(0, 16).map((l) => (Array.isArray(l) ? l.slice(0, 6).filter((x) => typeof x === 'string' && /^[A-Za-z0-9_.]{1,64}$/.test(x)) : [])).filter((l) => l.length).slice(0, 3);
+}
+/** HH:MM of an instant on this device's clock face (a PURE default; the panel passes its locale's). */
+function hhmm(ms) {
+  const d = new Date(Number(ms));
+  if (!Number.isFinite(d.getTime())) return '';
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
 /**
  * IS THE FEED ON, AND IS IT CARRYING THIS ACCOUNT — the ONE answer (§2.8). Positive evidence only:
  *   off        not declared / the account disabled / the owner's option `off` / the HELD sign-in lacks the scope
@@ -950,12 +964,18 @@ function feedState(caps, rec, now, { everySec = FEED_DEFAULTS.everySec, overlapS
   const ref = f.refused && typeof f.refused === 'object' ? f.refused : null;
   if (ref) {
     const lifted = credentialChangedAt(r) > (Number(ref.at) || 0) || (Number(ref.retryAt) > 0 && Number(now) >= Number(ref.retryAt));
-    if (!lifted) return { ...base, state: 'refused', why: String(ref.code || 'refused'), mode, requiredScopes: Array.isArray(ref.requiredScopes) ? ref.requiredScopes.slice(0, 8) : [], retryAt: num(ref.retryAt), at: num(ref.at) };
+    if (!lifted) return { ...base, state: 'refused', why: String(ref.code || 'refused'), mode, requiredScopes: Array.isArray(ref.requiredScopes) ? ref.requiredScopes.slice(0, 8) : [], retryAt: num(ref.retryAt), at: num(ref.at), fields: shapeFields(ref.fields) };
   }
   const on = { ...base, on: true, mode };
   // verify r1: the back-off says WHICH wait it is — the vendor limiting the search (a 429) or the search not answering (a
-  // 5xx / a timeout / a refused shape: the feed's own failure ladder), never "limiting" for a search that is down
-  if (Number(f.backoffUntil) > Number(now)) return { ...on, state: 'backoff', why: f.backoffWhy === 'failed' ? 'failed' : 'rate-limited', until: Number(f.backoffUntil) };
+  // 5xx / a timeout / a refused shape: the feed's own failure ladder), never "limiting" for a search that is down.
+  // lane lark-p2p verify r1: a LONE missed answer (fewer than FEED_LOUD_STRIKES in a row) while the last good page is
+  // still fresh is not "not answering" — the feed delivered a window inside its bound (a 504 / 200 alternation read "is
+  // not answering" on 235 of 240 ticks while a window completed every 30 s); the card keeps the mode's line. A 429, or a
+  // row of three, or a stale last page, is said as the wait it is.
+  const freshOk = Number(f.lastOkAt) > 0 && Number(now) - Number(f.lastOkAt) <= feedFreshMs({ everySec, overlapSec });
+  const lone = f.backoffWhy === 'failed' && (Number(f.strikes) || 0) < FEED_LOUD_STRIKES && freshOk;
+  if (Number(f.backoffUntil) > Number(now) && !lone) return { ...on, state: 'backoff', why: f.backoffWhy === 'failed' ? 'failed' : 'rate-limited', until: Number(f.backoffUntil) };
   if (!(Number(f.lastOkAt) > 0)) return { ...on, state: 'never' };
   if (Number(now) - Number(f.lastOkAt) > feedFreshMs({ everySec, overlapSec })) return { ...on, state: 'behind', ageSeconds: ageS(f.lastOkAt, Number(now)) };
   return { ...on, fresh: true, state: mode, carrying: mode === 'carrying' };
@@ -965,7 +985,7 @@ function feedState(caps, rec, now, { everySec = FEED_DEFAULTS.everySec, overlapS
  * measured: {total, missed, rate}, requiredScopes, until, scope}). '' where nothing needs saying (not declared,
  * disabled, or the scope is missing — the grants line says the one Re-authorize).
  */
-function feedText(view, { t = defaultT, vendor = '', now = Date.now() } = {}) {
+function feedText(view, { t = defaultT, vendor = '', now = Date.now(), clock = hhmm } = {}) {
   const v = view && typeof view === 'object' ? view : {};
   const V = vendor || t('The vendor');
   const every = Number(v.everySec) || FEED_DEFAULTS.everySec;
@@ -975,10 +995,34 @@ function feedText(view, { t = defaultT, vendor = '', now = Date.now() } = {}) {
     case 'refused':
       if (v.why === 'forbidden') return t('Search is off: {vendor} refused {scopes} — enable it in the app console, publish a version, then Re-authorize', { vendor: V, scopes: (Array.isArray(v.requiredScopes) && v.requiredScopes.length ? v.requiredScopes : [v.scope || 'search:message']).join(' + ') });
       if (v.why === 'time-range-ignored') return t('Search is off: {vendor} ignored its time window — each chat is checked on its own', { vendor: V });
+      // lane lark-p2p (2026-09-30): the search ANSWERS, but this version cannot read its hits — said with WHAT it could
+      // not read (the owner's card said nothing while 241 260 hits were dropped as malformed)
+      if (v.why === 'shape') {
+        const names = [...new Set(shapeFields(v.fields).flat())];
+        return names.length
+          ? t("{vendor}'s search answers, but its hits have a shape this version does not read (missing or unreadable: {fields}) — the single-chat feed is off until an update; each chat is checked on its own", { vendor: V, fields: names.join(', ') })
+          : t("{vendor}'s search answers, but its hits have a shape this version does not read — the single-chat feed is off until an update; each chat is checked on its own", { vendor: V });
+      }
       return t('Search is off: {vendor} answered in a shape this version does not read — each chat is checked on its own', { vendor: V });
     case 'backoff': {
       const s = Math.max(1, Math.ceil((Number(v.until) - Number(now)) / 1000));
-      if (v.why === 'failed') return t('{vendor} search is not answering — each chat is checked on its own · retrying in {s} s', { vendor: V, s });
+      if (v.why === 'failed') {
+        // lane lark-p2p: the back-off SAYS its count, its kind and its END — "until 03:28", never a countdown the card
+        // freezes at (a card is drawn once per broadcast)
+        const n = Math.floor(Number(v.strikes) || 0);
+        const time = clock(Number(v.until));
+        // verify r1: "in a row" needs a row — a single missed answer (every lone 504, a 30 s wait) reads as "is not
+        // answering — until HH:MM", never "1× in a row"
+        if (n >= 2 && (!v.strikeWhy || v.strikeWhy === 'transport')) return t("{vendor}'s search did not answer {n}× in a row — each chat is checked on its own until {time}", { vendor: V, n, time });
+        // verify r3: a search that ANSWERS, with something that is not a search page (the envelope judge's `envelope` strike
+        // kind: a changed API, a proxy page, a captive portal), is never "not answering" — the card says what it is
+        if (v.strikeWhy === 'envelope') {
+          if (n >= 2) return t("{vendor}'s search answered {n}× in a row with something that is not a search page — each chat is checked on its own until {time}", { vendor: V, n, time });
+          return t("{vendor}'s search answered with something that is not a search page — each chat is checked on its own until {time}", { vendor: V, time });
+        }
+        if (n >= 2) return t("{vendor}'s search failed {n}× in a row — each chat is checked on its own until {time}", { vendor: V, n, time });
+        return t("{vendor}'s search is not answering — each chat is checked on its own until {time}", { vendor: V, time });
+      }
       return t('{vendor} is limiting the search · resuming in {s} s', { vendor: V, s });
     }
     case 'never': return t('New messages: searching for the first time');
@@ -1005,6 +1049,17 @@ function feedText(view, { t = defaultT, vendor = '', now = Date.now() } = {}) {
     }
     default: return '';
   }
+}
+/** Hits the search returned that this version could not read, BELOW the park (lane lark-p2p): said with the fields, so
+ *  a feed that drops some of what it finds is never silent. '' when none were dropped. Verify r2: the count is the LAST
+ *  HOUR's (`counters.malformedRecent`, the engine's ring), never the cumulative `malformed` — two stray items in one minute
+ *  used to stay on the card as "4 search hits could not be read" for ever; a view without the recent count says nothing. */
+function feedUnreadableText(view, { t = defaultT } = {}) {
+  const c = view && view.counters && typeof view.counters === 'object' ? view.counters : null;
+  const n = c ? Math.floor(Number(c.malformedRecent) || 0) : 0;
+  if (!n) return '';
+  const names = [...new Set(shapeFields(c.malformedFields).flat())];
+  return names.length ? t('{n} search hits could not be read in the last hour (missing or unreadable: {fields})', { n, fields: names.join(', ') }) : t('{n} search hits could not be read in the last hour', { n });
 }
 /** The single-chat catch-up (§2.7), said once it ran: how many single chats the first run found. */
 function feedCatchUpText(cu, { t = defaultT } = {}) {
@@ -1064,4 +1119,6 @@ module.exports = {
   pushWindow, pushSamplesAdd, pushMissRate, pushDemotionVerdict, pushLaneText,
   // lane lark-search-poll: the change feed's one lane answer + its words
   FEED_MODES, FEED_DEFAULTS, feedState, feedText, feedCatchUpText, grantsText, untitledText, credentialChangedAt, feedBoundSec, feedFreshMs, changeFeedRow,
+  // lane lark-p2p: a shape park's bounded field lists + the unreadable-hits line; verify r1: the lone-miss bound
+  shapeFields, feedUnreadableText, FEED_LOUD_STRIKES,
 };

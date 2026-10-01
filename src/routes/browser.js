@@ -56,6 +56,14 @@
  *                                             / downgrade_* / switch_export_only / browser_restarting); a browser somebody is
  *                                             DRIVING answers mode:'proposal' (filed to the inbox when a session is named)
  *   DELETE /api/browser/blocked/:id           dismiss an agent's blocked claim
+ *   GET    /api/browser/proposals/:id         lane browser-propose: a tier-2 claim's PROPOSAL as its card draws it
+ *                                             (SW.proposalCardBlock) — the user's; an agent's bearer 403 agent_forbidden
+ *   POST   /api/browser/proposals/:id/approve { shown }   THE USER's Approve: runs EXACTLY the frozen proposal (the install,
+ *                                             ONLY the claim's host on browser.cloak.egressAllowlist, the in-place switch or
+ *                                             a new CloakBrowser profile, the page, the agent told for free); `shown` = the
+ *                                             digest of the card pressed — another ⇒ 409 proposal_changed, none ⇒ 400
+ *                                             shown_required; 409 proposal_state / proposal_unavailable; agent bearer 403
+ *   POST   /api/browser/proposals/:id/reject  the user's Reject (the agent hears it once, at its next navigation to the host)
  *   GET/POST /api/browser/site-hints          per-site memory (a claim: {site|url, backend|tier, why} by 'user' — `site`, because `host` is the MACHINE parameter)
  *   DELETE /api/browser/site-hints/:host
  *
@@ -159,7 +167,20 @@ const STATUS = { 'not-found': 404, no_lease: 404, 'bad-request': 400, label_requ
   // and a Task Group list that could not be read (never `not_owner`)
   'list-changed': 409, empty_list: 400, too_many: 400, unknown_task: 400, unknown_conversation: 400, no_browser_key: 409, 'session-gone': 410, groups_unreadable: 409,
   // lane browser-stuck (2026-09-28): a page dialog holds the page; nothing open to answer; no watch on that browser; the browser did not take the answer
-  dialog_open: 409, no_dialog: 409, not_watched: 409, answer_failed: 502 };
+  dialog_open: 409, no_dialog: 409, not_watched: 409, answer_failed: 502,
+  // lane browser-propose (2026-09-30): a proposal's Approve / Reject — not in a state to decide, a card that is not the proposal as it stands, nothing to approve here
+  proposal_state: 409, proposal_changed: 409, proposal_unavailable: 409,
+  // lane site-reset: a tab that is not this conversation's; a stop the tab did not answer; the site-reset refusals
+  not_your_tab: 403, stop_failed: 502, close_failed: 502, no_loop: 409, no_picture: 409, host_not_current: 409, 'bad-host': 400, shared_profile: 409, clear_failed: 502,
+  // lane browser-resume (§3.9): a Forget of nothing kept / of a browser that runs / that could not remove its directory
+  not_kept: 404, kept_live: 409, forget_failed: 500,
+  // lane browser-resume B (ruling 2): a Resume's refusals (a helper's browser is never kept; its directory became a named
+  // profile; the conversation is not running) and the hand-back's (a browser this conversation does not hold; the stash)
+  child_not_kept: 409, resume_adopted: 409, no_live_session: 409, not_yours: 403, stash_refused: 503,
+  // verify r2: a hand-back with nothing new while the previous one still waits for the agent's next turn (one carrier, once)
+  already_handed_back: 409,
+  // lane browser-resume C (§3.9, ruling 3): tabs — nothing ran (the verdict precedes every exec); the act itself failed
+  no_such_tab: 404, take_over_first: 409, last_tab: 409, mediated_tabs: 409, tab_failed: 502 };
 function fail(res, e) {
   const code = e?.code || null;
   // B-f7ab verify r2 (LOW): a key minted by THIS call rides a refused answer too (`res.locals.minted`, set by needKey) — the
@@ -478,16 +499,21 @@ router.post('/api/browser/adopt', async (req, res) => {
     const be = ctx.browserEnv?.() || null;
     let profile, adopted = false, note;
     const all = { owner: { kind: 'instance', id: null }, createdBy: f.browserKey };
-    if (variant === B.VARIANTS.C && be) {
-      // the symlink's target IS the browserKey-named scratch directory
-      const dir = be.resolvedProfileDir(f.browserKey);
+    // lane browser-resume (§3.9): rung D KEEPS its directory now (the generated config names `data/browser-profiles/<key>`)
+    // — adopted exactly like rung C's; only the conversation's OWN kept directory (named by its key), never a directory a
+    // pin-era config still names (a registered profile's: clearPinnedDir's class)
+    const keptOwn = variant === B.VARIANTS.D && be && typeof be.scratchDirFor === 'function' ? (() => { let d = null; try { d = be.resolvedProfileDir(f.browserKey); } catch { d = null; } return d && B.sameDir(d, be.scratchDirFor(f.browserKey)) ? d : null; })() : null;
+    if ((variant === B.VARIANTS.C || keptOwn) && be) {
+      // the symlink's target IS the browserKey-named scratch directory (rung C); rung D's config names the same directory
+      const dir = keptOwn || be.resolvedProfileDir(f.browserKey);
       if (!dir) throw Object.assign(new Error('this session\'s browser directory could not be read back off its indirection'), { code: 'adopt_failed' });
       if (typeof k.stopEphemeralOf === 'function') { try { await k.stopEphemeralOf(f.browserKey); } catch (e) { console.warn(`[browser] ${f.browserKey}: its own browser did not stop before the adopt — ${e && e.message}`); } }
       profile = k.adoptScratch({ label: req.body?.label, scratchDir: dir, ...all });
       adopted = true;
+      try { k.keptStore?.()?.adopted?.(f.browserKey); } catch (e) { console.warn(`[browser] ${f.browserKey}: its kept entry was not ended after the adopt — ${e && e.message}`); } // lane browser-resume: its directory is the profile's now
       note = 'the login that exists in this browser right now is kept: its directory was moved under ~/.agent-browser/ and registered — every conversation of yours can use it';
     } else {
-      // rung D (no directory to adopt — that is the point of D), N, none, H:
+      // rung D with keeping off / a fenced one (no directory of its own), N, none, H:
       // the honest form is an EMPTY profile, said plainly (§3.2.5)
       profile = k.createProfile({ label: req.body?.label }, all);
       note = 'this session\'s browser had no directory of its own to adopt (rung ' + (variant || 'none') + '), so an EMPTY persistent profile was created — the login you just completed was NOT saved; the next browser command opens the new profile and you log in once more';
@@ -523,6 +549,101 @@ router.get('/api/browser/session/:sessionId', (req, res) => {
   const f = needKey(res, sessionFacts(String(req.params.sessionId || ''))); if (!f) return;
   // MULTIVIEW §4: + the helpers' WITNESSED names (handle → its Task's description) — the strip's list is browser-stream.browserListFor over this one answer
   try { res.json({ ...k.statusFor(f.browserKey), helperNames: require('../server/browser-helpers.js').namesOf(f.session), backend: f.session.backend || null }); } catch (e) { fail(res, e); }
+});
+/** lane browser-resume (§3.9, the owner's ruling 1): THE KEPT BROWSERS — a conversation's own browser's logins directory +
+ *  its tabs after the browser stopped. The user's rows (the Agent browser panel's "Kept browsers"): cookie only — an
+ *  agent's own session / job token is refused `agent_forbidden` (the rows carry every conversation's tab titles and
+ *  urls). Forget = the user's act: the entry and its directory go; a running browser is refused `kept_live`. */
+const KEPT_IS_USERS = 'the kept browsers are the user\'s to see and forget — an agent token may not read or remove them';
+router.get('/api/browser/kept', (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, KEPT_IS_USERS)) return;
+  const k = keeperOr503(res); if (!k) return;
+  const ks = typeof k.keptStore === 'function' ? k.keptStore() : null;
+  if (!ks) return res.status(503).json({ error: 'kept browsers are not available on this server', code: 'unavailable' });
+  try { res.json({ kept: ks.list(), limits: ks.limits(), sweep: ks.lastSweep() }); } catch (e) { fail(res, e); }
+});
+router.delete('/api/browser/kept/:browserKey', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, KEPT_IS_USERS)) return;
+  const k = keeperOr503(res); if (!k) return;
+  const ks = typeof k.keptStore === 'function' ? k.keptStore() : null;
+  if (!ks) return res.status(503).json({ error: 'kept browsers are not available on this server', code: 'unavailable' });
+  const bk = String(req.params.browserKey || '');
+  if (!require('../browser-profiles.js').isBrowserKey(bk)) return res.status(400).json({ error: 'not a browser key', code: 'bad-request' });
+  try { res.json(await ks.forget(bk)); } catch (e) { fail(res, e); }
+});
+/** lane browser-resume B (§3.9, the owner's ruling 2): RESUME and "HAND BACK AND CONTINUE" — the user's acts (cookie only;
+ *  an agent's own token is refused `agent_forbidden` — its twin is `POST /api/agent/browser/resume`, for its OWN browser).
+ *  The browser is resolved INSIDE the session's own list (`ref`: the conversation's own `~ephemeral`, or an attachment it
+ *  holds) — never a bare profile id or key from the client. */
+const RESUME_IS_USERS = 'resuming a conversation\'s browser from here is the user\'s act — the agent runs `vibespace-browser resume` for its own';
+const HANDBACK_IS_USERS = 'handing the browser back is the user\'s act — an agent token may not do it';
+/** One Resume of `ref` in the session `f` → the answer object, or a refusal thrown by name. */
+async function resumeRow(k, f, ref) {
+  const S = require('../browser-stream.js');
+  const B = require('../browser-profiles.js');
+  const r0 = String(ref || '').trim() || S.EPHEMERAL_REF;
+  if (r0 === S.EPHEMERAL_REF) {
+    const pairs = managedPairs(f);
+    if (!pairs) throw Object.assign(new Error('this conversation\'s browser is not one VibeSpace runs here (the shared browser, or a session on another machine) — nothing is kept to resume'), { code: 'not_kept' });
+    const r = await k.resumeFor({ browserKey: f.browserKey, sessionId: f.sessionId, envPairs: pairs, sessionName: sessionNameOf(f), variant: f.session._browserVariant || null, by: 'user' });
+    const kept = r.kept || null;
+    return { ok: true, ref: r0, resumed: !r.already, already: !!r.already, restored: kept && kept.kind === 'restored' ? kept.opened : 0, skipped: kept && Array.isArray(kept.skipped) ? kept.skipped : [], current: kept && kept.current ? kept.current : null };
+  }
+  if (r0.startsWith('~child:') || B.isChildKey(r0)) throw Object.assign(new Error('a helper\'s browser is not kept — only the conversation\'s own browser can be resumed'), { code: 'child_not_kept' });
+  const rows = S.browserListFor({ ...k.statusFor(f.browserKey), helperNames: {} });
+  const row = rows.find((x) => x.ref === r0 && x.kind === 'attachment');
+  if (!row) throw Object.assign(new Error('that browser is not one of this session\'s'), { code: 'not-found' });
+  if (typeof k.humanOf === 'function' && k.humanOf(row.profileId)) return { ok: true, ref: r0, resumed: false, already: true, restored: 0, skipped: [], current: null };
+  const r = await k.resumeAttachment({ profileId: row.profileId, browserKey: f.browserKey, sessionId: f.sessionId, taskIds: f.taskIds, groupsUnreadable: f.groupsUnreadable });
+  return { ok: true, ref: r0, resumed: !r.already, already: !!r.already, restored: r.reopened && r.reopened.ok ? 1 : 0, skipped: r.reopened && !r.reopened.ok ? [{ url: r.reopened.url, why: r.reopened.why }] : [], current: r.reopened && r.reopened.ok ? { url: r.reopened.url, title: '' } : null };
+}
+router.post('/api/browser/session/:sessionId/resume', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, RESUME_IS_USERS)) return;
+  const k = keeperOr503(res); if (!k) return;
+  const f = needKey(res, sessionFacts(String(req.params.sessionId || ''))); if (!f) return;
+  try { res.json(await resumeRow(k, f, req.body?.ref)); } catch (e) { fail(res, e); }
+});
+/** The Agent browser panel's kept row: its Resume names the KEY (the row is the kept entry) — resolved here to the ONE live
+ *  session that carries it (a stopped conversation: `no_live_session` by name — the row draws words, never a dead button). */
+router.post('/api/browser/kept/:browserKey/resume', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, RESUME_IS_USERS)) return;
+  const k = keeperOr503(res); if (!k) return;
+  const B = require('../browser-profiles.js');
+  const bk = String(req.params.browserKey || '');
+  if (!B.isBrowserKey(bk)) return res.status(400).json({ error: 'not a browser key', code: 'bad-request' });
+  let sid = null;
+  for (const [id, s] of (ctx?.activeSessions || new Map())) if (s && s._browserKey === bk && !(s.hostId || s.host)) { sid = id; break; }
+  if (!sid) return res.status(409).json({ error: 'the conversation is not running — resume the conversation, then its browser', code: 'no_live_session' });
+  const f = needKey(res, sessionFacts(sid)); if (!f) return;
+  try { res.json({ ...(await resumeRow(k, f, require('../browser-stream.js').EPHEMERAL_REF)), sessionId: sid }); } catch (e) { fail(res, e); }
+});
+/** "Hand back and continue…": the user's one-line note + the tabs ride the conversation's NEXT turn (the stash; nothing is
+ *  delivered, nothing billed); a takeover of that browser ends (cause `continue`); its next command runs in the SAME
+ *  browser and is told which tab is current. */
+router.post('/api/browser/session/:sessionId/hand-back', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, HANDBACK_IS_USERS)) return;
+  const k = keeperOr503(res); if (!k) return;
+  const f = needKey(res, sessionFacts(String(req.params.sessionId || ''))); if (!f) return;
+  const S = require('../browser-stream.js');
+  const ref = String(req.body?.ref || '').trim() || S.EPHEMERAL_REF;
+  const note = typeof req.body?.note === 'string' ? req.body.note.slice(0, 4000) : '';
+  if (typeof ctx?.continueHandBack !== 'function') return res.status(503).json({ error: 'handing the browser back for the next turn is not available on this server', code: 'unavailable' });
+  try {
+    let profileId = null;
+    if (ref !== S.EPHEMERAL_REF) {
+      const row = S.browserListFor({ ...k.statusFor(f.browserKey), helperNames: {} }).find((x) => x.ref === ref);
+      if (!row || row.kind !== 'attachment') return res.status(403).json({ error: 'hand back a helper\'s browser from its own view — only this conversation\'s own browser or one it holds here', code: 'not_yours' });
+      profileId = row.profileId;
+    }
+    const r = await ctx.continueHandBack({ sessionId: f.sessionId, browserKey: f.browserKey, profileId, note });
+    if (!r || !r.ok) return failVerdict(res, r || { code: 'unavailable', error: 'no answer' });
+    res.json({ ok: true, id: r.id, stashed: r.stashed, durable: r.durable, carded: r.carded, tabs: r.tabs, tookOver: r.tookOver, ...(r.why ? { why: r.why } : {}) });
+  } catch (e) { fail(res, e); }
 });
 /** MULTIVIEW D4: THIS conversation's per-conversation browser cap — a USER act
  *  (the strip's `own/cap` chip, Session Properties). `cap` 1..6, or null = back
@@ -666,6 +787,37 @@ router.post('/api/browser/switch', async (req, res) => {
     res.json(r);
   } catch (e) { fail(res, e); }
 });
+// ── lane browser-propose step 3: THE PROPOSAL — the USER's Approve / Reject (owner-only: an agent's bearer is refused by
+// name here, and the PURE step refuses any actor but the user). Approve runs EXACTLY the proposal's frozen fields: the
+// body names the digest of the card that was pressed (`shown`); another one ⇒ 409 proposal_changed, nothing runs ──
+const PROPOSAL_ID_RE = /^(?:bl|sr)-[0-9a-f]{8}$/; // lane site-reset: + a site-reset proposal (`sr-…`) — the same routes
+const PROPOSAL_IS_USERS = 'approving or rejecting a browser proposal is the user\'s act — an agent token may not do it; tell the user a card waits for their Approve';
+function proposalsOr503(res) { const p = ctx?.proposals || null; if (!p) res.status(503).json({ error: 'browser proposals are not available on this server', code: 'unavailable' }); return p; }
+router.get('/api/browser/proposals/:id', (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, PROPOSAL_IS_USERS)) return;
+  const k = keeperOr503(res); if (!k) return;
+  if (!PROPOSAL_ID_RE.test(String(req.params.id || ''))) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+  const e = typeof k.proposalEntry === 'function' ? k.proposalEntry(req.params.id) : null;
+  if (!e) return res.status(404).json({ error: `no proposal ${req.params.id}`, code: 'not-found' });
+  res.json({ proposal: require('../browser-switch.js').proposalCardBlock(e) });
+});
+router.post('/api/browser/proposals/:id/approve', (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, PROPOSAL_IS_USERS)) return;
+  const pr = proposalsOr503(res); if (!pr) return;
+  if (!PROPOSAL_ID_RE.test(String(req.params.id || ''))) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+  const shown = typeof req.body?.shown === 'string' ? req.body.shown.slice(0, 40) : null;
+  if (!shown) return res.status(400).json({ error: 'an Approve names the card it was pressed on (`shown`)', code: 'shown_required' });
+  try { const r = pr.approve(req.params.id, { shown, by: 'user' }); if (!r.ok) return failVerdict(res, r); res.json(r); } catch (e) { fail(res, e); }
+});
+router.post('/api/browser/proposals/:id/reject', (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, PROPOSAL_IS_USERS)) return;
+  const pr = proposalsOr503(res); if (!pr) return;
+  if (!PROPOSAL_ID_RE.test(String(req.params.id || ''))) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+  try { const r = pr.reject(req.params.id, { by: 'user' }); if (!r.ok) return failVerdict(res, r); res.json(r); } catch (e) { fail(res, e); }
+});
 router.delete('/api/browser/blocked/:id', (req, res) => {
   if (refuseHost(req, res)) return;
   const k = keeperOr503(res); if (!k) return;
@@ -730,7 +882,7 @@ function clearPinnedDir(k, f) {
  *  NOTHING is re-pointed at the profile's directory any more. A pin that MOVES
  *  (or an unpin) detaches exactly the lease the previous pin MADE (`via:'pin'`),
  *  never an attachment the agent made itself. */
-function pinAnswer(k, f, ref, { by = 'agent' } = {}) {
+function pinAnswer(k, f, ref, { by = 'agent', quiet = false } = {}) { // lane browser-propose: `quiet` = a user pin whose telling rides the caller's own message (the approved proposal) — no second notice
   const B = require('../browser-profiles.js');
   let p = null;
   if (ref !== null && ref !== undefined && ref !== '' && ref !== false) {
@@ -761,7 +913,8 @@ function pinAnswer(k, f, ref, { by = 'agent' } = {}) {
   const after = k.setFor(f.browserKey);
   // a USER pin that moved the pin says so, once; one that re-chose the current pin (the ticked row) moved nothing and says nothing
   const moved = (prevPin ? prevPin.profileId : null) !== (p ? p.id : null);
-  if (by === 'user') { if (moved) noteChange(f, { kind: 'browser-pin', was: prevPin ? prevPin.label : '', now: p ? p.label : '', handles: after.handles.map((h) => h.handle) }); }
+  if (quiet) k.tell(f.browserKey); // lane browser-propose: the approved proposal's own message is the telling (no second notice)
+  else if (by === 'user') { if (moved) noteChange(f, { kind: 'browser-pin', was: prevPin ? prevPin.label : '', now: p ? p.label : '', handles: after.handles.map((h) => h.handle) }); }
   else k.tell(f.browserKey);
   try { ctx.onPinChanged?.(f.sessionId, f.session, pin); } catch { /* optional */ }
   return { pin, repoint, detached, appliesFrom: B.pinApplyNotice({ liveBrowser, label: p ? p.label : '' }), attachments: after.attachments, handles: after.handles, defaultId: after.defaultId, changedSet: before.fingerprint !== after.fingerprint, moved, ...(added ? { added } : {}) };
@@ -1086,7 +1239,7 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
         const e = await k.ensureEphemeral({ browserKey: f.browserKey, sessionId: f.sessionId, envPairs: pairs, sessionName: sessionNameOf(f), variant: f.session._browserVariant || null });
         stampActive(f, '');
         ensureBindingOnce(f); // lane H: its actions stay findable after the conversation stops
-        return send({ ok: true, kind: 'ephemeral', shared: false, handle: null, env: pairs, ...envBasis(f, { k, pairs }), profile: e.profile, browser: e.browser, lease: e.lease, created: e.created, handles: v.handles, pinTab: false, at: resolvedAt, ...(await dialogAnswerFor(k, f, e.profile && e.profile.id)), ...displayNoteOf(e.browser, resolvedAt) });
+        return send({ ok: true, kind: 'ephemeral', shared: false, handle: null, env: pairs, ...envBasis(f, { k, pairs }), profile: e.profile, browser: e.browser, lease: e.lease, created: e.created, handles: v.handles, pinTab: false, at: resolvedAt, ...(await dialogAnswerFor(k, f, e.profile && e.profile.id, { verb })), ...displayNoteOf(e.browser, resolvedAt), ...keptAnswerOf(e.kept) });
       }
       stampActive(f, '');
       return send({ ok: true, kind: 'none', shared, handle: null, env: [], ...envBasis(f, { k, pairs: f.session._browserEnv, ephemeral: !shared }), handles: v.handles, pinTab: false, at: resolvedAt });
@@ -1100,14 +1253,72 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
       const childPairs = B.childPairsOver(parentPairs || (Array.isArray(f.session._browserEnv) ? f.session._browserEnv : []), env);
       if (parentPairs && typeof k.ensureEphemeral === 'function') {
         const e = await k.ensureEphemeral({ browserKey: v.handle, sessionId: f.sessionId, envPairs: childPairs, sessionName: `${sessionNameOf(f)} · child ${v.handle.slice(v.handle.indexOf('.') + 1)}`, variant: f.session._browserVariant || null });
-        return send({ ok: true, kind: 'child', handle: v.handle, env: env.pairs, unset: env.unset, ...envBasis(f, { k, pairs: childPairs }), handles: v.handles, pinTab: false, profile: e.profile, browser: e.browser, at: resolvedAt, ...(await dialogAnswerFor(k, f, e.profile && e.profile.id)), ...displayNoteOf(e.browser, resolvedAt) });
+        // verify r2 (D6): a helper's browser keeps nothing — said ONCE, in its own first answer (the CLI prints the note)
+        return send({ ok: true, kind: 'child', handle: v.handle, env: env.pairs, unset: env.unset, ...envBasis(f, { k, pairs: childPairs }), handles: v.handles, pinTab: false, profile: e.profile, browser: e.browser, at: resolvedAt, ...(await dialogAnswerFor(k, f, e.profile && e.profile.id, { verb })), ...displayNoteOf(e.browser, resolvedAt), ...(e.created ? { notKept: { text: require('../browser-kept.js').helperNotKeptText() } } : {}) });
       }
       return send({ ok: true, kind: 'child', handle: v.handle, env: env.pairs, unset: env.unset, ...envBasis(f, { k, pairs: childPairs }), handles: v.handles, pinTab: false, at: resolvedAt });
     }
     const r = await k.attach({ profileId: v.attachment.profileId, browserKey: f.browserKey, sessionId: f.sessionId, taskIds: f.taskIds, groupsUnreadable: f.groupsUnreadable });
     stampActive(f, v.attachment.profileId); // the command RUNS on this attachment: that is what the chip calls "last used"
     // r2: an attachment's daemon lives under the keeper's own root (its pairs never carry SOCKET_DIR), whatever the session's spawn pairs say
-    send({ ok: true, kind: 'attachment', handle: v.handle, ...attachAnswer(r, { cdp: req.body?.wrapper === true, agent: agentFactsOf(f) }), ...envBasis(f, { k, pairs: r.env, ephemeral: false }), handles: v.handles, isDefault: !!v.attachment.isDefault, at: resolvedAt, ...(await dialogAnswerFor(k, f, r.profile && r.profile.id)), ...displayNoteOf(r.browser, resolvedAt) });
+    send({ ok: true, kind: 'attachment', handle: v.handle, ...attachAnswer(r, { cdp: req.body?.wrapper === true, agent: agentFactsOf(f) }), ...envBasis(f, { k, pairs: r.env, ephemeral: false }), handles: v.handles, isDefault: !!v.attachment.isDefault, at: resolvedAt, ...(await dialogAnswerFor(k, f, r.profile && r.profile.id, { verb })), ...displayNoteOf(r.browser, resolvedAt) });
+  } catch (e) { fail(res, e); }
+});
+/** lane browser-resume B (§3.9): what a start did with the conversation's KEPT browser, as the agent's answer — ONE field
+ *  per kind, each with its sentence (PURE src/browser-kept.js): `restored` (its kept tabs reopened by themselves — D2),
+ *  `resumed` (the user resumed it / handed it back: the tab that is current; their note when the stash could not take it),
+ *  `kept` (its tabs are kept, not reopened — `vibespace-browser resume` does that). Its own tabs only (its own key). */
+function keptAnswerOf(kept) {
+  if (!kept || typeof kept !== 'object') return {};
+  const KB = require('../browser-kept.js');
+  if (kept.kind === 'resumed') return { resumed: { handedBack: !!kept.handedBack, tabs: Array.isArray(kept.tabs) ? kept.tabs.length : 0, current: (Array.isArray(kept.tabs) && kept.tabs[kept.currentIndex]) || null, text: KB.resumedNoteText({ note: kept.note || '', tabs: kept.tabs || [], currentIndex: kept.currentIndex, handedBack: !!kept.handedBack, drove: !!kept.drove }) } };
+  if (kept.kind === 'restored') return { restored: { opened: kept.opened || 0, skipped: Array.isArray(kept.skipped) ? kept.skipped : [], current: kept.current || null, text: KB.restoredNoteText({ why: kept.why, opened: kept.opened || 0, skipped: kept.skipped || [], current: kept.current || null }) } };
+  if (kept.kind === 'kept') return { kept: { tabs: kept.tabs || 0, why: kept.why || null, text: KB.keptNoteText({ why: kept.why, tabs: kept.tabs || 0 }) } };
+  return {};
+}
+/** lane browser-resume B: `vibespace-browser resume` — THIS conversation's own browser, started (if it is not) with its
+ *  kept tabs reopened, or (running) its waiting tabs reopened as new tabs. Never a named profile's (it keeps its own
+ *  logins and is opened by any page verb), never a helper's. While the user drives it: `browser_paused` like any verb. */
+router.post('/api/agent/browser/resume', async (req, res) => {
+  const k = keeperOr503(res); if (!k) return;
+  const f = agentFacts(req, res); if (!f) return;
+  const B = require('../browser-profiles.js');
+  const h = String(req.body?.handle || '').trim();
+  try {
+    if (h && B.isChildKey(h)) return res.status(409).json({ error: 'a helper\'s browser is not kept — `resume` reopens the conversation\'s own browser', code: 'child_not_kept' });
+    if (h) return res.status(409).json({ error: `\`resume\` is for this conversation's own browser — "${h.slice(0, 60)}" is a named profile: it keeps its own logins, and any page verb on it opens it`, code: 'not_kept' });
+    const pairs = managedPairs(f);
+    if (!pairs) return res.status(409).json({ error: 'this session\'s browser is not one VibeSpace keeps (the shared browser, or a session on another machine) — nothing to resume', code: 'not_kept' });
+    const paused = typeof k.pausedVerdictFor === 'function' ? k.pausedVerdictFor(f.browserKey, null, { verb: 'resume' }) : null;
+    if (paused) return failVerdict(res, paused);
+    const r = await k.resumeFor({ browserKey: f.browserKey, sessionId: f.sessionId, envPairs: pairs, sessionName: sessionNameOf(f), variant: f.session._browserVariant || null, by: 'agent' });
+    stampActive(f, '');
+    ensureBindingOnce(f);
+    res.json({ ok: true, already: !!r.already, ...keptAnswerOf(r.kept) });
+  } catch (e) { fail(res, e); }
+});
+/** lane browser-resume C (§3.9, the owner's ruling 3): THE AGENT'S `tab` VERBS on a SHARED profile's browser — its own tabs
+ *  only (list / new / switch / close). The CLI routes a `tab` verb here after its /resolve on an attachment; the keeper
+ *  judges again from the SESSION's key (resolveFor first: browser_paused while the user drives, profile_changed, the
+ *  handles), reads the tabs once and runs at most ONE act under this conversation's own session — another holder's tab is
+ *  `not_your_tab` before anything runs. `passthrough` = a browser that holds only this conversation's tabs (its own, a
+ *  helper's, a mediated lease): the CLI runs the binary as before. Registered after the belt (every answer walked). */
+router.post('/api/agent/browser/tab', async (req, res) => {
+  const k = keeperOr503(res); if (!k) return;
+  const f = agentFacts(req, res); if (!f) return;
+  try {
+    if (typeof k.agentTabAct !== 'function') return res.json({ ok: true, passthrough: true, why: 'this server has no tab fence' });
+    const r = await k.agentTabAct({ browserKey: f.browserKey, handle: String(req.body?.handle || ''), argv: Array.isArray(req.body?.argv) ? req.body.argv.map(String).slice(0, 12) : [] });
+    if (!r.ok) return failVerdict(res, r);
+    if (!r.passthrough) stampActive(f, r.profileId || '');
+    // 2.369.199 integration (lane site-reset verify r4 #1 × lane browser-resume C): a fenced `tab new` NAMES its tab (the
+    // binary's ack the keeper read) — the dialog watch binds it to THIS conversation, as the CLI's audit does for an unfenced one
+    if (r.opened) {
+      const ack = r.opened.ack || r.opened.targetId || null;
+      if (ack && ctx.dialogs && typeof ctx.dialogs.bindTab === 'function') { try { const t = dialogTargetFor(k, f, r.profileId); if (t.ok) ctx.dialogs.bindTab(t, ack); } catch (e) { console.warn('[browser] the new tab was not bound to its conversation — ' + (e && e.message)); } }
+      const { ack: _ack, ...opened } = r.opened; r.opened = opened;
+    }
+    res.json(r);
   } catch (e) { fail(res, e); }
 });
 router.post('/api/agent/browser/new-child', (req, res) => {
@@ -1136,6 +1347,8 @@ router.post('/api/agent/browser/audit', async (req, res) => {
     // P4 (§7.4 step 1): a navigation stamps the lease's lastUrl — the URL a switch re-opens; the audit LINE stays verb-only
     if (profileId && typeof req.body?.url === 'string') k.noteLeaseUrl(f.browserKey, profileId, req.body.url);
     k.audit({ sessionId: f.sessionId, browserKey: f.browserKey, profileId, verb: req.body?.verb, ok: req.body?.ok !== false });
+    // lane browser-resume C: an attachment's FIRST command bound a tab of its own — its first tab ROOT (once per lease; bounded)
+    if (profileId && !ephOk && req.body?.ok !== false && typeof k.bootstrapTabRoot === 'function') { try { await k.bootstrapTabRoot(profileId, f.browserKey); } catch { /* the roots are learned at the next tab act */ } }
     // THE AGENT IS TOLD (the owner's ruling, 2026-09-27 — "告知agent发生了打断"): a takeover that began at or after this
     // command's /resolve caught it in flight — the CLI prints it by name and exits as a refusal. A child handle's pair is
     // its own key (a helper's browser); an unmanaged / ephemeral command asks the conversation's own pair.
@@ -1149,8 +1362,34 @@ router.post('/api/agent/browser/audit', async (req, res) => {
     }
     // lane browser-stuck: what the verb ran into — a dialog it opened (an alert accepted, a confirm held), the notes it was
     // not told, the verb's outcome for the unresponsive verdict (a timeout, or `dialog` = the CLI cut it at a dialog)
-    const dlg = profileId ? await dialogAnswerFor(k, f, profileId, { arm: false, outcome: req.body?.dialog ? 'held-by-dialog' : req.body?.timedOut ? 'timeout' : 'ok', ended: true }) : (endVerb(f), {});
-    res.json({ ok: true, ...(interrupted ? { interrupted } : {}), ...dlg });
+    // verify r4 #1 (site-reset): a `tab new` that succeeded NAMES its tab (the CLI read the binary's own ack) — the watch binds it
+    // to THIS conversation before the fact after the verb is read (never "the verb that happened to be in flight")
+    const tabAck = req.body?.tab && typeof req.body.tab === 'object' && typeof req.body.tab.targetId === 'string' ? req.body.tab.targetId.slice(0, 64) : null;
+    const dlg = profileId ? await dialogAnswerFor(k, f, profileId, { arm: false, outcome: req.body?.dialog ? 'held-by-dialog' : req.body?.loop ? 'loop' : req.body?.timedOut ? 'timeout' : 'ok', ended: true, bind: tabAck }) : (endVerb(f), {}); // lane site-reset: a verb cut at a navigation loop is not a timeout (the loop explains it)
+    // lane site-reset: a verb the loop CUT keeps its session's daemon waiting until 0.38.1's own timeout — remembered, said
+    if (req.body?.loop === 'cut' && since > 0) { try { ctx.dialogs?.noteCut?.(f.browserKey, since); } catch { /* optional */ } }
+    if (dlg.dialog && ctx.dialogs && typeof ctx.dialogs.busyFor === 'function') { const b = ctx.dialogs.busyFor(f.browserKey); if (b > 0) dlg.dialog.busy = require('../browser-stuck.js').busyText(b); }
+    // lane browser-propose step 2: a navigation's FINAL url + title (the CLI read them off the browser CLI's own result)
+    // against the PURE sign-in refusal table — a HINT the CLI prints like the 403/429 one, never a detection
+    const nav = req.body?.nav && typeof req.body.nav === 'object' ? req.body.nav : null;
+    const hint = nav ? require('../browser-switch.js').navHint({ url: typeof nav.url === 'string' ? nav.url.slice(0, 4096) : '', title: typeof nav.title === 'string' ? nav.title.slice(0, 4096) : '' }) : null;
+    // lane browser-propose step 3: a proposal the user REJECTED is told ONCE — at this conversation's next navigation to
+    // that host (the requested url or where it landed)
+    let rejected = null;
+    if (ctx.proposals && typeof ctx.proposals.rejectionFor === 'function' && (typeof req.body?.url === 'string' || nav)) {
+      for (const u of [nav && typeof nav.url === 'string' ? nav.url : null, typeof req.body?.url === 'string' ? req.body.url : null]) {
+        if (!u || rejected) continue;
+        try { rejected = ctx.proposals.rejectionFor({ browserKey: f.browserKey, host: u }); } catch { rejected = null; }
+      }
+    }
+    // verify r1 V1 (lane browser-propose): what CloakBrowser's site list REFUSED while this verb ran — its own profile's
+    // proxy (one per cloak profile), a profile this conversation HOLDS a lease on (never another's refusals), since the
+    // verb's /resolve — by name, so the agent asks for exactly that site (one card) instead of reading a blank page
+    let egressRefused = null;
+    if (profileId && since > 0 && typeof k.cloakRefusals === 'function' && typeof k.leasesFor === 'function' && k.leasesFor(f.browserKey).some((l) => l.profileId === profileId)) {
+      try { const hosts = k.cloakRefusals(profileId, since); if (hosts.length) egressRefused = { hosts, text: require('../browser-switch.js').egressRefusedText(hosts) }; } catch { egressRefused = null; }
+    }
+    res.json({ ok: true, ...(interrupted ? { interrupted } : {}), ...dlg, ...(hint ? { hint } : {}), ...(rejected ? { proposalRejected: { site: rejected.site, text: rejected.text } } : {}), ...(egressRefused ? { egressRefused } : {}) });
   } catch (e) { fail(res, e); }
 });
 // ── lane browser-stuck (2026-09-28, the owner's ruling "让agent知道这个对话框的存在和交互能力"): A PAGE DIALOG IS A FACT OF THE
@@ -1172,19 +1411,25 @@ function dialogTargetFor(k, f, profileId) {
   if (!held) return { ok: false, code: 'not_attached', error: 'this conversation holds no lease on that browser' };
   return { ok: true, profileId: p.id, ephemeral: false, sessionId: f.sessionId, browserKey: f.browserKey };
 }
-function endVerb(f) { try { ctx.dialogs?.verbEnded?.(f.browserKey); } catch { /* optional */ } }
+function endVerb(f, profileId = null) { try { ctx.dialogs?.verbEnded?.(f.browserKey, { profileId: profileId || null }); } catch { /* optional */ } }
 /** `{dialog: {watched, open, text, notes, stuck}}` for a resolve / audit answer ({} without a watch). A resolve ARMS the
  *  watch first (bounded — it must be on the tab before the verb can open a dialog) and marks the verb running; an
  *  audit ends it and notes its outcome. Notes are told ONCE (consumed here). Never throws. */
-async function dialogAnswerFor(k, f, profileId, { arm = true, outcome = null, ended = false } = {}) {
+async function dialogAnswerFor(k, f, profileId, { arm = true, outcome = null, ended = false, verb = null, bind = null } = {}) {
   const D = ctx.dialogs;
-  if (ended) endVerb(f);
+  if (ended) endVerb(f, profileId);
   if (!D || !profileId) return {};
   const t = dialogTargetFor(k, f, profileId);
   if (!t.ok) return {};
   try {
-    if (arm) { await D.arm(t.profileId); D.verbStarted(f.browserKey); }
+    if (arm) await D.arm(t.profileId);
+    // verify r4 #1: the tab a `tab new`'s ack named is bound to this conversation FIRST — the fact below reads it as its own
+    let bound = null;
+    if (bind && typeof D.bindTab === 'function') { try { bound = D.bindTab(t, bind); } catch (e) { bound = { ok: false, code: 'bind_failed', error: String(e && e.message) }; } }
     const fct = D.factFor({ ...t, consume: true });
+    // lane site-reset: a page-ACTING verb's instant (its page turn is the agent's, never a loop) — never one the CLI will
+    // answer with the standing loop instead of running it (a refused click must not reset the loop it was refused for)
+    if (arm) D.verbStarted(f.browserKey, { profileId: t.profileId, verb: fct.loop && !require('../browser-stuck.js').loopPasses(verb) ? null : verb });
     // verify r1 A7: a timeout while the watch saw a navigation start on this conversation's tab and not commit is the
     // NETWORK's (a slow site) — never evidence of a hung page (three of them branded a browser "not responding" whose
     // next `open` answered in 96 ms)
@@ -1193,7 +1438,12 @@ async function dialogAnswerFor(k, f, profileId, { arm = true, outcome = null, en
     const loading = outcome === 'timeout' && fct.loading ? fct.loading : null;
     if (outcome) D.noteOutcome(t.profileId, { state: loading && !loading.over ? 'loading' : outcome, browserKey: t.browserKey }); // verify r1: the run is THIS conversation's
     const stuck = outcome && !fct.open ? D.factFor({ ...t, consume: false }).stuck : fct.stuck;
-    return { dialog: { watched: fct.watched, profileId: t.profileId, open: fct.open, text: fct.text || '', notes: fct.notes, stuck: stuck ? stuck.text : null, blind: !!fct.blind, unattributed: !!fct.unattributed, loading: loading ? require('../browser-stuck.js').loadingText(loading, { now: loading.at }) : null } };
+    // lane site-reset: a navigation LOOP standing on this conversation's tab (the block + the sentence) — a page-waiting verb is
+    // answered with it at once, the ways out still run; at the audit it says what the verb ran into
+    const fresh = outcome ? D.factFor({ ...t, consume: false }) : fct;
+    const loop = fresh.loop;
+    // verify r1: `loopShared` — some tab of a shared browser loops and this conversation's cannot be told apart (a kind only)
+    return { dialog: { watched: fct.watched, profileId: t.profileId, open: fct.open, text: fct.text || '', notes: fct.notes, stuck: stuck ? stuck.text : null, blind: !!fct.blind, unattributed: !!fct.unattributed, loading: loading ? require('../browser-stuck.js').loadingText(loading, { now: loading.at }) : null, loop: loop || null, loopShared: !!fresh.loopShared, ...(bound ? { tabBound: { ok: !!bound.ok, code: bound.code || null } } : {}) } };
   } catch (e) { console.warn(`[browser-dialog] ${f.browserKey}: the dialog fact was not read — ${e && e.message}`); return {}; }
 }
 /** The CLI's long-poll while its verb runs: answers at the first HELD dialog in this conversation's scope (the event),
@@ -1206,13 +1456,17 @@ router.get('/api/agent/browser/dialog', async (req, res) => {
   const t = dialogTargetFor(k, f, req.query.profile);
   if (!t.ok) return failVerdict(res, t);
   const wait = Math.max(0, Math.min(Number(req.query.wait) || 0, 25000));
+  // lane site-reset: `loop=1` — the verb also ends at a navigation loop judged in its scope; `after` = the verb's own
+  // resolve instant for a NAVIGATION verb (the old page's loop is not its own — the new page's is)
+  const loopWanted = String(req.query.loop || '') === '1' ? { after: Math.max(0, Number(req.query.after) || 0) } : null;
   const ac = new AbortController();
   res.on('close', () => ac.abort());
   try {
-    const hit = wait ? await D.waitForOpen(t, wait, { signal: ac.signal }) : null;
+    const hit = wait ? await D.waitForOpen(t, wait, { signal: ac.signal, loop: loopWanted }) : null;
     if (ac.signal.aborted && !res.writable) return;
     const fct = D.factFor({ ...t, consume: false });
-    res.json({ watched: fct.watched, open: fct.open, text: fct.text || '', via: hit ? hit.via : null, eventAt: hit ? hit.at : null, answeredAt: Date.now() });
+    const loop = hit && hit.loop ? { ...require('../browser-stuck.js').loopBlock(hit.loop), runStart: hit.loop.runStart, text: require('../browser-stuck.js').loopText(hit.loop) } : null;
+    res.json({ watched: fct.watched, open: fct.open, text: fct.text || '', via: hit ? hit.via : null, eventAt: hit ? hit.at : null, answeredAt: Date.now(), ...(loop && !fct.open ? { loop } : {}) });
   } catch (e) { fail(res, e); }
 });
 /** The agent's `dialog status | accept [text] | dismiss` — answered through the watch (the one client that saw the
@@ -1253,6 +1507,88 @@ router.post('/api/agent/browser/dialog', async (req, res) => {
     res.json({ ok: true, text: r.text, dialog: r.dialog });
   } catch (e) { fail(res, e); }
 });
+/** lane site-reset step 1b (the owner, 2026-09-30: "这种问题不应该导致浏览器无法操作啊，agent 应该至少能选择关闭、停止页面"): THE WAYS
+ *  OUT, DIRECT — through the watch's own CDP socket, never the browser CLI's queue (measured on 0.38.1: a verb the loop cut
+ *  keeps its session's daemon waiting until its own 25 s timeout; everything the agent runs next queues behind it):
+ *    stop        Page.stopLoading on the conversation's looping (else loading) tab — ms
+ *    close       Target.closeTarget on the LOOPING tab (the CLI sends a bare `tab close` here only while a loop stands)
+ *    screenshot  Page.captureScreenshot on the looping tab, bounded — the picture (base64; the CLI writes the file it
+ *                judged) or `no_picture` by name (a page that never draws has none)
+ *  A tab another conversation's (or the user's own) live view shows is never acted on (`not_your_tab`). */
+router.post('/api/agent/browser/direct', async (req, res) => {
+  const k = keeperOr503(res); if (!k) return;
+  const f = agentFacts(req, res); if (!f) return;
+  const D = ctx.dialogs;
+  const ST = require('../browser-stuck.js');
+  const action = String(req.body?.action || '');
+  if (!['stop', 'close', 'screenshot'].includes(action)) return res.status(400).json({ error: 'direct takes stop | close | screenshot', code: 'bad-request' });
+  if (f.remote) return res.status(409).json({ error: 'this conversation runs on another machine — its browser is that machine\'s; VibeSpace cannot act on its pages from here', code: 'remote_session', remedy: 'vibespace-browser tab close' });
+  if (!D || !req.body?.profile) return res.status(409).json({ error: 'VibeSpace does not watch this browser (the machine\'s shared browser, or one it does not manage) — nothing was done', code: 'not_watched', remedy: 'vibespace-browser tab close' });
+  const t = dialogTargetFor(k, f, req.body?.profile);
+  if (!t.ok) return failVerdict(res, t);
+  try {
+    const armed = await D.arm(t.profileId);
+    if (!armed.ok) return res.status(409).json({ error: armed.error || 'VibeSpace is not watching this browser', code: 'not_watched', remedy: 'vibespace-browser tab close' });
+    let st = null; try { st = k.inputStateFor(t.ephemeral ? t.browserKey : f.browserKey, t.ephemeral ? null : t.profileId); } catch { st = null; }
+    if (st && st.input === 'user') return res.status(409).json({ error: require('../browser-interrupt.js').interruptedText(action === 'close' ? 'tab close' : action), code: 'browser_interrupted', takenAt: st.takenAt || 0 });
+    const busyMs = D.busyFor(f.browserKey);
+    if (action === 'stop') {
+      const r = await D.stopTab(t);
+      if (!r.ok) return res.status(STATUS[r.code] || 409).json({ error: r.error, code: r.code, ...(r.why ? { why: r.why } : {}), ...(r.remedy ? { remedy: r.remedy } : {}) }); // verify r1: an unattributed shared browser is said by name, with the way out
+      return res.json({ ok: true, text: ST.stopText({ ...r, busyMs }), url: r.url || '', title: r.title || '', nothing: !!r.nothing, ...(r.was ? { loop: r.was } : {}) });
+    }
+    if (action === 'close') {
+      const r = await D.closeTab(t);
+      if (!r.ok) return res.status(STATUS[r.code] || 409).json({ error: r.error, code: r.code });
+      return res.json({ ok: true, text: ST.closeText({ ...r, busyMs }), url: r.url, title: r.title, opened: !!r.opened, ...(r.was ? { loop: r.was } : {}) });
+    }
+    const r = await D.captureTab(t);
+    if (!r.ok) return res.status(STATUS[r.code] || 409).json({ error: r.error, code: r.code, ...(r.loop ? { loop: r.loop } : {}) });
+    res.json({ ok: true, data: r.data, url: r.url, title: r.title, ...(r.loop ? { loop: r.loop } : {}) });
+  } catch (e) { fail(res, e); }
+});
+/** lane site-reset step 2: the agent's `site-reset <host> | --host <host>` — ONE site's stored login cleared in the
+ *  conversation's OWN browser (its ephemeral one, or a named profile only it may use and nobody else holds or browses):
+ *  the cookies that reach the host, its origins' storage, the session storage of its open tabs — through the watch's own
+ *  socket, never `clearBrowserCookies`. PURE ST.siteResetVerdict orders the refusals (remote, not watched, a bad host, not
+ *  the site of one of its own tabs without `--host`); a SHARED profile is never cleared here (`shared_profile` → step 3's
+ *  proposal). The CLI writes the audit line like every verb's. */
+router.post('/api/agent/browser/site-reset', async (req, res) => {
+  const k = keeperOr503(res); if (!k) return;
+  const f = agentFacts(req, res); if (!f) return;
+  const D = ctx.dialogs;
+  const ST = require('../browser-stuck.js');
+  const B = require('../browser-profiles.js');
+  const host = typeof req.body?.host === 'string' ? req.body.host.trim().toLowerCase().slice(0, 253) : '';
+  const explicit = req.body?.explicit === true;
+  const t = D && req.body?.profile ? dialogTargetFor(k, f, req.body.profile) : { ok: false };
+  if (!f.remote && D && req.body?.profile && !t.ok) return failVerdict(res, t);
+  try {
+    if (t.ok) { const armed = await D.arm(t.profileId); if (!armed.ok) t.ok = false; }
+    let own = true, p = null;
+    if (t.ok && !t.ephemeral) {
+      try { p = k.profile(t.profileId); } catch { p = null; }
+      // who else holds it (other conversations) and whether the user browses in it — the keeper's ONE holder reader
+      let who = { others: 1, human: true }; try { who = k.siteResetHolders(t.profileId, { except: f.browserKey }); } catch { /* unknown ⇒ shared (a proposal) */ }
+      own = ST.siteResetOwn({ ephemeral: false, use: B.whoMayUse(p), me: B.parentKeyOf(String(f.browserKey)), others: who.others, human: who.human });
+    }
+    const tabs = t.ok ? D.ownTabs(t) : [];
+    const v = ST.siteResetVerdict({ host, explicit, current: tabs.map((x) => x.url), remote: !!f.remote, watched: !!t.ok, shared: !own });
+    if (!v.ok) return res.status(STATUS[v.code] || 409).json({ error: v.error, code: v.code, ...(v.remedy ? { remedy: v.remedy } : {}) });
+    let st = null; try { st = k.inputStateFor(t.ephemeral ? t.browserKey : f.browserKey, t.ephemeral ? null : t.profileId); } catch { st = null; }
+    if (st && st.input === 'user') return res.status(409).json({ error: require('../browser-interrupt.js').interruptedText('site-reset'), code: 'browser_interrupted', takenAt: st.takenAt || 0 });
+    if (v.proposal) {
+      const onHost = tabs.find((x) => ST.hostOf(x.url) === v.host);
+      const pr = typeof ctx.siteResets?.propose === 'function' ? ctx.siteResets.propose({ f, t, profile: p, host: v.host, url: onHost ? onHost.url : '' }) : null;
+      if (!pr) return res.status(409).json({ error: `this profile is shared (other conversations, or the user's own browsing, use it) — ${v.host}'s login is cleared there only by the user's Approve, and no proposal can be filed on this server`, code: 'shared_profile' });
+      if (!pr.ok) return failVerdict(res, pr);
+      return res.json({ ok: true, proposal: pr.proposal, text: pr.text });
+    }
+    const r = await D.clearSite(t.profileId, { host: v.host });
+    if (!r.ok) return res.status(STATUS[r.code] || 502).json({ error: r.error, code: r.code });
+    res.json({ ok: true, cleared: { host: r.host, cookies: r.cookies, cookieDomains: r.cookieDomains, origins: r.origins, storageFailed: r.storageFailed || [], sessionTabs: r.sessionTabs, remaining: r.remaining }, text: ST.siteResetText(r) });
+  } catch (e) { fail(res, e); }
+});
 /** P4: the same provider rows for the CLI (`vibespace-browser providers`),
  *  with the verdict for `?host=` when given — an agent learns WHY a provider
  *  is refused before it asks for one. */
@@ -1284,12 +1620,18 @@ router.post('/api/agent/browser/new', (req, res) => {
       // ADOPTABLE ROOTS (2026-09-21): the user's own browser directory is never a
       // session's to register — the PURE verdict names the roots and the remedy
       const B = require('../browser-profiles.js');
+      const F = require('../browser-facts.js');
       const roots = ctx.adoptRoots || {};
-      let existing = null; try { existing = (k.list().profiles || []).find((p) => p && p.dir === adoptDir) || null; } catch { existing = null; }
-      const v = B.adoptDirVerdict({ dir: adoptDir, homeDir: roots.homeDir || null, dataDir: roots.dataDir || null, existing, browserKey: f.browserKey });
+      // verify F1: the REAL path is judged and registered — a symlink / a `//` spelling is never a way past the fence,
+      // and the registry holds ONE identity per directory (the kept store's "never a registered profile's directory")
+      const realDir = F.existingRealDir(adoptDir);
+      // verify r2 (Y1e): a paired MACHINE's profile (`p.host`) names a directory on THAT machine — the same text here is a
+      // different directory; it never answers for a local adopt (it refused one as "already registered … use <remote>")
+      let existing = null; try { existing = (k.list().profiles || []).find((p) => p && !p.host && p.dir && (p.dir === adoptDir || (realDir && F.sameRealDir(p.dir, realDir) === true))) || null; } catch { existing = null; }
+      const v = B.adoptDirVerdict({ dir: adoptDir, realDir, homeDir: roots.homeDir || null, dataDir: roots.dataDir || null, realHomeDir: F.existingRealDir(roots.homeDir || ''), realDataDir: F.existingRealDir(roots.dataDir || ''), existing, browserKey: f.browserKey });
       if (!v.ok) return res.status(v.code === 'adopt_failed' ? 409 : 403).json({ error: v.error, code: v.code });
       // owner ruling A: usable by ALL of the owner's conversations (`createdBy` = this one); the user's panel switch narrows it
-      const a = k.adoptDirectory({ label: req.body?.label, dir: adoptDir, owner: { kind: 'instance', id: null }, createdBy: f.browserKey });
+      const a = k.adoptDirectory({ label: req.body?.label, dir: v.dir, owner: { kind: 'instance', id: null }, createdBy: f.browserKey });
       if (!a.profile) return res.status(409).json({ error: a.why || 'cannot adopt that directory', code: 'adopt_failed' });
       return res.json({ profile: view(a.profile), adopted: true, created: a.created });
     }
@@ -1320,6 +1662,22 @@ router.post('/api/agent/browser/pin', (req, res) => {
   const f = agentFacts(req, res); if (!f) return;
   try { res.json(pinAnswer(k, f, req.body?.profile, { by: 'agent' })); } catch (e) { fail(res, e); }
 });
+/** lane browser-propose step 3: what the agent is told when its claim filed (or found) a PROPOSAL — the ONE next step
+ *  (tell the user in one sentence) and what it must not do (work around the refusal). */
+function proposalNext(r) {
+  const p = r.proposal || {};
+  const id = r.claim && r.claim.id;
+  if (r.rejected) return `the user REJECTED switching your browser to CloakBrowser for ${p.site} — do not work around the refusal (no copied session, no other browser); tell the user which page needs them and carry on with what you can`;
+  if (p.state === 'unavailable') {
+    const why = p.plan && p.plan.why === 'remote' ? 'this conversation runs on another machine' : p.plan && p.plan.why === 'other-machine' ? 'your browser runs on a paired machine' : p.plan && p.plan.why === 'already-cloak' ? 'your browser already is CloakBrowser' : p.plan && p.plan.why === 'never-admitted' ? `CloakBrowser never opens ${p.site} — a loopback / link-local address` : p.installWhy === 'provider_unavailable' ? 'CloakBrowser is not available in this version' : `CloakBrowser cannot be installed here (${p.installWhy || 'unavailable'})`;
+    return `no switch can be offered on this machine (${why}) — the user sees your claim as a card in the chat; tell them in ONE sentence which page refused you: signing in there is theirs (the live view's Take over). Do not work around it`;
+  }
+  // verify r1: a REJECT is not pushed — it is said at the agent's next navigation to the host (or its next claim on it)
+  if (r.duplicate) return `the same card still waits for the user (proposal ${id}, ${p.state}) — no second card was made. Do not ask again and do not work around the refusal; when they approve you are told (with their next message if your turn has ended); if they reject it, your next navigation to ${p.site} says so`;
+  const what = p.plan && p.plan.kind === 'switch' ? 'switch this browser to CloakBrowser in place' : p.plan && p.plan.kind === 'site' ? `let your CloakBrowser browser open ${p.site}` : 'a new CloakBrowser profile for this conversation';
+  const also = Array.isArray(p.alsoSites) && p.alsoSites.length ? `, with the sites ${p.site}'s sign-in page loads from` : '';
+  return `a card in the user's chat now waits for their Approve (proposal ${id}: ${what}${also}${p.install === 'needed' ? ', installing CloakBrowser first' : ''}). Tell the user in ONE sentence that the card waits for their Approve — then stop: do NOT work around the refusal (no copied session, no other browser, no switch of your own). When they approve, you are told (with their next message if your turn has ended); re-run the sign-in then`;
+}
 /** P4 (§7.4): the profile an agent's backend verb acts on — a named handle/id, else the set's default / only member; the
  *  ephemeral browser has no registry record, so it is refused with the remedy (a switch is a property of a PROFILE). */
 function agentProfileFor(k, f, ref) {
@@ -1369,17 +1727,21 @@ router.post('/api/agent/browser/blocked', (req, res) => {
     // from this conversation is not one it could have hit a block in; refused by the admission's own name (the user's live
     // view of a kept profile never shows a stranger's claim with a one-click switch beside it)
     if (named && !named.ambiguous) { const B = require('../browser-profiles.js'); const may = B.mayAttach(named, agentFactsOf(f)); if (!may.ok) return res.status(STATUS[may.code] || 409).json({ error: may.error, code: may.code, ...(may.remedy ? { remedy: may.remedy } : {}) }); }
-    const r = k.blocked({ url: req.body?.url, why: req.body?.why, evidence: req.body?.evidence, tier: req.body?.tier, browserKey: f.browserKey, sessionId: f.sessionId, profileId });
+    const r = k.blocked({ url: req.body?.url, why: req.body?.why, evidence: req.body?.evidence, tier: req.body?.tier, browserKey: f.browserKey, sessionId: f.sessionId, profileId, sessionName: String(f.session?.webuiName || f.session?.name || ''), remote: !!f.remote });
+    // lane browser-propose step 3: a tier-2 claim is ONE proposal — its card in the chat + its For-you item (the runner shows them)
+    if (r.proposal) { try { ctx.proposals?.filed?.(r); } catch (e) { console.warn('[browser] the proposal card was not shown — ' + (e && e.message)); } }
     let remembered = null;
     if (req.body?.remember === true) { try { remembered = k.addSiteHint({ host: r.claim.host, tier: r.claim.tier, backend: null, why: r.claim.why || 'blocked (agent claim)', by: 'agent' }); } catch (e) { remembered = { error: String(e && e.message), code: e && e.code }; } }
     // the rebuilt dialog: the live view offers the switch ONLY when another browser is available for this profile
     // (SW.switchChoices, the digest's `backends[id].choices`) — the agent is told which world it is in
     let choices = [];
     try { choices = profileId && typeof k.choicesFor === 'function' ? k.choicesFor(profileId) : []; } catch { choices = []; }
-    const next = choices.includes('cloak')
-      ? 'the user sees your claim in the live view with a one-click "Switch to CloakBrowser…" — the switch is THEIR act; `vibespace-browser backend <name>` proposes it yourself'
-      : 'the user sees your claim in the live view; no other browser is available on this instance, so the switch is not offered there — it is THEIR act to arrange one; `vibespace-browser backend` lists the rows';
-    res.json({ ...r, remembered, next });
+    const next = r.proposal ? proposalNext(r)
+      : choices.includes('cloak')
+        ? 'the user sees your claim in the live view with a one-click "Switch to CloakBrowser…" — the switch is THEIR act; `vibespace-browser backend <name>` proposes it yourself'
+        : 'the user sees your claim in the live view; no other browser is available on this instance, so the switch is not offered there — it is THEIR act to arrange one; `vibespace-browser backend` lists the rows';
+    const { proposal, ...rest } = r;
+    res.json({ ...rest, ...(proposal ? { proposal: { id: r.claim.id, state: proposal.state, install: proposal.install, plan: { kind: proposal.plan.kind, why: proposal.plan.why || null, label: proposal.plan.label || proposal.plan.profileLabel || null }, site: proposal.site } } : {}), remembered, next });
   } catch (e) { fail(res, e); }
 });
 router.post('/api/agent/browser/site-hint', (req, res) => {
@@ -1388,4 +1750,4 @@ router.post('/api/agent/browser/site-hint', (req, res) => {
   try { res.json({ hint: k.addSiteHint({ host: req.body?.site || req.body?.url, tier: req.body?.tier, backend: req.body?.backend, why: req.body?.why, by: 'agent' }) }); } catch (e) { fail(res, e); }
 });
 
-module.exports = { router, setup, unpinProfile, pinGuardFor, healDanglingPins, pinHoldersOf, releaseProfile, convertPinnedDirs, keyForPickedSession, sessionFacts, STATUS }; // + "Who can use it": the ONE resolver of a picked live session (the trace routes' PATCH calls it) // lane S2: the delete's refuse-or-warn + the one unpin (+ the boot heal); owner ruling A: Delete…'s release; the boot conversion of pre-ruling pins
+module.exports = { router, setup, unpinProfile, pinGuardFor, healDanglingPins, pinHoldersOf, releaseProfile, convertPinnedDirs, keyForPickedSession, sessionFacts, pinAnswer, STATUS }; // + "Who can use it": the ONE resolver of a picked live session (the trace routes' PATCH calls it) // lane S2: the delete's refuse-or-warn + the one unpin (+ the boot heal); owner ruling A: Delete…'s release; the boot conversion of pre-ruling pins

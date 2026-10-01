@@ -31,7 +31,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # NOTE: bypassPermissions is blocked for root — run the app as a normal user.
 # mc (MinIO client): lets users mint PERMANENT revocable share credentials
 # (service accounts); without it shares fall back to 7-day STS credentials
-RUN curl -fsSL https://dl.min.io/client/mc/release/linux-$(dpkg --print-architecture | sed 's/armhf/arm/')/mc -o /usr/local/bin/mc && chmod +x /usr/local/bin/mc
+# dl.min.io answered 410 Gone on 2026-09-30 (MinIO retired its download host);
+# the last community release of mc lives on GitHub — pinned by tag AND sha256
+# (amd64 / arm64), so a moved or replaced asset fails the build by name.
+RUN set -e; arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      amd64) sha=01f866e9c5f9b87c2b09116fa5d7c06695b106242d829a8bb32990c00312e891 ;; \
+      arm64) sha=14c8c9616cfce4636add161304353244e8de383b2e2752c0e9dad01d4c27c12c ;; \
+      *) echo "mc: no pinned build for $arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/minio/mc/releases/download/RELEASE.2025-08-13T08-35-41Z/mc.linux-${arch}.RELEASE.2025-08-13T08-35-41Z" -o /usr/local/bin/mc \
+    && echo "${sha}  /usr/local/bin/mc" | sha256sum -c - \
+    && chmod +x /usr/local/bin/mc
 
 RUN npm install -g @anthropic-ai/claude-code
 

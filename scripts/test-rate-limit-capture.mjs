@@ -176,7 +176,9 @@ fs.rmSync(dir, { recursive: true, force: true });
   const eng = fs2.readFileSync(new URL('../src/server/usage-pool-engine.js', import.meta.url), 'utf8');
   const engCode = eng.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
   ok(!/\borgVerifiedKey\b/.test(engCode), '⑥ REFUTED AND REMOVED: no executable line calls orgVerifiedKey — nothing may key a reading on the observed org (the comments keep the record)');
-  ok(/function corroborateReading\(session, key, what\)[\s\S]{0,800}observedOrgFor\?\.\(session\?\.claudeSessionId\)/.test(eng), '⑥ the observation survives as CORROBORATION: same query, logs + telemetry, no return into the key');
+  // lane-hot-switch (2026-09-30): the org is a machine-wide LABEL (measured) — the
+  // corroboration survivor is retired too: no executable engine line asks it
+  ok(!/\bcorroborateReading\b|\bobservedMemberFor\b|observedOrgFor\?\.\(/.test(engCode), '⑥ RETIRED: no executable engine line asks the OTel label anything (no corroboration, no veto, no "observed on" line)');
   // 2026-09-08 (inc-mts8a8mr-ulmm): the READING half also hands its own window
   // to the resolver (the lag shadow is strictly additional evidence about which
   // credentials produced it), so the pin allows the extra arguments while still
@@ -211,8 +213,8 @@ fs.rmSync(dir, { recursive: true, force: true });
   ok(/\(prev\.source \|\| 'unknown'\) === \(cache\.source \|\| 'unknown'\)/.test(est), '⑥ calib pairs are same-source (cross-source offset is attribution, not prediction error — mirrors extractPairs 2.340.0; lives in usage-estimator.sweepAnchorGroup since 2.369.164)');
   ok(!/\(prev\.source \|\| 'unknown'\) === \(g\.cache\.source \|\| 'unknown'\)/.test(engCode) && /sweepAnchorGroup\(/.test(engCode), '⑥ …and the engine holds no inline copy of the pairing rule — it calls the estimator\'s sweepAnchorGroup (ONE implementation)');
   const sv = fs2.readFileSync(new URL('../server.js', import.meta.url), 'utf8');
-  ok(/getOtelIngest: \(\) => \{ try \{ return otelIngest; \}/.test(sv), '⑥ server.js hands the engine a lazy otelIngest (TDZ: created later in the file)');
-  ok(/observedOrgFor\(sid\)/.test(fs2.readFileSync(new URL('../src/server/otel-ingest.js', import.meta.url), 'utf8')), '⑥ the ingest exposes the per-session observed org');
+  void sv;
+  ok(!/^\s*observedOrgFor\(sid\)/m.test(fs2.readFileSync(new URL('../src/server/otel-ingest.js', import.meta.url), 'utf8')), '⑥ the ingest no longer exposes a per-session "observed org" to ask');
   // ⑦ a DELETED account's zombie cache file must not join identity groups —
   // it poisoned org→account resolution (OTel booked live spend to the dead
   // id, atype 'unknown', outside every quota view: the org-29c4 implied-full

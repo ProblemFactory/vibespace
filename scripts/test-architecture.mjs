@@ -44,7 +44,7 @@ const resolveRel = (from, spec) => {
 };
 
 // ── Tier membership (path-based; NEW files inherit their directory's tier) ──
-const PURE = new Set(['src/hidden-chars.js', 'src/window-desktop.js', 'src/plugin-manifest.js', 'src/account-pool-auto.js', 'src/model-family.js', 'src/task-color-seq.js', 'src/ssh-key-format.js', 'src/session-schema.js', 'src/otel-truth.js', 'src/msg-acl.js', 'src/backend-caps.js',
+const PURE = new Set(['src/record-lateness.js' /* lane-hot-switch: a late record is not a live fact — the stream clock + the look-ahead, imports nothing */, 'src/hidden-chars.js', 'src/window-desktop.js', 'src/plugin-manifest.js', 'src/account-pool-auto.js', 'src/model-family.js', 'src/task-color-seq.js', 'src/ssh-key-format.js', 'src/session-schema.js', 'src/otel-truth.js', 'src/msg-acl.js', 'src/backend-caps.js',
   // AGENT BROWSER (design-agent-browser-v2 §3.6): the identity/spawn-env decisions, the
   // registry + lease model and the keeper's verdicts — imports nothing (P0/P1); and the ONE
   // constants home every process keeper counts and bounds by (src/keeper-limits.js)
@@ -75,6 +75,7 @@ const PURE = new Set(['src/hidden-chars.js', 'src/window-desktop.js', 'src/plugi
   'src/file-disposition.js', // lane raw-filename: THE one Content-Disposition that names a file (both RFC 6266 forms) — files.js + remote-fs.js; imports nothing
   'src/collab-row.js', // codex multi-agent collab row labels/HTML — esc/t/icons injected, so the XSS rule is unit-provable
   'src/model-echo.js', // the CLI's `Set model to` echo — ONE parser for the status bar, the command-card label and the server's model-lock repin
+  'src/changelog-style.js', // the user changelog's style rules (lint + parity of CHANGELOG.md / .zh / .ja) — test-changelog-style runs them over the three files; imports nothing
   // login-session lifetime (2026-09-07): the claude harness descriptor reads the
   // credential file, this decides what the numbers MEAN; pool decisions + accounts
   // + the watcher all consume it, so it must stay dependency-free
@@ -127,6 +128,11 @@ const PURE = new Set(['src/hidden-chars.js', 'src/window-desktop.js', 'src/plugi
   //     `caps.receive`, which is why they must be importable from the browser
   //     bundle and from a node suite with no server at all.
   'src/channel-record.js', 'src/channel-caps.js',
+  //   peer-text — THE belt on peer text toward an agent (lane peer-census, 2026-09-29): bound → the hidden
+  //     characters folded → the frame rule per line and per inline piece, composed ONCE over channel-record's
+  //     frame rule and hidden-chars' set (PURE → PURE); every census row of test-peer-text-census that claims the
+  //     rule calls it (channel-filter, channel-groups, inbox-reply, job-model, agent-routes, channels-engine).
+  'src/peer-text.js',
   //   channel-filter — the rule matcher + the honest estimator + the
   //     assignment model (its two authority caps, the round-robin, the
   //     pacing verdict) + the §7.5 renderer an agent is handed. Imports only
@@ -2395,7 +2401,7 @@ console.log('§62 every path where the user names a window goes through wm.revea
     'src/lib/window.js': [9, 2, 'the door\'s own raise (revealWindow: its replay branch + the raise), restore\'s raise, createWindow\'s focus of a NEW window, the POINTER (_focusFromPointer ×2, beginDragFromPointer), startMoveMode, _focusMostRecent (the close / minimize handoff)'],
     'src/lib/tab-group.js': [3, 0, 'a detach and the two close handoffs — machine'],
     'src/lib/layout.js': [4, 2, 'boot restore / remote apply / preset re-apply — the RECORD decides the tab (§6b)'],
-    'src/lib/stage-manager.js': [2, 0, 'the stage raising its own hero (_stageBypass)'],
+    'src/lib/stage-manager.js': [3, 0, 'the stage raising its own hero (_stageBypass ×2) + materialize named a guest of the hero\'s own group: its plain raise-only focus (verify r2 of inc-munl8jkl-gaih — shouldIntercept says no, so focusWindow never re-enters materialize)'],
     'src/lib/command-mode.js': [1, 1, 'the Tab cycle steps FRAMES (each group on the tab it shows) — it names no tab'],
     'src/lib/desktop-app-window.js': [1, 0, 'the capture pointerdown — a PRESS keeps the tab'],
     'src/lib/browser-live-window.js': [1, 0, 'the fallback for an app without goToWinId (a stub app in a suite) — goToWinId IS the door'],
@@ -2778,6 +2784,58 @@ console.log('§64b the lane\'s new words are in both dictionaries');
   const missing = [...keys].filter((k) => !SAME_IN_EVERY_LANGUAGE.has(k) && (!zh.has(k) || !ja.has(k)));
   ok(LANE.every((k) => keys.has(k)) && keys.size >= 100, `§64b the census reads the lane's surfaces (${keys.size} literals, the ${LANE.length} spec §4.6 / §9 strings among them)`, LANE.filter((k) => !keys.has(k)).join(' | '));
   ok(missing.length === 0, `§64b every literal has zh + ja${missing.length ? ' — missing: ' + missing.slice(0, 8).join(' | ') : ''}`);
+}
+
+// §67 THE HOT-SWITCH VERDICT IS A MEASUREMENT (lane-hot-switch, 2026-09-30). Every reader of
+// `capsOf(backend).hotSwitch === 'verified'` (the pool's hot re-point, ws-create's held stamp, the
+// held-member rule, the reset credit's identity) acts as if a RUNNING process follows its link. The
+// first 'verified' (2.368.21) rested on a file-system test and decompiled code, and a telemetry
+// label was later read as its refutation. So: a 'verified' row carries `hotSwitchEvidence` whose
+// record file SHOWS the link followed on the pinned CLI, plus the heavy gate that re-measures the
+// installed CLI; nothing but the caps rows ever states the verdict, and no runtime prober flips it.
+console.log('§67 the hot-switch verdict is a measurement with its record');
+{
+  const caps = (await import('node:module')).createRequire(import.meta.url)(path.join(REPO, 'src/backend-caps.js'));
+  const verdictProblems = (rows) => {
+    const bad = [];
+    for (const [be, row] of Object.entries(rows)) {
+      if (!['verified', 'impossible', 'unverified'].includes(row.hotSwitch)) bad.push(`${be}: unknown verdict ${JSON.stringify(row.hotSwitch)}`);
+      if (row.hotSwitch !== 'verified') continue;
+      const ev = row.hotSwitchEvidence;
+      if (!ev || !ev.cli || !ev.measuredAt || !ev.mechanism || !ev.record || !ev.gate) { bad.push(`${be}: 'verified' without a complete hotSwitchEvidence`); continue; }
+      let rec = null; try { rec = JSON.parse(read(ev.record)); } catch { }
+      if (!rec) { bad.push(`${be}: the record ${ev.record} is unreadable`); continue; }
+      if (!String(rec.cli || '').startsWith(ev.cli)) bad.push(`${be}: the record measured ${rec.cli}, the row pins ${ev.cli}`);
+      const m2 = rec.variants?.symlink?.requests?.msg2 || [];
+      if (!(m2.length && m2.every((a) => a === 'B:200'))) bad.push(`${be}: the record does not show the link followed (symlink msg2 = ${JSON.stringify(m2)})`);
+      if (!fs.existsSync(path.join(REPO, ev.gate))) bad.push(`${be}: the gate ${ev.gate} is missing`);
+    }
+    return bad;
+  };
+  const bad = verdictProblems(caps.BACKEND_CAPS);
+  ok(bad.length === 0 && caps.capsOf('claude').hotSwitch === 'verified', `§67 every 'verified' row carries a record that shows the link followed${bad.length ? ' — ' + bad.join(' | ') : ''}`);
+  const ciSrc = read('scripts/ci.mjs');
+  ok(/\{ name: 'test-claude-hot-switch', tier: 'heavy'/.test(ciSrc), '§67 the re-measuring gate is in the HEAVY tier (a real binary)');
+  ok(caps.setVerifiedCap('claude', 'hotSwitch', 'impossible') === false && caps.setVerifiedCap('claude', 'hotSwitchEvidence', null) === false && caps.capsOf('claude').hotSwitch === 'verified',
+    '§67 no runtime prober can flip the switching verdict (setVerifiedCap refuses it)');
+  // nothing but the caps rows (and the ACP harness's own row) STATES a verdict
+  const writers = [];
+  const walk67 = (dir) => fs.readdirSync(path.join(REPO, dir), { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walk67(dir + '/' + d.name) : /\.(c|m)?js$/.test(d.name) ? [dir + '/' + d.name] : []));
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
+  for (const f of walk67('src')) {
+    if (!f.endsWith('.js') || f === 'src/backend-caps.js' || f === 'src/harnesses/acp.js') continue;
+    const src = strip(read(f));
+    if (/hotSwitch\s*:\s*['"]/.test(src) || /\.hotSwitch\s*=[^=]/.test(src)) writers.push(f);
+  }
+  ok(writers.length === 0, `§67 no module outside the caps rows states or assigns a hotSwitch verdict${writers.length ? ' — ' + writers.join(' ') : ''}`);
+  // NEGATIVE CONTROLS: the checker sees a bare 'verified' and a record that shows the process HELD
+  const ctl1 = verdictProblems({ x: { hotSwitch: 'verified' } });
+  const heldRec = path.join(os.tmpdir(), 'vs-arch-hotsw-' + process.pid + '.json');
+  fs.writeFileSync(heldRec, JSON.stringify({ cli: '9.9.9', variants: { symlink: { requests: { msg2: ['A:200'] } } } }));
+  let ctl2;
+  try { ctl2 = verdictProblems({ y: { hotSwitch: 'verified', hotSwitchEvidence: { cli: '9.9.9', measuredAt: 'x', mechanism: 'x', record: path.relative(REPO, heldRec), gate: 'scripts/test-claude-hot-switch.mjs' } } }); } finally { try { fs.unlinkSync(heldRec); } catch { } }
+  ok(ctl1.some((x) => /without a complete hotSwitchEvidence/.test(x)) && ctl2.some((x) => /does not show the link followed/.test(x)),
+    '§67 NEGATIVE CONTROLS: a bare \'verified\' and a record showing the process held its first member are both caught', JSON.stringify({ ctl1, ctl2 }));
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

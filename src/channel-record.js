@@ -164,10 +164,35 @@ function carriesFrame(text) {
  *  module's own predicate. The complete tags go first (`inertFrames`), then a
  *  dangling opener loses its `<` (`[system-reminder`): no line can leave an
  *  opener behind, so no join can complete one. */
-const FRAME_OPEN_RE = new RegExp(`<(${FRAME_HEAD.slice(1)}(?:${FRAME_NAMES}))(?=${FRAME_TAIL}(?:\\s[^<>]*)?$)`, 'giu');
+const FRAME_OPEN_RE = new RegExp(`<(${FRAME_HEAD.slice(1)}(?:${FRAME_NAMES}))(?=${FRAME_TAIL}(?:\\s|$))`, 'iuy');
+/** THE DANGLING OPENERS of ONE line whose complete tags are already inert — judged RIGHT TO LEFT (lane peer-census verify r6
+ *  F1): one `replace` from the left judged every opener's lookahead against the ORIGINAL line, so of `x <system-reminder
+ *  </system-reminder` only the second (dangling) opener was neutered and the first was LEFT dangling behind it —
+ *  `<system-reminder [/system-reminder` — for the next line's `>` (a quote mark, a list bullet) to complete, by this
+ *  module's own predicate, at every door (the belt's line and block forms, a name, a label, a page's words). An opener can
+ *  only dangle AFTER the line's last `>` (before it, that `>` or the `<` of a later tag ends the run a join could
+ *  continue; a complete tag is inert already), so the walk starts at the last `<` and moves left: each opener is judged
+ *  with every opener after it ALREADY neutered, and the first `<` that is no opener blocks every one before it (its run
+ *  can never reach a later `>`). One sticky match per `<`, the edits applied in one pass: linear. Idempotent. */
+function inertOpeners(t) {
+  const g = t.lastIndexOf('>');
+  let i = t.lastIndexOf('<');
+  if (i <= g) return t;
+  const edits = [];
+  for (; i > g; i = i > 0 ? t.lastIndexOf('<', i - 1) : -1) {   // (a negative fromIndex is read as 0: the walk ends at the line's first character)
+    FRAME_OPEN_RE.lastIndex = i;
+    const m = FRAME_OPEN_RE.exec(t);
+    if (!m) break;
+    edits.push([i, i + m[0].length, '[' + m[1].replace(FOLD_G, '')]);
+  }
+  if (!edits.length) return t;
+  let out = '', at = 0;
+  for (const [s, e, r] of edits.reverse()) { out += t.slice(at, s) + r; at = e; }
+  return out + t.slice(at);
+}
 function inertFrameLine(line) {
   if (typeof line !== 'string' || !line) return '';
-  return inertFrames(line).replace(FRAME_OPEN_RE, (m, name) => '[' + name.replace(FOLD_G, ''));
+  return inertOpeners(inertFrames(line));
 }
 
 const str = (v, max) => {
@@ -195,12 +220,24 @@ const peerText = (v, max) => inertFrames(str(v, max));
  */
 const NAME_INVISIBLE_RE = /[\u202A-\u202E\u2066-\u2069\u200B\u2060\uFEFF\u00AD]/g;
 const NAME_CONTROL_RE = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]+/g;
+// THE LINE RULE TOO (lane peer-census verify r1, F2): a name is always ONE INLINE PIECE that a surface writes more
+// after — the agent's read answer prints `attachment: <name> (mime), N bytes` and then the NEXT record's line, the list
+// prints a title and then the next row, a wake block writes ` at <time>` ⏎ `> …` after an author. `peerText` neuters
+// COMPLETE tags only, so an attachment named `report <system-reminder` reached the agent's tool result intact and the
+// next record's `> quoted …` completed it (reproduced over the real engine). A dangling opener at a name's end loses
+// its `<` here, AFTER the bound (the cut can leave one too), so no surface can complete one — the same rule every
+// other inline piece takes through the belt (src/peer-text.js). Idempotent: judged at ingest and again on the way out.
 function peerName(v, max) {
   const s0 = typeof v === 'string' ? v : (typeof v === 'number' && Number.isFinite(v) ? String(v) : null);
   if (s0 === null) return null;
-  const s = peerText(s0.slice(0, max * 4).replace(NAME_CONTROL_RE, ' ').replace(NAME_INVISIBLE_RE, ''), max * 4).replace(/\s+/g, ' ').trim().slice(0, max).trim();
+  const t = peerText(s0.slice(0, max * 4).replace(NAME_CONTROL_RE, ' ').replace(NAME_INVISIBLE_RE, ''), max * 4).replace(/\s+/g, ' ').trim();
+  // verify r3 F7 (lane peer-census): the bound never splits a surrogate pair — a lone surrogate at the cut is a name the
+  // CLI's stdout re-encodes as U+FFFD (the name the agent sees is not the name the store holds)
+  const s = inertFrameLine(peerText(t.slice(0, nameCutAt(t, max)).trim()));
   return s || null;
 }
+/** the largest cut ≤ n that does not split a surrogate pair (src/peer-text.js cutText's rule; this module imports nothing) */
+const nameCutAt = (s, n) => (n > 0 && /[\uD800-\uDBFF]/.test(s.charAt(n - 1)) ? n - 1 : n);
 
 // ── THE BLOCK SCHEMA (design §25) ─────────────────────────────────────────
 /** Block kinds — CLOSED. p = a paragraph of inline runs; quote / sig = foldable
@@ -654,7 +691,7 @@ function makeConversation(input) {
 module.exports = {
   RECORD_FIELDS, OPTIONAL_FIELDS, MAX_TEXT, MAX_RAW_BYTES, FRAME_TAG_RE, FRAME_TAGS,
   BLOCK_KINDS, RUN_KINDS, ATTACHMENT_ROLES, SYS_WHATS, BLOCK_LIMITS, LINK_SCHEMES,
-  makeRecord, makeConversation, resolveMentions, inertFrames, inertFrameLine, peerText, peerName, carriesFrame, recordKey, isSynthetic,
+  makeRecord, makeConversation, resolveMentions, inertFrames, inertFrameLine, inertOpeners, peerText, peerName, carriesFrame, recordKey, isSynthetic,
   safeHref, validateBlocks,
   // lane channel-threads (2026-09-28): reactions + the side log's schema and bounds
   REACTIONS_MAX, REACTION_BY_MAX, REACTION_KEY_MAX, REACTION_KEY_RE, REACTION_GLYPH_MAX, REACTION_LABEL_MAX, REACTION_COUNT_MAX,

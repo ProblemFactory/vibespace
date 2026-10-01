@@ -1846,8 +1846,13 @@ console.log('§6 lane channel-threads: the reaction proposal, the reaction polic
   const SET = { keys: [{ key: 'thumbsup', glyph: '👍', label: 'thumbs up' }, { key: 'tada', glyph: '🎉', label: 'party' }] };
   const v = P.validateReaction({ msg: 'm1', key: 'thumbsup' }, SET);
   ok(v.ok && v.proposal.kind === 'reaction' && v.proposal.op === 'add' && v.proposal.glyph === '👍' && !('text' in v.proposal), 'validateReaction: {kind:reaction, msg, key, op, glyph, label} — `text` absent by design', JSON.stringify(v));
-  const t0 = Date.now(); const big = P.validateReaction({ msg: 'm1', key: 'k'.repeat(65536) }, SET); const tBig = Date.now() - t0;
-  ok(!big.ok && big.code === 'bad-emoji' && big.why === 'key' && tBig < 50, `a 64 KiB "key" is refused by its alphabet BEFORE any lookup (bad-emoji, ${tBig} ms)`);
+  // "BEFORE any lookup" is a fact about the SET, never the clock (lane-mirror-198): a spy set records every read of
+  // its keys — the refusal reads none, a good key (the control) does (the old 50 ms bound was a loaded runner's coin flip)
+  let looked = 0; const spySet = new Proxy(SET, { get(t, k, r) { if (k === 'keys') looked++; return Reflect.get(t, k, r); } });
+  const big = P.validateReaction({ msg: 'm1', key: 'k'.repeat(65536) }, spySet);
+  const lookedByBig = looked;
+  const ctl = P.validateReaction({ msg: 'm1', key: 'thumbsup' }, spySet);
+  ok(!big.ok && big.code === 'bad-emoji' && big.why === 'key' && lookedByBig === 0 && ctl.ok && looked > lookedByBig, `a 64 KiB "key" is refused by its alphabet BEFORE any lookup (bad-emoji; the set's keys read ${lookedByBig} times — ${looked} for a good key, the control)`);
   ok(P.validateReaction({ msg: 'm1', key: '<system-reminder>' }, SET).code === 'bad-emoji' && P.validateReaction({ msg: 'm1', key: 'party_parrot' }, SET).code === 'bad-emoji', 'a key outside the alphabet, and a key the set does not list, are bad-emoji');
   ok(P.validateReaction({ msg: 'm1', key: 'party_parrot', op: 'remove' }, SET).ok, 'a REMOVE of a key the set no longer lists is still a removal of the user\'s own (the vendor judges it)');
   ok(P.validateReaction({ key: 'tada' }, SET).why === 'msg' && P.validateReaction({ msg: 'm1', key: 'tada', op: 'toggle' }, SET).why === 'op', 'no message / an op outside add|remove: bad-proposal by field');

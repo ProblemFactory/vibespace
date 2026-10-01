@@ -316,6 +316,9 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     clear: () => actBtn('clear', UI_ICONS.eraser, t('Clear content…'), t('Replace this item’s text — it keeps its place and time'), 'iw-act-clear'),
     'exit-allow': () => actBtn('exit-allow', UI_ICONS.check, t('Allow'), t('Allow'), 'iw-act-primary iw-act-exit'),
     'exit-deny': () => actBtn('exit-deny', UI_ICONS.close, t('Deny'), t('Deny'), 'iw-act-exit'),
+    // lane browser-propose: the agent's browser proposal — ONE primary Approve (runs exactly what the item says), a quiet Reject
+    'proposal-approve': () => actBtn('proposal-approve', UI_ICONS.check, t('Approve'), t('Runs exactly what this card says'), 'iw-act-primary iw-act-exit'),
+    'proposal-reject': () => actBtn('proposal-reject', UI_ICONS.close, t('Reject'), t('Reject'), 'iw-act-exit'),
   };
   const viewOf = (it, e) => itemView(it, {
     t, words: model.wordsOf(it), detail: model.detailOf(it), name: model.nameFor(it.sessionKey, [it]),
@@ -393,9 +396,11 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     // verify r6 F3: a helper's ask carries its WHOLE request in the detail — verbatim too (markdown would eat a `*`,
     // fold its lines and make a `# …` line a heading: the same trap as F4 of r4)
     const verbatim = isCmd || !!(it.action && it.action.type === 'helper-ask');
-    const detailSig = (verbatim ? 'cmd\u0000' : 'md\u0000') + v.detail;
+    // lane browser-propose: a browser proposal's detail is what its Approve runs, line for line — verbatim too, never markdown
+    const plain = verbatim || !!(it.action && it.action.type === 'browser-proposal');
+    const detailSig = (plain ? 'cmd\u0000' : 'md\u0000') + v.detail;
     if (c.sig.detail !== detailSig) {
-      if (verbatim) { const pre = mk('pre', 'iw-exit-cmd'); pre.textContent = v.detail; c.detail.replaceChildren(pre); }
+      if (plain) { const pre = mk('pre', 'iw-exit-cmd'); pre.textContent = v.detail; c.detail.replaceChildren(pre); }
       else mdInto(c.detail, v.detail);
       c.detail.style.display = v.detail ? '' : 'none'; c.sig.detail = detailSig;
     }
@@ -576,6 +581,12 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     }
     if (a === 'producer') { model.runAction(it); return; }
     if (a === 'clear') { model.clearContent(id); return; } // the store's broadcast repaints the pane (and drops this button)
+    if (a === 'proposal-approve' || a === 'proposal-reject') {
+      // lane browser-propose: an Approve on a pane shown a moment ago is not a press on what the user read (the exit ask's V1 rule)
+      if (a === 'proposal-approve') { const pv = pressVerdict({ since: st.armId === id ? st.armAt : null, now: performance.now() }); if (!pv.ok) { showToast(t('That Approve moved under the pointer just now — read it, then press it again')); return; } }
+      if (await model.runAction(it, a === 'proposal-approve' ? 'approve' : 'reject')) advance(id);
+      return;
+    }
     if (a === 'exit-allow' || a === 'exit-deny') {
       // verify-r6 V1: Allow advances to the next item, whose pane shows Allow in the same place — a press on a pane
       // shown ARM_MS ago or less is not a press on what the user read (a double-click allowed the next ask unseen)

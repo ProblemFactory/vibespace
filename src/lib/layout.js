@@ -1,5 +1,6 @@
 import { track } from './telemetry-client.js';
-import { cssVarDefault } from './utils.js';
+import { cssVarDefault, showToast } from './utils.js';
+import { t } from './i18n.js';
 import { isTransientWindowType } from './window-types.js';
 import { wordlessTitleOf } from '../record-clear.js'; // PURE: the title a layout RECORD keeps for a window drawn from a record's words (lane-redact verify r7)
 import { chainSyncKey, ratioDiffers, heldRatio, releaseRatio, withoutMembers } from './chain-layout.js'; // agent browser P7 (§4.6): the sync key carries the layout; the ratio applies in place (unless a local divider drag holds it — v2 verify r1 ①)
@@ -10,6 +11,22 @@ const membersOf = (c) => ((c && Array.isArray(c.tabs)) ? c.tabs : []).map(String
 // THE HELD CLOSE (inc-mukeyzpt-lpou): how long a LOCAL close outranks a remote record that still lists the window
 // when no save carrying the close has left this client yet — §6b's dirty expiry, the held ratio's RATIO_HOLD_MS.
 const CLOSE_HOLD_MS = 60000;
+// THE UNSAVED ACT's hold (verify r4 ①): a move / drag / resize witness (`_movedAt` / `_boundsAt`) holds against a record only this
+// long after the act (§6b guard 2's expiry: an idle page holds nothing over the server) — the close hold's and the divider's bound
+const ACT_HOLD_MS = 60000;
+// THE ACK (verify r5 ⑤): a save CARRIES an act only once the server says it READ it (`layout-sync-ack {desktopId, sentAt}`),
+// never at the send — a socket that looks open but the server never reads (a restart under it, a wifi drop the browser
+// sees late) used to count the save as sent, the reconnect's re-read reversed the act and nothing re-sent it. A server that
+// answers no ack at all (an older one) is given this long after the send on an OPEN socket, then today's rule applies
+// (stamped at the send) — a skewed pair never hangs; once ONE ack has been seen from this server the fallback is off for good
+const ACK_WAIT_MS = 2000;
+// THE CLOCK WATCH (verify r5 ①): every hold above is a wall-clock age, and a machine that SLEEPS wakes with the wall clock 20
+// minutes ahead while the page ran for none of it — every held witness expired at once, guard 2 dropped the save that was
+// pending at the lid-close, the reconnect's re-read reversed the act, nothing said. A tick every CLOCK_TICK_MS; one that
+// arrives CLOCK_JUMP_MS late (past its interval) is a sleep: what was held when the page stopped running is re-armed by the
+// gap. A minute the page RAN through still expires (an idle page holds nothing over the server).
+const CLOCK_TICK_MS = 5000;
+const CLOCK_JUMP_MS = 20000;
 
 // Window types that legitimately carry no openSpec (never persisted/synced):
 // chat/terminal restore by session identity + get their openSpec async after
@@ -43,7 +60,9 @@ export function scanStoppedInDesktopStates(data, activeId, live, all, getCustomN
       if (alive) continue;
       const customName = getCustomName?.(backendSessionId);
       // land the resumed window back on ITS desktop at its saved spot
-      const winBounds = { gridBounds: ws.gridBounds || null, desktopId: meta.id };
+      // …taking the place of its old record entry there (never opened by this page: nothing else removes it —
+      // userW inc-mun7qjmw-iksh)
+      const winBounds = { gridBounds: ws.gridBounds || null, desktopId: meta.id, winId: ws.winId || ws.id || null };
       const stoppedMatch = all.find((s) => (s.backendSessionId || s.sessionId) === backendSessionId && (s.backend || 'claude') === backend);
       if (stoppedMatch) {
         out.push({ sessionId: stoppedMatch.sessionId, cwd: stoppedMatch.cwd,
@@ -58,6 +77,11 @@ export function scanStoppedInDesktopStates(data, activeId, live, all, getCustomN
   }
   return out;
 }
+
+/** The reconnect's re-read of /api/layouts, when it fails (5xx, a cut socket): retried this many times, this far apart
+ *  (× the attempt) — a failed read leaves the page on the stale base the read exists to end (verify r2 ⑥). */
+const RESYNC_RETRIES = 3;
+const RESYNC_RETRY_MS = 1500;
 
 class LayoutManager {
   constructor(app) {
@@ -74,41 +98,182 @@ class LayoutManager {
     //   can never echo a slightly-different state back (the ping-pong where an
     //   op on one client got undone and replayed).
     // _pointerDown: while the user is mid-drag/resize, inbound remote state is
-    //   deferred (latest wins) and applied on pointerup — remote state can no
-    //   longer yank a window out from under an in-progress drag.
+    //   deferred (the latest PER DESKTOP) and applied on pointerup — remote state
+    //   can no longer yank a window out from under an in-progress drag.
+    // _pendingRemote: desktopId ('' = the legacy single record) → the latest record
+    //   deferred under a gate (the pointer down, or `_restoring` — the apply's 1 s
+    //   cooldown and the boot's 5 s). NEVER dropped (lane desktop-move verify r1,
+    //   D4): a record dropped here left this client's base of that desktop stale,
+    //   and its next save then dropped the window another client had just moved
+    //   there — one slot for every desktop lost the HR record of a burst HR, Fin,
+    //   Fin, and a record under `_restoring` was dropped outright.
     this._lastRemoteSeq = 0;
     this._userDirty = false;
-    this._pendingRemote = null;
+    this._pendingRemote = new Map();
+    this._drainTimer = null;
     this._pointerDown = false;
+    // _applying: the SYNCHRONOUS span of a remote apply (and the cached sweep's closes) — a close made inside it is
+    //   the record's; one made in the 1 s cooldown after it (`_restoring`) is the USER's (verify r3 ③: noteClosed and
+    //   the dirty desks refused every close under `_restoring`, and scheduleAutoSave dropped every user act under it —
+    //   a drop, a close, a drag in the second after another client's record landed waited for the next act; a reload
+    //   in between undid it). _booting: the boot restore (its 5 s).
+    this._applying = false;
+    this._booting = false;
     this._lastSentJson = null;
+    // THE ACK's ledger (verify r5 ⑤): the saves answered by nothing yet ({sentAt, desks, pending, refused, at: when it left on
+    // an open socket}); `_carried` desktop → the sentAt of the last save the server READ for it (actHeld's release);
+    // `_serverAcks` once this server has acked anything (the no-ack fallback is then never taken)
+    this._unacked = []; this._carried = new Map(); this._serverAcks = false; this._ackTimer = null;
+    this._clockLast = Date.now(); this._clockTimer = setInterval(() => this._clockTick(), CLOCK_TICK_MS); this._clockTimer.unref?.(); // THE CLOCK WATCH (verify r5 ①)
     document.addEventListener('pointerdown', () => { this._userDirty = true; this._lastUserInputAt = Date.now(); this._pointerDown = true; }, { capture: true, passive: true });
     document.addEventListener('keydown', () => { this._userDirty = true; this._lastUserInputAt = Date.now(); }, { capture: true, passive: true });
-    const flushPending = () => {
-      this._pointerDown = false;
-      if (this._pendingRemote) {
-        const pending = this._pendingRemote; this._pendingRemote = null;
-        // Wait for the drop's own snap/capture timers (250ms) to settle first
-        setTimeout(() => this._handleRemoteSync(pending), 300);
-      }
-    };
+    const flushPending = () => this._flushPending();
     document.addEventListener('pointerup', flushPending, { capture: true, passive: true });
     document.addEventListener('pointercancel', flushPending, { capture: true, passive: true });
-    // Server restart resets its seq counter — reset ours on every reconnect
-    app.ws.onStateChange((connected) => { if (connected) this._lastRemoteSeq = 0; });
+    // Server restart resets its seq counter — reset ours on every reconnect; and a RECONNECT re-reads the layout
+    // (§6b guard 9, lane desktop-move verify r1 D2): what other clients wrote during the outage never arrives
+    // by broadcast. 250 ms after the open — the sends queued during the outage have left first.
+    this._connects = 0;
+    // a socket that DIED answers nothing more: the saves it carried are owed by nobody (their acts stay held — `_carried` is
+    // untouched — and the re-send after the re-read carries them again); one queued while down (`at` null) has not left
+    app.ws.onStateChange((connected) => { if (!connected) { this._lastSentJson = null; this._unacked = this._unacked.filter((s) => s.at == null); } if (connected) { this._clockTick(); this._lastRemoteSeq = 0; for (const s of this._unacked) if (s.at == null) s.at = Date.now(); if (this._connects++ > 0) setTimeout(() => this._resyncFromServer(), 250); } }); // a save queued while down LEAVES now (ws.js flushes right after the handlers): its no-ack clock starts here (verify r5 ⑤)
 
     // Listen for state sync from other clients
     app.ws.onGlobal((msg) => {
-      if (msg.type !== 'layout-sync' || this._restoring) return;
+      if (msg.type === 'layout-sync-ack') { this._onLayoutAnswer(msg.desktopId, msg.sentAt, { refused: false }); return; } // the server READ a save (verify r5 ⑤)
+      if (msg.type === 'layout-sync-refused') { this._onLayoutAnswer(msg.desktopId, msg.sentAt, { refused: true }); return; } // …or refused one: that desktop's acts stay held (the desktop manager reconciles + re-sends)
+      if (msg.type !== 'layout-sync') return;
       if (msg.seq) {
         if (msg.seq <= this._lastRemoteSeq) return; // stale echo — never re-apply older state
         this._lastRemoteSeq = msg.seq;
       }
-      if (this._pointerDown) { this._pendingRemote = msg; return; } // defer while interacting
+      msg.receivedAt = Date.now(); // a record knows nothing this page did after this instant (the held move, verify r2)
+      // under a gate: DEFERRED per desktop, applied once the gate opens — never dropped (§6b guard 3)
+      if (this._restoring || this._pointerDown) { this._deferRemote(msg); return; }
       this._handleRemoteSync(msg);
     });
   }
 
+  /** The pointer came up: the records deferred under it are applied after the drop's own snap/capture timers
+   *  (250 ms) have settled. */
+  _flushPending() {
+    this._pointerDown = false;
+    if (this._pendingRemote.size) this._drainDeferred(300);
+  }
+
+  /** A record that landed under a gate waits under its DESKTOP's key (the latest per desktop wins; a burst for
+   *  several desktops keeps one each). Under the apply / boot gate the drain polls until the gate opens; under
+   *  the pointer, the pointerup drains. */
+  _deferRemote(msg) {
+    this._pendingRemote.set(msg.desktopId || '', msg);
+    if (!this._pointerDown) this._drainDeferred(200);
+  }
+
+  /** Apply the deferred records ONE per tick, lowest seq first, each only when neither gate is up (an apply of
+   *  the desktop on show raises `_restoring` for 1 s — the next record waits for it). */
+  _drainDeferred(delayMs) {
+    if (this._drainTimer) clearTimeout(this._drainTimer);
+    this._drainTimer = setTimeout(() => {
+      this._drainTimer = null;
+      if (!this._pendingRemote.size || this._pointerDown) return; // the pointerup drains
+      if (this._restoring) { this._drainDeferred(200); return; }
+      const [key, msg] = [...this._pendingRemote.entries()].sort((a, b) => (a[1].seq || 0) - (b[1].seq || 0))[0];
+      this._pendingRemote.delete(key);
+      this._handleRemoteSync(msg);
+      if (this._pendingRemote.size) this._drainDeferred(200);
+    }, delayMs);
+  }
+
+  /** A RECONNECT RE-READS THE LAYOUT (lane desktop-move verify r1, D2 — §6b guard 9): layout records are a
+   *  broadcast-only mirror, and every other such mirror (settings, user state, tasks, statuses) is re-fetched on
+   *  reconnect (app.js). Without this a client's held records stayed at what it last saw before the outage, and
+   *  its next save wrote that base over whatever arrived meanwhile — one window another client had opened was
+   *  wiped (two are the belt's). Each desktop's record is taken exactly as a broadcast would be (the gates defer
+   *  it): the desktop on show is applied — positions, creates, a remote move, and a close ONLY of a window the
+   *  wire base listed (one the wire never listed is this client's own unsent change and stays) — the others
+   *  cached; the meta follows. */
+  async _resyncFromServer(attempt = 0) {
+    if (attempt === 0) { this._clockTick(); if (this._resyncing) return; this._resyncing = true; } // ONE read in flight (verify r3 ④: a held save re-asks it); a wake is noticed first (verify r5 ①)
+    const startedAt = Date.now(); // the read covers every broadcast that landed BEFORE it was asked (verify r2 ⑤)
+    let data = null;
+    try {
+      const res = await fetch('/api/layouts');
+      if (res.ok === false) throw new Error('HTTP ' + res.status);
+      data = await res.json();
+      if (!data || typeof data !== 'object') throw new Error('not a layout document');
+    } catch (err) {
+      // a failed read leaves the page on the stale base the read exists to end — its next save would write that base
+      // over what arrived during the outage (one window is below the belt): retry, bounded; then say so (verify r2 ⑥)
+      if (attempt < RESYNC_RETRIES) { setTimeout(() => this._resyncFromServer(attempt + 1), RESYNC_RETRY_MS * (attempt + 1)); return; }
+      console.warn('[layout-sync] the reconnect re-read of /api/layouts failed; this page keeps its last records', err);
+      try { window.__vsOp?.('layout-resync-failed', { attempts: attempt + 1 }); } catch { }
+      // THE STALE BASE (verify r3 ④): until a read succeeds this page's records are older than the server's — a save
+      // from them would write that base over what arrived during the outage (the D2 class; below the belt after a
+      // restart). Saves are HELD (_doAutoSave re-asks the read); the user is told once per episode.
+      this._resyncing = false;
+      this._resyncStale = true;
+      if (!this._staleTold) { this._staleTold = true; showToast(t('The layout could not be re-read after reconnecting — window changes on this page are held until it can be'), { type: 'warn', duration: 10000 }); }
+      return;
+    }
+    this._resyncing = false;
+    const wasStale = this._resyncStale;
+    this._resyncStale = false; this._staleTold = false;
+    const expired = wasStale ? this._expiredHeldActs() : 0; // counted BEFORE the applies prune the expired witnesses (verify r4 ④)
+    const dm = this.app.desktopManager;
+    const active = dm?.activeDesktopId;
+    const meta = Array.isArray(data.desktopMeta) && data.desktopMeta.length ? data.desktopMeta : undefined;
+    // THE RE-READ'S HORIZON (verify r3 ②): the answer knows nothing this page did after it was ASKED, and nothing whose
+    // save has not left on an open socket — a drop made while the read was in flight, or while disconnected with its
+    // save queued, is held over the answer and re-sent (stamped at the answer, the read reversed the move and the
+    // apply's dirty clear swallowed its save — r2 ① one layer up)
+    const receivedAt = Math.min(startedAt, this._movesSentAt ?? 0);
+    // A record still DEFERRED for the same desktop (verify r2 ⑤): one received before the read was asked is older
+    // than the read — dropped, never applied after it (it used to drain a stale record over the fresh one); one
+    // received while the read was in flight may be newer than what the read saw — it stays and supersedes the
+    // read's record for that desktop (a per-desktop record is whole).
+    const take = (msg) => {
+      const key = msg.desktopId || '';
+      const pend = this._pendingRemote.get(key);
+      if (pend && (pend.receivedAt || 0) >= startedAt) return;
+      if (this._restoring || this._pointerDown) this._deferRemote(msg); // replaces the older deferred record
+      else { this._pendingRemote.delete(key); this._handleRemoteSync(msg); }
+    };
+    let n = 0;
+    const desktops = dm && data.desktops && typeof data.desktops === 'object' ? data.desktops : {};
+    // the desktop on show LAST: a window that left it for another desktop during the outage is then found in that
+    // desktop's freshly cached record and MOVED there (adoptRemoteMove), not closed
+    const order = Object.entries(desktops).sort(([a], [b]) => (a === active) - (b === active));
+    for (const [id, d] of order) {
+      if (id === '__stage__' || !d?.autoSave || !Array.isArray(d.autoSave.windows)) continue;
+      take({ type: 'layout-sync', desktopId: id, state: d.autoSave, resync: true, receivedAt, desktopMeta: id === active ? meta : undefined }); n++;
+    }
+    if (!dm && Array.isArray(data.autoSave?.windows)) { take({ type: 'layout-sync', state: data.autoSave, resync: true, receivedAt }); n++; }
+    try { window.__vsOp?.('layout-resync', { desktops: n }); } catch { }
+    if (wasStale && this._userDirty) this.scheduleAutoSave(); // the save held on the stale base goes out on the fresh one (verify r3 ④)
+    // THE STALE RELEASE (verify r4 ④): an act held past ACT_HOLD_MS / CLOSE_HOLD_MS is not kept — the fresh records are not
+    // held off by an expired witness and no save carries it (§6b guard 2's expiry) — the page followed the server above;
+    // the stale toast promised "held until it can be", so the ones that were not are counted and SAID, once
+    if (expired) showToast(t('The layout was re-read — window changes made on this page more than a minute ago were not kept ({n})', { n: expired }), { type: 'warn', duration: 10000 });
+  }
+
+  /** THE STALE RELEASE's count (verify r4 ④): the acts this page held on its stale base that are past their hold — a
+   *  move / drag / resize / group witness no save the server read has carried older than ACT_HOLD_MS, a held close older
+   *  than CLOSE_HOLD_MS. Asked before the re-read's records apply. What it counts it RETIRES (verify r5 ④): an expired
+   *  witness holds nothing, but left on the window it was counted — and toasted — again at the NEXT stale release. */
+  _expiredHeldActs() {
+    const now = Date.now();
+    let n = 0;
+    for (const [, w] of this.app.wm.windows) {
+      const t = Math.max(w._movedAt || 0, w._boundsAt || 0, w._chainAt || 0);
+      if (!(t > this._carriedAt(w._desktopId) && now - t > ACT_HOLD_MS)) continue;
+      n++; w._movedAt = 0; w._boundsAt = 0; w._chainAt = 0; // counted once: said, then gone
+    }
+    for (const [id, h] of this._heldCloses || []) if (now - h.at > CLOSE_HOLD_MS) { n++; this._heldCloses.delete(id); }
+    return n;
+  }
+
   _handleRemoteSync(msg) {
+    this._clockTick(); // a record after a sleep: the held acts are re-armed BEFORE it is judged against them (verify r5 ①)
     const dm = this.app.desktopManager;
     // Bar heights are GLOBAL chrome riding PER-DESKTOP states — apply them
     // BEFORE the desktop gate (2.252.2, adversarial-review catch): a client
@@ -120,29 +285,41 @@ class LayoutManager {
       if (msg.state.taskbarHeight) this._applyTaskbarHeight(msg.state.taskbarHeight);
       this._applyToolbarState(msg.state);
     }
+    const receivedAt = msg.receivedAt ?? Date.now(); // THE HELD MOVE (verify r2): a record cannot know a move this page made after it arrived (a re-read's horizon may be 0: a page that never saved — verify r3 ②)
     if (dm && msg.desktopId) {
       // Desktop-aware: only apply if it's for our active desktop
       if (msg.desktopId !== dm.activeDesktopId) {
         // Cache state for non-active desktop — through the desktop manager: a window this client still holds
         // (hidden) that the record's sender REMOVED is closed here now, never shown again by the next switch
         // (inc-mukeyzpt-lpou, the parked second client)
-        dm.cacheRemoteState(msg.desktopId, msg.state);
+        dm.cacheRemoteState(msg.desktopId, msg.state, { receivedAt });
         dm._renderSwitcher(); // update window counts
         return;
       }
     }
-    this._applyRemoteState(msg.state);
-    if (dm && msg.desktopId) dm.noteWire(msg.desktopId, msg.state); // the record this desktop was last seen as on the wire
+    this._applyRemoteState(msg.state, { closeOnlyWired: !!msg.resync, receivedAt });
+    if (dm && msg.desktopId) {
+      dm.noteWire(msg.desktopId, msg.state); // the record this desktop was last seen as on the wire
+      // …and the held record of the desktop on show follows it (the view's base: the next save merges the page's
+      // windows onto it; a window a held close removed never comes back through it)
+      dm.cacheShownState?.(msg.desktopId, msg.state);
+    }
     if (msg.desktopMeta && dm) dm.updateFromMeta(msg.desktopMeta);
   }
 
   // Apply remote state: diff against local windows, update only what changed
-  _applyRemoteState(state) {
+  _applyRemoteState(state, { closeOnlyWired = false, receivedAt = Date.now() } = {}) {
     if (!state) return;
     this._restoring = true;
+    this._applying = true;
     let heldKept = false; // a local divider drag kept over the record (v2 verify r1 ①) — re-sent once below
     let heldClosed = false; // a window THIS client closed, still listed by the record (inc-mukeyzpt-lpou) — the close is re-sent once below
+    let heldMoved = false; // a window THIS page moved AFTER the record arrived (verify r2) — kept where the user put it, the move re-sent once below
     const heldIds = (state.windows || []).map((rw) => rw.winId || rw.id).filter((id) => this._closeHeld(id));
+    // THE HELD CHAIN ACT (stage-blank verify r5): a tab this user tore off / merged / moved in its strip here that no record
+    // has AGREED with yet — the record's chains and that window's entry are older than the act (_heldChainIds)
+    const heldChain = new Set(this._heldChainIds(state));
+    const chainHeld = (tabs) => Array.isArray(tabs) && tabs.some((id) => heldChain.has(String(id)));
     try {
       // Grid
       if (state.grid) {
@@ -167,6 +344,9 @@ class LayoutManager {
           const winId = rw.winId || rw.id;
           remoteIds.add(winId);
           const win = this.app.wm.windows.get(winId);
+          // a window whose chain act is held: the record's entry for it (its box = its OLD frame's) is older than the act —
+          // skipped whole, the act re-sent below (stage-blank verify r5)
+          if (win && heldChain.has(String(winId))) { heldClosed = true; continue; }
 
           if (!win) {
             // THE HELD CLOSE (inc-mukeyzpt-lpou): this client closed it and no save carrying that close has left
@@ -176,6 +356,23 @@ class LayoutManager {
             this._createRemoteWindow(rw);
             continue;
           }
+          // THE HELD MOVE (verify r2): this page moved the window AFTER the record arrived (a drop on a preview at
+          // the very pointerup the record waited for) — the record cannot know it; nothing of its entry applies,
+          // and the move goes out once more below. (r1's move-in below re-adopted the window onto the desktop the
+          // user had just dragged it off, and the apply's dirty clear swallowed the move's own save.)
+          if (this.actHeld(win._movedAt, receivedAt, win)) { heldMoved = true; continue; }
+          // A REMOTE MOVE IN (lane desktop-move verify r1, D4): the record of the desktop on show lists a window
+          // this client holds on ANOTHER desktop — another client moved it here. It is moved here, not left
+          // where it was: the source desktop's record (sent right after the target's) would otherwise CLOSE it
+          // below, and that close became evidence that lost the window on the server.
+          this.app.desktopManager?.adoptRemoteMove?.(win, win._desktopId, { to: this.app.desktopManager.activeDesktopId, rec: rw });
+          // THE HELD GEOMETRY (verify r2 ⑩; the held move's twin for a drag / a resize on the desktop on show): the
+          // user's own drag or resize ended AFTER this record arrived (`_boundsAt`, stamped by window.js at the
+          // pointerup) — the record's box, maximize and minimize are older than it; skipped, and re-sent below
+          // (guard 3 applied the deferred record at the pointerup and snapped the window back where the other
+          // client last saw it, and the apply's dirty clear swallowed the drag's own save)
+          const heldGeom = this.actHeld(win._boundsAt, receivedAt, win);
+          if (heldGeom) heldMoved = true;
 
           // Update gridBounds. Epsilon must exceed the px-rounding drift:
           // _captureGridBounds derives fractions from INTEGER offsetLeft/Width,
@@ -183,7 +380,7 @@ class LayoutManager {
           // 1280w) — the old 0.0001 epsilon saw that as a "change" and clients
           // with different viewport sizes re-broadcast forever (ping-pong).
           // 0.002 ≈ 2-4px: below any real move, above all rounding noise.
-          if (rw.gridBounds) {
+          if (rw.gridBounds && !heldGeom) {
             const EPS = 0.002;
             const changed = !win.gridBounds
               || Math.abs(win.gridBounds.left - rw.gridBounds.left) > EPS
@@ -203,18 +400,20 @@ class LayoutManager {
             win.element.style.zIndex = z;
             if (z >= this.app.wm.zIndex) this.app.wm.zIndex = z + 1;
           }
-          // maximize
-          const isMax = rw.isMaximized ?? false;
-          if (isMax && !win.isMaximized) this.app.wm.toggleMaximize(win.id);
-          if (!isMax && win.isMaximized) this.app.wm.toggleMaximize(win.id);
-          // minimize/restore
-          const isMin = rw.min ?? rw.isMinimized ?? false;
-          if (isMin && !win.isMinimized) this.app.wm.minimize(win.id);
-          if (!isMin && win.isMinimized) this.app.wm.restore(win.id);
-          // snap state
-          win._isSnapped = rw.snap ?? rw.isSnapped ?? false;
-          const snapB = rw.snapBounds || rw.preSnapBounds;
-          if (snapB) win._preSnapBounds = snapB;
+          if (!heldGeom) {
+            // maximize
+            const isMax = rw.isMaximized ?? false;
+            if (isMax && !win.isMaximized) this.app.wm.toggleMaximize(win.id);
+            if (!isMax && win.isMaximized) this.app.wm.toggleMaximize(win.id);
+            // minimize/restore
+            const isMin = rw.min ?? rw.isMinimized ?? false;
+            if (isMin && !win.isMinimized) this.app.wm.minimize(win.id);
+            if (!isMin && win.isMinimized) this.app.wm.restore(win.id);
+            // snap state
+            win._isSnapped = rw.snap ?? rw.isSnapped ?? false;
+            const snapB = rw.snapBounds || rw.preSnapBounds;
+            if (snapB) win._preSnapBounds = snapB;
+          }
           // file explorer navigation sync (host first — path is host-relative)
           const rwHost = rw.explorerHost || '';
           if (win._explorer && (win._explorerHost || '') !== rwHost) {
@@ -237,6 +436,19 @@ class LayoutManager {
             // e.g. a createSession window still waiting for its 'created' reply.
             // Closing it here would KILL the just-created session.
             if (!win?._openSpec) continue;
+            // THE HELD MOVE (verify r2): this page moved the window HERE after the record arrived — it stays
+            if (this.actHeld(win._movedAt, receivedAt, win)) { heldMoved = true; continue; }
+            // A WINDOW BORN AFTER THE RECORD ARRIVED (2.369.199 integration): a record deferred under a gate — the boot's 5 s
+            // `_restoring` since lane desktop-move — drained over the windows this page opened meanwhile and closed them (a phone's
+            // first Channels window vanished 12 ms after it opened). The record cannot know a window younger than itself.
+            if (win._bornAt > receivedAt) continue;
+            // A REMOTE MOVE OUT (lane desktop-move verify r1, D4): another desktop's held record — the target's,
+            // which arrives first — lists it: it moved there. Moved, never closed (a close here made 'closed'
+            // evidence and the next save of the target dropped it on the server).
+            if (this.app.desktopManager?.adoptRemoteMove?.(win, activeDesk)) continue;
+            // a reconnect's re-read closes only what the WIRE listed: a window the wire never listed for this
+            // desktop is this client's own change, not sent yet (its save left the queue an instant ago)
+            if (closeOnlyWired && !this.app.desktopManager?.wireListed?.(activeDesk, id)) continue;
             this.app.wm.closeWindow(id);
           }
         }
@@ -252,6 +464,7 @@ class LayoutManager {
         // split / unsplit — is applied IN PLACE too (applyChainRecord: no
         // re-parenting, `active` stays this client's); only a membership or
         // host change rebuilds the chain.
+        const recorded = new Map(state.windows.map((rw) => [rw.winId || rw.id, rw])); // the record's row per window id (the broken chain's members go back to the record's boxes, verify r4)
         const remoteChains = new Map(); // key -> { tabs, active, layout, split, order }
         const remoteByMembers = new Map(); // tabs.join(',') -> key
         for (const rw of state.windows) {
@@ -271,8 +484,17 @@ class LayoutManager {
         const localChainKeys = new Set();
         for (const [, w] of this.app.wm.windows) {
           if (w._tabChain && w._tabChain.tabs[0] === w.id) {
+            // a chain on ANOTHER desktop (hidden there) is not this record's to judge (verify r2: every save of
+            // the desktop on show by another client BROKE every tab group this page held on its other desktops —
+            // the group gone on the page, then on the server with this page's next save of that desktop)
+            if (activeDesk && w._desktopId && w._desktopId !== activeDesk) continue;
             const key = chainSyncKey(w._tabChain);
             localChainKeys.add(key);
+            // THE HELD CHAIN (verify r5 ②): a group this page changed — a merge, a side-by-side, an unsplit, a swap, a reorder, a
+            // tear-off — after the record landed, or whose change no save the server read has carried (tab-group witnessChain →
+            // `_chainAt` on every member), is kept exactly as it is and re-sent once: the record cannot know it (it used to break
+            // the group a merge had just made, or put the older layout back over the user's split, and the act's save was swallowed)
+            if (this.actHeld(w._chainAt, receivedAt, w)) { heldKept = true; continue; }
             const rc = remoteChains.get(key);
             if (rc && ratioDiffers(rc, w._tabChain)) {
               if (heldRatio(w._tabChain, Date.now()) !== null) heldKept = true;
@@ -280,18 +502,31 @@ class LayoutManager {
             }
             const sameMembers = !remoteChains.has(key) && remoteByMembers.get(membersOf(w._tabChain));
             if (sameMembers && !localChainKeys.has(sameMembers)) {
+              // the user's own reorder / split / unsplit here, no record has agreed with yet: kept, re-sent (verify r5)
+              if (chainHeld(w._tabChain.tabs)) { heldClosed = true; localChainKeys.add(sameMembers); continue; }
               const kept = this.app.wm.applyChainRecord(w._tabChain, remoteChains.get(sameMembers));
               if (kept) heldKept = true;
               localChainKeys.add(sameMembers);
               continue;
             }
             if (!remoteChains.has(key)) {
-              // Break this chain
+              // the user's own merge here, no record has agreed with yet: the group stays, re-sent (verify r5)
+              if (chainHeld(w._tabChain.tabs)) { heldClosed = true; continue; }
+              // Break this chain — and put every member back where the RECORD places it (verify r4 of inc-munl8jkl-gaih,
+              // found under the mixed-version leg): the windows loop above applied the record's box, then the detach copied
+              // the HOST's box onto each leaving guest (tab-group _detachFromChain: a tear-off drops the tab beside its frame),
+              // so a tab torn off on ANOTHER device landed ON its old host here, and this page's next save wrote it back there
+              // for every client — the other user's tear-off undone
+              const members = [...w._tabChain.tabs];
               while (w._tabChain && w._tabChain.tabs.length > 1) {
                 const lastId = w._tabChain.tabs[w._tabChain.tabs.length - 1];
                 this.app.wm._detachFromChain(w._tabChain, lastId);
               }
               if (w._tabChain) this.app.wm._ungroupLast(w._tabChain);
+              for (const id of members) {
+                const rw = recorded.get(id), win = this.app.wm.windows.get(id);
+                if (rw && rw.gridBounds && win && !win._onStage) { win.gridBounds = { ...rw.gridBounds }; this.app.wm._applyGridBounds(win); }
+              }
             }
           }
         }
@@ -305,6 +540,13 @@ class LayoutManager {
         const replaying = this._replaying || new Set();
         for (const [key, tc] of remoteChains) {
           if (localChainKeys.has(key)) continue;
+          // a group this user tore a tab out of here (or took apart), no record has agreed with yet: never re-formed by a
+          // record that predates the tear — deferred under the very drag, or captured before the tear's save reached its
+          // sender (stage-blank verify r5: the torn tab snapped back onto its old host at the drop, fleet-wide)
+          if (chainHeld(tc.tabs)) { heldClosed = true; continue; }
+          // …nor is a record's group rebuilt around a member this page just moved out of (or into) a group (verify r5 ②: a
+          // tear-off was undone by the older record's chain re-created around the window that left)
+          if ((tc.tabs || []).some((id) => { const m = this.app.wm.windows.get(String(id)); return m && this.actHeld(m._chainAt, receivedAt, m); })) { heldKept = true; continue; }
           this._queueChain(key, tc, { inFlight: replaying, waitMs: 8000 });
         }
       }
@@ -317,6 +559,7 @@ class LayoutManager {
     // re-broadcasting until the user actually touches something. This is the
     // anti-echo gate: delayed capture/notify timers spawned by the apply fire
     // after the 1s cooldown, but _doAutoSave drops them while !_userDirty.
+    this._applying = false;
     this._userDirty = false;
     setTimeout(() => { this._restoring = false; }, 1000);
     // …except a local divider drag the apply KEPT (the record could not know it): it is this user's act, not the
@@ -324,6 +567,134 @@ class LayoutManager {
     // (same delay, scheduled later ⇒ runs later).
     if (heldKept) setTimeout(() => this._resendHeldRatio(), 1000);
     if (heldClosed) setTimeout(() => this._resendHeldClose(), 1000); // …and a close the record could not know, the same way
+    // …and a desktop this page OWES the server (a move's target / source no save the server read has carried — the dirty
+    // desks): the clear above dropped its save, and a record that never names the moved window (a peer closed it meanwhile)
+    // re-arms nothing through the loops — the owed desk is the witness (verify r5 ⑥: the move sat on the page until the
+    // user's next act, and a reload in between lost it)
+    const owed = this.app.desktopManager?._dirtyDesks;
+    if (owed && [...owed].some((d) => !this._unacked.some((s) => s.desks.includes(d)))) heldMoved = true;
+    if (heldMoved) setTimeout(() => this._resendHeldMove(), 1000); // …and a move the record could not know (verify r2)
+  }
+
+  /** THE CLOCK WATCH (verify r5 ①): called by the 5 s tick and at every wake path (a save, a record, the reconnect, the
+   *  re-read). A call that comes CLOCK_JUMP_MS later than the tick's interval since the last call is a SLEEP (the page ran
+   *  for none of it; `document.hidden` = a background tab's throttled timer, not a sleep — nothing is re-armed there, nothing
+   *  can be held in a tab nobody drives). */
+  _clockTick() {
+    const now = Date.now(), before = this._clockLast; this._clockLast = now;
+    const gap = now - before - CLOCK_TICK_MS;
+    if (!(gap > CLOCK_JUMP_MS) || (typeof document !== 'undefined' && document.hidden)) return;
+    this._rearmAfterSuspend(gap, before);
+  }
+
+  /** What was HELD when the page stopped running at `before` — a move / drag / resize witness no save the server read has
+   *  carried, a held close, a held divider ratio, the dirty bit's input time while a save is pending, the owed answers'
+   *  no-ack clocks — is moved forward by `gap`: the hold measures how long the page RAN past the act. A witness already
+   *  past its hold at `before`, or one a save carried, is left alone (a run minute expires as ever). */
+  _rearmAfterSuspend(gap, before) {
+    const fresh = (t, hold = ACT_HOLD_MS) => t > 0 && before - t <= hold;
+    let n = 0;
+    for (const [, w] of this.app.wm.windows) {
+      const carried = this._carriedAt(w._desktopId);
+      if (fresh(w._movedAt) && w._movedAt > carried) { w._movedAt += gap; n++; }
+      if (fresh(w._boundsAt) && w._boundsAt > carried) { w._boundsAt += gap; n++; }
+      if (fresh(w._chainAt) && w._chainAt > carried) { w._chainAt += gap; n++; }
+      const ch = w._tabChain;
+      if (ch && ch.tabs[0] === w.id && ch._ratioHeld && fresh(ch._ratioHeld.at)) { ch._ratioHeld.at += gap; n++; }
+    }
+    for (const [, h] of this._heldCloses || []) if (fresh(h.at, CLOSE_HOLD_MS)) { h.at += gap; n++; }
+    if ((this._userDirty || this._deferT || this._autoSaveTimer) && fresh(this._lastUserInputAt)) { this._lastUserInputAt += gap; n++; }
+    for (const s of this._unacked) if (s.at != null) s.at += gap;
+    try { window.__vsOp?.('layout-clock-jump', { gap, rearmed: n }); } catch { }
+  }
+
+  /** THE UNSAVED ACT (verify r4 ①): is a local act stamped at `t` (a move's `_movedAt`, a drag's / resize's / snap's
+   *  `_boundsAt`) held over a record received at `receivedAt`? Yes when the record landed BEFORE the act — it cannot
+   *  know it (the held move / geometry of r2) — and yes while NO SAVE HAS CARRIED THE ACT (`_movesSentAt`, stamped by
+   *  every save that leaves on an open socket): a record received after the act but before its save left was
+   *  captured by a page that could not know it either. It used to revert a drop or a drag made up to 500 ms before
+   *  it landed (the autosave's debounce) and swallow the act's save, and under the apply's cooldown the deferred
+   *  save (r3 ③) then wrote the peer's box back as the user's; a peer saving every 400 ms undid every act here.
+   *  Bounded by ACT_HOLD_MS like every held witness (§6b guard 2: an idle page holds nothing over the server; the
+   *  act's real time is never fabricated). */
+  actHeld(t, receivedAt, win = null) {
+    if (!(t > 0) || Date.now() - t > ACT_HOLD_MS) return false;
+    return t >= receivedAt || t > (win ? this._carriedAt(win._desktopId) : (this._movesSentAt || 0));
+  }
+
+  // ── THE ACK (verify r5 ⑤): a save carries its acts only once the server READ it ──
+  /** The sentAt of the last save the server read for `desk` (`''` = the legacy single record). */
+  _carriedAt(desk) { return this._carried.get(desk || '') || 0; }
+
+  /** A save LEFT (or queued, `at` null until the open): `desks` = the desktop records it sent, one answer owed each. */
+  noteLayoutSent(desks, sentAt) {
+    if (!desks?.length) return;
+    this._unacked.push({ sentAt, desks: [...desks], pending: desks.length, refused: new Set(), at: this.app.ws?.connected !== false ? Date.now() : null });
+    this._armAckWatch();
+  }
+
+  /** The server answered a record of `desk` sent at `sentAt` (an ack, or a refusal — the refused desktop's acts stay held:
+   *  nothing carried them; the desktop manager reconciles and re-sends). An answer without `sentAt` (an older server's
+   *  refusal, a switch's broadcast) is the oldest owed answer for that desktop. */
+  _onLayoutAnswer(desk, sentAt, { refused = false } = {}) {
+    if (!refused) this._serverAcks = true;
+    const key = desk || '';
+    const s = (sentAt && this._unacked.find((x) => x.sentAt === sentAt && x.desks.includes(key))) || this._unacked.find((x) => x.desks.includes(key) && !x.refused.has(key) && x.pending > 0);
+    if (!s) return;
+    if (refused) s.refused.add(key);
+    s.pending--;
+    if (s.pending <= 0) this._settleSave(s);
+  }
+
+  /** Every record of the save is answered (or the no-ack fallback fired): the desktops it sent and the server READ are
+   *  carried as of `sentAt` — their held moves / geometry, closes and divider ratios older than it are released. */
+  _settleSave(s) {
+    const i = this._unacked.indexOf(s); if (i >= 0) this._unacked.splice(i, 1);
+    for (const d of s.desks) if (!s.refused.has(d)) this._markCarried(d, s.sentAt);
+    if (s.desks.some((d) => !s.refused.has(d))) this._movesSentAt = Math.max(this._movesSentAt || 0, s.at ?? s.sentAt); // the re-read's horizon: when the server READ it — a save queued while down left at the open, not when it was composed
+  }
+
+  _markCarried(desk, sentAt) {
+    const key = desk || '';
+    if (!(sentAt > this._carriedAt(key))) return;
+    this._carried.set(key, sentAt);
+    this._movesSentAt = Math.max(this._movesSentAt || 0, sentAt); // the re-read's horizon: the newest save the server read
+    this.app.desktopManager?.noteCarried?.(key); // a dirty desk the server read is owed no more
+    this._releaseHeldCloses(key || null, sentAt);
+    for (const [, w] of this.app.wm.windows) if (w._tabChain && w._tabChain.tabs[0] === w.id && (w._desktopId || '') === key && (w._tabChain._ratioHeld?.at ?? Infinity) <= sentAt) releaseRatio(w._tabChain);
+  }
+
+  /** The owed answers are swept while any is owed: a save older than the hold is forgotten (its acts expired with it); a
+   *  save an older server will never answer is settled ACK_WAIT_MS after it left on an open socket (today's rule). */
+  _armAckWatch() {
+    if (this._ackTimer || !this._unacked.length) return;
+    this._ackTimer = setTimeout(() => { this._ackTimer = null; this._sweepUnacked(); this._armAckWatch(); }, 500);
+    this._ackTimer.unref?.();
+  }
+
+  _sweepUnacked() {
+    const now = Date.now();
+    for (const s of [...this._unacked]) {
+      if (now - s.sentAt > ACT_HOLD_MS) { const i = this._unacked.indexOf(s); if (i >= 0) this._unacked.splice(i, 1); continue; }
+      if (!this._serverAcks && s.at != null && now - s.at > ACK_WAIT_MS) { try { window.__vsOp?.('layout-ack-fallback', { sentAt: s.sentAt, desks: s.desks.length }); } catch { } this._settleSave(s); }
+    }
+  }
+
+  /** THE HELD MOVE (verify r2; the held close's twin). A remote apply skipped a window this page MOVED after the
+   *  record arrived (`win._movedAt`, stamped by moveWindowToDesktop; the record's `receivedAt`, stamped when it
+   *  landed — a drop on a preview happens at the very pointerup the deferred record waited for). The move is this
+   *  user's act, and the apply's dirty clear dropped its own save: send it once, as the user's own act (dirty at
+   *  the move's REAL time — §6b guard 2's expiry keeps its meaning), through the ordinary autosave — the target's
+   *  held record is dirty, the source is the desktop on show. A move a save already carried (`_movesSentAt`) is
+   *  not re-sent. */
+  _resendHeldMove(tries = 0) {
+    if (this._restoring) { if (tries < 25) setTimeout(() => this._resendHeldMove(tries + 1), 200); return; }
+    let at = 0;
+    for (const [, w] of this.app.wm.windows) { const t = Math.max(w._movedAt || 0, w._boundsAt || 0); if (t > this._carriedAt(w._desktopId) && Date.now() - t <= ACT_HOLD_MS) at = Math.max(at, t); } // a move, a drag or a resize no save the server READ has carried (an expired one holds nothing — verify r4 ①; the ack, verify r5 ⑤)
+    if (!at) return; // a later save already carried it
+    this._userDirty = true;
+    this._lastUserInputAt = Math.max(this._lastUserInputAt || 0, at);
+    this.scheduleAutoSave();
   }
 
   /** THE HELD CLOSE (inc-mukeyzpt-lpou; the held ratio's twin). A LOCAL close is a local change like a drag: until a
@@ -334,7 +705,7 @@ class LayoutManager {
    *  apply or the boot restore made (`_restoring`). Released by the save that carries it (_releaseHeldCloses),
    *  expired after CLOSE_HOLD_MS, and void once a window with that id exists again (an explicit re-open). */
   noteClosed(id, desktopId) {
-    if (!id || this._restoring) return;
+    if (!id || this._applying || this._booting) return; // a close the apply (or the boot) itself made — one made in the cooldown after an apply is the user's (verify r3 ③)
     const now = Date.now();
     if (!this._lastUserInputAt || now - this._lastUserInputAt > CLOSE_HOLD_MS) return;
     (this._heldCloses ||= new Map()).set(String(id), { at: now, desk: desktopId || null });
@@ -350,25 +721,75 @@ class LayoutManager {
 
   /** A save of `desktopId`'s state left this client (or was identical to the last one sent): it carries every
    *  close made on that desktop — release them (a missing desktop id = every held close). */
-  _releaseHeldCloses(desktopId) {
+  _releaseHeldCloses(desktopId, upTo = Infinity) {
     if (!this._heldCloses) return;
-    for (const [id, h] of this._heldCloses) if (!desktopId || !h.desk || h.desk === desktopId) this._heldCloses.delete(id);
+    for (const [id, h] of this._heldCloses) if ((!desktopId || !h.desk || h.desk === desktopId) && h.at <= upTo) this._heldCloses.delete(id);
   }
 
-  /** A remote apply REFUSED to re-create a held close — send the close ONCE, as the user's own act (the
-   *  _resendHeldRatio shape): the dirty bit re-set with the close's REAL time, §6b's 60 s expiry keeping its
-   *  meaning, through the ordinary autosave (the no-op guard included). */
+  /** THE HELD CHAIN ACT (stage-blank verify r5 of inc-munl8jkl-gaih; the held close's twin for a tab TORN OFF, MERGED or
+   *  MOVED IN ITS STRIP by this user). A record that still named the old group — deferred under the very drag (§6b
+   *  guard 3), or captured by a page that had not received the tear's save yet — re-formed the group at the drop: the
+   *  torn tab back on its old host, the drop point lost, and this page's next save carried the re-formed group to
+   *  every client (measured in Chrome on two pages). The box's witness (`_boundsAt`, lane desktop-move) is the
+   *  drag's, never the strip's. Recorded by the strip's USER doors (tab-group.js _noteChainAct: the tear-off, the
+   *  merge drops, moveTabInChain / bindSplit / unbindSplit / swapSplit / undoSplit) for an act made while this user is
+   *  active and not under an apply or the boot; released by AGREEMENT — the first record whose chain for the window
+   *  (members, strip order, layout, sides: the PURE chainSyncKey, the key the in-place path judges by) matches this
+   *  page's (one that carries the act, or a later one) — NEVER by the save: a record deferred
+   *  under the drag is applied after the save left (measured: the tear's save at 675 ms, the deferred record applied
+   *  at 1742 ms; a hold released at the save would have let it through). Expired after CLOSE_HOLD_MS (§6b guard 2: an
+   *  idle page holds nothing over the server); void once the window is gone. While held, the record's entry for the
+   *  window and every chain naming it are skipped and the act is re-sent once (the close's re-send; the no-op guard
+   *  ends any echo between two pages each holding its own act). */
+  noteChainAct(ids, desktopId) {
+    if (!Array.isArray(ids) || !ids.length || (this._applying ?? this._restoring) || this._booting) return; // never a record's own mutation (an apply, the boot restore; lane desktop-move's `_applying` once merged)
+    const now = Date.now();
+    if (!this._lastUserInputAt || now - this._lastUserInputAt > CLOSE_HOLD_MS) return;
+    for (const id of ids) if (id) (this._heldChainActs ||= new Map()).set(String(id), { at: now, desk: desktopId || null });
+  }
+
+  /** THE DROP of a torn-out tab (tab-group's drop handler, verify r5 ⑤): the detach armed the save while the window still
+   *  carried its old host's box, and the drop's own capture runs 250 ms after the release — a release just BEFORE the
+   *  debounce fired let the save out in that gap (measured: the tear's save at 689 ms, the release at ~540 ms, the capture
+   *  at ~790 ms). _doAutoSave waits 400 ms past the last drop. */
+  noteDrop() { this._dropAt = Date.now(); }
+
+  /** The record's chain for `id` (the host row's tabChain); null = it stands alone there. */
+  _recordChainOf(state, id) {
+    for (const rw of (state && state.windows) || []) if (rw.tabChain && !rw.isTabGuest && Array.isArray(rw.tabChain.tabs) && rw.tabChain.tabs.map(String).includes(String(id))) return rw.tabChain;
+    return null;
+  }
+
+  /** The ids whose chain act is held AGAINST `state`: fresh, the window alive, and the record DISAGREES with this page's
+   *  chain for it (PURE chainSyncKey over both: members, order, layout, sides; alone = ''). An agreeing record releases
+   *  the act (it carries it, or a later one does). */
+  _heldChainIds(state) {
+    const out = [];
+    const keyOf = (c) => (c && Array.isArray(c.tabs) ? chainSyncKey(c) : '');
+    for (const [id, h] of this._heldChainActs || []) {
+      const w = this.app.wm.windows.get(id);
+      if (Date.now() - h.at > CLOSE_HOLD_MS || !w) { this._heldChainActs.delete(id); continue; }
+      if (keyOf(w._tabChain) === keyOf(this._recordChainOf(state, id))) { this._heldChainActs.delete(id); continue; }
+      out.push(id);
+    }
+    return out;
+  }
+
+  /** A remote apply REFUSED to re-create a held close (or to undo a held chain act — verify r5, the same re-send) —
+   *  send it ONCE, as the user's own act (the _resendHeldRatio shape): the dirty bit re-set with the act's REAL time,
+   *  §6b's 60 s expiry keeping its meaning, through the ordinary autosave (the no-op guard included). */
   _resendHeldClose(tries = 0) {
     if (this._restoring) { if (tries < 25) setTimeout(() => this._resendHeldClose(tries + 1), 200); return; }
     let at = 0;
     for (const [id] of this._heldCloses || []) if (this._closeHeld(id)) at = Math.max(at, this._heldCloses.get(id).at);
+    for (const [id, h] of this._heldChainActs || []) if (Date.now() - h.at <= CLOSE_HOLD_MS && this.app.wm.windows.has(id)) at = Math.max(at, h.at); // a held chain act rides the same re-send (verify r5)
     if (!at) return; // a later save (or the expiry) already carried it
     this._userDirty = true;
     this._lastUserInputAt = Math.max(this._lastUserInputAt || 0, at);
     this.scheduleAutoSave();
   }
 
-  /** v2 verify r1 ①: a remote apply KEPT a local divider drag (PURE heldRatio) — send it ONCE, as the user's own
+  /** v2 verify r1 ① (+ the held chain, verify r5 ②): a remote apply KEPT a local divider drag (PURE heldRatio) or a group change — send it ONCE, as the user's own
    *  act: the dirty bit is re-set with the drag's REAL release time (so §6b's 60 s expiry keeps its meaning — a
    *  stamp past it holds nothing) and the ordinary autosave sends it (the no-op guard included). The other client
    *  applies it in place (ratioDiffers) and its own apply clears its dirty bit — one send, no echo. */
@@ -379,17 +800,12 @@ class LayoutManager {
     for (const [, w] of this.app.wm.windows) {
       const ch = w._tabChain;
       if (ch && ch.tabs[0] === w.id && heldRatio(ch, now) !== null) at = Math.max(at, ch._ratioHeld.at);
+      if (w._chainAt > this._carriedAt(w._desktopId) && now - w._chainAt <= ACT_HOLD_MS) at = Math.max(at, w._chainAt); // a group change no save the server read has carried (verify r5 ②)
     }
     if (!at) return; // a later save (or the expiry) already took it
     this._userDirty = true;
     this._lastUserInputAt = Math.max(this._lastUserInputAt || 0, at);
     this.scheduleAutoSave();
-  }
-
-  /** Every save that leaves this client (or is skipped as identical to the last one sent) carries every held
-   *  ratio — release them (v2 verify r1 ①). */
-  _releaseHeldRatios() {
-    for (const [, w] of this.app.wm.windows) if (w._tabChain && w._tabChain.tabs[0] === w.id) releaseRatio(w._tabChain);
   }
 
   /** Rebuild ONE chain record (remote or persisted) now, or keep it PENDING
@@ -454,15 +870,33 @@ class LayoutManager {
   // Capture current workspace state (complete)
   // Only captures windows belonging to the active desktop (if desktops are enabled)
   captureState() {
+    return { windows: this.captureWindows(this.app.desktopManager?.activeDesktopId), ...this.captureChrome() };
+  }
+
+  /** The page's captures of the windows it has BUILT on `desktopId` (the active desktop also owns an untagged
+   *  window, as captureState always did). What a desktop record is merged with — never the record itself: a desktop
+   *  the page has not built holds windows this list cannot know (userW inc-mun7qjmw-iksh, src/lib/desktop-record.js). */
+  captureWindows(desktopId) {
     const activeDesk = this.app.desktopManager?.activeDesktopId;
     const windows = [];
     for (const [id, win] of this.app.wm.windows) {
-      // Skip windows on other desktops
-      if (activeDesk && win._desktopId && win._desktopId !== activeDesk) continue;
+      if (desktopId) {
+        if (win._desktopId ? win._desktopId !== desktopId : desktopId !== activeDesk) continue;
+      } else if (activeDesk && win._desktopId && win._desktopId !== activeDesk) continue; // Skip windows on other desktops
+      const winState = this.captureWin(win, id);
+      if (winState) windows.push(winState);
+    }
+    return windows;
+  }
+
+  /** ONE window's capture (null for the stage placeholder). */
+  captureWin(win, id = win?.id) {
+    { // (a bare block: the body kept at the indentation it had inside captureState's loop)
+      if (!win) return null;
       // The stage placeholder is a stage-only pseudo-window — it must never
       // enter a desktop record (a pre-guard drag once retagged one onto a
       // normal desktop and autosave captured it).
-      if (win.type === 'stage-placeholder' || win._isStagePlaceholder) continue;
+      if (win.type === 'stage-placeholder' || win._isStagePlaceholder) return null;
       const el = win.element;
       const termSession = this.app.sessions.get(id);
       // Ensure gridBounds is up to date
@@ -561,8 +995,12 @@ class LayoutManager {
         if (c.layout === 'split' && c.split) winState.tabChain.split = { pair: [...c.split.pair], ratio: c.split.ratio, dir: 'row', left: [...(c.split.left || [])], right: [...(c.split.right || [])] }; // split tabs v2: the strip order + the SIDES (a missing field reads as the pre-v2 default — repaired by rule)
         winState.isTabGuest = c.tabs[0] !== id;
       }
-      windows.push(winState);
+      return winState;
     }
+  }
+
+  /** The non-window fields of a capture: the active desktop's grid + the global chrome every record carries. */
+  captureChrome() {
     const grid = this.app.wm.grid;
     const theme = this.app.themeManager.current;
     const globalFontSize = this.app._fontSize;
@@ -576,7 +1014,7 @@ class LayoutManager {
     // client applies+re-echoes 48, which migrates back to 1.2 — round-trip;
     // without it old clients re-echo their fixed 40 forever)
     const toolbarHeight = Math.round(40 * (toolbarScale || 1));
-    return { windows, grid, theme, globalFontSize, globalFontFamily, sidebarOpen, taskbarHeight, toolbarScale, toolbarHeight };
+    return { grid, theme, globalFontSize, globalFontFamily, sidebarOpen, taskbarHeight, toolbarScale, toolbarHeight };
   }
 
   // Restore workspace from state (used for autosave restore on startup)
@@ -818,16 +1256,33 @@ class LayoutManager {
   // Auto-save (debounced, triggered on every window change)
   // Won't fire until initial restore is complete
   scheduleAutoSave() {
+    this._clockTick(); // a save after a sleep: its act's time is re-armed before guard 2 reads it (verify r5 ①)
     // Dynamic desktop: while staged, the ONLY thing to persist is the stage's
     // own grid config (through the stage store — desktop autosave stays
     // suppressed). Intercept BEFORE the restore gates: they exist to protect
     // desktop records, and letting them drop this call silently lost the grid
     // (smoke-caught: _restoring was still true when the user set a grid).
     if (this.app.stage?.isActive) { this.app.stage.onStageLayoutChanged(); return; }
-    if (this._restoring) return; // Don't autosave while restoring
-    if (this.app.desktopManager?._restoring) return; // Don't autosave during desktop switch
+    // Under a gate (the apply's 1 s cooldown, the boot's 5 s, a switch's 1 s) a save the USER caused is DEFERRED past it,
+    // never dropped (verify r3 ③); the apply's own churn (inside `_applying`, or with no input since the apply cleared
+    // the dirty bit) still schedules nothing — guard 1 (anti-echo) holds
+    if (this._restoring || this.app.desktopManager?._restoring) { this._deferSave(); return; }
     if (this._autoSaveTimer) clearTimeout(this._autoSaveTimer);
     this._autoSaveTimer = setTimeout(() => this._doAutoSave(), 500);
+  }
+
+  /** A user-caused save under a gate waits for the gate (verify r3 ③): re-asked once it is expected open. An apply
+   *  meanwhile clears the dirty bit — the deferred act is still this user's and unsaved (unless a save left since,
+   *  `_savedAt`): the bit is re-armed at the act's REAL time (§6b guard 2's expiry keeps its meaning), the held
+   *  move's / close's / ratio's rule. */
+  _deferSave() {
+    if (!this._userDirty || this._applying || this._deferT) return;
+    const at = this._lastUserInputAt || Date.now();
+    this._deferT = setTimeout(() => {
+      this._deferT = null;
+      if (!this._userDirty && !(this._savedAt > at)) { this._userDirty = true; this._lastUserInputAt = Math.max(this._lastUserInputAt || 0, at); }
+      this.scheduleAutoSave();
+    }, 1100);
   }
 
   _isMobile() {
@@ -835,42 +1290,95 @@ class LayoutManager {
   }
 
   async _doAutoSave() {
+    this._clockTick(); // the timer that was pending at the lid-close fires at the wake: the act it carries is re-armed first (verify r5 ①)
     // Dynamic desktop: while the STAGE view is active the desktop-layout
     // autosave/broadcast is suppressed — the stage persists through its own
     // SyncStore, and capturing here would write stage-visible windows into a
     // normal desktop's record (cross-client chaos). Stage-level layout state
     // (its grid config) persists through the stage's own store instead.
     if (this.app.stage?.isActive) { this.app.stage.onStageLayoutChanged(); return; }
-    if (this._restoring) return;
-    if (this.app.desktopManager?._restoring) return;
+    if (this._restoring || this.app.desktopManager?._restoring) { this._deferSave(); return; } // a gate raised since the schedule: deferred, never dropped (verify r3 ③)
     // Anti-echo: only broadcast state the USER caused. After applying a remote
     // state, our own follow-up timers (captureGridBounds, onResize chains)
     // schedule autosaves with a state that differs only by rounding — sending
     // those bounced every operation between clients several times.
     if (!this._userDirty) return;
+    // A SAVE WHILE THE POINTER IS DOWN IS A SNAPSHOT OF AN UNFINISHED ACT (stage-blank verify r5): a tab torn off and held
+    // for longer than the debounce went out standing on its old HOST's box (the detach copies the host's box onto the
+    // torn window; the drop's own capture comes 250 ms after the release) — every other page showed it on its old host
+    // for a moment, and a page that saved in that moment handed the box back as an agreeing record (measured). Wait for
+    // the release, then once more for the drop's own capture; the dirty bit and its time stay the act's (§6b guard 2).
+    if (this._pointerDown) { this._saveWaitsForDrop = true; this._autoSaveTimer = setTimeout(() => this._doAutoSave(), 300); return; }
+    if (this._saveWaitsForDrop || (this._dropAt && Date.now() - this._dropAt < 400)) { this._saveWaitsForDrop = false; this._autoSaveTimer = setTimeout(() => this._doAutoSave(), 400); return; } // …and a drop released BEFORE the debounce fired, whose capture is still 250 ms away (noteDrop)
     // Dirty EXPIRES: a client whose last real input was minutes ago must not
     // broadcast — an idle tab (phone left open, a stray automation client)
     // with a stuck dirty bit would echo STALE positions after every remote
     // apply, reverting other clients' fresh drags and replaying old layouts
     // (real incident: leftover test tabs fought the user's two clients).
     if (!this._lastUserInputAt || Date.now() - this._lastUserInputAt > 60000) { this._userDirty = false; return; }
-    const state = this.captureState();
-    const desktopId = this.app.desktopManager?.activeDesktopId;
+    // THE STALE BASE (verify r3 ④): the reconnect's re-read failed for good — this page's records are older than the
+    // server's; nothing is saved from them (the dirty desks stay dirty). The read is asked again; a success releases it.
+    if (this._resyncStale) { if (!this._resyncing) this._resyncFromServer(); return; }
+    const dm = this.app.desktopManager;
+    // The desktops this page CHANGED but does not show (a move's target and source) go first: their HELD record —
+    // the server's record plus this page's change — never a list derived from the page, which for a desktop not
+    // opened since the page loaded holds none of its windows (userW inc-mun7qjmw-iksh: HR 3 → 1)
+    // every record of this save carries `sentAt`; the server's ack of each names it back, and only then are the acts it
+    // carries released (verify r5 ⑤: a save that left on a socket the server never read used to count as sent — the
+    // reconnect's re-read reversed the act and nothing re-sent it). A refused record releases nothing.
+    const sentAt = Date.now(), sentDesks = [];
+    for (const d of dm?.takeDirty?.() || []) {
+      const st = dm.recordFor(d);
+      this.app.ws.send({ type: 'layout-sync', state: st, desktopId: d, evidence: dm.evidence(), sentAt });
+      sentDesks.push(d);
+      dm.noteSent(d, st);
+    }
+    this._savedAt = Date.now(); // a deferred save's witness (verify r3 ③): an act older than this left with this save
+    const desktopId = dm?.activeDesktopId;
+    // THE RECORD, never the bare DOM capture (userW inc-mun7qjmw-iksh): the desktop's held record merged with the
+    // windows the page built there — a window still being built stays; only one the page could not build leaves
+    const state = dm?.recordFor && desktopId ? dm.recordFor(desktopId) : this.captureState();
     // No-op guard: focus clicks and timers frequently schedule saves with an
     // unchanged state — skip the send (and the server disk write + rebroadcast
     // + every other client's full diff pass) when nothing actually changed.
     const json = JSON.stringify({ state, desktopId });
-    this._releaseHeldRatios(); this._releaseHeldCloses(desktopId); // this state (or the identical one already sent) carries every held divider ratio and every close made here
-    if (json === this._lastSentJson) return;
+    // identical to the last record sent AND that send was READ (nothing owed for this desktop): a no-op — the state is carried
+    // as of now (an act that changed nothing — a drag back to its place — is not held for a minute). While the last send is
+    // still owed it is NOT a no-op: the held act's re-send after a reconnect IS that very text, and the server never read it
+    // (verify r5 ⑤ on the real page: the drag on the desktop on show was kept but never reached the server)
+    if (json === this._lastSentJson && !this._unacked.some((s) => s.desks.includes(desktopId || ''))) {
+      this._markCarried(desktopId || '', sentAt);
+      this.noteLayoutSent(sentDesks, sentAt);
+      return;
+    }
     this._lastSentJson = json;
-    // Full state to server for disk persistence
-    this.app.ws.send({ type: 'layout-sync', state, desktopId });
-    if (desktopId) this.app.desktopManager?.noteWire(desktopId, state);
+    // Full state to server for disk persistence (+ the evidence the server's shrink belt reads)
+    this.app.ws.send({ type: 'layout-sync', state, desktopId, evidence: dm?.evidence?.() || [], sentAt });
+    sentDesks.push(desktopId || '');
+    this.noteLayoutSent(sentDesks, sentAt);
+    if (desktopId) { if (dm?.noteSent) dm.noteSent(desktopId, state); else dm?.noteWire?.(desktopId, state); }
+  }
+
+  /** The ids of the closes this page holds (made here, not carried by a save yet) — a record read off the wire
+   *  never brings them back (inc-mukeyzpt-lpou; the desktop manager's held records drop them too). */
+  heldCloseIds() {
+    return [...(this._heldCloses || new Map()).keys()].filter((id) => this._closeHeld(id));
+  }
+
+  /** A record the server REFUSED was reconciled (desktop-manager onSyncRefused): send the corrected one through the
+   *  ordinary autosave — the dirty bit re-armed, never the input time (§6b guard 2's 60 s expiry keeps its meaning:
+   *  an idle page sends nothing). */
+  rearmSave() {
+    if (!this._lastUserInputAt || Date.now() - this._lastUserInputAt > 60000) return;
+    this._userDirty = true;
+    this._lastSentJson = null;
+    this.scheduleAutoSave();
   }
 
   // Load auto-saved state on startup
   async loadAutoSave() {
     this._restoring = true;
+    this._booting = true;
     this._bootStoppedSessions = []; // arm the resume-all collector (see restoreState)
     try {
       const res = await fetch('/api/layouts');
@@ -925,7 +1433,7 @@ class LayoutManager {
     this._bootStoppedSessions = null;
     if (stopped.length >= 2) setTimeout(() => this._offerResumeAll(stopped), 1200);
     // Allow autosave after restore is complete (with extra delay for windows to attach)
-    setTimeout(() => { this._restoring = false; }, 5000);
+    setTimeout(() => { this._restoring = false; this._booting = false; }, 5000);
   }
 
   // Bulk-resume the sessions that restored stopped (2.250.0). resumeSession
@@ -998,6 +1506,7 @@ class LayoutManager {
         winInfo.element.style.zIndex = winState.zIndex;
         if (winState.zIndex >= this.app.wm.zIndex) this.app.wm.zIndex = winState.zIndex + 1;
       }
+      this.app.wm.witnessGeometry?.(winInfo.id); // a named preset is the user's act on every window it places (verify r5 ③) — the ONE witness stamp in this file
       // Restore from minimized if preset says it should be visible
       if (!winState.isMinimized && winInfo.isMinimized) {
         this.app.wm.restore(winInfo.id);
@@ -1256,6 +1765,7 @@ class LayoutManager {
     // Minimize windows not in the preset
     for (const [id, win] of this.app.wm.windows) {
       if (!matchedWinIds.has(id) && !win.isMinimized) {
+        this.app.wm.witnessGeometry?.(id); // the preset's act too (verify r5 ③)
         this.app.wm.minimize(id);
       }
     }

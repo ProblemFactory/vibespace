@@ -26,6 +26,7 @@ function create({ rootDir, BUFFERS_DIR, META_DIR, DTACH_CMD, USAGE_SCANNER_PATH,
   checkClaudeGoalStatus, broadcastToSession, broadcastActiveSessions,
   noteModelSeen, noteHarnessModels, recordUsageAttribution, daemonPtyShim, sbSeenFirst, getDeviceMgr,
   agentEnv, // the SANITIZED spawn env (spawn-hygiene law) — the ONE local re-attach uses it, as ws-handler's detector always did
+  onLocalReattach = null, // lane-dead-bridge: told after EVERY local re-attach (the watch, the broken-stdin detector, the probe) — ends the socket's orphans, counts the catch-up
   getHosts, getUsageHistory, getTelemetry, getNoConvoRef, getDeliver, getPages, getPermissionRules, getBrain = () => null, getExitProxy = () => null }) {
   const hosts = mk(getHosts);
   const exitProxyRef = mk(getExitProxy);                // verify-r2 A3-r2 / ask-a: a dead conversation's exit pairs + waiting asks end with it
@@ -102,6 +103,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
   // ONE slot the consumer registered second REPLACES this stamp — the consumer
   // keeps streaming and ptyQuietSince reads "silent" for a relaying bridge
   // (B-ae4b; test-pty-duck is the census).
+  session._ptyOpenedAt = Date.now(); // THIS bridge's birth (verify r1): `ptyQuietSince(session, _ptyOpenedAt)` = "this pty never spoke" — the broken-stdin detector re-sends only then
   ptyProcess.onData(() => { session._lastPtyDataAt = Date.now(); });
 
   if (session.mode === 'chat') {
@@ -492,10 +494,11 @@ function ptyQuietSince(session, since) { return !(Number(session._lastPtyDataAt)
  *  The TRIGGERS differ because the evidence differs (no bytes since attach vs
  *  no ack + no bytes since the write); the HEALING is one implementation.
  *  Deliberately local: the daemon is the thing under suspicion. */
-function reattachLocalPty(id, session, why, { resend = null } = {}) {
+function reattachLocalPty(id, session, why, { resend = null, kind = 'reattach' } = {}) {
   if (!activeSessions.has(id) || !session.socketPath) return false;
   console.log(`[${id}] ${why} — re-attaching dtach locally`);
   try { global.__vsEvent?.('pty-reattach-local', why); } catch { }
+  const silentSince = Number(session._lastPtyDataAt) || null;   // the last byte the OLD bridge carried (the catch-up's "lost at" floor)
   if (session.pty) { try { session.pty.kill(); } catch { } }
   const newPty = pty.spawn(DTACH_CMD, ['-a', session.socketPath, '-E', '-r', 'winch'], {
     name: 'xterm-256color', cols: 120, rows: 30,
@@ -503,6 +506,9 @@ function reattachLocalPty(id, session, why, { resend = null } = {}) {
   });
   setupSessionPty(session, id, newPty);
   if (resend != null) setTimeout(() => { try { newPty.write(resend + '\n'); } catch { } }, 500);
+  // lane-dead-bridge: a stuck attach client a dead server left (an ORPHAN) is what makes a bridge dead; the new attach is
+  // connected now — the watch ends the socket's orphans (attach first, then kill) and counts what the heal releases
+  try { onLocalReattach?.(id, session, { why, kind, silentSince }); } catch { }
   return true;
 }
 

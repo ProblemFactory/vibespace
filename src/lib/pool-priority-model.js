@@ -110,6 +110,23 @@ export function placementNote(auth, t) {
   return '';
 }
 
+/** THE ONE RE-RENDER KEY OF A BILLING IDENTITY (2026-09-30, lane billing-chip — the owner's
+ *  conversations kept the member they started on, on the phone, after the pool moved them).
+ *  `auth` = server.js sessionAuth(s). Every KEYED renderer of it — the title-bar chip
+ *  (window.js setAuthBadge) and the phone's status-bar chip (chat-status-bar.js setBilling) —
+ *  skips a repaint while this key is unchanged, so the key is a CENSUS of what those chips print:
+ *  the source (the chip's kind), the account / pool name, the member the conversation RUNS ON
+ *  (name + id: two members may share a name), the machine, the "estimated" mark, an API key's
+ *  tail / detail, and the placement note (pinned / priority #n / automatic — it derives from
+ *  pinned, pinnedId, placement, priorityRank). The phone chip's old key was the pool's name
+ *  alone, so a per-session switch, a pin or a gather never reached it. A JSON array: no two
+ *  identities spell the same key whatever their names contain. '' = no identity. */
+export function billingAuthKey(auth, t) {
+  if (!auth) return '';
+  return JSON.stringify([auth.source || '', auth.name || '', auth.poolTarget || '', auth.poolTargetId || '',
+    auth.hostName || '', auth.guessed ? 1 : 0, auth.tail || '', auth.detail || '', placementNote(auth, t)]);
+}
+
 /** A MEMBER LEFT THE POOL — what the act's own answer says about the conversations that could
  *  NOT leave it (verify r1): `evicted` = the members route's `{removed, moved, restarted, stayed}`.
  *  The ones that moved are told one by one (the pool's notices); the ones that STAY keep billing

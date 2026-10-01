@@ -6,7 +6,7 @@
 
 import { marked } from 'marked';
 import { sanitizeHtml } from './safe-html.js'; // THE one sanitizer for agent / peer / file HTML (no CSS, no product classes, no forms)
-import { escHtml, copyText, showContextMenu, showToast, absUrl, onOutsidePress } from './utils.js';
+import { escHtml, copyText, showContextMenu, showToast, absUrl, onOutsidePress, fetchJson } from './utils.js';
 import { track } from './telemetry-client.js';
 import { renderCodeBlock, rehighlightCodeBlock, stripAnsi, getHljsLanguages } from './highlight.js';
 import { UI_ICONS } from './icons.js';
@@ -23,6 +23,7 @@ import { mcpParts } from './chat-run-summary.js';
 import { assistantNoteOf, noteSentence, toolResultSentence } from './chat-run-summary.js'; // lane S3: text addressed to the ASSISTANT is a note, harness bookkeeping in a tool result is a sentence
 import { isVibespaceNotice, noticeCardView, impersonatesVibespace } from '../notification-senders.js'; // lane S3: a VibeSpace notice is titled "VibeSpace · …", never `Message from "…"`; S3 verify F3: decided by the record's PATH (`peerVia`), never its sender's name or first sentence
 import { handbackFacts } from '../browser-takeover.js'; // lane S3: the handback card's title, read back by the module that wrote the words
+import { ownResumable } from '../browser-fact.js'; // lane browser-resume B (§3.9): the newest end card of the conversation's own browser offers Resume when THE fact says it can
 import { handoverFacts } from '../stash-summary.js'; // 2026-09-28: the hand-over card's title + the notices behind its expander, read back by the module that wrote the words
 const noticeFacts = (body) => handbackFacts(body) || handoverFacts(body);   // ONE facts hook per producer, tried in order; null = the generic rules
 // PURE builder (CJS pulled into the bundle, like ssh-key-format.js) — the
@@ -44,6 +45,7 @@ const permissionClassOf = (w) => (w && w.cls === 'allowed' ? 'chat-permission-al
 import { openResetCreditDialog } from './reset-credit-dialog.js';
 import { startCardText, endCardText, endCardReplays, framesGoneText } from './browser-session-words.js'; // 2026-09-27: a browser session's start / end card — the words shared with the live view and the replay window
 import { btn as textBtn } from './channel-chrome.js'; // the house text button (`mounts-btn`): a button says what it does
+import { renderProposalCard, patchProposalCard } from './browser-proposal-card.js'; // lane browser-propose: the agent's proposal, ONE Approve (patched in place)
 import { parseReply as parseInboxReply } from '../inbox-reply.js'; // PURE: the For-you reply's marker + quote block (design-user-inbox-reply D1.8) — text-derived, so live and history agree
 
 // Agent-memory files get their own card treatment (user ask: a memory write
@@ -782,6 +784,9 @@ class ChatRenderers {
     return el;
   }
 
+  /** lane browser-propose: the proposal card's in-place patch (chat-view `_onEditMessage` — never a swap). */
+  patchProposal(el, msg) { patchProposalCard(el, msg); }
+
   /** THE BROWSER SESSION CARD (2026-09-27): `msg.content[0]` = the normalizer's sanitized block (src/browser-sessions.js
    *  cardBlock — ids, instants, counts, a profile's name; never markup). Every string through textContent; the icon from
    *  icons.js; the end card's Replay = the house text button opening the replay window on THAT session. */
@@ -802,15 +807,63 @@ class ChatRenderers {
     el.appendChild(head);
     if (b.phase === 'end') {
       if (b.framesRemoved) { const g = document.createElement('div'); g.className = 'chat-browser-session-note chat-status-dim'; g.textContent = framesGoneText(b.limit); el.appendChild(g); }
-      if (!endCardReplays(b)) return el; // nothing to watch: the head says "0 actions" and why the session ended — no Replay
+      const resumable = this._browserResumeOffer(b);
+      if (!endCardReplays(b) && !resumable) { this._noteBrowserCard(b, el, null); return el; } // nothing to watch: the head says "0 actions" and why the session ended — no Replay
       const row = document.createElement('div');
       row.className = 'chat-browser-session-actions';
-      const replay = textBtn(t('Replay'), () => this.app?.openBrowserReplay?.({ browserKey: b.browserKey || null, conversation: (() => { try { const ids = this._getSessionCtx?.(); return ids && (ids.claudeId || ids.backendSessionId) || null; } catch { return null; } })(), session: b.session }), 'chat-browser-session-replay');
-      replay.title = t('Watch this browser session again, action by action');
-      row.appendChild(replay);
+      if (endCardReplays(b)) {
+        const replay = textBtn(t('Replay'), () => this.app?.openBrowserReplay?.({ browserKey: b.browserKey || null, conversation: (() => { try { const ids = this._getSessionCtx?.(); return ids && (ids.claudeId || ids.backendSessionId) || null; } catch { return null; } })(), session: b.session }), 'chat-browser-session-replay');
+        replay.title = t('Watch this browser session again, action by action');
+        row.appendChild(replay);
+      }
+      // lane browser-resume B (§3.9, the owner's ruling 2): the NEWEST end card of the conversation's OWN browser offers
+      // Resume while THE fact says it is stopped with something kept — the same route as the live view's; the live view opens
+      let resume = null;
+      if (resumable) {
+        resume = textBtn(t('Resume'), () => this._resumeBrowserFromCard(resume), 'chat-browser-session-resume');
+        resume.title = t('Reopen this browser with its last tabs');
+        row.appendChild(resume);
+      }
       el.appendChild(row);
-    }
+      this._noteBrowserCard(b, el, resume);
+    } else this._noteBrowserCard(b, el, null);
     return el;
+  }
+  /** lane browser-resume B: may THIS end card offer Resume? The conversation's OWN browser (its key, not a helper's, not a
+   *  named profile's), the fact says resumable, and no newer card of this conversation's browser was drawn. */
+  _browserResumeOffer(b) {
+    try {
+      if (!b || b.phase !== 'end' || !this.sessionId) return false;
+      const key = String(b.browserKey || '');
+      if (!/^bk-[0-9a-f]{8}$/.test(key)) return false;
+      const named = ((this.app && this.app._browserProfiles && this.app._browserProfiles.profiles) || []).some((p) => p && p.id === b.profileId);
+      if (named) return false;
+      const row = (this.app?.sidebar?._allSessions || []).find((x) => x && x.webuiId === this.sessionId) || null;
+      const fact = row && row.browserFact;
+      if (!fact || fact.key !== key || !ownResumable(fact)) return false;
+      const last = this._browserCardLast;
+      return !(last && Number(last.at) > Number(b.at || 0));
+    } catch { return false; }
+  }
+  /** The newest browser-session card of this chat so far — a newer one takes an older end card's Resume away (a start
+   *  card: the browser runs again; an end card: the newest one offers it). Pages render out of order: only a newer wins. */
+  _noteBrowserCard(b, el, resumeBtn) {
+    const at = Number(b && b.at) || 0;
+    const last = this._browserCardLast;
+    if (last && Number(last.at) > at) return;
+    if (last && last.resume && last.resume.isConnected) last.resume.remove();
+    this._browserCardLast = { at, el, resume: resumeBtn };
+  }
+  async _resumeBrowserFromCard(btn) {
+    if (!this.sessionId || (btn && btn.disabled)) return;
+    if (btn) btn.disabled = true;
+    const r = await fetchJson(`/api/browser/session/${encodeURIComponent(this.sessionId)}/resume`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: '~ephemeral' }) });
+    if (btn) btn.disabled = false;
+    if (!r || r.error) { showToast(t('Could not resume the browser: {why}', { why: String((r && r.error) || t('server unreachable')) }), { type: 'error', duration: 7000 }); return; }
+    const n = Number(r.restored) || 0;
+    showToast(r.already ? t('The browser is running — reconnecting') : n ? t('Resumed — {n} tab(s) reopened', { n }) : t('Resumed — the browser runs again'), { duration: 4000 });
+    if (btn && btn.isConnected) btn.remove();
+    try { this.app?.openBrowserLive?.({ sessionId: this.sessionId }); } catch { /* the live view is optional */ }
   }
 
   /** A STORED RESET CREDIT a card offers (the wall card / the auto-resume arm
@@ -1338,6 +1391,11 @@ class ChatRenderers {
     // drawn like the takeover / handback cards, never agent text; the end card opens the replay of that session
     if (msg.noticeKind === 'browser-session' && msg.content?.[0]?.type === 'browser_session') {
       return { el: this._renderBrowserSessionCard(msg), sideEffect: null };
+    }
+    // LANE BROWSER-PROPOSE (2026-09-30, the owner: the agent proposes the switch, the user approves with one click): the
+    // proposal's ONE card at the claim's position — what Approve runs, word for word; patched in place (patchProposal)
+    if (msg.noticeKind === 'browser-proposal' && msg.content?.[0]?.type === 'browser_proposal') {
+      return { el: renderProposalCard(msg, { app: this.app || null }), sideEffect: null };
     }
     // UNKNOWN EVENT — the fall-back card (2.369.119/.120, owner): a harness
     // record VibeSpace does not recognize sits in the flow like any other

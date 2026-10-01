@@ -36,6 +36,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # them the keeper records the refusal by name and the app is shown where X put it.
 # The WM path was MEASURED 2026-09-22 with this image's own xfwm4 4.18 against a
 # scratch X (§9-8): the frame becomes exactly the framebuffer.
+# xvfb (2026-09-30, a fleet user's Google sign-in refused as "this browser may
+# not be secure"): the agent browser's hidden-window rung (src/browser-display.js)
+# lets agent-browser start its OWN invisible Xvfb for a headed launch, so the
+# browser reports a normal `Chrome/<major>` UA instead of `HeadlessChrome/…`;
+# without the binary every fleet pod falls to the headless rung, which sign-in
+# pages read as automation. at-spi2-core + gir1.2-atspi-2.0 + python3-gi: the
+# window-target TREE (src/window-targets-helper.py reads libatspi through
+# GObject introspection) — without them every shared window is pixels-only;
+# xdotool above is the window-target INPUT rung (XTest) as well as the app-fit.
 RUN install -d -m 0755 /usr/share/keyrings \
     && curl -fsSL https://xpra.org/xpra.asc -o /usr/share/keyrings/xpra.asc \
     && printf '%s\n' 'Types: deb' 'URIs: https://xpra.org' 'Suites: bookworm' 'Components: main' 'Signed-By: /usr/share/keyrings/xpra.asc' > /etc/apt/sources.list.d/xpra.sources \
@@ -44,6 +53,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       tigervnc-standalone-server dbus-x11 xfce4-session xfwm4 xfce4-panel \
       xfdesktop4 xfce4-terminal thunar chromium xterm xdotool wmctrl \
       xpra xpra-x11 xpra-html5 \
+      xvfb at-spi2-core gir1.2-atspi-2.0 python3-gi \
       fonts-noto-cjk fonts-noto-color-emoji xdg-utils \
       adwaita-icon-theme \
     && rm -rf /var/lib/apt/lists/*
@@ -75,7 +85,18 @@ RUN chmod u+s /usr/bin/fusermount3 && ln -sf /proc/self/mounts /etc/mtab
 
 # Agent CLIs + mc (share-credential minting). bypassPermissions is blocked for
 # root → the app runs as the non-root `vibe` user below.
-RUN curl -fsSL https://dl.min.io/client/mc/release/linux-$(dpkg --print-architecture | sed 's/armhf/arm/')/mc -o /usr/local/bin/mc && chmod +x /usr/local/bin/mc
+# dl.min.io answered 410 Gone on 2026-09-30 (MinIO retired its download host);
+# the last community release of mc lives on GitHub — pinned by tag AND sha256
+# (amd64 / arm64), so a moved or replaced asset fails the build by name.
+RUN set -e; arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      amd64) sha=01f866e9c5f9b87c2b09116fa5d7c06695b106242d829a8bb32990c00312e891 ;; \
+      arm64) sha=14c8c9616cfce4636add161304353244e8de383b2e2752c0e9dad01d4c27c12c ;; \
+      *) echo "mc: no pinned build for $arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/minio/mc/releases/download/RELEASE.2025-08-13T08-35-41Z/mc.linux-${arch}.RELEASE.2025-08-13T08-35-41Z" -o /usr/local/bin/mc \
+    && echo "${sha}  /usr/local/bin/mc" | sha256sum -c - \
+    && chmod +x /usr/local/bin/mc
 # Pinned rclone 1.65.2 at /usr/local/bin (shadows Debian's 1.60): old rclone
 # signs the Accept-Encoding header into V4 signatures — Cloudflare-fronted S3
 # (R2!) rewrites it and every object GET 403s; the counter-flag needs >=1.63.

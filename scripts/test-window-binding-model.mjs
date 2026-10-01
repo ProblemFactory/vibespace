@@ -220,8 +220,9 @@ console.log('— ③ wiring pins');
   ok(/\(this\._replaying \|\|= new Set\(\)\)\.add\(winId\)/.test(lj) && /const waiting = tc\.tabs\.some\(\(id\) => !wm\.windows\.has\(id\) && inFlight\.has\(id\)\);/.test(lj) && /if \(waiting && Date\.now\(\) < deadline\) return false;/.test(lj), 'a member still being replayed (an async openSpec) keeps the remote chain PENDING, bounded by a deadline (F2\'s race: a free viewer here broke the other client\'s chain on the next save)');
   // kb-design-lessons §6b: the four anti-ping-pong guards UNTOUCHED (the chunk's exit condition)
   ok(/if \(msg\.seq <= this\._lastRemoteSeq\)|_lastRemoteSeq/.test(lj) && /this\._userDirty = false;\n    setTimeout\(\(\) => \{ this\._restoring = false; \}, 1000\);/.test(lj), '§6b guard 1+2: the seq gate and the user-dirty clear at the end of _applyRemoteState are in place');
-  ok(/if \(this\._pointerDown\) \{ this\._pendingRemote = msg; return; \}/.test(lj), '§6b guard 3: defer-while-interacting is in place');
-  ok(/Date\.now\(\) - this\._lastUserInputAt > 60000/.test(lj) && /if \(json === this\._lastSentJson\) return;/.test(lj), '§6b guard 2 (60 s expiry) + 4 (no-op guard) are in place');
+  ok(/if \(this\._restoring \|\| this\._pointerDown\) \{ this\._deferRemote\(msg\); return; \}/.test(lj) && /this\._pendingRemote\.set\(msg\.desktopId \|\| '', msg\);/.test(lj), '§6b guard 3: defer-while-interacting is in place (per desktop since lane desktop-move verify r1 — the record deferred under the pointer or the apply gate, never dropped)');
+  ok(/const members = \[\.\.\.w\._tabChain\.tabs\];[\s\S]{0,600}for \(const id of members\) \{\n\s+const rw = recorded\.get\(id\), win = this\.app\.wm\.windows\.get\(id\);\n\s+if \(rw && rw\.gridBounds && win && !win\._onStage\) \{ win\.gridBounds = \{ \.\.\.rw\.gridBounds \}; this\.app\.wm\._applyGridBounds\(win\); \}/.test(lj) && /const recorded = new Map\(state\.windows\.map\(\(rw\) => \[rw\.winId \|\| rw\.id, rw\]\)\);/.test(lj), 'layout.js: a chain the record no longer holds is broken AND its members go back to the RECORD\'s boxes (stage-blank verify r4: the detach copied the host\'s box over the record\'s — a tab torn off on another device landed on its old host here; heavy test-stage-dragout-ui § 7)');
+  ok(/Date\.now\(\) - this\._lastUserInputAt > 60000/.test(lj) && /if \(json === this\._lastSentJson && !this\._unacked\.some\(\(s\) => s\.desks\.includes\(desktopId \|\| ''\)\)\) \{/.test(lj), '§6b guard 2 (60 s expiry) + 4 (no-op guard — since lane desktop-move verify r5 ⑤ a text identical to the last sent is a no-op only when the server READ that send) are in place');
   // ── ④ split tabs v2: the strip halves, the tab drag, the settings read at the act, the open source ──
   const rtb = fnBody('_renderTabBar');
   ok(/tabBar\.classList\.add\('tab-bar-split'\)/.test(rtb) && /half\.className = 'tab-strip-half';/.test(rtb) && /for \(const id of chain\.split\[side\]\)/.test(rtb) && /for \(const id of visualTabOrder\(chain\)\)/.test(rtb), '④ _renderTabBar: a split draws TWO HALVES, each ITS side\'s list in order (the glyph between); tabs keeps one strip in visualTabOrder');
@@ -267,7 +268,7 @@ console.log('— ③ wiring pins');
   ok(/this\._userDirty = false;\n    setTimeout\(\(\) => \{ this\._restoring = false; \}, 1000\);\n(?:    \/\/[^\n]*\n)*    if \(heldKept\) setTimeout\(\(\) => this\._resendHeldRatio\(\), 1000\);/.test(lj), '⑤ ① the apply still clears the dirty bit (§6b guard 2 untouched) and a KEPT drag is re-sent ONCE, after the 1 s gate opens');
   const rhr = (() => { const i = lj.indexOf('\n  _resendHeldRatio('); return i < 0 ? '' : lj.slice(i, lj.indexOf('\n  }\n', i)); })();
   ok(/heldRatio\(ch, now\) !== null/.test(rhr) && /this\._lastUserInputAt = Math\.max\(this\._lastUserInputAt \|\| 0, at\);/.test(rhr) && /this\.scheduleAutoSave\(\);/.test(rhr) && !/Date\.now\(\) - |_lastUserInputAt = Date\.now\(\)/.test(rhr), '⑤ ① the re-send re-arms the dirty bit with the drag\'s REAL release time (never a fabricated "now" — §6b\'s 60 s expiry keeps its meaning) through the ordinary autosave');
-  ok(/const json = JSON\.stringify\(\{ state, desktopId \}\);\n    this\._releaseHeldRatios\(\);[^\n]*\n    if \(json === this\._lastSentJson\) return;/.test(lj), '⑤ ① every save that leaves (or is identical to the last one sent) releases the held ratios — the no-op guard (§6b guard 4) untouched');
+  ok(/const json = JSON\.stringify\(\{ state, desktopId \}\);/.test(lj) && /releaseRatio\(w\._tabChain\);/.test(lj) && lj.indexOf('releaseRatio(w._tabChain);') > lj.indexOf('  _markCarried(desk, sentAt) {') && lj.indexOf('releaseRatio(w._tabChain);') < lj.indexOf('  _armAckWatch() {') && !/_releaseHeldRatios/.test(lj), '⑤ ① the held ratios are released when the server READ the save that carried them (_markCarried at the layout-sync ack — lane desktop-move verify r5 ⑤; it used to be the send, and a save on a socket the server never read released them for nothing); the no-op guard (§6b guard 4) is still the one guard');
   ok(/if \(chain\.layout === 'split' && chain\.split && Math\.abs\(chain\.split\.ratio - startRatio\) > 0\.005\) this\._holdSplitRatio\(chain\);/.test(div) && /_holdSplitRatio\(chain\) \{ holdRatio\(chain, Date\.now\(\)\); \}/.test(tg), '⑤ ① only a USER divider act that MOVED the ratio holds it (the drag\'s release, the double-click)');
   ok(/tab-strip-half\[data-side="right"\] \{ grid-column: 3; margin-right: calc\(var\(--split-ctl, 89px\) \+ var\(--split-btn, 30px\)\); \}/.test(css) && !/tab-strip-half\[data-side="right"\] \{[^}]*padding-right/.test(css), '⑤ ② the right half reserves the tail with a MARGIN (a padding lets a scroll box paint its tabs under the controls)');
   const fst = fnBody('_fitSplitTail');
@@ -311,10 +312,221 @@ console.log('— ⑥ THE ONE RETIREMENT + the held close (inc-mukeyzpt-lpou: a c
   ok(/closeBtn\.addEventListener\('click', \(e\) => \{ e\.stopPropagation\(\); this\.requestClose\(tabWinId\); \}\)/.test(tg6) && !/this\.removeFromTabChain\(chain, tabWinId\)/.test(tg6), '⑥ the tab ✕ is a user close through the ONE door (requestClose → closeWindow), never removeFromTabChain directly');
   ok(/if \(heldIds\.includes\(winId\)\) \{ heldClosed = true; continue; \}\n(?:\s*\/\/[^\n]*\n)*\s*this\._createRemoteWindow\(rw\);/.test(lj6), '⑥ the remote apply never re-creates a HELD close (checked before _createRemoteWindow)');
   ok(/const tc = heldIds\.length \? withoutMembers\(rw\.tabChain, heldIds\) : rw\.tabChain;/.test(lj6) && /remoteChains\.set\(key, tc\);/.test(lj6), '⑥ …and reads a record\'s chain WITHOUT the held members (PURE withoutMembers — the local close\'s arithmetic), never a rebuild that flattens the split');
-  ok(/if \(heldClosed\) setTimeout\(\(\) => this\._resendHeldClose\(\), 1000\);/.test(lj6) && /this\._releaseHeldRatios\(\); this\._releaseHeldCloses\(desktopId\);/.test(lj6) && /this\.app\.layoutManager\?\._releaseHeldCloses\?\.\(desktopId\);/.test(dm6), '⑥ a refused re-creation re-sends the close ONCE; every save that leaves (the autosave, a switch\'s broadcast) releases the closes made on its desktop');
+  ok(/if \(heldClosed\) setTimeout\(\(\) => this\._resendHeldClose\(\), 1000\);/.test(lj6) && /this\._releaseHeldCloses\(key \|\| null, sentAt\);/.test(lj6) && /this\.app\.layoutManager\?\.noteLayoutSent\?\.\(\[desktopId\], sentAt\);/.test(dm6) && !/_releaseHeldCloses\?\.\(desktopId\)/.test(dm6), '⑥ a refused re-creation re-sends the close ONCE; every save that leaves (the autosave, a switch\'s broadcast) owes an answer, and the closes made on its desktop are released when the server READ it (lane desktop-move verify r5 ⑤)');
   const rhc = (() => { const i = lj6.indexOf('\n  _resendHeldClose('); return i < 0 ? '' : lj6.slice(i, lj6.indexOf('\n  }\n', i)); })();
   ok(/this\._lastUserInputAt = Math\.max\(this\._lastUserInputAt \|\| 0, at\);/.test(rhc) && !/_lastUserInputAt = Date\.now\(\)/.test(rhc), '⑥ the close re-send keeps §6b\'s expiry meaningful (the close\'s REAL time, never a fabricated now)');
-  ok(/dm\.cacheRemoteState\(msg\.desktopId, msg\.state\);/.test(lj6) && !/dm\._savedStates\.set\(msg\.desktopId/.test(lj6) && /base\.has\(String\(w\.id\)\) && !now\.has\(String\(w\.id\)\)/.test(dm6), '⑥ a remote record for a desktop not on show goes through cacheRemoteState: a hidden window the last record on the wire listed and this one drops is closed then (the parked second client)');
+  ok(/dm\.cacheRemoteState\(msg\.desktopId, msg\.state, \{ receivedAt \}\);/.test(lj6) && !/dm\._savedStates\.set\(msg\.desktopId/.test(lj6) && /base\.has\(String\(w\.id\)\) && !now\.has\(String\(w\.id\)\)/.test(dm6), '⑥ a remote record for a desktop not on show goes through cacheRemoteState: a hidden window the last record on the wire listed and this one drops is closed then (the parked second client)');
+}
+
+console.log('— ⑦ THE HELD CHAIN ACT (stage-blank verify r5: a record that predated a tab tear-off re-formed the group at the drop, fleet-wide)');
+{
+  // THE SCENE: the real WindowManager + tab-group mixin + the real LayoutManager over fake elements (test-stage-visibility's
+  // recipe) — the REAL _applyRemoteState, _detachFromChain, restoreTabChain, createTabChain, _resendHeldClose run; only
+  // the DOM-only bookkeeping is stubbed. A record is built the way captureState writes it (a tabChain on the host row,
+  // isTabGuest on the guests).
+  globalThis.requestAnimationFrame ||= (fn) => setTimeout(fn, 0);
+  globalThis.document ||= { addEventListener() { }, removeEventListener() { }, createElement: () => ({ style: {}, classList: { add() { }, remove() { }, toggle() { }, contains: () => false }, setAttribute() { }, removeAttribute() { }, appendChild() { }, remove() { }, querySelector: () => null, querySelectorAll: () => [] }), body: { appendChild() { }, classList: { add() { }, remove() { }, toggle() { }, contains: () => false } }, documentElement: { style: { setProperty() { } } }, getElementById: () => null, querySelector: () => null, querySelectorAll: () => [] };
+  globalThis.window ||= { addEventListener() { }, removeEventListener() { }, matchMedia: () => ({ matches: false, addEventListener() { } }), localStorage: { getItem: () => null, setItem() { }, removeItem() { } }, getComputedStyle: () => ({ getPropertyValue: () => '' }), innerWidth: 1571, innerHeight: 854 };
+  globalThis.localStorage ||= globalThis.window.localStorage; globalThis.getComputedStyle ||= globalThis.window.getComputedStyle;
+  const { WindowManager } = await import(path.join(REPO, 'src/lib/window.js'));
+  const { installTabGroupMixin } = await import(path.join(REPO, 'src/lib/tab-group.js'));
+  const { LayoutManager } = await import(path.join(REPO, 'src/lib/layout.js'));
+  const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
+  const cls = () => { const s = new Set(); return { contains: (n) => s.has(n), add: (...n) => n.forEach((x) => s.add(x)), remove: (...n) => n.forEach((x) => s.delete(x)), toggle: (n, on) => { if (on === undefined ? !s.has(n) : on) s.add(n); else s.delete(n); } }; };
+  const fakeEl = () => { const kids = new Set(); return { style: { zIndex: '', display: '', left: '', top: '', width: '', height: '', visibility: '', pointerEvents: '', contentVisibility: '' }, box: null, classList: cls(), getAttribute: () => null, setAttribute() { }, removeAttribute() { }, appendChild: (c) => kids.add(c), removeChild: (c) => kids.delete(c), contains: (c) => kids.has(c), remove() { }, querySelector: () => null, querySelectorAll: () => [] }; };
+  const near = (a, b, eps = 0.005) => !!a && !!b && ['left', 'top', 'width', 'height'].every((k) => Math.abs((a[k] ?? 0) - (b[k] ?? 0)) < eps);
+  const members = (w) => (w._tabChain ? [...w._tabChain.tabs].sort().join(',') : '');
+  const HOME_A = { left: 0.05, top: 0.1, width: 0.4, height: 0.5 }, HOME_B = { left: 0.5, top: 0.12, width: 0.36, height: 0.45 }, HOME_C = { left: 0.55, top: 0.5, width: 0.3, height: 0.4 };
+  const X = { left: 0.3, top: 0.48, width: 0.4, height: 0.5 }, Y = { left: 0.18, top: 0.64, width: 0.4, height: 0.5 };
+  function scene(LM, { onlyMine = false } = {}) {
+    const wm = Object.create(WindowManager.prototype);
+    Object.assign(wm, { windows: new Map(), zIndex: 100, activeWindowId: null, grid: null, _settings: { get: () => undefined }, _hideMq: { matches: false }, windowCounter: 0 });
+    installTabGroupMixin(wm);
+    for (const k of ['_notify', '_mobileYieldSidebar', 'setGrid', '_reflowWindows', '_scheduleOverlapUpdate', '_renderTabBar', '_applyChainLayout', '_clearSplitDom', '_notifyChainChange', '_placeInboxBadge', 'setAuthBadge', '_markStrip', '_labelSplitBtn', '_resizePanes', '_fitChipsSoon', '_focusMostRecent', 'toggleMaximize', 'minimize', 'restore', 'closeWindow', 'setSplitRatio', '_captureGridBounds', '_withdrawMergeToast', '_afterUserMerge']) wm[k] = () => { };
+    if (onlyMine && typeof wm.witnessChain === 'function') wm.witnessChain = () => { }; // a CONTROL judges this lane's hold alone: lane desktop-move's own chain witness (its r5 ②, the same act held by its ack'd-save rule on the merged tree) is neutered in control scenes
+    wm._followPartner = () => null;
+    wm._applyGridBounds = (w) => { if (w && w.gridBounds) w.element.box = { ...w.gridBounds }; };
+    const app = { wm, sessions: new Map(), isMobile: false, settings: { get: () => undefined, on() { } }, desktopManager: { activeDesktopId: 'scra', cacheRemoteState() { }, noteWire() { }, _renderSwitcher() { } }, sidebar: { isOpen: true, toggle() { } }, ws: { send() { }, onStateChange() { }, onGlobal() { } }, updateTaskbar() { } };
+    wm._app = app;
+    const lm = new LM(app); // the REAL constructor: every field either lane's constructor sets exists (a fake built by Object.create broke on lane desktop-move's `_unacked`)
+    Object.assign(lm, { _userDirty: false, _lastUserInputAt: Date.now(), _restoring: false, _pointerDown: false, _pendingChains: [], saves: 0, created: 0 });
+    lm._applyToolbarState = () => { }; lm._applyTaskbarHeight = () => { }; lm.scheduleAutoSave = () => { lm.saves++; }; lm._createRemoteWindow = () => { lm.created++; };
+    app.layoutManager = lm;
+    const mk = (id, gb) => { const w = { id, type: 'chat', element: fakeEl(), content: { classList: cls(), id: id + '-content' }, titleBar: { querySelector: () => null }, titleSpan: { style: {} }, _desktopId: 'scra', gridBounds: { ...gb }, _openSpec: { action: 'viewSession', backend: 'claude', backendSessionId: 'e2e00000-0000-4000-8000-00000000f' + id } }; wm.windows.set(id, w); wm._applyGridBounds(w); return w; };
+    const A = mk('A', HOME_A), B = mk('B', HOME_B), C = mk('C', HOME_C);
+    /** a record as captureState writes it: `chains` = [[host, ...guests]] */
+    const record = (boxes, chains = []) => ({ windows: ['A', 'B', 'C'].filter((id) => wm.windows.has(id)).map((id) => { const w = wm.windows.get(id); const row = { winId: id, gridBounds: { ...(boxes[id] || w.gridBounds) }, openSpec: w._openSpec }; const ch = chains.find((c) => c.includes(id)); if (ch) { row.tabChain = { tabs: [...ch], active: 0, layout: 'tabs' }; row.isTabGuest = ch[0] !== id; } return row; }) });
+    return { wm, lm, app, A, B, C, record };
+  }
+  /** the legs over a LayoutManager class (the real one, or a patched copy for the control); returns the failed names */
+  async function heldChainLegs(LM, { quiet = false } = {}) {
+    const failed = [];
+    const leg = (c, n, extra) => { if (quiet) { if (!c) failed.push(n); } else ok(c, n, extra); return !!c; };
+    const waitResend = async () => { if (!quiet) await tick(1250); }; // the re-send's 1 s timer is judged once, in the full run (the TIER RULE's 10 s: a control judges the holds)
+    // ── the tear-off (the measured class): [A host, B] grouped earlier; the user tears B off and drops it at X ──
+    {
+      const { wm, lm, A, B, C, record } = scene(LM, { onlyMine: quiet });
+      wm.createTabChain(A, B); await tick();
+      const stale = record({ A: HOME_A, B: HOME_A, C: HOME_C }, [['A', 'B']]); // the record the other page still holds
+      wm._detachFromChain(A._tabChain, 'B'); B.gridBounds = { ...X }; wm._applyGridBounds(B); wm._noteChainAct(['B', 'A']); // the drag's tear-off door
+      leg(!B._tabChain && !A._tabChain && lm._heldChainActs && lm._heldChainActs.has('B') && lm._heldChainActs.has('A'), '⑦ the tear-off door holds the torn tab and its old host (noteChainAct via the strip\'s _noteChainAct)', J({ held: [...(lm._heldChainActs || new Map()).keys()] }));
+      lm._applyRemoteState(stale); await tick();
+      leg(!B._tabChain && !A._tabChain, '⑦ a record that still names the group — deferred under the drag or captured before the tear\'s save reached its sender — does NOT re-form it', J({ b: members(B), a: members(A) }));
+      leg(near(B.gridBounds, X) && near(B.element.box, X), `⑦ …and B stays where the user dropped it ${J(X)} (its entry in the record — its old host's box — is older than the act)`, J({ gb: B.gridBounds, box: B.element.box }));
+      leg(near(C.gridBounds, HOME_C) && lm.created === 0, '⑦ …the rest of the record applies as usual (C\'s box; nothing re-created)');
+      leg(lm._heldChainActs.has('B') && lm._heldChainActs.has('A'), '⑦ …the hold STAYS after the apply (a record that disagrees releases nothing)');
+      await waitResend();
+      leg(quiet || (lm._userDirty === true && lm.saves >= 1 && lm._lastUserInputAt > 0), '⑦ …the act is re-sent ONCE as the user\'s own (the held close\'s re-send: dirty at the act\'s real time, the autosave scheduled)', J({ dirty: lm._userDirty, saves: lm.saves }));
+      // a record that AGREES (the other page received the tear: B alone at Y) releases the hold and applies in full
+      lm._applyRemoteState(record({ A: HOME_A, B: Y, C: HOME_C }, [])); await tick();
+      leg(!B._tabChain && near(B.gridBounds, Y) && lm._heldChainActs.size === 0, `⑦ a record that AGREES with the act (B alone) is applied whole (B at its ${J(Y)}) and releases the hold`, J({ gb: B.gridBounds, held: [...lm._heldChainActs.keys()] }));
+      // …after which a stale record would win (the last-arrival class — accepted, as for the box). This leg judges THIS lane's
+      // release alone: lane desktop-move's own chain witness (`_chainAt`, its r5 ②: released by its ack'd save) is cleared first —
+      // on the merged tree both holds stand on one act, and theirs would still hold here
+      for (const w of wm.windows.values()) delete w._chainAt;
+      lm._applyRemoteState(stale); await tick(300);
+      leg(!!B._tabChain && members(B) === 'A,B', '⑦ …and once released, a later record naming the group re-forms it (no hold without a fresh act: the last-arrival class, as for a box)', J({ b: members(B) }));
+    }
+    // ── the twin: the user MERGES C onto A; a stale record (A and C apart) must not break it ──
+    {
+      const { wm, lm, A, B, C, record } = scene(LM, { onlyMine: quiet });
+      const stale = record({ A: HOME_A, B: HOME_B, C: HOME_C }, []);
+      wm.createTabChain(A, C); wm._noteChainAct(['A', 'C']); await tick(); // the merge drop's door
+      lm._applyRemoteState(stale); await tick();
+      leg(!!C._tabChain && members(C) === 'A,C' && near(A.gridBounds, HOME_A), '⑦ the merge\'s twin: a record from before the user\'s merge does not break the group (and A keeps its box)', J({ c: members(C), a: A.gridBounds }));
+      leg(near(B.gridBounds, HOME_B) && !B._tabChain, '⑦ …a window of no held act (B) takes the record as usual');
+      leg(lm._heldChainActs.has('A') && lm._heldChainActs.has('C'), '⑦ …the merge stays held (its re-send is the same timer the tear-off leg judged)');
+    }
+    // ── the strip's own layout: a reorder the user made (same members, another key) is not undone in place ──
+    {
+      const { wm, lm, A, B, record } = scene(LM, { onlyMine: quiet });
+      wm.createTabChain(A, B); await tick();
+      const stale = record({ A: HOME_A, B: HOME_A }, [['A', 'B']]);
+      A._tabChain.order = ['B', 'A']; wm._noteChainAct(['A', 'B']); // moveTabInChain's door
+      lm._applyRemoteState(stale); await tick();
+      leg(!!A._tabChain && A._tabChain.order && A._tabChain.order.join(',') === 'B,A', '⑦ the user\'s own reorder of the strip is kept against the record\'s older order (the in-place path is held too)', J({ order: A._tabChain && A._tabChain.order }));
+    }
+    // ── the bounds: an act by an idle user, under an apply, or past a minute holds nothing ──
+    {
+      const { wm, lm, A, B, record } = scene(LM, { onlyMine: quiet });
+      wm.createTabChain(A, B); await tick();
+      const stale = record({ A: HOME_A, B: HOME_A }, [['A', 'B']]);
+      lm._lastUserInputAt = Date.now() - 120000; wm._detachFromChain(A._tabChain, 'B'); wm._noteChainAct(['B', 'A']);
+      leg(!lm._heldChainActs || lm._heldChainActs.size === 0, '⑦ an act while the user is IDLE (no input for 2 min) is not held (§6b\'s expiry: an idle page holds nothing)');
+      lm._lastUserInputAt = Date.now(); lm._restoring = true; lm._applying = true; wm._noteChainAct(['B', 'A']); lm._restoring = false; lm._applying = false; // under an apply: both flags (lane desktop-move's `_applying` is the gate once merged; `_restoring` here)
+      leg(!lm._heldChainActs || lm._heldChainActs.size === 0, '⑦ a chain mutation under an apply / the boot restore is the RECORD\'s, never held');
+      wm._noteChainAct(['B', 'A']); for (const h of lm._heldChainActs.values()) h.at = Date.now() - 61000;
+      for (const w of wm.windows.values()) delete w._chainAt; // lane desktop-move's own witness (see above): this leg judges THIS lane's expiry
+      lm._applyRemoteState(stale); await tick(300);
+      leg(!!B._tabChain && members(B) === 'A,B' && lm._heldChainActs.size === 0, '⑦ a hold past CLOSE_HOLD_MS is gone: the record applies (the group re-forms)', J({ b: members(B) }));
+      wm._detachFromChain(A._tabChain, 'B'); wm._noteChainAct(['B', 'A']); wm.windows.delete('B');
+      lm._applyRemoteState(record({ A: HOME_A }, [])); await tick();
+      leg(!lm._heldChainActs.has('B'), '⑦ a hold on a window that is gone is void');
+    }
+    return failed;
+  }
+  await heldChainLegs(LayoutManager);
+  // CONTROLS (scripts/mutant-copy.mjs): the hold never consulted ⇒ the tear-off leg RED (the group re-forms, B on its old host);
+  // the release-by-save variant (the hold dropped by the save, as the held close is) ⇒ the deferred-record leg RED too
+  const { mutantCopies } = await import(path.join(REPO, 'scripts/mutant-copy.mjs'));
+  const M = mutantCopies('winbind', REPO);
+  const LJ = read('src/lib/layout.js');
+  const holdFind = "    const heldChain = new Set(this._heldChainIds(state));\n";
+  ok(LJ.includes(holdFind), '⑦ control: the patched line exists in layout.js');
+  if (LJ.includes(holdFind)) {
+    const f = M.write('src/lib/layout.js', LJ.replace(holdFind, "    const heldChain = new Set();\n"), 'no-chain-hold');
+    const failed = await heldChainLegs((await import(f)).LayoutManager, { quiet: true });
+    ok(failed.some((n) => /does NOT re-form it/.test(n)) && failed.some((n) => /stays where the user dropped it/.test(n)) && failed.some((n) => /merge's twin/.test(n)), `⑦ CONTROL: the hold never consulted turns the tear-off, the box and the merge legs RED (${failed.length}: ${failed.slice(0, 2).join(' | ').slice(0, 160)})`, J(failed));
+  }
+  const relHead = /(\n  _releaseHeldCloses\([^)]*\) \{\n)/; // the method's head, whatever its parameter list (lane desktop-move adds `upTo`)
+  ok(relHead.test(LJ), '⑦ control: _releaseHeldCloses exists in layout.js');
+  if (relHead.test(LJ)) {
+    // release-by-SAVE: the save (here: the re-send's scheduleAutoSave → the release, as the real _doAutoSave does) drops the hold —
+    // then the agreeing-record leg still passes but a record deferred under the drag and applied after the save re-forms the group
+    const mut = LJ.replace(relHead, '$1    if (this._heldChainActs) this._heldChainActs.clear();\n');
+    ok(mut !== LJ, '⑦ control: the release-by-save copy differs (the clear sits first, before any early return)');
+    const f = M.write('src/lib/layout.js', mut, 'release-by-save');
+    const { LayoutManager: LM2 } = await import(f);
+    const { wm, lm, A, B, record } = scene(LM2, { onlyMine: true });
+    wm.createTabChain(A, B); await tick();
+    const stale = record({ A: HOME_A, B: HOME_A }, [['A', 'B']]);
+    wm._detachFromChain(A._tabChain, 'B'); B.gridBounds = { ...X }; wm._applyGridBounds(B); wm._noteChainAct(['B', 'A']);
+    lm._releaseHeldCloses('scra'); // the tear's save left (measured: 675 ms after the tear, the pointer still down)
+    lm._applyRemoteState(stale); await tick(300); // the record deferred under the drag, applied at the pointerup (1742 ms)
+    ok(!!B._tabChain && members(B) === 'A,B', '⑦ CONTROL: a hold released by the SAVE lets the record deferred under the drag re-form the group after the save left (why the release is by AGREEMENT)', J({ b: members(B) }));
+  }
+  // WIRING PINS: the doors and the apply's three sites
+  const TG7 = read('src/lib/tab-group.js');
+  const body7 = (name) => { const i = TG7.indexOf('\n  ' + name + '('); if (i < 0) return ''; const j = TG7.indexOf('\n  },', i); return TG7.slice(i, j); };
+  ok(/this\._detachFromChain\(chain, winId\);\n(?:\s*this\.witnessChain\([^\n]*\n)?\s+const win = this\.windows\.get\(winId\);\n\s+if \(!win\) \{ mouseDown = false; return; \}\n(?:\s*\/\/[^\n]*\n)*\s+try \{ this\._app\?\.stage\?\.onTornOff\?\.\(win, frame\); \} catch \(err\) \{[^\n]*\}\n(?:\s*this\.witnessChain\([^\n]*\n)?\s+this\._noteChainAct\(\[winId, frame && frame\.id\]\);/.test(body7('_setupTabDrag')), '⑦ the tab drag\'s tear-off tells the layout manager (the torn tab + its frame\'s host) right after the detach and the Stage\'s hook (lane desktop-move\'s own witnessChain line may sit between — since its verify r5 final, right after the Stage hand-over)');
+  ok(/this\._noteChainAct\(win\._tabChain \? \[\.\.\.win\._tabChain\.tabs\] : \[win\.id\]\);/.test(body7('_mergeDrop')), '⑦ the ONE merge-drop body (the title / icon / tab drags) tells it after the add');
+  for (const v of ['moveTabInChain', 'bindSplit', 'unbindSplit', 'swapSplit', 'undoSplit']) ok(/this\._noteChainAct\(/.test(body7(v)), `⑦ the strip verb ${v} tells it`);
+  for (const v of ['restoreTabChain', 'applyChainRecord', '_detachFromChain', 'createTabChain', 'addToTabChain', 'removeFromTabChain', '_ungroupLast']) ok(!/_noteChainAct\(/.test(body7(v)), `⑦ …${v} (a restore / an apply / a plain detach / a programmatic join / a close) never does`);
+  ok(/noteChainAct\(ids, desktopId\) \{\n\s+if \(!Array\.isArray\(ids\) \|\| !ids\.length \|\| \(this\._applying \?\? this\._restoring\) \|\| this\._booting\) return;/.test(LJ) && /if \(!this\._lastUserInputAt \|\| now - this\._lastUserInputAt > CLOSE_HOLD_MS\) return;\n\s+for \(const id of ids\) if \(id\) \(this\._heldChainActs \|\|= new Map\(\)\)/.test(LJ), '⑦ layout.js noteChainAct: refused under an apply / the boot (lane desktop-move\'s _applying once merged, else _restoring) and for an idle user; keyed per window');
+  ok(/if \(win && heldChain\.has\(String\(winId\)\)\) \{ heldClosed = true; continue; \}\n\n\s+if \(!win\) \{/.test(LJ), '⑦ the windows loop skips a held window\'s entry BEFORE the held-close / create branch');
+  ok(/if \(sameMembers && !localChainKeys\.has\(sameMembers\)\) \{\n\s+\/\/[^\n]*\n\s+if \(chainHeld\(w\._tabChain\.tabs\)\) \{ heldClosed = true; localChainKeys\.add\(sameMembers\); continue; \}/.test(LJ) && /if \(!remoteChains\.has\(key\)\) \{\n\s+\/\/[^\n]*\n\s+if \(chainHeld\(w\._tabChain\.tabs\)\) \{ heldClosed = true; continue; \}/.test(LJ) && /if \(localChainKeys\.has\(key\)\) continue;\n(?:\s*\/\/[^\n]*\n)+\s+if \(chainHeld\(tc\.tabs\)\) \{ heldClosed = true; continue; \}\n[\s\S]{0,700}?this\._queueChain\(key, tc/.test(LJ), '⑦ the three chain sites (in place / break / create) ask chainHeld first');
+  const rel7 = (() => { const i = LJ.indexOf('\n  _releaseHeldCloses('); return i < 0 ? '' : LJ.slice(i, LJ.indexOf('\n  }\n', i)); })();
+  ok(rel7 && !/_heldChainActs/.test(rel7), '⑦ the save releases NO chain act (the release is by agreement — _heldChainIds; a hold released by the save let the deferred record through)');
+  ok(/_resendHeldClose\(tries = 0\) \{[\s\S]{0,700}for \(const \[id, h\] of this\._heldChainActs \|\| \[\]\) if \(Date\.now\(\) - h\.at <= CLOSE_HOLD_MS && this\.app\.wm\.windows\.has\(id\)\) at = Math\.max\(at, h\.at\);/.test(LJ), '⑦ the held chain act rides the close\'s re-send (the act\'s real time, once)');
+}
+
+console.log('— ⑧ A SAVE WAITS FOR THE DROP (stage-blank verify r5: a tab torn off and held past the debounce went out on its old host\'s box)');
+{
+  const { LayoutManager } = await import(path.join(REPO, 'src/lib/layout.js'));
+  const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
+  const mkLm = (LM) => {
+    const sent = [];
+    const lm = new LM({ stage: null, wm: { windows: new Map() }, desktopManager: { activeDesktopId: 'scra', _restoring: false, noteWire() { } }, ws: { send: (m) => sent.push({ t: Date.now(), m }), onStateChange() { }, onGlobal() { } } }); // the real constructor (see ⑦)
+    Object.assign(lm, { _userDirty: true, _lastUserInputAt: Date.now(), _restoring: false, _pointerDown: false, _lastSentJson: null, _autoSaveTimer: null, sent });
+    lm.captureState = () => ({ windows: [] });
+    return lm;
+  };
+  async function dropLegs(LM, { quiet = false } = {}) {
+    const failed = [];
+    const leg = (c, n, extra) => { if (quiet) { if (!c) failed.push(n); } else ok(c, n, extra); return !!c; };
+    // the pointer is up: a save goes at once (the ordinary autosave)
+    { const lm = mkLm(LM); await lm._doAutoSave(); leg(lm.sent.length === 1, '⑧ with the pointer up a scheduled save leaves at once'); }
+    // the pointer is DOWN (a tab torn off and held): no save leaves while it is held, none in the 250 ms the drop's capture takes, one soon after
+    {
+      const lm = mkLm(LM); lm._pointerDown = true;
+      const t0 = Date.now();
+      await lm._doAutoSave(); await tick(450);
+      leg(lm.sent.length === 0, '⑧ no save leaves while the pointer is down (the act is unfinished: the torn tab still carries its old host\'s box)', J(lm.sent.length));
+      lm._pointerDown = false; const tUp = Date.now();
+      await tick(260);
+      leg(lm.sent.length === 0, '⑧ …nor in the 250 ms after the release (the drop\'s own capture runs then)', J({ sent: lm.sent.length }));
+      await tick(700);
+      leg(lm.sent.length === 1 && lm.sent[0].t - tUp >= 250 && lm.sent[0].t - tUp < 1200, `⑧ …one save leaves after the drop's capture (${lm.sent.length ? lm.sent[0].t - tUp : '—'} ms after the release) — the dirty bit untouched by the wait`, J({ sent: lm.sent.length, dirty: lm._userDirty, since: t0 }));
+      leg(!lm._saveWaitsForDrop, '⑧ …and the wait is spent');
+    }
+    // the pointer RELEASED just before the debounce fired (the T3 shape: the detach at 189 ms, the release at ~540 ms, the save at
+    // 689 ms, the drop's capture at ~790 ms): the drop itself tells the save to wait
+    {
+      const lm = mkLm(LM); lm.noteDrop(); const tDrop = Date.now();
+      await lm._doAutoSave(); await tick(260);
+      leg(lm.sent.length === 0, '⑧ a save armed before a drop released < 250 ms ago waits (the drop told it: noteDrop)', J(lm.sent.length));
+      await tick(700);
+      leg(lm.sent.length === 1 && lm.sent[0].t - tDrop >= 390, `⑧ …and leaves after the drop's capture (${lm.sent.length ? lm.sent[0].t - tDrop : '—'} ms after the drop)`, J({ sent: lm.sent.length }));
+      const lm2 = mkLm(LM); lm2._dropAt = Date.now() - 5000; await lm2._doAutoSave();
+      leg(lm2.sent.length === 1, '⑧ a drop older than the window holds nothing (the save leaves at once)');
+    }
+    return failed;
+  }
+  await dropLegs(LayoutManager);
+  // CONTROL: the two gate lines removed ⇒ the save leaves while the pointer is down
+  const { mutantCopies } = await import(path.join(REPO, 'scripts/mutant-copy.mjs'));
+  const M8 = mutantCopies('winbind8', REPO);
+  const LJ8 = read('src/lib/layout.js');
+  const gate = "    if (this._pointerDown) { this._saveWaitsForDrop = true; this._autoSaveTimer = setTimeout(() => this._doAutoSave(), 300); return; }\n    if (this._saveWaitsForDrop || (this._dropAt && Date.now() - this._dropAt < 400)) { this._saveWaitsForDrop = false; this._autoSaveTimer = setTimeout(() => this._doAutoSave(), 400); return; }";
+  ok(LJ8.includes(gate), '⑧ control: the gate lines exist in layout.js');
+  if (LJ8.includes(gate)) {
+    const f = M8.write('src/lib/layout.js', LJ8.replace(gate, ''), 'no-drop-wait');
+    const failed = await dropLegs((await import(f)).LayoutManager, { quiet: true });
+    ok(failed.some((n) => /no save leaves while the pointer is down/.test(n)) && failed.some((n) => /released < 250 ms ago waits/.test(n)), `⑧ CONTROL: without the gate the save leaves under the held pointer and in the release…capture gap (${failed.length}: ${failed[0] || ''})`.slice(0, 220), J(failed));
+  }
+  const dab = (() => { const i = LJ8.indexOf('\n  async _doAutoSave('); return i < 0 ? '' : LJ8.slice(i, LJ8.indexOf('\n  }\n', i)); })();
+  ok(/if \(!this\._userDirty\) return;\n(?:\s*\/\/[^\n]*\n)+\s+if \(this\._pointerDown\) \{ this\._saveWaitsForDrop = true;/.test(dab) && /if \(this\._saveWaitsForDrop \|\| \(this\._dropAt && Date\.now\(\) - this\._dropAt < 400\)\) \{ this\._saveWaitsForDrop = false; this\._autoSaveTimer = setTimeout\(\(\) => this\._doAutoSave\(\), 400\); return; \}/.test(dab), '⑧ the gate sits in _doAutoSave after the dirty check and before the expiry (the act\'s time is never touched), and reads the drop');
+  ok(/if \(!win\) return;\n\s+this\._app\?\.layoutManager\?\.noteDrop\?\.\(\);/.test(read('src/lib/tab-group.js')) && /noteDrop\(\) \{ this\._dropAt = Date\.now\(\); \}/.test(LJ8), '⑧ the tab drag\'s detached drop tells the layout manager (noteDrop) before its own 250 ms capture');
 }
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);

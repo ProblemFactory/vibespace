@@ -16,7 +16,7 @@ const { NULL_QUOTA } = require('./null-quota');
 const { HARNESS_SETTINGS } = require('../harness-settings'); // PURE: a built-in ACP harness (opencode) has a declared table; a contributed one brings its own
 
 const ACP_DEFAULT_CAPS = Object.freeze({
-  pool: false, hotSwitch: 'unverified', planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null,
+  pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null,
   fork: false, streamProtocol: 'acp-events', peerDelivery: 'stash-only', frameFile: true,
 });
 

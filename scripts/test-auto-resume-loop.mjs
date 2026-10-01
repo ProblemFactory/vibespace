@@ -235,7 +235,7 @@ if (!probe) {
     const c = w.readCache(w.LINK);
     ok('…because the LINKED member is what got demoted — utilization 1, source wall, on the FIRST rejection', c.fiveHour.utilization === 1 && c.source === 'wall' && c.fiveHour.status === 'limited', JSON.stringify(c));
     ok("…journaled as a credential-slot demotion, not a guess", lines.some((l) => /\[wall\] demoted PandyMax 5h until \S+ \(1 walls \/ credential slot\)/.test(l)), lines.filter((l) => /demoted/.test(l)).join(' | '));
-    ok('…and the OTel-observed org is corroboration in the log, never the target', lines.some((l) => /\[billing PandyMax, OTel observed Fish Max\]|\[billing B-Stack Max, OTel observed Fish Max\]/.test(l)) && !lines.some((l) => /demoted Fish Max/.test(l)), lines.filter((l) => /walled turn/.test(l)).join(' | '));
+    ok('…and the OTel label is neither the target nor in the log (a machine-wide label since the 2026-09-30 measurement — it corroborates nothing)', !lines.some((l) => /OTel observed/.test(l)) && !lines.some((l) => /demoted Fish Max/.test(l)), lines.filter((l) => /walled turn/.test(l)).join(' | '));
   }
 
   // (c) THE BREAKER alone stops it — attribution still wrong, damage bounded
@@ -1142,9 +1142,9 @@ if (!probe) {
   ok('WIRING: …and the ONLY thing that may move the banner off that pin is a re-file this turn PROVED (the banner states no time, so it has no evidence of its own)',
     (() => {
       const b = eng.slice(eng.indexOf('const pinKey = slot.key || readingSlotFor(session).key'));
-      const body = b.slice(0, b.indexOf('const corr = corroborateReading(session, key,'));
+      const body = b.slice(0, b.indexOf('const nowSec = Math.floor(Date.now() / 1000);'));
       const assigns = (body.match(/(?<![.\w$])key\s*=(?!=)[^;]*/g) || []).filter((a) => !/^key\s*=\s*pinKey$/.test(a.trim()));
-      return assigns.length === 1 && /^key\s*=\s*refile\.to$/.test(assigns[0].trim()) && /session\._turnWallRefile/.test(body);
+      return assigns.length === 1 && /^key\s*=\s*refile\.to$/.test(assigns[0].trim()) && /session\._turnWallRefile/.test(body) && /session\._turnWallRefuted/.test(body); // …and a REFUTED pin is never marked (lane-hot-switch): that branch archives and returns, it moves nothing
     })(), 'assignments between the pin and the write');
   ok('WIRING: the refuted resolver is GONE from executable code (comments keep the record)', !/\borgVerifiedKey\b/.test(engCode) && /REFUTED AND REMOVED: `orgVerifiedKey/.test(eng));
   // wallSlotFor is the FRESH reading; it now has exactly THREE readers —
@@ -1186,7 +1186,7 @@ if (!probe) {
   // now tolerates siblings while still forbidding a silent empty list.
   ok('WIRING: decidePoolSwitch takes the exclusion as a NAMED input and reports it (never a silent empty candidate list)', /exclude = null,[^)]*explain = false \}\)/.test(read('src/account-pool-auto.js')) && /excludedN \? 'all-rejected' :[\s\S]{0,120}'no-members'/.test(read('src/account-pool-auto.js')));
   ok('WIRING: session-schema documents the slot flag on the wall signals', /_turnWallSigs:[^\n]*\{at, resetsAtMs, bucket, scopedName, key, slot\}/.test(read('src/session-schema.js')), read('src/session-schema.js').split('\n').find((l) => /_turnWallSigs/.test(l)));
-  ok('the engine INSTANCE exports the new seams (functional call check, never a source grep — the 2.369.4 lesson)', ['fireIdentityFor', 'sessionBillingMember', 'readingSlotFor', 'corroborateReading', 'wallKeyFor', 'sessionWalledMembers'].every((k) => typeof probe.eng[k] === 'function') && typeof probe.eng.sessionReadingMember === 'undefined');
+  ok('the engine INSTANCE exports the new seams (functional call check, never a source grep — the 2.369.4 lesson)', ['fireIdentityFor', 'sessionBillingMember', 'readingSlotFor', 'wallKeyFor', 'sessionWalledMembers'].every((k) => typeof probe.eng[k] === 'function') && typeof probe.eng.sessionReadingMember === 'undefined' && typeof probe.eng.corroborateReading === 'undefined'); // corroborateReading retired 2026-09-30 (the OTel org is a label)
   ok('the auto-resume INSTANCE exports the breaker seams', ['noteFireOutcome', 'recentFireFailures', 'canFire', 'noteNoPoolTarget'].every((k) => typeof probe.ar[k] === 'function'));
   // ── round 2 ──
   const ar2src = read('src/server/auto-resume.js');

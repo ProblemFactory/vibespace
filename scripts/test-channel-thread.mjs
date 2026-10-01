@@ -30,10 +30,13 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { startWorkMeter, linear, work, LINEAR_BOUND } from './work-meter.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const MODEL = 'src/channel-thread.js';
 const SRC = fs.readFileSync(path.join(REPO, MODEL), 'utf8');
+startWorkMeter(); // BEFORE the modules load — a complexity claim is counted in WORK, never the clock (lane-mirror-198)
+const TFILES = ['src/channel-thread.js', 'src/channel-record.js'];
 const T = require(path.join(REPO, MODEL));
 const R = require(path.join(REPO, 'src/channel-record.js'));
 const lark = require(path.join(REPO, 'src/channels/lark.js'));
@@ -187,19 +190,19 @@ console.log('② the thread index — T1 / T2 / T3 / T4 / T6');
     R.makeRecord({ adapterId: 'a', convId: 'c', vendorId: 'b', at: T0 + 2, replyTo: 'a', text: 'b' }),
     R.makeRecord({ adapterId: 'a', convId: 'c', vendorId: 'a', at: T0 + 1, replyTo: 'b', text: 'a' }),
   ];
-  const t0 = Date.now();
   const cix = T.threadIndex(cyc);
-  ok(cix.byRecord.get('a') === 'a' && cix.byRecord.get('b') === 'a' && Date.now() - t0 < 2000, 'T6 (attack 1): a cycle a → b → a terminates and keys by the smaller id', [...cix.byRecord]);
+  const cycW = work(() => T.threadIndex(cyc), TFILES);
+  ok(cix.byRecord.get('a') === 'a' && cix.byRecord.get('b') === 'a' && cycW < 2000, `T6 (attack 1): a cycle a → b → a terminates and keys by the smaller id (${cycW} ops — the hop bound, never a spin)`, [...cix.byRecord]);
   // T6: the hop bound — a chain of 200 keyed where the 64-hop walk stands
   const long = [];
   for (let i = 0; i < 200; i++) long.push(R.makeRecord({ adapterId: 'a', convId: 'c', vendorId: 'n' + String(i).padStart(3, '0'), at: T0 + i, replyTo: i ? 'n' + String(i - 1).padStart(3, '0') : null, text: 'x' }));
   const lix = T.threadIndex(long);
   ok(lix.threads.size >= 1 && [...lix.byRecord.keys()].length === 200, 'T6: a 200-deep chain is indexed (every record placed; the walk is bounded, memoized)');
-  // O(n): 20 000 records well under a second
+  // O(n): 20 000 records — counted in WORK (2× the records ⇒ ≤ 2.2× the ops), never the clock
   const big = [];
   for (let i = 0; i < 20000; i++) big.push(R.makeRecord({ adapterId: 'a', convId: 'c', vendorId: 'v' + i, at: T0 + i, replyTo: i % 3 ? 'v' + (i - (i % 3)) : null, text: 'x' }));
-  const tb = Date.now(); T.threadIndex(big); const bms = Date.now() - tb;
-  ok(bms < 1500, `T6: the index is O(n) — 20 000 records in ${bms} ms`);
+  const bigL = linear((n) => big.slice(0, n), (x) => T.threadIndex(x), 10000, TFILES);
+  ok(bigL.ok, `T6: the index is O(n) — 10 000 records ${bigL.w1} ops, 20 000 records ${bigL.w2} ops, ×${bigL.r.toFixed(2)} (≤ ${LINEAR_BOUND})`);
 }
 
 // ═══ ③ T5 ═══════════════════════════════════════════════════════════════════════════════════════
@@ -298,14 +301,18 @@ console.log('⑤b verify r2: a thread past THREAD_REPLIES_MAX — the newest pag
   ok(seen === 600 && last.exhausted && last.records[0].vendorId === 'r000001' && pages === 12, `paging back reaches the FIRST reply (${seen} replies over ${pages} pages, exhausted only at the true start)`);
   // AT SCALE: one thread of 50 000 replies
   const huge = bigThread(50000);
-  const tm = (f) => { const t = process.hrtime.bigint(); const r = f(); return [Number(process.hrtime.bigint() - t) / 1e6, r]; };
-  const [msIx, ix] = tm(() => T.threadIndex(huge));
-  const [msV, hv] = tm(() => T.threadView(huge, 'omt_big', { limit: 50 }));
+  const ix = T.threadIndex(huge);
+  const hv = T.threadView(huge, 'omt_big', { limit: 50 });
   const page = huge.slice(-50);
-  const [msP] = tm(() => { for (const r of page) T.placeOf(r, ix); });
   const he = ix.threads.get('omt_big');
   ok(he.count === 50000 && he.replies.length === T.THREAD_REPLIES_MAX && he.replies[he.replies.length - 1] === 'r050000' && hv.records[hv.records.length - 1].vendorId === 'r050000', '50 000 replies in ONE thread: count exact, the newest 500 listed, the anchor and the first page end at the newest reply');
-  ok(msIx < 400 && msV < 400 && msP < 50, `…in linear time: the index ${msIx.toFixed(1)} ms, the first page ${msV.toFixed(1)} ms, placeOf over a page ${msP.toFixed(2)} ms (a quadratic step would be minutes; test-channel-reactions ⑥ is the 2n/n ratio census)`);
+  // COUNTED IN WORK (lane-mirror-198): the index and the first page grow linearly from 25 000 to 50 000 replies, and
+  // placeOf over a page costs the same against the 50 000-reply index as against a 5 000-reply one (O(1) per record)
+  const ixL = linear((n) => bigThread(n), (x) => T.threadIndex(x), 25000, TFILES);
+  const vL = linear((n) => bigThread(n), (x) => T.threadView(x, 'omt_big', { limit: 50 }), 25000, TFILES);
+  const small = bigThread(5000), ixSmall = T.threadIndex(small), pageSmall = small.slice(-50);
+  const pW = work(() => { for (const r of page) T.placeOf(r, ix); }, TFILES), pWs = work(() => { for (const r of pageSmall) T.placeOf(r, ixSmall); }, TFILES);
+  ok(ixL.ok && vL.ok && pW <= 1.25 * pWs + 256, `…in linear WORK: the index ×${ixL.r.toFixed(2)} (${ixL.w1} → ${ixL.w2} ops), the first page ×${vL.r.toFixed(2)} (${vL.w1} → ${vL.w2} ops), placeOf over a page ${pW} ops against 50 000 replies vs ${pWs} against 5 000 (a quadratic step would read ×4; test-channel-reactions ⑥ is the census)`);
 }
 
 // ═══ ⑥ THE CENSUS SHAPE ═════════════════════════════════════════════════════════════════════════

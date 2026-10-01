@@ -89,6 +89,12 @@
  *     no keys); `yieldAfter` is the yield's transitions (a press inside the
  *     view, a fresh claim or its release ends it). A focus nobody pressed for
  *     is reclaimed exactly as before.
+ *   · A DIALOG YOU OPENED TAKES THE KEYS (lane dialog-keys, the owner's "ok" 2026-09-30 on takeover-keyboard r4's
+ *     proposal — before, Delete → the confirm → Enter put a line break into the PAGE and the file stayed): an app modal the
+ *     user's own trusted act opened (`dialogOpener`) gets Enter / Escape / Tab / typing (`dialogVerdict` → 'take';
+ *     `keyboardOwnership` reads `dialog`), the takeover continues, and its close gives the keys back where they were
+ *     (`dialogReturn`: the page, the text box they were yielded to, the older dialog's field); a modal that opens BY
+ *     ITSELF while the keys are the page's is taken back and said once (`dialogReclaimCue`) — the password guard.
  *   · STALE APPROVALS (lane J r2, the study's S8-36): an approval card the
  *     agent queued for a browser PAGE command before the user took over
  *     would, once allowed, run a step planned on a page that may be gone.
@@ -104,12 +110,16 @@
  */
 
 const INT = require('./browser-interrupt.js'); // PURE: the interruption's words + cycle (the owner's ruling, 2026-09-27)
+const TBS = require('./browser-tabs.js'); // lane browser-resume C (PURE): the user's tab acts while he drove, said at the handback
 // re-exported under their own names (shorthand keeps node's CJS named-export detection whole: the client imports this file as ESM)
 const { INTERRUPTED_CODE, INTERRUPTED_TEXT, inFlightAt, openInterruption, noteRefused, closeInterruption, interruptedVerbs, interruptionView, takeoverText, rerunSentence } = INT;
 const INPUT_SIDES = Object.freeze(['agent', 'user']);
 // lane H verify r6 LOW 3: `stop` — the browser the takeover was on was STOPPED (a panel Stop while the user drove it): the
 // takeover cannot outlive its browser, so control goes back with the stop (a state change, never a delivered turn)
-const HANDBACK_CAUSES = Object.freeze(['explicit', 'idle', 'viewer-left', 'restart', 'detach', 'stop']);
+// lane browser-resume B (§3.9, the owner's ruling 2): `continue` — the user's "Hand back and continue": the takeover ends and
+// the user's note + the tabs ride the conversation's NEXT turn through the stash (ONE carrier — never a delivered turn,
+// never the zero-spend notice beside it)
+const HANDBACK_CAUSES = Object.freeze(['explicit', 'idle', 'viewer-left', 'restart', 'detach', 'stop', 'continue']);
 /** What a takeover is OF: a browser tab (the default, every string unchanged)
  *  or a native window target (P9b — the noun changes, the rules do not). */
 const TARGETS = Object.freeze(['browser', 'window']);
@@ -222,6 +232,9 @@ function announceVerdict({ cause = 'explicit', announceIdle = false, sibling = f
   // zero-spend notice rides its next turn. One click on one view never wakes every conversation leased on the browser.
   if (c === 'explicit' && sibling && !(Array.isArray(rerun) && rerun.length)) return { deliver: false, reason: null, why: 'a handback mirrored from another conversation\'s view, with nothing of this conversation\'s interrupted or refused: zero-spend — the notice rides its next turn' };
   if (c === 'explicit') return { deliver: true, reason: SPEND_REASON, why: 'an explicit handback is a per-occurrence owner act, and the agent may be idle — only a turn wakes it (it still takes the ceiling)' };
+  // lane browser-resume B: the between-turns twin — the stash entry IS its carrier (the agent reads it at its next turn); no
+  // turn, no notice (two carriers read the same hand-back twice — the owner's one-carrier rule, 2026-09-27)
+  if (c === 'continue') return { deliver: false, reason: null, notice: false, why: 'the user handed it back for the next turn — the stash entry carries the note and the tabs (one carrier, nothing billed)' };
   if (c === 'idle' || c === 'viewer-left') return announceIdle
     ? { deliver: true, reason: SPEND_REASON, why: `browser.announceIdleHandback is ON — a ${c} handback is announced under the same reason and the same ceiling` }
     : { deliver: false, reason: null, why: `a ${c} handback is nobody's action: zero-spend by default (the lease flips, the live view and the card update, the agent discovers it when its next command succeeds; the notice rides the next message)` };
@@ -268,7 +281,7 @@ function browserPausedRefusal({ state = null, label = null, handles = [], now = 
  *  say the whole thing once, with the URL first). `rerun` (the owner's ruling,
  *  2026-09-27 — "交还时提醒它重新运行") = the verbs the takeover interrupted or
  *  refused: said LAST, once; absent/empty ⇒ the words are byte-identical to before. */
-function handbackText({ cause = 'explicit', label = null, url = '', heldMs = 0, idleMs = DEFAULT_TAKEOVER_IDLE_MS, target = 'browser', handle = null, rerun = [] } = {}) {
+function handbackText({ cause = 'explicit', label = null, url = '', heldMs = 0, idleMs = DEFAULT_TAKEOVER_IDLE_MS, target = 'browser', handle = null, rerun = [], userActs = [] } = {}) {
   const tg = targetOf(target);
   const who = whoOf(label, tg);
   const c = HANDBACK_CAUSES.includes(cause) ? cause : 'explicit';
@@ -278,7 +291,9 @@ function handbackText({ cause = 'explicit', label = null, url = '', heldMs = 0, 
         : c === 'stop' ? `The user stopped ${who} while they were driving it; control is back with you.`
           : `Control of ${who} is back with you (${c}).`;
   const again = tg === 'browser' ? INT.rerunSentence(rerun) : '';
-  const tail = again ? ` ${again}` : '';
+  // lane browser-resume C (the owner's ruling 3): what the user did to the agent's tabs while he drove — said once, here
+  const acts = tg === 'browser' ? TBS.userActsSentence(userActs) : '';
+  const tail = (acts ? ` ${acts}` : '') + (again ? ` ${again}` : '');
   // lane H verify r6 LOW 3: a stopped browser has no page to re-orient on — its pages are gone; the next command starts it
   if (c === 'stop' && tg === 'browser') return `${head} Its open pages are closed — your next browser command starts it again${url ? ` (the user was last on ${url})` : ''}.${tail}`;
   if (tg === 'window') return `${head} Snapshot it before continuing (\`vibespace-window snapshot ${handle || '<handle>'}\`) — the window may have changed (something typed, a dialog opened, a different state); refs from before the takeover are stale.`;
@@ -326,10 +341,12 @@ function handbackFacts(text) {
 
 /** The zero-spend notice (session-status `pushNotice`, kind `browser-handback`)
  *  that rides the user's own next message when nothing is delivered. */
-function handbackNotice({ cause = 'idle', label = null, url = '', heldMs = 0, idleMs = DEFAULT_TAKEOVER_IDLE_MS, at = 0, target = 'browser', handle = null, rerun = [] } = {}) {
+function handbackNotice({ cause = 'idle', label = null, url = '', heldMs = 0, idleMs = DEFAULT_TAKEOVER_IDLE_MS, at = 0, target = 'browser', handle = null, rerun = [], userActs = [] } = {}) {
   const tg = targetOf(target);
   const again = tg === 'browser' && Array.isArray(rerun) ? rerun.map(String).filter(Boolean).slice(0, 20) : [];
-  return { kind: 'browser-handback', cause: HANDBACK_CAUSES.includes(cause) ? cause : 'idle', label: label || null, url: url || null, heldMs: num(heldMs), idleMs: num(idleMs), at: num(at), ...(tg === 'window' ? { target: tg, handle: handle || null } : {}), ...(again.length ? { rerun: again } : {}) };
+  // lane browser-resume C: the user's tab acts ride the notice too (bounded like the cycle: 16, the words cut)
+  const acts = tg === 'browser' && Array.isArray(userActs) ? userActs.filter((a) => a && INT.USER_ACT_KINDS.includes(a.kind)).slice(-INT.USER_ACTS_CAP).map((a) => ({ kind: a.kind, title: String(a.title || '').slice(0, 300), url: String(a.url || '').slice(0, 2048) })) : [];
+  return { kind: 'browser-handback', cause: HANDBACK_CAUSES.includes(cause) ? cause : 'idle', label: label || null, url: url || null, heldMs: num(heldMs), idleMs: num(idleMs), at: num(at), ...(tg === 'window' ? { target: tg, handle: handle || null } : {}), ...(again.length ? { rerun: again } : {}), ...(acts.length ? { userActs: acts } : {}) };
 }
 function renderHandbackNotice(n) {
   return '<system-reminder>\n' + handbackText(n || {}) + '\n</system-reminder>';
@@ -544,12 +561,13 @@ function isPasteChord(k) {
  * user pressed a text box outside the view (`focusVerdict` → 'yield'), so the
  * view owns no keys until a press inside it; the takeover itself continues.
  */
-function keyboardOwnership({ mode = 'watch', mine = false, connected = true, displayed = true, closed = false, yielded = false } = {}) {
+function keyboardOwnership({ mode = 'watch', mine = false, connected = true, displayed = true, closed = false, yielded = false, dialog = false } = {}) {
   if (closed) return { owns: false, why: 'closed' };
   if (mode !== 'takeover') return { owns: false, why: 'watch' };
   if (!mine) return { owns: false, why: 'another viewer drives' };
   if (!connected) return { owns: false, why: 'disconnected' };
   if (!displayed) return { owns: false, why: 'hidden' };
+  if (dialog) return { owns: false, why: 'dialog' }; // lane dialog-keys: a dialog the user's own press opened holds the keys until it closes
   if (yielded) return { owns: false, why: 'yielded' };
   return { owns: true, why: 'driving' };
 }
@@ -729,9 +747,9 @@ function focusVerdict({ owns = false, mine = false, editable = false, insideView
  * keydown and never the keyup).
  */
 function keyboardTransition({ was = null, now = {}, caretOutside = false } = {}) {
-  const w = { owns: !!(was && was.owns), yielded: !!(was && was.yielded) };
-  const n = { owns: !!(now && now.owns), yielded: !!(now && now.yielded) };
-  const changed = !was || w.owns !== n.owns || w.yielded !== n.yielded;
+  const w = { owns: !!(was && was.owns), yielded: !!(was && was.yielded), dialog: !!(was && was.dialog) };
+  const n = { owns: !!(now && now.owns), yielded: !!(now && now.yielded), dialog: !!(now && now.dialog) };
+  const changed = !was || w.owns !== n.owns || w.yielded !== n.yielded || w.dialog !== n.dialog; // lane dialog-keys: a dialog taking the keys (or giving them back) is a transition too
   return { changed, moveCaret: n.owns && !w.owns && !!caretOutside, release: w.owns && !n.owns };
 }
 /** How long after the user's own press its focus may land and still be his: a mouse press focuses in the SAME task
@@ -792,6 +810,70 @@ function yieldAfter(yielded, event) {
 function yieldHomeVerdict({ yielded = false, drivesNow = false, drovePrev = true, homeVisible = false } = {}) {
   if (!yielded || !drivesNow || drovePrev) return 'keep';
   return homeVisible ? 'keep' : 'end';
+}
+// ── lane dialog-keys (the owner's "ok", 2026-09-30, on takeover-keyboard r4's proposal): A DIALOG YOU OPENED TAKES THE KEYS ──
+/**
+ * WHO OPENED an app MODAL (src/lib/utils.js createModalShell / the static #dialog-overlay, both announce their open in the
+ * opening act's own task): the user's own act on the APP — his TRUSTED press (re-stamped at its release: a click opens at
+ * the pointerup), or a key the app itself took (a reserved chord / command mode, a key typed into a dialog he opened) —
+ * within `windowMs` of the open. `press` = `{at, trusted, picture}` — `picture`: the press landed on the live view's
+ * PICTURE, i.e. it went to the agent's PAGE and can open nothing in the app (a dialog that opens by itself right after a
+ * click into the page is not his). `{byUserPress, why}` — 'no press' | 'synthetic press' (isTrusted false: a script's
+ * dispatched event is never the user — the password guard's fact) | 'pressed the page' | 'stale press' | 'pressed'.
+ * Fails closed: anything unproven is not his.
+ */
+function dialogOpener({ press = null, openAt = 0, windowMs = USER_PRESS_MS } = {}) {
+  const p = press && typeof press === 'object' ? press : null;
+  const since = p ? Number(openAt) - Number(p.at) : NaN;
+  const why = !p ? 'no press'
+    : p.trusted !== true ? 'synthetic press'      // the browser's own isTrusted, never a flag a script could set
+      : p.picture ? 'pressed the page'
+        : !(Number.isFinite(since) && since >= 0 && since <= windowMs) ? 'stale press'
+          : 'pressed';
+  return { byUserPress: why === 'pressed', why };
+}
+/** What can raise a dialog the keyboard rules see: an app modal, or the agent's PAGE dialog (the live view's own
+ *  Accept / Dismiss bar, lane browser-stuck) — the page's is not an app modal and is never taken by this rule. */
+const DIALOG_OPENERS = Object.freeze(['app', 'page']);
+/**
+ * An APP MODAL opened while this client drives the agent's browser (asked only while the takeover is this view's).
+ * Before (takeover-keyboard verify r3 F4): every one was TAKEN BACK — Delete → the confirm → Enter put a line break into
+ * the page's textarea and the file was kept; the user was told to click the dialog's buttons. The owner's rule: a modal
+ * the user's OWN fresh act opened (`byUserPress`, PURE `dialogOpener`) TAKES THE KEYBOARD — Enter, Escape, Tab and typing
+ * are the dialog's, the takeover continues (the agent stays refused), and when it closes the keys go back where they were
+ * (PURE `dialogReturn`); one that opens BY ITSELF (a broadcast, a timer, a notification) while the keys are the page's
+ * (`owns` — driving, not `yielded` to a text box, no dialog `held` already) is TAKEN BACK and said, as before: nothing but
+ * the user's own act moves the keys out of the page. Not his and the keys are not the page's (yielded, a dialog he opened
+ * holds them, the view off screen) ⇒ 'allow' — not the view's to decide. `opener` ∈ DIALOG_OPENERS (anything else = not an
+ * app modal). → 'take' | 'reclaim' | 'allow'.
+ */
+function dialogVerdict({ owns = false, yielded = false, held = false, byUserPress = false, opener = 'app' } = {}) {
+  if (opener !== 'app') return 'allow';
+  if (byUserPress) return 'take';
+  return owns && !yielded && !held ? 'reclaim' : 'allow';
+}
+/**
+ * Where the keys go when a dialog that took them CLOSES — answered, dismissed, or removed by a script (no orphan hold).
+ * `left` = the dialogs still holding after it; `back` = `{valid}` of the element focused when it opened (the older
+ * dialog's field — a confirm over an input dialog); `base` = where they were before the FIRST one: `{to: 'sink'}` (the
+ * page — the view owned them) | `{to: 'yield', valid}` (the text box they had been yielded to, still a visible box).
+ * → 'back' (refocus the older dialog's element) | 'older' (the older dialog still holds but the element the keys would go
+ * back to is gone — replaced by a re-render, or inside a dialog a script removed: the older dialog's OWN field, its first
+ * text box else its overlay, never <body>, where the keys would go nowhere while the chip still says "in the dialog" —
+ * verify r1) | 'sink' (the view's sink: the keys are the page's again) | 'yield' (the text box) | 'stay' (move nothing:
+ * the yielded box is gone — the yield's own home rule answers when the view next drives).
+ */
+function dialogReturn({ left = 0, back = null, base = null } = {}) {
+  if (Number(left) > 0) return back && back.valid ? 'back' : 'older';
+  if (!base) return 'stay';
+  if (base.to === 'sink') return 'sink';
+  return base.to === 'yield' && base.valid ? 'yield' : 'stay';
+}
+/** A modal that opened by itself and was TAKEN BACK is said once — rate-limited with the Q1 cue (one limiter for every
+ *  "typing still goes to the browser" sentence). → true = say it now. */
+function dialogReclaimCue({ verdict = null, at = 0, lastCueAt = null, everyMs = RECLAIM_CUE_MS } = {}) {
+  if (verdict !== 'reclaim') return false;
+  return !(lastCueAt != null && Number(at) - Number(lastCueAt) < everyMs);
 }
 /** CDP's modifier bits (Input.dispatchKeyEvent `modifiers`) by the key that holds each. */
 const MODIFIER_KEY_BITS = Object.freeze({ Alt: 1, Control: 2, Meta: 4, Shift: 8 });
@@ -934,6 +1016,7 @@ module.exports = {
   keyboardTransition, yieldHomeVerdict, // lane takeover-keyboard verify r2 (H1): every ownership transition redraws at once; keys moving to the page move the caret
   RECLAIM_CUE_MS, reclaimCue, // lane takeover-keyboard verify r2 (Q1): a reclaim the user's own press elsewhere caused is said (rate-limited)
   heldReleases, // lane takeover-keyboard verify r1 (K4): a yield releases in the page what is still held there
+  DIALOG_OPENERS, dialogOpener, dialogVerdict, dialogReturn, dialogReclaimCue, // lane dialog-keys: a dialog the user's own act opened takes the keys; one that opens by itself never does
   // lane live-input: a Mac viewer's ⌘ chords on a non-Mac browser, the copy-out chords, the journal's URL
   MAC_CHORD_ROWS, isMacPlatform, macChord, copyChordOf, urlForLog,
   COPY_GESTURES, COPY_GESTURE_MS, copyGestureOfRecord, armCopyGesture, copyDeliverVerdict, copyWriteVerdict, // lane live-input verify: the copy-out door is the user's own gesture (single-use, fail closed)

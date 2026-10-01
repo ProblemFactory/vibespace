@@ -584,13 +584,21 @@ console.log('— ③b the rebuilt dialog: ROW_STATES / rowState / switchChoices 
   const body = await res.json();
   flag('fail-cloak', false);
   ok(res.status === 502 && body.code === 'launch_failed' && body.restored === true && body.from === 'chromium' && body.to === 'cloak', 'POST /api/browser/switch: the failure body spreads restored / from / to (fail())', JSON.stringify(body).slice(0, 300));
-  const bl = await fetch(API3 + '/api/agent/browser/blocked', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer vsst_' + 'c'.repeat(24) }, body: JSON.stringify({ url: 'https://portal.example/x', profile: pb.id }) });
+  // lane browser-propose: a TIER-2 claim is a proposal (its card waits for the user's Approve); a claim of another tier keeps the
+  // live view's words below (whether another browser is available here)
+  const bl0 = await fetch(API3 + '/api/agent/browser/blocked', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer vsst_' + 'c'.repeat(24) }, body: JSON.stringify({ url: 'https://portal.example/p', profile: pb.id }) });
+  const blj0 = await bl0.json();
+  ok(bl0.status === 200 && blj0.proposal && blj0.proposal.state === 'open' && /waits for their Approve/.test(blj0.next) && /do NOT work around the refusal/.test(blj0.next), 'a tier-2 claim ⇒ ONE proposal: the agent is told a card waits for the user\'s Approve and not to work around the refusal', blj0.next);
+  const bl = await fetch(API3 + '/api/agent/browser/blocked', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer vsst_' + 'c'.repeat(24) }, body: JSON.stringify({ url: 'https://portal.example/x', profile: pb.id, tier: 3 }) });
   const blj = await bl.json();
-  ok(bl.status === 200 && /THEIR act/.test(blj.next) && /Switch to CloakBrowser/.test(blj.next), 'the blocked claim\'s `next`: another browser IS available here ⇒ the live view offers the switch (THEIR act)', blj.next);
+  ok(bl.status === 200 && !blj.proposal && /THEIR act/.test(blj.next) && /Switch to CloakBrowser/.test(blj.next), 'the blocked claim\'s `next` (a claim with no proposal — tier 3): another browser IS available here ⇒ the live view offers the switch (THEIR act)', blj.next);
   RT.setup({ keeper: kShip, activeSessions: new Map([['sess-a', { agentToken: 'vsst_' + 'c'.repeat(24), _browserKey: KEY_A, name: 'A' }]]), browserEnv: () => null, cloakPlan: () => B.cloakservePlan({ enabled: false }), forwards: () => [], propose: () => ({ id: 'ut-3b' }) });
-  const bl2 = await fetch(API3 + '/api/agent/browser/blocked', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer vsst_' + 'c'.repeat(24) }, body: JSON.stringify({ url: 'https://portal.example/x', profile: pShip.id }) });
+  const bl2 = await fetch(API3 + '/api/agent/browser/blocked', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer vsst_' + 'c'.repeat(24) }, body: JSON.stringify({ url: 'https://portal.example/x', profile: pShip.id, tier: 3 }) });
   const blj2 = await bl2.json();
   ok(bl2.status === 200 && /THEIR act/.test(blj2.next) && /no other browser is available on this instance/.test(blj2.next), '…under a refused record: the agent is told no other browser is available, so the switch is not offered (still THEIR act to arrange one)', blj2.next);
+  const bl3 = await fetch(API3 + '/api/agent/browser/blocked', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer vsst_' + 'c'.repeat(24) }, body: JSON.stringify({ url: 'https://portal.example/q', profile: pShip.id }) });
+  const blj3 = await bl3.json();
+  ok(bl3.status === 200 && blj3.proposal && blj3.proposal.state === 'unavailable' && /no switch can be offered on this machine \(CloakBrowser is not available in this version\)/.test(blj3.next), '…and a tier-2 claim there is a proposal that offers nothing, saying why (CloakBrowser is not wired under a refused record)', blj3.next);
   await kb.stop(pb.id, { why: 'user' }).catch(() => {});
   await kf.stop(pf.id, { why: 'user' }).catch(() => {});
   delete fakeEnv.VIBESPACE_INTEGRATION_CLOAK_LICENSEKEY;
@@ -643,8 +651,13 @@ console.log('— ④ the routes and the CLI: switcher, switch, backend, blocked,
   await j('POST', '/api/agent/browser/detach', { profile: pr.id }, bearer(TOKEN_B));
   r = await j('POST', '/api/agent/browser/backend', { provider: 'cloak' }, bearer(TOKEN_A));
   ok(r.status === 200 && r.json.mode === 'switch' && r.json.to === 'cloak' && r.json.chip === 'cloak 146 (free)' && r.json.reopened.length === 1 && kR.profile(pr.id).provider === 'cloak', 'alone on the profile, the agent\'s switch is direct: chromium → cloak, its tab re-opened');
+  // verify r1 V1: the site is on CloakBrowser's list here — a CloakBrowser profile whose list LACKS the site asks for it
+  // instead (the `site` plan, test-browser-propose ③b)
+  settings['browser.cloak.egressAllowlist'] = 'portal.example';
   r = await j('POST', '/api/agent/browser/blocked', { url: 'https://portal.example/login', why: 'captcha', evidence: 'HTTP 403', remember: true }, bearer(TOKEN_A));
-  ok(r.status === 200 && r.json.claim.by === 'agent' && r.json.claim.browserKey === KEY_A && r.json.claim.profileId === pr.id && /the agent says/.test(r.json.text) && r.json.remembered && r.json.remembered.tier === 2 && r.json.remembered.backend === null && r.json.remembered.by === 'agent' && /THEIR act/.test(r.json.next), 'POST /api/agent/browser/blocked: a claim by the agent, remembered as a tier-only hint (never an auto-escalation), the answer says the switch is the user\'s act');
+  // lane browser-propose: a tier-2 claim files ONE proposal — here the profile already IS CloakBrowser (and the site is on
+  // its list), so the proposal offers nothing (a sentence, no Approve) and the answer says so (test-browser-propose drives the Approve itself)
+  ok(r.status === 200 && r.json.claim.by === 'agent' && r.json.claim.browserKey === KEY_A && r.json.claim.profileId === pr.id && /the agent says/.test(r.json.text) && r.json.remembered && r.json.remembered.tier === 2 && r.json.remembered.backend === null && r.json.remembered.by === 'agent' && r.json.proposal && r.json.proposal.state === 'unavailable' && r.json.proposal.plan.why === 'already-cloak' && /no switch can be offered/.test(r.json.next) && /Do not work around it/.test(r.json.next), 'POST /api/agent/browser/blocked: a claim by the agent, remembered as a tier-only hint (never an auto-escalation); its proposal offers nothing on a profile that already is CloakBrowser, and the answer says so');
   r = await j('GET', '/api/browser/site-hints');
   ok(r.status === 200 && r.json.siteHints.length === 1 && r.json.siteHints[0].host === 'portal.example', 'GET /api/browser/site-hints lists it');
   r = await j('POST', '/api/browser/site-hints', { url: 'https://bank.example/x', tier: 3, why: 'step-up' });
@@ -670,7 +683,8 @@ console.log('— ④ the routes and the CLI: switcher, switch, backend, blocked,
   const bk3 = await cli(['backend', 'cloak']);
   ok(bk3.status === 0 && /switched chromium → cloak/.test(bk3.stdout) && !/backend_no_key/.test(bk3.stdout + bk3.stderr), 'with no key the CLI\'s switch to cloak goes through (lane-cloak: the free build needs no key — measured)', bk3.stdout + bk3.stderr);
   const bl = await cli(['blocked', '--url', 'https://portal.example/login', '--why', 'captcha']);
-  ok(bl.status === 0 && /recorded your claim: the agent says this page is blocked \(portal.example: captcha\)/.test(bl.stdout) && /THEIR act/.test(bl.stdout), 'vibespace-browser blocked records the claim and says the switch is the user\'s act', bl.stdout + bl.stderr);
+  ok(bl.status === 0 && /recorded your claim: the agent says this page is blocked \(portal.example: captcha\)/.test(bl.stdout) && /no switch can be offered/.test(bl.stdout) && /proposal bl-[0-9a-f]{8}: nothing can be offered here/.test(bl.stdout), 'vibespace-browser blocked records the claim and prints its proposal (here: nothing to offer — the profile already is CloakBrowser)', bl.stdout + bl.stderr);
+  delete settings['browser.cloak.egressAllowlist'];
   const bl2 = await cli(['blocked']);
   ok(bl2.status === 2 && /usage: vibespace-browser blocked --url/.test(bl2.stderr), 'blocked without --url prints usage');
   await kR.stop(pr.id, { why: 'user' }).catch(() => {});
@@ -731,11 +745,22 @@ const rec = { argv: process.argv.slice(2), env: Object.fromEntries(Object.entrie
 // vendor's update host (refused before any upstream) — FAKE_SKIP_PROXY = a Node that ignored the proxy (the control)
 const net = require('net');
 const via = (host, port = 443) => new Promise((resolve) => { const u = new URL(process.env.HTTPS_PROXY || 'http://127.0.0.1:1'); const sk = net.connect({ host: u.hostname, port: Number(u.port) }); let buf = ''; sk.on('data', (d) => { buf += d; if (/\\r\\n\\r\\n/.test(buf)) { sk.destroy(); resolve(/ 200 /.test(buf) ? 'admitted' : 'refused'); } }); sk.on('error', () => resolve('error')); sk.once('connect', () => sk.write('CONNECT ' + host + ':' + port + ' HTTP/1.1\\r\\nHost: ' + host + ':' + port + '\\r\\n\\r\\n')); setTimeout(() => { try { sk.destroy(); } catch (e) {} resolve('timeout'); }, 5000).unref(); });
+const d = path.join(process.env.CLOAKBROWSER_CACHE_DIR, 'chromium-' + process.env.CLOAKBROWSER_VERSION);
+// THE VENDOR'S CACHE RULE (0.5.10 dist/download.js ensureBinary, a pinned version): a chrome that exists and is executable
+// is returned AS IS — nothing downloaded, nothing verified (verify r1 V3 of lane browser-propose)
+try { fs.accessSync(path.join(d, 'chrome'), fs.constants.X_OK); console.log('[cloakbrowser] cached ' + path.join(d, 'chrome')); process.exit(0); } catch (e) { /* not cached */ }
+// verify r1 V3: FAKE_MODE_FILE names what this run's download does — tampered (not the measured build), enospc (the
+// unpack is cut by a full disk after chrome was written: exit 1, no sibling), else the whole build (chrome + a sibling)
+let mode = ''; try { mode = fs.readFileSync(process.env.FAKE_MODE_FILE, 'utf8').trim(); } catch (e) { mode = ''; }
 (async () => {
   if (!process.env.FAKE_SKIP_PROXY) { rec.download = await via('cloakbrowser.dev', Number(process.env.FAKE_DOWNLOAD_PORT) || 443); rec.update = await via('api.github.com'); }
   fs.writeFileSync(path.join(process.cwd(), 'binary-step.json'), JSON.stringify(rec));
-  const d = path.join(process.env.CLOAKBROWSER_CACHE_DIR, 'chromium-' + process.env.CLOAKBROWSER_VERSION);
-  fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'chrome'), ${JSON.stringify(FAKE_BROWSER)}, { mode: 0o755 });
+  fs.mkdirSync(d, { recursive: true });
+  if (mode === 'tampered') { fs.writeFileSync(path.join(d, 'chrome'), '#!/bin/sh\\necho not-the-measured-build\\n', { mode: 0o755 }); console.log(path.join(d, 'chrome')); return; }
+  fs.writeFileSync(path.join(d, 'chrome'), ${JSON.stringify(FAKE_BROWSER)}, { mode: 0o755 });
+  if (mode === 'enospc') { console.error('Error: ENOSPC: no space left on device, write'); process.exit(1); }
+  fs.writeFileSync(path.join(d, 'resources.pak'), 'pak');
+  console.log('[cloakbrowser] Downloading Chromium: 12.5 %'); console.log('[cloakbrowser] Downloading Chromium: 67%'); // the download's own progress lines (the card's percent reads the last)
   console.log(path.join(d, 'chrome'));
 })();`)});
 process.stdout.write('fake npm installed ' + spec + '\\n');
@@ -769,6 +794,8 @@ process.stdout.write('fake npm installed ' + spec + '\\n');
   const stM = kM.installVerdict().state;
   ok(bs.download === 'admitted' && bs.update === 'refused' && stM.refused.some((r) => r.host === 'api.github.com') && !stM.refused.some((r) => r.host === 'cloakbrowser.dev'), 'through the install proxy the record\'s download host was ADMITTED and the vendor\'s update-check host (api.github.com) REFUSED — and the state names the refusal', JSON.stringify({ bs, refused: stM.refused }));
   ok(stM.exitCode === 0 && stM.error === null && stM.step === 'done' && stM.running === false, 'the install state records the finish (step done, exit 0)');
+  const ipM = kM.installProgress();
+  ok(ipM.percent === 67 && ipM.running === false && ipM.failed === false && ipM.logBytes > 0, 'lane browser-propose (verify r1 V7): installProgress() reads the LAST percent the download printed into the install log (67 — what the proposal card shows) and the log\'s size (the stall rule\'s sign of life)', ipM);
   const bin = kM.installedCloakBin();
   ok(bin === path.join(kM.cloakCacheDir, 'chromium-146.0.7680.177.5', 'chrome') && kM.installedStamp().ok && kM.installedStamp().stamp.sha256 === fakeSha && kM.cloakExecutable().ok && kM.cloakExecutable().path === bin, 'step 3 (verify): the browser\'s SHA-256 is the record\'s, the stamp is written, and cloakExecutable() now answers THE BROWSER (never the package\'s CLI)');
   const st2 = kM.installVerdict();
@@ -780,7 +807,7 @@ process.stdout.write('fake npm installed ' + spec + '\\n');
   await kBad.installCloak();
   await waitIdle(kBad);
   const stB = kBad.installVerdict();
-  ok(stB.state.failed === true && /^verify: /.test(stB.state.error) && /is not the measured/.test(stB.state.error) && !kBad.installedStamp().ok && !kBad.cloakExecutable().ok && fs.existsSync(kBad.installedCloakBin()), 'NEGATIVE CONTROL: a browser whose SHA-256 is not the record\'s fails at `verify` by name — no stamp, cloakExecutable() still says no (the file is there, it is NOT used)', JSON.stringify(stB.state));
+  ok(stB.state.failed === true && /^verify: /.test(stB.state.error) && /is not the measured/.test(stB.state.error) && /it was removed/.test(stB.state.error) && !kBad.installedStamp().ok && !kBad.cloakExecutable().ok && !fs.existsSync(path.dirname(kBad.installedCloakBin())), 'NEGATIVE CONTROL: a browser whose SHA-256 is not the record\'s fails at `verify` by name — no stamp, cloakExecutable() still says no, and (verify r1 V3) this install\'s own download is REMOVED, so a later try fetches it again', JSON.stringify(stB.state));
   // NEGATIVE CONTROL: a download that went AROUND the proxy (a Node ignoring NODE_USE_ENV_PROXY — the fake connects nothing
   // through it and still unpacks the browser) ⇒ the evidence guard refuses it at `binary`, nothing stamped
   const { keeper: kByp } = mkKeeper({ dataDir: path.join(ROOT, 'data-install-bypass'), providers: { ...wired, proof: proofFx }, envPath: PATH_NPM, settingsOver: noSetting, extraEnv: { ...fakeEnvI, FAKE_SKIP_PROXY: '1' }, egressResolve });
@@ -788,6 +815,55 @@ process.stdout.write('fake npm installed ' + spec + '\\n');
   await waitIdle(kByp);
   const stP = kByp.installVerdict().state;
   ok(stP.failed === true && /^binary: /.test(stP.error) && /without passing the egress proxy/.test(stP.error) && !kByp.installedStamp().ok && !kByp.cloakExecutable().ok, 'NEGATIVE CONTROL: a browser that appeared while the install proxy admitted NOTHING fails at `binary` by name — the boundary is proven by evidence, not assumed', JSON.stringify(stP));
+  // ── lane browser-propose verify r1 V3: "Approve again" must mean again — an install's own rejected / cut unpack never
+  // lingers in the cache (the vendor's CLI would return it as is for ever); a pre-seeded build is never touched ──
+  const modeFile = path.join(ROOT, 'fake-cloak-mode');
+  const setMode = (m) => fs.writeFileSync(modeFile, m);
+  const envM = { ...fakeEnvI, FAKE_MODE_FILE: modeFile };
+  const installOnce = async (kk) => { try { await kk.installCloak(); } catch (e) { return { refused: e.code }; } await waitIdle(kk); return kk.installVerdict().state; };
+  const vdirOf = (kk) => path.dirname(kk.installedCloakBin());
+  const { keeper: kRe } = mkKeeper({ dataDir: path.join(ROOT, 'data-install-again'), providers: { ...wired, proof: proofFx }, envPath: PATH_NPM, settingsOver: noSetting, extraEnv: envM, egressResolve });
+  setMode('tampered');
+  const re1 = await installOnce(kRe);
+  setMode('');
+  const re2 = await installOnce(kRe);
+  ok(re1.failed === true && /it was removed/.test(re1.error) && re2.failed === false && re2.step === 'done' && kRe.installedStamp().ok && kRe.cloakExecutable().ok && fs.existsSync(path.join(vdirOf(kRe), 'resources.pak')),
+    'V3 (A): a download that is not the measured build is REMOVED, so "Approve again" downloads it again and installs (without the removal the vendor\'s CLI returns the rejected build for ever — control below)', JSON.stringify({ re1, re2 }));
+  const { keeper: kCut } = mkKeeper({ dataDir: path.join(ROOT, 'data-install-cut'), providers: { ...wired, proof: proofFx }, envPath: PATH_NPM, settingsOver: noSetting, extraEnv: envM, egressResolve });
+  setMode('enospc');
+  const cut1 = await installOnce(kCut);
+  const cutGone = !fs.existsSync(vdirOf(kCut));
+  setMode('');
+  const cut2 = await installOnce(kCut);
+  ok(cut1.failed === true && /^binary: /.test(cut1.error) && /partial unpack was removed/.test(cut1.error) && cutGone && cut2.step === 'done' && fs.existsSync(path.join(vdirOf(kCut), 'resources.pak')),
+    'V3 (B): an unpack cut by a full disk (its chrome already written) is REMOVED, so the next try unpacks the WHOLE build — never a half build stamped as installed', JSON.stringify({ cut1, cut2 }));
+  const { keeper: kDead } = mkKeeper({ dataDir: path.join(ROOT, 'data-install-dead'), providers: { ...wired, proof: proofFx }, envPath: PATH_NPM, settingsOver: noSetting, extraEnv: envM, egressResolve });
+  fs.mkdirSync(vdirOf(kDead), { recursive: true });
+  fs.writeFileSync(path.join(vdirOf(kDead), 'chrome'), FAKE_BROWSER, { mode: 0o755 }); // a server restart cut an unpack after its chrome
+  fs.writeFileSync(path.join(kDead.installDir, 'cloak-unpacking.json'), JSON.stringify({ dir: vdirOf(kDead), at: 1 }));
+  const dead = await installOnce(kDead);
+  ok(dead.step === 'done' && fs.existsSync(path.join(vdirOf(kDead), 'resources.pak')) && !fs.existsSync(path.join(kDead.installDir, 'cloak-unpacking.json')),
+    'V3: an unpack a DEAD process left (its marker names the directory) is removed at the next run and unpacked whole', JSON.stringify(dead));
+  const { keeper: kSeed } = mkKeeper({ dataDir: path.join(ROOT, 'data-install-seed'), providers: { ...wired, proof: proofFx }, envPath: PATH_NPM, settingsOver: noSetting, extraEnv: envM, egressResolve });
+  fs.mkdirSync(vdirOf(kSeed), { recursive: true });
+  fs.writeFileSync(path.join(vdirOf(kSeed), 'chrome'), '#!/bin/sh\necho seeded-other-build\n', { mode: 0o755 }); // seeded by someone else, no marker
+  const seed = await installOnce(kSeed);
+  ok(seed.failed === true && /already in the cache at .*not downloaded by this install.*remove that directory/.test(seed.error) && fs.existsSync(path.join(vdirOf(kSeed), 'chrome')),
+    'V3: a build that was in the cache BEFORE this install (seeded / linked — not ours) is never removed; its refusal names the directory to remove', JSON.stringify(seed));
+  { // CONTROL: the keeper without the removal — the vendor's cache rule returns the rejected build for ever
+    const kSrcI = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+    const cutI = "const dropOwnUnpack = () => { if (had) return;", cutM = "if (!had) { try { writeJsonAtomic(unpackMark,";
+    ok(kSrcI.includes(cutI) && kSrcI.includes(cutM), 'V3 control: the install removes its own unpack (in the run, and by its marker at the next run) where the control cuts it');
+    const MUT3 = mutantCopies('browser-backend-v3', REPO);
+    const K3 = MUT3.load('src/server/browser-keeper.js', kSrcI.replace(cutI, 'const dropOwnUnpack = () => { if (true) return;').replace(cutM, 'if (false) { try { writeJsonAtomic(unpackMark,'), 'keep-unpack');
+    const kK = K3.create({ dataDir: path.join(ROOT, 'data-install-keep'), homeDir: HOME, env: () => ({ PATH: PATH_NPM, HOME, ...envM }), serverSetting: (k2) => (k2 in noSetting ? noSetting[k2] : settings[k2]), egressResolve, liveKeys: () => new Set(), install: false, now: () => clock, log: { log() {}, warn() {}, error() {} }, providers: { ...wired, proof: proofFx }, hostKnown: () => false });
+    setMode('tampered');
+    await installOnce(kK);
+    setMode('');
+    const k2 = await installOnce(kK);
+    ok(k2.failed === true && /not the measured/.test(k2.error), 'CONTROL: a keeper that keeps its rejected unpack (no in-run removal, no marker) fails "Approve again" with the SAME rejection — V3 (A) would be red', JSON.stringify(k2));
+    for (const c of copiesCensus(MUT3.files, MUT3.dir, REPO, { label: 'V3 control: ' })) ok(c.pass, c.name, c.detail);
+  }
   ok(!fs.existsSync(path.join(kI.installDir, 'node_modules')), 'CONTROL: the refused keeper\'s prefix still holds no package');
   // the routes: GET = the verdict (200 either way), POST = the act (typed 4xx on a refusal), host refused by name
   const express = require('express');

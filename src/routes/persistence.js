@@ -11,6 +11,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { listCodexThreads } = require('../codex-session-store');
+const { desktopChanges } = require('../lib/desktop-record.js'); // PURE: a rollback point names the change that followed it (userW inc-mun7qjmw-iksh)
 
 const router = express.Router();
 
@@ -148,7 +149,11 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // a fresh object — a shape production never uses; the test now mirrors the
   // real read-modify-write pattern.)
   let _lastGood = null;
-  function snapshotLayout(prev, nextShape) {
+  // `next` = the layout about to REPLACE prev (absent for the forced restore snapshot): the point also names what
+  // changed after it — per desktop whose window set changed, [name, before, after] ("HR 3 → 1") — so a user looking
+  // for the state before a loss finds the row the loss FOLLOWS (userW inc-mun7qjmw-iksh: every row read "44
+  // windows — …", the damage was in none of them)
+  function snapshotLayout(prev, nextShape, next = null) {
     try {
       // No detached copy yet (first write after boot, or a restore issued
       // before anything read layouts): fall back to what is ON DISK — that IS
@@ -167,6 +172,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       // inline; mkdir/stringify/write/prune ride a setImmediate over a
       // DETACHED copy, so a later mutation of the caller's object cannot reach
       // the snapshot either.
+      let change = null;
+      try { change = next ? desktopChanges(prev, next) : null; } catch { change = null; } // computed NOW — the caller mutates `next` in place later
       const snap = detach(prev);
       if (!snap) return;
       wordlessTitles(snap); // a rollback point is a layout record too (the disk belt above may read what an older build wrote)
@@ -184,10 +191,10 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
           const at = Date.now();
           // atomic like layouts.json next door — a torn rollback point fails
           // exactly when it is finally needed
-          writeJsonAtomic(path.join(HISTORY_DIR, `layout-${stamp}.json`), { at, summary: before, totalWindows: total, layouts: snap });
+          writeJsonAtomic(path.join(HISTORY_DIR, `layout-${stamp}.json`), { at, summary: before, totalWindows: total, change, layouts: snap });
           // tiny sidecar header: listing must not parse 40 whole layouts on the
           // panic-button path
-          writeJsonAtomic(path.join(HISTORY_DIR, `layout-${stamp}.meta.json`), { at, summary: before, totalWindows: total });
+          writeJsonAtomic(path.join(HISTORY_DIR, `layout-${stamp}.meta.json`), { at, summary: before, totalWindows: total, change });
           pruneHistory();
         } catch (e) {
           // never silent: the UI asserts this protection exists
@@ -219,7 +226,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     wordlessTitles(data);
     try {
       const nextShape = layoutShape(data);
-      snapshotLayout(_lastGood, nextShape);   // the DETACHED previous state, never the live cache
+      snapshotLayout(_lastGood, nextShape, data);   // the DETACHED previous state, never the live cache (+ what replaces it, for the row's "what changed")
       _lastShape = nextShape;
       _lastGood = detach(data);
     } catch {}
@@ -236,11 +243,11 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
           // layouts.json each) is read only when actually restoring
           try {
             const m = JSON.parse(fs.readFileSync(path.join(HISTORY_DIR, f.replace(/\.json$/, '.meta.json')), 'utf-8'));
-            return { id: f, at: m.at, summary: m.summary, totalWindows: m.totalWindows };
+            return { id: f, at: m.at, summary: m.summary, totalWindows: m.totalWindows, change: m.change || null };
           } catch {}
           try {
             const j = JSON.parse(fs.readFileSync(path.join(HISTORY_DIR, f), 'utf-8'));
-            return { id: f, at: j.at, summary: j.summary, totalWindows: j.totalWindows };
+            return { id: f, at: j.at, summary: j.summary, totalWindows: j.totalWindows, change: j.change || null };
           } catch { return null; } // unparseable → omit, never a 1970/0-window row
         }).filter(Boolean);
     } catch { return []; }
@@ -642,6 +649,15 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // getSyncStore('settings') (that store is empty — a real bug class: 9 server
   // reads silently saw defaults regardless of what the user configured).
   router.readSettings = readSettings;
+  /** lane browser-propose: a SERVER act that writes a setting the user approved (the proposal's site on the CloakBrowser
+   *  list) — the PATCH route's own merge through the ONE writer (atomic file, `settings-updated` broadcast to every client). */
+  router.patchSettings = (patch) => {
+    if (!patch || typeof patch !== 'object') throw new Error('patchSettings: expected an object');
+    const merged = { ...readSettings(), ...patch };
+    for (const [k, v] of Object.entries(merged)) { if (v === null) delete merged[k]; }
+    writeSettings(merged);
+    return true;
+  };
 
   router.get('/api/settings', (req, res) => res.json(readSettings()));
 

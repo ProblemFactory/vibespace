@@ -129,6 +129,7 @@ Overrides persist in the layout auto-save.
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `session.defaultMode` | enum | `chat` | Default mode for new sessions and single-click resume: Terminal or Chat |
+| `session.deadBridgeMinutes` | number | `3` | Reconnect a silent conversation after N minutes: a local session that sent nothing for this long while its agent kept working (its output file or its API requests say so) is re-attached by itself, and what it missed is shown as caught up (a card in the chat), never re-run. 0 = off. |
 
 ### Agent browser
 

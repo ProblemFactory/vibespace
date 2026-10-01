@@ -1,22 +1,37 @@
 {
-  "_note": "SHAPE of POST /open-apis/im/v1/messages/search (Lark docs im-v1/message/search, read 2026-09-28 — lane lark-search-poll, design §0 V1/V2): an EMPTY query + a time_range answers items of {meta_data, display_info}. NEUTRAL ids; `atOffsetMs` = an instant RELATIVE to the suite's clock (the suite writes `create_time` in MILLISECONDS — the im/v1 unit the adapter DECLARES, U5). U1: the message id is read from `meta_data.message_id` (the doc sample's field) else the item's own `message_id` / `id` — unverified against a live answer; the adapter logs the field NAMES of its first page once. `display_info` is the snippet: never read, kept or logged.",
+  "_note": "SHAPE of POST /open-apis/im/v1/messages/search, READ FROM THE VENDOR'S OWN ANSWER (lane lark-p2p, 2026-09-30). The production probe printed the first page's field names — `observedFields` below, verbatim — and the vendor's doc (im-v1/message/search, response `message_search_item`) spells the same item: `id` (the message id), `display_info` (the snippet), `meta_data {message_id, type, create_time (ISO 8601), update_time, position, chat_id, from_id, thread_id, thread_position, is_p2p_chat (boolean)}` — the last four only when they apply (the production page carried none of them). `page1` is EXACTLY the observed shape (3 single chats + 2 groups); `page2` carries the doc-only fields (a thread reply), the tolerated spelling (the message id in `id` alone) and two items malformed BY NAME; `oldShapePage` is the shape the .197 lane INVENTED (`create_time` digits of milliseconds, no `id`) — the control: under the declared ISO form every item is unreadable, named `meta_data.create_time`. NEUTRAL invented ids and values; `atOffsetMs` = an instant RELATIVE to the suite's clock, written by the suite as ISO 8601 at +08:00 (the vendor's own example form) unless `createForm` says `ms`. `display_info` is the snippet: never read, kept or logged.",
+  "observedFields": { "at": "2026-09-30", "version": "2.369.198", "top": ["display_info", "id", "meta_data"], "meta": ["chat_id", "create_time", "from_id", "is_p2p_chat", "message_id", "position", "type"] },
+  "docFields": { "top": ["id", "display_info", "meta_data"], "meta": ["message_id", "type", "create_time", "update_time", "position", "chat_id", "from_id", "thread_id", "thread_position", "is_p2p_chat"] },
   "page1": {
     "code": 0, "msg": "success",
     "data": {
-      "has_more": true, "page_token": "pt-search-2", "total": 5,
+      "has_more": true, "page_token": "pt-search-2", "total": 9,
       "items": [
-        { "meta_data": { "message_id": "om_srch_group_01", "type": "text", "atOffsetMs": -20000, "updOffsetMs": -20000, "chat_id": "oc_ops_room_0001", "from_id": "ou_member_b", "thread_id": "", "thread_position": 0, "is_p2p_chat": false }, "display_info": "the <b>deploy</b> finished — SNIPPET-MUST-NOT-LEAK" },
-        { "meta_data": { "message_id": "om_srch_dm_01", "type": "text", "atOffsetMs": -15000, "chat_id": "oc_dm_peer_0001", "from_id": "ou_peer_c", "thread_id": "", "thread_position": 0, "is_p2p_chat": true }, "display_info": "hey, are you around? SNIPPET-MUST-NOT-LEAK" },
-        { "meta_data": { "message_id": "om_srch_reply_01", "type": "post", "atOffsetMs": -10000, "chat_id": "oc_ops_room_0001", "from_id": "ou_member_a", "thread_id": "omt_thread_0001", "thread_position": 2, "is_p2p_chat": false }, "display_info": "a reply in a thread SNIPPET-MUST-NOT-LEAK" },
-        { "meta_data": { "message_id": "om_srch_seconds", "type": "text", "createSeconds": true, "atOffsetMs": -5000, "chat_id": "oc_ops_room_0001", "from_id": "ou_member_b", "is_p2p_chat": false }, "display_info": "a create_time in SECONDS under the ms declaration" },
-        { "display_info": "an item with no meta_data at all" }
+        { "display_info": "hey, are you around? SNIPPET-MUST-NOT-LEAK", "id": "om_srch_dm_01", "meta_data": { "chat_id": "oc_dm_peer_0001", "atOffsetMs": -50000, "from_id": "ou_peer_c", "is_p2p_chat": true, "message_id": "om_srch_dm_01", "position": 12, "type": "text" } },
+        { "display_info": "the <h>deploy</h> finished — SNIPPET-MUST-NOT-LEAK", "id": "om_srch_group_01", "meta_data": { "chat_id": "oc_ops_room_0001", "atOffsetMs": -40000, "from_id": "ou_member_b", "is_p2p_chat": false, "message_id": "om_srch_group_01", "position": 305, "type": "post" } },
+        { "display_info": "lunch? SNIPPET-MUST-NOT-LEAK", "id": "om_srch_dm_02", "meta_data": { "chat_id": "oc_dm_peer_0002", "atOffsetMs": -30000, "from_id": "ou_peer_d", "is_p2p_chat": true, "message_id": "om_srch_dm_02", "position": 3, "type": "text" } },
+        { "display_info": "[image] SNIPPET-MUST-NOT-LEAK", "id": "om_srch_dm_03", "meta_data": { "chat_id": "oc_dm_peer_0003", "atOffsetMs": -20000, "from_id": "ou_member_a", "is_p2p_chat": true, "message_id": "om_srch_dm_03", "position": 41, "type": "image" } },
+        { "display_info": "standup notes SNIPPET-MUST-NOT-LEAK", "id": "om_srch_group_02", "meta_data": { "chat_id": "oc_new_group_0002", "atOffsetMs": -10000, "from_id": "ou_member_b", "is_p2p_chat": false, "message_id": "om_srch_group_02", "position": 77, "type": "text" } }
       ]
     }
   },
   "page2": {
     "code": 0, "msg": "success",
-    "data": { "has_more": false, "page_token": "", "total": 5, "items": [
-      { "meta_data": { "message_id": "om_srch_group_02", "type": "image", "atOffsetMs": -2000, "chat_id": "oc_new_group_0002", "from_id": "ou_member_b", "thread_id": "", "is_p2p_chat": false }, "display_info": "[image]" }
+    "data": { "has_more": false, "total": 9, "items": [
+      { "id": "om_srch_reply_01", "display_info": "a reply in a thread SNIPPET-MUST-NOT-LEAK", "meta_data": { "message_id": "om_srch_reply_01", "type": "post", "atOffsetMs": -8000, "updOffsetMs": -6000, "position": 306, "chat_id": "oc_ops_room_0001", "from_id": "ou_member_a", "thread_id": "omt_thread_0001", "thread_position": 2, "is_p2p_chat": false } },
+      { "id": "om_srch_dm_04", "display_info": "the message id in `id` alone SNIPPET-MUST-NOT-LEAK", "meta_data": { "type": "text", "atOffsetMs": -5000, "position": 13, "chat_id": "oc_dm_peer_0001", "from_id": "ou_peer_c", "is_p2p_chat": true } },
+      { "id": "om_srch_nochat", "display_info": "an item without its chat SNIPPET-MUST-NOT-LEAK", "meta_data": { "message_id": "om_srch_nochat", "type": "text", "atOffsetMs": -4000, "position": 1, "from_id": "ou_peer_c", "is_p2p_chat": true } },
+      { "id": "om_srch_msdigits", "display_info": "a create_time in digits under the ISO declaration", "meta_data": { "message_id": "om_srch_msdigits", "type": "text", "createForm": "ms", "atOffsetMs": -3000, "position": 2, "chat_id": "oc_ops_room_0001", "from_id": "ou_member_b", "is_p2p_chat": false } }
+    ] }
+  },
+  "oldShapePage": {
+    "code": 0, "msg": "success",
+    "data": { "has_more": true, "page_token": "pt-old-2", "total": 5, "items": [
+      { "meta_data": { "message_id": "om_old_01", "type": "text", "createForm": "ms", "atOffsetMs": -20000, "chat_id": "oc_ops_room_0001", "from_id": "ou_member_b", "thread_id": "", "thread_position": 0, "is_p2p_chat": false }, "display_info": "the .197 invented shape" },
+      { "meta_data": { "message_id": "om_old_02", "type": "text", "createForm": "ms", "atOffsetMs": -15000, "chat_id": "oc_dm_peer_0001", "from_id": "ou_peer_c", "thread_id": "", "thread_position": 0, "is_p2p_chat": true }, "display_info": "the .197 invented shape" },
+      { "meta_data": { "message_id": "om_old_03", "type": "post", "createForm": "ms", "atOffsetMs": -10000, "chat_id": "oc_ops_room_0001", "from_id": "ou_member_a", "thread_id": "omt_thread_0001", "thread_position": 2, "is_p2p_chat": false }, "display_info": "the .197 invented shape" },
+      { "meta_data": { "message_id": "om_old_04", "type": "text", "createForm": "ms", "atOffsetMs": -5000, "chat_id": "oc_dm_peer_0002", "from_id": "ou_peer_d", "is_p2p_chat": true }, "display_info": "the .197 invented shape" },
+      { "meta_data": { "message_id": "om_old_05", "type": "image", "createForm": "ms", "atOffsetMs": -2000, "chat_id": "oc_new_group_0002", "from_id": "ou_member_b", "thread_id": "", "is_p2p_chat": false }, "display_info": "the .197 invented shape" }
     ] }
   },
   "forbiddenScope": { "status": 400, "body": { "code": 99991679, "msg": "Unauthorized. You do not have permission to perform the requested operation on the resource. Please request user re-authorization and try again. required one of these privileges under the user identity: [search:message]" } },

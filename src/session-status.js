@@ -28,9 +28,11 @@ const URGENCIES = ['low', 'normal', 'high', 'urgent'];
 const MAX_ENTRIES = 500;
 
 class SessionStatusManager {
-  constructor({ dataDir, onChange }) {
+  constructor({ dataDir, onChange, onWriteError = null }) {
     this._file = path.join(dataDir, 'session-status.json');
     this._onChange = onChange || (() => {});
+    this._onWriteError = typeof onWriteError === 'function' ? onWriteError : null; // lane-dead-bridge: a failed background write is NAMED (src/server/fd-gauge.js), never a crash
+    this._writeFailures = 0;
     this._state = { statuses: {} };
     this._writeTimer = null; this._dirty = false; this._lastWritten = null;
     try {
@@ -61,7 +63,26 @@ class SessionStatusManager {
       for (const k of keys.slice(0, keys.length - MAX_ENTRIES)) delete this._state.statuses[k];
     }
     this._dirty = true;
-    if (!this._writeTimer) this._writeTimer = setTimeout(() => { this._writeTimer = null; this._flush(); }, 500);
+    if (!this._writeTimer) this._writeTimer = setTimeout(() => { this._writeTimer = null; this._flushFromTimer(); }, 500);
+  }
+
+  // THE DEBOUNCED WRITE MAY NOT THROW (lane-dead-bridge, 2026-09-30 12:03:17):
+  // this timer's bare writeFileSync met `EMFILE` — relayed by the workspace's
+  // FUSE daemon, not raised by this process — and the throw became
+  // `uncaughtException` → exit(1): the whole server died for one status file.
+  // A failed write keeps the state DIRTY (nothing is lost in memory), retries
+  // with a backoff (1 s, 2 s … 60 s) and is REPORTED through onWriteError,
+  // which names who ran out. The exit-path flush() keeps its throw — its
+  // callers already guard it.
+  _flushFromTimer() {
+    try { this._flush(); this._writeFailures = 0; }
+    catch (e) {
+      this._writeFailures++;
+      this._dirty = true;
+      const retryMs = Math.min(60000, 1000 * 2 ** Math.min(6, this._writeFailures - 1));
+      if (!this._writeTimer) { this._writeTimer = setTimeout(() => { this._writeTimer = null; this._flushFromTimer(); }, retryMs); this._writeTimer.unref?.(); }
+      try { this._onWriteError?.(e, this._file + '.tmp', { failures: this._writeFailures, retryMs }); } catch { }
+    }
   }
 
   _flush() {
@@ -344,6 +365,9 @@ const NOTICE_RENDERERS = Object.freeze({
   // lane browser-stuck (2026-09-28, rule 6): a page dialog opened while the agent ran no browser command — the ONE free
   // next-turn line (never a wake); its next verb says it again, by rule 2
   'browser-dialog': (n) => require('./browser-stuck').renderDialogNotice(n),
+  // lane browser-propose (2026-09-30): an approved switch told for FREE — only when the ladder's stash could not take the
+  // words (the proposal runner's one carrier otherwise); the words are browser-switch.approvedText's
+  'browser-proposal': (n) => '<system-reminder>\n' + String((n && n.text) || '').slice(0, 1200) + '\n</system-reminder>',
 });
 
 module.exports = { SessionStatusManager, SESSION_STATES: STATES, SESSION_URGENCIES: URGENCIES, NOTICE_KINDS: Object.keys(NOTICE_RENDERERS) };

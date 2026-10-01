@@ -983,7 +983,11 @@ class Sidebar {
     // (flickering the Remote tab and expanded cards; two user reports).
     // Identity sync runs on EVERY merge, NOT behind the digest gate: it feeds
     // window title-bar badges/titleMeta/openSpec identity, all internally
-    // no-op-guarded. Behind the gate, a freshly loaded page whose windows
+    // no-op-guarded (setTitleMeta only since lane badge-stale, 2026-09-30: it re-drew every tab strip — every tab's
+    // billing chip — on every merge). It re-judges the rows `_merge()` built from the LAST `active-sessions` frame:
+    // `auth` has no other source (the poll carries none), so a server writer of a payload fact that does not
+    // broadcast leaves every window on the old value however often this runs (the 30-minute stale title chip — the
+    // per-session pool link, accounts.js _notifyLinks). Behind the gate, a freshly loaded page whose windows
     // restore AFTER the first merge never got billing badges — the 2.72.0
     // order-insensitive digest made changes so rare it never re-fired
     // (real report: 订阅徽章消失 on reload).

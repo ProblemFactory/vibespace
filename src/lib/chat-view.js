@@ -3864,6 +3864,14 @@ class ChatView {
     }
     this._syncReviewAvailability();
 
+    // LANE BROWSER-PROPOSE: the proposal card is PATCHED IN PLACE (the server's edit carries only `content`) — the
+    // element, its buttons and the pointer over them stay; a re-created card would blink on every progress step
+    if (msg.noticeKind === 'browser-proposal' && fields.content && !fields.status) {
+      const el = this._elements.get(id);
+      if (el) this._renderers.patchProposal(el, msg);
+      return;
+    }
+
     // Queue chip: a cheap in-place swap. A full re-render here would rebuild
     // the whole bubble (markdown, images, fold state) for a one-word badge.
     if ('queueState' in fields) {

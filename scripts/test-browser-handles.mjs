@@ -275,7 +275,8 @@ console.log('— ③ the routes, the shipped CLI and the per-session config: a m
   const env0 = be.envFor({ browserKey: KEY_A, integrationOn: true, remote: false, cwd: ROOT });
   sessA._browserVariant = env0.variant;
   const cfgPath = env0.configPath;
-  ok(env0.variant === 'D' && cfgPath && fs.existsSync(cfgPath) && be.resolvedProfileDir(KEY_A) === '', 'the session spawned on rung D with a generated config naming NO profile (ephemeral)');
+  // lane browser-resume (§3.9): rung D's config names the conversation's OWN kept directory (data/browser-profiles/<key>) — never a profile's
+  ok(env0.variant === 'D' && cfgPath && fs.existsSync(cfgPath) && be.resolvedProfileDir(KEY_A) === be.scratchDirFor(KEY_A), 'the session spawned on rung D with a generated config naming its OWN kept directory (no profile\'s — lane browser-resume §3.9)');
   const work = k.createProfile({ label: 'Work account' }, { owner: { kind: 'session', id: KEY_A } });
   const pers = k.createProfile({ label: 'Personal' }, { owner: { kind: 'instance', id: null } });
   const CLI = path.join(REPO, 'data/bin/vibespace-browser');
@@ -335,7 +336,7 @@ console.log('— ③ the routes, the shipped CLI and the per-session config: a m
   // OWNER RULING A (2026-09-26): a pin is the conversation's DEFAULT ATTACHMENT, never a directory — the running session's
   // own config is NOT re-pointed at the profile (that was the study's path B: its own browser launched a second Chrome on
   // the directory the keeper's held, exit 21); the set's default is Work and the keeper's one browser serves it
-  ok(be.resolvedProfileDir(KEY_A) === '' && !('profile' in JSON.parse(fs.readFileSync(cfgPath, 'utf8'))) && k.setFor(KEY_A).defaultId === work.id, 'owner ruling A: the running session\'s per-session config names NO profile after the pin (never the directory — a second Chrome there dies on SingletonLock); the set\'s default is Work, reached through the keeper');
+  ok(be.resolvedProfileDir(KEY_A) === be.scratchDirFor(KEY_A) && JSON.parse(fs.readFileSync(cfgPath, 'utf8')).profile === be.scratchDirFor(KEY_A) && k.setFor(KEY_A).defaultId === work.id, 'owner ruling A: the running session\'s per-session config names only its OWN kept directory after the pin (never the profile\'s directory — a second Chrome there dies on SingletonLock); the set\'s default is Work, reached through the keeper');
   ok(!JSON.stringify(JSON.parse(fs.readFileSync(cfgPath, 'utf8'))).includes(pers.dir) && !env0.pairs.some((p) => p.includes(pers.dir)) && !env0.pairs.some((p) => p.includes(work.dir)), '…and resolves to NO OTHER: the non-default\'s directory is in neither the config nor the spawn env (layer ①\'s honest boundary: only the default is reachable without a handle)');
   ok(sessA._browserProfileId === work.id && sessA._browserPinOrigin === 'chosen' && persisted[persisted.length - 1].id === work.id && persisted[persisted.length - 1].origin === 'chosen', 'the live session is stamped and the pin is persisted to its meta (a restart keeps it)');
   ok(notices.length === 1 && notices[0].sid === 'sess-1' && notices[0].n.kind === 'browser-pin' && notices[0].n.by === 'user' && notices[0].n.now === 'Work account' && notices[0].n.handles.includes('work'), 'a USER pin queues ONE typed browser-pin notice (§3.8 layer ②, zero billed turns)');
@@ -351,7 +352,7 @@ console.log('— ③ the routes, the shipped CLI and the per-session config: a m
   ok(notices.length === 1, '…an agent\'s own pin queues no notice (its answer is the telling)');
   c = await cli(['--profile', 'work', '--', 'snapshot']);
   ok(c.status === 0 && cmds().length === 4, '…and its next command is NOT refused (its own act told it)');
-  ok(be.resolvedProfileDir(KEY_A) === '' && k.setFor(KEY_A).defaultId === pers.id, 'owner ruling A: the agent\'s pin moved the set\'s default to Personal and re-pointed NOTHING at its directory');
+  ok(be.resolvedProfileDir(KEY_A) === be.scratchDirFor(KEY_A) && k.setFor(KEY_A).defaultId === pers.id, 'owner ruling A: the agent\'s pin moved the set\'s default to Personal and re-pointed NOTHING at its directory (the config still names only the conversation\'s own kept one)');
   c = await cli(['status']);
   ok(c.status === 0 && /^\* personal  →  Personal/m.test(c.stdout) && /^  work  →  Work account/m.test(c.stdout) && /2 attachments: every command needs --profile/.test(c.stdout) && /pin: Personal/.test(c.stdout), '`status` shows the set with handles, marks the default with *, states the rule and the pin');
   // children
@@ -381,7 +382,7 @@ console.log('— ③ the routes, the shipped CLI and the per-session config: a m
   ok(be.childConfigFor(KEY_A).path === null && /not a child key/.test(be.childConfigFor(KEY_A).why), 'a non-child key gets no child config');
   // OWNER RULING A — the boot conversion: a live session whose indirection still names a registered profile's directory is
   // put back on its own browser (the pin stays: it is the default attachment); a session whose config names none is untouched
-  { const n = R.convertPinnedDirs(); ok(n === 1 && be.resolvedProfileDir(KEY_A) === '' && k.pinFor(KEY_A) && k.pinFor(KEY_A).profileId === pers.id, `owner ruling A: the boot conversion put the pre-ruling pinned session back on its own browser (${n} converted) — the pin itself stays (Personal)`); ok(R.convertPinnedDirs() === 0, '…and a second pass converts nothing (idempotent)'); }
+  { const n = R.convertPinnedDirs(); ok(n === 1 && be.resolvedProfileDir(KEY_A) === be.scratchDirFor(KEY_A) && k.pinFor(KEY_A) && k.pinFor(KEY_A).profileId === pers.id, `owner ruling A: the boot conversion put the pre-ruling pinned session back on its own browser (${n} converted) — the pin itself stays (Personal)`); ok(R.convertPinnedDirs() === 0, '…and a second pass converts nothing (idempotent)'); }
   // audit
   await cli(['--profile', 'work', '--', 'fill', '@e7', 'hunter2-secret']);
   const audit = fs.readFileSync(k.auditFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));

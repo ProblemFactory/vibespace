@@ -314,6 +314,15 @@ function viewerMessageVerdict(msg, { holder = null, viewerId = null, mode = 'wat
   // lane S4: the view verbs (the bridge sanitizes a `fit` report with src/browser-fit.js fitReport)
   if (t === 'fit') return { kind: 'fit', forward: false };
   if (t === 'refresh') return { kind: 'refresh', forward: false };
+  // lane browser-resume C (§3.9, the owner's ruling 3): the tab row's switch / ✕ — decided by the keeper (src/browser-tabs.js
+  // userTabVerdict over facts it re-reads), never forwarded; a CDP target id only (the row never names a tab by `t<N>`)
+  if (t === 'tab-act') {
+    const act = msg.act === 'switch' || msg.act === 'close' ? msg.act : null;
+    const id = typeof msg.targetId === 'string' && /^[0-9A-Fa-f]{32}$/.test(msg.targetId) ? msg.targetId.toUpperCase() : null;
+    const rid = Number.isInteger(msg.rid) ? msg.rid : null;
+    if (!act || !id) return { kind: 'tab-act', forward: false, refusal: { type: 'tab-ack', ok: false, rid, act: act || null, targetId: id, code: 'bad-request', error: 'a tab act is {act: switch | close, targetId: <a CDP target id>}' } };
+    return { kind: 'tab-act', forward: false, act, targetId: id, rid };
+  }
   return { kind: 'unknown', forward: false, refusal: { type: 'refused', code: 'unknown-type', error: `unknown message type ${JSON.stringify(t).slice(0, 40)}` } };
 }
 

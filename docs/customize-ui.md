@@ -23,6 +23,10 @@ A few core anchors are deliberately not customizable: the ☰ sidebar toggle, th
 
 Everything keeps working wherever it lives — e.g. drag the desktop previews and usage donuts into the toolbar, then set the taskbar to *Hidden*: full desktop switching and usage monitoring with zero taskbar.
 
+## A narrow screen: the toolbar folds, never overlaps
+
+When the toolbar has less room than its buttons need (a low-resolution screen, UI scale 125 %, a wide sidebar, a large toolbar scale, or ja labels), nothing overlaps and nothing hides under the sidebar: first the "VibeSpace" title shrinks (with an ellipsis, then out of sight), then the buttons give up their words one at a time — the icon stays, the words become its tooltip and screen-reader name (Presets first, then Desktop, then Web view / Apps, then Files / Terminal, New Session last) — and only then do they fold into a **⋯** button at the toolbar's right end, whose menu lists exactly the folded buttons in their order (the layout presets as a submenu of their own buttons); a row does exactly what its button does. The fold reads the arrangement you made here: a button you moved keeps its place in the order, a hidden button never counts, and the taskbar widgets you drag into the toolbar (usage, For you, desktop previews) never fold. While you are in Customize mode the fold is paused — every element is shown full so you can click and drag it, and the toolbar may take two rows — and **Done** folds it again.
+
 ## Position pills & alignment chips
 
 Segmented pills float next to the bars they control:

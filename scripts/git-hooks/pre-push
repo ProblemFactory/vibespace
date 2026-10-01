@@ -84,6 +84,9 @@ is_code_path() {
     # the agent-manual DIRECTORY itself: test-architecture §52b lists docs/agent (every manual + the web-access
     # skill text is scanned for the hidden browser CLI's name — a new file there changes the census) (2.369.168)
     docs/agent) return 0 ;;
+    # the user's changelogs in three languages + the engineering log: test-changelog-style lints them, checks their parity
+    # and that every user entry has its engineering section; test-codex-effort-meta reads release topics off the log
+    CHANGELOG.zh.md|CHANGELOG.ja.md|docs/changelog-engineering.md) return 0 ;;
     docs/README.md|docs/plugins.md|docs/settings.md|docs/keyboard-shortcuts.md) return 0 ;;
     # the desktop copy hint links its "## HTTPS for seamless copy" section and test-xpra-client reads it (2.369.166)
     docs/getting-started.md) return 0 ;;

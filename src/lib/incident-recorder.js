@@ -144,7 +144,9 @@ export function installIncidentRecorder(app) {
     try {
       out.windows = [...app.wm.windows.values()].map((w) => ({
         id: w.id, type: w.type, title: w.titleSpan?.textContent?.slice(0, 60),
-        desktop: w._desktopId, min: !!w.isMinimized, hiddenByDesktop: !!w._hiddenByDesktop, onStage: !!w._onStage,
+        desktop: w._desktopId, min: !!w.isMinimized, hiddenByDesktop: !!w._hiddenByDesktop, hiddenByStage: !!w._hiddenByStage, onStage: !!w._onStage,
+        // the element's derived marks as they stand (inc-munl8jkl-gaih: a hero with content-visibility:hidden = an undrawn box)
+        marks: w.element ? { cv: w.element.style.contentVisibility || '', vis: w.element.style.visibility || '', aria: w.element.getAttribute('aria-hidden') } : null,
         spec: w._openSpec ? { action: w._openSpec.action, backendSessionId: w._openSpec.backendSessionId, hostId: w._openSpec.hostId, cwd: w._openSpec.cwd } : null,
       }));
     } catch (e) { out.windows = 'failed: ' + e.message; }

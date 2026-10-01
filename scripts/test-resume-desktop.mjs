@@ -6,18 +6,21 @@
 // flattened the layout). This pins the two halves of the fix as pure logic:
 // (1) the snapshot CARRIES the desktop; (2) the resume MOVES the window back
 // only when the desktop still exists and differs.
-import fs from 'node:fs'; import path from 'node:path';
+import fs from 'node:fs'; import path from 'node:path'; import { createRequire } from 'node:module';
 const src = fs.readFileSync(new URL('../src/lib/session-lifecycle.js', import.meta.url), 'utf8');
 let pass=0, fail=0; const ok=(c,n,e)=>{if(c){pass++;console.log('  ✓ '+n);}else{fail++;console.error('  ✗ '+n+(e?'\n    '+e:''));}};
 
 // (1) _snapshotWinBounds is a small pure method — extract + run it against a mock.
 const m = src.match(/_snapshotWinBounds\(win\)\s*\{([\s\S]*?)\n {2}\},/);
 ok(!!m, '_snapshotWinBounds located in source');
-const bodyFn = new Function('win', m[1] + '\n');
-const snap = bodyFn({ _desktopId: 'desk-home-1', gridBounds: { left: 0.1, top: 0.2, width: 0.3, height: 0.4 }, isMaximized: false });
+// the body calls PURE stage-rules carriedGeometry (lane stage-blank verify r1 of inc-munl8jkl-gaih) — hand it the real one
+const { carriedGeometry } = createRequire(import.meta.url)('../src/lib/stage-rules.js');
+const bodyFn = new Function('win', 'carriedGeometry', m[1] + '\n').bind(null);
+const snapOf = (win) => bodyFn(win, carriedGeometry);
+const snap = snapOf({ _desktopId: 'desk-home-1', gridBounds: { left: 0.1, top: 0.2, width: 0.3, height: 0.4 }, isMaximized: false });
 ok(snap.desktopId === 'desk-home-1', 'snapshot CARRIES the window’s home desktop id (the dropped field)');
 ok(snap.gridBounds && Math.abs(snap.gridBounds.left - 0.1) < 1e-9, 'geometry still captured alongside');
-const snapNone = bodyFn({ gridBounds: null });
+const snapNone = snapOf({ gridBounds: null });
 ok(snapNone.desktopId === null, 'a window with no desktop tag snapshots desktopId:null (no crash)');
 
 // (2) the resume move-guard: assert the exact predicate the fix uses, so a

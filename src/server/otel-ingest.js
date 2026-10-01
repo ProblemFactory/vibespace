@@ -14,6 +14,16 @@
 // this channel: the ≥25min staleness is how long the CLI keeps REPORTING its
 // spawn-time org, not how long it keeps BILLING it. What this module does
 // now:
+// ── 2026-09-30: THE ORG IS A MACHINE-WIDE LABEL (lane-hot-switch) ──────────
+// Measured (scripts/fixtures/claude-cred-read-2.1.281.json): `organization.id`
+// is ~/.claude.json's oauthAccount.organizationUuid as the process read it at
+// start — the SAME value whichever token the process holds, rewritten machine-
+// wide by the next claude process that refetches its own profile (every 24 h).
+// Nothing reads it as a member any more: the engine's corroboration, witness
+// veto and "observed on X while linked to Y" lines are retired, and the stash
+// row's comparison is named for what it is (`labelMatchesSlot`, a coincidence
+// metric — it was `agreed`, which read as identity). The requests, tokens and
+// cost per rid stay worth keeping; the org on them is the label.
 // ── 2026-09-07: THE OBSERVATION IS CORROBORATION, NEVER ATTRIBUTION ────────
 // The module's founding premise was "organization.id names the org that
 // AUTHORIZED this request". The owner's post-mortem refuted it twice: it is
@@ -35,10 +45,10 @@
 //   ③ raw append-only stash (data/usage-history/otel-truth.ndjson) — models
 //      re-derivable offline forever, same principle as the anchors store.
 //      UNCHANGED: the observation is still worth keeping, it is simply not
-//      the key. Each row now records whether it AGREED with the walk.
-//   ④ observedOrgFor(sid) — the corroboration query. usage-pool-engine's
-//      corroborateReading() logs when a reading's credential slot and this
-//      observation disagree; it never changes where the reading lands.
+//      the key. Each row records the walk's slot beside the label
+//      (`labelMatchesSlot` since 2026-09-30; rows before that say `agreed`).
+//   ④ observedOrgFor(sid) — the corroboration query — RETIRED 2026-09-30
+//      with the engine's corroborateReading(): the label corroborates nothing.
 // Auth: loopback remoteAddress + persisted token header (x-vibespace-otel,
 // threaded to sessions via OTEL_EXPORTER_OTLP_HEADERS on the PROCESS-ENV
 // channel — never argv). The auth.js cookie middleware exempts /otel/* and
@@ -68,15 +78,28 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
   const file = path.join(dataDir, 'usage-history', 'otel-truth.ndjson');
   const truth = new Map();      // rid → accountId|null (null = machine global login)
   const order = [];             // rid insertion order (cap pruning)
-  const lastTruthAcct = new Map(); // sid → last written (truth→walk) pair (dedup)
-  const lastSidOrg = new Map();    // sid → {orgUuid, acct, known, ts} — the org this session's requests are OBSERVED to bill (B-b3cd: rate_limit_event org verification)
   let unknownOrgs = new Map();  // orgUuid → count (surfaced, never silently dropped)
   // Arrival counters (2.367.1): "did the CLI export at all" is a DIFFERENT
   // question from "did we keep anything", and the CI gate needs to tell them
   // apart — the chat E2E's OTel assertion failed on every GitHub Actions push
   // from 2.361.0 on, and with only a kept-count there was no way to know
   // whether the runner's CLI exported nothing or our parser dropped it.
-  const arrivals = { posts: 0, rejected: 0, records: 0, kept: 0, stashed: 0, noRid: 0, noOrg: 0, disagreed: 0, events: {} };
+  const arrivals = { posts: 0, rejected: 0, records: 0, kept: 0, stashed: 0, noRid: 0, noOrg: 0, labelDiffers: 0, events: {} };
+  // THE CLI'S OWN LIVENESS WITNESS (lane-dead-bridge): the newest api_request
+  // instant per conversation (session.id). Kept for EVERY parsed row — a row
+  // with no request id or no org still proves the CLI worked — and read by the
+  // dead-bridge watch: a session whose stdout delivered nothing for minutes
+  // while its CLI kept calling the API has a dead bridge, not a quiet CLI.
+  // Memory only (a restart forgets; the next export refills it); bounded.
+  const lastApi = new Map();    // sid → ms
+  const LAST_API_CAP = 2000;
+  const noteApi = (sid, ts) => {
+    if (!sid || !(ts > 0)) return;
+    const prev = lastApi.get(sid);
+    if (prev != null) { if (ts <= prev) return; lastApi.delete(sid); }
+    lastApi.set(sid, ts);
+    if (lastApi.size > LAST_API_CAP) lastApi.delete(lastApi.keys().next().value);
+  };
 
   // Boot replay: the stash IS the persistence — bake-time overrides must
   // survive restarts or a reboot mid-race re-bakes with link-intent again.
@@ -136,6 +159,7 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
     const { records, seen } = parseOtlpLogs(payload);
     let disagreements = 0;
     for (const rec of records) {
+      noteApi(rec.sid, rec.ts || Date.now());   // the liveness witness first — before any row is dropped for its ledger fields
       // A parsed api_request that carries no request id or no organization.id
       // cannot join the ledger, so it is dropped — but SILENTLY dropping it
       // made a quiet truth channel undiagnosable (2.367.2: CI's personal-OAT
@@ -145,14 +169,6 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
       if (!rec.orgUuid) { arrivals.noOrg++; continue; }
       const dup = truth.has(rec.rid);
       const { known, acct } = resolveOrg(rec.orgUuid, rec.email);
-      // Per-session latest observed org — the query rate_limit_event capture
-      // uses to verify a reading's org BEFORE writing it into an account's
-      // usage cache (a hot-switched pool session keeps its old token ≥25min
-      // and its quota events describe the OLD org's buckets).
-      if (rec.sid) {
-        lastSidOrg.set(rec.sid, { orgUuid: rec.orgUuid, acct: known ? acct : null, known, ts: rec.ts || Date.now() });
-        if (lastSidOrg.size > 4096) { const k = lastSidOrg.keys().next().value; lastSidOrg.delete(k); }
-      }
       if (!known) {
         const n = (unknownOrgs.get(rec.orgUuid) || 0) + 1;
         unknownOrgs.set(rec.orgUuid, n);
@@ -160,38 +176,21 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
       } else if (!dup) {
         remember(rec.rid, acct);
       }
-      // CORROBORATION (2026-09-07). This block used to WRITE a corrective
-      // attribution record whenever the observation disagreed with the walk —
-      // i.e. it permanently taught the ledger the spawn-time org. It now only
-      // COUNTS and LOGS the disagreement: the walk's answer comes from
-      // recordAttribution, which resolves the credential link (and whose
-      // re-points are recorded in data/slot-transitions.jsonl), and that is
-      // the identity whose credentials the process actually reads.
-      // Computed BEFORE the stash write so the row can carry the comparison —
-      // the raw stash stays the offline-forever record, and "did the
-      // observation agree with the credential slot" is the one field a future
-      // analysis of this refutation will want.
+      // THE WALK'S SLOT BESIDE THE LABEL (2026-09-07; renamed 2026-09-30). This
+      // block once WROTE a corrective attribution record when the label and the
+      // walk disagreed, then only logged it. The label is machine-wide, so the
+      // "disagreement" was the normal state of every session not on the label's
+      // member (84-99 % of rows) — the log line read as proof the process held
+      // the wrong account. Now the row just records both, the comparison under
+      // a name that says what it is, and one counter (stats().labelDiffers).
       let attributed; // undefined = we could not ask (no ledger / no sid)
       if (known && rec.sid) {
         try {
           const uh = getUsageHistory?.();
           if (uh) {
-            const now = rec.ts || Date.now();
-            const cur = uh.attribAt(rec.sid, now);
+            const cur = uh.attribAt(rec.sid, rec.ts || Date.now());
             attributed = cur.acct || null;
-            const pair = (acct || '') + '→' + (cur.acct || '');
-            if ((cur.acct || null) !== (acct || null)) {
-              disagreements++;
-              // one line per (sid, transition) — the pair key is kept from the
-              // corrective-record era for exactly the reason it was chosen
-              // there: an acct-only marker hides the NEXT switch.
-              if (lastTruthAcct.get(rec.sid) !== pair) {
-                lastTruthAcct.set(rec.sid, pair);
-                arrivals.disagreed++;
-                console.log(`[otel] ${rec.sid}: observed org ${acct || '(global)'} ≠ attributed ${cur.acct || '(global)'} — spawn-time identity, attribution unchanged`);
-                global.__vsMetric?.('otel-org-disagreement', 1);
-              }
-            }
+            if (attributed !== (acct || null)) { disagreements++; arrivals.labelDiffers++; }
           }
         } catch { }
       }
@@ -199,7 +198,7 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
         try {
           fs.mkdirSync(path.dirname(file), { recursive: true });
           fs.appendFileSync(file, JSON.stringify({ ...rec, acct: known ? acct : undefined, acctKnown: known,
-            ...(attributed !== undefined ? { attributed, agreed: attributed === (acct || null) } : {}) }) + '\n');
+            ...(attributed !== undefined ? { attributed, labelMatchesSlot: attributed === (acct || null) } : {}) }) + '\n');
           arrivals.stashed++;
         } catch { }
         global.__vsMetric?.('otel-truth-req', 1);
@@ -263,9 +262,8 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
      *  and so the source pin in scripts/test-readings-attribution.mjs can
      *  assert nobody passes it to a bake path. */
     observedOrgForRid(rid) { return rid && truth.has(rid) ? truth.get(rid) : undefined; },
-    /** Latest OBSERVED billing org for a claude session (or null): the org-
-     *  verification source for rate_limit_event capture — see ④ in the header. */
-    observedOrgFor(sid) { return (sid && lastSidOrg.get(sid)) || null; },
+    /** The newest api_request instant (ms) this conversation's CLI exported, or null (lane-dead-bridge's witness). */
+    lastApiRequestAt(sid) { return (sid && lastApi.get(sid)) || null; },
     stats() { return { rids: truth.size, unknownOrgs: [...unknownOrgs.entries()], ...arrivals }; },
     /** All /otel routes + a read-only stats view. The stats endpoint exists so
      *  a test (or a human) can tell "the CLI exported nothing here" from "we

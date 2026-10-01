@@ -12,6 +12,7 @@ import { api, escHtml, estDisplayPair, fetchJson, hostStateChip, showConfirmDial
 // with two callers instead of two `||` chains that drift.
 import { resumeSpawnPick } from '../resume-continuity.js';
 import { forkGroupPlan } from './fork-groups.js'; // a fork lands in its source's Task Groups (2026-09-25)
+import { carriedGeometry } from './stage-rules.js'; // the geometry a replaced window carries: a borrowed hero's HOME, never the Stage's slot (verify r1 of inc-munl8jkl-gaih)
 import { attachSlab } from './view-visibility.js'; // perf r1: the slab an attach asks for (floor | text)
 import { memberState, poolSubmenuModel, submenuNoteWords } from './pool-priority-model.js'; // THE CONVERSATION'S POOL PIN (2026-09-28): the pool row's submenu, as a PURE model
 import { deviceLocale } from './i18n.js';
@@ -105,7 +106,23 @@ export function installSessionLifecycle(App, ctx = {}) {
     // Geometry carried over from a window this session replaces (billing
     // switch kill+resume, resume of a terminated read-only window) — without
     // it the conversation "moves" into a default-sized centered window.
-    if (winBounds) {
+    if (winBounds && winInfo._onStage) {
+      // ON THE STAGE createWindow's trailing focus already materialized the window INTO THE SLOT (stage-manager
+      // _borrowHero): the geometry it carries over is its HOME geometry — the hand-back's, never the element's
+      // (inc-munl8jkl-gaih (C): a conversation resumed on the Stage landed at its old desktop box, off the slot). The
+      // Stage is a VIEW, not an owner: like any borrowed hero the window keeps its HOME desktop (the one the replaced
+      // window lived on, when it still exists), so leaving the Stage hands it back there — a move now would be the
+      // Stage's refusal (the 2.112.4 rule), and the replaced window's record is gone from that desktop, so the Stage's
+      // identity adoption cannot find it later (measured: it stayed parked on the Stage).
+      // the box carried is the HOME (PURE carriedGeometry, never the slot); slot-shaped or not it is kept (verify r3: the r1
+      // belt refused a legitimately slot-shaped home and the Stage gave it a cascade box)
+      if (winBounds.gridBounds) winInfo._stageHomeBounds = { ...winBounds.gridBounds };
+      if (winBounds.isMaximized) winInfo._stageHomeMax = true;
+      if (winBounds.preSnapBounds) winInfo.preSnapBounds = { ...winBounds.preSnapBounds };
+      const home = winBounds.desktopId;
+      if (home && home !== '__stage__' && (this.desktopManager?._desktops || []).some((d) => d.id === home)) winInfo._desktopId = home;
+      try { window.__vsOp?.('resume-place', { win: winInfo.id, home: winBounds.desktopId || null, stage: true, landed: winInfo._desktopId }); } catch {}
+    } else if (winBounds) {
       if (winBounds.gridBounds) { winInfo.gridBounds = { ...winBounds.gridBounds }; this.wm._applyGridBounds(winInfo); }
       if (winBounds.preSnapBounds) winInfo.preSnapBounds = { ...winBounds.preSnapBounds };
       if (winBounds.isMaximized) this.wm.toggleMaximize(winInfo.id);
@@ -118,7 +135,10 @@ export function installSessionLifecycle(App, ctx = {}) {
       const desktopExists = !!destDesktop && destDesktop !== '__stage__'
         && (dm?._desktops || []).some((d) => d.id === destDesktop);
       if (desktopExists && destDesktop !== winInfo._desktopId && dm?.moveWindowToDesktop) {
-        try { dm.moveWindowToDesktop(winInfo.id, destDesktop); } catch {}
+        // `replaces`: the resumed conversation takes the place of its OLD window's record entry there (resume-all of
+        // a desktop the page never opened: that window was never built, so no close removed it — userW
+        // inc-mun7qjmw-iksh; the rest of that desktop's record is left exactly as it is)
+        try { dm.moveWindowToDesktop(winInfo.id, destDesktop, { replaces: winBounds.winId || null }); } catch {}
       }
       try { window.__vsOp?.('resume-place', { win: winInfo.id, home: destDesktop || null, exists: desktopExists, landed: winInfo._desktopId }); } catch {}
     }
@@ -896,18 +916,22 @@ export function installSessionLifecycle(App, ctx = {}) {
 
   _snapshotWinBounds(win) {
     if (!win) return undefined;
-    return {
-      gridBounds: win.gridBounds ? { ...win.gridBounds } : null,
-      preSnapBounds: win.preSnapBounds ? { ...win.preSnapBounds } : null,
-      isMaximized: !!win.isMaximized,
-      // The resumed conversation must stay on its HOME desktop — not the one
-      // that happens to be active. A single billing switch usually resumes a
-      // session on the visible desktop (so this is a no-op there), but the
-      // pool cold-restart kills+resumes sessions across EVERY desktop at once
-      // while one is active: without this every one of them piled onto the
-      // active desktop and flattened the whole layout (a fleet user, inc-mso43urh).
-      desktopId: win._desktopId || null,
-    };
+    // PURE stage-rules carriedGeometry (verify r1 of inc-munl8jkl-gaih): a window BORROWED by the Stage sits at the
+    // Stage's slot — the box it carries into its replacement is the HOME the Stage remembered (`_stageHomeBounds`,
+    // un-maximized with `_stageHomeMax`), never the element's. Read off the element, the hero's own Resume / a billing
+    // switch / a restart carried the slot as the new window's home: the hand-back landed it at slot size on its
+    // desktop and every client's record of that desktop took it (the slot-leaks-into-desktop-records class).
+    // The resumed conversation must stay on its HOME desktop — not the one
+    // that happens to be active. A single billing switch usually resumes a
+    // session on the visible desktop (so this is a no-op there), but the
+    // pool cold-restart kills+resumes sessions across EVERY desktop at once
+    // while one is active: without this every one of them piled onto the
+    // active desktop and flattened the whole layout (a fleet user, inc-mso43urh).
+    // THE FRAME'S FACTS (verify r2): a grouped guest is drawn by its host's element and its box mirrors the host's
+    // (createTabChain / addToTabChain / _syncChainBounds copy it) — so a guest of a BORROWED frame carries the slot by
+    // construction; what it keeps on the desktop is the FRAME's home. The desktop is the window's own.
+    const frame = (win._tabChain && Array.isArray(win._tabChain.tabs) && this.wm.windows.get(win._tabChain.tabs[0])) || win;
+    return carriedGeometry({ gridBounds: frame.gridBounds, preSnapBounds: frame.preSnapBounds, isMaximized: frame.isMaximized, desktopId: win._desktopId, onStage: frame._onStage, stageHomeBounds: frame._stageHomeBounds, stageHomeMax: frame._stageHomeMax });
   },
 
   // "Hot-switch" a session's billing account (title-bar badge click). A true

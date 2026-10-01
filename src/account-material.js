@@ -19,9 +19,13 @@
 const fs = require('fs');
 const crypto = require('crypto');
 
-/** Atomically re-point `linkPath` at `targetDir`. `credsPath` (optional) gets
- *  a utimes bump so the CLI re-reads it mid-turn. Throws rather than replace
- *  a non-symlink. */
+/** Atomically re-point `linkPath` at `targetDir`. `credsPath` gets a utimes
+ *  bump — LOAD-BEARING (measured on claude 2.1.281, lane-hot-switch
+ *  2026-09-30, scripts/fixtures/claude-cred-read-2.1.281.json): a running CLI
+ *  re-reads its credential file only when the mtime it statx()es through the
+ *  link DIFFERS from the last one it saw, so a re-point onto a file with an
+ *  equal mtime is never followed. Every re-point of a session or pool link
+ *  passes the target's creds path. Throws rather than replace a non-symlink. */
 function repointPoolSymlink(linkPath, targetDir, credsPath = null) {
   try {
     const st = fs.lstatSync(linkPath);

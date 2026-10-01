@@ -24,6 +24,8 @@
 //   ⑦ B-f7ab the LATE KEY: a session created WITHOUT a key (the pre-feature spawn: key, pairs, config stripped after
 //      create) runs `vibespace-browser open <local url>` from a shell with no browser pairs ⇒ it succeeds (the first
 //      command minted the key, said once), the binding names that conversation, the live view + the fact name the browser
+//   ⑨ lane browser-resume (§3.9): a conversation's own (rung D) browser runs on its KEPT directory — a persistent cookie
+//      is sent again by a NEW browser after the turn-idle stop; CONTROL: keeping off loses it (the pre-lane shape)
 //   ⑧ lane-cloak: the CloakBrowser rung — the measured build installed by the product's own Install, a profile switched to
 //      cloak launches UNDER THE EGRESS PROXY (a named site admitted, an unnamed one and loopback refused by name), a page
 //      verb, the action trace, the switch back — SKIPs with evidence where the measured build is absent (the Actions mirror)
@@ -103,6 +105,9 @@ else await (async () => {
   TR.setup({ keeper: k, trace, activeSessions: active, releaseProfile: (id) => R.releaseProfile(id), unpinProfile: (id) => R.unpinProfile(id), notice: (sid, s, nn) => notices.push({ sid, n: nn }), keyForPickedSession: (id) => R.keyForPickedSession(id) });
   const bridge = require('../src/server/browser-stream.js').create({ keeper: k, activeSessions: active, requestAuthed: () => true, log: quiet });
   const app = express(); app.use(express.json());
+  // lane browser-resume (§3.9): a page that sets a PERSISTENT cookie, and one that shows the cookies it was sent (as its title)
+  app.get('/cookie/set', (req, res) => { res.set('Set-Cookie', 'kept=yes-' + String(req.query.v || '').replace(/[^\w-]/g, '') + '; Max-Age=86400; Path=/'); res.type('html').send('<!doctype html><title>set</title><p>set</p>'); });
+  app.get('/cookie/get', (req, res) => { res.type('html').send(`<!doctype html><title>cookies:${String(req.headers.cookie || 'none').replace(/[^\w=;-]/g, '')}</title><p>get</p>`); });
   app.get('/page/:name', (req, res) => { res.type('html').send(`<!doctype html><title>${String(req.params.name).replace(/[^\w-]/g, '')}</title><p>${String(req.params.name).replace(/[^\w-]/g, '')}</p>`); });
   app.use(R.router); app.use(TR.router);
   const srv = http.createServer(app);
@@ -128,7 +133,7 @@ else await (async () => {
     const tA = await run(s1, ['get', 'title']);
     ok(c.ok && /WORKA/.test(titleOf(tA)) && chromesOn(work.dir) === 1, `① conversation 1 browses in work — its page "${titleOf(tA)}", ONE Chrome on the directory`, { c, tA });
     let r = await j('POST', '/api/browser/pin', { sessionId: 'sess-2', profile: 'work' });
-    ok(r.status === 200 && r.json.pin && r.json.pin.by === 'user' && be.resolvedProfileDir(KB) === '', '① the USER pins work for conversation 2 (Session properties) — its own config is NOT re-pointed at the directory', r.json);
+    ok(r.status === 200 && r.json.pin && r.json.pin.by === 'user' && be.resolvedProfileDir(KB) === be.scratchDirFor(KB), '① the USER pins work for conversation 2 (Session properties) — its own config is NOT re-pointed at the directory (it names only the conversation\'s own kept one — lane browser-resume §3.9)', r.json);
     c = await run(s2, ['open', PAGE('WORKB')]);
     const tB = await run(s2, ['get', 'title']);
     const tA2 = await run(s1, ['get', 'title']);
@@ -321,6 +326,42 @@ else await (async () => {
       try { ws4.close(); } catch { /* closed */ }
       ok(h4 && h4.target && h4.target.kind === 'ephemeral' && h4.target.ns === B.sessionNameFor(late), '⑦ the live view of that session answers (the real bridge): its target is the conversation\'s own browser under the late key', h4);
       R.setup({ keeper: k, activeSessions: active, browserEnv: () => be, adoptRoots: { homeDir: KH, dataDir: DATA }, notice: (sid, s, nn) => notices.push({ sid, n: nn }), persistPin: () => { }, tasksForSession: () => [] });
+    }
+    // ── ⑨ lane browser-resume (§3.9, the owner's ruling 1 — "state survives the process"), MEASURED on the real binary +
+    //    Chrome: a conversation's own (rung D) browser runs on its KEPT directory, a persistent cookie set in it is sent
+    //    again after the browser was STOPPED (the turn-idle release) and a NEW Chrome started by the next command — and the
+    //    CONTROL: the same steps with keeping OFF (the pre-lane rung D, the binary's throw-away directory) lose it ──
+    {
+      const cookieRun = async (bk, n, name, beX) => {
+        const e = beX.envFor({ browserKey: bk, integrationOn: true, remote: false, cwd: CWD });
+        const sx = { agentToken: 'vsst_' + String(n).repeat(24), _browserKey: bk, _browserVariant: e.variant, _browserEnv: e.pairs.slice(), name, webuiName: name, mode: 'chat', createdAt: Date.now() };
+        active.set('sess-' + n, sx); live.add(bk); conv[bk] = { turn: 'idle', name };
+        const set = await run(sx, ['open', `${API}/cookie/set?v=${n}`]);
+        const before = await run(sx, ['open', `${API}/cookie/get`]);
+        const t0 = await run(sx, ['get', 'title']);
+        const e0 = k.ephemeralFor(bk);
+        const dir0 = e0 && e0.dir;
+        const pid0 = e0 && e0.pid;
+        if (e0) await k.stop(e0.profileId, { why: 'turn-idle' });
+        const stopped = !(k.ephemeralFor(bk) || {}).live && (!dir0 || chromesOn(dir0) === 0);
+        const sizeOf = (d) => { let n = 0; const walk = (x) => { let st; try { st = fs.lstatSync(x); } catch { return; } if (st.isDirectory()) { for (const c of fs.readdirSync(x)) walk(path.join(x, c)); } else n += st.size; }; if (d) walk(d); return n; };
+        const bytes0 = sizeOf(dir0);
+        const after = await run(sx, ['open', `${API}/cookie/get`]);
+        const t1 = await run(sx, ['get', 'title']);
+        const e1 = k.ephemeralFor(bk);
+        const out = { bytes0, set: set.ok, before: before.ok, t0: titleOf(t0), stopped, pid0, pid1: e1 && e1.pid, dir0, dir1: e1 && e1.dir, after: after.ok, t1: titleOf(t1), config: (() => { try { return JSON.parse(fs.readFileSync(beX.configPathFor(bk), 'utf8')).profile || null; } catch { return null; } })() };
+        if (e1) await k.stop(e1.profileId, { why: 'user' });
+        active.delete('sess-' + n); live.delete(bk);
+        return out;
+      };
+      const K5 = 'bk-0000d005', K6 = 'bk-0000d006';
+      const kept5 = await cookieRun(K5, 5, 'Kept chat', be);
+      ok(kept5.config === be.scratchDirFor(K5) && kept5.dir0 === be.scratchDirFor(K5) && kept5.set && /kept=yes-5/.test(kept5.t0) && kept5.stopped && kept5.pid1 && kept5.pid1 !== kept5.pid0 && /kept=yes-5/.test(kept5.t1),
+        `⑨ lane browser-resume: the conversation's own browser runs on data/browser-profiles/${K5}; its cookie ("${kept5.t0}") is sent again by a NEW browser (daemon ${kept5.pid0} → ${kept5.pid1}) after the turn-idle stop: "${kept5.t1}" — its logins survived the process (its kept directory after two pages: ${(kept5.bytes0 / 1048576).toFixed(1)} MB)`, kept5);
+      const beOff = BE.create({ dataDir: DATA, homeDir: KH, serverNotice: null, telemetry: null, log: { warn() { }, log() { } }, env: { XDG_RUNTIME_DIR: KXD }, keepOn: () => false });
+      const off6 = await cookieRun(K6, 6, 'Unkept chat', beOff);
+      ok(off6.config === null && off6.set && /kept=yes-6/.test(off6.t0) && off6.stopped && /cookies:none/.test(off6.t1),
+        `⑨ CONTROL: keeping OFF (the pre-lane rung D — the binary's throw-away directory) — the same steps lose the cookie ("${off6.t0}" → "${off6.t1}"): the leg above can go red`, off6);
     }
     // ── ⑧ lane-cloak (2026-09-28): THE CLOAKBROWSER RUNG on the real binaries — the measured build installed by the
     //    product's own Install (the real package + the measured cache ⇒ nothing downloaded), a never-launched profile

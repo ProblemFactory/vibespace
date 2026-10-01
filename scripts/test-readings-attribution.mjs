@@ -226,16 +226,18 @@ if (!probe) {
   }
 }
 
-// ── §2 the observation corroborates, never keys ────────────────────────────
+// ── §2 the observation never keys — and since 2026-09-30 it is not read at all ─
+// (lane-hot-switch: MEASURED on claude 2.1.281, the OTel org is ~/.claude.json's
+// machine-wide label for every token a process holds — a "corroboration" that
+// said "not corroborated" of readings billed exactly where their link said)
 {
   const w = mkWorld(); const cap = quiet();
   w.am.ensureSessionPoolLink(w.P, w.SID, w.SPARE, { why: 'per-session-switch' });
   w.reading(0.55); w.endTurn();
   const lines = cap.done();
-  ok('§2 the divergence is LOGGED, naming both identities', lines.some((l) => /filed on the credential slot Member B while OTel last observed Member F/.test(l)), lines.filter((l) => /credential slot/.test(l)).join(' | ').slice(0, 160));
-  ok('§2 …and stamped on the reading as a LABEL (corroborated:false), which is a fact about the disagreement, not a routing decision', w.readCache(w.SPARE).corroborated === false, JSON.stringify(w.readCache(w.SPARE).corroborated));
-  const c = w.eng.corroborateReading(w.session, w.SPARE, 'probe');
-  ok('§2 corroborateReading REPORTS {agree, observed} and returns no key at all', c && c.agree === false && c.observed === w.FISH && c.key === undefined, JSON.stringify(c));
+  ok('§2 the label is NOT journalled against the reading (no "while OTel last observed" line)', !lines.some((l) => /OTel last observed/.test(l)), lines.filter((l) => /OTel/.test(l)).join(' | ').slice(0, 160));
+  ok('§2 …nor stamped on it: no `corroborated` verdict (the panel said "not corroborated" of readings billed exactly where their link said)', !('corroborated' in w.readCache(w.SPARE)), JSON.stringify(w.readCache(w.SPARE).corroborated));
+  ok('§2 corroborateReading is RETIRED', typeof w.eng.corroborateReading === 'undefined');
 
   // NEGATIVE CONTROL: the pre-fix rule, reproduced from its own description —
   // "a fresh observation naming an account outside the key's identity group
@@ -246,8 +248,7 @@ if (!probe) {
     return key;
   };
   ok('§2 NEGATIVE CONTROL: orgVerifiedKey\'s rule, applied to the very same state, files the reading on the account the session was SPAWNED on', preFix(w.session, w.SPARE) === w.FISH && w.eng.readingSlotFor(w.session).key === w.SPARE, `pre-fix=${preFix(w.session, w.SPARE)} now=${w.eng.readingSlotFor(w.session).key}`);
-  ok('§2 …and a corroborating observation (same identity group) is not a divergence', (() => { w.obs.set(w.CID, { orgUuid: 'org-x', acct: w.SPARE, known: true, ts: Date.now() }); const c2 = w.eng.corroborateReading(w.session, w.SPARE, 'probe'); return c2 && c2.agree === true; })());
-  ok('§2 …no observation at all ⇒ no opinion, and the key is unchanged', (() => { w.obs.delete(w.CID); return w.eng.corroborateReading(w.session, w.SPARE, 'probe') === null; })());
+  ok('§2 …and a label naming the slot\'s own member changes nothing either (the key is the slot either way)', (() => { w.obs.set(w.CID, { orgUuid: 'org-x', acct: w.SPARE, known: true, ts: Date.now() }); return w.eng.readingSlotFor(w.session).key === w.SPARE; })());
 }
 
 // ── §3 the turn pin ────────────────────────────────────────────────────────
@@ -595,8 +596,7 @@ if (!probe) {
   const eng = code('src/server/usage-pool-engine.js');
   ok('§9 orgVerifiedKey exists nowhere in executable code (the comments keep the refutation on record)', !/\borgVerifiedKey\b/.test(eng) && /REFUTED AND REMOVED: `orgVerifiedKey/.test(read('src/server/usage-pool-engine.js')));
   ok('§9 sessionReadingMember is gone too — one question, one answer', !/\bsessionReadingMember\b/.test(eng));
-  const omRefs = (eng.match(/observedMemberFor\(/g) || []).length;
-  ok('§9 observedMemberFor survives with exactly TWO readers, both corroboration: sessionBillingMember (journal line) and the wall ladder\'s observed-org rung', omRefs === 3 && /const observedId = observedMemberFor\(session, poolId\);\n  const divergent = noteDivergence/.test(read('src/server/usage-pool-engine.js')) && /const observedMatch = !!observedId && ids\.has\(observedId\)/.test(read('src/server/usage-pool-engine.js')), 'observedMemberFor refs (incl. its definition): ' + omRefs);
+  ok('§9 the OTel label has NO reader left in the engine (observedMemberFor / corroborateReading / noteDivergence retired 2026-09-30 — the org is a machine-wide label)', !/\bobservedMemberFor\b|\bcorroborateReading\b|\bnoteDivergence\b|observedOrgFor\?\.\(/.test(eng));
   ok('§9 server.js executes no setTruthLookup at all (the OTel map may never key a bake again)', !/setTruthLookup\s*\(/.test(code('server.js')));
   ok('§9 the ingest writes no attribution record (the corrective-record era is over)', !/recordAttribution\(/.test(code('src/server/otel-ingest.js')));
   const st = read('src/slot-transitions.js');
@@ -1019,13 +1019,15 @@ if (!probe) {
     w.eng.writeUsageCacheForKey(w.LINK, { fiveHour: { utilization: 0.7 }, source: 'on-demand', fetchedAt: Date.now(), corroborated: true });
     return w.readCache(w.LINK).corroborated === true;
   })());
-  // NEGATIVE CONTROL: a producer that DOES have an opinion still stamps it
+  // (was a NEGATIVE CONTROL "a producer that DOES have an opinion still stamps
+  // it" — since 2026-09-30 no live producer has one: the OTel org is a
+  // machine-wide label and corroborates nothing, lane-hot-switch)
   {
     const w2 = mkWorld(); const cap2 = quiet();
     w2.am.ensureSessionPoolLink(w2.P, w2.SID, w2.SPARE, { why: 'per-session-switch' }); // OTel still names FISH ⇒ divergence
     w2.reading(0.5); w2.endTurn();
     cap2.done();
-    ok('§11e NEGATIVE CONTROL: a producer whose own write HAS a verdict still stamps it (the label is not being deleted, it is being un-inherited)', w2.readCache(w2.SPARE).corroborated === false);
+    ok('§11e …and no live producer stamps a label verdict any more (a divergent OTel label leaves `corroborated` unset)', w2.readCache(w2.SPARE).corroborated === undefined);
   }
   // DRIFT GUARD: every preserve-merge writer of a usage-cache file must decide
   // the label for its own write.
@@ -4078,17 +4080,17 @@ esac
     const cap3 = quiet(); const r3 = await w.withHome(() => u.refreshViaCliPanel(w.LINK)); const lines3 = cap3.done();
     ok('§19 ③ …a repeat of the same verdict is archived and logged again but not re-journaled (one line per (key, verdict) transition)', r3 === false && w.archive().filter((x) => x.what === 'panel-identity').length === 2 && w.probeRows().filter((p) => p.outcome === 'write-refused').length === 2 && !lines3.some((l) => /panel-identity: refusing/.test(l)));
 
-    // ⑤ the ⟳ route: a session the engine cannot vouch for is SKIPPED, and the answer names the rung + verification
+    // ⑤ the ⟳ route: the answer names the rung + verification; only a lag-shadowed session is SKIPPED (the OTel label vetoes nothing since 2026-09-30)
     w.setMode('by-config');
     w.obs.set(w.CID, { orgUuid: 'org-fish', acct: w.FISH, known: true, ts: Date.now() });   // observed on Member F while linked to Member Y
     const capD = quiet(); const d1 = await w.eng.probeUsageForAccountKey(w.LINK, { detailed: true }); capD.done();
-    ok('§19 ⑤ control rung: an OTel-DIVERGENT session is not asked — skipped with the reason, nothing parsed', d1 && d1.parsed === null && d1.rung === 'control' && d1.skipped.length === 1 && d1.skipped[0].sessionId === w.SID && /observed on Member F while linked to Member Y/.test(d1.skipped[0].why), JSON.stringify(d1));
+    ok('§19 ⑤ control rung: an OTel-DIVERGENT session IS asked — the label vetoes nothing (lane-hot-switch: it is machine-wide; it was the veto that sent almost every ⟳ to the panel)', d1 && d1.rung === 'control' && d1.skipped.length === 0 && d1.sessionId === w.SID, JSON.stringify(d1));
     const capD2 = quiet(); const bare = await w.eng.probeUsageForAccountKey(w.LINK); capD2.done();
     ok('§19 ⑤ …and the bare call keeps its parsed|null shape for every other caller', bare === null);
     const { call } = w.mkUsage();
     const capR = quiet(); const a1 = await w.withHome(() => call({ account: w.LINK })); capR.done();
-    ok('§19 ⑤ the ⟳ route answer names the rung that answered (panel — the control rung skipped), that the identity was verified, and lists the skipped session with why',
-      a1.success === true && a1.via === 'cli-panel' && a1.rung === 'panel' && a1.identityVerified === true && /API-derived window/.test(a1.why) && a1.skipped.length === 1 && /observed on Member F/.test(a1.skipped[0].why), JSON.stringify(a1));
+    ok('§19 ⑤ the ⟳ route answer names the rung that answered (panel — the asked session gave nothing here) and that the identity was verified; no session was skipped for a label',
+      a1.success === true && a1.via === 'cli-panel' && a1.rung === 'panel' && a1.identityVerified === true && /API-derived window/.test(a1.why) && a1.skipped.length === 0, JSON.stringify(a1));
     // inside a re-point's LAG SHADOW: the link just moved and no reading has ended the shadow
     w.obs.set(w.CID, { orgUuid: 'org-b', acct: w.SPARE, known: true, ts: Date.now() });
     w.am.ensureSessionPoolLink(w.P, w.SID, w.SPARE, { why: 'per-session-switch' });

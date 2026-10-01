@@ -24,6 +24,7 @@ VibeSpace is a backend-agnostic web workspace for **coding agents** — it drive
 ## Reference
 
 - **[Keyboard Shortcuts](keyboard-shortcuts.md)** — Complete shortcut and drag modifier reference
+- **[Changelog style](changelog-style.md)** — How the user's changelog (CHANGELOG.md / .zh.md / .ja.md) is written; the engineers' record of every release is [changelog-engineering.md](changelog-engineering.md)
 
 ## Architecture
 

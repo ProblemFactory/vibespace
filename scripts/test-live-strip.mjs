@@ -55,6 +55,16 @@ console.log('— ① the fold (stripFold) at 1400 / 900 / 600 px');
 const L = require(path.join(REPO, MODEL));
 const realFailed = foldLegs(L);
 {
+  // lane browser-resume C (§3.9, ruling 3): THE TAB ROW folds by the strip's rule — the tab on show never; the ones the viewer
+  // can act on (the agent's / his own) outlast another conversation's / nobody's; ties right to left; the row's end always there
+  const T = (n) => String(n).padStart(4, '0') + 'C'.repeat(28);
+  const rows = [['agent', false], ['other', false], ['agent', true], ['orphan', false], ['you', false], ['other', false]].map(([owner, active], i) => ({ targetId: T(i + 1), title: 'tab ' + i, owner, active }));
+  const widths = Object.fromEntries(rows.map((r) => [r.targetId, 120]));
+  const g = (avail) => L.tabRowFold({ rows, widths, avail, endPx: 30, morePx: 44 }).folded.map((id) => Number(id.slice(0, 4)));
+  ok(J(g(2000)) === '[]' && J(g(700)) === '[6]' && J(g(560)) === '[4,6]' && J(g(440)) === '[2,4,6]' && J(g(300)) === '[1,2,4,5,6]' && J(g(100)) === '[1,2,4,5,6]',
+    '① the TAB ROW (tabRowFold): another conversation\'s / nobody\'s tabs fold first (right to left), the agent\'s / his own next, the tab on show NEVER', { 700: g(700), 560: g(560), 440: g(440), 300: g(300) });
+}
+{
   // the design's realistic six (§2 A1: "6 枚标签 ≈ 780–1260 px")
   const zh = [['bp-1', '工作(默认)'], ['bp-2', '个人'], ['~ephemeral', '本会话的浏览器'], ['bk-0000000a.1', '帮手：查价格'], ['bk-0000000a.2', '帮手：订酒店和机票并比较三家的价格'], ['bk-0000000a.3', '帮手 3']];
   const en = [['bp-1', 'Work account (default)'], ['bp-2', 'Personal'], ['~ephemeral', 'This conversation’s browser'], ['bk-0000000a.1', 'Helper: Check the prices'], ['bk-0000000a.2', 'Helper: Book the hotel and the flights'], ['bk-0000000a.3', 'Helper 3']];

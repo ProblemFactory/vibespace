@@ -28,7 +28,7 @@ vibespace-browser is visible|enabled|checked @ref
 vibespace-browser find role button click --name Submit
 vibespace-browser scroll down 600 · scrollintoview @ref · wait <ms|@ref> · wait --load networkidle
 vibespace-browser back · forward · reload
-vibespace-browser tab list · tab new · tab 2 · tab close
+vibespace-browser tab list · tab new [url] · tab <id> · tab close [<id>]   YOUR tabs only (§3 "Your tabs, and only yours")
 vibespace-browser screenshot <path> [--annotate] · pdf <path>   (write under the project, /tmp or ~/Downloads only)
 vibespace-browser eval "<js that READS the page>"
 vibespace-browser cookies get|set|clear · storage local|session · state save|load <file>
@@ -131,8 +131,41 @@ Exit codes: `0` ok · `1` a typed refusal, or the page command itself failed ·
   there `browser_cap` says "machine ceiling reached", names only YOUR browsers
   and counts the rest — nothing of yours is queued; wait for one to idle out, or
   ask the user to stop one, then run the same command again.
-* **It is EPHEMERAL.** A login you perform in it is gone once it idles out. For
-  a login that survives, use a named profile (section 3).
+* **It keeps its logins.** When it closes — let go after your turn, idled out,
+  stopped by the user, closed by you, or VibeSpace restarting — its cookies and
+  site storage are KEPT for this conversation (in a folder of its own), and your
+  next command starts it again with them; its list of open tabs is kept too.
+  They stay until the conversation ends, the user presses Forget in their Agent
+  browser window, or the kept browsers pass the user's size limit (the least
+  recently used goes first). A browser FENCED to allowed domains keeps its tabs
+  but no login (the browser CLI refuses a kept profile beside a fence); a
+  helper's browser keeps nothing (its first command's answer says so once:
+  `note: this helper's browser keeps nothing … [browser_not_kept]`). For a
+  login OTHER conversations can use too, use a named profile (section 3).
+* **Its tabs come back.** After a close you did not choose (let go after your
+  turn, idled out, VibeSpace restarting) your next command starts it again WITH
+  its tabs, in order, on the tab that was showing — the command's note says so:
+  `note: your browser was closed (…) and started again with its 3 kept tab(s) —
+  current: … [browser_restored]`. After a close somebody chose (the user's Stop,
+  your own `close` / `detach`) the logins stay but the tabs are NOT reopened by
+  themselves: `note: … its 3 tab(s) are kept — \`vibespace-browser resume\`
+  reopens them [browser_kept]`. **`vibespace-browser resume`** starts your
+  browser with its kept tabs (or, while it runs, reopens the kept ones as NEW
+  tabs — the page you are on is never navigated away); nothing kept ⇒
+  `[not_kept]`. A tab that could not be reopened is named with the browser's
+  own reason. `resume` is for THIS conversation's own browser only (a helper's
+  is never kept; a named profile keeps its own logins and any page verb opens it).
+* **The user can Resume it and hand it back.** The user's **Resume** (the live
+  view, your chat's browser card, their Agent browser panel) starts your
+  browser with its tabs too; your next command is told once: `note: the user
+  resumed your browser — N tab(s), current: <title> — <url> … [browser_resumed]`.
+  When they drove it and press **Hand back and continue…**, their one-line
+  note and the tab list arrive with your NEXT turn as a VibeSpace notice ("The
+  user drove your browser and handed it back for your next turn with a note: “…”.
+  Its tabs now: … Your next browser command runs in this same browser…") — no
+  turn is started for it; your next browser command runs in the SAME browser
+  (same logins, same tabs) on the tab they left current: re-read the page first,
+  then continue as their note says.
 * **The user can watch it and take over.** They open **Agent browser** from
   your session card or the status bar, see what you do, and can **Take over**.
   While they drive they may also type to YOU in the chat (clicking the chat
@@ -245,6 +278,83 @@ guess from a timeout:
   Agent browser panel; it loses what was typed on the page); never retry in a
   loop.
 
+### A page that keeps reloading — a navigation loop
+
+A page can also refuse to SETTLE: it navigates by itself, again and again —
+typically a sign-in page that sees a stale stored login and sends you to the
+site's app, whose page finds the login expired and sends you straight back.
+Every command that waits for the page to finish loading would only run into
+the timeout. VibeSpace watches every tab's navigations, so you never have to
+guess from a timeout:
+
+* **The loop is a named fact.** When a tab of yours commits 6 or more page
+  loads of its own within 30 s that keep returning to the same addresses — a
+  cycle of two, three or more stations (one address reloading itself counts; a
+  sign-in round trip through four addresses counts once every one of them
+  repeats, and twelve loads that settle on none of them count even when every
+  address is spelled anew — a nonce in the path; your own `open` / `click` never
+  do, nor the user's own clicks while they drive your browser), the command
+  that was waiting returns AT ONCE with `[navigation_loop]`, exit 1, and its
+  result STARTS with the sentence: `The page keeps navigating by itself and
+  will not settle — 7 loads cycling between "https://login.example/signin" and
+  "https://app.example/home" in 4 s (a navigation loop); … The site's stored
+  login may be stale — vibespace-browser site-reset <host>` (one `site-reset`
+  per host of the cycle — the stale login may sit on the sign-in host or the
+  app's; a cycle longer than three addresses says "and N more"). `Stop the page:
+  vibespace-browser stop; close it: vibespace-browser tab close. …` (the
+  addresses without their query or fragment; `--json` prints `{"success":false,
+  "code":"navigation_loop","loop":{urls,hops,sinceMs,host},"error":"<the
+  sentence>"}`). While it stands every page-waiting verb (`click`, `fill`,
+  `wait`, `eval`, …) answers the same sentence at once. The user sees it too
+  (the chip says "page keeps reloading", the live view lists the addresses).
+* **A page that loads between its reloads can still be read.** When the pages
+  of the loop do load (a dashboard on a `<meta refresh>`, a fast bounce whose
+  pages paint before moving on), the reading verbs — `snapshot`, `get`, `is`,
+  `console`, `errors` — still run and answer, with the loop sentence as a
+  `note: … [navigation_loop]` beside the result; a page that refreshes itself
+  on a regular period is said as such: `The page reloads itself every 8 s …
+  (a self-refreshing page … not a stale login)` and the chip reads "page
+  refreshes itself every 8 s". To act on such a page, `stop` it first. On a
+  loop whose pages never load (the sign-in bounce above) the reading verbs are
+  answered with the sentence at once — there is nothing to read.
+* **The ways out never wait for the page:**
+  * `vibespace-browser stop` — stops the tab loading (at once; it names the page
+    it stopped). A `snapshot` then reads where it stopped.
+  * `vibespace-browser tab close` — closes the looping tab at once (a blank tab
+    takes its place when it was the only one); `tab new <url>` goes on.
+  * `vibespace-browser screenshot [path]` — still runs, bounded: a picture, or
+    `[no_picture]` when the page never draws one (it navigates away first).
+  * `vibespace-browser open <another url>` — navigating elsewhere ends it (your
+    own navigation starts the judgement afresh).
+  * `vibespace-browser site-reset <host>` — see below.
+* **On a shared browser whose tab of yours VibeSpace cannot tell** (no live view
+  of your conversation is open, no tab of yours pinned), a loop is not pinned on
+  you: a command of yours that fails or times out there says `note: a tab of
+  this shared browser is in a navigation loop … VibeSpace cannot tell whether it
+  is yours … [navigation_loop_shared]` — no address (it may be another
+  conversation's page). If your page is the one bouncing: `tab close`, then
+  `tab new <url>` and `site-reset --host <host>`.
+* **The command the loop cut short is still finishing** in your browser session
+  for up to 25 s (the browser CLI waits out its own timeout): the answers say
+  `your browser session is still finishing the command the loop cut short
+  (about N s more)`; `stop`, `tab close`, `screenshot` and `site-reset` answer
+  now, other page commands queue behind it.
+* **`vibespace-browser site-reset <host>` clears ONE site's stored login** — the
+  cookies that site receives (its own and its parent domain's, e.g.
+  `.example.com`; each named and counted) and the data its pages stored (local
+  storage, IndexedDB, caches, service workers, session storage of open tabs);
+  nothing of any other site. `<host>` must be the site of one of your open tabs;
+  `site-reset --host <host>` names another on purpose. In YOUR OWN browser (your
+  conversation's browser, or a profile only you use) it runs at once and says
+  what it cleared; then `open` the page again — signing in is the user's. On a
+  **shared** profile (other conversations use it, or the user browses in it) it
+  runs nothing: it files ONE card in the user's chat ("The agent proposes
+  clearing <host>'s login … Every conversation using this profile (N) … will be
+  signed out"), and you are told when they approve (with their next message if
+  your turn has ended); a rejection is said at your next navigation to that
+  host. Refused by name: `remote_session` (your browser runs on another
+  machine), `not_watched`, `host_not_current`, `bad-host`.
+
 ---
 
 ## 3. Named profiles — a login that survives
@@ -316,14 +426,36 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
   from another conversation's live view, `browser_busy` says so. Your command
   did not run: wait, then run it again ONCE — never in a loop; or tell the
   user (they can take over from that conversation's live view).
+* **Your tabs, and only yours.** A profile's ONE browser holds every
+  conversation's tabs and the user's own (Browse yourself), and the browser
+  CLI itself would list and close any of them — so on a shared profile the
+  `tab` verbs are VibeSpace's: `tab list` names YOUR tabs (the tab it gave you,
+  every tab you opened with `tab new`, every popup your pages opened) as
+  `t3  <title> — <url>  [current]`, and only COUNTS the rest ("2 other tabs in
+  this browser are not yours"); `tab <id>` / `tab close <id>` (a `t<N>`, a
+  label or a target id) of another conversation's tab or of the user's is
+  refused `not_your_tab` — nothing ran. `tab close` with no id closes your
+  current tab: your next page verb then answers `tab_gone` until you switch to
+  another of yours (`tab <id>`) or open one (`tab new <url>`) — the answer says
+  so. A `tab` line inside a `batch` is refused `tab_in_batch` there (run it on
+  its own). `tabs_unreadable` = the browser's tab list could not be read:
+  nothing ran, run it again once. On a "separate tabs" (mediated) profile and
+  on your conversation's own browser every tab you see is already yours.
+* **The user may close or switch your tabs while they drive.** During a
+  takeover the live view's tab row lets them switch your current tab or close
+  one of yours (never your last one, never another conversation's). A tab that
+  was your current one is left for another of yours FIRST, so your next command
+  runs there. The handback says what they did — "While driving, the user closed
+  2 of your tabs (“Cart — https://shop.example/cart”, …) and switched your
+  current tab to “Docs — …”." — re-read the page before continuing.
 * **`close --all` on an attached profile closes only YOUR session** — your
   connection to the profile's browser, then your lease (the note says
   `[close_all_scoped]`); the profile's one browser keeps running for the keeper
   and every other session on it, whether or not anyone else is attached (the
   browser CLI's own `close --all` would close every session of the profile).
   `detach` drops your own tab and lease — on your conversation's own ephemeral
-  browser (no profile attached) it stops that browser now (its pages close;
-  your next command starts it again). While the USER has taken a browser over,
+  browser (no profile attached) it stops that browser now (its pages close,
+  its logins are kept; your next command starts it again). While the USER has taken a browser over,
   `detach` is refused `browser_paused` like any command (it would end their
   takeover) — wait for the handback. If they take over WHILE your `close` runs,
   the close still ran but your lease is NOT dropped: the note says so with
@@ -334,8 +466,9 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
 * **When the user closes a profile's browser (or it crashes).** VibeSpace
   starts it again by itself, within seconds while you hold it, or on your next
   command — your open pages are gone. Your next command then answers
-  `tab_gone` ("bound tab is gone"): run `vibespace-browser tab new <url>` and
-  carry on. If it answers `browser_closed`, it could not be started again
+  `tab_gone` ("bound tab is gone" — the note names this tool's way out,
+  `[tab_gone]`): run `vibespace-browser tab new <url>` (or `tab list`, then
+  `tab <id>` to one of yours) and carry on. If it answers `browser_closed`, it could not be started again
   (or it died right after starting): run your command once more — a command
   retries at once — and if it still answers `browser_closed`, tell the user
   to stop it from the Browser panel, then run your command again.
@@ -385,24 +518,50 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
   be used, WHY. `new <label> --host <machine>` runs the profile's browser on a
   paired machine; `new <label> --provider cdp --cdp-port <n>` reaches a browser
   somebody else started — nothing is started, nothing of yours is stopped.
-* **Being blocked.** When a page blocks you (a captcha, a 403/429, an anti-bot
-  wall), do NOT switch anything yourself: `blocked --url <u> --why <code>`
-  records your CLAIM with your name and the user sees it in the live view. The
-  live view offers "Switch to CloakBrowser…" beside it ONLY when another
-  browser is available for that profile on this instance (the answer's `next`
-  says which); otherwise the user sees the claim and a Dismiss, and getting
-  past the check is theirs (a takeover in the live view). `--remember` files a
-  per-site hint; `backend` lists the hints — no user surface shows them. A
-  backend switch (`backend <name>`) is a PROPOSAL: it happens directly only
-  when you are the only session attached and nobody drives; otherwise it
-  becomes a "For you" item for the user. While a switch restarts the browser,
-  commands answer `browser_restarting` — retry in a moment, never in a loop.
+* **Being blocked — you PROPOSE, the user approves.** When a sign-in page
+  says the browser may not be secure (your navigation's result then carries
+  `hint: may-need-cloak — … sign-in page says this browser may not be secure`),
+  or a captcha wall / a 403 / a 429 / an anti-bot page stops you: run
+  `vibespace-browser blocked --url <the page> --why <code> --tier 2` AT ONCE
+  (`--why sign-in-refused` for a refused sign-in, `http-403` / `http-429` /
+  `captcha` otherwise) and tell the user in ONE sentence that a card in the chat
+  waits for their Approve. Do NOT explain workarounds, do NOT copy a session or
+  its cookies from anywhere, do NOT open another browser, and never switch
+  anything yourself — the switch is the user's Approve (D31: nothing escalates
+  by itself). The claim puts ONE card in the chat (and one "For you" item) that
+  says exactly what Approve does: install CloakBrowser if it is missing, add
+  ONLY that page's host to the sites CloakBrowser may open (for a known
+  vendor's sign-in host — Google, Microsoft, GitHub, Apple — also the sites
+  that sign-in page loads its parts from, named on the card), then switch THIS
+  conversation's browser to CloakBrowser (your profile in place — or a new
+  CloakBrowser profile for you when your browser is the temporary one or a
+  newer Chromium wrote it), and reopen the page. A second `blocked` for the
+  same site while the card waits is the same card (`duplicate`) — never ask
+  again. When the user approves you are told ("Approved: your browser is now
+  CloakBrowser …; re-run the sign-in at <url>") — in your running turn when that
+  is free, else with their next message — then re-read the page and sign in
+  again; on the new profile the sign-in is the USER's (take-over in the live
+  view). When they REJECT it, your next `open` of that site prints `note: the
+  user rejected switching … [proposal_rejected]` once — do not work around it.
+  When nothing can be offered here (another machine, CloakBrowser cannot be
+  installed, your browser already is CloakBrowser) the answer's `next` says why:
+  tell the user which page needs them. `--tier 3` / `--tier 1` records the claim
+  only (no card). `--remember` files a per-site hint; `backend` lists the hints.
+  `backend <name>` is still a PROPOSAL of its own: it happens directly only when
+  you are the only session attached and nobody drives; otherwise it becomes a
+  "For you" item. While a switch restarts the browser, commands answer
+  `browser_restarting` — retry in a moment, never in a loop.
 * **On CloakBrowser** (`backend` says `cloak`): the browser reaches ONLY the
   sites the user listed (Settings → Agent browser → "Sites CloakBrowser may
   open"); `providers` prints them. A site not on that list does not load — an
   http page opens as one line, `egress refused: <host> is not in the egress
-  allowlist (…)`, an https one fails to open. Tell the user which site to add;
-  never retry in a loop, never ask for a switch back to get around it.
+  allowlist (…)`, an https one fails to open, and a part of a page (a script,
+  a font) from such a site is simply missing. Every page command whose page was
+  refused a site prints `note: CloakBrowser's site list refused <host>, … [egress_refused]`:
+  run the `blocked --url https://<host>/ --why egress-refused --tier 2` it names
+  (one claim per site) — that card asks the user to let CloakBrowser open it,
+  nothing else changes. Never retry in a loop, never ask for a switch back to
+  get around it.
 * **Separate tabs** (`new <label> --sharing instance`) is an ISOLATION option,
   not "who may use it": it confines every attached session to its own tabs
   through a mediated connection: `tab
@@ -471,6 +630,8 @@ default with `*`.
 * **`dialog_open` is answered, never waited out.** Read what the page asks,
   decide from the task, `vibespace-browser dialog accept [text]` or `dismiss`,
   then continue — never retry the command that ran into it.
+* **`navigation_loop` is got out of, never waited out** — `stop`, `tab close` or
+  `site-reset <host>`; never retry the command that ran into it.
 * **`browser_paused` / `browser_interrupted` are never retried in a loop.**
   Wait for the handback; it names what to re-run. The same for `browser_busy`
   (another conversation drives a shared browser): run the command again once,
@@ -480,7 +641,10 @@ default with `*`.
   Agent browser panel"); never offer the user a `vibespace-browser` command line, and never
   create a second profile to get around a refusal.
 * **A login or a captcha is the user's.** Tell them which page needs them and
-  stop; continue after the handback.
+  stop; continue after the handback. When the SITE refuses the browser itself
+  (a sign-in page saying the browser may not be secure, an anti-bot wall), file
+  `blocked --url <u> --why <code> --tier 2` first — the user's Approve on that
+  card is the way through, never a workaround of yours.
 * **Never look for another road to a browser** — not the user's own desktop
   browser windows, not an absolute path, not a raw CDP port. If this tool
   cannot do what you need, say so.
@@ -524,6 +688,12 @@ default with `*`.
   answers `[browser_interrupted]` so you know to re-check the page.
 * **A reached (`--provider cdp`) or remote profile has no live view yet** — say
   so rather than working around it.
+* **A page that keeps reloading or bouncing between two addresses** is reported
+  to you as a navigation loop with the addresses; the usual cause is a stale
+  stored login — run `site-reset <host>` (your own browser clears it at once; on
+  a shared profile the same command files it for the user's Approve) and tell
+  the user in one sentence; never restart the browser to get out of it, never
+  open another browser.
 * **The browser CLI may be missing.** A command that answers `binary_absent`
   means this machine has nothing to browse with; tell the user
   (`vibespace-browser providers` lists what exists).

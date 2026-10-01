@@ -316,9 +316,9 @@ try {
   ok(cA.status === 0 && cD.status === 0 && logOf('launches.log').length === 1 && !logOf('refused.log').length && logOf('connects.log').length === 2, 'both conversations\' commands run over the CDP url — two connections, one browser, no SingletonLock');
 
   // ── path B: the USER pins work for conversation 2 (rung D) in Session properties while conversation 1 runs it ──
-  ok(sB._browserVariant === 'D' && be.resolvedProfileDir(KB) === '', 'path B setup: conversation 2 spawned on rung D, its own config names no profile');
+  ok(sB._browserVariant === 'D' && be.resolvedProfileDir(KB) === be.scratchDirFor(KB), 'path B setup: conversation 2 spawned on rung D, its own config names only its OWN kept directory (lane browser-resume §3.9 — never a profile\'s)');
   r = await j('POST', '/api/browser/pin', { sessionId: 'sess-2', profile: 'work' });
-  ok(r.status === 200 && r.json.pin && r.json.pin.profileId === work.id && r.json.pin.by === 'user' && be.resolvedProfileDir(KB) === '' && /opens "work"/.test(r.json.appliesFrom), 'path B: the user\'s pin names the profile and re-points NOTHING at its directory (the config still names no profile)', r.json);
+  ok(r.status === 200 && r.json.pin && r.json.pin.profileId === work.id && r.json.pin.by === 'user' && be.resolvedProfileDir(KB) === be.scratchDirFor(KB) && /opens "work"/.test(r.json.appliesFrom), 'path B: the user\'s pin names the profile and re-points NOTHING at its directory (the config still names only the conversation\'s own kept one)', r.json);
   r = await j('POST', '/api/agent/browser/resolve', { argv: ['open', 'https://work.example/b'], wrapper: true }, as(sB));
   const envB = r.json && r.json.env;
   ok(r.status === 200 && r.json.kind === 'attachment' && Array.isArray(envB) && envB.some((kv) => kv === `AGENT_BROWSER_CDP=ws://127.0.0.1:19777/devtools/browser/fake-vs-${work.id}`) && logOf('launches.log').length === 1 && !k.ephemeralFor(KB), 'path B: conversation 2\'s first bare command opens its pin THROUGH THE KEEPER — kind attachment, the same browser\'s CDP url, NO second launch, no temporary browser started', r.json);
@@ -376,7 +376,7 @@ try {
     // put conversation 6 back the way the ruling's boot conversion does (and prove it) for the legs below
     R.setup(ctxFor(k));
     const n = R.convertPinnedDirs();
-    ok(n === 1 && be.resolvedProfileDir(KF) === '' && k.pinFor(KF) && k.pinFor(KF).profileId === work.id, 'the boot conversion puts the pre-ruling pinned conversation back on its own browser (the pin stays — it is the default attachment now)');
+    ok(n === 1 && be.resolvedProfileDir(KF) === be.scratchDirFor(KF) && k.pinFor(KF) && k.pinFor(KF).profileId === work.id, 'the boot conversion puts the pre-ruling pinned conversation back on its own browser (the pin stays — it is the default attachment now)');
     await dropEphemeral(KF);
     await j('POST', '/api/browser/pin', { sessionId: 'sess-6', profile: null });
   }

@@ -14,6 +14,7 @@ const { get: harnessOf } = require('./harnesses'); // S3: store.warmTranscript p
 const { capsOf } = require('./backend-caps');      // inputModes.queueVerbs / review / renameWriteback gates (never a backend-id branch)
 const { reconcileAttachStreaming } = require('./turn-state'); // §2.5: ONE attach-time streaming decision, shared with the live consumer
 const { pidsMatchingCmdline } = require('./cli-identity'); // THE process reader: the kill path's `pgrep -f` without the fork
+const { shrinkVerdict, windowIds } = require('./lib/desktop-record.js'); // PURE (userW inc-mun7qjmw-iksh): the layout-sync shrink belt
 
 /** The sentence a harness-level verb refusal carries. Every branch says what
  *  happens to the message ANYWAY — a refusal that only says "no" leaves the
@@ -256,6 +257,27 @@ function registerWsHandler(wss, ctx) {
   // connections; resets on server restart — clients reset their counter on WS
   // reconnect, which a server restart always forces).
   const layoutSyncSeqRef = { value: 0 };
+  // THE BELT'S MEMORY OF ARRIVALS (lane desktop-move verify r1, D4/D2): per desktop, the windows a write ADDED to
+  // the stored record and which socket wrote them, for 10 min. A later write from ANOTHER socket that drops one of
+  // them with nothing to explain it is refused at ANY count (PURE shrinkVerdict's `recent`): that socket wrote from a
+  // base older than the arrival — a broadcast it missed under a gate, an outage, a boot read that predated the write.
+  // A socket's own arrivals it may drop by the ≥ 2 rule. A deleted desktop forgets its arrivals.
+  const ARRIVAL_TTL_MS = 10 * 60 * 1000;
+  const layoutArrivals = new Map(); // desktopId → Map(winId → {at, by})
+  let layoutClientSeq = 0;
+  const layoutClientOf = (ws) => (ws._layoutClient || (ws._layoutClient = ++layoutClientSeq));
+  const recentArrivals = (desktopId, ws) => {
+    const m = layoutArrivals.get(desktopId); if (!m) return [];
+    const now = Date.now(), me = layoutClientOf(ws), out = [];
+    for (const [id, a] of m) { if (now - a.at > ARRIVAL_TTL_MS) { m.delete(id); continue; } if (a.by !== me) out.push(id); }
+    return out;
+  };
+  const noteArrivals = (desktopId, prevIds, nextIds, ws) => {
+    let m = layoutArrivals.get(desktopId); if (!m) { m = new Map(); layoutArrivals.set(desktopId, m); }
+    const prev = new Set(prevIds), next = new Set(nextIds), at = Date.now(), by = layoutClientOf(ws);
+    for (const id of next) if (!prev.has(id)) m.set(id, { at, by });
+    for (const id of prev) if (!next.has(id)) m.delete(id);
+  };
 
   // 'create' case family — extracted to src/ws-create.js (拆分P2). Handler is
   // connection-agnostic; ws/data/attachedSessions ride per call.
@@ -1486,10 +1508,40 @@ function registerWsHandler(wss, ctx) {
           // Refuse new writes and scrub any persisted residue.
           if (desktopId === '__stage__') break;
           if (layoutData.desktops?.__stage__) delete layoutData.desktops.__stage__;
+          // A DESKTOP THE META DOES NOT NAME (lane desktop-move verify r2 ⑦): a per-desktop write for a desktop deleted
+          // meanwhile — a page still on it, an old bundle, a concurrent delete of the deleter's target — used to
+          // re-create `desktops[<id>]`: an orphan record no meta names, cached as a ghost held record on every boot,
+          // its windows reachable by nobody. Refused; the sender gets the current meta and drops the desktop too.
+          if (desktopId && Array.isArray(layoutData.desktopMeta) && layoutData.desktopMeta.length && !layoutData.desktopMeta.some((d) => d && d.id === desktopId)) {
+            console.warn(`[layout-sync] REFUSED a record of desktop ${desktopId}: no such desktop (deleted meanwhile); the sender is told`);
+            try { telemetry?.record?.({ kind: 'event', name: 'layout-sync-refused', detail: 'no-such-desktop' }); } catch { }
+            try { ws.send(JSON.stringify({ type: 'layout-sync-refused', desktopId, reason: 'no-such-desktop', desktops: layoutData.desktopMeta, sentAt: data.sentAt ?? null })); } catch { }
+            break;
+          }
+          // THE SHRINK BELT (userW inc-mun7qjmw-iksh — the money of that bug is data loss): a sync that drops ≥ 2
+          // windows of the stored record that nothing explains is REFUSED for that desktop. Explained = the client's
+          // own evidence (a close, a move, a replace, a window it tried to build and could not — `evidence`, the
+          // client's recent ops) or the window's session being gone. The server keeps its record, tells the sender
+          // `layout-sync-refused` WITH that record (the sender reconciles: its view becomes the record plus what it
+          // built, and the corrected record comes back), writes nothing, broadcasts nothing. A legitimate bulk close
+          // carries a close for every window it drops. PURE rule: src/lib/desktop-record.js shrinkVerdict.
+          if (desktopId && layoutData.desktops?.[desktopId]?.autoSave && data.state && Array.isArray(data.state.windows)) {
+            const stored = layoutData.desktops[desktopId].autoSave;
+            const v = shrinkVerdict({ prev: stored.windows, next: data.state.windows, evidence: data.evidence, alive: (sid) => activeSessions.has(sid), recent: recentArrivals(desktopId, ws) });
+            if (!v.ok) {
+              const name = (layoutData.desktopMeta || []).find((d) => d.id === desktopId)?.name || desktopId;
+              const arrived = v.arrived?.length ? `; ${v.arrived.length} of them (${v.arrived.join(', ')}) arrived from another client lately — this record was written from an older base` : '';
+              console.warn(`[layout-sync] REFUSED a record of desktop "${name}" (${desktopId}): it drops ${v.unexplained.length} window(s) with no close/move/kill (${v.unexplained.join(', ')}) — ${(stored.windows || []).length} → ${data.state.windows.length}${arrived}; the server keeps its record`);
+              try { telemetry?.record?.({ kind: 'event', name: 'layout-sync-refused', detail: `${v.reason} ${v.unexplained.length}/${(stored.windows || []).length}${v.arrived?.length ? ' arrived=' + v.arrived.length : ''}` }); } catch { }
+              try { ws.send(JSON.stringify({ type: 'layout-sync-refused', desktopId, reason: v.reason, unexplained: v.unexplained, arrived: v.arrived || [], state: stored, sentAt: data.sentAt ?? null })); } catch { }
+              break;
+            }
+          }
           if (desktopId) {
             // Per-desktop save
             if (!layoutData.desktops) layoutData.desktops = {};
             if (!layoutData.desktops[desktopId]) layoutData.desktops[desktopId] = {};
+            if (Array.isArray(data.state?.windows)) noteArrivals(desktopId, windowIds(layoutData.desktops[desktopId].autoSave || null), windowIds(data.state.windows), ws); // what this write ADDS is remembered against every OTHER socket
             layoutData.desktops[desktopId].autoSave = { ...data.state, updatedAt: Date.now() };
           } else {
             // Legacy single-desktop save
@@ -1501,6 +1553,10 @@ function registerWsHandler(wss, ctx) {
           wss.clients.forEach(client => {
             if (client !== ws && client.readyState === WS_OPEN) { try { client.send(syncMsg); } catch {} }
           });
+          // THE ACK (lane desktop-move verify r5 ⑤): the sender learns its record was READ and written — `sentAt` names the
+          // save back; the client releases the acts that save carried only now, never at its send (a save on a socket the
+          // server never read used to count as sent, and the reconnect's re-read reversed the act for good)
+          try { ws.send(JSON.stringify({ type: 'layout-sync-ack', desktopId: desktopId || null, sentAt: data.sentAt ?? null, seq: layoutSyncSeqRef.value })); } catch { }
           break;
         }
 
@@ -1527,6 +1583,7 @@ function registerWsHandler(wss, ctx) {
             layoutData.desktopMeta = layoutData.desktopMeta.filter(d => d.id !== data.desktopId);
           }
           if (layoutData.desktops) delete layoutData.desktops[data.desktopId];
+          layoutArrivals.delete(data.desktopId); // the belt's memory of a deleted desktop goes with it
           writeLayouts(layoutData);
           const broadcast = JSON.stringify({ type: 'desktop-updated', desktops: layoutData.desktopMeta || [] });
           wss.clients.forEach(c => { if (c !== ws && c.readyState === WS_OPEN) try { c.send(broadcast); } catch {} });

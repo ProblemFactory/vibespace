@@ -421,7 +421,9 @@ console.log('(5) setting + wiring');
   const SV = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8'); // raw: server.js carries '/*' inside strings, the comment stripper would eat code
   check('server.js pin: the store is built with getSetting = serverSetting; agent-routes gets serverSetting', /new TaskGroupManager\(\{[\s\S]{0,200}getSetting: \(k\) => serverSetting\(k\)/.test(SV) && /setupAgentRoutes\(\{[^}]*serverSetting,/.test(SV));
   const BS = fs.readFileSync(path.join(REPO, 'src/backlog-select.js'), 'utf8');
-  check('backlog-select stays PURE (no require, no Buffer — the bundle shares it)', !/\brequire\(/.test(strip(BS)) && !/\bBuffer\./.test(strip(BS)));
+  // lane peer-census verify r4 F1: the ONE import allowed is the PURE belt (src/peer-text.js — itself PURE and bundled: the
+  // nudge quotes other sessions' item texts and cuts them, and a cut must be followed by the rule where the cut is)
+  check('backlog-select stays PURE (no require but the PURE belt ./peer-text.js, no Buffer — the bundle shares it)', (strip(BS).match(/\brequire\(/g) || []).length === 1 && /require\('\.\/peer-text\.js'\)/.test(strip(BS)) && !/\bBuffer\./.test(strip(BS)));
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

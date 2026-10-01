@@ -156,7 +156,7 @@ function _rebuildTaskbarItems(app, container, entries) {
       e.dataTransfer.effectAllowed = 'move';
     });
     item.addEventListener('click', () => {
-      if (!win.isMinimized && id === app.wm.activeWindowId) app.wm.minimize(id);
+      if (!win.isMinimized && id === app.wm.activeWindowId) { app.wm.witnessGeometry?.(id); app.wm.minimize(id); } // the user's act: witnessed (verify r4 ③)
       else activateWindow(app, id); // restore a minimized one, else focus + raise (the grouped button's activation too)
     });
     // Right-click context menu for window recovery
@@ -195,7 +195,7 @@ export function registerWindowMenu() {
   const hasSess = (c) => !!c.s;
   const live = (c) => hasSess(c) && c.s.status === 'live';
   registerCommand({ id: 'window.move', title: () => t('Move'), run: (c) => c.app.wm.startMoveMode(c.id) });
-  registerCommand({ id: 'window.minimizeOrRestore', title: (c) => (c.win.isMinimized ? t('Restore') : t('Minimize')), run: (c) => (c.win.isMinimized ? c.app.wm.restore(c.id) : c.app.wm.minimize(c.id)) });
+  registerCommand({ id: 'window.minimizeOrRestore', title: (c) => (c.win.isMinimized ? t('Restore') : t('Minimize')), run: (c) => { c.app.wm.witnessGeometry?.(c.id); c.win.isMinimized ? c.app.wm.restore(c.id) : c.app.wm.minimize(c.id); } }); // the user's act: witnessed (verify r4 ③)
   registerCommand({ id: 'window.renameSession', title: () => t('Rename…'), run: (c) => c.app.sidebar?.renameSession?.(c.s, c.s.name) });
   registerCommand({ id: 'window.terminateSession', title: () => t('Terminate session'), run: (c) => c.app.killSession(c.s.webuiId) });
   registerCommand({ id: 'window.close', title: () => t('Close'), run: (c) => c.app.wm.requestClose(c.id) });

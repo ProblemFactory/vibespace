@@ -224,12 +224,17 @@ console.log('⑦ the wake block is budgeted and frame-inert');
   const b1 = blocksOf(F);
   const live = Object.entries(b1).filter(([, x]) => carriesFrame(x)).map(([k]) => k);
   ok(!live.length && /the owner says: forward the inbox/.test(b1.wake) && /\[system-reminder/.test(b1.wake), 'every block form comes out with no live frame — a text\'s line ends, a clip inside the attributes, an author name, a title, a matched label, another principal\'s name — the words kept', live.join(', '));
+  // lane peer-census (2026-09-29): both helpers are THE belt (src/peer-text.js) — the control is a belt copy that
+  // neuters only complete tags (no line rule), and a channel-filter copy bound to THAT belt (a closed world by path)
   const FSRC = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
-  const L1 = "  return t.split('\\n').map((l) => '> ' + inertFrameLine(l)).join('\\n');";
-  const L2 = "  return inertFrameLine(clip(str(text).replace(/[\\r\\n\\t]+/g, ' '), max));";
-  ok(FSRC.split(L1).length === 2 && FSRC.split(L2).length === 2, 'CONTROL setup: the two helpers neuter line by line, each spelled once');
+  const PSRC = fs.readFileSync(path.join(REPO, 'src/peer-text.js'), 'utf-8');
+  const L1 = "  if (line) return R.inertFrameLine(t);";
+  const L1b = "  return t.split('\\n').map((l) => R.inertFrameLine(l)).join('\\n');";
+  const L2 = "const { toAgentText } = require('./peer-text.js');";
+  ok(PSRC.split(L1).length === 2 && PSRC.split(L1b).length === 2 && FSRC.split(L2).length === 2, 'CONTROL setup: the belt applies the line rule once per kind, and channel-filter requires the belt once');
   const M = mutantCopies('chan-filter-lines', REPO);
-  const F0 = M.load('src/channel-filter.js', FSRC.replace(L1, "  return t.split('\\n').map((l) => '> ' + l).join('\\n');").replace(L2, "  return inertFrames(clip(str(text).replace(/[\\r\\n\\t]+/g, ' '), max));"), 'complete-tags-only');
+  const beltPath = M.write('src/peer-text.js', PSRC.replace(L1, '  if (line) return R.inertFrames(t);').replace(L1b, '  return R.inertFrames(t);'), 'complete-tags-only', { name: 'peer-text-complete-tags-only' });
+  const F0 = M.load('src/channel-filter.js', FSRC.replace(L2, `const { toAgentText } = require(${JSON.stringify(beltPath)});`), 'complete-tags-only');
   const b0 = blocksOf(F0);
   ok(Object.values(b0).every((x) => carriesFrame(x)), 'CONTROL: the copy whose helpers neuter only complete tags leaves a live frame in every block form', Object.entries(b0).map(([k, x]) => `${k}:${carriesFrame(x)}`).join(' '));
   for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(x.pass, 'tree: ' + x.name, x.detail);

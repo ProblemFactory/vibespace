@@ -495,6 +495,9 @@ function send(payload) {
   child.stdin.write(`${line}\n`);
 }
 
+// the reset-credit consume's per-try answer budget (a suite shortens it to
+// drive the one same-key retry without waiting 30 s)
+const RESET_CREDIT_CONSUME_TIMEOUT_MS = Math.max(50, Number(process.env.VIBESPACE_CODEX_RESET_TIMEOUT_MS) || 30000);
 function request(method, params, timeoutMs = 30000) {
   const id = nextId++;
   send({ id, method, params });
@@ -3100,9 +3103,27 @@ async function handleInput(msg) {
   if (msg.type === 'codex-reset-credit') {
     // Consume a stored rate-limit reset credit (owner ask: let the user choose
     // reset vs switching accounts). Outcomes seen in the binary enum:
-    // reset | nothingToReset | alreadyRedeemed (+ cooldown_active state).
+    // reset | nothingToReset | alreadyRedeemed (+ cooldown_active state);
+    // 0.159.3 adds noCredit.
+    // THE IDEMPOTENCY KEY (lane-codex-0159): codex-cli >= 0.159 REFUSES a consume
+    // without one ("Invalid request: missing field `idempotencyKey`"; 0.153.4 took
+    // `{}`) and dedupes by it — "reuse the same value when retrying that attempt".
+    // The SERVER mints one per press and hands it down; a server older than the
+    // key sends none and this wrapper mints its own. ONE retry, only when the
+    // consume got NO answer (a timeout: it may have landed) and with the SAME
+    // key, so the vendor spends at most one credit for the press (a landed first
+    // try answers the retry `alreadyRedeemed` = this key's reset completed).
+    const idempotencyKey = (typeof msg.idempotencyKey === 'string' && msg.idempotencyKey.trim())
+      ? msg.idempotencyKey.trim().slice(0, 200)
+      : require('crypto').randomUUID();
+    let attempts = 0;
     try {
-      const r = await request('account/rateLimitResetCredit/consume', {}, 30000);
+      let r = null;
+      for (;;) {
+        attempts += 1;
+        try { r = await request('account/rateLimitResetCredit/consume', { idempotencyKey }, RESET_CREDIT_CONSUME_TIMEOUT_MS); break; }
+        catch (e) { if (attempts < 2 && /timed out after/.test(String((e && e.message) || e))) continue; throw e; }
+      }
       // THE POST-RESET READING GOES OUT FIRST (reset credits r3): the server
       // decides the pool on the account's cache, and until this re-read lands
       // that cache still carries the wall's spent mark — answering `reset`
@@ -3118,8 +3139,8 @@ async function handleInput(msg) {
         if (rl2) { meta.rateLimits = rl2; meta.rateLimitsFetchedAt = Date.now(); scheduleMeta(); emitTaskEvent('rate_limits_updated', { rateLimits: rl2, resetCredits: r2?.rateLimitResetCredits || null }); }
         else emitTaskEvent('rate_limits_updated', { error: 'no rateLimits in the post-reset read', onDemand: true, afterReset: true });
       } catch (e2) { emitTaskEvent('rate_limits_updated', { error: String((e2 && e2.message) || e2), onDemand: true, afterReset: true }); }
-      emitTaskEvent('reset_credit_result', { result: r || null, outcome: r?.outcome || null });
-    } catch (e) { emitTaskEvent('reset_credit_result', { error: String(e.message || e) }); }
+      emitTaskEvent('reset_credit_result', { result: r || null, outcome: r?.outcome || null, idempotencyKey, attempts });
+    } catch (e) { emitTaskEvent('reset_credit_result', { error: String(e.message || e), idempotencyKey, attempts }); }
     return;
   }
   if (msg.type === 'review-start') {

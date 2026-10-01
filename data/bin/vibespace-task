@@ -98,7 +98,7 @@ async function call(method, url, body) {
 // shipped to hosts without a checkout and cannot require the module).
 const MARK = { high: '! ', low: '↓ ' };
 const fmtBacklog = (items, showDetail, you) => {
-  items.forEach((b, i) => {
+  for (const [i, b] of items.entries()) {   // (a for-of, not a callback: the print census walks what each printed piece holds — lane peer-census verify r4)
     const claimed = b.claimedBy || [];
     const mine = !!you && claimed.includes(you);
     const others = claimed.filter((k) => k !== you).length;
@@ -110,7 +110,7 @@ const fmtBacklog = (items, showDetail, you) => {
     if (showDetail && claimed.length) console.log('       claimed by ' + claimed.join(', '));
     if (showDetail && b.addedBy) console.log('       parked by ' + b.addedBy + (b.addedAt ? ' at ' + new Date(b.addedAt).toISOString().slice(0, 16).replace('T', ' ') : ''));
     if (showDetail && b.detail) for (const dl of b.detail.split('\n')) console.log('       ' + dl);
-  });
+  }
   if (!showDetail && items.some((b) => b.detail)) console.log('  († = has detail — rerun with --full)');
 };
 const printItem = (b) => {

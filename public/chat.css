@@ -344,6 +344,19 @@
 .chat-browser-session-note { font-size: 11px; margin-top: 4px; }
 .chat-browser-session-actions { display: flex; gap: 6px; margin-top: 6px; }
 @media (max-width: 768px) { .chat-browser-session-replay { min-height: 44px; padding: 6px 14px; font-size: 12px; } }
+/* lane browser-propose (2026-09-30): the agent's PROPOSAL card — what Approve runs, word for word; ONE primary Approve + a quiet Reject */
+.chat-browser-proposal .chat-browser-proposal-ic { display: inline-flex; flex: 0 0 auto; }
+.chat-browser-proposal-claim { font-size: 13px; overflow-wrap: anywhere; }
+.chat-browser-proposal-evidence { font-size: 11px; margin-top: 2px; overflow-wrap: anywhere; }
+.chat-browser-proposal-plan { margin: 6px 0 0; padding-left: 18px; font-size: 12px; line-height: 1.45; }
+.chat-browser-proposal-plan li { overflow-wrap: anywhere; margin: 2px 0; }
+.chat-browser-proposal-none { font-size: 12px; margin-top: 6px; overflow-wrap: anywhere; }
+.chat-browser-proposal-state { font-size: 12px; margin-top: 6px; font-weight: 600; overflow-wrap: anywhere; }
+.chat-browser-proposal-state[data-state="failed"] { color: var(--red); }
+.chat-browser-proposal-state[data-state="done"] { color: var(--green); }
+.chat-browser-proposal-state[data-state="rejected"] { color: var(--text-dim); font-weight: 400; }
+.chat-browser-proposal-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+@media (max-width: 768px) { .chat-browser-proposal-actions .mounts-btn { min-height: 44px; padding: 6px 16px; font-size: 13px; } }
 .chat-peer-name:hover { text-decoration: underline; }
 
 /* ── Codex multi-agent collab rows (B-7473) ──

@@ -12,6 +12,7 @@
 //   convCaps    a CACHE with a TTL and an honest degrade
 //   offers      both halves must allow it; `unknown` ⇒ not offered + a reason
 //   freshness   answers "how long ago", so it reads the clock it is HANDED
+import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
@@ -357,7 +358,9 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
     ['an ignored time window parks for 24 h…', feedCaps, acct({ feed: { refused: { at: NOW - 3600e3, code: 'time-range-ignored', retryAt: NOW + 23 * 3600e3 } } }), { state: 'refused', why: 'time-range-ignored' }],
     ['…and retries after it', feedCaps, acct({ feed: { refused: { at: NOW - 25 * 3600e3, code: 'time-range-ignored', retryAt: NOW - 3600e3 } } }), { state: 'carrying', carrying: true }],
     ['the vendor limiting the search (a back-off carries nothing)', feedCaps, acct({ feed: { backoffUntil: NOW + 30e3 } }), { state: 'backoff', why: 'rate-limited', on: true, carrying: false }],
-    ['verify r1: the search NOT ANSWERING (a 5xx / a timeout — the feed\'s own failure ladder) says so', feedCaps, acct({ feed: { backoffUntil: NOW + 30e3, backoffWhy: 'failed' } }), { state: 'backoff', why: 'failed', on: true, carrying: false }],
+    ['verify r1: the search NOT ANSWERING (a 5xx / a timeout — the feed\'s own failure ladder, three in a row) says so', feedCaps, acct({ feed: { backoffUntil: NOW + 30e3, backoffWhy: 'failed', strikes: 3, strikeWhy: 'transport' } }), { state: 'backoff', why: 'failed', on: true, carrying: false }],
+    ['lark-p2p verify r1: ONE missed answer while the last good page is fresh keeps the mode (the feed delivered)', feedCaps, acct({ feed: { backoffUntil: NOW + 30e3, backoffWhy: 'failed', strikes: 1, strikeWhy: 'transport' } }), { state: 'carrying', carrying: true, fresh: true }],
+    ['…but a missed answer after a STALE last page is the search failing', feedCaps, acct({ feed: { lastOkAt: NOW - 10 * 60e3, backoffUntil: NOW + 30e3, backoffWhy: 'failed', strikes: 1, strikeWhy: 'transport' } }), { state: 'backoff', why: 'failed', carrying: false }],
     ['never ran', feedCaps, acct({ feed: { lastOkAt: null } }), { state: 'never', on: true, carrying: false }],
     ['behind (its last good page older than the fresh bound)', feedCaps, acct({ feed: { lastOkAt: NOW - 181e3 } }), { state: 'behind', on: true, carrying: false }],
     ['measuring', feedCaps, acct({ feed: { mode: 'measuring' } }), { state: 'measuring', on: true, carrying: false, fresh: true }],
@@ -400,11 +403,19 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
   const f2 = C.freshnessClaim(feedCaps, l2, hotEn, NOW, { tiers: T, watched: true });
   ok(f1.state === 'bound' && f1.seconds === 90 && f1.source === 'feed' && f2.seconds === 30, 'freshnessClaim(feed): "within 90 s" (the feed\'s bound, source feed), never the 5-min net it no longer depends on; an open window claims its 30 s', JSON.stringify([f1, f2]));
   // THE WORDS
-  const w = (v) => C.feedText(v, { vendor: 'Lark', now: NOW });
+  const clk = (ms) => `@${new Date(ms).toISOString().slice(11, 16)}`;   // a deterministic clock face (UTC) for the words
+  const w = (v) => C.feedText(v, { vendor: 'Lark', now: NOW, clock: clk });
   const W1 = {
     optOff: w({ state: 'off', why: 'option-off' }), scope: w({ state: 'off', why: 'scope-not-granted' }), none: w({ state: 'off', why: 'not-declared' }),
     forbidden: w({ state: 'refused', why: 'forbidden', requiredScopes: ['search:message'] }), ignored: w({ state: 'refused', why: 'time-range-ignored' }), shape: w({ state: 'refused', why: 'contract' }),
     backoff: w({ state: 'backoff', until: NOW + 12e3 }), down: w({ state: 'backoff', why: 'failed', until: NOW + 30e3 }), never: w({ state: 'never' }), behind: w({ state: 'behind' }),
+    // lane lark-p2p: the back-off with its count, its kind and its END; a shape park with the fields it could not read
+    down3: w({ state: 'backoff', why: 'failed', until: NOW + 15 * 60e3, strikes: 3, strikeWhy: 'transport' }), failed3: w({ state: 'backoff', why: 'failed', until: NOW + 15 * 60e3, strikes: 3, strikeWhy: 'token' }),
+    // verify r1: ONE missed answer is no row — the lone 504's 30 s wait reads as "is not answering", never "1× in a row"
+    down1: w({ state: 'backoff', why: 'failed', until: NOW + 30e3, strikes: 1, strikeWhy: 'transport' }), down2: w({ state: 'backoff', why: 'failed', until: NOW + 2 * 60e3, strikes: 2, strikeWhy: 'transport' }),
+    // verify r3: a search that ANSWERS something that is not a search page (the envelope judge) says so — never "is not answering"
+    envelope3: w({ state: 'backoff', why: 'failed', until: NOW + 5 * 60e3, strikes: 3, strikeWhy: 'envelope' }), envelope1: w({ state: 'backoff', why: 'failed', until: NOW + 30e3, strikes: 1, strikeWhy: 'envelope' }),
+    unreadable: w({ state: 'refused', why: 'shape', fields: [['meta_data.create_time'], ['id', 'meta_data.message_id']] }), unreadableBare: w({ state: 'refused', why: 'shape' }),
     measuring: w({ state: 'measuring', everySec: 30, measured: { total: 57 } }), carrying: w({ state: 'carrying', everySec: 30, relaxedSec: 300 }),
     measuringMiss: w({ state: 'measuring', everySec: 30, promoteMin: 200, measured: { total: 760, missed: 76, rate: 0.1 } }), measuringFull: w({ state: 'measuring', everySec: 30, promoteMin: 200, measured: { total: 300, missed: 3, rate: 0.01 } }),
     demoted: w({ state: 'demoted', measured: { missed: 5, total: 60, rate: 5 / 60 } }),
@@ -415,7 +426,15 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
     ignored: 'Search is off: Lark ignored its time window — each chat is checked on its own',
     shape: 'Search is off: Lark answered in a shape this version does not read — each chat is checked on its own',
     backoff: 'Lark is limiting the search · resuming in 12 s', never: 'New messages: searching for the first time',
-    down: 'Lark search is not answering — each chat is checked on its own · retrying in 30 s',
+    down: `Lark's search is not answering — each chat is checked on its own until ${clk(NOW + 30e3)}`,
+    down3: `Lark's search did not answer 3× in a row — each chat is checked on its own until ${clk(NOW + 15 * 60e3)}`,
+    failed3: `Lark's search failed 3× in a row — each chat is checked on its own until ${clk(NOW + 15 * 60e3)}`,
+    down1: `Lark's search is not answering — each chat is checked on its own until ${clk(NOW + 30e3)}`,
+    down2: `Lark's search did not answer 2× in a row — each chat is checked on its own until ${clk(NOW + 2 * 60e3)}`,
+    envelope3: `Lark's search answered 3× in a row with something that is not a search page — each chat is checked on its own until ${clk(NOW + 5 * 60e3)}`,
+    envelope1: `Lark's search answered with something that is not a search page — each chat is checked on its own until ${clk(NOW + 30e3)}`,
+    unreadable: "Lark's search answers, but its hits have a shape this version does not read (missing or unreadable: meta_data.create_time, id, meta_data.message_id) — the single-chat feed is off until an update; each chat is checked on its own",
+    unreadableBare: "Lark's search answers, but its hits have a shape this version does not read — the single-chat feed is off until an update; each chat is checked on its own",
     behind: 'Search is behind — each chat is checked on its own until it catches up',
     measuring: 'New messages: a search every 30 s · each chat is still checked on its own until 200 messages show it finds everything (57/200)',
     carrying: 'New messages come from a search every 30 s; each chat is also checked every 5 min',
@@ -438,6 +457,28 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
     ok(keys.size >= 100 && keys.has(k0) && !gaps(ZHd, JAd).length, `every word channel-caps says (${keys.size} t() keys, grep-derived) has its zh AND ja entry`, gaps(ZHd, JAd).join(' | '));
     const { [k0]: _drop, ...zhLess } = ZHd;
     ok(gaps(zhLess, JAd).join('|') === k0, 'CONTROL: the judge flags a dictionary missing the quiet feed\'s sentence');
+  }
+  // lane lark-p2p: the unreadable-hits line below the park (the tooltip) — with the fields, bounded; silent at zero
+  {
+    // verify r2: the count is the LAST HOUR's (`malformedRecent`), never the cumulative `malformed` — a view whose recent
+    // count is zero (or that has none: a record from before the ring) says nothing, whatever the cumulative counter holds
+    const u1 = C.feedUnreadableText({ counters: { malformed: 12, malformedRecent: 12, malformedFields: [['meta_data.chat_id'], ['meta_data.create_time']] } });
+    const u0 = C.feedUnreadableText({ counters: { malformed: 0, malformedRecent: 0 } });
+    const uB = C.feedUnreadableText({ counters: { malformed: 2, malformedRecent: 2, malformedFields: [['bad name!', 'x'.repeat(100)], 'not-a-list'] } });
+    const uOld = C.feedUnreadableText({ counters: { malformed: 4, malformedRecent: 0, malformedFields: [['meta_data.chat_id']] } });
+    const uNone = C.feedUnreadableText({ counters: { malformed: 4, malformedFields: [['meta_data.chat_id']] } });
+    ok(u1 === '12 search hits could not be read in the last hour (missing or unreadable: meta_data.chat_id, meta_data.create_time)' && u0 === '' && uB === '2 search hits could not be read in the last hour' && uOld === '' && uNone === '', 'feedUnreadableText: the LAST HOUR\'s count with the fields (names in the field alphabet only); silent at zero, silent when the hour holds none whatever the cumulative counter says, silent for a view without the recent count', JSON.stringify([u1, u0, uB, uOld, uNone]));
+    // lane lark-p2p verify r1 (the wiring pin): the panel draws that sentence as its OWN visible line (`chanFeedUnreadable`),
+    // never only a tooltip — a feed dropping most of what it finds must be readable on a phone too
+    const panelSrc = fs.readFileSync(path.join(REPO, 'src/lib/channels-panel.js'), 'utf-8');
+    ok(/const un = [^\n]*feedUnreadableText\(a\.feed, \{ t \}\);\n\s*if \(un\) \{ const u = noteLine\('chan-sec-note', un\); u\.dataset\.chanFeedUnreadable = a\.id; out\.push\(u\); \}/.test(panelSrc) && !/tips\.push\(un\)/.test(panelSrc), 'the panel draws feedUnreadableText as its own note line (data-chan-feed-unreadable), not a tooltip');
+    const fs1 = C.feedState(feedCaps, acct({ feed: { refused: { at: NOW - 60e3, code: 'shape', retryAt: NOW + 3600e3, fields: [['meta_data.create_time'], ['x y'], ...Array.from({ length: 9 }, (_, i) => [`f${i}`])] } } }), NOW);
+    ok(fs1.state === 'refused' && fs1.why === 'shape' && fs1.on === false && fs1.fields.length === 3 && JSON.stringify(fs1.fields[0]) === JSON.stringify(['meta_data.create_time']), 'feedState: a SHAPE park is refused (nothing carried) and hands its fields, bounded to 3 lists in the field alphabet', JSON.stringify(fs1));
+    // verify r1: a LONE missed answer while the last good page is fresh keeps the mode's state (the feed delivered); a
+    // row of three, a stale last page, or a 429 is the wait it is
+    const bo = (over) => C.feedState(feedCaps, acct({ feed: { mode: 'carrying', lastOkAt: NOW - 40e3, backoffUntil: NOW + 30e3, backoffWhy: 'failed', strikes: 1, strikeWhy: 'transport', ...over } }), NOW);
+    const lone = bo({}), two = bo({ strikes: 2 }), three = bo({ strikes: 3 }), stale = bo({ lastOkAt: NOW - 10 * 60e3 }), rate = bo({ backoffWhy: 'rate-limited' }), over = bo({ backoffUntil: NOW - 1 });
+    ok(C.FEED_LOUD_STRIKES === 3 && lone.state === 'carrying' && lone.carrying && lone.fresh && two.state === 'carrying' && three.state === 'backoff' && three.why === 'failed' && stale.state === 'backoff' && rate.state === 'backoff' && rate.why === 'rate-limited' && over.state === 'carrying', 'feedState (verify r1): one or two missed answers with a fresh last page keep the mode (carrying, fresh); the third in a row, a stale last page, a 429 are the wait they are; a wait that ended is nothing', JSON.stringify({ lone: lone.state, two: two.state, three: three.state, stale: stale.state, rate: rate.why, over: over.state }));
   }
   const cu = [C.feedCatchUpText({ done: false, days: 7 }), C.feedCatchUpText({ done: true, found: 4, days: 7 }), C.feedCatchUpText({ done: true, found: 20, days: 7, bounded: true }), C.feedCatchUpText({ done: true, found: 0 })];
   ok(cu[0] === 'Looking for single chats from the last 7 days…' && cu[1] === 'Found 4 single chats from the last 7 days' && cu[2] === 'Found 20 single chats from the last 7 days — quieter ones appear with their next message' && cu[3] === '', 'feedCatchUpText: in progress / found / bounded / nothing found (silent)', JSON.stringify(cu));

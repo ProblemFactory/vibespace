@@ -263,7 +263,7 @@ export function installUserTodos(app) {
   // appeared or MOVED (a resolved row above it shrank, an expiry) starts its ARM_MS again (PURE src/lib/press-arm.js)
   const armExitButtons = () => {
     const now = performance.now();
-    for (const b of document.querySelectorAll('.ut-action-exit.ut-exit-allow')) {
+    for (const b of document.querySelectorAll('.ut-action-exit.ut-exit-allow, .ut-action-proposal.ut-proposal-approve')) { // lane browser-propose: an Approve is armed the same way
       const top = b.getBoundingClientRect().top;
       b._armSince = armAfterLayout({ prevTop: b._armTop ?? null, top, prevSince: b._armSince ?? null, now });
       b._armTop = top;
@@ -642,6 +642,10 @@ export function installUserTodos(app) {
     // Anchor to the button's CURRENT position — customize mode can move it to
     // any bar, so the old fixed bottom-right CSS pointed nowhere.
     if (!popup.classList.contains('hidden')) anchorFixedPopup(popup, anchor);
+    // lane browser-propose verify r1: the row pass above sampled every Allow / Approve BEFORE the anchor placed the popup —
+    // so the first press after an open always read as "moved under the pointer" (reproduced in chrome: sampled at 696 px,
+    // pressed at 709 px after 900 ms still). Sample again where the popup now IS: its buttons are armed from the open.
+    if (!popup.classList.contains('hidden')) armExitButtons();
   };
   btn.onclick = () => togglePopup(btn);
   if (mBtn) mBtn.onclick = () => togglePopup(mBtn);
@@ -791,6 +795,19 @@ export function installUserTodos(app) {
     }
     if (e.target.closest('.ut-action-reset')) {
       model.runAction(todos.open.find((i) => i.id === id)); // THE producer's verb (the model maps the type)
+      return;
+    }
+    const propBtn = e.target.closest('.ut-action-proposal');
+    if (propBtn) {
+      // lane browser-propose: the agent's proposal answered where it appears (Approve / Reject) — an Approve that appeared
+      // or moved under the pointer a moment ago is not the one the user read (the exit ask's V1 rule)
+      if (propBtn.dataset.answer === 'approve') {
+        armExitButtons();
+        const pv = pressVerdict({ since: propBtn._armSince ?? null, now: performance.now() });
+        if (!pv.ok) { showToast(t('That Approve moved under the pointer just now — read it, then press it again')); return; }
+      }
+      propBtn.disabled = true;
+      Promise.resolve(model.runAction(todos.open.find((i) => i.id === id), propBtn.dataset.answer)).finally(() => { propBtn.disabled = false; });
       return;
     }
     const exitBtn = e.target.closest('.ut-action-exit');

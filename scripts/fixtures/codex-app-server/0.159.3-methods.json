@@ -1,0 +1,2220 @@
+{
+ "_note": "MEASURED by scripts/measure-codex-protocol.mjs — never edited by hand. `clientRequests` = every request the CLI serves (required + known params fields, from its own JSON Schema); `wrapperMethods` = the requests data/bin/codex-chat-wrapper.js makes, with the CLI's own answer to `{}` when the live half ran. scripts/test-codex-protocol-drift.mjs judges the wrapper against the NEWEST table and fails when the installed codex is a version no table measured.",
+ "codexVersion": "0.159.3",
+ "measuredAt": "2026-10-01",
+ "how": {
+  "schema": "codex app-server generate-json-schema --experimental --out DIR (launch-free; empty CODEX_HOME, no login)",
+  "live": "codex app-server under sudo -n unshare -n + setpriv (an empty network namespace, back to this user), empty CODEX_HOME, vendor keys stripped; initialize, then each wrapper method with params {}",
+  "network": {
+   "traced": true,
+   "inet": 10,
+   "inetOk": 0,
+   "unix": 6
+  }
+ },
+ "unknownMethodError": {
+  "code": -32600,
+  "message": "Invalid request: unknown variant `vibespace/noSuchMethod`, expected one of `initialize`, `server/diagnostics`, `userVerification/status`, `userVerification/enroll`, `userVerification/delete`, `userVerification/verify`, `userVerification/cancel`, `thread/start`, `thread/resume`, `thread/fork`, `threa"
+ },
+ "wrapperMethods": {
+  "account/rateLimitResetCredit/consume": {
+   "params": "ConsumeAccountRateLimitResetCreditParams",
+   "paramsOptional": false,
+   "required": [
+    "idempotencyKey"
+   ],
+   "properties": [
+    "creditId",
+    "idempotencyKey"
+   ],
+   "errorOnEmpty": {
+    "code": -32600,
+    "message": "Invalid request: missing field `idempotencyKey`"
+   }
+  },
+  "account/rateLimits/read": {
+   "params": "GetAccountRateLimitsParams|null",
+   "paramsOptional": true,
+   "required": [],
+   "properties": [
+    "excludeResetCreditDetails",
+    "supportsLunaReserve"
+   ],
+   "errorOnEmpty": {
+    "code": -32600,
+    "message": "codex account authentication required to read rate limits"
+   }
+  },
+  "config/read": {
+   "params": "ConfigReadParams",
+   "paramsOptional": false,
+   "required": [],
+   "properties": [
+    "cwd",
+    "includeLayers"
+   ],
+   "errorOnEmpty": {
+    "ok": true,
+    "resultKeys": [
+     "config",
+     "origins"
+    ]
+   }
+  },
+  "initialize": {
+   "params": "InitializeParams",
+   "paramsOptional": false,
+   "required": [
+    "clientInfo"
+   ],
+   "properties": [
+    "capabilities",
+    "clientInfo"
+   ],
+   "errorOnEmpty": null
+  },
+  "review/start": {
+   "params": "ReviewStartParams",
+   "paramsOptional": false,
+   "required": [
+    "target",
+    "threadId"
+   ],
+   "properties": [
+    "delivery",
+    "target",
+    "threadId"
+   ],
+   "errorOnEmpty": {
+    "code": -32600,
+    "message": "Invalid request: missing field `threadId`"
+   }
+  },
+  "thread/compact/start": {
+   "params": "ThreadCompactStartParams",
+   "paramsOptional": false,
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "threadId"
+   ],
+   "errorOnEmpty": {
+    "code": -32600,
+    "message": "Invalid request: missing field `threadId`"
+   }
+  },
+  "thread/fork": {
+   "params": "ThreadForkParams",
+   "paramsOptional": false,
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "approvalPolicy",
+    "approvalsReviewer",
+    "baseInstructions",
+    "beforeTurnId",
+    "config",
+    "cwd",
+    "deferGoalContinuation",
+    "developerInstructions",
+    "ephemeral",
+    "excludeTurns",
+    "lastTurnId",
+    "model",
+    "modelProvider",
+    "path",
+    "permissions",
+    "runtimeWorkspaceRoots",
+    "sandbox",
+    "serviceTier",
+    "threadId",
+    "threadSource"
+   ],
+   "errorOnEmpty": {
+    "code": -32600,
+    "message": "Invalid request: missing field `threadId`"
+   }
+  },
+  "thread/goal/clear": {
+   "params": "ThreadGoalClearParams",
+   "paramsOptional": false,
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "threadId"
+   ],
+   "errorOnEmpty": {
+    "code": -32600,
+    "message": "Invalid request: missing field `threadId`"
+   }
+  },
+  "thread/goal/get": {
+   "params": "ThreadGoalGetParams",
+   "paramsOptional": false,
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "threadId"
+   ],
+   "errorOnEmpty": {
+    "code": -32600,
+    "message": "Invalid request: missing field `threadId`"
+   }
+  },
+  "thread/goal/set": {
+   "params": "ThreadGoalSetParams",
+   "paramsOptional": false,
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "objective",
+    "status",
+    "threadId",
+    "tokenBudget"
+   ],
+   "errorOnEmpty": {
+    "code": -32600,
+    "message": "Invalid request: missing field `threadId`"
+   }
+  },
+  "thread/inject_items": {
+   "params": "ThreadInjectItemsParams",
+   "paramsOptional": false,
+   "required": [
+    "items",
+    "threadId"
+   ],
+   "properties": [
+    "items",
+    "threadId"
+   ],
+   "errorOnEmpty": {
+    "code": -32600,
+    "message": "Invalid request: missing field `threadId`"
+   }
+  },
+  "thread/name/set": {
+   "params": "ThreadSetNameParams",
+   "paramsOptional": false,
+   "required": [
+    "name",
+    "threadId"
+   ],
+   "properties": [
+    "name",
+    "threadId"
+   ],
+   "errorOnEmpty": {
+    "code": -32600,
+    "message": "Invalid request: missing field `threadId`"
+   }
+  },
+  "thread/queue/add": {
+   "params": "ThreadQueueAddParams",
+   "paramsOptional": false,
+   "required": [
+    "clientUserMessageId",
+    "input",
+    "threadId"
+   ],
+   "properties": [
+    "clientUserMessageId",
+    "input",
+    "threadId"
+   ],
+   "errorOnEmpty": {
+    "code": -32600,
+    "message": "Invalid request: missing field `threadId`"
+   }
+  },
+  "thread/queue/delete": {
+   "params": "ThreadQueueDeleteParams",
+   "paramsOptional": false,
+   "required": [
+    "queuedSubmissionId",
+    "threadId"
+   ],
+   "properties": [
+    "queuedSubmissionId",
+    "threadId"
+   ],
+   "errorOnEmpty": {
+    "code": -32600,
+    "message": "Invalid request: missing field `threadId`"
+   }
+  },
+  "thread/queue/list": {
+   "params": "ThreadQueueListParams",
+   "paramsOptional": false,
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "cursor",
+    "limit",
+    "threadId"
+   ],
+   "errorOnEmpty": {
+    "code": -32600,
+    "message": "Invalid request: missing field `threadId`"
+   }
+  },
+  "thread/queue/reorder": {
+   "params": "ThreadQueueReorderParams",
+   "paramsOptional": false,
+   "required": [
+    "queuedSubmissionIds",
+    "threadId"
+   ],
+   "properties": [
+    "queuedSubmissionIds",
+    "threadId"
+   ],
+   "errorOnEmpty": {
+    "code": -32600,
+    "message": "Invalid request: missing field `threadId`"
+   }
+  },
+  "thread/queue/start": {
+   "params": "ThreadQueueStartParams",
+   "paramsOptional": false,
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "queuedSubmissionId",
+    "threadId"
+   ],
+   "errorOnEmpty": {
+    "code": -32600,
+    "message": "Invalid request: missing field `threadId`"
+   }
+  },
+  "thread/queue/update": {
+   "params": "ThreadQueueUpdateParams",
+   "paramsOptional": false,
+   "required": [
+    "input",
+    "queuedSubmissionId",
+    "threadId"
+   ],
+   "properties": [
+    "input",
+    "queuedSubmissionId",
+    "threadId"
+   ],
+   "errorOnEmpty": {
+    "code": -32600,
+    "message": "Invalid request: missing field `threadId`"
+   }
+  },
+  "thread/resume": {
+   "params": "ThreadResumeParams",
+   "paramsOptional": false,
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "approvalPolicy",
+    "approvalsReviewer",
+    "baseInstructions",
+    "config",
+    "cwd",
+    "developerInstructions",
+    "excludeTurns",
+    "history",
+    "initialTurnsPage",
+    "model",
+    "modelProvider",
+    "path",
+    "permissions",
+    "personality",
+    "runtimeWorkspaceRoots",
+    "sandbox",
+    "serviceTier",
+    "threadId"
+   ],
+   "errorOnEmpty": {
+    "code": -32600,
+    "message": "Invalid request: missing field `threadId`"
+   }
+  },
+  "thread/settings/update": {
+   "params": "ThreadSettingsUpdateParams",
+   "paramsOptional": false,
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "approvalPolicy",
+    "approvalsReviewer",
+    "collaborationMode",
+    "cwd",
+    "disabledPluginIds",
+    "effort",
+    "model",
+    "multiAgentMode",
+    "permissions",
+    "personality",
+    "sandboxPolicy",
+    "serviceTier",
+    "summary",
+    "threadId"
+   ],
+   "errorOnEmpty": {
+    "code": -32600,
+    "message": "Invalid request: missing field `threadId`"
+   }
+  },
+  "thread/start": {
+   "params": "ThreadStartParams",
+   "paramsOptional": false,
+   "required": [],
+   "properties": [
+    "allowProviderModelFallback",
+    "approvalPolicy",
+    "approvalsReviewer",
+    "baseInstructions",
+    "config",
+    "cwd",
+    "daybreakEnabled",
+    "developerInstructions",
+    "dynamicTools",
+    "environments",
+    "ephemeral",
+    "experimentalRawEvents",
+    "historyMode",
+    "mockExperimentalField",
+    "model",
+    "modelProvider",
+    "multiAgentMode",
+    "permissions",
+    "personality",
+    "projectId",
+    "runtimeWorkspaceRoots",
+    "sandbox",
+    "selectedCapabilityRoots",
+    "serviceName",
+    "serviceTier",
+    "sessionStartSource",
+    "threadSource"
+   ],
+   "errorOnEmpty": {
+    "ok": true,
+    "resultKeys": [
+     "activePermissionProfile",
+     "approvalPolicy",
+     "approvalsReviewer",
+     "cwd",
+     "disabledPluginIds",
+     "instructionSources",
+     "model",
+     "modelProvider",
+     "multiAgentMode",
+     "reasoningEffort",
+     "runtimeWorkspaceRoots",
+     "sandbox",
+     "serviceTier",
+     "thread"
+    ]
+   }
+  },
+  "turn/interrupt": {
+   "params": "TurnInterruptParams",
+   "paramsOptional": false,
+   "required": [
+    "threadId",
+    "turnId"
+   ],
+   "properties": [
+    "threadId",
+    "turnId"
+   ],
+   "errorOnEmpty": {
+    "code": -32600,
+    "message": "Invalid request: missing field `threadId`"
+   }
+  },
+  "turn/start": {
+   "params": "TurnStartParams",
+   "paramsOptional": false,
+   "required": [
+    "input",
+    "threadId"
+   ],
+   "properties": [
+    "additionalContext",
+    "approvalPolicy",
+    "approvalsReviewer",
+    "clientUserMessageId",
+    "collaborationMode",
+    "cwd",
+    "cyberAccessProgram",
+    "disabledPluginIds",
+    "effort",
+    "environments",
+    "input",
+    "model",
+    "multiAgentMode",
+    "outputSchema",
+    "permissions",
+    "personality",
+    "responsesapiClientMetadata",
+    "runtimeWorkspaceRoots",
+    "sandboxPolicy",
+    "serviceTier",
+    "serviceTierForTurn",
+    "summary",
+    "threadId",
+    "toolOutput",
+    "turnTrigger"
+   ],
+   "errorOnEmpty": {
+    "code": -32600,
+    "message": "Invalid request: missing field `threadId`"
+   }
+  },
+  "turn/steer": {
+   "params": "TurnSteerParams",
+   "paramsOptional": false,
+   "required": [
+    "expectedTurnId",
+    "input",
+    "threadId"
+   ],
+   "properties": [
+    "additionalContext",
+    "clientUserMessageId",
+    "expectedTurnId",
+    "input",
+    "responsesapiClientMetadata",
+    "threadId"
+   ],
+   "errorOnEmpty": {
+    "code": -32600,
+    "message": "Invalid request: missing field `threadId`"
+   }
+  }
+ },
+ "resetCreditOutcomes": [
+  "alreadyRedeemed",
+  "noCredit",
+  "nothingToReset",
+  "reset"
+ ],
+ "clientNotifications": [
+  "initialized"
+ ],
+ "serverRequests": [
+  "account/chatgptAuthTokens/refresh",
+  "applyPatchApproval",
+  "attestation/generate",
+  "currentTime/read",
+  "execCommandApproval",
+  "item/commandExecution/requestApproval",
+  "item/fileChange/requestApproval",
+  "item/permissions/requestApproval",
+  "item/tool/call",
+  "item/tool/requestUserInput",
+  "mcpServer/elicitation/request"
+ ],
+ "serverNotifications": [
+  "account/gatewayOAuth/changed",
+  "account/login/completed",
+  "account/rateLimits/updated",
+  "account/updated",
+  "app/list/updated",
+  "autoApprovalReview/strictReviewRequired",
+  "command/exec/outputDelta",
+  "configWarning",
+  "deprecationNotice",
+  "error",
+  "externalAgentConfig/import/completed",
+  "externalAgentConfig/import/progress",
+  "fs/changed",
+  "fuzzyFileSearch/sessionCompleted",
+  "fuzzyFileSearch/sessionUpdated",
+  "guardianWarning",
+  "hook/completed",
+  "hook/started",
+  "item/agentMessage/delta",
+  "item/autoApprovalReview/completed",
+  "item/autoApprovalReview/started",
+  "item/commandExecution/outputDelta",
+  "item/commandExecution/terminalInteraction",
+  "item/completed",
+  "item/fileChange/outputDelta",
+  "item/fileChange/patchUpdated",
+  "item/mcpToolCall/progress",
+  "item/plan/delta",
+  "item/reasoning/summaryPartAdded",
+  "item/reasoning/summaryTextDelta",
+  "item/reasoning/textDelta",
+  "item/started",
+  "mcpServer/event/stream/notification",
+  "mcpServer/oauthLogin/completed",
+  "mcpServer/startupStatus/updated",
+  "model/rerouted",
+  "model/safetyBuffering/updated",
+  "model/verification",
+  "modelProvider/authRecoveryCompleted",
+  "modelProvider/authRecoveryStarted",
+  "process/exited",
+  "process/outputDelta",
+  "project/changed",
+  "remoteControl/status/changed",
+  "serverRequest/resolved",
+  "skills/changed",
+  "thread/archived",
+  "thread/attachment/updated",
+  "thread/closed",
+  "thread/compacted",
+  "thread/deleted",
+  "thread/environment/connected",
+  "thread/environment/disconnected",
+  "thread/goal/cleared",
+  "thread/goal/updated",
+  "thread/name/updated",
+  "thread/project/updated",
+  "thread/queue/changed",
+  "thread/realtime/closed",
+  "thread/realtime/error",
+  "thread/realtime/item/completed",
+  "thread/realtime/item/started",
+  "thread/realtime/item/transcript/delta",
+  "thread/realtime/itemAdded",
+  "thread/realtime/outputAudio/delta",
+  "thread/realtime/sdp",
+  "thread/realtime/started",
+  "thread/realtime/transcript/delta",
+  "thread/realtime/transcript/done",
+  "thread/reverted",
+  "thread/settings/updated",
+  "thread/started",
+  "thread/status/changed",
+  "thread/tokenUsage/updated",
+  "thread/unarchived",
+  "turn/completed",
+  "turn/diff/updated",
+  "turn/moderationMetadata",
+  "turn/plan/updated",
+  "turn/started",
+  "warning",
+  "windows/worldWritableWarning",
+  "windowsSandbox/setupCompleted"
+ ],
+ "clientRequests": {
+  "initialize": {
+   "required": [
+    "clientInfo"
+   ],
+   "properties": [
+    "capabilities",
+    "clientInfo"
+   ]
+  },
+  "server/diagnostics": {
+   "required": [],
+   "properties": []
+  },
+  "userVerification/status": {
+   "required": [],
+   "properties": []
+  },
+  "userVerification/enroll": {
+   "required": [],
+   "properties": []
+  },
+  "userVerification/delete": {
+   "required": [],
+   "properties": []
+  },
+  "userVerification/verify": {
+   "required": [
+    "challenge",
+    "description",
+    "title"
+   ],
+   "properties": [
+    "challenge",
+    "description",
+    "title"
+   ]
+  },
+  "userVerification/cancel": {
+   "required": [
+    "requestId"
+   ],
+   "properties": [
+    "requestId"
+   ]
+  },
+  "thread/start": {
+   "required": [],
+   "properties": [
+    "allowProviderModelFallback",
+    "approvalPolicy",
+    "approvalsReviewer",
+    "baseInstructions",
+    "config",
+    "cwd",
+    "daybreakEnabled",
+    "developerInstructions",
+    "dynamicTools",
+    "environments",
+    "ephemeral",
+    "experimentalRawEvents",
+    "historyMode",
+    "mockExperimentalField",
+    "model",
+    "modelProvider",
+    "multiAgentMode",
+    "permissions",
+    "personality",
+    "projectId",
+    "runtimeWorkspaceRoots",
+    "sandbox",
+    "selectedCapabilityRoots",
+    "serviceName",
+    "serviceTier",
+    "sessionStartSource",
+    "threadSource"
+   ]
+  },
+  "thread/resume": {
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "approvalPolicy",
+    "approvalsReviewer",
+    "baseInstructions",
+    "config",
+    "cwd",
+    "developerInstructions",
+    "excludeTurns",
+    "history",
+    "initialTurnsPage",
+    "model",
+    "modelProvider",
+    "path",
+    "permissions",
+    "personality",
+    "runtimeWorkspaceRoots",
+    "sandbox",
+    "serviceTier",
+    "threadId"
+   ]
+  },
+  "thread/fork": {
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "approvalPolicy",
+    "approvalsReviewer",
+    "baseInstructions",
+    "beforeTurnId",
+    "config",
+    "cwd",
+    "deferGoalContinuation",
+    "developerInstructions",
+    "ephemeral",
+    "excludeTurns",
+    "lastTurnId",
+    "model",
+    "modelProvider",
+    "path",
+    "permissions",
+    "runtimeWorkspaceRoots",
+    "sandbox",
+    "serviceTier",
+    "threadId",
+    "threadSource"
+   ]
+  },
+  "thread/archive": {
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "threadId"
+   ]
+  },
+  "thread/delete": {
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "threadId"
+   ]
+  },
+  "thread/unsubscribe": {
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "threadId"
+   ]
+  },
+  "thread/increment_elicitation": {
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "threadId"
+   ]
+  },
+  "thread/decrement_elicitation": {
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "threadId"
+   ]
+  },
+  "thread/name/set": {
+   "required": [
+    "name",
+    "threadId"
+   ],
+   "properties": [
+    "name",
+    "threadId"
+   ]
+  },
+  "thread/goal/set": {
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "objective",
+    "status",
+    "threadId",
+    "tokenBudget"
+   ]
+  },
+  "thread/goal/get": {
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "threadId"
+   ]
+  },
+  "thread/goal/clear": {
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "threadId"
+   ]
+  },
+  "thread/queue/add": {
+   "required": [
+    "clientUserMessageId",
+    "input",
+    "threadId"
+   ],
+   "properties": [
+    "clientUserMessageId",
+    "input",
+    "threadId"
+   ]
+  },
+  "thread/queue/list": {
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "cursor",
+    "limit",
+    "threadId"
+   ]
+  },
+  "thread/queue/update": {
+   "required": [
+    "input",
+    "queuedSubmissionId",
+    "threadId"
+   ],
+   "properties": [
+    "input",
+    "queuedSubmissionId",
+    "threadId"
+   ]
+  },
+  "thread/queue/delete": {
+   "required": [
+    "queuedSubmissionId",
+    "threadId"
+   ],
+   "properties": [
+    "queuedSubmissionId",
+    "threadId"
+   ]
+  },
+  "thread/queue/reorder": {
+   "required": [
+    "queuedSubmissionIds",
+    "threadId"
+   ],
+   "properties": [
+    "queuedSubmissionIds",
+    "threadId"
+   ]
+  },
+  "thread/queue/start": {
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "queuedSubmissionId",
+    "threadId"
+   ]
+  },
+  "thread/metadata/update": {
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "daybreakEnabled",
+    "gitInfo",
+    "projectId",
+    "threadId"
+   ]
+  },
+  "thread/attachment/add": {
+   "required": [
+    "attachmentType",
+    "identityKey",
+    "payload",
+    "threadId"
+   ],
+   "properties": [
+    "attachmentType",
+    "identityKey",
+    "payload",
+    "threadId"
+   ]
+  },
+  "thread/attachment/list": {
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "cursor",
+    "limit",
+    "threadId"
+   ]
+  },
+  "thread/attachment/remove": {
+   "required": [
+    "attachmentType",
+    "identityKey",
+    "threadId"
+   ],
+   "properties": [
+    "attachmentType",
+    "identityKey",
+    "threadId"
+   ]
+  },
+  "thread/section/move": {
+   "required": [
+    "sectionId",
+    "threadId"
+   ],
+   "properties": [
+    "beforeThreadId",
+    "sectionId",
+    "threadId"
+   ]
+  },
+  "thread/settings/update": {
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "approvalPolicy",
+    "approvalsReviewer",
+    "collaborationMode",
+    "cwd",
+    "disabledPluginIds",
+    "effort",
+    "model",
+    "multiAgentMode",
+    "permissions",
+    "personality",
+    "sandboxPolicy",
+    "serviceTier",
+    "summary",
+    "threadId"
+   ]
+  },
+  "thread/memoryMode/set": {
+   "required": [
+    "mode",
+    "threadId"
+   ],
+   "properties": [
+    "mode",
+    "threadId"
+   ]
+  },
+  "memory/status": {
+   "required": [],
+   "properties": [
+    "minConsolidatedThreads"
+   ]
+  },
+  "memory/reset": {
+   "required": [],
+   "properties": []
+  },
+  "rollout/compress": {
+   "required": [],
+   "properties": []
+  },
+  "thread/unarchive": {
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "threadId"
+   ]
+  },
+  "thread/compact/start": {
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "threadId"
+   ]
+  },
+  "thread/shellCommand": {
+   "required": [
+    "command",
+    "threadId"
+   ],
+   "properties": [
+    "command",
+    "threadId",
+    "timeoutMs"
+   ]
+  },
+  "thread/approveGuardianDeniedAction": {
+   "required": [
+    "event",
+    "threadId"
+   ],
+   "properties": [
+    "event",
+    "threadId"
+   ]
+  },
+  "thread/backgroundTerminals/clean": {
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "threadId"
+   ]
+  },
+  "thread/backgroundTerminals/list": {
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "cursor",
+    "limit",
+    "threadId"
+   ]
+  },
+  "thread/backgroundTerminals/terminate": {
+   "required": [
+    "processId",
+    "threadId"
+   ],
+   "properties": [
+    "processId",
+    "threadId"
+   ]
+  },
+  "thread/revert": {
+   "required": [
+    "beforeTurnId",
+    "threadId"
+   ],
+   "properties": [
+    "beforeTurnId",
+    "threadId"
+   ]
+  },
+  "thread/list": {
+   "required": [],
+   "properties": [
+    "ancestorThreadId",
+    "archived",
+    "cursor",
+    "cwd",
+    "limit",
+    "modelProviders",
+    "originators",
+    "parentThreadId",
+    "projectId",
+    "searchTerm",
+    "sectionId",
+    "sortDirection",
+    "sortKey",
+    "sourceKinds",
+    "useStateDbOnly"
+   ]
+  },
+  "project/list": {
+   "required": [],
+   "properties": [
+    "cursor",
+    "limit",
+    "sortDirection",
+    "sortKey"
+   ]
+  },
+  "project/read": {
+   "required": [
+    "projectId"
+   ],
+   "properties": [
+    "projectId"
+   ]
+  },
+  "project/create": {
+   "required": [
+    "idempotencyKey",
+    "name",
+    "roots"
+   ],
+   "properties": [
+    "idempotencyKey",
+    "metadata",
+    "name",
+    "roots"
+   ]
+  },
+  "project/import": {
+   "required": [
+    "idempotencyKey",
+    "name",
+    "roots"
+   ],
+   "properties": [
+    "idempotencyKey",
+    "metadata",
+    "name",
+    "roots",
+    "threads"
+   ]
+  },
+  "project/update": {
+   "required": [
+    "projectId"
+   ],
+   "properties": [
+    "metadata",
+    "name",
+    "projectId",
+    "roots"
+   ]
+  },
+  "project/move": {
+   "required": [
+    "projectId"
+   ],
+   "properties": [
+    "beforeProjectId",
+    "projectId"
+   ]
+  },
+  "project/delete": {
+   "required": [
+    "projectId"
+   ],
+   "properties": [
+    "projectId"
+   ]
+  },
+  "threadSection/list": {
+   "required": [],
+   "properties": [
+    "cursor",
+    "limit"
+   ]
+  },
+  "threadSection/create": {
+   "required": [
+    "name"
+   ],
+   "properties": [
+    "appearance",
+    "name"
+   ]
+  },
+  "threadSection/update": {
+   "required": [
+    "name",
+    "sectionId"
+   ],
+   "properties": [
+    "appearance",
+    "name",
+    "sectionId"
+   ]
+  },
+  "threadSection/delete": {
+   "required": [
+    "sectionId"
+   ],
+   "properties": [
+    "sectionId"
+   ]
+  },
+  "thread/search": {
+   "required": [
+    "searchTerm"
+   ],
+   "properties": [
+    "archived",
+    "cursor",
+    "limit",
+    "searchTerm",
+    "sortDirection",
+    "sortKey",
+    "sourceKinds"
+   ]
+  },
+  "thread/searchOccurrences": {
+   "required": [
+    "searchTerm",
+    "threadId"
+   ],
+   "properties": [
+    "cursor",
+    "limit",
+    "searchTerm",
+    "threadId"
+   ]
+  },
+  "thread/loaded/list": {
+   "required": [],
+   "properties": [
+    "cursor",
+    "limit"
+   ]
+  },
+  "thread/read": {
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "includeTurns",
+    "threadId"
+   ]
+  },
+  "thread/turns/list": {
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "cursor",
+    "itemsView",
+    "limit",
+    "sortDirection",
+    "threadId"
+   ]
+  },
+  "thread/items/list": {
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "cursor",
+    "limit",
+    "sortDirection",
+    "threadId",
+    "turnId"
+   ]
+  },
+  "thread/inject_items": {
+   "required": [
+    "items",
+    "threadId"
+   ],
+   "properties": [
+    "items",
+    "threadId"
+   ]
+  },
+  "skills/list": {
+   "required": [],
+   "properties": [
+    "cwds",
+    "forceReload"
+   ]
+  },
+  "skills/extraRoots/set": {
+   "required": [
+    "extraRoots"
+   ],
+   "properties": [
+    "extraRoots"
+   ]
+  },
+  "hooks/list": {
+   "required": [],
+   "properties": [
+    "cwds"
+   ]
+  },
+  "marketplace/add": {
+   "required": [
+    "source"
+   ],
+   "properties": [
+    "refName",
+    "source",
+    "sparsePaths"
+   ]
+  },
+  "marketplace/remove": {
+   "required": [
+    "marketplaceName"
+   ],
+   "properties": [
+    "marketplaceName"
+   ]
+  },
+  "marketplace/upgrade": {
+   "required": [],
+   "properties": [
+    "marketplaceName"
+   ]
+  },
+  "plugin/list": {
+   "required": [],
+   "properties": [
+    "cwds",
+    "forceRefetch",
+    "marketplaceKinds"
+   ]
+  },
+  "plugin/search": {
+   "required": [
+    "searchTerm"
+   ],
+   "properties": [
+    "cursor",
+    "cwds",
+    "limit",
+    "scope",
+    "searchTerm"
+   ]
+  },
+  "plugin/installed": {
+   "required": [],
+   "properties": [
+    "cwds",
+    "installSuggestionPluginNames"
+   ]
+  },
+  "plugin/reconcile": {
+   "required": [],
+   "properties": [
+    "reason"
+   ]
+  },
+  "plugin/read": {
+   "required": [
+    "pluginName"
+   ],
+   "properties": [
+    "marketplacePath",
+    "pluginName",
+    "remoteMarketplaceName"
+   ]
+  },
+  "plugin/skill/read": {
+   "required": [
+    "remoteMarketplaceName",
+    "remotePluginId",
+    "skillName"
+   ],
+   "properties": [
+    "remoteMarketplaceName",
+    "remotePluginId",
+    "skillName"
+   ]
+  },
+  "plugin/share/save": {
+   "required": [
+    "pluginPath"
+   ],
+   "properties": [
+    "discoverability",
+    "pluginPath",
+    "remotePluginId",
+    "shareTargets"
+   ]
+  },
+  "plugin/share/updateTargets": {
+   "required": [
+    "discoverability",
+    "remotePluginId",
+    "shareTargets"
+   ],
+   "properties": [
+    "discoverability",
+    "remotePluginId",
+    "shareTargets"
+   ]
+  },
+  "plugin/share/list": {
+   "required": [],
+   "properties": []
+  },
+  "plugin/share/checkout": {
+   "required": [
+    "remotePluginId"
+   ],
+   "properties": [
+    "remotePluginId"
+   ]
+  },
+  "plugin/share/delete": {
+   "required": [
+    "remotePluginId"
+   ],
+   "properties": [
+    "remotePluginId"
+   ]
+  },
+  "app/read": {
+   "required": [
+    "appIds"
+   ],
+   "properties": [
+    "appIds",
+    "includeTools",
+    "threadId"
+   ]
+  },
+  "app/list": {
+   "required": [],
+   "properties": [
+    "cursor",
+    "forceRefetch",
+    "limit",
+    "threadId"
+   ]
+  },
+  "app/installed": {
+   "required": [],
+   "properties": [
+    "forceRefresh",
+    "threadId"
+   ]
+  },
+  "fs/readFile": {
+   "required": [
+    "path"
+   ],
+   "properties": [
+    "path"
+   ]
+  },
+  "fs/writeFile": {
+   "required": [
+    "dataBase64",
+    "path"
+   ],
+   "properties": [
+    "dataBase64",
+    "path"
+   ]
+  },
+  "fs/createDirectory": {
+   "required": [
+    "path"
+   ],
+   "properties": [
+    "path",
+    "recursive"
+   ]
+  },
+  "fs/getMetadata": {
+   "required": [
+    "path"
+   ],
+   "properties": [
+    "path"
+   ]
+  },
+  "fs/readDirectory": {
+   "required": [
+    "path"
+   ],
+   "properties": [
+    "path"
+   ]
+  },
+  "fs/remove": {
+   "required": [
+    "path"
+   ],
+   "properties": [
+    "force",
+    "path",
+    "recursive"
+   ]
+  },
+  "fs/copy": {
+   "required": [
+    "destinationPath",
+    "sourcePath"
+   ],
+   "properties": [
+    "destinationPath",
+    "recursive",
+    "sourcePath"
+   ]
+  },
+  "fs/watch": {
+   "required": [
+    "path",
+    "watchId"
+   ],
+   "properties": [
+    "path",
+    "watchId"
+   ]
+  },
+  "fs/unwatch": {
+   "required": [
+    "watchId"
+   ],
+   "properties": [
+    "watchId"
+   ]
+  },
+  "skills/config/write": {
+   "required": [
+    "enabled"
+   ],
+   "properties": [
+    "enabled",
+    "name",
+    "path"
+   ]
+  },
+  "plugin/install": {
+   "required": [
+    "pluginName"
+   ],
+   "properties": [
+    "installAttemptId",
+    "marketplacePath",
+    "pluginName",
+    "remoteMarketplaceName"
+   ]
+  },
+  "plugin/uninstall": {
+   "required": [
+    "pluginId"
+   ],
+   "properties": [
+    "pluginId"
+   ]
+  },
+  "turn/start": {
+   "required": [
+    "input",
+    "threadId"
+   ],
+   "properties": [
+    "additionalContext",
+    "approvalPolicy",
+    "approvalsReviewer",
+    "clientUserMessageId",
+    "collaborationMode",
+    "cwd",
+    "cyberAccessProgram",
+    "disabledPluginIds",
+    "effort",
+    "environments",
+    "input",
+    "model",
+    "multiAgentMode",
+    "outputSchema",
+    "permissions",
+    "personality",
+    "responsesapiClientMetadata",
+    "runtimeWorkspaceRoots",
+    "sandboxPolicy",
+    "serviceTier",
+    "serviceTierForTurn",
+    "summary",
+    "threadId",
+    "toolOutput",
+    "turnTrigger"
+   ]
+  },
+  "turn/settings/update": {
+   "required": [
+    "threadId",
+    "turnId"
+   ],
+   "properties": [
+    "approvalsReviewer",
+    "effort",
+    "model",
+    "serviceTier",
+    "summary",
+    "threadId",
+    "turnId"
+   ]
+  },
+  "turn/steer": {
+   "required": [
+    "expectedTurnId",
+    "input",
+    "threadId"
+   ],
+   "properties": [
+    "additionalContext",
+    "clientUserMessageId",
+    "expectedTurnId",
+    "input",
+    "responsesapiClientMetadata",
+    "threadId"
+   ]
+  },
+  "turn/interrupt": {
+   "required": [
+    "threadId",
+    "turnId"
+   ],
+   "properties": [
+    "threadId",
+    "turnId"
+   ]
+  },
+  "thread/realtime/start": {
+   "required": [
+    "outputModality",
+    "threadId"
+   ],
+   "properties": [
+    "backendReasoningStatus",
+    "clientManagedHandoffs",
+    "codexResponseHandoffChannelPrefixes",
+    "codexResponseHandoffMode",
+    "codexResponseItemPrefix",
+    "codexResponsesAsItems",
+    "delegationAckFiller",
+    "flushTranscriptTailOnSessionEnd",
+    "includeStartupContext",
+    "initialItems",
+    "model",
+    "outputModality",
+    "prompt",
+    "realtimeEndInstructions",
+    "realtimeSessionId",
+    "realtimeStartInstructions",
+    "threadId",
+    "transport",
+    "version",
+    "voice"
+   ]
+  },
+  "thread/realtime/appendAudio": {
+   "required": [
+    "audio",
+    "threadId"
+   ],
+   "properties": [
+    "audio",
+    "threadId"
+   ]
+  },
+  "thread/realtime/appendText": {
+   "required": [
+    "text",
+    "threadId"
+   ],
+   "properties": [
+    "role",
+    "text",
+    "threadId"
+   ]
+  },
+  "thread/realtime/appendSpeech": {
+   "required": [
+    "text",
+    "threadId"
+   ],
+   "properties": [
+    "text",
+    "threadId"
+   ]
+  },
+  "thread/realtime/stop": {
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "threadId"
+   ]
+  },
+  "thread/timeline/list": {
+   "required": [
+    "threadId"
+   ],
+   "properties": [
+    "cursor",
+    "limit",
+    "threadId"
+   ]
+  },
+  "thread/realtime/listVoices": {
+   "required": [],
+   "properties": []
+  },
+  "review/start": {
+   "required": [
+    "target",
+    "threadId"
+   ],
+   "properties": [
+    "delivery",
+    "target",
+    "threadId"
+   ]
+  },
+  "model/list": {
+   "required": [],
+   "properties": [
+    "cursor",
+    "includeHidden",
+    "limit"
+   ]
+  },
+  "account/gatewayOAuth/read": {
+   "required": [],
+   "properties": []
+  },
+  "account/gatewayOAuth/login": {
+   "required": [],
+   "properties": []
+  },
+  "account/gatewayOAuth/cancel": {
+   "required": [],
+   "properties": []
+  },
+  "modelProvider/capabilities/read": {
+   "required": [],
+   "properties": []
+  },
+  "experimentalFeature/list": {
+   "required": [],
+   "properties": [
+    "cursor",
+    "limit",
+    "threadId"
+   ]
+  },
+  "permissionProfile/list": {
+   "required": [],
+   "properties": [
+    "cursor",
+    "cwd",
+    "limit"
+   ]
+  },
+  "experimentalFeature/enablement/set": {
+   "required": [
+    "enablement"
+   ],
+   "properties": [
+    "enablement"
+   ]
+  },
+  "remoteControl/enable": {
+   "required": [],
+   "properties": [
+    "ephemeral"
+   ]
+  },
+  "remoteControl/disable": {
+   "required": [],
+   "properties": [
+    "ephemeral"
+   ]
+  },
+  "remoteControl/status/read": {
+   "required": [],
+   "properties": []
+  },
+  "remoteControl/pairing/start": {
+   "required": [],
+   "properties": [
+    "manualCode"
+   ]
+  },
+  "remoteControl/pairing/status": {
+   "required": [],
+   "properties": [
+    "manualPairingCode",
+    "pairingCode"
+   ]
+  },
+  "remoteControl/client/list": {
+   "required": [
+    "environmentId"
+   ],
+   "properties": [
+    "cursor",
+    "environmentId",
+    "limit",
+    "order"
+   ]
+  },
+  "remoteControl/client/revoke": {
+   "required": [
+    "clientId",
+    "environmentId"
+   ],
+   "properties": [
+    "clientId",
+    "environmentId"
+   ]
+  },
+  "collaborationMode/list": {
+   "required": [],
+   "properties": []
+  },
+  "mock/experimentalMethod": {
+   "required": [],
+   "properties": [
+    "value"
+   ]
+  },
+  "environment/add": {
+   "required": [
+    "environmentId",
+    "execServerUrl"
+   ],
+   "properties": [
+    "authBearerToken",
+    "connectTimeoutMs",
+    "environmentId",
+    "execServerUrl"
+   ]
+  },
+  "environment/info": {
+   "required": [
+    "environmentId"
+   ],
+   "properties": [
+    "environmentId"
+   ]
+  },
+  "environment/status": {
+   "required": [
+    "environmentId"
+   ],
+   "properties": [
+    "environmentId"
+   ]
+  },
+  "mcpServer/oauth/login": {
+   "required": [
+    "name"
+   ],
+   "properties": [
+    "clientRegistration",
+    "name",
+    "scopes",
+    "threadId",
+    "timeoutSecs"
+   ]
+  },
+  "config/mcpServer/reload": {
+   "required": [],
+   "properties": []
+  },
+  "mcpServerStatus/list": {
+   "required": [],
+   "properties": [
+    "cursor",
+    "detail",
+    "limit",
+    "serverName",
+    "threadId"
+   ]
+  },
+  "mcpServer/resource/read": {
+   "required": [
+    "server",
+    "uri"
+   ],
+   "properties": [
+    "connectorId",
+    "originCallId",
+    "server",
+    "target",
+    "threadId",
+    "uri"
+   ]
+  },
+  "mcpServer/event/stream/start": {
+   "required": [
+    "arguments",
+    "name",
+    "server",
+    "subscriptionId",
+    "threadId"
+   ],
+   "properties": [
+    "_meta",
+    "arguments",
+    "name",
+    "server",
+    "subscriptionId",
+    "threadId"
+   ]
+  },
+  "mcpServer/event/stream/stop": {
+   "required": [
+    "subscriptionId"
+   ],
+   "properties": [
+    "subscriptionId"
+   ]
+  },
+  "mcpServer/tool/call": {
+   "required": [
+    "server",
+    "threadId",
+    "tool"
+   ],
+   "properties": [
+    "_meta",
+    "arguments",
+    "server",
+    "threadId",
+    "tool"
+   ]
+  },
+  "windowsSandbox/setupStart": {
+   "required": [
+    "mode"
+   ],
+   "properties": [
+    "cwd",
+    "mode"
+   ]
+  },
+  "windowsSandbox/readiness": {
+   "required": [],
+   "properties": []
+  },
+  "account/login/start": {
+   "required": [],
+   "properties": []
+  },
+  "account/bedrock/discover": {
+   "required": [],
+   "properties": []
+  },
+  "account/bedrock/setup": {
+   "required": [],
+   "properties": []
+  },
+  "account/login/cancel": {
+   "required": [
+    "loginId"
+   ],
+   "properties": [
+    "loginId"
+   ]
+  },
+  "account/logout": {
+   "required": [],
+   "properties": []
+  },
+  "account/rateLimits/read": {
+   "required": [],
+   "properties": [
+    "excludeResetCreditDetails",
+    "supportsLunaReserve"
+   ]
+  },
+  "account/rateLimitResetCredit/consume": {
+   "required": [
+    "idempotencyKey"
+   ],
+   "properties": [
+    "creditId",
+    "idempotencyKey"
+   ]
+  },
+  "account/usage/read": {
+   "required": [],
+   "properties": [
+    "threadId"
+   ]
+  },
+  "account/workspaceMessages/read": {
+   "required": [],
+   "properties": []
+  },
+  "account/sendAddCreditsNudgeEmail": {
+   "required": [
+    "creditType"
+   ],
+   "properties": [
+    "creditType"
+   ]
+  },
+  "feedback/upload": {
+   "required": [
+    "classification"
+   ],
+   "properties": [
+    "classification",
+    "extraLogFiles",
+    "includeLogs",
+    "reason",
+    "tags",
+    "threadId"
+   ]
+  },
+  "command/exec": {
+   "required": [
+    "command"
+   ],
+   "properties": [
+    "command",
+    "cwd",
+    "disableOutputCap",
+    "disableTimeout",
+    "env",
+    "outputBytesCap",
+    "permissionProfile",
+    "processId",
+    "sandboxPolicy",
+    "size",
+    "streamStdin",
+    "streamStdoutStderr",
+    "timeoutMs",
+    "tty"
+   ]
+  },
+  "command/exec/write": {
+   "required": [
+    "processId"
+   ],
+   "properties": [
+    "closeStdin",
+    "deltaBase64",
+    "processId"
+   ]
+  },
+  "command/exec/terminate": {
+   "required": [
+    "processId"
+   ],
+   "properties": [
+    "processId"
+   ]
+  },
+  "command/exec/resize": {
+   "required": [
+    "processId",
+    "size"
+   ],
+   "properties": [
+    "processId",
+    "size"
+   ]
+  },
+  "process/spawn": {
+   "required": [
+    "command",
+    "cwd",
+    "processHandle"
+   ],
+   "properties": [
+    "command",
+    "cwd",
+    "env",
+    "outputBytesCap",
+    "processHandle",
+    "size",
+    "streamStdin",
+    "streamStdoutStderr",
+    "timeoutMs",
+    "tty"
+   ]
+  },
+  "process/writeStdin": {
+   "required": [
+    "processHandle"
+   ],
+   "properties": [
+    "closeStdin",
+    "deltaBase64",
+    "processHandle"
+   ]
+  },
+  "process/kill": {
+   "required": [
+    "processHandle"
+   ],
+   "properties": [
+    "processHandle"
+   ]
+  },
+  "process/resizePty": {
+   "required": [
+    "processHandle",
+    "size"
+   ],
+   "properties": [
+    "processHandle",
+    "size"
+   ]
+  },
+  "config/read": {
+   "required": [],
+   "properties": [
+    "cwd",
+    "includeLayers"
+   ]
+  },
+  "externalAgentConfig/detect": {
+   "required": [],
+   "properties": [
+    "cwds",
+    "includeHome",
+    "maxSessionAgeDays",
+    "maxSessions",
+    "migrationSource",
+    "source"
+   ]
+  },
+  "externalAgentConfig/import": {
+   "required": [
+    "migrationItems"
+   ],
+   "properties": [
+    "migrationItems",
+    "migrationSource",
+    "providerId",
+    "source"
+   ]
+  },
+  "externalAgentConfig/import/recordHistory": {
+   "required": [
+    "itemTypeResults",
+    "providerId"
+   ],
+   "properties": [
+    "itemTypeResults",
+    "providerId"
+   ]
+  },
+  "externalAgentConfig/import/readHistories": {
+   "required": [],
+   "properties": []
+  },
+  "config/value/write": {
+   "required": [
+    "keyPath",
+    "mergeStrategy",
+    "value"
+   ],
+   "properties": [
+    "expectedVersion",
+    "filePath",
+    "keyPath",
+    "mergeStrategy",
+    "value"
+   ]
+  },
+  "config/batchWrite": {
+   "required": [
+    "edits"
+   ],
+   "properties": [
+    "edits",
+    "expectedVersion",
+    "filePath",
+    "reloadUserConfig"
+   ]
+  },
+  "configRequirements/read": {
+   "required": [],
+   "properties": []
+  },
+  "account/read": {
+   "required": [],
+   "properties": [
+    "refreshToken"
+   ]
+  },
+  "fuzzyFileSearch": {
+   "required": [
+    "query",
+    "roots"
+   ],
+   "properties": [
+    "cancellationToken",
+    "query",
+    "roots"
+   ]
+  },
+  "fuzzyFileSearch/sessionStart": {
+   "required": [
+    "roots",
+    "sessionId"
+   ],
+   "properties": [
+    "roots",
+    "sessionId"
+   ]
+  },
+  "fuzzyFileSearch/sessionUpdate": {
+   "required": [
+    "query",
+    "sessionId"
+   ],
+   "properties": [
+    "query",
+    "sessionId"
+   ]
+  },
+  "fuzzyFileSearch/sessionStop": {
+   "required": [
+    "sessionId"
+   ],
+   "properties": [
+    "sessionId"
+   ]
+  }
+ }
+}

@@ -103,6 +103,12 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
   // handback delivered by that id would open a billed turn on the PARENT (the notice rides the fork's next message instead)
   const conversationIdOf = (s) => addressableId(s);
 
+  /** THE ONE BILLED SITE of this module — through the gated ladder, under the declared reason (§4.3.1). `noWake` (lane
+   *  browser-propose: an approved switch is TOLD, never a wake) = deliver only where it costs nothing — a notification
+   *  steered into a turn already running — else the ladder refuses `no-wake` and the caller stashes for the next turn. */
+  function viaLadder(cid, text, { noWake = false } = {}) {
+    return deliver.deliverToConversation(cid, text, { kind: 'notification', spendReason: 'browser-handback', fromName: FROM_NAME, cardText: text, ...(noWake ? { noWake: true } : {}) }); // the LITERAL is what the census reads; it equals T.SPEND_REASON (pinned by the suite)
+  }
   function queueNotice(sess, n) {
     if (!notice || !sess) return false;
     try { notice(sess.id, sess.s, n); return true; } catch (e) { log.warn?.(`[browser] handback notice not queued — ${e && e.message}`); return false; }
@@ -130,7 +136,8 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     const idleMs = keeper && typeof keeper.takeoverIdleMs === 'function' ? keeper.takeoverIdleMs() : T.DEFAULT_TAKEOVER_IDLE_MS;
     // the owner's ruling (2026-09-27): the cycle's re-run list (the keeper closed it at this handback) rides every word below
     const rerun = !win && Array.isArray(ev.rerun) ? ev.rerun.map(String).filter(Boolean) : [];
-    const args = { cause, label, url: ev.url || '', heldMs: ev.heldMs || 0, idleMs, ...(win ? { target: 'window', handle: ev.handle || null } : {}), ...(rerun.length ? { rerun } : {}) };
+    const userActs = !win && Array.isArray(ev.userActs) ? ev.userActs : []; // lane browser-resume C: the user's tab acts while he drove — said in the same words, never a delivery of their own
+    const args = { cause, label, url: ev.url || '', heldMs: ev.heldMs || 0, idleMs, ...(win ? { target: 'window', handle: ev.handle || null } : {}), ...(rerun.length ? { rerun } : {}), ...(userActs.length ? { userActs } : {}) };
     const verdict = T.announceVerdict({ cause, announceIdle: announceIdle(), sibling: !win && !!ev.sibling, rerun }); // verify r7: a sibling's handback with nothing to re-run is zero-spend
     const out = { cause, target: win ? 'window' : 'browser', sessionId: sess ? sess.id : null, verdict, delivered: false, stashed: false, noticed: false, inbox: false, why: null };
     if (!sess) { out.why = win ? 'no live session holds this window' : 'no live session carries this browser key'; log.log?.(`[browser] handback (${cause}) for ${win ? ev.handle : ev.browserKey}: ${out.why}`); return out; }
@@ -151,10 +158,7 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
       return out;
     }
     let r = null;
-    try {
-      // THE ONE BILLED SITE of this feature: through the gated ladder, under the declared reason (§4.3.1)
-      r = await deliver.deliverToConversation(cid, text, { kind: 'notification', spendReason: 'browser-handback', fromName: FROM_NAME, cardText: text }); // the LITERAL is what the census reads; it equals T.SPEND_REASON (pinned by the suite)
-    } catch (e) { r = { ok: false, reason: 'delivery threw: ' + (e && e.message) }; }
+    try { r = await viaLadder(cid, text); } catch (e) { r = { ok: false, reason: 'delivery threw: ' + (e && e.message) }; }
     if (r && r.ok) {
       out.delivered = true;
       log.log?.(`[browser] handback (${cause}) for ${sess.id}: announced into the conversation (${r.via || r.mode || 'delivered'})`);
@@ -168,6 +172,33 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     if (!out.stashed) out.noticed = queueNotice(sess, T.handbackNotice({ ...args, at: Date.now() }));
     log.log?.(`[browser] handback (${cause}) for ${sess.id}: NOT delivered (${out.why})${out.stashed ? ' — stashed for the next injection' : ''}${out.noticed ? '; the notice rides the next message' : ''}`);
     return out;
+  }
+
+  /**
+   * LANE BROWSER-PROPOSE step 3 (d): THE APPROVED SWITCH IS TOLD — the proposal runner hands the words here, and they
+   * take this module's ONE ladder site with `noWake` (a switch is not a wake): joined into a turn that is RUNNING where
+   * that costs nothing (the harness's notification steer), else the ladder's own stash — the conversation's next turn,
+   * free; only when the stash cannot take them, the zero-spend notice. ONE carrier. `{told: steered | stashed | noticed |
+   * failed}`. The chat's card of those words is drawn where the agent receives them (the steer's own record, the stash's
+   * drain) — the proposal card already says "the agent hears it with your next message".
+   */
+  async function tellProposal({ sessionId = null, browserKey = null, text = '' } = {}) {
+    const sess = sessionFor(sessionId, browserKey);
+    if (!sess || !text) return { told: 'failed', why: !sess ? 'no live session carries this browser key' : 'nothing to tell' };
+    const cid = conversationIdOf(sess.s);
+    const noticeOnly = () => (queueNotice(sess, { kind: 'browser-proposal', text, at: Date.now() }) ? { told: 'noticed' } : { told: 'failed', why: 'the notice queue is not wired' });
+    if (!cid || !deliver || typeof deliver.deliverToConversation !== 'function') return noticeOnly();
+    let r = null;
+    try { r = await viaLadder(cid, text, { noWake: true }); } catch (e) { r = { ok: false, reason: 'delivery threw: ' + (e && e.message) }; }
+    if (r && r.ok) { log.log?.(`[browser] proposal told to ${sess.id} in its running turn (${r.lane || 'delivered'})`); return { told: 'steered' }; }
+    try {
+      if (typeof deliver.stashFor === 'function') {
+        const st = deliver.stashFor(cid, { source: 'agent', kind: 'notification', fromName: FROM_NAME, text });
+        log.log?.(`[browser] proposal told to ${sess.id} with its next message (stashed${st && st.stored === false ? ' in memory only: ' + st.why : ''})`);
+        return { told: 'stashed' };
+      }
+    } catch (e) { log.warn?.(`[browser] proposal stash failed — ${e && e.message}`); }
+    return noticeOnly();
   }
 
   /**
@@ -276,6 +307,60 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     });
   }
 
+  /**
+   * lane browser-resume B (§3.9, the owner's ruling 2): "HAND BACK AND CONTINUE" — the between-turns twin of the explicit
+   * handback. The user's one-line note + the tab list ride the conversation's NEXT turn: ONE entry on the ladder's own
+   * stash (kind `notification`, `ref` = the restore id — a failed disk write is SAID, never "stashed") and ONE display-only
+   * card in the user's chat (the takeover card's path). NOTHING IS DELIVERED: no rung, no authorizer, no spend reason — the
+   * only billed path stays the user's own "Hand over now" (stash-handover). Refusals BEFORE any act: no live session, a
+   * conversation with no id yet (nothing to stash under). The keeper ends a takeover (cause `continue`) and reads the tabs;
+   * its restore tells the agent's next command which tab is current. → `{ok, id, stashed, durable, carded, tabs, …}` | refusal.
+   */
+  async function continueFor({ sessionId = null, browserKey = null, profileId = null, note = '' } = {}) {
+    const KB = require('../browser-kept.js');
+    const sess = sessionFor(sessionId, browserKey);
+    if (!sess) return { ok: false, code: 'no_live_session', error: 'the conversation is not running — nothing to hand the browser back to' };
+    const cid = conversationIdOf(sess.s);
+    if (!cid || !deliver || typeof deliver.stashFor !== 'function') return { ok: false, code: 'stash_refused', error: !cid ? 'this conversation has no id yet (its first reply has not come back) — hand it back after the agent has answered once' : 'the delivery stash is not wired on this server' };
+    if (!keeper || typeof keeper.continueState !== 'function') return { ok: false, code: 'unavailable', error: 'the browser keeper is not available' };
+    const st = await keeper.continueState({ browserKey, profileId, sessionId: sess.id });
+    if (!st || !st.ok) return st || { ok: false, code: 'unavailable', error: 'no answer' };
+    // verify r2 (Y5): ONE hand-back per turn. A press with NOTHING NEW — no takeover ended here, and this conversation's
+    // previous hand-back still WAITING in the stash for its next turn — is refused by name: a double press, a second owner
+    // tab inside the broadcast window or a retried POST filed a SECOND frame + card and the agent read the same hand-back
+    // twice (reproduced: four frames for one next turn). A takeover that ended here is new (the user drove again: its
+    // acts and re-run list are this press's own) and always files. The stash is asked, never remembered here (a drain,
+    // a restart, an eviction all move the truth); a stash that cannot be peeked leaves the press alone (a dedupe, not a gate).
+    if (!st.tookOver) {
+      let waiting = null;
+      try { waiting = typeof deliver.stashPeek === 'function' ? ((deliver.stashPeek(cid) || []).find((e) => e && e.ref && /^bres-[0-9a-f]{8,16}$/.test(String(e.ref)) && e.fromName === FROM_NAME) || null) : null; } catch { waiting = null; }
+      if (waiting) {
+        log.log?.(`[browser] ${browserKey}${profileId ? ' on ' + profileId : ''} for ${sess.id}: hand-back refused already_handed_back — ${waiting.ref} still waits for the agent's next turn (nothing new: no takeover ended here)`);
+        return { ok: false, code: 'already_handed_back', error: 'already handed back — the agent reads it with its next turn; take the browser over again to hand it back anew', id: String(waiting.ref) };
+      }
+    }
+    const id = 'bres-' + require('crypto').randomBytes(4).toString('hex');
+    const text = KB.continueFrame({ note, tabs: st.tabs, currentIndex: st.currentIndex, rerun: st.rerun, rerunSentence: T.rerunSentence, userActs: st.userActs || [], actsSentence: require('../browser-tabs.js').userActsSentence, drove: !!st.tookOver }); // verify r2: the head says drove / resumed
+    const cardText = KB.continueCardText({ note, tabs: st.tabs, currentIndex: st.currentIndex });
+    const out = { ok: true, id, stashed: false, durable: false, carded: false, tabs: st.tabs.length, tookOver: !!st.tookOver, own: !!st.own };
+    try {
+      const r = deliver.stashFor(cid, { source: 'agent', kind: 'notification', fromName: FROM_NAME, ref: id, text });
+      out.stashed = true; out.durable = !(r && r.stored === false);
+      if (!out.durable) out.why = r.why;
+    } catch (e) { out.stashed = false; out.why = String(e && e.message); }
+    // the conversation's own browser: its next command is told which tab is current (the note too when the stash could not take it)
+    if (st.own) { try { keeper.noteContinue?.({ browserKey, tabs: st.tabs, note, stashed: out.stashed, drove: !!st.tookOver }); } catch (e) { log.warn?.(`[browser] hand-back restore not noted — ${e && e.message}`); } }
+    const card = { fromName: FROM_NAME, text: cardText, kind: 'notification' };
+    try {
+      if (typeof emitCard === 'function') out.carded = emitCard(sess.s, card) !== false;
+      else if (typeof deliver.emitPeerCard === 'function') { deliver.emitPeerCard(cid, card); out.carded = true; }
+    } catch (e) { log.warn?.(`[browser] hand-back card not shown — ${e && e.message}`); }
+    try { onLiveFactsChanged?.({ kind: 'continue', browserKey }); } catch { /* optional */ }
+    log.log?.(`[browser] ${browserKey}${profileId ? ' on ' + profileId : ''} for ${sess.id}: handed back for the next turn — ${out.stashed ? `stashed (${out.durable ? 'on disk' : 'in memory: ' + out.why})` : `NOT stashed (${out.why})${st.own ? '; the note rides its next browser command instead' : ''}`}${out.carded ? '; card shown' : ''} (free — nothing delivered)`);
+    if (!out.stashed) return { ...out, ok: false, code: 'stash_refused', error: `the note could not be queued for the agent's next turn: ${out.why}${st.own ? ' — its next browser command is told instead' : ''}` };
+    return out;
+  }
+
   let unsubInput = null, unsubConfirm = null, unsubWindow = null;
   /** P9b: hang on the window-targets engine's input seam — the same announce, target 'window'. Idempotent. */
   function installWindow(engine) {
@@ -300,6 +385,9 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
       // the owner's ruling (2026-09-27): the takeover TELLS — one card + one zero-spend notice per cycle, nothing billed
       if (ev.kind === 'takeover') { try { announceTakeover(ev); } catch (e) { log.warn?.(`[browser] takeover announce failed — ${e && e.message}`); } return; }
       if (ev.kind !== 'handback') return;
+      // lane browser-resume B: "Hand back and continue" — the stash entry `continueFor` files IS the one carrier (no turn,
+      // no zero-spend notice beside it: the same hand-back read twice); the stale sweep above still ran
+      if (ev.cause === 'continue') return;
       announce(ev).catch((e) => log.warn?.(`[browser] handback announce failed — ${e && e.message}`));
     });
     if (!unsubConfirm && typeof keeper.onConfirmation === 'function') unsubConfirm = keeper.onConfirmation((ev) => { try { noteConfirmation(ev); } catch (e) { log.warn?.(`[browser] confirmation inbox failed — ${e && e.message}`); } });
@@ -307,7 +395,7 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
   }
   function shutdown() { try { unsubInput?.(); unsubConfirm?.(); unsubWindow?.(); } catch { /* */ } unsubInput = null; unsubConfirm = null; unsubWindow = null; }
 
-  return { announce, announceTakeover, noteConfirmation, install, installWindow, shutdown, announceIdle, sweepStale, takenFor, FROM_NAME };
+  return { announce, announceTakeover, tellProposal, noteConfirmation, install, installWindow, shutdown, announceIdle, sweepStale, takenFor, continueFor, FROM_NAME };
 }
 
 module.exports = { create, FROM_NAME };

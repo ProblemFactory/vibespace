@@ -10,10 +10,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { startWorkMeter, measure } from './work-meter.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 300) : '')); } };
+startWorkMeter(); // BEFORE the modules load — the perf claims are counted in WORK, never the clock (lane-mirror-198)
+const LFILES = ['src/usage-anchors.js', 'src/usage-history.js'];
 const { UsageHistory } = require(path.join(REPO, 'src/usage-history.js'));
 const { costBetweenMulti } = require(path.join(REPO, 'src/usage-anchors.js'));
 
@@ -60,12 +63,16 @@ ok(uh._evCountUpTo(T0 - 1) === 0 && uh._evCountUpTo(T0 + SPAN + 1) === N && uh._
 const gen = [...uh._events(T0 + 86400000, T0 + 2 * 86400000)];
 ok(gen.every((e, i) => i === 0 || e.ts >= gen[i - 1].ts) && gen.every((e) => e.ts >= T0 + 86400000 && e.ts <= T0 + 2 * 86400000) && gen.length === all.filter((e) => e.ts >= T0 + 86400000 && e.ts <= T0 + 2 * 86400000).length, '_events yields exactly the interval, in time order');
 
-// timing: 2000 pair-costs (a realistic learn) must be far below one loop-blocking second
+// WORK, never the clock (lane-mirror-198): 2000 pair-costs (a realistic learn) — a pair costs fewer ops than ONE step
+// per ledger event (the pre-2.369.36 shape walked all 60k events per pair: the brute reference above, measured on ten
+// pairs, is the control), and the memoized second learn does at most a tenth of the first's work (a count is the same
+// on every machine; the old 1500 ms / 60 ms bounds were a loaded runner's coin flip)
 const pairs = []; for (let k = 0; k < 2000; k++) { const a = T0 + Math.floor(rnd() * SPAN), b = a + 5 * 3600000; pairs.push([a, b]); }
-let t = Date.now(); for (const [a, b] of pairs) costBetweenMulti(uh, ['sub-a', '__global__'], a, b); const cold = Date.now() - t;
-t = Date.now(); for (const [a, b] of pairs) costBetweenMulti(uh, ['sub-a', '__global__'], a, b); const warm = Date.now() - t;
-ok(cold < 1500, `2000 interval costs over 60k events, cold: ${cold}ms (was a full 60k scan per pair)`);
-ok(warm < 60, `…and memoized on the second learn: ${warm}ms`);
+const cold = measure(() => { for (const [a, b] of pairs) costBetweenMulti(uh, ['sub-a', '__global__'], a, b); }, LFILES).total;
+const warm = measure(() => { for (const [a, b] of pairs) costBetweenMulti(uh, ['sub-a', '__global__'], a, b); }, LFILES).total;
+const bruteW = measure(() => { for (const [a, b] of pairs.slice(0, 10)) brute(['sub-a', '__global__'], a, b); }, LFILES).total / 10;
+ok(cold / pairs.length < N && bruteW >= N, `2000 interval costs over 60k events, cold: ${cold} ops = ${Math.round(cold / pairs.length)} per pair — fewer than one step per event (${N}); the full-scan reference costs ${Math.round(bruteW)} per pair`);
+ok(warm <= cold / 10, `…and memoized on the second learn: ${warm} ops (≤ a tenth of the first's ${cold})`);
 // memo invalidation: a late event INSIDE an interval changes its cost
 const [a0, b0] = pairs[0]; const before = costBetweenMulti(uh, ['sub-a'], a0, b0).total;
 fs.appendFileSync(path.join(dataDir, 'usage-history', 'events-2026-09.ndjson'), JSON.stringify({ rid: 'late-1', ts: a0 + 1000, sid: 'sx', acct: 'sub-a', model: 'claude-fable-5-1', cwd: '/w', i: 100000, cw5: 0, cw1: 0, cr: 0, o: 1000, tier: 'default' }) + '\n');

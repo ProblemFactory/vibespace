@@ -1,8 +1,9 @@
-// PURE OTLP-logs parser → per-request billing-TRUTH records (B-345b 终案,
-// 2.361.0). The Claude CLI's built-in OpenTelemetry export is the ONLY
-// channel that NAMES the billing org per request (transcripts, statusline and
-// rate_limit_event all carry quota VALUES but no identity — verified by field
-// inventory on 2.1.235). Each `claude_code.api_request` log record carries
+// PURE OTLP-logs parser → per-request records (B-345b, 2.361.0). Each record
+// joins the usage ledger by request id with its tokens and cost. Its
+// `organization.id` was taken for "the billing org per request"; MEASURED on
+// 2026-09-30 (lane-hot-switch, scripts/fixtures/claude-cred-read-2.1.281.json)
+// it is ~/.claude.json's machine-wide oauthAccount org, the same for every
+// token a process holds — a LABEL, never the account a request billed. Each `claude_code.api_request` log record carries
 // organization.id + request_id (the ledger's rid primary key) + session.id +
 // model + all four token classes + cost_usd — a complete truth record that
 // joins the usage ledger exactly. The CLI pushes these to OUR loopback

@@ -9,6 +9,11 @@
 //       oracle); a real click into its textarea, keys + an IME commit of 6 CJK characters typed EXACTLY;
 //   (b) the conversation already on that browser keeps working the whole time: its commands answer, its tab keeps its
 //       page (his address row navigates HIS tab only — U3 on the real product), nothing is paused or interrupted;
+//   (b2) lane browser-resume C (the owner's ruling 3) — TABS on the REAL 0.38.1 through the shipped CLI: the agent's `tab
+//       list` names its own tab (current) and only COUNTS the rest — his page never in it; `tab close` / `tab <id>` of HIS
+//       tab refused `not_your_tab` (his tab still in Chrome's own list); `tab new` + `tab close` of its own; its current
+//       tab closed ⇒ its next verb `[tab_gone]` with this tool's way out; `tab <id>` back to its own; his window's tab row
+//       marks his tab `you` and the agent's `other` (no control on it), his only tab has no ✕;
 //   (c) Close (the bar's button, a real click) ⇒ his window closes, HIS tab is gone from Chrome's own target list, the
 //       agent's stays, the browser keeps running (the SAME Chrome pid); Browse yourself again ⇒ JOIN (the same pid);
 //   (d) his session is in the Sessions list (holder user, recorded, ended `released`) with his acts — the typed words
@@ -288,6 +293,35 @@ const other = await S1.vb(['open', innerUrl('agent2')]);
 ok(other.ok && !!(await innerUntil('agent2', () => true, 20000)) && (reports.get('mine') || {}).b === 'abc你好世界再见', 'the conversation opens another page while he browses — on its own tab; his page keeps what he typed', (other.stdout + other.stderr).slice(-200));
 const jl = journal.split('\n').filter((l) => /the user took over|taken over WITH|refused with browser_paused|paused from birth/.test(l));
 ok(jl.length === 0, 'the journal names no takeover, pause or interruption anywhere while he browsed', jl.slice(-4).join(' | '));
+
+// ═══ (b2) lane browser-resume C: THE AGENT'S OWN TABS on the real 0.38.1, and HIS row ═══════════════════════
+console.log('— (b2) tabs on the real 0.38.1: the agent lists / opens / closes ITS OWN tabs only; his tab is never its to touch; his row');
+{
+  const pagesNow = async () => { try { return (await (await fetch(`http://127.0.0.1:${chrome0.port}/json/list`)).json()).filter((t) => t.type === 'page'); } catch { return []; } };
+  const hisId = ((await pagesNow()).find((t) => t.url.includes('n=mine')) || {}).id || null;
+  const tl = await S1.vb(['tab', 'list']);
+  ok(tl.ok && /n=agent2.*\[current\]/.test(tl.stdout) && /other tabs? in this browser (is|are) not yours/.test(tl.stdout) && !tl.stdout.includes('n=mine') && !tl.stdout.includes(String(hisId)), 'the agent\'s `tab list` (the shipped CLI → the server, the REAL daemon): ITS tab, current — the rest only COUNTED, his page never named', (tl.stdout + tl.stderr).slice(-500));
+  const c1 = await S1.vb(['tab', 'close', String(hisId)]); const c2 = await S1.vb(['tab', String(hisId)]);
+  ok(hisId && !c1.ok && /\[not_your_tab\]/.test(c1.stderr) && !c2.ok && /\[not_your_tab\]/.test(c2.stderr) && (await pagesNow()).some((t) => t.id === hisId) && (reports.get('mine') || {}).b === 'abc你好世界再见', 'the agent\'s `tab close <his tab>` and `tab <his tab>` are refused [not_your_tab] — his tab is still in Chrome\'s own list, his typed page untouched', (c1.stderr + ' | ' + c2.stderr).slice(-500));
+  const tn = await S1.vb(['tab', 'new', innerUrl('agent3')]);
+  const own2 = await S1.vb(['tab', 'list', '--json']);
+  let j2 = null; try { j2 = JSON.parse(own2.stdout); } catch { j2 = null; }
+  ok(tn.ok && !!(await innerUntil('agent3', () => true, 20000)) && j2 && j2.data.tabs.length === 2 && j2.data.tabs.some((t) => t.current && t.url.includes('n=agent3')), '`tab new <url>` opens a tab of its OWN (now its current) — its list names two', (tn.stdout + tn.stderr + own2.stdout).slice(-500));
+  const cc = await S1.vb(['tab', 'close']);
+  const goneA3 = await until(async () => !(await pagesNow()).some((t) => t.url.includes('n=agent3')), 8000, 150);
+  ok(cc.ok && /\[tab_closed_current\]/.test(cc.stderr) && goneA3, '`tab close` closes ITS current tab (gone from Chrome\'s list) and says what its next verb meets', (cc.stdout + cc.stderr).slice(-400));
+  const tg = await S1.vb(['get', 'url']);
+  ok(!tg.ok && /\[tab_gone\]/.test(tg.stderr) && /vibespace-browser tab list/.test(tg.stderr), 'its next page verb: the REAL binary\'s tab_gone, and this tool\'s way out by name [tab_gone]', (tg.stdout + tg.stderr).slice(-400));
+  const own3 = await S1.vb(['tab', 'list', '--json']);
+  let j3 = null; try { j3 = JSON.parse(own3.stdout); } catch { j3 = null; }
+  const back2 = j3 && j3.data.tabs.find((t) => t.url.includes('n=agent2'));
+  const sw = back2 ? await S1.vb(['tab', back2.id || back2.targetId]) : { ok: false, stderr: 'no own tab' };
+  const u2 = await S1.vb(['get', 'url']);
+  ok(back2 && sw.ok && u2.ok && u2.stdout.includes('n=agent2'), '`tab <id>` back to its own tab: its verbs run there again', (sw.stderr + u2.stdout + u2.stderr).slice(-400));
+  const hr = await until(() => E.h('if (!L) return null; const r = L.state().tabRow; return r && r.rows.length >= 2 && r.rows.some((x) => x.owner === "you") && r.rows.some((x) => x.owner === "other") ? r : null;').catch(() => null), 10000, 200);
+  const hisRow = hr && hr.rows.find((x) => x.owner === 'you'), agentRows = hr ? hr.rows.filter((x) => x.owner === 'other') : [];
+  ok(hisRow && !hisRow.canClose && agentRows.length >= 1 && agentRows.every((x) => !x.canClose && !x.canSwitch), 'HIS window\'s tab row: his tab "Yours" (his only one — no ✕: Close ends his browsing), the conversation\'s "Another conversation’s" with NO control on it', JSON.stringify(hr));
+}
 
 // ═══ (c) CLOSE ⇒ HIS TAB ONLY; BROWSE YOURSELF AGAIN ⇒ JOIN ═══════════════════════
 console.log('— (c) Close: his tab closes, the browser stays for the agent; Browse yourself again joins it');

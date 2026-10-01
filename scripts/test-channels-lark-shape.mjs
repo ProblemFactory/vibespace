@@ -39,6 +39,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { freePort } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { startWorkMeter, bounded } from './work-meter.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -1239,17 +1240,22 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
 console.log('\n⑬ the change feed: the search page, the declared unit, the describe ladder, the scopes');
 {
   const SX = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/lark/search.json'), 'utf-8'));
+  // lane lark-p2p: an instant as the vendor writes it — ISO 8601 at +08:00 (its own doc's example form), whole seconds
+  const isoAt = (ms, offMin = 480) => { const d = new Date(ms + offMin * 60e3); const p = (n) => String(n).padStart(2, '0'); return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}+${p(Math.floor(offMin / 60))}:${p(offMin % 60)}`; };
+  // the fixture's offsets become the vendor's fields IN PLACE (the probe prints the key order the vendor sent)
   const it = (x) => {
-    const m = x.meta_data ? { ...x.meta_data } : null;
-    if (m) {
-      const at = T0 + Number(m.atOffsetMs);
-      m.create_time = m.createSeconds ? String(Math.floor(at / 1000)) : String(at);
-      if (m.updOffsetMs !== undefined) m.update_time = String(T0 + Number(m.updOffsetMs));
-      delete m.atOffsetMs; delete m.updOffsetMs; delete m.createSeconds;
-    }
-    return m ? { ...x, meta_data: m } : { ...x };
+    if (!x.meta_data) return { ...x };
+    const form = x.meta_data.createForm || 'iso';
+    const m = Object.fromEntries(Object.entries(x.meta_data).flatMap(([k, v]) => {
+      if (k === 'createForm') return [];
+      if (k === 'atOffsetMs') return [['create_time', form === 'ms' ? String(T0 + Number(v)) : isoAt(T0 + Number(v))]];
+      if (k === 'updOffsetMs') return [['update_time', isoAt(T0 + Number(v))]];
+      return [[k, v]];
+    }));
+    return { ...x, meta_data: m };
   };
   const pageOf = (k) => ({ ...SX[k], data: { ...SX[k].data, items: SX[k].data.items.map(it) } });
+  const pageOfX = (pg) => ({ ...pg, data: { ...pg.data, items: pg.data.items.map(it) } });
   const calls = [];
   const st = { chatRefuse: new Set(), fail: null };
   const fetchS = async (url, init = {}) => {
@@ -1257,6 +1263,7 @@ console.log('\n⑬ the change feed: the search page, the declared unit, the desc
     const body = init.body ? JSON.parse(init.body) : null;
     calls.push({ method: init.method || 'GET', path: u.pathname, q: Object.fromEntries(u.searchParams), body });
     if (st.fail) { const e = SX[st.fail]; st.fail = null; return jsonRes(e.body, e.status); }
+    if (u.pathname === '/open-apis/im/v1/messages/search' && st.envelope) return jsonRes(st.envelope);   // verify r2: a 200 that is not a search page
     if (u.pathname === '/open-apis/im/v1/messages/search' && st.bigPage) { const p0 = pageOf('page1'); return jsonRes({ ...p0, data: { ...p0.data, items: Array.from({ length: st.bigPage }, (_, i) => ({ ...p0.data.items[0], meta_data: { ...p0.data.items[0].meta_data, message_id: `om_big_${i}` } })) } }); }
     if (u.pathname === '/open-apis/im/v1/messages/search') return jsonRes(pageOf(u.searchParams.get('page_token') === 'pt-search-2' ? 'page2' : 'page1'));
     if (u.pathname.startsWith('/open-apis/contact/v3/users/')) return jsonRes(SX.userPeer);
@@ -1273,22 +1280,36 @@ console.log('\n⑬ the change feed: the search page, the declared unit, the desc
   tokens.st.token = { access_token: 'u-access-0001', expiresAt: now() + 7200e3, refresh_token: 'ur-refresh-0001', refreshExpiresAt: now() + 2592000e3, scopes: [...lark.SCOPES, lark.SEARCH_SCOPE, lark.P2P_READ_SCOPE], openId: 'ou_member_a', name: 'Member A' };
   const metered = { n: 0 };
   const a = reg.create('lark', { id: 'lark' }, { now, fetch: fetchS, tokens, resolveIntegration: () => CRED, log: logS, meter: (u) => { metered.n += u; } });
-  ok(CH.validateCaps('lark', lark.caps) === true && lark.caps.changeFeed.via === 'search' && lark.caps.changeFeed.scope === 'search:message' && lark.caps.changeFeed.option === 'search' && lark.caps.changeFeed.timeUnit === 'ms' && lark.caps.changeFeed.pageSize === 30 && lark.caps.changeFeed.perMin === 10 && lark.caps.pace.cost.feed === 1, 'the declaration: via search, the held scope search:message, the option `search`, ms, 30 a page, 10 pages a sliding minute (10 % of the vendor\'s 100/min tenant tier), a page costs one request');
+  ok(CH.validateCaps('lark', lark.caps) === true && lark.caps.changeFeed.via === 'search' && lark.caps.changeFeed.scope === 'search:message' && lark.caps.changeFeed.option === 'search' && lark.caps.changeFeed.timeUnit === 'iso' && lark.caps.changeFeed.reader === 2 && lark.caps.changeFeed.pageSize === 30 && lark.caps.changeFeed.perMin === 10 && lark.caps.pace.cost.feed === 1, 'the declaration: via search, the held scope search:message, the option `search`, the instant an ISO 8601 string (lane lark-p2p — the vendor\'s doc and its answer), hit reader revision 2, 30 a page, 10 pages a sliding minute (10 % of the vendor\'s 100/min tenant tier), a page costs one request');
+  // lane lark-p2p: THE FIXTURE IS READ FROM THE VENDOR'S OWN ANSWER — page1's items carry EXACTLY the field names the
+  // production probe printed on 2026-09-30, and every one of them is a field the vendor's doc names
+  {
+    const O = SX.observedFields;
+    const topOk = SX.page1.data.items.every((x) => JSON.stringify(Object.keys(x)) === JSON.stringify(O.top));
+    const metaOk = SX.page1.data.items.map(it).every((x) => JSON.stringify(Object.keys(x.meta_data)) === JSON.stringify(O.meta));
+    const inDoc = O.top.every((k) => SX.docFields.top.includes(k)) && O.meta.every((k) => SX.docFields.meta.includes(k));
+    ok(topOk && metaOk && inDoc && O.at === '2026-09-30', 'lark-p2p: the fixture\'s page1 carries EXACTLY the production probe\'s fields (display_info, id, meta_data; meta_data: chat_id, create_time, from_id, is_p2p_chat, message_id, position, type), each one the vendor\'s doc names', JSON.stringify({ topOk, metaOk, inDoc }));
+  }
   const from = T0 - 90e3, to = T0;
   const p1 = await a.changes({ from, to, pageSize: 30 });
   const c1 = calls[calls.length - 1];
-  ok(c1.method === 'POST' && c1.path === '/open-apis/im/v1/messages/search' && c1.q.user_id_type === 'open_id' && c1.q.page_size === '30' && !('page_token' in c1.q) && c1.body.query === '' && c1.body.time_range.start_time === new Date(from).toISOString().replace(/\.\d{3}Z$/, 'Z') && c1.body.time_range.end_time === new Date(to).toISOString().replace(/\.\d{3}Z$/, 'Z') && !('chat_type' in c1.body), 'the request: POST …/im/v1/messages/search, an EMPTY query, the window as ISO 8601 whole seconds, the pagination in the query string (open ids, 30 a page), no chat type on a steady page', JSON.stringify(c1));
-  ok(p1.hits.length === 3 && p1.malformed === 2 && p1.more === true && p1.pageToken === 'pt-search-2' && p1.total === 5 && p1.stripped === 0, 'the hits: three good items; the seconds-valued create_time (under the ms declaration) and the item with no meta_data are MALFORMED, counted — never rescaled; the continuation and the total kept', JSON.stringify(p1));
-  const [hg, hd, hr] = p1.hits;
-  ok(hg.convId === 'oc_ops_room_0001' && hg.vendorId === 'om_srch_group_01' && hg.at === T0 - 20000 && hg.updatedAt === T0 - 20000 && hg.isP2p === false && hg.threadKey === null && hd.isP2p === true && hd.convId === 'oc_dm_peer_0001' && hd.fromId === 'ou_peer_c' && hr.threadKey === 'omt_thread_0001', 'each hit is a MARK: the chat, the message id (meta_data.message_id), the instant in ms, a single chat flagged, a thread reply its thread', JSON.stringify(p1.hits));
+  const isoW = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  ok(c1.method === 'POST' && c1.path === '/open-apis/im/v1/messages/search' && c1.q.user_id_type === 'open_id' && c1.q.page_size === '30' && !('page_token' in c1.q) && c1.body.query === '' && c1.body.filter && c1.body.filter.time_range.start_time === isoW(from) && c1.body.filter.time_range.end_time === isoW(to) && !('time_range' in c1.body) && !('chat_type' in c1.body) && !('chat_type' in c1.body.filter), 'the request: POST …/im/v1/messages/search, an EMPTY query, the window as ISO 8601 whole seconds INSIDE `filter` (the vendor\'s doc — lane lark-p2p: at the top level it was never read), the pagination in the query string (open ids, 30 a page), no chat type on a steady page', JSON.stringify(c1));
+  ok(p1.hits.length === 5 && p1.malformed === 0 && p1.more === true && p1.pageToken === 'pt-search-2' && p1.total === 9 && p1.stripped === 0 && p1.hits.filter((h) => h.isP2p).length === 3, 'lark-p2p: the OBSERVED shape reads whole — five hits (three single chats, two groups), nothing malformed; the continuation and the total kept', JSON.stringify(p1));
+  const [hd, hg] = p1.hits;
+  ok(hd.convId === 'oc_dm_peer_0001' && hd.vendorId === 'om_srch_dm_01' && hd.at === T0 - 50000 && hd.updatedAt === null && hd.isP2p === true && hd.fromId === 'ou_peer_c' && hd.threadKey === null && hg.convId === 'oc_ops_room_0001' && hg.isP2p === false && hg.at === T0 - 40000, 'each hit is a MARK: the chat, the message id (meta_data.message_id), the ISO 8601 instant at +08:00 read to the exact ms, a single chat flagged by the boolean is_p2p_chat, no thread / no edit when the vendor sends none', JSON.stringify(p1.hits.slice(0, 2)));
   ok(!JSON.stringify(p1).includes('SNIPPET-MUST-NOT-LEAK') && !said.some((x) => x.includes('SNIPPET-MUST-NOT-LEAK') || x.includes('om_srch_')), 'THE SNIPPET NEVER LEAVES THE ADAPTER: not in the page, not in any log line (nor a message id)');
   const names = said.filter((x) => /message search's first page carries fields/.test(x));
-  ok(names.length === 1 && /display_info/.test(names[0]) && /meta_data: .*message_id/.test(names[0]) && /chat_id/.test(names[0]), 'the FIELD NAMES (never values) of the first page are said once per process — the fixture\'s check against reality (U1)', names.join(' | '));
+  ok(names.length === 1 && names[0].includes("the message search's first page carries fields display_info, id, meta_data; meta_data: chat_id, create_time, from_id, is_p2p_chat, message_id, position, type;") && /create_time form: iso8601; all 5 readable/.test(names[0]), 'lark-p2p: the probe over the fixture prints the PRODUCTION probe\'s field list verbatim, plus the create_time FORM (iso8601, never a value) and what this version could read — the probe and the parser checked against each other', names.join(' | '));
   const p2 = await a.changes({ from, to, pageToken: p1.pageToken });
   const c2 = calls[calls.length - 1];
-  ok(c2.q.page_token === 'pt-search-2' && p2.more === false && p2.pageToken === null && p2.hits.length === 1 && said.filter((x) => /first page carries fields/.test(x)).length === 1, 'the next page carries the token; the last page ends the window (no token, more:false); the field names are not said again', JSON.stringify(p2));
+  const [hr, hid] = p2.hits;
+  ok(c2.q.page_token === 'pt-search-2' && p2.more === false && p2.pageToken === null && p2.hits.length === 2 && said.filter((x) => /first page carries fields/.test(x)).length === 1, 'the next page carries the token; the last page ends the window (no token, more:false); the field names are not said again', JSON.stringify(p2));
+  ok(hr.threadKey === 'omt_thread_0001' && hr.updatedAt === T0 - 6000 && hr.at === T0 - 8000 && hid.vendorId === 'om_srch_dm_04' && hid.isP2p === true, 'the doc-only fields read when present (a thread reply\'s thread, an ISO update_time); the message id read from the item\'s own `id` when meta_data carries none (both spellings the vendor uses)', JSON.stringify(p2.hits));
+  ok(p2.malformed === 2 && JSON.stringify(p2.malformedFields) === JSON.stringify([['meta_data.chat_id'], ['meta_data.create_time']]), 'lark-p2p: an unreadable hit is malformed BY NAME — the item without its chat names `meta_data.chat_id`, the digits-of-ms create_time under the ISO declaration names `meta_data.create_time` (never rescaled, never read in a form nobody declared)', JSON.stringify(p2));
   await a.changes({ from, to, chatType: 'p2p' });
-  ok(calls[calls.length - 1].body.chat_type === 'p2p', 'the single-chat catch-up asks chat_type p2p');
+  const cp = calls[calls.length - 1].body;
+  ok(cp.filter && cp.filter.chat_type === 'p2p' && !('chat_type' in cp), 'the single-chat catch-up asks chat_type p2p — inside `filter`', JSON.stringify(cp));
   ok(metered.n === 3, `every page is metered ONE request through the gate (${metered.n})`);
   // verify r1: a page LARGER than asked (the vendor ignored page_size) is the page contract — refused, never cut to 30
   // with the rest silently dropped as "malformed"
@@ -1314,8 +1335,8 @@ console.log('\n⑬ the change feed: the search page, the declared unit, the desc
       const fetchB = async (url) => {
         const u = new URL(String(url));
         if (u.pathname === '/open-apis/im/v1/messages/search') {
-          if (big) return jsonRes({ code: 0, data: { has_more: false, items: Array.from({ length: 10000 }, (_, i) => ({ meta_data: { message_id: `om_bd_${i}`, create_time: String(T0 - 5000), chat_id: `oc_bigdm_${i}`, is_p2p_chat: true } })) } });
-          return jsonRes({ code: 0, data: { has_more: false, items: [{ meta_data: { message_id: 'om_known', create_time: String(T0 - 5000), chat_id: 'oc_known_dm', is_p2p_chat: true } }] } });
+          if (big) return jsonRes({ code: 0, data: { has_more: false, items: Array.from({ length: 10000 }, (_, i) => ({ meta_data: { message_id: `om_bd_${i}`, create_time: isoAt(T0 - 5000), chat_id: `oc_bigdm_${i}`, is_p2p_chat: true } })) } });
+          return jsonRes({ code: 0, data: { has_more: false, items: [{ meta_data: { message_id: 'om_known', create_time: isoAt(T0 - 5000), chat_id: 'oc_known_dm', is_p2p_chat: true } }] } });
         }
         if (/^\/open-apis\/im\/v1\/chats\//.test(u.pathname)) return jsonRes(SX.chatP2pRefused.body, SX.chatP2pRefused.status);
         return jsonRes({ code: 0, data: {} });
@@ -1346,7 +1367,7 @@ console.log('\n⑬ the change feed: the search page, the declared unit, the desc
       const saidF = [];
       const tk = mkTokens(); tk.st.token = { ...tokens.st.token };
       // verify r2: a hostile key INSIDE meta_data too (the revert table: the meta half of the bound was never exercised)
-      const fetchF = async () => jsonRes({ code: 0, data: { has_more: false, items: [{ meta_data: { message_id: 'om_f1', create_time: String(T0 - 5000), chat_id: 'oc_f1', ['m'.repeat(1 << 20)]: 1, 'meta\nkey': 2 }, ['k'.repeat(1 << 20)]: 1, 'bad\nkey': 2 }] } });
+      const fetchF = async () => jsonRes({ code: 0, data: { has_more: false, items: [{ meta_data: { message_id: 'om_f1', create_time: isoAt(T0 - 5000), chat_id: 'oc_f1', ['m'.repeat(1 << 20)]: 1, 'meta\nkey': 2 }, ['k'.repeat(1 << 20)]: 1, 'bad\nkey': 2 }] } });
       const aF = rgF.create('lark', { id: 'lark' }, { now, fetch: fetchF, tokens: tk, resolveIntegration: () => CRED, log: { log: (m) => saidF.push(String(m)), warn: (m) => saidF.push(String(m)), error() {} }, meter() {} });
       await aF.changes({ from, to });
       return saidF.filter((x) => /first page carries fields/.test(x));
@@ -1361,14 +1382,63 @@ console.log('\n⑬ the change feed: the search page, the declared unit, the desc
     const flm = await fieldsRun(LSRC.replace(OKM, "const meta = [...new Set(items.flatMap((it) => (it && it.meta_data && typeof it.meta_data === 'object' ? Object.keys(it.meta_data) : [])))].slice(0, 30);"), 'fields-meta-unbounded');
     ok(flm.length === 1 && flm[0].length > (1 << 20), `CONTROL: the copy whose meta_data half logs every key writes a ${flm[0] && flm[0].length}-character line — the leg above would be red`);
   }
+  // verify r2 (S3): THE ENVELOPE — a 200 that is not a search page. `has_more` is the doc's one required field and a
+  // page_token rides every has_more:true; an answer without them used to RETURN `more:false` (the engine then completes
+  // the window and moves its cursor past everything it still held — 470 of 500 hits on a page that said has_more with no
+  // token). Each is refused as the search's own failure (vendor-error, retryable — the ladder, the cursor held), never
+  // the 24-h contract park; a page that says has_more:false with no items is an EMPTY page. CONTROL: the copy without the
+  // guard returns the has_more-no-token page as complete.
+  {
+    const hitAt = (i) => ({ id: `om_env_${i}`, display_info: 'x', meta_data: { message_id: `om_env_${i}`, type: 'text', create_time: isoAt(T0 - 1000 - i), position: i, chat_id: 'oc_ops_room_0001', from_id: 'ou_member_b', is_p2p_chat: false } });
+    const thirty = Array.from({ length: 30 }, (_, i) => hitAt(i));
+    const ENVELOPES = [
+      ['{} (no envelope)', {}, 'has_more'],
+      ['{code:0} (no data)', { code: 0, msg: 'success' }, 'has_more'],
+      ['{code:0, data:{}}', { code: 0, data: {} }, 'has_more'],
+      ['data.items:null, has_more absent', { code: 0, data: { items: null } }, 'has_more'],
+      ['has_more:true with NO page_token, 30 hits', { code: 0, data: { items: thirty, total: 500, has_more: true } }, 'page_token'],
+      ['has_more:true with page_token "", 30 hits', { code: 0, data: { items: thirty, total: 500, has_more: true, page_token: '' } }, 'page_token'],
+      ['data.items a string', { code: 0, data: { items: 'x', has_more: false } }, 'items'],
+      ['data an array', { code: 0, data: [] }, 'data'],
+    ];
+    const outcomes = [];
+    for (const [name, body, field] of ENVELOPES) {
+      st.envelope = body;
+      const e = await threw(() => a.changes({ from, to }));
+      outcomes.push({ name, code: e && e.code, field: e && e.detail && e.detail.envelope, contract: !!(e && e.detail && e.detail.contract), retryable: e && e.retryable, want: field });
+    }
+    st.envelope = null;
+    const badE = outcomes.filter((o) => !(o.code === 'vendor-error' && o.field === o.want && !o.contract && o.retryable === true));
+    ok(!badE.length, 'verify r2: a 200 that is not a search page ({} / no data / has_more absent / has_more:true with no token / items not a list / data not an object) is REFUSED as the search\'s own retryable failure naming the missing envelope field — never returned as a complete window, never the 24-h contract park', JSON.stringify(badE));
+    st.envelope = { code: 0, data: { has_more: false } };
+    const empty = await a.changes({ from, to });
+    st.envelope = null;
+    ok(empty.hits.length === 0 && empty.more === false && empty.pageToken === null && empty.malformed === 0, 'verify r2: has_more:false with no items is an EMPTY page (the quiet window), not a refusal', JSON.stringify(empty));
+    const MENV = mutantCopies('chan-lark-envelope', REPO);
+    const LSRCe = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
+    const ENVL = "      if (data.has_more === true && !next) throw envelope('page_token', 'has_more with no page_token (the rest of the window cannot be asked for)');";
+    ok(LSRCe.split(ENVL).length === 2, 'CONTROL setup: the has_more-without-token refusal is spelled once');
+    {
+      const mod = MENV.load('src/channels/lark.js', LSRCe.replace(ENVL, ''), 'envelope-token-trusted');
+      const rgE = CH.createChannelRegistry(); rgE.register(mod.adapter);
+      const tk = mkTokens(); tk.st.token = { ...tokens.st.token };
+      const fetchE = async () => jsonRes({ code: 0, data: { items: thirty, total: 500, has_more: true } });
+      const aE = rgE.create('lark', { id: 'lark' }, { now, fetch: fetchE, tokens: tk, resolveIntegration: () => CRED, log: { log() {}, warn() {}, error() {} }, meter() {} });
+      const pE = await aE.changes({ from, to });
+      ok(pE.hits.length === 30 && pE.more === false && pE.pageToken === null, `CONTROL: the copy that trusts has_more:true without a token returns the page as COMPLETE (30 hits, more:false — the engine would move the cursor past the other 470) — the leg above would be red`, JSON.stringify({ hits: pE.hits.length, more: pE.more }));
+    }
+  }
   // a refusal's own words name the scope — bounded
   st.fail = 'forbiddenScope';
   const e1 = await threw(() => a.changes({ from, to }));
   ok(e1 && e1.code === 'forbidden' && JSON.stringify(e1.detail.requiredScopes) === JSON.stringify(['search:message']), 'a 99991679 refusal is `forbidden` with detail.requiredScopes read from the vendor\'s own words', JSON.stringify(e1 && e1.detail));
-  const huge = `No permission. required: [${Array.from({ length: 5000 }, (_, i) => `scope${i}:read`).join(', ')}] ` + 'x'.repeat(64 * 1024);
-  const t0 = Date.now();
-  const f2 = lark.typedFailure(403, { code: 99991672, msg: huge }, 'lark');
-  ok(f2.detail.requiredScopes.length === 8 && f2.detail.requiredScopes.every((x) => x.length <= 64) && Date.now() - t0 < 200, `a 64 KiB refusal naming 5 000 scopes ⇒ at most 8 names, each ≤ 64 characters, read from the first 4 KiB (${Date.now() - t0} ms)`);
+  const hugeMsg = (n) => `No permission. required: [${Array.from({ length: 5000 }, (_, i) => `scope${i}:read`).join(', ')}] ` + 'x'.repeat(n);
+  const f2 = lark.typedFailure(403, { code: 99991672, msg: hugeMsg(64 * 1024) }, 'lark');
+  // "read from the first 4 KiB" is a fact about WORK, never the clock (lane-mirror-198): the meter starts late here,
+  // so the instrument is the natives' element work — a cut precedes the walk ⇒ twice the message costs the same
+  startWorkMeter();
+  const hugeW = bounded(hugeMsg, (m) => lark.typedFailure(403, { code: 99991672, msg: m }, 'lark'), 64 * 1024, ['src/channels/lark.js']);
+  ok(f2.detail.requiredScopes.length === 8 && f2.detail.requiredScopes.every((x) => x.length <= 64) && hugeW.ok, `a 64 KiB refusal naming 5 000 scopes ⇒ at most 8 names, each ≤ 64 characters, read from the first 4 KiB (the same work at 128 KiB: ${hugeW.w1} → ${hugeW.w2} ops)`);
   ok(lark.requiredScopesOf('a:' + 'b'.repeat(200)).length === 0 && JSON.stringify(lark.requiredScopesOf('need im:message.p2p_msg:get_as_user and contact:user.base:readonly')) === JSON.stringify(['im:message.p2p_msg:get_as_user', 'contact:user.base:readonly']), 'a scope name is the scope alphabet within bounds (an over-long token is not one)');
   // the describe ladder
   calls.length = 0;
@@ -1408,6 +1478,92 @@ console.log('\n⑬ the change feed: the search page, the declared unit, the desc
   // the gated-call census reads both new calls as the ONE gate (api())
   const src = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
   ok(/await api\(`\/im\/v1\/messages\/search\?\$\{q\}`/.test(src) && /await api\(`\/contact\/v3\/users\//.test(src) && !/display_info/.test(src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')), 'the search and the contact lookup go through the ONE gate (api(): token → pace → meter); the code never names `display_info`');
+
+  // ═══ ⑬b lane lark-p2p (2026-09-30 — the owner: "我怎么在频道里还是看不到lark私聊？"; production 2.369.198: 241 260 hits
+  //      read as malformed, 0 single chats born, 8 043 pages, the card silent). THE ONE READER over the measured shape,
+  //      the request's `filter`, the card's words for an unreadable shape, births from single-chat hits; controls: the
+  //      .197 declaration (`ms`) reads the observed page as all-malformed; the .197 request body (the window at the top
+  //      level) lets a doc-faithful vendor answer the whole history.
+  const Feed = require(path.join(REPO, 'src/channel-feed.js'));
+  const CC = require(path.join(REPO, 'src/channel-caps.js'));
+  const LSRCP = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
+  const MP = mutantCopies('chan-lark-p2p', REPO);
+  // a DOC-FAITHFUL vendor: it reads the window and the chat type ONLY inside `filter` (the doc's request body); any other
+  // body answers the whole searchable history (a message from a month ago on the first page)
+  const HIST = [
+    { id: 'om_hist_old', display_info: 'x', meta_data: { chat_id: 'oc_dm_peer_0009', create_time: isoAt(T0 - 30 * 86400e3), from_id: 'ou_peer_z', is_p2p_chat: true, message_id: 'om_hist_old', position: 1, type: 'text' } },
+    ...SX.page1.data.items.map(it),
+  ];
+  const docVendor = (sink) => async (url, init = {}) => {
+    const u = new URL(String(url));
+    const body = init.body ? JSON.parse(init.body) : {};
+    sink.push(body);
+    if (u.pathname !== '/open-apis/im/v1/messages/search') return jsonRes({ code: 0, data: {} });
+    const f = body && body.filter && typeof body.filter === 'object' ? body.filter : null;
+    const tr = f && f.time_range ? { from: Feed.isoMs(f.time_range.start_time), to: Feed.isoMs(f.time_range.end_time) } : null;
+    const items = HIST.filter((x) => { const at = Feed.isoMs(x.meta_data.create_time); return (!tr || (at >= tr.from && at <= tr.to)) && (!(f && f.chat_type) || (f.chat_type === 'p2p') === (x.meta_data.is_p2p_chat === true)); });
+    return jsonRes({ code: 0, data: { has_more: false, total: items.length, items } });
+  };
+  const adapterOf = (mod, fetchX, logX = { log() {}, warn() {}, error() {} }) => {
+    const rg = CH.createChannelRegistry(); rg.register(mod.adapter);
+    const tk = mkTokens(); tk.st.token = { ...tokens.st.token };
+    return rg.create('lark', { id: 'lark' }, { now, fetch: fetchX, tokens: tk, resolveIntegration: () => CRED, log: logX, meter() {} });
+  };
+  {
+    const win = { from: T0 - 90e3, to: T0 };
+    const bodies = [];
+    const aR = adapterOf(lark, docVendor(bodies));
+    const pr = await aR.changes(win);
+    const vr = Feed.pageVerdict(pr, win, { pageSize: 30, now: T0 });
+    const pc = await aR.changes({ ...win, chatType: 'p2p' });
+    ok(vr.ok && pr.hits.length === 5 && pc.hits.length === 3 && pc.hits.every((h) => h.isP2p), 'lark-p2p: a vendor that reads the window only inside `filter` (its doc) answers the window — five hits, the page trusted; the catch-up\'s `chat_type` inside `filter` answers the three single chats', JSON.stringify({ n: pr.hits.length, v: vr.ok, p2p: pc.hits.length }));
+    const OLDB = "      const filter = { time_range: { start_time: Feed.isoSec(from), end_time: Feed.isoSec(to) } };\n      if (chatType === 'p2p' || chatType === 'group') filter.chat_type = chatType;\n      const body = { query: '', filter };";
+    ok(LSRCP.split(OLDB).length === 2, 'CONTROL setup: the request body is spelled once');
+    const old = MP.load('src/channels/lark.js', LSRCP.replace(OLDB, "      const body = { query: '', time_range: { start_time: Feed.isoSec(from), end_time: Feed.isoSec(to) } };\n      if (chatType === 'p2p' || chatType === 'group') body.chat_type = chatType;"), 'lark-p2p-toplevel-window');
+    const pO = await adapterOf(old, docVendor([])).changes(win);
+    const vO = Feed.pageVerdict(pO, win, { pageSize: 30, now: T0 });
+    ok(!vO.ok && vO.park === 'time-range-ignored' && pO.hits.length === 6, `CONTROL: the .197 request (the window at the TOP level) gets the vendor's whole history — a month-old single chat on the first page (${pO.hits.length} hits) — parked as an ignored window by the (now readable) page`, JSON.stringify(vO));
+  }
+  {
+    // the OLD SHAPE (the .197 lane's invented fixture) under the declared ISO form: every item unreadable, named
+    const saidO = [];
+    const aO = adapterOf(lark, async () => jsonRes(pageOfX(SX.oldShapePage)), { log: (m) => saidO.push(String(m)), warn() {}, error() {} });
+    const po = await aO.changes({ from: T0 - 90e3, to: T0 });
+    const sv = Feed.shapeVerdict(null, { items: po.hits.length + po.malformed, malformed: po.malformed, fields: po.malformedFields });
+    const card = CC.feedText({ state: 'refused', why: 'shape', fields: sv.fields }, { vendor: 'Lark' });
+    ok(po.hits.length === 0 && po.malformed === 5 && JSON.stringify(po.malformedFields) === JSON.stringify([['meta_data.create_time']]) && sv.park === true, 'CONTROL (the old shape): the .197 invented page (create_time in digits of ms) is five unreadable hits, each naming `meta_data.create_time` — the shape verdict parks', JSON.stringify({ po, sv }));
+    ok(card === "Lark's search answers, but its hits have a shape this version does not read (missing or unreadable: meta_data.create_time) — the single-chat feed is off until an update; each chat is checked on its own", 'lark-p2p: …and the account card SAYS it, with the field — never silent', card);
+    // the .197 DECLARATION over the OBSERVED page: every hit malformed — the production incident, reproduced
+    const DECL = "describes: true, timeUnit: 'iso', reader: 2 }),";
+    ok(LSRCP.split(DECL).length === 2, 'CONTROL setup: the declaration is spelled once');
+    const ms197 = MP.load('src/channels/lark.js', LSRCP.replace(DECL, "describes: true, timeUnit: 'ms', reader: 2 }),"), 'lark-p2p-ms-declared');
+    const p197 = await adapterOf(ms197, async () => jsonRes(pageOfX(SX.page1))).changes({ from: T0 - 90e3, to: T0 });
+    ok(p197.hits.length === 0 && p197.malformed === 5 && JSON.stringify(p197.malformedFields) === JSON.stringify([['meta_data.create_time']]), 'CONTROL (the .197 declaration `ms`): the OBSERVED page reads as five malformed hits — the production incident (241 260 of them), now named by field', JSON.stringify(p197));
+  }
+  {
+    // BIRTHS FROM SINGLE-CHAT HITS: the observed page folded — three single chats nobody knew are BORN, the two groups are
+    // discovery hints (the chat listing is the membership authority)
+    const pb = await adapterOf(lark, async () => jsonRes(pageOfX(SX.page1))).changes({ from: T0 - 90e3, to: T0 });
+    const fold = Feed.foldHits(Feed.pageVerdict(pb, { from: T0 - 90e3, to: T0 }, { pageSize: 30, now: T0 }).hits, { stateOf: () => null });
+    ok(JSON.stringify([...fold.births.keys()].sort()) === JSON.stringify(['oc_dm_peer_0001', 'oc_dm_peer_0002', 'oc_dm_peer_0003']) && JSON.stringify([...fold.groups.keys()].sort()) === JSON.stringify(['oc_new_group_0002', 'oc_ops_room_0001']) && JSON.stringify(fold.births.get('oc_dm_peer_0001').fromIds) === JSON.stringify(['ou_peer_c']), 'lark-p2p: the observed page BIRTHS its three single chats (their authors kept for the describe ladder) and hints its two groups', JSON.stringify({ b: [...fold.births.keys()], g: [...fold.groups.keys()] }));
+  }
+  {
+    // THE HIT READER IS BOUNDED BEFORE PARSE: a megabyte create_time / chat id, a meta_data that is an array, an item that
+    // is a string — each malformed by name in well under the budget; the snippet is never touched
+    const big = 'x'.repeat(1 << 20);
+    const t0 = Date.now();
+    const rs = [
+      lark.readSearchHit({ id: 'om_1', meta_data: { chat_id: 'oc_1', create_time: `2026-09-30T00:00:00+08:00${big}`, message_id: 'om_1' } }, { now: T0 }),
+      lark.readSearchHit({ id: 'om_1', meta_data: { chat_id: big, create_time: isoAt(T0 - 1000), message_id: 'om_1' } }, { now: T0 }),
+      lark.readSearchHit({ id: 'om_1', meta_data: [] }, { now: T0 }),
+      lark.readSearchHit('om_1', { now: T0 }),
+      lark.readSearchHit({ meta_data: { chat_id: 'oc_1', create_time: '2026-02-30T00:00:00Z', message_id: 'om_1' } }, { now: T0 + 100 * 86400e3 * 30 }),
+      lark.readSearchHit({ display_info: { toString() { throw new Error('the snippet was read'); } }, id: 'om_ok', meta_data: { chat_id: 'oc_1', create_time: isoAt(T0 - 1000), is_p2p_chat: 'true' } }, { now: T0 }),
+    ];
+    const ms = Date.now() - t0;
+    ok(JSON.stringify(rs.slice(0, 5).map((r) => r.fields)) === JSON.stringify([['meta_data.create_time'], ['meta_data.chat_id'], ['meta_data'], ['item'], ['meta_data.create_time']]) && rs[5].ok && rs[5].hit.vendorId === 'om_ok' && rs[5].hit.isP2p === true && ms < 200, `lark-p2p: the ONE reader is bounded before parse (${ms} ms): an over-long time or id, an array for meta_data, a non-object item, a calendar date that does not exist (Feb 30) — each malformed by name; the snippet is never read; the id from \`id\`, the p2p flag from its string`, JSON.stringify(rs.map((r) => r.fields || r.hit)));
+  }
+  for (const c of copiesCensus(MP.files, MP.dir, REPO, { minCopies: 2, label: 'chan-lark-p2p: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

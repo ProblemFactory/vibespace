@@ -375,7 +375,7 @@ function testHostFor(rowId, values = {}) {
   }
   if (row.host.region) {
     const region = String((values && values.region) || '').trim().toLowerCase();
-    if (!/^[a-z]{2}-[a-z]+-\d$/.test(region)) return { ok: false, code: 'host_underivable', error: `${rowId}: its host is derived from the region field (e.g. us-east-1), which is ${region ? 'not a region id: ' + region.slice(0, 40) : 'empty'}` };
+    if (!/^[a-z]{2}-[a-z]+-\d$/.test(region)) return { ok: false, code: 'host_underivable', error: `${rowId}: its host is derived from the region field, e.g. us-east-1, which is ${region ? 'not a region id: ' + region.slice(0, 40) : 'empty'}` };
     return { ok: true, host: row.host.region.replace('{region}', region), rule: 'region' };
   }
   return { ok: false, code: 'host_underivable', error: `${rowId}: no host rule` };
@@ -469,12 +469,521 @@ function blockedText(claim) {
   const tierWord = claim.tier === 3 ? ' (a window on your own desktop — your act: the real-desktop switch, then the agent uses vibespace-window; nothing escalates by itself)' : claim.tier === 2 ? ' (a fingerprint backend — your act in the switcher)' : '';
   return `the agent says this page is blocked (${claim.host}${claim.why ? ': ' + claim.why : ''}) and suggests tier ${claim.tier}${tierWord}${claim.evidence ? ' — ' + claim.evidence : ''}`;
 }
-/** The HINT a real 403/429 carries on the CLI's error (§7.6 rule 5): typed
- *  `{tier, why}`, worded so it cannot be mistaken for a detection. */
+/**
+ * THE SIGN-IN REFUSAL PAGES (lane browser-propose step 2, userW's fleet pod 2026-09-30): a vendor's own page saying it
+ * refuses to sign in THIS browser. A row matches a navigate result's FINAL url + title: the exact host, then the path
+ * marker OR one of the page's own titles (in the languages it was seen in). A HINT, never a detection (§7.6 rule 5): the
+ * agent reads it and files its claim (`blocked`); nothing escalates by itself. Keep the table SMALL, every row dated and
+ * named by its source; a page that merely failed a sign-in ("We couldn't sign you in" on Microsoft's login host) is not a
+ * refusal of the browser and is deliberately absent.
+ */
+const SIGNIN_REFUSAL_ROWS = Object.freeze([
+  Object.freeze({
+    id: 'google-rejected', vendor: 'Google', host: 'accounts.google.com', date: '2026-09-30',
+    source: 'userW\'s fleet pod (a fresh sign-in in a headless agent browser); the refusal page\'s URL shapes and its title as users report it',
+    paths: Object.freeze([/\/signin\/rejected\b/i, /deniedsigninrejected/i]),
+    titles: Object.freeze(['This browser or app may not be secure', '此浏览器或应用可能不安全', 'このブラウザまたはアプリは安全でない可能性があります']),
+  }),
+]);
+const normTitle = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim().toLowerCase();
+/** The row a navigate result's final url + title match, or null. PURE, bounded (a url / title past 4 KiB is cut first). */
+function signinRefusalOf({ url = '', title = '' } = {}) {
+  const u = String(url || '').slice(0, 4096);
+  const host = normalizeHost(u);
+  if (!host) return null;
+  let pathPart = '';
+  try { const x = new URL(/^[a-z][a-z0-9+.-]*:/i.test(u) ? u : 'https://' + u); pathPart = x.pathname + x.search; } catch { pathPart = ''; }
+  const t = normTitle(String(title || '').slice(0, 4096));
+  for (const row of SIGNIN_REFUSAL_ROWS) {
+    if (host !== row.host) continue;
+    if (row.paths.some((re) => re.test(pathPart)) || (t && row.titles.some((x) => t.includes(normTitle(x))))) return row;
+  }
+  return null;
+}
+/**
+ * The HINT a navigation carries on the CLI's output (§7.6 rule 5): typed `{tier, why, hint, source, text}`, worded so it
+ * cannot be mistaken for a detection. Two rungs: a real 403/429 (`navHint(403)` — the status the CLI read), and a known
+ * vendor's SIGN-IN REFUSAL page (`navHint({url, title})` — the navigate result's final url + title, SIGNIN_REFUSAL_ROWS).
+ */
 function navHint(status) {
+  if (status && typeof status === 'object') {
+    const s0 = Number(status.status);
+    if (s0 === 403 || s0 === 429) return navHint(s0);
+    const row = signinRefusalOf(status);
+    if (!row) return null;
+    return { tier: 2, why: 'sign-in-refused', hint: 'may-need-cloak', source: 'sign-in-page', vendor: row.vendor, row: row.id, host: row.host,
+      text: `${row.vendor}'s sign-in page says this browser may not be secure — a hint from the page, not a detection: do not work around it; ask the user to approve a switch to CloakBrowser (vibespace-browser blocked --url <the sign-in page> --why sign-in-refused --tier 2 puts one Approve card in their chat)` };
+  }
   const s = Number(status);
   if (s !== 403 && s !== 429) return null;
   return { tier: 2, why: `HTTP ${s}`, hint: 'may-need-cloak', source: 'http-status', text: `HTTP ${s} — a hint from the status code, not a detection: the page may need a tier-2 backend (vibespace-browser blocked --url <u> --why http-${s} records your claim)` };
+}
+
+// ── lane browser-propose step 3: A REFUSAL THE AGENT MEETS BECOMES ONE PROPOSAL WITH ONE APPROVE ────────────
+// The owner's ruling (2026-09-30): "the agent PROPOSES the switch, the user APPROVES with one click" — D31 stands:
+// nothing switches by itself; the claim (`blocked --tier 2`) files ONE proposal whose FROZEN fields are exactly what its
+// card shows and exactly what Approve runs (by id + the digest of those fields — never re-derived from text). Every
+// decision is here; the ORCH half (src/server/browser-propose.js) only acts on it.
+const i18nKey = (s) => s; // extraction marker (scripts/i18n-extract.mjs) — the client words it through t()
+const PROPOSAL_STATES = Object.freeze(['open', 'approved', 'rejected', 'done', 'failed', 'unavailable']);
+const PROPOSAL_INSTALL = Object.freeze(['needed', 'installed', 'unavailable']);
+const PROPOSAL_PLANS = Object.freeze(['switch', 'new-profile', 'site', 'none']);
+/**
+ * THE SITES A SIGN-IN PAGE LOADS ITS OWN PARTS FROM (verify r1 V1): CloakBrowser reaches ONLY the sites on its list (the
+ * egress proxy, §7.2.1), and a vendor's sign-in page is never one host — its scripts, styles, fonts, pictures, its
+ * challenge and the redirect that finishes a sign-in come from the vendor's other hosts. A proposal that added the
+ * claimed host alone left the page broken AFTER the Approve, silently. So a claim on a row's sign-in host freezes the
+ * row's `also` hosts WITH it (named on the card, added on Approve); an unknown vendor stays one host, and whatever the
+ * page is refused reaches the agent by name (the verb's `egressRefused`) so it can ask for exactly that site.
+ * PURE and SMALL, each row dated and named by its source. NOT a measurement: a verifier never opens a real vendor
+ * sign-in page — the rows are the hosts these pages are publicly known to load from as of the date; a host missing
+ * here costs one more card (the refusal names it), never a silent break.
+ */
+const SIGNIN_DEPENDENCIES = Object.freeze([
+  Object.freeze({ id: 'google', vendor: 'Google', date: '2026-09-30', source: 'the hosts Google\'s sign-in page is publicly known to load from (scripts / styles / fonts / avatars / the challenge / the post-sign-in cookie hop) — not measured on the live page',
+    signin: Object.freeze(['accounts.google.com']),
+    also: Object.freeze(['www.gstatic.com', 'ssl.gstatic.com', 'fonts.gstatic.com', 'fonts.googleapis.com', 'apis.google.com', 'play.google.com', 'lh3.googleusercontent.com', 'www.google.com', 'accounts.youtube.com']) }),
+  Object.freeze({ id: 'microsoft', vendor: 'Microsoft', date: '2026-09-30', source: 'the hosts Microsoft\'s work / personal sign-in pages are publicly known to load from (their CDN hosts, and each other for the account-type hop) — not measured on the live page',
+    signin: Object.freeze(['login.microsoftonline.com', 'login.live.com']),
+    also: Object.freeze(['login.microsoftonline.com', 'login.live.com', 'aadcdn.msftauth.net', 'aadcdn.msauth.net', 'logincdn.msftauth.net', 'logincdn.msauth.net', 'acctcdn.msftauth.net', 'acctcdn.msauth.net']) }),
+  Object.freeze({ id: 'github', vendor: 'GitHub', date: '2026-09-30', source: 'the hosts GitHub\'s pages (its sign-in included) are publicly known to load from — not measured on the live page',
+    signin: Object.freeze(['github.com']),
+    also: Object.freeze(['github.githubassets.com', 'avatars.githubusercontent.com']) }),
+  Object.freeze({ id: 'apple', vendor: 'Apple', date: '2026-09-30', source: 'the hosts Apple\'s account sign-in pages are publicly known to load from — not measured on the live page',
+    signin: Object.freeze(['appleid.apple.com', 'idmsa.apple.com']),
+    also: Object.freeze(['appleid.apple.com', 'idmsa.apple.com', 'appleid.cdn-apple.com', 'www.apple.com']) }),
+]);
+/** The sign-in row a claimed host belongs to: `{id, vendor, also}` (`also` without the host itself), or null. PURE. */
+function signinDependenciesOf(host) {
+  const h = normalizeHost(host);
+  if (!h) return null;
+  const row = SIGNIN_DEPENDENCIES.find((r) => r.signin.includes(h));
+  return row ? { id: row.id, vendor: row.vendor, also: row.also.filter((x) => x !== h) } : null;
+}
+/** Why a proposal offers nothing (plan `none`) — each is a plain sentence on the card, never a greyed button. */
+const PROPOSAL_NONE_WHY = Object.freeze(['remote', 'other-machine', 'already-cloak', 'install-unavailable', 'never-admitted']);
+/** Why the plan is a NEW profile rather than the in-place switch. */
+const PROPOSAL_NEW_WHY = Object.freeze(['ephemeral', 'newer-profile', 'not-switchable']);
+/** The label a new CloakBrowser profile gets (unique: `taken(label)` asked, " 2".." 9" appended). */
+function proposalLabel(sessionName, taken = () => false) {
+  const base = String(sessionName || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+  const head = base ? `${base} · CloakBrowser` : 'CloakBrowser';
+  if (!taken(head)) return head;
+  for (let n = 2; n < 10; n++) if (!taken(`${head} ${n}`)) return `${head} ${n}`;
+  return `${head} ${Date.now() % 1000}`;
+}
+/** What the INSTALL half of a proposal is, from the keeper's install facts: `installed` (the measured build answers),
+ *  `needed` (the verdict would install it — or an install already runs: Approve waits for it), else `unavailable` with
+ *  the refusal's code (npm missing ⇒ `install_unavailable`). */
+function proposalInstall({ exeOk = false, verdict = null, npm = true } = {}) {
+  if (exeOk) return { install: 'installed', installWhy: null };
+  const v = verdict || {};
+  if (v.ok && npm !== false) return { install: 'needed', installWhy: null, bytes: v.proof && Number.isInteger(v.proof.downloadBytes) ? v.proof.downloadBytes : null, from: v.proof && v.proof.downloadHost ? String(v.proof.downloadHost) : null };
+  if (v.code === 'install_running') return { install: 'needed', installWhy: null, running: true };
+  if (v.code === 'already_installed') return { install: 'installed', installWhy: null };
+  return { install: 'unavailable', installWhy: v.ok ? 'install_unavailable' : String(v.code || 'install_unavailable'), installError: String((v.ok ? 'npm is not on this machine' : v.error) || '').slice(0, 300) };
+}
+/**
+ * THE PLAN a proposal freezes (what Approve will run), FIRST MATCH WINS:
+ *   1 the conversation runs on another machine            ⇒ none   (remote)
+ *   1b the site is loopback / link-local (CloakBrowser's proxy never admits it) ⇒ none (never-admitted)
+ *   2 CloakBrowser cannot be installed / run here           ⇒ none   (install-unavailable)
+ *   3 its browser is a profile on a paired machine          ⇒ none   (other-machine)
+ *   4 its browser already IS CloakBrowser, and the site (with its sign-in page's own sites) is on its list
+ *                                                         ⇒ none   (already-cloak)
+ *   4b its browser already IS CloakBrowser, the site is NOT on its list (verify r1 V1: the agent was told a host the
+ *     page was refused) ⇒ site (add the host — and a sign-in row's hosts — to the list; nothing else changes)
+ *   5 a local chromium profile the version ladder admits    ⇒ switch (in place: same directory, logins kept; a
+ *     directory nothing recorded ⇒ `confirm` — the Approve IS the one confirmation)
+ *   6 …the ladder refuses (a NEWER Chromium wrote it)       ⇒ new-profile (newer-profile — opening it would destroy it)
+ *   7 a profile that cannot be switched in place (cdp…)     ⇒ new-profile (not-switchable)
+ *   8 the conversation's own temporary browser              ⇒ new-profile (ephemeral — it keeps nothing between runs)
+ * `target` = `{kind:'ephemeral'}` | `{kind:'profile', id, label, provider, host, ownsDir, recordedMajor, dirMajor, others}`;
+ * `siteListed` = CloakBrowser's site list already admits the claimed host and every host its sign-in row adds.
+ */
+function proposalPlan({ remote = false, target = null, install = null, cloakMajor = CLOAK_TIERS.free.chromiumMajor, sessionName = '', labelTaken = () => false, siteListed = false, siteAdmissible = true } = {}) {
+  const inst = install || { install: 'unavailable', installWhy: 'install_unavailable' };
+  const t = target || { kind: 'ephemeral' };
+  const none = (why) => ({ kind: 'none', why });
+  const fresh = (why, extra = {}) => ({ kind: 'new-profile', why, label: proposalLabel(sessionName, labelTaken), ...extra });
+  if (remote) return none('remote');
+  // verify r1: a loopback / link-local site (a dev server on this machine) is one CloakBrowser's egress proxy NEVER admits,
+  // whatever its list says — a switch would make the page unreachable, so nothing is offered
+  if (!siteAdmissible) return none('never-admitted');
+  if (inst.install === 'unavailable') return none('install-unavailable');
+  if (t.kind === 'profile') {
+    if (t.host) return none('other-machine');
+    const prov = String(t.provider || 'chromium');
+    const from = { profileId: String(t.id || ''), profileLabel: String(t.label || '').slice(0, 120) };
+    if (prov === 'cloak') return siteListed ? none('already-cloak') : { kind: 'site', ...from };
+    if (prov === 'chromium' && t.ownsDir !== false) {
+      const lad = versionLadder({ target: 'cloak', targetMajor: cloakMajor, recordedMajor: Number.isInteger(t.recordedMajor) ? t.recordedMajor : null, dirMajor: Number.isInteger(t.dirMajor) ? t.dirMajor : null });
+      const others = Math.max(0, Number(t.others) || 0);
+      if (lad.ok) return { kind: 'switch', ...from, confirm: false, others, cloakMajor };
+      if (lad.code === 'downgrade_unknown') return { kind: 'switch', ...from, confirm: true, others, cloakMajor };
+      return fresh('newer-profile', { ...from, wrote: Number.isInteger(lad.wrote) ? lad.wrote : null, cloakMajor });
+    }
+    return fresh('not-switchable', from);
+  }
+  return fresh('ephemeral');
+}
+/** FNV-1a 32 over the FROZEN fields — the one digest the card shows and the Approve route checks (PURE, no crypto). */
+function proposalDigest(p) {
+  if (p && p.kind === 'site-reset') return siteResetDigest(p); // lane site-reset: its own frozen fields
+  const x = p || {};
+  const pl = x.plan || {};
+  const s = JSON.stringify([x.id, x.backend, x.site, x.url, x.install, pl.kind, pl.why || null, pl.profileId || null, pl.label || null, !!pl.confirm, Array.isArray(x.alsoSites) ? x.alsoSites.join(',') : '']);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return 'pd-' + h.toString(16).padStart(8, '0');
+}
+/** THE PROPOSAL RECORD a claim files — every field frozen at the claim; `state` is `unavailable` from birth when the
+ *  plan offers nothing (a sentence, no Approve). */
+/** The page a proposal SHOWS and REOPENS — the agent's URL parsed, so what the card prints is ASCII (a character that is
+ *  not drawn or reorders a line is percent-encoded, never drawn) and is exactly what opens; '' when it does not parse
+ *  (the proposal then reopens the site's root). */
+function proposalUrlOf(u) {
+  const s = String(u == null ? '' : u).trim();
+  try { return new URL(/^[a-z][a-z0-9+.-]*:/i.test(s) ? s : 'https://' + s).href.slice(0, 2000); } catch { return ''; }
+}
+function proposalFor({ claim, plan, install, at = 0 } = {}) {
+  const c = claim || {};
+  const dep = signinDependenciesOf(c.host);
+  const inst = install || { install: 'unavailable', installWhy: 'install_unavailable' };
+  const p = {
+    id: String(c.id || ''), backend: 'cloak', site: String(c.host || ''), url: proposalUrlOf(c.url) || proposalUrlOf(c.host),
+    // verify r1 V1: the sites the claimed host's sign-in page loads its own parts from — FROZEN with it (the card names
+    // them, Approve adds them); none for a vendor the table does not know
+    ...(dep && dep.also.length ? { alsoSites: dep.also.slice(0, 16), vendor: dep.vendor } : {}),
+    install: PROPOSAL_INSTALL.includes(inst.install) ? inst.install : 'unavailable', installWhy: inst.installWhy || null,
+    ...(inst.installError ? { installError: inst.installError } : {}),
+    ...(Number.isInteger(inst.bytes) ? { installBytes: inst.bytes } : {}), ...(inst.from ? { installFrom: inst.from } : {}),
+    plan: { ...(plan || { kind: 'none', why: 'install-unavailable' }) },
+    state: plan && plan.kind !== 'none' ? 'open' : 'unavailable', by: 'agent', at: Number(at) || 0,
+    decided: null, outcome: null, progress: null, told: false,
+  };
+  p.digest = proposalDigest(p);
+  return p;
+}
+/** A second claim on the same (conversation, host): `same` card while one is open / running / failed / unavailable;
+ *  `rejected` = the user rejected it and the agent has not been told yet (it is told now); `new` otherwise (open again
+ *  after a told rejection or a finished switch). Only a tier-2 claim files a proposal (`claim-only`). */
+function claimVerdict({ existing = null, tier = 2 } = {}) {
+  if (Number(tier) !== 2) return 'claim-only';
+  const p = existing && existing.proposal;
+  if (!p) return 'new';
+  // verify r1 V2: a run refused because the world no longer matches the card (`proposal_stale`) is not the card to keep —
+  // the next claim makes a new one that says how things stand
+  if (p.state === 'failed' && p.outcome && p.outcome.code === 'proposal_stale') return 'new';
+  if (['open', 'approved', 'failed', 'unavailable'].includes(p.state)) return 'same';
+  if (p.state === 'rejected' && !p.told) return 'rejected';
+  return 'new';
+}
+/**
+ * THE TRANSITIONS — every move names its actor; anything else is a typed refusal:
+ *   approve   open | failed  → approved   by the USER only (agent_forbidden), `shown` === the digest (proposal_changed)
+ *   reject    open | failed  → rejected   by the USER only
+ *   progress  approved       → approved   (the runner's step / percent)
+ *   done      approved       → done       (the runner's outcome)
+ *   fail      approved       → failed     (the step + the error, by name; Approve again runs the same frozen fields)
+ *   told      rejected       → rejected   (`told: true` — the agent heard the rejection once)
+ */
+function proposalStep(p, { event, by = null, at = 0, shown = null, outcome = null, progress = null } = {}) {
+  if (!p) return { ok: false, code: 'not-found', error: 'no such proposal' };
+  const refuse = (code, error) => ({ ok: false, code, error });
+  const human = event === 'approve' || event === 'reject';
+  if (human && by !== 'user') return refuse('agent_forbidden', 'approving or rejecting a proposal is the user\'s act — an agent cannot decide its own proposal');
+  if (event === 'approve') {
+    if (p.state === 'unavailable') return refuse('proposal_unavailable', 'this proposal offers nothing to approve on this machine');
+    if (!['open', 'failed'].includes(p.state)) return refuse('proposal_state', `this proposal is ${p.state} — there is nothing to approve`);
+    if (shown !== p.digest) return refuse('proposal_changed', 'the card you pressed is not this proposal as it stands — nothing ran; read it again');
+    return { ok: true, next: { ...p, state: 'approved', decided: { action: 'approve', by: 'user', at: Number(at) || 0 }, outcome: null, progress: { step: 'starting', percent: null } } };
+  }
+  if (event === 'reject') {
+    if (!['open', 'failed'].includes(p.state)) return refuse('proposal_state', `this proposal is ${p.state} — there is nothing to reject`);
+    return { ok: true, next: { ...p, state: 'rejected', decided: { action: 'reject', by: 'user', at: Number(at) || 0 }, progress: null, told: false } };
+  }
+  if (event === 'progress') {
+    if (p.state !== 'approved') return refuse('proposal_state', `progress on a ${p.state} proposal`);
+    const pr = progress || {};
+    // verify r1 V3: `stalledSec` = how long the download has shown no progress at all (the card says so — a frozen percent
+    // for 15 minutes looked like progress); absent while it moves
+    const stalled = Number.isFinite(pr.stalledSec) && pr.stalledSec >= 0 ? Math.min(24 * 3600, Math.round(pr.stalledSec)) : null;
+    return { ok: true, next: { ...p, progress: { step: String(pr.step || 'starting').slice(0, 40), percent: Number.isFinite(pr.percent) ? Math.max(0, Math.min(100, Math.round(pr.percent))) : null, ...(stalled !== null ? { stalledSec: stalled } : {}) } } };
+  }
+  if (event === 'done' || event === 'fail') {
+    if (p.state !== 'approved') return refuse('proposal_state', `${event} on a ${p.state} proposal`);
+    return { ok: true, next: { ...p, state: event === 'done' ? 'done' : 'failed', progress: null, outcome: { ...(outcome || {}), at: Number(at) || 0 } } };
+  }
+  if (event === 'told') {
+    if (p.state !== 'rejected') return refuse('proposal_state', `told on a ${p.state} proposal`);
+    return { ok: true, next: { ...p, told: true } };
+  }
+  return refuse('bad-request', `unknown proposal event ${JSON.stringify(event)}`);
+}
+/**
+ * THE CLAIM STORE'S BOUND (verify r1): the keeper keeps the newest 50 claim entries — and a proposal RIDES its claim
+ * entry, so a plain `slice(-50)` let any conversation's 50 cheap claims evict another conversation's OPEN proposal
+ * (its For-you Approve then answered 404, its card vanished at the next rebuild — silently). A full store drops the
+ * entries nobody waits on FIRST: a claim with no proposal (rank 0), a decided proposal (done / unavailable / a
+ * rejection already told — 1), a failed one (2); an undecided one (open / a rejection not yet told — 3) and a running
+ * one (approved — 4) only when nothing else is left — oldest first within a rank. `{keep, dropped}`, `list`'s order kept.
+ */
+const BLOCKED_KEEP_MAX = 50;
+function blockedRank(e) {
+  const p = e && e.proposal;
+  if (!p) return 0;
+  if (p.state === 'done' || p.state === 'unavailable' || (p.state === 'rejected' && p.told)) return 1;
+  if (p.state === 'failed') return 2;
+  return p.state === 'approved' ? 4 : 3;
+}
+function blockedKeep(list, max = BLOCKED_KEEP_MAX) {
+  const arr = Array.isArray(list) ? list : [];
+  if (arr.length <= max) return { keep: arr.slice(), dropped: [] };
+  const order = arr.map((e, i) => ({ i, r: blockedRank(e) })).sort((a, b) => a.r - b.r || a.i - b.i);
+  const drop = new Set(order.slice(0, arr.length - max).map((x) => x.i));
+  return { keep: arr.filter((_, i) => !drop.has(i)), dropped: arr.filter((_, i) => drop.has(i)) };
+}
+/** Is `host` already admitted by a comma list of exact hosts / ".domain" entries? */
+function siteAdmitted(list, host) {
+  const h = String(host || '').toLowerCase();
+  return String(list || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean).some((e) => e === h || (e.startsWith('.') && (h === e.slice(1) || h.endsWith(e))));
+}
+/** The allowlist with `hosts` added (ONLY those hosts — one host, or the frozen list a proposal names) — each one
+ *  already admitted is left as it is. `{list, added, hosts}` (`hosts` = the ones added now). */
+function allowlistWith(list, hosts) {
+  const cur = String(list || '').split(',').map((x) => x.trim()).filter(Boolean);
+  const addedHosts = [];
+  for (const one of (Array.isArray(hosts) ? hosts : [hosts])) {
+    const h = normalizeHost(one);
+    if (!h || siteAdmitted([...cur, ...addedHosts].join(','), h)) continue;
+    addedHosts.push(h);
+  }
+  if (!addedHosts.length) return { list: String(list || ''), added: false, hosts: [] };
+  return { list: [...cur, ...addedHosts].join(','), added: true, hosts: addedHosts };
+}
+/** The one sentence the agent's CLI prints once, at its next navigation to a host whose proposal the user REJECTED. */
+function rejectionText(p) {
+  if (p && p.kind === 'site-reset') return `the user rejected clearing ${p.site}'s stored login in the profile "${p.profileLabel || p.profileId}" — do not clear it another way (no other browser, no copied session); tell the user which site's login looks stale and carry on with what you can`;
+  const what = p && p.plan && p.plan.kind === 'site' ? `letting CloakBrowser open ${p.site}` : `switching your browser to CloakBrowser for ${p.site}`;
+  return `the user rejected ${what} — do not work around the refusal (no other browser, no copied session); tell the user which page needs them and carry on with what you can`;
+}
+/** verify r1 V1: the sites CloakBrowser's list REFUSED while the agent's verb ran (its own browser's proxy, by name) —
+ *  the one sentence its CLI prints, so it asks for exactly those sites (one card) instead of guessing at a blank page. */
+function egressRefusedText(hosts) {
+  const hs = [...new Set((Array.isArray(hosts) ? hosts : []).map((h) => normalizeHost(h)).filter(Boolean))].slice(0, 8);
+  if (!hs.length) return '';
+  return `CloakBrowser's site list refused ${hs.join(', ')} while this page loaded — parts of it may be missing. Do not work around it: \`vibespace-browser blocked --url https://${hs[0]}/ --why egress-refused --tier 2\` puts ONE card in the user's chat asking them to let CloakBrowser open it${hs.length > 1 ? ' (one claim per site)' : ''}`;
+}
+/** The words the agent is told when the switch is DONE — through the handback's ladder site (a free next-turn stash, or
+ *  the running turn where joining it is free). */
+function approvedText(p) {
+  if (p && p.kind === 'site-reset') { const o = p.outcome || {}; return `Approved: ${p.site}'s stored login was cleared in the profile "${p.profileLabel || p.profileId}" (${Number(o.cookies) || 0} cookie${Number(o.cookies) === 1 ? '' : 's'}, and the stored data of its pages). Open ${p.url || p.site} again — re-read the page first; signing in is the user's.`; }
+  const o = p.outcome || {};
+  const where = o.label ? ` (profile "${o.label}"${o.newProfile ? ', new — sign in there once' : ''})` : '';
+  // verify r1 V1: the sites named on the card; a site the page is refused later is told by name (the verb's note)
+  const sites = `${p.site}${Array.isArray(p.alsoSites) && p.alsoSites.length ? ` with the sites its sign-in page loads from (${p.alsoSites.join(', ')})` : ''}`;
+  const later = ' — a page refused any other site is named to you on your next page command';
+  if (p.plan && p.plan.kind === 'site') return `Approved: CloakBrowser may now open ${sites}${o.siteAdded ? '' : ' (it already could)'}${later}. Re-open ${p.url} — re-read the page first.`;
+  return `Approved: your browser is now CloakBrowser${where}; ${sites} ${sites === p.site ? 'is' : 'are'} on its site list${o.siteAdded ? ' (added now — only those)' : ''}${later}. Re-run the sign-in at ${p.url} — re-read the page first.`;
+}
+/** THE CARD's block — the proposal as the chat card and the For-you row draw it: structure only (ids, codes, counts,
+ *  bounded strings), never markup. `claim` = the entry the proposal rides (why / evidence / tier / host). */
+function proposalCardBlock(entry) {
+  if (entry && entry.proposal && entry.proposal.kind === 'site-reset') return siteResetCardBlock(entry); // lane site-reset
+  const e = entry || {};
+  const p = e.proposal;
+  if (!p || !/^bl-[0-9a-f]{8}$/.test(String(e.id || '')) || !PROPOSAL_STATES.includes(p.state)) return null;
+  const s = (v, n) => (v == null ? '' : String(v).slice(0, n));
+  const pl = p.plan || {};
+  return {
+    type: 'browser_proposal', id: e.id, at: Number(e.at) || 0, browserKey: e.browserKey || null,
+    host: s(e.host, 253), url: s(p.url || e.url, 2000), why: s(e.why, 64), evidence: s(e.evidence, 400), tier: Number(e.tier) || 2,
+    backend: 'cloak', site: s(p.site, 253), alsoSites: Array.isArray(p.alsoSites) ? p.alsoSites.slice(0, 16).map((h) => s(h, 253)) : [], vendor: s(p.vendor, 40) || null, install: p.install, installWhy: p.installWhy || null, installError: s(p.installError, 300) || null,
+    installBytes: Number.isInteger(p.installBytes) ? p.installBytes : null, installFrom: s(p.installFrom, 253) || null,
+    plan: { kind: PROPOSAL_PLANS.includes(pl.kind) ? pl.kind : 'none', why: s(pl.why, 40) || null, label: s(pl.label, 120) || null, profileLabel: s(pl.profileLabel, 120) || null, confirm: !!pl.confirm, others: Math.max(0, Number(pl.others) || 0), wrote: Number.isInteger(pl.wrote) ? pl.wrote : null, cloakMajor: Number.isInteger(pl.cloakMajor) ? pl.cloakMajor : null },
+    state: p.state, decided: p.decided ? { action: p.decided.action, at: Number(p.decided.at) || 0 } : null,
+    progress: p.progress ? { step: s(p.progress.step, 40), percent: Number.isFinite(p.progress.percent) ? p.progress.percent : null, stalledSec: Number.isFinite(p.progress.stalledSec) ? p.progress.stalledSec : null } : null,
+    outcome: p.outcome ? { code: s(p.outcome.code, 40) || null, step: s(p.outcome.step, 40) || null, error: s(p.outcome.error, 400) || null, label: s(p.outcome.label, 120) || null, newProfile: !!p.outcome.newProfile, siteAdded: !!p.outcome.siteAdded, reopened: Math.max(0, Number(p.outcome.reopened) || 0), told: s(p.outcome.told, 20) || null, at: Number(p.outcome.at) || 0 } : null,
+    told: !!p.told, digest: String(p.digest || ''),
+  };
+}
+/** A `{key, params}` line in English (the For-you item's `detail` beside its structure; the agent never reads it). */
+function lineText(l) { return String(l.key).replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m)); }
+/** Why CloakBrowser cannot be installed here, one whole sentence per install refusal code (a sentence is never built
+ *  from translated fragments); any other code says the refusal's own words. */
+const INSTALL_WHY_WORDS = Object.freeze({
+  install_unmeasured_platform: i18nKey('No switch can be offered: CloakBrowser cannot be installed on this machine — its build for this kind of machine was never measured.'),
+  install_precondition_unmet: i18nKey('No switch can be offered: CloakBrowser cannot be installed on this machine — the egress measurement it needs is missing.'),
+  install_unavailable: i18nKey('No switch can be offered: CloakBrowser cannot be installed on this machine — npm is not on this machine.'),
+  install_local_only: i18nKey('No switch can be offered: CloakBrowser cannot be installed on this machine — a paired machine installs its own.'),
+  provider_unavailable: i18nKey('No switch can be offered: CloakBrowser is not available in this version of VibeSpace.'),
+});
+/**
+ * THE WORDS of a proposal, as STRUCTURE (`{key, params}` lines the client says through its own t() — the chat card and
+ * the For-you row alike, so what the row says Approve runs is word for word what the card says): `claim` (who says
+ * what), `plan` (what Approve runs, in order), `none` (why nothing is offered). From the CARD BLOCK only — the frozen
+ * fields. The card's live state lines (progress, outcome) are the client's.
+ */
+function proposalLines(b) {
+  if (b && b.kind === 'site-reset') return siteResetLines(b); // lane site-reset
+  const x = b || {};
+  const pl = x.plan || {};
+  const host = x.host || x.site;
+  const status = /^http-(\d{3})$/i.exec(String(x.why || ''));
+  const claim = x.why === 'sign-in-refused' ? { key: i18nKey('The agent says {host} refused to sign in this browser (the page says it may not be secure).'), params: { host } }
+    : x.why === 'egress-refused' ? { key: i18nKey('The agent says its page needs {host}, which CloakBrowser\'s site list refused.'), params: { host } }
+    : status ? { key: i18nKey('The agent says {host} answered HTTP {status}.'), params: { host, status: status[1] } }
+      : x.why ? { key: i18nKey('The agent says {host} blocked it ({why}).'), params: { host, why: x.why } }
+        : { key: i18nKey('The agent says {host} blocked it.'), params: { host } };
+  if (pl.kind === 'none') {
+    const why = pl.why === 'remote' ? { key: i18nKey('No switch can be offered: this conversation runs on another machine, and its browser is that machine\'s.') }
+      : pl.why === 'other-machine' ? { key: i18nKey('No switch can be offered: this conversation\'s browser "{profile}" runs on a paired machine.'), params: { profile: pl.profileLabel || '' } }
+        : pl.why === 'already-cloak' ? { key: i18nKey('No switch can be offered: this conversation\'s browser already is CloakBrowser. Sign in yourself in the live view, or tell the agent to stop.') }
+          : pl.why === 'never-admitted' ? { key: i18nKey('No switch can be offered: CloakBrowser never opens {host} — a loopback or link-local address is refused by its site list whatever the list says.'), params: { host: x.site } }
+          : INSTALL_WHY_WORDS[x.installWhy] ? { key: INSTALL_WHY_WORDS[x.installWhy] }
+            : { key: i18nKey('No switch can be offered: CloakBrowser cannot be installed on this machine ({why}).'), params: { why: x.installError || x.installWhy || '' } };
+    return { claim, plan: [], none: why };
+  }
+  const plan = [];
+  if (x.install === 'needed') plan.push(Number.isInteger(x.installBytes) && x.installBytes > 0 ? { key: i18nKey('CloakBrowser is not installed: about {mb} MB is downloaded once from its maker.'), params: { mb: Math.max(1, Math.round(x.installBytes / 1e6)) } } : { key: i18nKey('CloakBrowser is not installed: it is downloaded once from its maker.') });
+  if (pl.kind === 'switch') {
+    plan.push({ key: i18nKey('Switch this conversation\'s browser "{label}" to CloakBrowser. Your logins in it stay in the profile; the page you were on is reopened.'), params: { label: pl.profileLabel || '' } });
+    if (pl.confirm) plan.push({ key: i18nKey('Nothing recorded which Chromium last wrote "{label}" — your Approve is the one confirmation the switch needs.'), params: { label: pl.profileLabel || '' } });
+    if (pl.others === 1) plan.push({ key: i18nKey('One other conversation uses this browser too — its tab is reopened on CloakBrowser as well.') });
+    else if (pl.others > 1) plan.push({ key: i18nKey('{n} other conversations use this browser too — their tabs are reopened on CloakBrowser as well.'), params: { n: pl.others } });
+  } else if (pl.kind === 'site') {
+    plan.push({ key: i18nKey('This conversation\'s browser "{label}" already is CloakBrowser — only its site list changes.'), params: { label: pl.profileLabel || '' } });
+  } else if (pl.why === 'newer-profile') {
+    plan.push({ key: i18nKey('"{profile}" was last written by Chromium {wrote}, newer than CloakBrowser\'s {cloak}, and Chromium cannot open it with an older version without destroying it. So a new CloakBrowser profile "{label}" is opened for this conversation at {url}; you sign in there once — your logins in "{profile}" stay where they are.'), params: { profile: pl.profileLabel || '', wrote: pl.wrote == null ? '?' : pl.wrote, cloak: pl.cloakMajor == null ? '?' : pl.cloakMajor, label: pl.label || '', url: x.url } });
+  } else if (pl.why === 'not-switchable') {
+    plan.push({ key: i18nKey('"{profile}" cannot be switched in place, so a new CloakBrowser profile "{label}" is opened for this conversation at {url}; you sign in there once.'), params: { profile: pl.profileLabel || '', label: pl.label || '', url: x.url } });
+  } else {
+    plan.push({ key: i18nKey('Open a new CloakBrowser profile "{label}" for this conversation and reopen {url} there. Its current browser keeps nothing between runs, so you sign in there once.'), params: { label: pl.label || '', url: x.url } });
+  }
+  // verify r1 V1: the claimed host WITH the sites its vendor's sign-in page loads from (frozen, named here, added on
+  // Approve); an unknown vendor stays one host — and what its page is refused reaches the agent by name
+  const also = Array.isArray(x.alsoSites) ? x.alsoSites.filter(Boolean) : [];
+  plan.push(also.length
+    ? { key: i18nKey('CloakBrowser opens only the sites you list: {host} is added, and — because {vendor}\'s sign-in page loads its parts from them — also {also}. A page that needs yet another site is refused it, and the agent is told which one so it can ask you again.'), params: { host: x.site, vendor: x.vendor || '', also: also.join(', ') } }
+    : { key: i18nKey('CloakBrowser opens only the sites you list: {host} is added (only that host). A page that needs another site is refused it, and the agent is told which one so it can ask you again.'), params: { host: x.site } });
+  plan.push({ key: i18nKey('The agent is told when it is done — with your next message if its turn has ended.') });
+  return { claim, plan, none: null };
+}
+/** The For-you item a proposal files: English words (the dedupe key and the agent CLI's contract) + the same as
+ *  STRUCTURE the client words with its own t() — the claim and EVERY plan line, the card's words exactly; the ACTION is
+ *  the proposal's id and digest (Approve / Reject). An unavailable proposal is a NOTICE (nothing to decide). */
+function proposalInboxItem(entry) {
+  if (entry && entry.proposal && entry.proposal.kind === 'site-reset') return siteResetInboxItem(entry); // lane site-reset
+  const p = entry && entry.proposal;
+  const b = proposalCardBlock(entry);
+  if (!p || !b) return null;
+  const actionable = p.state !== 'unavailable';
+  const L = proposalLines(b);
+  const lines = [L.claim, ...(L.none ? [L.none] : L.plan)].slice(0, 12);
+  const strip = (l) => ({ key: l.key, ...(l.params ? { params: Object.fromEntries(Object.entries(l.params).map(([k, v]) => [k, typeof v === 'number' ? v : String(v)])) } : {}) });
+  const siteOnly = p.plan && p.plan.kind === 'site'; // verify r1 V1: a CloakBrowser browser asks for one more site
+  const text = siteOnly ? `The agent asks you to let CloakBrowser open ${p.site}` : actionable ? `The agent proposes switching its browser to CloakBrowser (${p.site} refused it)` : `The agent says ${p.site} refused its browser — no switch can be offered here`;
+  return {
+    text, kind: actionable ? 'action' : 'notice', urgency: actionable ? 'high' : 'normal', origin: 'browser',
+    detail: lines.map(lineText).join('\n'),
+    ...(actionable ? { action: { type: 'browser-proposal', id: String(entry.id), shown: p.digest } } : {}),
+    i18n: {
+      text: siteOnly ? { key: i18nKey('The agent asks you to let CloakBrowser open {site}'), params: { site: p.site } } : actionable ? { key: i18nKey('The agent proposes switching its browser to CloakBrowser ({site} refused it)'), params: { site: p.site } } : { key: i18nKey('The agent says {site} refused its browser — no switch can be offered here'), params: { site: p.site } },
+      detail: lines.map(strip),
+      source: { key: i18nKey('Agent browser') },
+    },
+  };
+}
+
+// ── lane site-reset step 3 (2026-09-30): CLEARING ONE SITE'S STORED LOGIN ON A SHARED PROFILE IS A PROPOSAL ──────────
+// The agent's `site-reset <host>` on a named profile other conversations (or the user's own browsing) use is never run by
+// the agent: it files ONE proposal of this SAME shape — `kind: 'site-reset'`, id `sr-…` — shown by the same card, the same
+// For-you item and answered by the same routes (`/api/browser/proposals/:id/approve|reject`); every transition is
+// `proposalStep`'s. What Approve runs is EXACTLY the frozen (profile, host): the cookies that reach the host and the
+// stored data of its origins, in that profile's browser — nothing else. The digest covers every word the card prints.
+const PROPOSAL_ID_RE = /^(?:bl|sr)-[0-9a-f]{8}$/;
+const SITE_RESET_ID_RE = /^sr-[0-9a-f]{8}$/;
+function siteResetDigest(p) {
+  const x = p || {};
+  const s = JSON.stringify(['site-reset', x.id, x.site, x.url, x.profileId, x.profileLabel, Number(x.holders) || 0, !!x.human]);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return 'pd-' + h.toString(16).padStart(8, '0');
+}
+/** THE RECORD a site-reset proposal files: every field frozen at the ask (`holders` = the conversations using the profile
+ *  now, the asker included; `human` = the user browses in it now). */
+function siteResetProposalFor({ id, host, url = '', profileId, profileLabel = '', holders = 1, human = false, at = 0 } = {}) {
+  const h = normalizeHost(host) || '';
+  const p = {
+    kind: 'site-reset', id: String(id || ''), site: h, url: proposalUrlOf(url) || (h ? `https://${h}/` : ''),
+    profileId: String(profileId || ''), profileLabel: String(profileLabel || '').replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 120),
+    holders: Math.max(1, Number(holders) || 1), human: !!human,
+    state: 'open', by: 'agent', at: Number(at) || 0, decided: null, outcome: null, progress: null, told: false,
+  };
+  p.digest = siteResetDigest(p);
+  return p;
+}
+/** A second ask on the same (conversation, profile, host): the SAME card while one stands; a rejection the agent was not
+ *  told yet is told now; a told rejection, a finished run or a stale one opens a new card. */
+function siteResetClaimVerdict({ existing = null } = {}) {
+  const p = existing && existing.proposal;
+  if (!p) return 'new';
+  if (p.state === 'failed' && p.outcome && p.outcome.code === 'proposal_stale') return 'new';
+  if (['open', 'approved', 'failed'].includes(p.state)) return 'same';
+  if (p.state === 'rejected' && !p.told) return 'rejected';
+  return 'new';
+}
+function siteResetCardBlock(entry) {
+  const e = entry || {};
+  const p = e.proposal;
+  if (!p || !SITE_RESET_ID_RE.test(String(e.id || '')) || !PROPOSAL_STATES.includes(p.state)) return null;
+  const s = (v, n) => (v == null ? '' : String(v).slice(0, n));
+  return {
+    type: 'browser_proposal', kind: 'site-reset', id: e.id, at: Number(e.at) || 0, browserKey: e.browserKey || null,
+    host: s(p.site, 253), site: s(p.site, 253), url: s(p.url, 2000), profileId: s(p.profileId, 40), profileLabel: s(p.profileLabel, 120),
+    holders: Math.max(1, Number(p.holders) || 1), human: !!p.human, plan: { kind: 'site-reset' },
+    state: p.state, decided: p.decided ? { action: p.decided.action, at: Number(p.decided.at) || 0 } : null,
+    progress: p.progress ? { step: s(p.progress.step, 40), percent: null, stalledSec: null } : null,
+    outcome: p.outcome ? { code: s(p.outcome.code, 40) || null, step: s(p.outcome.step, 40) || null, error: s(p.outcome.error, 400) || null, cookies: Math.max(0, Number(p.outcome.cookies) || 0), told: s(p.outcome.told, 20) || null, at: Number(p.outcome.at) || 0 } : null,
+    told: !!p.told, digest: String(p.digest || ''),
+  };
+}
+/** THE WORDS (the owner's sentence, line for line): what the agent proposes, who is signed out, that nothing else is
+ *  touched, what exactly is cleared, when the agent hears. Structure (`{key, params}`), said through the client's t(). */
+function siteResetLines(b) {
+  const x = b || {};
+  const n = Math.max(1, Number(x.holders) || 1);
+  const claim = { key: i18nKey('The agent proposes clearing {host}\'s login and stored data in the profile "{profile}".'), params: { host: x.site, profile: x.profileLabel || '' } };
+  const plan = [
+    x.human ? { key: i18nKey('Every conversation using this profile ({n}) and your own browsing tab will be signed out of {host}.'), params: { n, host: x.site } }
+      : { key: i18nKey('Every conversation using this profile ({n}) will be signed out of {host} — and so will you when you browse in it.'), params: { n, host: x.site } },
+    { key: i18nKey('Cleared: the cookies {host} receives and the data its pages stored (local storage, IndexedDB, caches, service workers). Nothing else is touched — every other site stays signed in.'), params: { host: x.site } },
+    { key: i18nKey('The agent is told when it is done — with your next message if its turn has ended.') },
+  ];
+  return { claim, plan, none: null };
+}
+function siteResetInboxItem(entry) {
+  const p = entry && entry.proposal;
+  const b = siteResetCardBlock(entry);
+  if (!p || !b) return null;
+  const L = siteResetLines(b);
+  const lines = [L.claim, ...L.plan];
+  const strip = (l) => ({ key: l.key, ...(l.params ? { params: Object.fromEntries(Object.entries(l.params).map(([k, v]) => [k, typeof v === 'number' ? v : String(v)])) } : {}) });
+  return {
+    text: `The agent proposes clearing ${p.site}'s stored login in "${p.profileLabel || p.profileId}"`, kind: 'action', urgency: 'high', origin: 'browser',
+    detail: lines.map(lineText).join('\n'),
+    action: { type: 'browser-proposal', id: String(entry.id), shown: p.digest },
+    i18n: { text: { key: i18nKey('The agent proposes clearing {site}\'s stored login in "{profile}"'), params: { site: p.site, profile: p.profileLabel || p.profileId } }, detail: lines.map(strip), source: { key: i18nKey('Agent browser') } },
+  };
+}
+/** What the agent's `site-reset` is answered with when it filed (or found) the proposal. */
+function siteResetProposalNext({ entry, duplicate = false, rejected = false } = {}) {
+  const p = (entry && entry.proposal) || {};
+  const id = entry && entry.id;
+  if (rejected) return `the user REJECTED clearing ${p.site}'s stored login in "${p.profileLabel || p.profileId}" — do not clear it another way (no other browser, no copied session); tell the user which site's login looks stale and carry on with what you can`;
+  if (duplicate) return `the same card still waits for the user (proposal ${id}, ${p.state}) — no second card was made. Do not ask again and do not clear it another way; when they approve you are told (with their next message if your turn has ended); if they reject it, your next navigation to ${p.site} says so`;
+  return `the profile "${p.profileLabel || p.profileId}" is shared (${p.holders} conversation${p.holders === 1 ? '' : 's'} use it${p.human ? ', and the user browses in it' : ''}), so clearing ${p.site}'s login signs every one of them out — a card in the user's chat now waits for their Approve (proposal ${id}). Tell the user in ONE sentence that the card waits — then stop: do NOT clear it another way, do not open another browser. When they approve you are told (with their next message if your turn has ended); if they reject it, your next navigation to ${p.site} says so`;
 }
 
 // ── the chip and the switch gate ─────────────────────────────────────────
@@ -844,7 +1353,12 @@ module.exports = {
   majorOf, parseLastVersion, majorOfBrowserString, chromiumMajorFor, cloakTargetName, versionLadder, fingerprintNote, fingerprintChange,
   seatState, ageText, seatVerdict, SEAT_TAKEN_RE, classifyLaunchFailure, tierFromLaunch,
   testHostFor, hostOfUrl, testRequestFor,
-  HINT_BY, TIERS, normalizeHost, siteHintVerdict, siteHintFor, blockedClaim, blockedText, navHint,
+  HINT_BY, TIERS, normalizeHost, siteHintVerdict, siteHintFor, blockedClaim, blockedText, navHint, SIGNIN_REFUSAL_ROWS, signinRefusalOf,
+  SIGNIN_DEPENDENCIES, signinDependenciesOf, egressRefusedText, // verify r1 V1: the sign-in page's own sites; a refused site told to the agent
+  PROPOSAL_STATES, PROPOSAL_INSTALL, PROPOSAL_PLANS, PROPOSAL_NONE_WHY, PROPOSAL_NEW_WHY, proposalLabel, proposalInstall, proposalPlan, proposalDigest, proposalUrlOf, proposalFor, claimVerdict, proposalStep,
+  PROPOSAL_ID_RE, SITE_RESET_ID_RE, siteResetDigest, siteResetProposalFor, siteResetClaimVerdict, siteResetCardBlock, siteResetLines, siteResetInboxItem, siteResetProposalNext, // lane site-reset step 3
+  BLOCKED_KEEP_MAX, blockedRank, blockedKeep, // verify r1: the claim store's bound drops the entries nobody waits on first
+  siteAdmitted, allowlistWith, rejectionText, approvedText, proposalCardBlock, proposalLines, lineText, INSTALL_WHY_WORDS, proposalInboxItem,
   backendChip, restartingRefusal, SWITCH_CODES, switchVerdict, switcherRows,
   ROW_STATES, rowState, holdOf, switchChoices, backendFact, installFacts,
 };

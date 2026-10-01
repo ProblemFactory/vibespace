@@ -370,7 +370,10 @@ for (const { kind, caps } of REGISTERED) {
     ['an unknown via', { ...F, via: 'scrape' }, /changeFeed\.via must be one of search/],
     ['a zero page size', { ...F, pageSize: 0 }, /changeFeed\.pageSize must be a positive integer/],
     ['a fractional per-minute ceiling', { ...F, perMin: 2.5 }, /changeFeed\.perMin must be a positive integer/],
-    ['no declared time unit', { ...F, timeUnit: undefined }, /changeFeed\.timeUnit must be one of ms\|s — ONE declared unit/],
+    ['no declared time unit', { ...F, timeUnit: undefined }, /changeFeed\.timeUnit must be one of ms\|s\|iso — ONE declared unit/],
+    // lane lark-p2p: the hit reader's revision is a positive integer when declared
+    ['a fractional hit-reader revision', { ...F, reader: 1.5 }, /changeFeed\.reader must be a positive integer/],
+    ['a zero hit-reader revision', { ...F, reader: 0 }, /changeFeed\.reader must be a positive integer/],
     ['a guessed time unit', { ...F, timeUnit: 'auto' }, /timeUnit must be one of ms\|s/],
     ['a malformed catch-up', { ...F, catchUp: { chatType: 'p2p', pagesMax: -1 } }, /changeFeed\.catchUp must be/],
     ['describes as a string', { ...F, describes: 'yes' }, /changeFeed\.describes must be a boolean/],
@@ -403,6 +406,12 @@ for (const { kind, caps } of REGISTERED) {
   const pg = await a.changes({});
   const h0 = pg.hits[0] || {};
   ok(pg.hits.length === 2 && !('text' in h0) && !('snippet' in h0) && !('display_info' in h0) && pg.stripped === 1 && pg.malformed === 2 && pg.more === true && pg.pageToken === 'tok-1' && pg.total === 3, 'the SNIPPET NEVER PASSES: every hit through the closed field list (the text / snippet / display_info stripped and COUNTED), a 700-char id is malformed, the continuation kept', JSON.stringify(pg));
+  // lane lark-p2p: WHAT was unreadable passes as field NAMES only — ≤ 3 distinct lists, ≤ 6 names each, the field
+  // alphabet (a value, a newline, a megabyte never reaches the card); a list that is not a list is dropped
+  pageOf.malformedFields = [['meta_data.create_time'], ['meta_data.chat_id', 'bad\nname', 'x'.repeat(1 << 20)], ['meta_data.create_time'], 'not a list', ['a'], ['b'], Array.from({ length: 1e5 }, (_, i) => `f${i}`)];
+  const pgF = await a.changes({});
+  ok(JSON.stringify(pgF.malformedFields) === JSON.stringify([['meta_data.create_time'], ['meta_data.chat_id'], ['a']]), 'lark-p2p: the unreadable hits\' FIELD NAMES pass bounded — the first three distinct lists, names in the field alphabet only (a newline, a megabyte, a non-list dropped)', JSON.stringify(pgF.malformedFields).slice(0, 300));
+  delete pageOf.malformedFields;
   pageOf.pageToken = 'bad\u0000token'; pageOf.more = true;
   const pg2 = await a.changes({});
   ok(pg2.pageToken === null && pg2.more === false, 'a continuation token with a control character is refused — and `more` is never claimed without a token to continue by', JSON.stringify(pg2));

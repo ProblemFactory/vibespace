@@ -21,8 +21,10 @@ import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { stampScratchRun, readRunRecord, runOwnerState, RUN_RECORD } from './scratch-run.mjs';
 const require = createRequire(import.meta.url);
 const { FIXTURE_CWD_PREFIX, TMP_ROOTS, FIXTURE_SID_PREFIX } = require('../src/fixture-guard.js');
+export { stampScratchRun, readRunRecord, runOwnerState, RUN_RECORD };
 
 /** The first-run Welcome wizard is skipped when localStorage 'vs-onboarded' is
  *  set OR when the machine already has sessions (app.js _checkOnboarding). A
@@ -44,15 +46,33 @@ export function scratch(name) {
   return path.join(TMP_ROOTS[0], `${FIXTURE_CWD_PREFIX}${name}-${process.pid}`);
 }
 
+/** `scratch(name)` CREATED and OWNED (B-1d08, 2026-09-29): the directory plus
+ *  its run record `<dir>/.vs-run.json` naming this process (pid + starttime +
+ *  boot). The gate's scratch-orphan reaper (scripts/ci.mjs) never touches a
+ *  process that names a root whose owner is alive, and convicts the ones under
+ *  a root whose owner is gone — so a suite that PLANTS a detached process (a
+ *  stray it wants to observe) plants it under a root made here, or another
+ *  run's sweep may read it as litter. Returns the path; the caller removes it. */
+export function scratchDir(name) {
+  const dir = scratch(name);
+  fs.mkdirSync(dir, { recursive: true });
+  stampScratchRun(dir);
+  return dir;
+}
+
 /** An ISOLATED $HOME for a suite that boots a server and needs discovery
  *  (2026-09-09). The server can only discover transcripts under the home it
  *  runs with, so the fixture goes HERE and the developer's real ~/.claude is
  *  never touched. `dirs` are pre-created because a spawned CLI/server must not
  *  race the first mkdir. Returns the home path; the caller removes it in its
- *  exit AND signal handlers. */
-export function scratchHome(name, fs, dirs = ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) {
+ *  exit AND signal handlers. Stamped with this process's run record (B-1d08):
+ *  the server's detached device daemon lives under this HOME, and it is litter
+ *  exactly when this suite is gone. */
+export function scratchHome(name, fsArg, dirs = ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) {
   const home = scratch(name);
-  for (const d of dirs) fs.mkdirSync(path.join(home, d), { recursive: true });
+  for (const d of dirs) (fsArg || fs).mkdirSync(path.join(home, d), { recursive: true });
+  (fsArg || fs).mkdirSync(home, { recursive: true });
+  stampScratchRun(home);
   return home;
 }
 

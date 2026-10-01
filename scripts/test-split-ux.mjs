@@ -890,7 +890,14 @@ else await (async () => {
 
     // L9 — an OLD layouts record (no order, no side lists) restores as a valid split
     await v2scene();
+    await ev(`window.__l9sent = 0; if (!window.__l9hook) { window.__l9hook = 1; const s0 = app.ws.send.bind(app.ws); app.ws.send = function (m) { if (m && m.type === 'layout-sync') window.__l9sent++; return s0(m); }; } return true;`);
     await ev(`wm.bindSplit(bySid(${S(sidA)}), bySid(${S(sidC)}), { side: 'right', focus: 'anchor' }); return true;`); await sleep(300);
+    // 2.369.199 integration: the bind is a HELD chain act for a minute (lane stage-blank r5 ⑦ `_heldChainActs`, lane desktop-move
+    // r5 ② `_chainAt`) — a record arriving inside it never undoes it and the act is re-sent BY DESIGN (test-window-binding-model ⑦).
+    // L9 judges an OLD record's restore, so the page's own save lands first and the act is made old before the old record is sent
+    await until(() => ev(`const lm = app.layoutManager; return window.__l9sent > 0 && !lm._deferT && !lm._saveWaitsForDrop && !(lm._unacked || []).length;`), 8000, 100); // the bind's OWN save has LEFT and been READ — it is debounced, and sent after the old record it overwrote it (2.369.199 integration)
+    await toDisk((c) => c.layout === 'split' && !!c.order);
+    await ev(`const lm = app.layoutManager; lm._heldChainActs?.clear?.(); lm._heldCloses?.clear?.(); for (const w of wm.windows.values()) { w._chainAt = 0; w._boundsAt = 0; w._movedAt = 0; if (w._tabChain) delete w._tabChain._ratioHeld; } return true;`); // every held act of this page made old (the bind's geometry witness too — lane desktop-move r5 ③)
     const oldState = await ev(`const st = app.layoutManager.captureState(); for (const w of st.windows) if (w.tabChain) { delete w.tabChain.order; if (w.tabChain.split) { delete w.tabChain.split.left; delete w.tabChain.split.right; } } return st;`);
     ws.send(JSON.stringify({ type: 'layout-sync', state: oldState, desktopId: deskId || undefined }));
     ok(await toDisk((c) => c.layout === 'split' && !c.order && c.split && !c.split.left), 'L9 the store now holds a PRE-v2 record (no order, no side lists)', S(chainFromDisk()));

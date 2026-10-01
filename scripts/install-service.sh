@@ -57,6 +57,18 @@ Environment=PATH=$(dirname "$NODE_BIN"):$HOME/.local/bin:/usr/local/bin:/usr/bin
 EnvironmentFile=-%h/.config/vibespace/env
 # Prefer killing memory hogs (browsers, builds) over the workspace server.
 OOMScoreAdjust=-500
+# Open-files limit, soft AND hard (one value sets both). node raises its OWN soft
+# limit to the hard one at startup (measured: under 1024:524288 it runs at
+# 524288/524288), so the "LimitNOFILESoft=1024" systemctl shows without this
+# line is NOT what the server runs at — this line makes the unit say what the
+# process and every session it spawns (dtach, wrappers, agent CLIs) really get.
+# It is not the 2026-09-30 12:03 EMFILE: the server held ~75 handles; the
+# workspace's FUSE daemon (bindfs, soft 1024) ran out and the file system relayed
+# its EMFILE. For a FUSE-mounted workspace raise THAT mount's limit (a drop-in
+# with LimitNOFILE= for its .mount unit) — the boot log's [fd] line and the fd
+# gauge name who ran out. 524288 = systemd's default HARD limit (the value node
+# raises itself to on a stock box); a lower number here would LOWER the server's.
+LimitNOFILE=524288
 # CRITICAL: only kill the node server on stop/restart — NOT the whole cgroup.
 # Agent sessions run in dtach and must survive server restarts (that's the
 # whole persistence design); the default control-group KillMode killed every

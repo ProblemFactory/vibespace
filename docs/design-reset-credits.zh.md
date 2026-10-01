@@ -113,3 +113,10 @@
 - **手动 Use… 经正在冷重启的承载会话: 按名拒绝。** r4 的说法 ("拒绝") 与实际 (警告后允许, 动词走在正在被替换的进程上) 不符。现在 `restartPending` 区分两种状态: `inFlight` (请求已发出) ⇒ preview/POST `restart_pending` (409), 对话框禁用并点名成员; `pending` (池已移动但还没有客户端被请求) ⇒ 允许, 对话框第一句说明"在客户端把它重启到 {member} 之前仍持有这个登录"。优先选择不在飞行中的承载会话。
 - **`no-start` 标记持久化。** rename / codex thread-meta 写入者用 `{...prev, createdAt: session.createdAt}` 把恢复时填入的启动时刻写回 meta, 第二次重启便能"确定地"说出上一次启动时的池默认成员。现在第一次恢复就把 `heldPoolOrigin:'no-start'` 写进 meta (仅限有 `accountId`、无 stamp、无 `createdAt` 的 meta), `heldOriginOf` 先认它。
 - **遗留:** 一个 `unknown` 持有者的读数和墙仍落在池当前成员上直到它重启 (未变); hold 在 10 分钟上限且无读数时, 下一次评估按缓存现状决定 (未变, verifier §2c 已记录); `_poolColdRestart` 的客户端路径与新的对话框文字未在浏览器中演练; heavy tier 未运行。
+
+## §16 消费请求的幂等键 (lane-codex-0159, 2026-09-30 — 生产: `codex-reset-credit-failed "Invalid request: missing field `idempotencyKey`"`)
+
+- **事实 (实测, 零 vendor 调用):** `account/rateLimitResetCredit/consume` 的参数是 `{idempotencyKey (必填), creditId?}`, 在 **0.153.4 和 0.159.3 上都是必填** (CLI 自己的 JSON Schema + 空网络命名空间里对 `{}` 的原话)。wrapper 从 2026-08-24 起一直发 `{}` — 这张 credit 在 0.159.3 更新之前就用不了。结果枚举两版相同: `reset | nothingToReset | noCredit | alreadyRedeemed`, 而 `alreadyRedeemed` 的定义是 "同一个幂等键已经完成过一次 reset"。
+- **一次按下 = 一个键:** 引擎唯一的写入者 `writeResetCredit` 每次按下铸一个 `crypto.randomUUID()` (存在该身份的 try 记录上), 随 `codex-reset-credit` 动词交给 wrapper; wrapper 发它 (旧服务器不给键时自己铸), 只在 consume **无应答** (超时) 时用**同一个键**重试一次 ⇒ vendor 对一个键只算一次, 重试永远花不了第二张。带键的 `alreadyRedeemed` = 这次按下自己的 reset (走 consumed 路径); 无键的 (旧 wrapper) 仍走 superseded 路径。
+- **旧 wrapper:** 不认识键 ⇒ 在新 CLI 上被本地拒绝 (什么都没花), 通知写 "Terminate + Resume 以更新 wrapper", 不再贴 CLI 原话; `nothingToReset` / `noCredit` 用话说。
+- **门:** scripts/test-codex-protocol-drift.mjs (fast) 把 wrapper 的每个请求对照从 CLI 实测的表; 安装的 codex 版本没被测过 ⇒ 按名红。test-reset-credit-ui 86 (新增 8 腿, 3 个对照)。

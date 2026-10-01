@@ -62,3 +62,5 @@ alice:hunter2pw@
 fs-appa-secret-0001
 # lane-redact's clear census: store FILE names in its ownership table
 { token: 'job-notifications
+# test-browser-kept: a kept url's user:password is stripped — the fixture spells one on a reserved .test host (not a credential)
+https://user:secret@bank.test/a

@@ -849,8 +849,12 @@ const titleCensus = (srcs) => {
 // the record comes from — a capture (`captureState()` within the lines above), a record the SERVER sent (already generic),
 // built without titles, or empty. A new holder is RED until it says which.
 const RC = require(path.join(ROOT, 'src/record-clear.js'));
-const HOLDER_RE = /\b_savedPresets\s*(?:\[[^\]]+\])?\s*=(?!=)|\b_savedStates\.set\(|\b_lastSentJson\s*=(?!=)/;
-const HOLDER_KINDS = new Set(['capture', 'server', 'titleless', 'empty']);
+// userW inc-mun7qjmw-iksh (lane desktop-move): a desktop's held record has ONE writer (DesktopManager._setRecord —
+// the `door`, its every CALL classified here) and a write MERGES (PURE src/lib/desktop-record.js): `merge` = a held
+// record merged with the ONE capture's entries (captureWin / captureWindows / recordFor) and/or minus entries — every
+// entry is a server record's or the wordless capture's
+const HOLDER_RE = /\b_savedPresets\s*(?:\[[^\]]+\])?\s*=(?!=)|\b_savedStates\.set\(|\.\s*_setRecord\(|\b_lastSentJson\s*=(?!=)/;
+const HOLDER_KINDS = new Set(['capture', 'server', 'titleless', 'empty', 'door', 'merge']);
 const HOLDERS_H2B = [
   // [file, a unique snippet of the line, kind, why]
   ['src/lib/layout.js', 'this._savedPresets = {};', 'empty', 'the constructor'],
@@ -859,12 +863,18 @@ const HOLDERS_H2B = [
   ['src/lib/layout.js', "      this._savedPresets = data.saved || {};\n      this._currentName = data.current || null;\n\n", 'server', 'the boot read of GET /api/layouts (the choke point wrote it)'],
   ['src/lib/layout.js', "      this._savedPresets = data.saved || {};\n      this._currentName = data.current || null;\n    } catch {}", 'server', 'refresh() — the Presets dialog re-reads GET /api/layouts'],
   ['src/lib/layout.js', 'this._savedPresets[name] = state;', 'capture', 'savePreset: the state captureState made (the r7 finding)'],
-  ['src/lib/desktop-manager.js', 'this._savedStates.set(firstId, legacyState);', 'server', 'the legacy top-level autoSave the server sent at boot'],
-  ['src/lib/desktop-manager.js', "if (id !== '__stage__' && dState.autoSave) { this._savedStates.set(id, dState.autoSave);", 'server', 'each desktop\'s autoSave the server sent at boot'],
-  ['src/lib/desktop-manager.js', 'this._savedStates.set(desktopId, state);', 'server', 'cacheRemoteState: a record the server RELAYED (its choke point made it generic in place, r5)'],
-  ['src/lib/desktop-manager.js', 'this._savedStates.set(this._activeId, currentState);', 'capture', 'switchTo: the record of the desktop being left (the r7 finding)'],
-  ['src/lib/desktop-manager.js', 'this._savedStates.set(desktopId, cached);', 'titleless', '_updateCachedDesktop: {winId, gridBounds, isMinimized, openSpec} per window — no title'],
-  ['src/lib/stage-manager.js', 'dm._savedStates.set(this._prevDesktopId, state);', 'capture', 'entering the stage: the record of the desktop being left'],
+  ['src/lib/desktop-manager.js', 'this._savedStates.set(desktopId, record);', 'door', '_setRecord: THE ONE writer of a held desktop record — every call below is classified'],
+  ['src/lib/desktop-manager.js', 'this._setRecord(firstId, legacyState);', 'server', 'the legacy top-level autoSave the server sent at boot'],
+  ['src/lib/desktop-manager.js', "if (id !== '__stage__' && dState.autoSave) { this._setRecord(id, dState.autoSave);", 'server', 'each desktop\'s autoSave the server sent at boot'],
+  ['src/lib/desktop-manager.js', 'this._setRecord(desktopId, held.length ? mergeDesktopRecord({ record: state, remove: held }) : state);', 'server', 'cacheRemoteState / cacheShownState: a record the server RELAYED (its choke point made it generic in place, r5), minus this page\'s held closes'],
+  ['src/lib/desktop-manager.js', 'this._setRecord(desktopId, state);', 'merge', 'noteSent: the record recordFor made (the held record merged with the ONE capture\'s entries) that just left this page'],
+  ['src/lib/desktop-manager.js', 'this._setRecord(desk, mergeDesktopRecord({ record: st, remove: [winId] }));', 'merge', 'purgeClosedWindow: a held record minus the closed window'],
+  ['src/lib/desktop-manager.js', 'this._setRecord(d, mergeDesktopRecord({ record: rec, built: lm.captureWindows(d)', 'merge', 'onSyncRefused: the record the server kept, merged with the ONE capture of the windows this page built there'],
+  ['src/lib/desktop-manager.js', 'this._setRecord(this._activeId, currentState);', 'capture', 'switchTo: the record of the desktop being left (the r7 finding) — recordFor = the held record merged with the ONE capture'],
+  ['src/lib/desktop-manager.js', 'this._setRecord(desktopId, mergeDesktopRecord({ record: this._savedStates.get(desktopId) || { windows: [] }, add: moved', 'merge', '_updateCachedDesktop: a move\'s target — its held record plus the moved windows\' captureWin entries'],
+  ['src/lib/desktop-manager.js', 'this._setRecord(from, mergeDesktopRecord({ record: this._savedStates.get(from), remove: ids }));', 'merge', '_updateCachedDesktop: a move\'s source — its held record minus the moved windows'],
+  ['src/lib/desktop-manager.js', 'this._setRecord(targetId, mergeDesktopRecord({ record: this._savedStates.get(targetId) || { windows: [] }, add: moving }));', 'merge', 'deleteDesktop: the target\'s held record plus the deleted desktop\'s own entries (each a server record\'s or the ONE capture\'s — lane desktop-move verify r1 ④)'],
+  ['src/lib/stage-manager.js', 'dm._setRecord(this._prevDesktopId, dm.recordFor(this._prevDesktopId));', 'capture', 'entering the stage: the record of the desktop being left (recordFor = the held record merged with the ONE capture)'],
 ];
 const holderSites = (srcs) => {
   const out = [];
@@ -874,18 +884,19 @@ const holderSites = (srcs) => {
       if (/^\s*(\/\/|\*|\/\*)/.test(l) || !HOLDER_RE.test(l)) return;
       const win = lines.slice(i, i + 4).join('\n') + '\n', above = lines.slice(Math.max(0, i - 16), i + 1).join('\n');
       const rows = HOLDERS_H2B.filter(([f, snip]) => f === rel && (snip.includes('\n') ? win.startsWith(snip) : l.includes(snip)));
-      out.push({ at: `${rel}:${i + 1}`, rows, captured: /captureState\(\)/.test(above), line: l.trim().slice(0, 120) });
+      out.push({ at: `${rel}:${i + 1}`, rows, captured: /captureState\(\)|\brecordFor\(/.test(above), merged: /\bmergeDesktopRecord\(|\brecordFor\(/.test(above), line: l.trim().slice(0, 120) });
     });
   }
   return out;
 };
-const captureTitled = (layoutSrc) => { const i = layoutSrc.indexOf('  captureState() {'); const body = i < 0 ? '' : layoutSrc.slice(i, layoutSrc.indexOf('\n  }\n', i)); return { wordless: /\btitle: wordlessTitleOf\(win\._openSpec, win\.title\),/.test(body), raw: /\btitle: win\.title\b/.test(body) }; };
+const captureTitled = (layoutSrc) => { const i = layoutSrc.indexOf('  captureWin(win, id = win?.id) {'); // the ONE per-window capture captureState / captureWindows / recordFor all read (lane desktop-move)
+  const body = i < 0 ? '' : layoutSrc.slice(i, layoutSrc.indexOf('\n  }\n', i)); return { wordless: /\btitle: wordlessTitleOf\(win\._openSpec, win\.title\),/.test(body), raw: /\btitle: win\.title\b/.test(body) }; };
 {
   ok(PERSIST.WORDLESS_TITLES === RC.WORDLESS_TITLES && RC.wordlessTitleOf({ action: 'openJobInteract', jobId: 'jb-1' }, 'digest SENTINEL — needs your input') === 'Job input' && RC.wordlessTitleOf({ action: 'openTaskLog' }, 'census — Log') === 'census — Log' && RC.wordlessTitleOf(null, 'x') === 'x', 'H2b ONE table: the server\'s choke point and the client\'s capture read the same WORDLESS_TITLES (PURE src/record-clear.js); wordlessTitleOf keeps any other window\'s title');
   const ct = captureTitled(read('src/lib/layout.js'));
   ok(ct.wordless && !ct.raw && /import \{ wordlessTitleOf \} from '\.\.\/record-clear\.js';/.test(read('src/lib/layout.js')), 'H2b the client\'s ONE capture (layout.js captureState) records a record-titled window under its generic title — never `title: win.title`', ct);
   const sites = holderSites(libSources());
-  const bad = sites.filter((s) => s.rows.length !== 1 || (s.rows[0][2] === 'capture' && !s.captured));
+  const bad = sites.filter((s) => s.rows.length !== 1 || (s.rows[0][2] === 'capture' && !s.captured) || (s.rows[0][2] === 'merge' && !s.merged));
   ok(sites.length >= 12 && !bad.length, `H2b every site that keeps a layout record in the page (${sites.length}) is classified — a capture (captureState() above it), a record the server sent, built without titles, or empty`, bad);
   const used = new Set(sites.flatMap((s) => s.rows));
   ok(HOLDERS_H2B.every((r) => used.has(r)) && HOLDERS_H2B.every(([, , k, why]) => HOLDER_KINDS.has(k) && why.length >= 8), 'H2b no dead row; every row names its kind and why', HOLDERS_H2B.filter((r) => !used.has(r)).map(([f, s]) => `${f}: ${s.slice(0, 50)}`));
@@ -1217,10 +1228,10 @@ console.log('§H6 controls: one client-side copy per class, each RED on its leg'
   }
   // 10. verify r7: a NEW page-side holder of layout records (a desktop cache built from the live windows, titles and all) is RED
   {
-    const rel = 'src/lib/desktop-manager.js', src = read(rel), a = '  _updateCachedDesktop(desktopId) {\n';
+    const rel = 'src/lib/desktop-manager.js', src = read(rel), a = '  _updateCachedDesktop(desktopId, { from = null, ids = [], replaces = [] } = {}) {\n';
     ok(src.split(a).length === 2, 'H6 control 10 (new-titled-holder) anchor present once');
     const m10 = MUT.write(rel, src.replace(a, "  _snapshotAll() { for (const d of this._desktops) this._savedStates.set(d.id, { windows: [...this.app.wm.windows.values()].filter((w) => w._desktopId === d.id).map((w) => ({ winId: w.id, title: w.title, openSpec: w._openSpec })) }); }\n" + a), 'new-titled-holder', { esm: true });
-    const bad10 = holderSites(libSources({ [rel]: m10 })).filter((s) => s.rows.length !== 1 || (s.rows[0][2] === 'capture' && !s.captured));
+    const bad10 = holderSites(libSources({ [rel]: m10 })).filter((s) => s.rows.length !== 1 || (s.rows[0][2] === 'capture' && !s.captured) || (s.rows[0][2] === 'merge' && !s.merged));
     ok(bad10.length === 1 && bad10[0].at.startsWith(rel + ':') && /_snapshotAll/.test(bad10[0].line), 'CONTROL 10 (verify r7): a new page-side holder of layout records (a desktop cache built from the live windows with their titles) is RED under H2b, and only it', bad10);
   }
   // 11. verify r7: a NEW server-persisted store a client writes (a SyncStore remembering the For-you window's last item) is RED
@@ -1642,6 +1653,7 @@ const I_RECV = {
   'src/lib/browser-switcher.js|e': ['error', 'an Error\'s name'], 'src/lib/browser-switcher.js|w': ['words', 'a PURE outcome\'s sentence'],
   'src/lib/browser-trace-view.js|e': ['browser profile', 'a profile label'], 'src/lib/browser-trace-view.js|f': ['browser profile', 'a profile / its file'], 'src/lib/browser-trace-view.js|o': ['browser profile', 'an orphan profile dir'],
   'src/lib/browser-trace-view.js|res.profile': ['browser profile', 'a profile label'], 'src/lib/browser-trace-view.js|res': ['browser profile', 'the profile adopted from'], 'src/lib/browser-trace-view.js|r': ['browser profile', 'a profile label'],
+  'src/lib/browser-trace-view.js|k': ['browser profile', 'a kept conversation browser\'s label (the session name it was kept for — lane browser-resume §3.9)'], 'src/server/browser-kept.js|e': ['browser profile', 'a kept conversation browser\'s label (the session name it was kept for — lane browser-resume §3.9)'],
   'src/lib/browser-who-dialog.js|r.profile': ['browser profile', 'a profile label'],
   'src/lib/channel-account-dialogs.js|k': ['channel account', 'an integration key label'], 'src/lib/channel-account-dialogs.js|v': ['channel account', 'an account name'],
   'src/lib/channel-group-dialogs.js|group': ['agent group', 'a group\'s name'], 'src/lib/channel-outbox.js|r': ['outbox proposal', 'a send\'s refusal reason'],
@@ -1666,11 +1678,12 @@ const I_RECV = {
   'src/routes/channels.js|b': ['caller', 'the request body — the owner\'s own proposal / consent words, handed to the engine'],
   'src/routes/desktop-apps.js|rec': ['desktop app', 'an app label'], 'src/routes/desktop-apps.js|row': ['desktop app', 'a machine\'s reason'], 'src/routes/desktop-apps.js|spec': ['desktop app', 'an app label'],
   'src/routes/files.js|shadow': ['mount', 'a storage name'],
-  'src/server/browser-handback.js|sess.s': ['session', 'a session\'s name'], 'src/server/browser-keeper.js|n': ['browser notice', 'the keeper\'s own notice (resources, a heal)'], 'src/server/browser-keeper.js|p': ['browser profile', 'a profile label'],
+  'src/server/browser-handback.js|sess.s': ['session', 'a session\'s name'], 'src/server/browser-propose.js|sess.s': ['session', 'a session\'s name'], 'src/server/browser-keeper.js|n': ['browser notice', 'the keeper\'s own notice (resources, a heal)'], 'src/server/browser-keeper.js|p': ['browser profile', 'a profile label'],
   'src/server/channels-engine.js|ctx': ['session', 'an agent session\'s name'], 'src/server/channels-engine.js|err': ['channel', 'a vendor error\'s detail'], 'src/server/channels-engine.js|fresh': ['outbox proposal', 'a decision reason'],
   'src/server/channels-engine.js|head': ['channel', 'a failing adapter\'s head sentence'], 'src/server/channels-engine.js|h': ['host', 'a machine name'], 'src/server/channels-engine.js|mod': ['channel', 'an adapter label'],
   'src/server/channels-engine.js|p.choice.fromMount': ['mount', 'a storage mount\'s name'], 'src/server/channels-engine.js|p': ['outbox proposal', 'a proposal\'s reason'], 'src/server/channels-engine.js|rec': ['channel', 'an account / adapter label'],
   'src/server/channels-engine.js|row': ['integration', 'an integration row label'], 'src/server/channels-engine.js|r': ['outbox proposal', 'a decision reason'], 'src/server/channels-engine.js|src': ['mount', 'a storage label'],
+  'src/server/fd-gauge.js|w': ['words', 'the fd gauge\'s own sentence (handle counts by kind, the busiest folders) — never a record (lane-dead-bridge)'], 'src/server/fd-gauge.js|b': ['words', 'the EMFILE blame sentence (who ran out: this server / a mount\'s FUSE daemon / the machine) — never a record (lane-dead-bridge)'],
   'src/server/channels-engine.js|v': ['outbox proposal', 'a verdict reason'], 'src/server/channels-engine.js|w.principal': ['session', 'a watcher\'s name'],
   'src/server/groups-engine.js|g': ['agent group', 'a group\'s name'], 'src/server/groups-engine.js|group': ['agent group', 'a group\'s name'], 'src/server/groups-engine.js|rg.group': ['agent group', 'a group\'s name'],
   'src/server/helper-asks.js|session': ['session', 'a session\'s name'], 'src/server/integration-store.js|row': ['integration', 'an integration row label'], 'src/server/login-expiry-watch.js|a': ['account', 'an account'],

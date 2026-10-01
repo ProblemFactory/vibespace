@@ -32,7 +32,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { SUITES, EXCLUDED, censusFindings, listSuiteFiles, heavyBlocker, machineGlobalFixtures, defaultLockPath, killedFromOutside, OUTSIDE_SIGNALS, scratchOrphans, SCRATCH_ROOT_RE, REAP_NAMES, reapReport, reapByHand, scratchRootsOf, ROOT_ENV, argvScratchRoots, PRODUCT_ROOT_RE, FAST_DISQUALIFIERS, FAST_MAX_MS, fastRuleFindings } from './ci.mjs';
+import { SUITES, EXCLUDED, censusFindings, listSuiteFiles, heavyBlocker, machineGlobalFixtures, defaultLockPath, killedFromOutside, OUTSIDE_SIGNALS, scratchOrphans, judgeScratch, SCRATCH_ROOT_RE, REAP_NAMES, reapReport, reapByHand, scratchRootsOf, ROOT_ENV, argvScratchRoots, PRODUCT_ROOT_RE, FAST_DISQUALIFIERS, FAST_MAX_MS, fastRuleFindings } from './ci.mjs';
 import { pathToFileURL } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
@@ -81,6 +81,7 @@ function stubGateRepo(tag) {
   fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
   fs.copyFileSync(path.join(REPO, 'scripts', 'ci.mjs'), path.join(root, 'scripts', 'ci.mjs'));
   fs.copyFileSync(path.join(REPO, 'scripts', 'git-env.mjs'), path.join(root, 'scripts', 'git-env.mjs'));
+  fs.copyFileSync(path.join(REPO, 'scripts', 'scratch-run.mjs'), path.join(root, 'scripts', 'scratch-run.mjs')); // ci.mjs's other sibling (B-1d08: the run record its reaper reads)
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'x', version: '0.0.0', private: true, scripts: { build: 'node -e "0"' } }) + '\n');
   fs.writeFileSync(path.join(root, 'scripts', STUB_SLICE + '.mjs'), "console.log('ALL PASS (1)');\n");
   git(root, ['init', '-q', '-b', 'main']);
@@ -1359,7 +1360,8 @@ console.log('\n§9 the scratch-orphan reaper');
     fs.utimesSync(d, born / 1000, born / 1000);
   };
   mk(1, { name: 'systemd', argv: ['/usr/lib/systemd/systemd', '--user'], ppid: 0, cwd: '/' });
-  mk(100, { name: 'vibespace-device', argv: ['vibespace-device'], ppid: 1, cwd: sGone, env: { HOME: sGone, VIBESPACE_AGENTD_ROOT: sGone + '/agentd-root' } });   // dir gone ⇒ reap
+  mk(100, { name: 'vibespace-device', argv: ['vibespace-device'], ppid: 1, cwd: sGone, env: { HOME: sGone, VIBESPACE_AGENTD_ROOT: sGone + '/agentd-root' }, born: OLD });   // dir gone ⇒ reap (B-1d08: once past the stale floor)
+  mk(101, { name: 'vibespace-device', argv: ['vibespace-device'], ppid: 1, cwd: sGone, env: { HOME: sGone } });   // B-1d08 (c): the same shape, YOUNG — a run in flight that removed its dir first, or a stray a suite planted ⇒ spared
   mk(201, { name: 'node', argv: ['node', '/tmp/x/scripts/ci.mjs', '--heavy'], ppid: 1, cwd: sLive, born: OLD });   // a gate RUNNER in its own isolated worktree: never a candidate
   mk(200, { name: 'node', argv: ['node', 'server.js'], ppid: 201, cwd: sLive, born: OLD });                       // its suite's server ⇒ owned ⇒ keep
   mk(202, { name: 'vibespace-device', argv: ['vibespace-device'], ppid: 1, cwd: sLive, env: { HOME: sLive }, born: OLD });   // that server's detached daemon: same root, group has a live member ⇒ keep
@@ -1375,10 +1377,10 @@ console.log('\n§9 the scratch-orphan reaper');
   // BEFORE the roots were read, while `--reap` said "no scratch orphans" (1045 daemons/Chromes, 47 GB).
   const sGone2 = `/tmp/vs-cigate9-gone2-${process.pid}-nowhere`, sGone3 = `/tmp/vs-cigate9-gone3-${process.pid}-nowhere`, sGone4 = `/tmp/vs-cigate9-gone4-${process.pid}-nowhere`;
   mk(601, { name: 'sleep', argv: ['sleep', '3600'], ppid: 1, cwd: sGone, born: OLD });                            // an unlisted name, orphaned under a GONE root ⇒ reap (evidence, whatever the name)
-  mk(700, { name: 'agent-browser-linux-x64', argv: ['/opt/ab/bin/agent-browser-linux-x64'], ppid: 1, cwd: sGone });   // the leaked daemon, rooted by its cwd ⇒ reap
-  mk(701, { name: 'headless_shell', argv: ['/opt/chrome/headless_shell', '--headless', `--user-data-dir=${sGone2}/prof`, '--no-sandbox'], ppid: 1, cwd: '/' });   // a Chrome: cwd `/`, its ONLY root the --user-data-dir ⇒ reap
-  mk(702, { name: 'agent-browser-linux-x64', argv: ['/opt/ab/bin/agent-browser-linux-x64'], ppid: 1, cwd: prodCwd, env: { HOME: HOME_OF_OWNER, AGENT_BROWSER_SOCKET_DIR: sGone3 + '/sock', AGENT_BROWSER_PROFILE: sGone3 + '/prof', AGENT_BROWSER_CONFIG: sGone3 + '/cfg.json' } });   // the FIELD shape: cwd a checkout, only the env roots ⇒ reap
-  mk(703, { name: 'chrome', argv: ['/opt/chrome/chrome', '--type=renderer'], ppid: 701, cwd: '/', env: { AGENT_BROWSER_SOCKET_DIR: sGone2 + '/sock' } });   // a Chrome child: walks up through its fellow member to init ⇒ reap
+  mk(700, { name: 'agent-browser-linux-x64', argv: ['/opt/ab/bin/agent-browser-linux-x64'], ppid: 1, cwd: sGone, born: OLD });   // the leaked daemon, rooted by its cwd ⇒ reap
+  mk(701, { name: 'headless_shell', argv: ['/opt/chrome/headless_shell', '--headless', `--user-data-dir=${sGone2}/prof`, '--no-sandbox'], ppid: 1, cwd: '/', born: OLD });   // a Chrome: cwd `/`, its ONLY root the --user-data-dir ⇒ reap
+  mk(702, { name: 'agent-browser-linux-x64', argv: ['/opt/ab/bin/agent-browser-linux-x64'], ppid: 1, cwd: prodCwd, env: { HOME: HOME_OF_OWNER, AGENT_BROWSER_SOCKET_DIR: sGone3 + '/sock', AGENT_BROWSER_PROFILE: sGone3 + '/prof', AGENT_BROWSER_CONFIG: sGone3 + '/cfg.json' }, born: OLD });   // the FIELD shape: cwd a checkout, only the env roots ⇒ reap
+  mk(703, { name: 'chrome', argv: ['/opt/chrome/chrome', '--type=renderer'], ppid: 701, cwd: '/', env: { AGENT_BROWSER_SOCKET_DIR: sGone2 + '/sock' }, born: OLD });   // a Chrome child: walks up through its fellow member to init ⇒ reap
   // THE OWNED-SHELL CONTROL (the pin that used to say "an unlisted executable is never a candidate
   // even under a gone scratch root", flipped): a user's shell whose cwd is a deleted scratch dir,
   // parented by a LIVE terminal outside the group, is owned by somebody alive ⇒ never listed.
@@ -1401,10 +1403,11 @@ console.log('\n§9 the scratch-orphan reaper');
   ok(list.find((o) => o.pid === 100).why === 'scratch dir gone' && /^orphaned 30 min/.test(list.find((o) => o.pid === 300).why), 'each verdict says which rule fired');
   ok(!pids.includes(200) && !pids.includes(202) && !pids.includes(201), 'a suite in flight (owned by a live runner) keeps its server AND its detached daemon');
   ok(!pids.includes(301), 'a reparented process younger than the stale floor is a possible run in flight and is spared');
+  ok(!pids.includes(101) && /^young: /.test((judgeScratch({ procRoot: root, now: NOW, self: 999999 }).spared.find((o) => o.pid === 101) || {}).why || ''), 'B-1d08 (c): a reparented process under a GONE root that is younger than the stale floor is spared too, and says why (incident ①: one fast tier reaped the stray another run\'s suite had just planted under a dir it had already removed)');
   ok(!pids.includes(400), 'the production server (cwd in a checkout, HOME the real home) is never a candidate');
   ok(pids.includes(601) && !REAP_NAMES.has('sleep') && !REAP_NAMES.has('agent-browser-linux-x64'), 'an unlisted executable IS a candidate under a gone scratch root when nobody alive owns it (the name is not evidence; the root and the ownership are)');
   const spared = scratchOrphans({ procRoot: root, now: NOW, self: 999999, staleMs: 24 * 3600 * 1000 });
-  ok(!spared.some((o) => o.pid === 300) && spared.some((o) => o.pid === 100), 'the stale floor is a parameter: a wider floor spares the reparented tree, the gone-dir rule still fires');
+  ok(!spared.some((o) => o.pid === 300) && !spared.some((o) => o.pid === 100) && !spared.length, 'the stale floor is a parameter, and every rule answers to it (B-1d08 (c)): a 24 h floor spares the reparented tree AND the 30-min-old rows under a gone dir');
   const asSelf = scratchOrphans({ procRoot: root, now: NOW, self: 310 });
   ok(!asSelf.some((o) => o.pid === 310 || o.pid === 300), 'this process and its ancestors are never candidates (a reaper does not reap itself)');
   const wired = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8');
@@ -1423,45 +1426,46 @@ console.log('\n§9 the scratch-orphan reaper');
   ok(report.length === list.length + 1 && /^\[ci\] reaping 9 scratch orphan process\(es\) from 4 finished scratch dir\(s\)/.test(report[0]), `the report is the head line + one line per victim (got ${report.length} lines for ${list.length} victims: ${report[0]})`);
   ok(list.every((o) => report.some((l) => l.includes(`pid ${o.pid} `) && l.includes(o.root) && l.includes(o.why))), 'every victim line names the pid, its root and the rule that fired');
   ok(report.some((l) => /pid 500 \(ppid 1\) dtach: dtach -a \S+cw-1 — root/.test(l)), 'a victim line carries the command head (argv[0..3]) — what the dead process WAS, not only its name');
-  ok(/export function reapScratchOrphans\([^)]*\) \{\n\s*const list = scratchOrphans\(opts\);\n\s*if \(!list\.length\) return list;\n\s*for \(const line of reapReport\(list\)\) log\(line\);/.test(wired) && /export async function reapScratchOrphansAsync\([^)]*\) \{\n\s*const list = scratchOrphans\(opts\);\n\s*if \(!list\.length\) return list;\n\s*for \(const line of reapReport\(list\)\) log\(line\);/.test(wired), 'WIRING: BOTH reapers (sync + the lanes\' async twin) print the per-pid report before the first SIGTERM');
+  ok(/export function reapScratchOrphans\([^)]*\) \{\n\s*const seam = opts\.procRoot \? null : procRootSeam\(\);[^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*const table = seam \|\| opts\.procRoot;[^\n]*\n\s*if \(!hasProcRoot\(table\)\) return \[\];[^\n]*\n\s*const lock = acquireReaperLock\(\{ lockPath, waitMs: lockWaitMs \}\);\n\s*if \(!lock\.ok\) \{ log\(skipLine\(lock\.why\)\);[^\n]*\n\s*if \(seam\) log\(seamLine\(seam\)\);\n\s*try \{\n\s*const list = scratchOrphans\(\{ \.\.\.opts, procRoot: table \}\);\n\s*if \(!list\.length\) return list;\n\s*for \(const line of reapReport\(list\)\) log\(line\);/.test(wired) && /export async function reapScratchOrphansAsync\([^)]*\) \{\n\s*const seam = opts\.procRoot \? null : procRootSeam\(\);[^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*const table = seam \|\| opts\.procRoot;[^\n]*\n\s*if \(!hasProcRoot\(table\)\) return \[\];[^\n]*\n\s*const lock = await acquireReaperLockAsync\(\{ lockPath, waitMs: lockWaitMs \}\);\n\s*if \(!lock\.ok\) \{ log\(skipLine\(lock\.why\)\);[^\n]*\n\s*if \(seam\) log\(seamLine\(seam\)\);\n\s*try \{\n\s*const list = scratchOrphans\(\{ \.\.\.opts, procRoot: table \}\);\n\s*if \(!list\.length\) return list;\n\s*for \(const line of reapReport\(list\)\) log\(line\);/.test(wired), 'WIRING: BOTH reapers (sync + the lanes\' async twin) resolve the test seam first (a refused one throws — verify r1 K7), hand that ONE resolution to the judge (verify r3 T3: announced = judged), take the sweep lock (a skip is said), announce a fake table, then print the per-pid report before the first SIGTERM (B-1d08)');
   // `--reap` BY HAND PRINTS EVERY VICTIM (lane H verify r1): the operator sees what it killed. Driven over a
   // fake proc root whose ONE victim is a real process this suite started (never anything else on the box):
   // a detached `sleep` (reparented, so its reaper is init, not us), named as the field daemon.
   const victim = Number(spawnSync('bash', ['-c', 'sleep 120 >/dev/null 2>&1 & echo $!'], { encoding: 'utf-8' }).stdout.trim());
   const root2 = mktmp('procroot-reap');
-  const mk2 = (pid, { name, argv, ppid, cwd, env = {} }) => { const d = path.join(root2, String(pid)); fs.mkdirSync(d); fs.writeFileSync(path.join(d, 'stat'), `${pid} (${name.slice(0, 15)}) S ${ppid} ${pid} ${pid} 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 12345 0 0`); fs.writeFileSync(path.join(d, 'cmdline'), (argv || [name]).join('\0') + '\0'); fs.writeFileSync(path.join(d, 'environ'), Object.entries(env).map(([k, v]) => `${k}=${v}`).join('\0') + '\0'); fs.symlinkSync(cwd, path.join(d, 'cwd')); };
+  const mk2 = (pid, { name, argv, ppid, cwd, env = {} }) => { const d = path.join(root2, String(pid)); fs.mkdirSync(d); fs.writeFileSync(path.join(d, 'stat'), `${pid} (${name.slice(0, 15)}) S ${ppid} ${pid} ${pid} 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 12345 0 0`); fs.writeFileSync(path.join(d, 'cmdline'), (argv || [name]).join('\0') + '\0'); fs.writeFileSync(path.join(d, 'environ'), Object.entries(env).map(([k, v]) => `${k}=${v}`).join('\0') + '\0'); fs.symlinkSync(cwd, path.join(d, 'cwd')); fs.utimesSync(d, OLD / 1000, OLD / 1000); };
+  const lock2 = path.join(root2, 'reaper.lock');   // this leg's OWN sweep lock (B-1d08) — never contends with a real tier's sweep
   mk2(1, { name: 'systemd', argv: ['/usr/lib/systemd/systemd', '--user'], ppid: 0, cwd: '/' });
   if (Number.isInteger(victim) && victim > 1) {
     mk2(victim, { name: 'agent-browser-linux-x64', argv: ['/opt/ab/bin/agent-browser-linux-x64'], ppid: 1, cwd: prodCwd, env: { AGENT_BROWSER_SOCKET_DIR: sGone3 + '/sock' } });
     const dryLines = []; reapByHand({ dryRun: true, procRoot: root2, self: 999999, log: (m) => dryLines.push(m) });
     const aliveNow = (p) => { try { process.kill(p, 0); return true; } catch { return false; } };
     ok(dryLines.some((l) => l.includes(`pid ${victim} (ppid 1) agent-browser-linux-x64: /opt/ab/bin/agent-browser-linux-x64 — root ${sGone3} — scratch dir gone`)) && /--dry-run: 1 process\(es\) listed above, none signalled/.test(dryLines[dryLines.length - 1]) && aliveNow(victim), '`--reap --dry-run` prints the per-pid report and signals nothing (the victim still runs)', dryLines);
-    const lines = []; reapByHand({ procRoot: root2, self: 999999, log: (m) => lines.push(m), graceMs: 2000 });
+    const lines = []; reapByHand({ procRoot: root2, self: 999999, log: (m) => lines.push(m), graceMs: 2000, lockPath: lock2 });
     let dead = false; for (let i = 0; i < 40 && !(dead = !aliveNow(victim)); i++) spawnSync('sleep', ['0.05']);
     ok(/^\[ci\] reaping 1 scratch orphan process\(es\) from 1 finished scratch dir\(s\)/.test(lines[0] || '') && lines.some((l) => l.includes(`pid ${victim} (ppid 1) agent-browser-linux-x64`) && l.includes('scratch dir gone')) && /^\[ci\] reaped 1 of 1 scratch orphan process\(es\)$/.test(lines[lines.length - 1] || '') && dead, `\`--reap\` BY HAND names every pid it kills (head + one line per victim, before the first SIGTERM) and closes with the count — the victim is gone`, lines);
     try { process.kill(victim, 'SIGKILL'); } catch { }
   } else ok(false, `could not start the reap leg's own victim process (got ${JSON.stringify(victim)})`);
-  ok(/if \(arg\('reap'\)\) \{ process\.exit\(reapByHand\(\{ dryRun: !!arg\('dry-run'\) \}\)\); \}/.test(wired) && /export function reapByHand\([^)]*\) \{[\s\S]{0,400}for \(const line of reapReport\(list\)\) log\(line\);[\s\S]{0,200}const list = reapScratchOrphans\(\{ log, \.\.\.opts \}\);/.test(wired), 'WIRING: `--reap` goes through reapByHand — the report printed through the operator\'s log on both paths, `--dry-run` signalling nothing');
+  ok(/if \(arg\('reap'\)\) \{ process\.exit\(reapByHand\(\{ dryRun: !!arg\('dry-run'\) \}\)\); \}/.test(wired) && /export function reapByHand\([^)]*\) \{[\s\S]{0,400}for \(const line of verdictReport\(judgeScratch\(\{ \.\.\.opts, procRoot: seam \|\| opts\.procRoot \}\)\)\) log\(line\);[\s\S]{0,200}const list = reapScratchOrphans\(\{ log, \.\.\.opts \}\);/.test(wired), 'WIRING: `--reap` goes through reapByHand — the verdicts printed through the operator\'s log on both paths, `--dry-run` signalling nothing');
   // NEGATIVE CONTROLS (scripts/mutant-copy.mjs, each copy ONE edit, loaded beside the real modules): the legs above can go red.
   const M9 = mutantCopies('cigate9-reaper', REPO);
   const src9 = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8');
   const mutant9 = async (tag, from, to) => { if (!src9.includes(from)) return { missing: from }; const f = M9.write('scripts/ci.mjs', src9.replace(from, to), tag); return import(pathToFileURL(f).href); };
   const pidsOf = (mod) => (mod && mod.scratchOrphans ? mod.scratchOrphans({ procRoot: root, now: NOW, self: 999999 }).map((o) => o.pid).sort((a, b) => a - b) : null);
-  const cA = await mutant9('name-gate', "const root = scratchRootsOf(i)[0]; if (!root) continue;", "if (!reapNamed(i.a0)) continue; const root = scratchRootsOf(i)[0]; if (!root) continue;");
+  const cA = await mutant9('name-gate', "    const claims = scratchRootClaims(i); if (!claims.length) continue;", "    if (!reapNamed(i.a0)) continue; const claims = scratchRootClaims(i); if (!claims.length) continue;");
   const pA = pidsOf(cA);
   ok(pA && !pA.includes(700) && !pA.includes(701) && !pA.includes(702) && !pA.includes(601) && pA.includes(100), `CONTROL (a): the pre-fix NAME GATE before the evidence (a copy) drops the agent-browser daemons, the headless_shell and the unlisted orphan — exactly the field leak (got ${JSON.stringify(pA || cA)})`);
   const cB = await mutant9('old-roots', "export const ROOT_ENV = ['HOME', 'VIBESPACE_DEVICE_ROOT', 'VIBESPACE_AGENTD_ROOT', 'AGENT_BROWSER_SOCKET_DIR', 'AGENT_BROWSER_PROFILE', 'AGENT_BROWSER_CONFIG'];", "export const ROOT_ENV = ['HOME', 'VIBESPACE_DEVICE_ROOT', 'VIBESPACE_AGENTD_ROOT'];");
   const pB = pidsOf(cB);
   ok(pB && !pB.includes(702) && pB.includes(700), `CONTROL (b): a copy whose roots are the pre-fix four (cwd/HOME/device/agentd) never sees the field daemon rooted only by AGENT_BROWSER_SOCKET_DIR (got ${JSON.stringify(pB || cB)})`);
   // (verify r2: the flag is ALSO read off the joined cmdline now — this control drops BOTH readings, one copy)
-  const uddNul = "if (a.startsWith('--user-data-dir=')) cands.push(a.slice('--user-data-dir='.length));", uddJoined = "  if (joined) for (const m of argv.join(' ').matchAll(UDD_JOINED_RE)) cands.push(m[1]);\n";
+  const uddNul = "if (a.startsWith('--user-data-dir=')) cands.push({ p: a.slice('--user-data-dir='.length), via: '--user-data-dir', dir: true });", uddJoined = "  if (joined) for (const m of argv.join(' ').matchAll(UDD_JOINED_RE)) cands.push({ p: m[1], via: '--user-data-dir', dir: true });\n";
   // (2.369.180, lanes N + H integrated: lane N's argv roots are a THIRD reading of the same flag — `--user-data-dir=<scratch>`
   // is a `<flag>=` element — so the copy drops that line too; without it the control proves nothing)
-  const argvRootsLine = "  cands.push(...argvScratchRoots(argv, { joined })); // lane N: a root named only in the arguments (dtach / pty-wrapper)\n";
+  const argvRootsLine = "  cands.push(...argvScratchClaims(argv, { joined })); // lane N: a root named only in the arguments (dtach / pty-wrapper)\n";
   const cU = src9.includes(uddNul) && src9.includes(uddJoined) && src9.includes(argvRootsLine) ? await import(pathToFileURL(M9.write('scripts/ci.mjs', src9.replace(uddNul, 'if (false) cands.push(a);').replace(uddJoined, '').replace(argvRootsLine, ''), 'no-udd')).href) : { missing: 'a --user-data-dir reading line' };
   const pU = pidsOf(cU);
   ok(pU && !pU.includes(701) && pU.includes(700), `CONTROL (c): a copy that ignores --user-data-dir never sees the headless_shell whose cwd is / (got ${JSON.stringify(pU || cU)})`);
-  const cO = await mutant9('gone-lists-all', 'victims = members.filter(orphaned);', 'victims = members;');
+  const cO = await mutant9('gone-lists-all', "          if (!orphaned(i)) kept.push(at(i, { why: 'owned by a live process outside the root' }));", "          if (false) kept.push(at(i, { why: 'owned by a live process outside the root' }));");
   const pO = pidsOf(cO);
   ok(pO && pO.includes(600) && pO.includes(110), `CONTROL (d): a copy whose gone rule lists every member regardless of ownership reaps the user's owned shell and the in-flight server — the owned-shell leg can go red (got ${JSON.stringify(pO || cO)})`);
   // ── LANE H VERIFY r2 (2026-09-25): three more holes in the evidence ──────────────────────────────────────────
@@ -1516,7 +1520,7 @@ console.log('\n§9 the scratch-orphan reaper');
     ok(o812 && o812.name === 'google-chrome' && /^orphaned/.test(o812.why), `r2 L3: /usr/bin/google-chrome (a0 'google-chrome', /proc comm 'chrome') passes the stale rule's name check through its comm (got ${JSON.stringify(o812)})`);
     ok(ids(r3g).includes(140) && ids(r3g).includes(141), `r2 L7: a Chrome under one gone root whose parent is itself a victim under ANOTHER gone root is listed in the SAME sweep (got ${JSON.stringify(ids(r3g))})`);
     // CONTROLS (M9, one edit each): the pre-fix rules
-    const cE = await mutant9('admits-vs-ab', 'if (m && !PRODUCT_ROOT_RE.test(m[0]) && !out.includes(m[0])) out.push(m[0]);', 'if (m && !out.includes(m[0])) out.push(m[0]);');
+    const cE = await mutant9('admits-vs-ab', '    if (!m || PRODUCT_ROOT_RE.test(m[0])) continue;', '    if (!m) continue;');
     const pE = cE && cE.scratchOrphans ? ids(list3(cE, absent)) : null;
     ok(pE && pE.includes(801) && pE.includes(802), `CONTROL (e): a copy whose root rule admits /tmp/vs-ab-<uid> lists the production daemon and its Chrome when the dir is gone (got ${JSON.stringify(pE || cE)})`);
     // (2.369.180: the copy also reads lane N's argv roots EXACTLY — their joined branch reads a title's words too)
@@ -1564,7 +1568,7 @@ console.log('\n§9 the scratch-orphan reaper');
     const cI = await mutant9('cap-8', 'const maxRounds = [...groups.values()].reduce((n, m) => n + m.length, 0) + 1;', 'const maxRounds = 8;');
     const pI = ids4(cI);
     ok(pI && chain.filter((p) => pI.includes(p)).length === 8, `r3 LOW 4 CONTROL: a copy capped at 8 rounds lists ${pI ? chain.filter((p) => pI.includes(p)).length : '?'} of the chain of 10 in one sweep — the leg above can go red (got ${JSON.stringify(pI || cI)})`);
-    const cJ = await mutant9('joined-always', "  if (joined) for (const m of argv.join(' ').matchAll(UDD_JOINED_RE)) cands.push(m[1]);", "  for (const m of argv.join(' ').matchAll(UDD_JOINED_RE)) cands.push(m[1]);");
+    const cJ = await mutant9('joined-always', "  if (joined) for (const m of argv.join(' ').matchAll(UDD_JOINED_RE)) cands.push({ p: m[1], via: '--user-data-dir', dir: true });", "  for (const m of argv.join(' ').matchAll(UDD_JOINED_RE)) cands.push({ p: m[1], via: '--user-data-dir', dir: true });");
     const pJ = ids4(cJ);
     ok(pJ && pJ.includes(950), `r3 MINOR 2 CONTROL: a copy that scans the joined words of EVERY argv (r2) roots the sh -c that only mentions the flag and lists it (got ${JSON.stringify(pJ || cJ)})`);
   }
@@ -1577,7 +1581,8 @@ console.log('\n§9 the scratch-orphan reaper');
 // cwd a deleted /tmp/vs-deskapp-smoke-*) held the machine-global :7/5901 and another run's server adopted it 40 s
 // later. The incident's shape over a fake proc root, the stale rule (where the NAME is still the one extra fact)
 // with the pre-fix name set in a patched copy as the control, and one DRY RUN on the real /proc: a reparented
-// process whose argv[0] is Xtigervnc under a removed scratch dir is LISTED (scratchOrphans signals nothing).
+// process whose argv[0] is Xtigervnc under a scratch dir whose owner is gone is LISTED once past the stale floor
+// (scratchOrphans signals nothing; B-1d08: the dir is kept, its run record names an exited owner).
 console.log('\n§9b the reaper judges the singleton Desktop\'s X server (Xtigervnc)');
 {
   const root = mktmp('procroot9b');
@@ -1614,16 +1619,23 @@ console.log('\n§9b the reaper judges the singleton Desktop\'s X server (Xtigerv
   const prePids = pre.scratchOrphans({ procRoot: root, now: NOW, self: 999999 }).map((o) => o.pid);
   ok(!prePids.includes(710) && !pre.REAP_NAMES.has('Xtigervnc'), `CONTROL: without the name the stale leaked Xtigervnc is never a candidate (pre-fix listed ${JSON.stringify(prePids.sort((a, b) => a - b))})`);
   // THE DRY RUN on the real /proc: a process whose argv[0] IS Xtigervnc (a `sleep` under that name — nothing is
-  // started on a display), reparented through a short-lived parent, rooted in a scratch dir that is then removed
+  // started on a display), reparented through a short-lived parent, rooted in a scratch dir whose OWNER is gone.
+  // B-1d08: the root STAYS, with a run record naming a process that has exited — a suite never plants a process
+  // under a root it has removed (every sweep on the box, another lane's fast tier or a tier on older code, would take
+  // it at once: incident ①). The listing moves the CLOCK past the stale floor instead; with the real clock the same
+  // seconds-old process is spared.
   const dry = sc('dry');
+  const deadOwner = Number(String(spawnSync(process.execPath, ['-e', 'console.log(process.pid)'], { encoding: 'utf8', timeout: 10000 }).stdout || '').trim());
+  fs.writeFileSync(path.join(dry, '.vs-run.json'), JSON.stringify({ v: 1, run: 'cigate9b-dead-owner', pid: deadOwner, starttime: 1, bootId: '', createdAt: Date.now() }) + '\n');
   const kid = spawnSync(process.execPath, ['-e', "const c = require('child_process').spawn('sleep', ['60'], { argv0: 'Xtigervnc', cwd: process.argv[1], detached: true, stdio: 'ignore' }); c.unref(); console.log(c.pid);", dry], { encoding: 'utf8', timeout: 10000 });
   const dpid = Number(String(kid.stdout || '').trim());
   try {
     const argv0 = (() => { try { return fs.readFileSync(`/proc/${dpid}/cmdline`, 'utf8').split('\0')[0]; } catch { return null; } })();
-    fs.rmSync(dry, { recursive: true, force: true });
-    const listed = scratchOrphans({}).find((o) => o.pid === dpid);
-    ok(dpid > 0 && argv0 === 'Xtigervnc' && !!listed && listed.name === 'Xtigervnc' && listed.why === 'scratch dir gone' && listed.root === dry,
-      `DRY RUN on the real /proc: the reparented "Xtigervnc" (pid ${dpid}) under the removed ${dry} is listed — ${listed ? listed.why : 'NOT listed'} (nothing signalled)`);
+    const listed = scratchOrphans({ now: Date.now() + 11 * 60 * 1000 }).find((o) => o.pid === dpid);
+    ok(deadOwner > 0 && dpid > 0 && argv0 === 'Xtigervnc' && !!listed && listed.name === 'Xtigervnc' && /^owner gone: run cigate9b-dead-owner pid \d+ (is gone|was reused)/.test(listed.why) && listed.root === dry,
+      `DRY RUN on the real /proc, the clock past the stale floor: the reparented "Xtigervnc" (pid ${dpid}) under ${dry}, whose run record names an exited owner, is listed — ${listed ? listed.why : 'NOT listed'} (nothing signalled)`);
+    const young = judgeScratch({}).spared.find((o) => o.pid === dpid);
+    ok(!!young && /^young: /.test(young.why), `…and with the real clock the same seconds-old process is SPARED (${young ? young.why : 'not among the spared'}): a young orphan may be a run in flight or a stray planted on purpose`);
     let alive = true; try { process.kill(dpid, 0); } catch { alive = false; }
     ok(alive, '…and listing signalled nothing: the process is still alive until this suite ends it');
   } finally { if (dpid > 0) { try { process.kill(dpid, 'SIGKILL'); } catch { } } }
@@ -1668,13 +1680,13 @@ console.log('\n§9c the reaper reads a scratch root off the arguments (dtach / p
   // CONTROL: ci.mjs without the argv roots (the pre-fix candidate set) — the incident's rows are invisible
   const M = mutantCopies('cigate9c', REPO);
   const ciSrc = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf8');
-  const preFix = ciSrc.replace('  cands.push(...argvScratchRoots(argv, { joined })); // lane N: a root named only in the arguments (dtach / pty-wrapper)\n', ''); // scratchRootsOf without the argv roots (2.369.180: lane H's function carries them)
+  const preFix = ciSrc.replace('  cands.push(...argvScratchClaims(argv, { joined })); // lane N: a root named only in the arguments (dtach / pty-wrapper)\n', ''); // scratchRootClaims without the argv roots (2.369.180: lane H's function carries them)
   ok(preFix !== ciSrc, 'CONTROL: the patched copy really drops the argv roots from the candidate roots');
   const pre = await import(M.write('scripts/ci.mjs', preFix, 'no-argv-roots', { esm: true }));
   const prePids = pre.scratchOrphans({ procRoot: root, now: NOW, self: 999999 }).map((o) => o.pid);
   ok(!prePids.includes(800) && !prePids.includes(810), `CONTROL: without the argv roots the leaked dtach + pty-wrapper are never candidates (pre-fix listed ${JSON.stringify(prePids)})`);
   // CONTROL: without the product-root exclusion the production Chrome row IS listed (so the row above proves the exclusion)
-  const noExcl = ciSrc.replace('if (!PRODUCT_ROOT_RE.test(r) && !out.includes(r))', 'if (!out.includes(r))').replace('if (m && !PRODUCT_ROOT_RE.test(m[0]) && !out.includes(m[0])) out.push(m[0]);', 'if (m && !out.includes(m[0])) out.push(m[0]);');
+  const noExcl = ciSrc.replace('if (!PRODUCT_ROOT_RE.test(r) && !out.some((c) => c.p === r + slash))', 'if (!out.some((c) => c.p === r + slash))').replace('    if (!m || PRODUCT_ROOT_RE.test(m[0])) continue;', '    if (!m) continue;');
   ok(noExcl.split('PRODUCT_ROOT_RE.test(').length === ciSrc.split('PRODUCT_ROOT_RE.test(').length - 2, 'CONTROL: the second patched copy really drops BOTH /tmp/vs-ab-<uid> exclusions (argv roots + the candidate roots)');
   const ne = await import(M.write('scripts/ci.mjs', noExcl, 'no-product-root', { esm: true }));
   ok(ne.scratchOrphans({ procRoot: root, now: NOW, self: 999999 }).some((o) => o.pid === 830), 'CONTROL: without the exclusion the production Chrome under /tmp/vs-ab-<uid> would be reaped');

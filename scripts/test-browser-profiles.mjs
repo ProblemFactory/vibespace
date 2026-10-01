@@ -115,9 +115,15 @@ const PROD_SOCK = '/tmp/vs-ab-' + (typeof process.getuid === 'function' ? proces
 const prodSockPreExisted = fs.existsSync(PROD_SOCK);
 process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } try { fs.rmSync(SHORT, { recursive: true, force: true }); } catch { } });
 
+// lane browser-propose (2026-09-30): `browser.automationFlag` is OFF for these resolvers — the legs below pin the user's own
+// `args` byte for byte; the flag rule (on by default, the user's own value winning) is test-browser-env's subject
+const NO_FLAG = (k) => (k === 'browser.automationFlag' ? false : undefined);
+// lane browser-resume (§3.9): this suite judges the rung ladder's config COMPOSITION with the conversation's kept browser
+// OFF (its "absence of `profile` is the ephemerality" legs); the kept directory itself is test-browser-kept's, and one
+// leg below (②k) drives it ON through this same resolver
 const mk = (over = {}) => BE.create({
-  dataDir: DATA, homeDir: HOME, serverNotice: null, telemetry: null,
-  log: { warn() { }, log() { } }, ...SESSION_ENV, ...over,
+  dataDir: DATA, homeDir: HOME, serverNotice: null, telemetry: null, serverSetting: NO_FLAG,
+  log: { warn() { }, log() { } }, keepOn: () => false, ...SESSION_ENV, ...over,
 });
 const KEY = 'bk-0011aabb', KEY2 = 'bk-0022ccdd';
 const pairsMap = (pairs) => Object.fromEntries(pairs.map((p) => [p.slice(0, p.indexOf('=')), p.slice(p.indexOf('=') + 1)]));
@@ -283,9 +289,19 @@ console.log('\n④ the ladder (D12) and its reasons');
 // ladder half — but it still BOUNDS the rest: a line of no declared kind fails,
 // or a future flood would simply hide behind the filter.
 const LADDER_RE = /variant [A-Za-z]+ → [A-Za-z]+|remote sessions decide/;
-const CONFIG_RE = /the generated agent-browser config drops `|the profile pin was NOT applied|config also carries the project-level|could not be layered into the generated config|daemon socket would be \d+ bytes|NOT carried: a project file lives where the agent works|from `args` — a switch that opens a raw debugging endpoint/;
+const CONFIG_RE = /keeps its tabs but not its logins after it stops|the generated agent-browser config drops `|the profile pin was NOT applied|config also carries the project-level|could not be layered into the generated config|daemon socket would be \d+ bytes|NOT carried: a project file lives where the agent works|from `args` — a switch that opens a raw debugging endpoint|config does not add --disable-blink-features=AutomationControlled/;
 const ladderOnly = (ls) => ls.filter((l) => LADDER_RE.test(String(l)));
 const undeclared = (ls) => ls.filter((l) => !LADDER_RE.test(String(l)) && !CONFIG_RE.test(String(l)));
+// ②k lane browser-resume (§3.9): the SAME resolver with the conversation's browser KEPT (the product default) names the
+// conversation's own directory, 0700, and journals nothing of an undeclared kind (a fenced one keeps tabs only — said once)
+{
+  const lk = [];
+  const ek = mk({ keepOn: () => true, log: { warn: (x) => lk.push(String(x)), log() { } } });
+  const rk = ek.envFor({ browserKey: 'bk-00c0ffee', integrationOn: true });
+  const ck = JSON.parse(fs.readFileSync(pairsMap(rk.pairs).AGENT_BROWSER_CONFIG, 'utf8'));
+  ok(ck.profile === ek.scratchDirFor('bk-00c0ffee') && (fs.statSync(ck.profile).mode & 0o777) === 0o700 && ek.resolvedProfileDir('bk-00c0ffee') === ck.profile && undeclared(lk).length === 0,
+    '②k keeping ON: the generated config names data/browser-profiles/<key> (0700), read back off the file; every journal line of a declared kind', { profile: ck.profile, lk });
+}
 
 // the real resolver on each rung, with the journal captured
 {
@@ -929,7 +945,7 @@ console.log('\n⑬ the project-level agent-browser.json is layered the way the C
   ]]);
   if (ok(!pre.err && pre.hits === 1, `PRE-FIX CONTROL #1 is a patched copy of the real module with exactly ONE replacement (${pre.err || 'hit'})`)) {
     const lp = [];
-    const ep = pre.mod.create({ dataDir: DATA, homeDir: H13, ...SESSION_ENV, log: { warn: (s) => lp.push(String(s)), log() { } } });
+    const ep = pre.mod.create({ dataDir: DATA, homeDir: H13, serverSetting: NO_FLAG, ...SESSION_ENV, log: { warn: (s) => lp.push(String(s)), log() { } } });
     const rp = ep.envFor({ browserKey: 'bk-13131306', integrationOn: true, cwd: PROJ });
     const cp = unmark(JSON.parse(fs.readFileSync(rp.configPath, 'utf8')), 'bk-13131306');
     ok(!('allowedDomains' in cp) && cp.args === '--no-sandbox,--user',

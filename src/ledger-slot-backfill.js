@@ -21,7 +21,12 @@
  * WHAT MAKES A ROW A CANDIDATE — evidence, never inference. Only a row billed
  * THROUGH A POOL can be one: a session with no pool reads one credential dir
  * for its whole life, so its observed org IS its slot by construction (the
- * refuted mechanism needs a re-point to lie). Such a row is touched only when
+ * refuted mechanism needs a re-point to lie). [2026-09-30, lane-hot-switch:
+ * THAT PREMISE IS REFUTED TOO — the observed org is ~/.claude.json's machine-
+ * wide label, not the process's own identity, so a no-pool row baked by
+ * `truthLookup` between 2.361.0 and 2026-09-07 can name the label's account
+ * as well. This pass ran with the premise; the residue is a HELD item in the
+ * lane's report, not re-keyed here.] Such a row is touched only when
  * the OTel path demonstrably wrote its account:
  *   · the OTel stash (`usage-history/otel-truth.ndjson`, append-only, kept
  *     offline for exactly this) names the row's rid with a KNOWN org and that
@@ -391,6 +396,8 @@ function backfillLedgerBySlot({ dataDir, id, transitions = null, members = null,
       // POOLED rows only: a session with no pool reads ONE credential dir for
       // its whole life, so its observed org and its slot are the same account
       // by construction — the refuted mechanism needs a re-point to lie.
+      // (2026-09-30: refuted as well — the org is a machine-wide label; see the
+      // header. Behaviour unchanged: this pass has run, the residue is held.)
       const local = r && r.sid && r.pool && r.be !== 'codex' && r.atype !== 'host' && !String(r.rid || '').startsWith('h:');
       if (!local || r.slotRekeyedBy) {
         // a row a CRASHED pass of this migration already re-keyed and renamed:

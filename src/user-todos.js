@@ -83,7 +83,7 @@ function normalizeAction(x) {
 // never carries an action, never merges into one). exit-proxy's asks: one item per ask (each is a different command;
 // a reopened item answered the NEXT ask under the user's pointer). helper-ask is NOT here on purpose: a helper's
 // parallel asks of one text SHARE one item by design (helper-asks.js re-points it — test-helper-ask ⑩)
-const ACTION_IDENTITY = Object.freeze({ 'exit-run-ask': 'askId' });
+const ACTION_IDENTITY = Object.freeze({ 'exit-run-ask': 'askId', 'browser-proposal': 'id' }); // lane browser-propose: one item per proposal (each is a different switch)
 const URGENCIES = ['low', 'normal', 'high', 'urgent'];
 const KINDS = ['action', 'notice']; // 2.369.118: action = needs the user (default); notice = for their information (own section, grey count)
 const STATUSES = ['open', 'done', 'dismissed'];
@@ -125,9 +125,11 @@ function validExpiry(x, now = Date.now()) {
 class UserTodoManager {
   /** @param expirySweepMs how often expireDue() runs (0 = never on a timer —
    *  a migration or a suite that builds a private manager must not leave one) */
-  constructor({ dataDir, onChange, expirySweepMs = EXPIRY_SWEEP_MS }) {
+  constructor({ dataDir, onChange, expirySweepMs = EXPIRY_SWEEP_MS, onWriteError = null }) {
     this._file = path.join(dataDir, 'user-todos.json');
     this._onChange = onChange || (() => {});
+    this._onWriteError = typeof onWriteError === 'function' ? onWriteError : null; // lane-dead-bridge: session-status's twin — a failed background write is named, never a crash
+    this._writeFailures = 0;
     this._statusListeners = []; // onStatus(fn): an item LEAVING 'open' by any door (verify-r2 ask-b), and (verify-r6 W2) a reopen
     this._state = { items: [] };
     this._writeTimer = null; this._dirty = false; this._lastWritten = null;
@@ -212,7 +214,21 @@ class UserTodoManager {
       if (drop.size) this._state.items = this._state.items.filter((i) => !drop.has(i.id));
     }
     this._dirty = true;
-    if (!this._writeTimer) this._writeTimer = setTimeout(() => { this._writeTimer = null; this._flush(); }, 500);
+    if (!this._writeTimer) this._writeTimer = setTimeout(() => { this._writeTimer = null; this._flushFromTimer(); }, 500);
+  }
+
+  // THE DEBOUNCED WRITE MAY NOT THROW — the twin of session-status.js's
+  // (lane-dead-bridge: that one's bare writeFileSync met a relayed EMFILE at
+  // 12:03:17 and killed the server). Dirty kept, backoff retry, reported.
+  _flushFromTimer() {
+    try { this._flush(); this._writeFailures = 0; }
+    catch (e) {
+      this._writeFailures++;
+      this._dirty = true;
+      const retryMs = Math.min(60000, 1000 * 2 ** Math.min(6, this._writeFailures - 1));
+      if (!this._writeTimer) { this._writeTimer = setTimeout(() => { this._writeTimer = null; this._flushFromTimer(); }, retryMs); this._writeTimer.unref?.(); }
+      try { this._onWriteError?.(e, this._file + '.tmp', { failures: this._writeFailures, retryMs }); } catch { }
+    }
   }
 
   _flush() {

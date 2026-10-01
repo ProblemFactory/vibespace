@@ -633,5 +633,30 @@ console.log('— ⑦ the keyless fact: "no browser yet" where the first browser 
   ok(nk.code === 'no-key' && /no browser yet/.test(nk.error) && !/predates/.test(nk.error), '⑦ the live view of such a session says "no browser yet" too (a view never starts a browser nor mints a key)', nk.error);
 }
 
+// ═══ ⑧ lane browser-resume B (§3.9): WHAT IS KEPT rides THE fact — the Resume every surface offers reads it here ═══
+console.log('— ⑧ lane browser-resume B: the kept fact, ownResumable, the stopped line\'s words');
+{
+  const view = (o = {}) => ({ profiles: PROFILES, pin: null, attachments: [], browsers: {}, own: { profileId: 'bp-00000009', state: 'stopped' }, input: null, live: '', now: 1000000, ...o });
+  const sess = (o = {}) => ({ browserKey: KEY, pinId: null, pinOrigin: null, active: '', variant: 'D', remote: false, ...o });
+  const kf = BF.browserFactFor(sess(), view({ kept: { tabs: 3, kind: 'full', stoppedWhy: 'turn-idle', restoreBy: 'auto', handedBack: false, waiting: 0 } }));
+  ok(kf.own && kf.own.kept && kf.own.kept.tabs === 3 && kf.own.kept.kind === 'full' && kf.own.kept.why === 'turn-idle' && BF.ownResumable(kf), '⑧ a stopped own browser with 3 kept tabs: `own.kept` rides the fact and it is resumable', JSON.stringify(kf.own));
+  const running = BF.browserFactFor(sess(), view({ own: { profileId: 'bp-00000009', state: 'ready' }, kept: { tabs: 3, kind: 'full' } }));
+  const none = BF.browserFactFor(sess(), view({ kept: null }));
+  const empty = BF.browserFactFor(sess(), view({ kept: { tabs: 0, kind: 'tabs-only' } }));
+  const loginsOnly = BF.browserFactFor(sess(), view({ kept: { tabs: 0, kind: 'full' } }));
+  const remote = BF.browserFactFor(sess({ remote: true }), view({ kept: { tabs: 3, kind: 'full' } }));
+  ok(!BF.ownResumable(running) && !BF.ownResumable(none) && !BF.ownResumable(empty) && BF.ownResumable(loginsOnly) && !BF.ownResumable(remote) && !BF.ownResumable(null), '⑧ ownResumable: never while it runs, never with nothing kept (no directory, no tab), never for a session on another machine; its logins alone are enough');
+  ok(kf.digest !== none.digest && kf.digest !== BF.browserFactFor(sess(), view({ kept: { tabs: 3, kind: 'full', restoreBy: 'user' } })).digest && BF.browserFactFor(sess(), view({ kept: { tabs: 3, kind: 'full', restoreBy: 'user' } })).digest !== BF.browserFactFor(sess(), view({ kept: { tabs: 3, kind: 'full', restoreBy: 'user', handedBack: true } })).digest, '⑧ the digest moves with what is kept (a Forget, a Resume, a hand-back re-render every surface)');
+  const words = BF.keptLineWords(kf);
+  const fenced = BF.keptLineWords(BF.browserFactFor(sess(), view({ kept: { tabs: 2, kind: 'fenced' } })));
+  ok(/3 tab\(s\) and its logins are kept/.test(words) && /fenced to allowed domains/.test(fenced) && /its logins are kept/.test(BF.keptLineWords(loginsOnly)) && BF.keptLineWords(none) === '', '⑧ the stopped line says what is kept (tabs + logins / tabs only because fenced / logins only); nothing kept ⇒ no line', [words, fenced]);
+  ok(/^<Stopped/.test(BF.keptLineWords(kf, (x) => '<' + x + '>')), '⑧ …through the caller\'s t() (literal keys)');
+  const kb = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  ok(/let kept = null; if \(B\.isBrowserKey\(bk\)\) \{ try \{ const ks = keptStore\(\); kept = ks \? ks\.brief\(bk\) : null; \}/.test(kb) && /browsers, own, input, live, now: now\(\), stuck, kept \};/.test(kb), '⑧ the keeper\'s factView reads the kept store\'s brief (the ONE fact — no surface reads the store itself)');
+  const lw = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
+  const cr = fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf8');
+  ok(/if \(ref === EPHEMERAL_REF \|\| \(!ref && !st\.target && f && f\.using && f\.using\.kind === 'own'\)\) return ownResumable\(f\);/.test(lw) && /if \(!fact \|\| fact\.key !== key \|\| !ownResumable\(fact\)\) return false;/.test(cr), '⑧ the live view\'s Resume and the chat end card\'s Resume both ask ownResumable over THE fact (no second derivation)');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

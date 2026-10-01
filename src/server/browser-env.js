@@ -122,9 +122,10 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const B = require('../browser-profiles.js');
-const { createBrowserFacts } = require('../browser-facts.js');
+const { createBrowserFacts, dirIdentity } = require('../browser-facts.js');
 const { repointPoolSymlink } = require('../account-material.js');
 const browserBindings = require('./browser-bindings.js');
+const KB = require('../browser-kept.js');
 
 /** tmp+rename, like every other store in this tree. A bare writeFileSync here
  *  is worse than elsewhere: a torn config file is a HARD ERROR in the CLI.
@@ -149,6 +150,9 @@ function mkdirPrivate(d) {
  *  in flight, and nothing may remove its files. One hour is far wider than any
  *  create takes and far narrower than the orphan problem being prevented. */
 const SWEEP_GRACE_MS = 60 * 60 * 1000;
+/** The keeper's registry (src/server/browser-keeper.js STORE_FILE — spelled here: the keeper requires nothing of this
+ *  module and this module must not require the keeper). test-browser-kept ③ pins the two agree. */
+const PROFILE_REGISTRY_FILE = 'browser-profiles.json';
 
 function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
   telemetry = null, homeDir = os.homedir(), facts = null, log = console,
@@ -166,7 +170,12 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
   // "our writer produced a file the CLI will refuse", which cannot be staged by
   // breaking the filesystem (that also breaks the write). The suite passes a
   // writer that lands garbage; production never passes this.
-  writeJson = writeJsonAtomic } = {}) {
+  writeJson = writeJsonAtomic,
+  // lane browser-resume (§3.9): is the conversation's own browser KEPT (`browser.keepConversationBrowser`, read through
+  // serverSetting by default) and which browser keys the kept store names (its directory is spared by the sweep, its
+  // key is never minted again) — by default READ OFF data/browser-kept.json (file-based, like the bindings: the two
+  // instances of this module in one server, ws-create's and the routes', read the same object)
+  keepOn = null, keptKeys = null } = {}) {
   const ENV_DIR = path.join(dataDir, 'browser-env');        // generated configs + pin symlinks (+ the C rung's `<key>.cwd`)
   const PROFILE_DIR = path.join(dataDir, 'browser-profiles'); // variant C scratch dirs (ours, swept)
   const bf = facts || createBrowserFacts({});
@@ -177,6 +186,26 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
 
   const setting = (k, d) => { try { const v = serverSetting(k); return v === undefined || v === null || v === '' ? d : v; } catch { return d; } };
   const enabled = () => setting('browser.isolateSessions', true) !== false;
+  const keeping = () => { if (typeof keepOn === 'function') { try { return !!keepOn(); } catch { return false; } } return KB.keptLimits((k) => setting(k, undefined)).on; };
+  /** The browser keys the kept store names (a set; unreadable ⇒ null, and the callers fail CLOSED: the sweep spares every
+   *  key-named directory, the fresh-key rule counts the key as named). */
+  const keptKeySet = () => {
+    if (typeof keptKeys === 'function') { try { const v = keptKeys(); return v instanceof Set ? v : new Set(v || []); } catch { return null; } }
+    let raw;
+    try { raw = fs.readFileSync(path.join(dataDir, KB.KEPT_FILE), 'utf8'); } catch (e) { return e && e.code === 'ENOENT' ? new Set() : null; }
+    try { return new Set(Object.keys(KB.normalizeKeptStore(JSON.parse(raw)).entries)); } catch { return null; }
+  };
+  /** verify F1 (the same class, found fixing it): the directories a REGISTERED named profile names — an in-place
+   *  `new --adopt` of a conversation's kept / scratch directory under data/browser-profiles/ makes that directory a
+   *  profile's logins, and once the kept entry ends (removeEntry leaves the directory in place) nothing here named it:
+   *  the sweep deleted it. Read off the keeper's registry file (file-based, like the kept store); this machine's
+   *  profiles only (a remote profile's path names another machine). Unreadable ⇒ null, and the sweep spares every
+   *  key-named directory (fail CLOSED). Compared by REAL identity; an unknown compare counts as registered. */
+  const registeredDirs = () => {
+    let raw;
+    try { raw = fs.readFileSync(path.join(dataDir, PROFILE_REGISTRY_FILE), 'utf8'); } catch (e) { return e && e.code === 'ENOENT' ? [] : null; }
+    try { return B.normalizeRegistry(JSON.parse(raw)).profiles.filter((p) => p && p.dir && !p.host && !B.isEphemeralProfile(p)).map((p) => String(p.dir)); } catch { return null; }
+  };
   /** THREE-STATE, because the honest default is "whatever the user's own
    *  ~/.agent-browser/config.json says" and there is no boolean for that.
    *  `null` ⇒ `generatedConfig` carries the user's own value across. A raw
@@ -187,6 +216,8 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
     if (v === false || v === 'no') return false;
     return null;
   };
+  /** lane browser-propose (step 1): `browser.automationFlag` — default ON; only an explicit false turns it off. */
+  const automationFlagOn = () => setting('browser.automationFlag', true) !== false;
 
   function ensureDirs() {
     for (const d of [ENV_DIR, PROFILE_DIR]) { try { mkdirPrivate(d); } catch { } }
@@ -341,6 +372,17 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
     // below is not attempted (no symlink, no scratch dir left behind).
     const fence = B.configFence(user);
     const fenced = !!fence;
+    // lane browser-resume (§3.9, the owner's ruling 1): the conversation's OWN browser keeps its logins — its directory is
+    // named by its browser key (the rung-C name, used on D too) and survives the browser's stop until the conversation
+    // ends or the size bound (src/server/browser-kept.js). Never beside a fence (the CLI refuses a profile with
+    // allowedDomains: a fenced conversation keeps its tabs only), never under a pin. 0700: a chromium user-data-dir.
+    let keptDir = null, keptWhy = null;
+    const keepOff = !keeping();
+    if (keepOff) keptWhy = 'the setting browser.keepConversationBrowser is off';
+    else if (fenced) keptWhy = 'fenced';
+    else if (!pin) {
+      try { mkdirPrivate(scratchDirFor(key)); keptDir = scratchDirFor(key); } catch (e) { keptWhy = `its directory could not be made: ${e && e.message}`; }
+    }
     // (D) — write the generated config and PROVE it readable before the env
     // variable can name it. The read-back is not belt and braces: a missing or
     // invalid file makes the CLI exit 1.
@@ -356,7 +398,9 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
       // and said (`projectDropped` / `argsDropped`, journalled below)
       // lane H verify r4: the config carries the keeper's launch MARK for this browser key — its Chrome is then proven
       // VibeSpace's by its own command line (the binary scrubs the Chrome's environment; a directory proves nothing)
-      composed = B.generatedConfigParts({ userConfig: eff.user, projectConfig: eff.projectFile, pinnedDir: pin, headed: headedSetting(), mark: key, holdDialogs: true }); // lane browser-stuck: a new spawn's browser holds page dialogs
+      // lane browser-stuck: a new spawn's browser holds page dialogs; lane browser-propose: …and stops announcing automation;
+      // lane browser-resume: its kept directory
+      composed = B.generatedConfigParts({ userConfig: eff.user, projectConfig: eff.projectFile, pinnedDir: pin, keptDir, headed: headedSetting(), mark: key, holdDialogs: true, automationFlag: automationFlagOn() });
       const cfg = composed.config;
       writeJson(p, cfg);
       const back = JSON.parse(fs.readFileSync(p, 'utf8'));
@@ -397,7 +441,10 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
         else { const r = ensureSocketDir(socket.dir); if (r.ok) socketDir = socket.dir; else socket.refused = r.why; }
       }
     }
-    return { ...ladder, dropped, projectDropped: composed ? composed.dropped.project : [], argsDropped: composed ? composed.dropped.args : [], pinRefused: conflict || null, projectConfig: eff.project, socket, socketDir };
+    // lane browser-resume: what this conversation's browser keeps — its directory on D (the config names it) and C (the
+    // link points at it); nothing on N / none (tabs only)
+    const kept = { dir: (ladder.variant === B.VARIANTS.D && keptDir) || (ladder.variant === B.VARIANTS.C && !pin) ? scratchDirFor(key) : null, fenced, why: keptWhy, off: keepOff };
+    return { ...ladder, dropped, projectDropped: composed ? composed.dropped.project : [], argsDropped: composed ? composed.dropped.args : [], automationFlag: composed ? composed.automationFlag : null, pinRefused: conflict || null, projectConfig: eff.project, socket, socketDir, kept };
   }
 
   /** One journal line per fallback, naming the rung it left, the rung it landed
@@ -461,6 +508,11 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
       journalOnce(`args-dropped:${res.argsDropped.join(',')}`, `${key}: the generated agent-browser config drops ${res.argsDropped.join(' ')} from \`args\` — a switch that opens a raw debugging endpoint or picks the user-data-dir would go around the lease and the mediation (I3); every other launch arg is carried.`);
       try { telemetry?.event?.('browser-config-args-dropped', res.argsDropped.length); } catch { }
     }
+    // lane browser-propose: a --disable-blink-features switch of the user's own decided against the automation flag — said
+    // once (theirs wins, untouched); their own AutomationControlled value needs no line (nothing of theirs is lost)
+    if (res.automationFlag === 'their-switch') {
+      journalOnce('automation-flag:their-switch', `${key}: the generated agent-browser config does not add ${B.AUTOMATION_FLAG} — your own \`args\` carry a --disable-blink-features switch (Chromium keeps one value per switch, so a second one would drop yours); yours is carried unchanged.`);
+    }
     // A DROPPED KEY IS A STATED DECISION (r2). Round 1's generated config was an
     // ALLOW list, so the user's browsing fence and the whole confirmation family
     // vanished by OMISSION — no line, nothing in the journal, no way to notice.
@@ -475,6 +527,12 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
     if (res.pinRefused) {
       journalOnce(`pin-refused:${res.pinRefused.key}`, `${key}: the profile pin was NOT applied — ${res.pinRefused.why}`);
       try { telemetry?.event?.('browser-pin-refused', res.pinRefused.key); } catch { }
+    }
+    // lane browser-resume (§3.9): a conversation whose browser keeps its TABS only (fenced / the setting off / its
+    // directory could not be made) is said once per reason — "the logins were not kept" must never be a surprise
+    // (the setting turned OFF is the user's own choice — never journalled)
+    if (res.kept && !res.kept.dir && res.kept.why && !res.kept.off && !res.remote && res.variant !== B.VARIANTS.NONE) {
+      journalOnce(`kept:${res.kept.why}`, `${key}: this conversation's browser keeps its tabs but not its logins after it stops — ${res.kept.why === 'fenced' ? 'its config restricts browsing to allowed domains and the browser CLI refuses a kept profile beside that fence' : res.kept.why}`);
     }
     // THE SOCKET ROOT (r4): said once per root, because a long HOME is
     // permanent while this runs once per create. A refusal is said too — the
@@ -585,6 +643,8 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
     const plan = B.pinResolution({
       variant: isFile(cfgP) ? B.VARIANTS.D : (isLink(linkP) ? B.VARIANTS.C : null),
       pinnedDir, ephemeralDir: scratchDirFor(browserKey),
+      // lane browser-resume (§3.9): an unpin goes back to the conversation's OWN kept directory (fence-checked below)
+      keptDir: keeping() ? scratchDirFor(browserKey) : null,
     });
     try {
       if (plan.variant === B.VARIANTS.D) {
@@ -594,9 +654,11 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
         const conflict = B.pinFenceConflict({ userConfig: current, pinnedDir });
         if (conflict) return { ok: false, why: conflict.why, conflict: conflict.key, fence: conflict.fence };
         const next = { ...current };
-        if (plan.configProfile) next.profile = plan.configProfile; else delete next.profile;
+        // lane browser-resume: the kept directory never lands beside the file's own fence (the pinned case was refused above)
+        const target = pinnedDir ? plan.configProfile : (B.configFence(current) ? null : plan.configProfile);
+        if (target) { if (!pinnedDir) mkdirPrivate(target); next.profile = target; } else delete next.profile;
         writeJson(cfgP, next);
-        return { ok: true, variant: plan.variant, appliesFrom: B.PIN_APPLIES_FROM, target: plan.configProfile };
+        return { ok: true, variant: plan.variant, appliesFrom: B.PIN_APPLIES_FROM, target: target || null };
       }
       if (plan.variant === B.VARIANTS.C) {
         // The C rung replaces no config, so the CLI still reads BOTH of its own
@@ -647,7 +709,7 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
    */
   function sweep(liveKeys, { graceMs = SWEEP_GRACE_MS } = {}) {
     if (!liveKeys) return { swept: 0, kept: 0, spared: [], skipped: 'no live-session set supplied' };
-    let swept = 0, kept = 0;
+    let swept = 0, kept = 0, keptDirs = 0;
     const spared = [];
     // THE ON-DISK HALF IS NOT OPTIONAL. A session restored at boot may not
     // carry `_browserKey` in memory at the instant this runs, and a meta file
@@ -657,6 +719,15 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
     // would silently revert and the next launch would land somewhere else.
     const live = new Set([...liveKeys].filter(Boolean));
     for (const k of liveKeysFromMeta()) live.add(k);
+    // lane browser-resume (§3.9): a KEPT browser's directory outlives its session — the kept store owns it (its end, its
+    // size bound). Its config / link / cwd files still go by the rule above (the next spawn rewrites them). An unreadable
+    // store spares EVERY key-named directory (fail closed: a login is never deleted because a file could not be read).
+    const keptSet = keptKeySet();
+    const regDirs = registeredDirs();
+    // each registered directory's identity ONCE per sweep; an unresolvable one (null) makes every compare unknown ⇒ spared
+    const regIds = regDirs ? regDirs.map((d) => dirIdentity(d)) : null;
+    const isRegistered = (p) => { if (!regIds) return true; if (!regIds.length) return false; const id = dirIdentity(p); return id === null || regIds.some((r) => r === null || r === id); };
+    let regSpared = 0;
     const sweptAt = Date.now();
     for (const [dir, isDir] of [[ENV_DIR, false], [PROFILE_DIR, true]]) {
       let names = []; try { names = fs.readdirSync(dir); } catch { continue; }
@@ -668,6 +739,8 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
         const key = B.parentKeyOf(isDir ? n : n.replace(/\.(json|profile|cwd)$/, ''));
         if (!B.isBrowserKey(key)) continue;
         if (live.has(key)) { kept++; continue; }
+        if (isDir && (!keptSet || keptSet.has(key))) { keptDirs++; continue; }
+        if (isDir && isRegistered(path.join(dir, n))) { regSpared++; continue; } // verify F1: a registered profile's directory is its logins — never swept
         // A create in flight has written its indirection and not yet its meta.
         // Every sweeper in this tree refuses to remove something that young,
         // and this one reports the age it spared rather than shrugging.
@@ -684,9 +757,9 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
       }
     }
     if (swept || spared.length) {
-      try { log.log?.(`[browser] swept ${swept} orphaned browser env object(s); ${kept} live${spared.length ? `; spared ${spared.length} younger than ${graceMs}ms (a create may still be in flight)` : ''}`); } catch { }
+      try { log.log?.(`[browser] swept ${swept} orphaned browser env object(s); ${kept} live${keptDirs ? `; ${keptDirs} kept browser director${keptDirs === 1 ? 'y' : 'ies'} left to the kept store${keptSet ? '' : ' (its file could not be read — every key-named directory was spared)'}` : ''}${regSpared ? `; ${regSpared} director${regSpared === 1 ? 'y' : 'ies'} a named profile registered in place spared${regDirs ? '' : ' (the profile registry could not be read — every key-named directory was spared)'}` : ''}${spared.length ? `; spared ${spared.length} younger than ${graceMs}ms (a create may still be in flight)` : ''}`); } catch { }
     }
-    return { swept, kept, spared, sweptAt, graceMs };
+    return { swept, kept, spared, sweptAt, graceMs, keptDirs, keptUnreadable: !keptSet, registeredDirs: regSpared, registryUnreadable: !regDirs };
   }
 
   /**
@@ -737,6 +810,9 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
     try { if (fs.readdirSync(ENV_DIR).some((n) => n === K || n.startsWith(K + '.'))) return true; } catch (e) { if (!e || e.code !== 'ENOENT') return true; }
     try { fs.lstatSync(scratchDirFor(K)); return true; } catch (e) { if (!e || e.code !== 'ENOENT') return true; }
     try { if (liveKeysFromMeta().has(K)) return true; } catch { return true; }
+    // lane browser-resume (§3.9): a KEPT browser (a tabs-only one has no directory to lstat) is its conversation's —
+    // a fresh key never lands on it; an unreadable store counts as named (fail closed)
+    const ks = keptKeySet(); if (!ks || ks.has(K)) return true;
     return false;
   }
   function liveKeysFromMeta() {
@@ -799,6 +875,8 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
 
   return {
     envFor, checkFloor, floorState, repointPin, resolvedProfileDir, sweep, priorKeyFor, liveKeysFromMeta, keyNamed, bindings, childConfigFor,
+    // lane browser-resume (§3.9): is keeping on, and the keys the kept store names (the routes' adopt + the suites)
+    keepOn: () => keeping(), keptKeys: () => keptKeySet(),
     // B-f7ab: the late key (src/server/browser-key.js) names WHY `envFor` gave nothing — this switch off, before it asks
     isolationOn: () => enabled(),
     // paths, so the suite asserts the real ones rather than its own guess
@@ -810,4 +888,4 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
   };
 }
 
-module.exports = { create, writeJsonAtomic, mkdirPrivate, SWEEP_GRACE_MS, FILE_MODE, DIR_MODE };
+module.exports = { create, writeJsonAtomic, mkdirPrivate, SWEEP_GRACE_MS, FILE_MODE, DIR_MODE, PROFILE_REGISTRY_FILE };

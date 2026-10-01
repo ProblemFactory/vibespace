@@ -143,4 +143,16 @@ function rowStateWords(row, rows) {
   return 'released';
 }
 
-module.exports = { rowStateWords, LABEL_MAX, TAB_BASE_PX, CJK_PX, LATIN_PX, DRIVER_PX, MORE_PX, CHIP_PX, shortLabel, estimateTabWidth, stripOrder, stripPriority, stripFold, capChip, stoppableRows };
+/**
+ * lane browser-resume C (§3.9, the owner's ruling 3): THE TAB ROW's fold — the SAME rule as the strip's (stripFold): the tab
+ * on show never folds (0), a tab the viewer can act on (the viewed agent's, his own) outlasts one it cannot (another
+ * conversation's, nobody's — 2), ties right to left; the row's end ("Close all tabs…") is always there (`endPx`).
+ * `rows` = src/browser-tabs.js tabRowModel's rows (targetId, title, owner, active). → { visible, folded } (target ids).
+ */
+function tabRowFold({ rows = [], widths = {}, avail = Infinity, endPx = 0, morePx = MORE_PX } = {}) {
+  const list = (rows || []).filter((r) => r && r.targetId).map((r) => ({ ref: r.targetId, label: r.title || '', state: r.owner === 'agent' || r.owner === 'you' ? 'running' : 'idle' }));
+  const shown = ((rows || []).find((r) => r && r.active) || {}).targetId || null;
+  return stripFold({ rows: list, widths, avail, shownRef: shown, chipPx: endPx, morePx });
+}
+
+module.exports = { rowStateWords, LABEL_MAX, TAB_BASE_PX, CJK_PX, LATIN_PX, DRIVER_PX, MORE_PX, CHIP_PX, shortLabel, estimateTabWidth, stripOrder, stripPriority, stripFold, capChip, stoppableRows, tabRowFold };

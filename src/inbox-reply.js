@@ -65,6 +65,11 @@ const CARD_ACTION_TYPES = Object.freeze(['helper-ask']);
 // about an ask on its own.
 const { askTransition, ASK_INITIAL } = require('./helper-ask.js');
 const cardReplyRefused = () => askTransition(ASK_INITIAL, 'reply').effects.includes('refuse');
+// lane peer-census (2026-09-29, the held LOW of the .197 integration): the quoted item is text an AGENT wrote (a
+// For-you item, its detail, its option chips) and the quote is prefixed `> ` line by line — a frame opener left
+// dangling at a line's end was completed by the next line's `>` (the line rule every other door already took).
+// Every quoted line and every chip goes through THE belt: bound → hidden characters folded → the frame rule per line.
+const { toAgentLines, toAgentText } = require('./peer-text.js');
 
 const pad = (n) => String(n).padStart(2, '0');
 function utcStamp(ms) {
@@ -83,7 +88,8 @@ function relAgo(ms, now) {
   return `${Math.round(h / 24)} d ago`;
 }
 const lf = (s) => String(s).replace(/\r\n?/g, '\n');
-const quote = (s) => lf(s).split('\n').map((l) => '> ' + l);
+const quote = (s) => toAgentLines(s).map((l) => '> ' + l);
+const chip = (s) => toAgentText(s, { kind: 'line', max: OPTION_MAX_CHARS * 4 });
 
 /** The user's reply text → `{ok:true, text}` (CRLF → LF, trimmed) or
  *  `{ok:false, code:'empty'|'too_long', why}`. */
@@ -130,7 +136,7 @@ function composeReply(item, replyText, { now = Date.now() } = {}) {
     lines.push(...quote(d.length > DETAIL_QUOTE_CAP ? d.slice(0, DETAIL_QUOTE_CAP) : d));
     if (d.length > DETAIL_QUOTE_CAP) lines.push(`> … (detail cut at ${DETAIL_QUOTE_CAP} of ${d.length} chars — \`vibespace-ask show ${it.id}\` prints the whole item)`);
   }
-  if (Array.isArray(it.options) && it.options.length) lines.push('> options: ' + it.options.join(' | '));
+  if (Array.isArray(it.options) && it.options.length) lines.push('> options: ' + it.options.map(chip).join(' | '));
   const body = typeof replyText === 'string' ? lf(replyText).trim() : '';
   return lines.join('\n') + '\n\n' + body;
 }

@@ -15,6 +15,16 @@ export function formatSize(b) { if(b<1024) return b+' B'; if(b<1048576) return (
 // id: singleton dedup — an existing overlay with the same id is removed first.
 // escapeToClose: focuses the overlay and closes on Escape (stopPropagation so
 // the global #dialog-overlay handler doesn't also fire).
+// lane dialog-keys (the owner's "ok", 2026-09-30): EVERY APP MODAL SAYS IT OPENED — createModalShell (below) and the static
+// #dialog-overlay (app._showDialog) dispatch MODAL_OPEN_EVENT on the document, synchronously, in the opening act's own task,
+// so a live view driving the agent's browser judges WHO opened it (src/lib/keyboard-yield.js onDialogOpen → PURE
+// dialogOpener / dialogVerdict): the user's own fresh act ⇒ the dialog takes Enter / Escape / typing; a dialog that opens by
+// itself ⇒ the keys stay the page's (the password guard). The event carries no evidence of its own — the judge reads the
+// browser's trusted press it saw itself — so a forged announcement can never hand a dialog the keys.
+export const MODAL_OPEN_EVENT = 'vs-modal-open';
+export function announceModal(overlay) {
+  try { document.dispatchEvent(new CustomEvent(MODAL_OPEN_EVENT, { detail: { overlay } })); } catch { /* a listener's failure is its own */ }
+}
 export function createModalShell({ id, title = '', dialogClass = '', bodyClass = '', minWidth = null, closeOnBackdrop = true, escapeToClose = false, onClose = null } = {}) {
   if (id) document.getElementById(id)?.remove();
   const overlay = document.createElement('div');
@@ -34,6 +44,7 @@ export function createModalShell({ id, title = '', dialogClass = '', bodyClass =
   dialog.append(header, body);
   overlay.appendChild(dialog);
   document.body.appendChild(overlay);
+  announceModal(overlay); // lane dialog-keys: in the opening act's own task, before the caller focuses anything in it
   const close = () => { overlay.remove(); onClose?.(); };
   closeBtn.onclick = close;
   if (closeOnBackdrop) overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(); });

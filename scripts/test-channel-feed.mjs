@@ -8,6 +8,10 @@
 //   ② THE PAGE VERDICT — in-window hits pass; ANY hit outside [from − 120 s, to + 120 s] ⇒ `time-range-ignored` (an
 //      edited old message is judged by its update); the `total` sanity; malformed hits dropped + counted; ONE declared
 //      unit (a seconds value under a ms declaration is malformed, never rescaled);
+//   ②b (lane lark-p2p, 2026-09-30) THE ISO FORM (Lark's `create_time` is ISO 8601 — the .197 `ms` declaration read all
+//      241 260 production hits malformed): a declared form read by a bounded reader, never Date.parse; THE SHAPE VERDICT
+//      (a run of pages ≥ 90 % unreadable parks by name — an unreadable page disables every other guard); the 7-day
+//      single-chat catch-up over a doc-faithful vendor; controls: the verdict that never parks, the Date.parse fallback;
 //   ③ THE FOLD — newest instant per key, the thread marks both the conversation and the thread (U6), dedup by message id
 //      across the overlap and inside a page, a stored record marks nothing, an unknown single chat is BORN, an unknown
 //      group is a discovery hint, an unlisted row is counted, the thread-owed bound;
@@ -110,8 +114,24 @@ function legVerdict(F, label = '') {
   const firstPage = F.pageVerdict({ hits: [hit({ vendorId: 'om_p1' }), hit({ vendorId: 'om_p2' })], pageToken: 'tk-2' }, win, { pageSize: 30, now: T0, sent: null, prevSig: p1.sig });
   const emptyTwice = F.pageVerdict({ hits: [], pageToken: null }, win, { pageSize: 30, now: T0, sent: 'tk-2', prevSig: '' });
   ok(p1.ok && !sameTok.ok && sameTok.park === 'contract' && sameTok.paging && !samePage.ok && samePage.park === 'contract' && next.ok && firstPage.ok && emptyTwice.ok, `${label}② (verify r1, U9) a continuation answering the token it was sent, or the previous page's hits again ⇒ the page token is ignored, parked by name; the next real page, a first page, an empty last page pass`, J([sameTok, samePage, next.ok, firstPage.ok, emptyTwice.ok]));
+  // verify r3: a loop of period TWO (A → B → A …, fresh tokens) repeats no PREVIOUS page — judged against every page of the
+  // window (`prevSig` a list) it is parked by name at its third page; against the previous page's signature alone it passed
+  // (measured: 161 pages in 77 minutes, then the count's ceiling under the wrong name)
+  const pA = F.pageVerdict({ hits: [hit({ vendorId: 'om_a1' }), hit({ vendorId: 'om_a2' })], pageToken: 'tk-A' }, win, { pageSize: 30, now: T0 });
+  const pB = F.pageVerdict({ hits: [hit({ vendorId: 'om_b1' })], pageToken: 'tk-B' }, win, { pageSize: 30, now: T0, sent: 'tk-A', prevSig: [pA.sig] });
+  const loopA = F.pageVerdict({ hits: [hit({ vendorId: 'om_a2' }), hit({ vendorId: 'om_a1' })], pageToken: 'tk-A' }, win, { pageSize: 30, now: T0, sent: 'tk-B', prevSig: [pA.sig, pB.sig] });
+  const loopLast = F.pageVerdict({ hits: [hit({ vendorId: 'om_a2' }), hit({ vendorId: 'om_a1' })], pageToken: 'tk-A' }, win, { pageSize: 30, now: T0, sent: 'tk-B', prevSig: pB.sig });
+  const loopFresh = F.pageVerdict({ hits: [hit({ vendorId: 'om_c1' })], pageToken: 'tk-C' }, win, { pageSize: 30, now: T0, sent: 'tk-B', prevSig: [pA.sig, pB.sig, 7, null] });
+  ok(pA.ok && pB.ok && !loopA.ok && loopA.park === 'contract' && loopA.paging && loopLast.ok && loopFresh.ok, `${label}② (verify r3) a period-two loop (A → B → A) is parked by name against the window's every page (a string is the previous page alone: it passed); a fresh page passes a list with junk in it`, J([loopA, loopLast.ok, loopFresh.ok]));
   const many = F.pageVerdict({ hits: Array.from({ length: 31 }, () => hit()) }, win, { pageSize: 30, now: T0 });
   ok(!many.ok && many.park === 'contract', `${label}② more hits than the page size ⇒ a contract violation (parked by name)`, J(many));
+  // lane lark-p2p verify r1: THE COUNT'S CEILING — the `total` rule applied to what was PAGED: page 151 of a 90 s window
+  // (150 × 30 + 1 = 4 501 hits > 90 × 50) is parked by name whatever the vendor claims (no total, total 0); page 150 passes
+  const ceilHit = F.pageVerdict({ hits: [hit()], total: null }, win, { pageSize: 30, now: T0, pages: 150 });
+  const ceilZero = F.pageVerdict({ hits: [hit()], total: 0 }, win, { pageSize: 30, now: T0, pages: 150 });
+  const ceilOk = F.pageVerdict({ hits: [hit()], total: null }, win, { pageSize: 30, now: T0, pages: 149 });
+  const ceilFirst = F.pageVerdict({ hits: Array.from({ length: 30 }, () => hit()), total: null }, win, { pageSize: 30, now: T0, pages: 0 });
+  ok(!ceilHit.ok && ceilHit.park === 'time-range-ignored' && ceilHit.paged === 4501 && !ceilZero.ok && ceilOk.ok && ceilFirst.ok, `${label}② (verify r1) THE COUNT'S CEILING: the 151st page of a 90 s window (4 501 hits paged > 90 × ${F.TOTAL_PER_SEC_MAX}) is parked by name with no \`total\` and with \`total: 0\` alike; the 150th passes; a first page never trips it`, J([ceilHit, ceilZero.park, ceilOk.ok, ceilFirst.ok]));
   const mal = F.pageVerdict({ hits: [hit(), hit({ convId: '' }), hit({ vendorId: 'x'.repeat(600) }), hit({ at: 'soon' }), hit({ convId: 'oc_<script>' }), hit({ threadKey: 'bad key!' })], malformed: 2 }, win, { pageSize: 30, now: T0 });
   ok(mal.ok && mal.hits.length === 1 && mal.malformed === 2 + 5, `${label}② malformed hits (no chat, a 600-char id, a word for a time, markup in an id, a bad thread key) are dropped + counted with the adapter's own count`, J(mal));
   // THE DECLARED UNIT
@@ -123,6 +143,101 @@ function legVerdict(F, label = '') {
   const r = { ms: ms.ok && ms.hit.at === T0 - 5e3 && ms.hit.isP2p === true, secUnderMs: !secUnderMs.ok && secUnderMs.why === 'time-out-of-range', sec: sec.ok && sec.hit.at === Math.floor((T0 - 5e3) / 1000) * 1000, future: !future.ok, undeclared: !undeclared.ok && undeclared.why === 'unit-undeclared' };
   ok(Object.values(r).every(Boolean), `${label}② ONE DECLARED UNIT: a ms value reads as ms; a SECONDS value under a ms declaration is MALFORMED (1970), never rescaled by its magnitude; a seconds declaration reads it; a day ahead of now and an undeclared unit are refused`, J(r));
   return r;
+}
+
+// ═══ ②b THE ISO FORM + THE SHAPE VERDICT (lane lark-p2p, 2026-09-30) ═══════════════════════════════════════════════
+// Lark's search answers `create_time` as ISO 8601 (`2026-03-21T16:15:30+08:00` — its doc and its production answer); the
+// .197 declaration `ms` read every hit malformed (241 260 of them) and every guard of the page judged READABLE hits only,
+// so the feed paged the vendor's whole history for ten hours, silently. The ISO form is a declared unit like the others
+// (never guessed); a run of pages ≥ 90 % unreadable PARKS by name with the fields.
+function legIso(F, label = '') {
+  const iso = (v, now = T0) => F.normalizeHit({ convId: 'oc_a', vendorId: 'om_1', createTime: v }, { unit: 'iso', now });
+  const r = {
+    offset: iso('2026-09-28T19:59:50+08:00').ok && iso('2026-09-28T19:59:50+08:00').hit.at === T0 - 10e3,
+    zulu: iso('2026-09-28T11:59:50Z').hit.at === T0 - 10e3,
+    noColon: iso('2026-09-28T19:59:50+0800').hit.at === T0 - 10e3,
+    frac: iso('2026-09-28T11:59:50.250Z').hit.at === T0 - 9750,
+    negative: iso('2026-09-28T06:59:50-05:00').hit.at === T0 - 10e3,
+    digitsUnderIso: !iso(String(T0 - 10e3)).ok && iso(String(T0 - 10e3)).why === 'no-time',
+    isoUnderMs: !F.normalizeHit({ convId: 'oc_a', vendorId: 'om_1', createTime: '2026-09-28T11:59:50Z' }, { unit: 'ms', now: T0 }).ok,
+    feb30: iso('2026-02-30T00:00:00Z').why === 'no-time',
+    spaced: iso('2026-09-28 11:59:50Z').why === 'no-time',
+    tooLong: iso(`2026-09-28T11:59:50Z${' '.repeat(80)}`).why === 'no-time',
+    future: iso('2026-09-30T12:00:00Z').why === 'time-out-of-range',
+    number: iso(T0).why === 'no-time',
+    update: F.normalizeHit({ convId: 'oc_a', vendorId: 'om_1', createTime: '2026-09-28T11:59:50Z', updateTime: '2026-09-28T11:59:55Z' }, { unit: 'iso', now: T0 }).hit.updatedAt === T0 - 5e3,
+  };
+  ok(Object.values(r).every(Boolean), `${label}②b THE ISO FORM (declared): an offset, Z, an offset without its colon, fractions, a west offset read to the exact ms; digits under the ISO declaration and ISO under the ms one are malformed (never read in a form nobody declared); Feb 30, a space for T, an over-long value, a day ahead, a number — refused; an ISO update_time read`, J(r));
+  ok(F.TIME_UNITS.includes('iso') && F.PARK_CODES.includes('shape'), `${label}②b the ISO form is a declared unit; \`shape\` is a park code`);
+  return r;
+}
+function legShape(F, label = '') {
+  const CT = [['meta_data.create_time']];
+  const full = F.shapeVerdict(null, { items: 30, malformed: 30, fields: CT });
+  const one = F.shapeVerdict(null, { items: 1, malformed: 1, fields: CT });
+  const four = F.shapeVerdict(one.run, { items: 4, malformed: 4, fields: [['meta_data.chat_id']] });
+  const healed = F.shapeVerdict(one.run, { items: 10, malformed: 2, fields: CT });
+  const ninety = F.shapeVerdict(null, { items: 10, malformed: 9, fields: CT });
+  const eighty = F.shapeVerdict(null, { items: 10, malformed: 8, fields: CT });
+  const empty = F.shapeVerdict(one.run, { items: 0, malformed: 0 });
+  const many = F.shapeVerdict(null, { items: 30, malformed: 30, fields: [['a'], ['b'], ['a'], ['c'], ['d'], ['bad name!'], 'x'] });
+  const r = {
+    full: full.park && J(full.fields) === J(CT),
+    oneIsNotAPark: !one.park && one.run.items === 1,
+    runReaches: four.park && four.run.items === 5 && J(four.fields) === J([['meta_data.create_time'], ['meta_data.chat_id']]),
+    readablePageEndsRun: !healed.park && healed.run === null,
+    ninety: ninety.park, eighty: !eighty.park && eighty.run === null,
+    emptyKeeps: !empty.park && empty.run && empty.run.items === 1,
+    bounded: J(many.fields) === J([['a'], ['b'], ['c']]),
+  };
+  ok(Object.values(r).every(Boolean), `${label}②b THE SHAPE VERDICT: a page of 30 unreadable parks with its field; one stray unreadable hit does not (a run of ≥ ${F.SHAPE_MIN_ITEMS} items does); a mostly readable page ends the run; 90 % parks, 80 % does not; an empty page keeps the run; the fields are the first ${F.SHAPE_FIELDS_MAX} distinct lists in the field alphabet`, J(r));
+  return r;
+}
+/** An all-unreadable vendor that pages for ever (the production 2026-09-29/30): how many pages the feed asks before it stops. */
+function unreadablePages(F, bound = 60) {
+  let run = null, pages = 0;
+  for (let i = 0; i < bound; i++) {
+    pages++;
+    const v = F.pageVerdict({ hits: [], malformed: 30, more: true }, { from: T0 - 90e3, to: T0 }, { pageSize: 30, now: T0 });
+    if (!v.ok) break;
+    const sv = F.shapeVerdict(run, { items: v.hits.length + v.malformed, malformed: v.malformed, fields: [['meta_data.create_time']] });
+    run = sv.run;
+    if (sv.park) break;
+  }
+  return pages;
+}
+/** A vendor that answers `has_more` for ever — a fresh token and 30 FRESH in-window ids every page, no `total` (lane
+ *  lark-p2p verify r1: the production's 8 043 pages, with the hits readable): how many pages one 90 s window asks. */
+function endlessPages(F, bound = 400) {
+  let pages = 0, seq = 0;
+  const win = { from: T0 - 90e3, to: T0 };
+  for (let i = 0; i < bound; i++) {
+    pages++;
+    const v = F.pageVerdict({ hits: Array.from({ length: 30 }, () => hit({ vendorId: `om_e${seq++}`, at: T0 - 1000 })), more: true, pageToken: `t${seq}`, total: null }, win, { pageSize: 30, now: T0, sent: i ? `t${seq - 30}` : null, pages: i });
+    if (!v.ok) break;
+  }
+  return pages;
+}
+/** THE 7-DAY SINGLE-CHAT CATCH-UP over a doc-faithful vendor: every single chat active in the last 7 days is born, one
+ *  whose last message is older is not (it appears with its next message), groups are never born. */
+function legCatchUp(F) {
+  const days = 7;
+  const from = T0 - days * 86400e3, to = T0 - 60e3;
+  const msgs = [];
+  for (let i = 0; i < 12; i++) msgs.push({ convId: `oc_dm_${i}`, vendorId: `om_c${i}`, at: T0 - (i + 0.5) * 12 * 3600e3, isP2p: true, fromId: `ou_p${i}` });   // spread over 6 days
+  msgs.push({ convId: 'oc_dm_old', vendorId: 'om_cold', at: T0 - 9 * 86400e3, isP2p: true, fromId: 'ou_old' });
+  msgs.push({ convId: 'oc_grp', vendorId: 'om_cg', at: T0 - 86400e3, isP2p: false, fromId: 'ou_g' });
+  const inWin = msgs.filter((m) => m.isP2p && m.at >= from && m.at <= to).sort((a, b) => b.at - a.at);
+  const births = new Map();
+  let pages = 0;
+  for (let off = 0; off < inWin.length; off += 5) {
+    pages++;
+    const v = F.pageVerdict({ hits: inWin.slice(off, off + 5).map((m) => hit(m)), more: off + 5 < inWin.length }, { from, to }, { pageSize: 5, now: T0 });
+    if (!v.ok) break;
+    for (const [k, b] of F.foldHits(v.hits, { stateOf: () => null }).births) births.set(k, b);
+  }
+  const bf = F.birthFacts({ at: T0 - 3 * 86400e3 }, { linkedAt: T0 - 30 * 86400e3, backlogUntil: T0, catchUp: true });
+  ok(births.size === 12 && !births.has('oc_dm_old') && !births.has('oc_grp') && pages === 3 && bf.readAt === T0 && bf.newsSince === T0, `②b THE 7-DAY CATCH-UP (p2p only): all 12 single chats active in the last ${days} days are BORN in ${pages} pages, the 9-day-old one is not, no group — and each is born READ (backlog, never news, never a wake)`, J({ n: births.size, pages, bf }));
 }
 
 // ═══ ③ THE FOLD ═════════════════════════════════════════════════════════════════════════════
@@ -270,7 +385,14 @@ function legMinute(F) {
 
 // ═══ RUN ═══════════════════════════════════════════════════════════════════════════════════
 console.log('channel-feed — the PURE arithmetic of the change feed');
-legWindow(F0); legLag(F0); legVerdict(F0); legFold(F0); legOwed(F0); legCensus(SRC, F0); legEngineCensus(); legMeasure(F0); legMinute(F0);
+legWindow(F0); legLag(F0); legVerdict(F0); legIso(F0); legShape(F0); legCatchUp(F0);
+{
+  const n = unreadablePages(F0);
+  ok(n === 1, `②b an all-unreadable vendor that pages for ever is PARKED after ${n} page (the production feed asked 8 043)`, n);
+  const e = endlessPages(F0);
+  ok(e === 151, `② (verify r1) a READABLE vendor that pages for ever (fresh ids, no total) is PARKED at page ${e} of a 90 s window — the count's ceiling (${90 * F0.TOTAL_PER_SEC_MAX} hits), never the feed's whole minute for ever`, e);
+}
+legFold(F0); legOwed(F0); legCensus(SRC, F0); legEngineCensus(); legMeasure(F0); legMinute(F0);
 ok(!/\brequire\(|\bimport\s|Date\.now\(|performance\.now|process\./.test(SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '').replace(/'use strict';/, '')), '⑤ the module imports nothing and reads no clock (every `now` is an argument)');
 
 // ═══ ⑧ PATCHED-COPY CONTROLS ════════════════════════════════════════════════════════════════
@@ -319,7 +441,80 @@ const patch = (from, to, tag) => { if (!SRC.includes(from)) throw new Error(`con
   try { r = legVerdict(F4, 'CONTROL(copy) '); } finally { QUIET = false; }
   ok(r && r.secUnderMs === false, 'CONTROL the unit guessed from the magnitude: a seconds value under a ms declaration is RESCALED by the copy — ② goes red');
 }
-for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 4, label: 'larkfeed: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
+{
+  // lane lark-p2p: the shape verdict that never parks — the all-unreadable vendor pages to the test's bound (60), the
+  // production's ten hours in miniature; ②b (the verdict table) goes red
+  const F7 = patch('return { run: r, park: r.items >= SHAPE_MIN_ITEMS, fields };', 'return { run: r, park: false, fields };', 'shape-never-parks');
+  const n = unreadablePages(F7);
+  let red = false;
+  QUIET = true;
+  try { red = !Object.values(legShape(F7, 'CONTROL(copy) ')).every(Boolean); } finally { QUIET = false; }
+  ok(n === 60 && red, `CONTROL the shape never parks: the all-unreadable vendor pages ${n} times (the bound) through the copy, and the verdict table goes red`, n);
+}
+{
+  // lane lark-p2p: the ISO form read by Date.parse — its legacy fallbacks read "2026-09-28 11:59:50Z" (a space for T), a
+  // form nobody declared; ②b goes red
+  const F8 = patch('  const m = ISO_RE.exec(v);\n  if (!m) return null;', '  const m = ISO_RE.exec(v);\n  if (!m) { const p = Date.parse(v); return Number.isFinite(p) ? p : null; }', 'iso-date-parse');
+  let red = false;
+  QUIET = true;
+  try { red = !Object.values(legIso(F8, 'CONTROL(copy) ')).every(Boolean); } finally { QUIET = false; }
+  ok(red, 'CONTROL the ISO form read by Date.parse: a copy that falls back to it reads a form nobody declared — ②b goes red');
+}
+{
+  // lane lark-p2p verify r1: the count's ceiling removed — the endless readable vendor pages to the walker's bound (400),
+  // the production's ten hours with readable hits; ② goes red
+  const F9 = patch("    if (paged > most) return { ok: false, park: 'time-range-ignored', why: `the window has run to", "    if (false) return { ok: false, park: 'time-range-ignored', why: `the window has run to", 'no-page-ceiling');
+  const e = endlessPages(F9);
+  const red = F9.pageVerdict({ hits: [hit()], total: null }, { from: T0 - 90e3, to: T0 }, { pageSize: 30, now: T0, pages: 150 }).ok === true;
+  ok(e === 400 && red, `CONTROL the count's ceiling removed: the endless readable vendor pages ${e} times (the bound) through the copy, and the 151st page passes — ② goes red`, e);
+}
+// ═══ ⑨ THE UNREADABLE RING (verify r2) ═══════════════════════════════════════════════════════════════════════════════
+// The card's "N search hits could not be read" is about NOW: the pages of the last UNREADABLE_RECENT_MS that held an
+// unreadable hit, appended per page, trimmed to the hour, bounded to UNREADABLE_RING_MAX; the count and the newest instant
+// read off it. Two stray items in one minute used to sit on the card as a cumulative count for ever.
+console.log('⑨ the unreadable ring (verify r2)');
+{
+  const H = F0.UNREADABLE_RECENT_MS;
+  let ring = F0.recentUnreadable([], T0, 2);
+  ring = F0.recentUnreadable(ring, T0 + 90e3, 2);                  // verify r3: a later MINUTE — its own entry
+  const c1 = F0.recentUnreadableCount(ring, T0 + 120e3);
+  const c2 = F0.recentUnreadableCount(ring, T0 + H);                 // the first entry is exactly an hour old: still inside; the second inside
+  const c3 = F0.recentUnreadableCount(ring, T0 + H + 1);             // …and the first has just fallen out
+  const c4 = F0.recentUnreadableCount(ring, T0 + 2 * H);
+  ok(H === 3600e3 && ring.length === 2 && c1.n === 4 && c1.at === T0 + 90e3 && c2.n === 4 && c3.n === 2 && c4.n === 0 && c4.at === null, 'the ring: two pages of two in two minutes ⇒ 4 in the hour with the newest instant; an entry counts for exactly an hour, then falls out; an empty hour is 0 / null', J({ c1, c2, c3, c4 }));
+  const trimmed = F0.recentUnreadable(ring, T0 + 2 * H, 0);
+  const zero = F0.recentUnreadable([], T0, 0);
+  ok(trimmed.length === 0 && zero.length === 0, 'appending nothing trims (an hour-old ring empties); a zero count adds no entry', J({ trimmed, zero }));
+  // verify r3: ONE ENTRY PER MINUTE (the newest instant, the minute's sum) — at the feed's 10 pages a minute the per-page ring
+  // filled its 200 entries in 20 minutes and the "last hour" said a third of the truth (5 200 for 15 600 dropped), as a count
+  let mins = F0.recentUnreadable([], T0 + 5e3, 26);
+  mins = F0.recentUnreadable(mins, T0 + 35e3, 26);
+  ok(mins.length === 1 && mins[0][0] === T0 + 35e3 && mins[0][1] === 52, 'two pages in one minute are ONE entry: the newest instant, the sum', J(mins));
+  let busy = [];
+  for (let i = 0; i < 600; i++) busy = F0.recentUnreadable(busy, T0 + i * 6000, 26);   // 10 pages a minute for an hour
+  const cb = F0.recentUnreadableCount(busy, T0 + 599 * 6000);
+  ok(busy.length <= 61 && busy.length < F0.UNREADABLE_RING_MAX && cb.n === 600 * 26, `600 pages of 26 in an hour: ${busy.length} entries (never near the ${F0.UNREADABLE_RING_MAX} bound), the count exact (${cb.n})`, J([busy.length, cb]));
+  const big = F0.recentUnreadable(Array.from({ length: 300 }, (_, i) => [T0 + i * 1000, 1]), T0 + 300e3, 1);   // a per-page ring read from disk (the r2 format)
+  ok(big.length === F0.UNREADABLE_RING_MAX && big[0][0] === T0 + 101e3 && F0.recentUnreadableCount(big, T0 + 300e3).n === 200, `the ring is bounded to ${F0.UNREADABLE_RING_MAX} entries (the oldest dropped)`, J([big.length, big[0]]));
+  const hostile = F0.recentUnreadable([['x', 1], [T0, 'y'], null, [T0 + 5e3, 3], [T0 + 9e9, 1]], T0 + 10e3, 1);
+  ok(hostile.length === 1 && hostile[0][1] === 4 && F0.recentUnreadableCount(hostile, T0 + 10e3).n === 4, 'a malformed or future entry is dropped, never counted (the good entry and the append share a minute: one entry)', J(hostile));
+  // verify r3 (the revert table): the COUNT's own future guard — a ring read from disk after the clock went back, never
+  // re-appended through recentUnreadable (the append's guard above never saw it), holds a future entry: never counted.
+  // CONTROL: the copy without the count's guard counts it.
+  const fromDisk = [[T0 + 9e9, 5], [T0 - 10e3, 1]];
+  const F12 = patch('if (a > t || t - a > UNREADABLE_RECENT_MS) continue;', 'if (t - a > UNREADABLE_RECENT_MS) continue;', 'count-future-counted');
+  ok(F0.recentUnreadableCount(fromDisk, T0).n === 1 && F0.recentUnreadableCount(fromDisk, T0).at === T0 - 10e3 && F12.recentUnreadableCount(fromDisk, T0).n === 6, 'a future entry in a ring read from disk is never counted (1, the newest instant the real one); CONTROL: the copy without the count\'s own guard counts it (6)', J([F0.recentUnreadableCount(fromDisk, T0), F12.recentUnreadableCount(fromDisk, T0)]));
+  // CONTROL: the copy whose ring never forgets keeps the hour-old entry counted
+  const F10 = patch('t - Number(e[0]) <= UNREADABLE_RECENT_MS && Number(e[0]) <= t)', 'true)', 'ring-never-forgets');
+  const c5 = F10.recentUnreadableCount(F10.recentUnreadable(F10.recentUnreadable([], T0, 2), T0 + 2 * H, 0), T0 + 2 * H);
+  ok(F0.recentUnreadableCount(F0.recentUnreadable(F0.recentUnreadable([], T0, 2), T0 + 2 * H, 0), T0 + 2 * H).n === 0 && c5.n === 0 && F10.recentUnreadable(F10.recentUnreadable([], T0, 2), T0 + 2 * H, 0).length === 1, 'CONTROL the ring that never forgets: the copy keeps a two-hour-old entry in the ring (the real module drops it) — the engine\'s hour leg (㉒ p2p-f, verify r2) would be red', J(c5));
+  // CONTROL (verify r3): the per-page copy — every page its own entry — fills the bound in an hour of busy pages and reads a floor
+  const F11 = patch("    if (last && Math.floor(last[0] / 60e3) === Math.floor(t / 60e3)) kept[kept.length - 1] = [t, last[1] + add];\n    else kept.push([t, add]);", '    kept.push([t, add]);', 'ring-per-page');
+  let busy0 = [];
+  for (let i = 0; i < 600; i++) busy0 = F11.recentUnreadable(busy0, T0 + i * 6000, 26);
+  ok(busy0.length === F11.UNREADABLE_RING_MAX && F11.recentUnreadableCount(busy0, T0 + 599 * 6000).n === 200 * 26, `CONTROL the per-page ring: 600 busy pages fill the ${F11.UNREADABLE_RING_MAX}-entry bound and the hour reads ${200 * 26} for ${600 * 26} dropped — the exactness leg would be red`, J(busy0.length));
+}
+for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 7, label: 'larkfeed: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
 
 console.log(`\n${failN ? '✗' : '✓'} test-channel-feed: ${passN} passed, ${failN} failed`);
 process.exit(failN ? 1 : 0);

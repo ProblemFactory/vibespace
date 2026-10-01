@@ -87,6 +87,13 @@ const exitAskHtml = (i, t) => (i && i.action && i.action.type === 'exit-run-ask'
     + (i.action.askId ? `<div class="ut-exit-answer"><button type="button" class="ut-act ut-action-exit ut-exit-allow" data-answer="allow">${escHtml(t('Allow'))}</button><button type="button" class="ut-act ut-action-exit ut-exit-deny" data-answer="deny">${escHtml(t('Deny'))}</button></div>` : '')
     + `<div class="ut-exit-note">${escHtml(t('Nothing runs until you answer. After 60 s it is refused.'))}</div>` : '');
 
+/** lane browser-propose (2026-09-30): the agent's PROPOSAL, answered where it appears — its words (the card's, line for
+ *  line: what Approve runs) ABOVE Approve / Reject, never folded (the exit-ask lesson: a folded detail below the button
+ *  read as the whole story). ONE primary (Approve), a quiet Reject; open items only. */
+const proposalAskHtml = (i, t, detail) => (i && i.action && i.action.type === 'browser-proposal'
+  ? `<div class="ut-proposal-plan">${escHtml(detail || '')}</div>`
+    + (i.action.id ? `<div class="ut-exit-answer ut-proposal-answer"><button type="button" class="ut-act ut-action-proposal ut-proposal-approve" data-answer="approve" title="${escHtml(t('Runs exactly what this card says'))}">${escHtml(t('Approve'))}</button><button type="button" class="ut-act ut-action-proposal ut-proposal-reject" data-answer="reject">${escHtml(t('Reject'))}</button></div>` : '') : '');
+
 /** The static parts of a row for `entry` + the signature patchRow compares.
  *  The LIVE half (enabled / tooltip of the reply controls) is NOT in here —
  *  applyLive owns it, so a turn flip never rebuilds a row. */
@@ -107,6 +114,8 @@ function partsOf(entry, ctx) {
   // Detail rides behind a collapsed expander (up to 2000 chars of agent context).
   // (an exit ask's detail IS its command — shown whole above its Allow / Deny, never again folded below them)
   const detailHtml = detail && !(i.action && i.action.type === 'exit-run-ask') ? `<details class="ut-detail-exp"><summary>${escHtml(t('detail'))}</summary><div class="ut-detail">${escHtml(detail)}</div></details>` : '';
+  // lane browser-propose: an open proposal's words are shown whole ABOVE its Approve (proposalAskHtml) — never folded again below
+  const detailFold = i && i.action && i.action.type === 'browser-proposal' && !resolved ? '' : detailHtml;
   // OPTION CHIPS (design-user-inbox-reply D3a): one click = a reply whose text
   // IS the label. Addressed by INDEX — the label never rides an attribute.
   const opts = !resolved && rs.show && Array.isArray(i.options) && i.options.length
@@ -125,7 +134,7 @@ function partsOf(entry, ctx) {
     meta = (notice ? `<span class="ut-sess">${escHtml(ctx.nameFor(i.sessionKey, [i]))}</span> · ` : '')
       + escHtml(agoText(i.createdAt, t)) + (exp ? ' · ' + escHtml(exp) : '');
   }
-  const body = `<div class="ut-text">${escHtml(words)}</div>${!resolved ? exitAskHtml(i, t) : ''}${detailHtml}${opts}<div class="ut-meta">${meta}</div>`;
+  const body = `<div class="ut-text">${escHtml(words)}</div>${!resolved ? exitAskHtml(i, t) + proposalAskHtml(i, t, detail) : ''}${detailFold}${opts}<div class="ut-meta">${meta}</div>`;
   // ⤢ = THE For-you window ON this item (design-user-inbox-reply §9: long text at full width, reply / done there)
   const view = `<button class="ut-act ut-view" title="${escHtml(t('Open in the For-you window'))}" aria-label="${escHtml(t('Open in the For-you window'))}">⤢</button>`;
   const actions = resolved

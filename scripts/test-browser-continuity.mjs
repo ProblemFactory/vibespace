@@ -212,6 +212,12 @@ console.log('\n② Terminate → Resume of one conversation keeps ONE browser ke
     await until(() => !!envOf(s1)?.AGENT_BROWSER_SESSION, 5000);
     const e1 = envOf(s1);
     ok(e1?.AGENT_BROWSER_SESSION === 'vs-' + k1, `and the spawned process really carries AGENT_BROWSER_SESSION=vs-${k1}`);
+    // lane browser-resume (§3.9): the config the process names gives its conversation's OWN kept directory — a login
+    // planted there must be there again after the product's Terminate → Resume
+    const keptDir1 = path.join(wt, 'data', 'browser-profiles', k1);
+    let cfg1 = null; try { cfg1 = JSON.parse(fs.readFileSync(e1?.AGENT_BROWSER_CONFIG || '', 'utf8')); } catch { }
+    ok(!!cfg1 && cfg1.profile === keptDir1 && fs.statSync(keptDir1).isDirectory(), `lane browser-resume: its generated config names its OWN kept directory data/browser-profiles/${k1} (${cfg1 && cfg1.profile})`);
+    try { fs.mkdirSync(path.join(keptDir1, 'Default'), { recursive: true }); fs.writeFileSync(path.join(keptDir1, 'Default', 'Cookies'), 'a login of this conversation'); } catch { }
 
     // Terminate — the product's own kill path, which UNLINKS the meta file.
     ws.send(JSON.stringify({ type: 'kill', sessionId: s1 }));
@@ -233,6 +239,9 @@ console.log('\n② Terminate → Resume of one conversation keeps ONE browser ke
       await until(() => !!envOf(s2)?.AGENT_BROWSER_SESSION, 5000);
       const e2 = envOf(s2);
       ok(e2?.AGENT_BROWSER_SESSION === 'vs-' + k1, `and session 2's process carries the SAME AGENT_BROWSER_SESSION=vs-${k1} (${e2?.AGENT_BROWSER_SESSION || 'none'}) — the browser identity survived the product's own Terminate → Resume`);
+      let cfg2 = null; try { cfg2 = JSON.parse(fs.readFileSync(e2?.AGENT_BROWSER_CONFIG || '', 'utf8')); } catch { }
+      let cookie = null; try { cookie = fs.readFileSync(path.join(keptDir1, 'Default', 'Cookies'), 'utf8'); } catch { }
+      ok(!!cfg2 && cfg2.profile === keptDir1 && cookie === 'a login of this conversation', `lane browser-resume: the resumed session's regenerated config names the SAME kept directory and the login planted there survived the Terminate (${cfg2 && cfg2.profile}, ${cookie === null ? 'gone' : 'kept'})`);
       // The durable store is the reason: it names the conversation after the
       // meta file is gone, and it names it ONCE (the second create re-recorded
       // the same key, not a new entry).

@@ -245,6 +245,42 @@ function isBrowserDaemon(pid) {
   return !!c && /agent-browser/.test(argv0Of(c));
 }
 /** `<dir>/SingletonLock` → `{host, pid}` (Chrome's `<hostname>-<pid>` symlink) or null. */
+/**
+ * THE ONE DIRECTORY IDENTITY (lane browser-resume verify F1). Two spellings name the same directory when their REAL
+ * paths agree — a symlink, a doubled slash, a `..`, a trailing slash all fold. Every "is this directory X's" question
+ * that GUARDS a deletion or a registration asks here, never a string compare: the adopt fence judged a link under
+ * ~/.agent-browser/ lexically (another conversation's kept logins registered as a profile) and the kept store compared
+ * `p.dir` by string (a `//`-spelled in-place adopt was invisible ⇒ its directory deleted).
+ *   `existingRealDir(d)` — the realpath of an EXISTING path, else null (adopt registers only what exists);
+ *   `dirIdentity(d)`     — the realpath; a path that does not exist (yet / any more) folds through its nearest existing
+ *                          ancestor's realpath (never a lexical guess over a symlinked parent); any other failure
+ *                          (EACCES, ELOOP, EIO) ⇒ null;
+ *   `sameRealDir(a, b)`  — true | false | null (unknown). Callers that guard a deletion treat null as "the same"
+ *                          (fail CLOSED: a login is never deleted on a guess).
+ */
+function existingRealDir(d) {
+  if (typeof d !== 'string' || !d.startsWith('/')) return null;
+  try { return fs.realpathSync.native(d); } catch { return null; }
+}
+function dirIdentity(d) {
+  if (typeof d !== 'string' || !d.startsWith('/')) return null;
+  try { return fs.realpathSync.native(d); } catch (e) { if (!e || (e.code !== 'ENOENT' && e.code !== 'ENOTDIR')) return null; }
+  let cur = path.resolve(d);
+  const rest = [];
+  for (let i = 0; i < 4096; i++) {
+    const up = path.dirname(cur);
+    if (up === cur) return null;
+    rest.unshift(path.basename(cur));
+    cur = up;
+    try { return path.join(fs.realpathSync.native(cur), ...rest); } catch (e) { if (!e || (e.code !== 'ENOENT' && e.code !== 'ENOTDIR')) return null; }
+  }
+  return null;
+}
+function sameRealDir(a, b) {
+  const ra = dirIdentity(a), rb = dirIdentity(b);
+  if (ra === null || rb === null) return null;
+  return ra === rb;
+}
 function readSingletonLock(dir) {
   if (!dir) return null;
   try { const t = fs.readlinkSync(path.join(String(dir), 'SingletonLock')); const m = /^(.*)-(\d+)$/.exec(t); return m ? { host: m[1], pid: Number(m[2]) } : null; } catch { return null; }
@@ -514,6 +550,8 @@ module.exports = { createBrowserFacts, binaryResolver, sanitizeProbeEnv, VERSION
   procCmdline, procEnvOf, procPpid, isBrowserDaemon, readSingletonLock, readDevToolsPort, lockHolderFacts, browserOfDaemon,
   // lane H verify r3: argv[0] of either cmdline form; does this machine read starttimes (LOW 3)
   argv0Of, startsReadable,
+  // lane browser-resume verify F1: the one directory identity (realpath) every registration / deletion guard asks
+  existingRealDir, dirIdentity, sameRealDir,
   // lane H verify r4: a process's ancestors (a wrapper between daemon and Chrome), every browser carrying a launch mark
   ancestorsOf, markedBrowsers,
   // lane H verify r5: the directory's launch stamp (did a browser come up on it during a launch)

@@ -11,6 +11,27 @@ function create({ app, rootDir, wss, WS_OPEN }) {
 // request only (never a background timer), cached 6h, best-effort: offline
 // instances just show the local version.
 const versionInfo = { fetchedAt: 0, latest: null, commit: null };
+// ONE reader of a file on the canonical repo's master (package.json for
+// /api/version, the user changelogs for /api/changelog-diff) → {ok, status,
+// text}; never throws. VIBESPACE_CHANGELOG_FIXTURE_DIR (TEST ONLY — a chrome
+// suite's scratch server) reads the same names from a local directory instead:
+// a gate never reaches the network, and a file missing there answers 404 like
+// an older canonical without it.
+const CANONICAL_RAW = 'https://raw.githubusercontent.com/ProblemFactory/vibespace/master/';
+async function canonicalFile(name, timeoutMs) {
+  const fixtureDir = process.env.VIBESPACE_CHANGELOG_FIXTURE_DIR;
+  if (fixtureDir) {
+    try { return { ok: true, status: 200, text: await fs.promises.readFile(path.join(fixtureDir, name), 'utf8') }; }
+    catch (e) { return { ok: false, status: e && e.code === 'ENOENT' ? 404 : 0, text: null }; }
+  }
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const r = await fetch(CANONICAL_RAW + name, { signal: ctl.signal });
+    return { ok: r.ok, status: r.status, text: r.ok ? await r.text() : null };
+  } catch { return { ok: false, status: 0, text: null }; }
+  finally { clearTimeout(t); }
+}
 // ── UI-driven self-update (2.111.21): the update runs as a DETACHED op with
 // its output in data/update.log; the client shows a progress dialog, keeps
 // polling across the restart (KillMode=process / the container supervisor
@@ -170,20 +191,20 @@ app.get('/api/version', async (req, res) => {
   const _verTtl = req.query.fresh ? 60 * 1000 : 15 * 60 * 1000;
   if (Date.now() - versionInfo.fetchedAt > _verTtl) {
     versionInfo.fetchedAt = Date.now(); // stamped even on failure — no hammering while offline
-    try {
-      const ctl = new AbortController();
-      const t = setTimeout(() => ctl.abort(), 5000);
-      const r = await fetch('https://raw.githubusercontent.com/ProblemFactory/vibespace/master/package.json', { signal: ctl.signal });
-      clearTimeout(t);
-      if (r.ok) versionInfo.latest = (await r.json()).version || null;
-    } catch {}
+    const r = await canonicalFile('package.json', 5000);
+    if (r.ok) { try { versionInfo.latest = JSON.parse(r.text).version || null; } catch {} }
   }
   res.json({ version: require(require('path').join(rootDir, 'package.json')).version, commit: versionInfo.commit || null, latest: versionInfo.latest });
 });
 
 // Changelog diff for the update-confirm dialog (user directive: clicking
 // Update shows every change between the running and latest versions first).
-// Canonical repo's CHANGELOG.md, lazily fetched + cached like /api/version.
+// The canonical repo's user changelog IN THE DEVICE'S LANGUAGE (2026-09-30:
+// CHANGELOG.md is en, CHANGELOG.zh.md / CHANGELOG.ja.md the same entries in
+// zh / ja — docs/changelog-style.md), lazily fetched + cached per language
+// like /api/version. An entry the language file lacks (an older canonical
+// without the file, or a version not translated yet) is served in English —
+// each entry says which language it is (`lang`).
 function versionNewerThan(a, b) {
   const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number);
   for (let i = 0; i < 3; i++) {
@@ -192,32 +213,47 @@ function versionNewerThan(a, b) {
   }
   return false;
 }
-app.get('/api/changelog-diff', async (req, res) => {
-  const cur = require(require('path').join(rootDir, 'package.json')).version;
-  if (Date.now() - (versionInfo.clFetchedAt || 0) > (req.query.fresh ? 60 * 1000 : 15 * 60 * 1000)) {
-    versionInfo.clFetchedAt = Date.now(); // stamped even on failure — offline-safe
-    try {
-      const ctl = new AbortController();
-      const t = setTimeout(() => ctl.abort(), 8000);
-      const r = await fetch('https://raw.githubusercontent.com/ProblemFactory/vibespace/master/CHANGELOG.md', { signal: ctl.signal });
-      clearTimeout(t);
-      if (r.ok) versionInfo.changelog = await r.text();
-    } catch {}
+const CHANGELOG_FILES = { en: 'CHANGELOG.md', zh: 'CHANGELOG.zh.md', ja: 'CHANGELOG.ja.md' };
+// lang → { text, fetchedAt }; text null = the canonical has no such file (404)
+// or it was never fetched. A network failure keeps the last text (offline-safe).
+const changelogCache = {};
+async function changelogText(lang, fresh) {
+  const c = changelogCache[lang] || (changelogCache[lang] = { text: null, fetchedAt: 0 });
+  if (Date.now() - c.fetchedAt > (fresh ? 60 * 1000 : 15 * 60 * 1000)) {
+    c.fetchedAt = Date.now(); // stamped even on failure — offline-safe
+    const r = await canonicalFile(CHANGELOG_FILES[lang], 8000);
+    if (r.ok) c.text = r.text;
+    else if (r.status === 404) c.text = null; // the canonical has no file in this language (yet)
   }
+  return c.text;
+}
+/** `## <version>` blocks of one changelog text, keyed by version. */
+function changelogEntries(text) {
   const all = [];
-  for (const block of String(versionInfo.changelog || '').split(/\n## /).slice(1)) {
+  for (const block of String(text || '').split(/\n## /).slice(1)) {
     const nl = block.indexOf('\n');
     const head = (nl < 0 ? block : block.slice(0, nl)).trim();
     const ver = (head.match(/^(\d+\.\d+\.\d+)/) || [])[1];
     if (!ver) continue;
     all.push({ version: ver, head, body: nl < 0 ? '' : block.slice(nl + 1).trim() });
   }
+  return all;
+}
+app.get('/api/changelog-diff', async (req, res) => {
+  const cur = require(require('path').join(rootDir, 'package.json')).version;
+  const lang = Object.prototype.hasOwnProperty.call(CHANGELOG_FILES, req.query.lang) ? req.query.lang : 'en';
+  const fresh = !!req.query.fresh;
+  const [enText, langText] = await Promise.all([changelogText('en', fresh), lang === 'en' ? null : changelogText(lang, fresh)]);
+  const inLang = new Map(changelogEntries(langText).map((e) => [e.version, e]));
+  // The English file is the canonical list of versions; each entry comes in
+  // the requested language when that file has it, else in English.
+  const all = changelogEntries(enText).map((e) => (inLang.has(e.version) ? { ...inLang.get(e.version), lang } : { ...e, lang: 'en' }));
   const entries = all.filter((e) => versionNewerThan(e.version, cur));
   // Already on the latest? Show the CURRENT version's own changelog entry
   // (matched, else the newest) instead of an empty dialog (user request).
   const atLatest = entries.length === 0;
   if (atLatest && all.length) entries.push(all.find((e) => e.version === cur) || all[0]);
-  res.json({ current: cur, latest: versionInfo.latest || null, entries, atLatest });
+  res.json({ current: cur, latest: versionInfo.latest || null, lang, entries, atLatest });
 });
 
 

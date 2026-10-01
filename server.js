@@ -422,7 +422,7 @@ const {
   maybeRepinLockedModel, maybeStopOnFallback, modelsMatch, onMemberReadingFresh, onMemberLoginSuccess, autoCliReady, lastMemberReadAt, projectionRereadFor, // …+ the new-member wake (2026-09-08) + its LOGIN half, handed to the account routes (2026-09-29: read there since 2026-09-08, never passed — dead until now)
   apiDerivedWindow, establishedWindows, repairIdentityAnchors, // B-855a: the two identity witnesses handed to setupUsage — the panel probe may only write the account it proves — + c2's STANDING identity repair (boot + POST /api/usage/repair-identity)
   poolChooserForModel, poolReadCache, probeUsageForAccountKey, readRawUsageCache, spendGuard, // the ONE raw usage-cache read (overage lives there — design §1.4) + THE SPEND CEILING (§4.4c): ONE authorizer in front of every turn nobody typed, per credential slot, persisted ⇒ src/server/spend-guard.js
-  noteSessionProduced, noteTurnEnd, noteWallSignal, beforeAutoResumeFire, fireIdentityFor, memberLoginState, probeUsageViaSession, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane, // …+ the SERVED-MODEL pair + its FALLBACK PREDICATE (r3-r2: the parse's target-less lock latch asks it, so a classifier substitute never becomes the lock target that defines placement) + the REROUTE THIS RECORD ANNOUNCES (r4: placed BEFORE the served capture at both feeds — the incident's first announcement rides the very record the substitute answered) + the per-turn LANE settle (2026-09-13 r3): both stdout feeds destructure them from the `engine:` literals below, and neither was exported here — the whole round-1 fix was a TypeError in production
+  noteSessionProduced, noteTurnEnd, noteWallSignal, noteStreamRecord, recordIsLate, beforeAutoResumeFire, fireIdentityFor, memberLoginState, probeUsageViaSession, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane, // …+ the SERVED-MODEL pair + its FALLBACK PREDICATE (r3-r2: the parse's target-less lock latch asks it, so a classifier substitute never becomes the lock target that defines placement) + the REROUTE THIS RECORD ANNOUNCES (r4: placed BEFORE the served capture at both feeds — the incident's first announcement rides the very record the substitute answered) + the per-turn LANE settle (2026-09-13 r3): both stdout feeds destructure them from the `engine:` literals below, and neither was exported here — the whole round-1 fix was a TypeError in production
   sessionModelFor, sweepUsageAnchors, usageCacheKeyFor, resetCreditOffer, resetCreditPreview, consumeResetCreditFor, claimColdRestarts, // the stored reset credits the auto-resume arm card offers (design-reset-credits §5) + the manual use's preview/POST (p2)
   usageIdentityAccountIds, usageIdentityGroups, usageIdentityGroupsCached,
   writeUsageCacheForKey, clearSealedOrders, pushSealedOrders,
@@ -503,14 +503,14 @@ const { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta,
   CLAUDE_STREAM_TYPES, _seenStreamTypes, activeSessions,
   engine: { _vsuPending, armWorkflowUsageWatcher, kickPoolEval, markLimitBanner, // EVERY name the registered consumers destructure from `engine` must be here — test-fable-cap-pool-storm §10 derives that set from their own `const {…} = engine;` and fails THIS literal (r3: two were missing and every claude chat record became raw output)
     maybePoolAutoSwitch, maybeRepinLockedModel, maybeStopOnFallback, notePoolAuthFailure,
-    modelsMatch, noteSessionProduced, noteTurnEnd, noteTurnStopped, noteWallSignal, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, usageEstimator, noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane },
+    modelsMatch, noteSessionProduced, noteTurnEnd, noteTurnStopped, noteWallSignal, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, usageEstimator, noteStreamRecord, recordIsLate, noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane },
   checkClaudeGoalStatus,
   broadcastToSession,
   broadcastActiveSessions: (...a) => broadcastActiveSessions(...a),
   noteModelSeen: (...a) => noteModelSeen(...a),
   noteHarnessModels: (...a) => noteHarnessModels(...a), // ACP harnesses learn their model list from the agent (S8)
   recordUsageAttribution: (...a) => recordUsageAttribution(...a),
-  daemonPtyShim: (...a) => daemonPtyShim(...a), agentEnv: (...a) => require('./src/ws-handler').agentEnv(...a), // the ONE local re-attach spawns with the sanitized env
+  daemonPtyShim: (...a) => daemonPtyShim(...a), agentEnv: (...a) => require('./src/ws-handler').agentEnv(...a), onLocalReattach: (...a) => bridgeWatch.afterReattach(...a), // the ONE local re-attach spawns with the sanitized env; every re-attach tells the dead-bridge watch (lane-dead-bridge)
   sbSeenFirst: (...a) => sbSeenFirst(...a),
   getDeviceMgr: () => deviceMgr,
   getHosts: () => { try { return hosts; } catch { return null; } },
@@ -998,6 +998,7 @@ const accounts = new AccountManager({
     for (const client of wss.clients) if (client.readyState === WS_OPEN) client.send(json);
     broadcastActiveSessions(); // account names on live session cards may change
   },
+  onSessionLinks: () => broadcastActiveSessions(), // lane badge-stale: a per-session pool link moved ⇒ auth.poolTarget in the payload (one frame per burst — accounts.js _notifyLinks)
 });
 // ── Usage history: a PERMANENT per-request token ledger mined from Claude's
 // JSONL transcripts (terminal + chat), for the Usage window. resolveAccount
@@ -1022,6 +1023,8 @@ const telemetry = new Telemetry({
 // Server-side fatals land in the same ledger (journald has them too, but the
 // diagnostics report should show one unified picture).
 process.on('uncaughtException', (e) => {
+  try { if (e && (e.code === 'EMFILE' || e.code === 'ENFILE')) console.error('[fd] ' + fdGauge.blame(e, e.path).words); } catch {} // lane-dead-bridge: NAME an EMFILE before dying — this process, the mount's FUSE daemon (12:03) or the machine
+  try { bridgeWatch.endAttachPtys(); } catch {} // …and end the attach clients like the clean shutdown does: a crash that left them alive left ORPHANS whose stuck socket kept the next server's attach dead for 3 h (lane-dead-bridge)
   try { telemetry.record({ kind: 'server-error', name: e.message || 'uncaughtException', stack: e.stack }); telemetry.flush(); } catch {}
   // Same flush belt as the clean shutdown (2.219.0 audit) — a crash used to
   // drop up to 2s of debounced writes (layouts, session-status, user-todos).
@@ -1139,6 +1142,7 @@ const otelIngest = require('./src/server/otel-ingest.js').create({
   listAccounts: () => accounts.list().accounts || [],
 });
 otelIngest.registerRoutes(app);
+const bridgeWatch = require('./src/server/bridge-watch.js').create({ activeSessions, BUFFERS_DIR, SOCKETS_DIR, reattachLocalPty, serverSetting, getOtelIngest: () => otelIngest, feedPeerCard, log: console }); // THE DEAD-BRIDGE WATCH (lane-dead-bridge): the attach-pty teardown shared by shutdown + crash, the orphan sweep, silence judged against the CLI's own witnesses (buffer file / OTel), the catch-up card
 // `usageHistory.setTruthLookup(otelIngest.…)` is DELIBERATELY UNWIRED since
 // 2026-09-07 — reasoning at the seam (usage-history.js) + otel-ingest's header.
 // Attribution log: dedup'd per (sid,acct) so a resume under a DIFFERENT account
@@ -1227,9 +1231,11 @@ require('./src/server/account-usage-routes.js').create({
 // The user's override of an agent-set status is injected as a system-reminder
 // into the NEXT chat message (see ws-handler chat-input) so the agent learns
 // the user disagreed with its self-assessment.
+const fdGauge = require('./src/server/fd-gauge.js').create({ serverNotice: (...a) => serverNotice(...a), log: console }); // THE FD GAUGE (lane-dead-bridge): the limit node REALLY runs at, the /proc/self/fd gauge (≥ 80 % ⇒ one notice an hour, by kind) and the NAME of an EMFILE (12:03: the workspace's FUSE daemon ran out) ⇒ src/server/fd-gauge.js
 const { SessionStatusManager } = require('./src/session-status');
 const sessionStatus = new SessionStatusManager({
   dataDir: path.join(__dirname, 'data'),
+  onWriteError: (e, file, o) => fdGauge.reportWriteError(e, file, o), // a failed debounced write retries + is named, never a crash (12:03:17)
   onChange: (statuses, extra) => { // `extra.cleared` = a history clear's ids (a statuses map equal to every client's copy must still reach it)
     const json = JSON.stringify({ type: 'session-status-updated', statuses, ...(extra && Array.isArray(extra.cleared) ? { cleared: extra.cleared } : {}) });
     wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
@@ -1245,6 +1251,7 @@ function sessionStatusKey(session, id) {
 const { UserTodoManager } = require('./src/user-todos');
 const userTodos = new UserTodoManager({
   dataDir: path.join(__dirname, 'data'),
+  onWriteError: (e, file, o) => fdGauge.reportWriteError(e, file, o), // session-status's twin (lane-dead-bridge)
   onChange: (todos) => {
     const json = JSON.stringify({ type: 'user-todos-updated', todos });
     wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
@@ -1354,7 +1361,7 @@ hosts.dialOnline = (deviceId) => agentdDials.has(deviceId);
 // ── Session-brain core (src/server/session-brain.js, decomposition #8) ──
 const sessionBrain = require('./src/server/session-brain.js').create({
   engine: { kickPoolEval, markLimitBanner, maybeStopOnFallback,
-    recordRateLimitEvent, resolveUsageKey, usageEstimator, noteServedModel, noteModelFallback, rerouteAnnouncedBy, notePoolAuthFailure }, // the device feed shares the parse's ONE served-model/fallback pair + the r4 rule that places the reroute BEFORE the served capture (2026-09-13); notePoolAuthFailure = the api_error 401/403 twin (design-unknown-records; forward-compat — the record is observed only in transcripts, which are NOT fed)
+    recordRateLimitEvent, resolveUsageKey, usageEstimator, noteServedModel, noteModelFallback, rerouteAnnouncedBy, notePoolAuthFailure, noteStreamRecord, recordIsLate }, // the device feed shares the parse's ONE served-model/fallback pair + the r4 rule that places the reroute BEFORE the served capture (2026-09-13); notePoolAuthFailure = the api_error 401/403 twin (design-unknown-records; forward-compat — the record is observed only in transcripts, which are NOT fed)
   applyTaskToolUpdate, updateSessionTodos,
   getUsageHistory: () => { try { return usageHistory; } catch { return null; } },
   // design-unknown-records (2026-09-21): the chrome-signal consumers' deps (notification toast,
@@ -1985,6 +1992,8 @@ server.listen(PORT, HOST, () => {
   setInterval(() => { try { const rep = repairIdentityAnchors('hourly'); if (rep && rep.changed) usage.reloadRateLimitCache?.(); } catch (e) { console.warn('[usage] hourly identity repair failed:', e.message); } }, 3600e3).unref();
   migrateLegacyHomeProjects();
   restoreSessions(); bootBrowserKeeper(); bootWindowLeases(); // agent browser P1 (§3.5) + P9b window leases (the same rule: after the live-session set is final): leases reconciled + browsers adopted only AFTER the live-key set is final (async, logged, never blocks the boot — mounts-plugins-wiring)
+  try { fdGauge.bootLine({ sessions: [...activeSessions.values()].filter((x) => x.socketPath).length }); fdGauge.start(); } catch (e) { console.warn('[fd] gauge failed to start:', e.message); } // lane-dead-bridge: the limit node REALLY runs at + the estimate; refuses nothing
+  setTimeout(() => { try { bridgeWatch.bootSweep(); bridgeWatch.start(); } catch (e) { console.warn('[bridge] boot sweep failed:', e.message); } }, 1500); // AFTER the restore's attaches connected: end a dead server's orphaned attach clients, then watch (lane-dead-bridge)
   // Plan C boot reconciliation: a per-session pool link whose session did not
   // survive the restart is a billing pointer nobody can see or move — unlink.
   try { const n = accounts.sweepSessionPoolLinks(new Set(activeSessions.keys())); if (n) console.log(`[pool] swept ${n} orphaned per-session link(s)`); } catch { }
@@ -2063,7 +2072,7 @@ function shutdown() {
 }
 function shutdownNow() {
   try { spendGuard.flush(); } catch {} // the unattended-spend ledger FIRST (a debounced-only write would hand the next boot a fresh hour — the whole point of persisting it)
-  for (const [, s] of activeSessions) { try { if (s.pty) s.pty.kill(); } catch {} }
+  bridgeWatch.endAttachPtys(); // THE teardown of every attach pty — shared with the crash path (lane-dead-bridge)
   // SyncStores + layouts persist on a debounce — flush so changes made within
   // the last couple seconds aren't lost across a restart
   for (const store of Object.values(syncStores)) { try { store.flush(); } catch {} }

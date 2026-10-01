@@ -175,6 +175,9 @@ export class CustomizeMode {
 
     // Re-render chrome with hidden items forced visible (cz-off dimmed)
     this.app._applyChromeSettings?.();
+    // lane toolbar-fold: the toolbar's fold is SUSPENDED while editing — every element full and shown (the bar may take
+    // two rows, style.css) so each one can be seen, clicked and dragged; Done re-folds
+    this.app._toolbarFold?.schedule();
 
     // Item outlines: click toggles visibility, drag moves between/within zones
     for (const meta of CHROME_ELEMENTS) {
@@ -231,6 +234,7 @@ export class CustomizeMode {
     if (this._sidebarWasOpen === false && this.app.sidebar?.isOpen) this.app.sidebar.toggle();
     // Re-render chrome normally (hidden items go back to display:none)
     this.app._applyChromeSettings?.();
+    this.app._toolbarFold?.schedule(); // lane toolbar-fold: fold again over the new arrangement
   }
 
   // Wire a spring for editing: outlined, click = open the config popover
@@ -683,7 +687,11 @@ export class CustomizeMode {
       // toolbar targets: chip below the bar; taskbar targets: above (flipped
       // when the taskbar is docked top)
       const below = inTaskbar ? taskbarTop : true;
-      chip.style.top = ((below ? r.bottom + 6 : r.top - ch * uiScale() - 6) / uiScale()) + 'px';
+      // a toolbar target's chip sits below the WHOLE toolbar: while editing the bar may wrap (lane toolbar-fold — the
+      // fold is suspended), and a chip under the center zone's own row landed over the buttons wrapped beneath it
+      const bar = !inTaskbar ? el.closest('#toolbar') : null;
+      const bottom = bar ? Math.max(r.bottom, bar.getBoundingClientRect().bottom) : r.bottom;
+      chip.style.top = ((below ? bottom + 6 : r.top - ch * uiScale() - 6) / uiScale()) + 'px';
       // taskbar-items spans most of the bar — centering its chip would collide
       // with the (centered) taskbar pill, so anchor it at the strip's left end
       const chipW = chip.offsetWidth * uiScale();

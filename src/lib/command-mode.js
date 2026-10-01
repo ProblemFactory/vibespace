@@ -46,7 +46,7 @@ export function registerCommandModeCommands() {
   registerCommand({ id: 'activeWindow.snapRight', title: 'Snap window right', run: snap('right') });
   registerCommand({ id: 'activeWindow.snapTop', title: 'Snap window top', run: snap('top') });
   registerCommand({ id: 'activeWindow.snapBottom', title: 'Snap window bottom', run: snap('bottom') });
-  registerCommand({ id: 'activeWindow.toggleMaximize', title: 'Toggle maximize', run: (c) => { const wm = c.app.wm; if (activeWin(c.app)) wm.toggleMaximize(wm.activeWindowId); } });
+  registerCommand({ id: 'activeWindow.toggleMaximize', title: 'Toggle maximize', run: (c) => { const wm = c.app.wm; if (activeWin(c.app)) { wm.witnessGeometry?.(wm.activeWindowId); wm.toggleMaximize(wm.activeWindowId); } } }); // the user's act: witnessed (verify r4 ③; snapToHalf stamps its own)
   registerCommand({ id: 'activeWindow.close', title: 'Close window', run: (c) => { const wm = c.app.wm; if (activeWin(c.app)) wm.requestClose(wm.activeWindowId); } });
   registerCommand({
     id: 'activeWindow.cycle', title: 'Cycle windows',
@@ -62,7 +62,7 @@ export function registerCommandModeCommands() {
         const curIdx = cycleIds.indexOf(wm.activeWindowId);
         const nextId = cycleIds[(curIdx + 1) % cycleIds.length];
         const nextWin = wm.windows.get(nextId);
-        if (nextWin && nextWin.isMinimized) wm.restore(nextId);
+        if (nextWin && nextWin.isMinimized) { wm.witnessGeometry?.(nextId); wm.restore(nextId); } // the user's act: witnessed (verify r4 ③)
         else wm.focusWindow(nextId);
         const session = app.sessions.get(nextId);
         if (session) session.focus();

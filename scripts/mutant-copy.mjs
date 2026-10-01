@@ -26,7 +26,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { scratch } from './scratch.mjs';
+import { scratch, stampScratchRun } from './scratch.mjs';
 import { gitEnvFrom } from './git-env.mjs';
 
 const req = createRequire(import.meta.url);
@@ -80,6 +80,7 @@ function removeOnExit(dir) {
 export function mutantCopies(name, repo) {
   const dir = scratch(name + '-mut');
   fs.mkdirSync(dir, { recursive: true });
+  stampScratchRun(dir); // owned by this process (B-1d08): a copy's children are this run's, never another sweep's litter
   removeOnExit(dir);
   const files = [];
   let seq = 0;

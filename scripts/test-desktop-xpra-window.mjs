@@ -1531,12 +1531,19 @@ try {
         await sleep(800);
         const recMid = await A.p.evalJs(`fetch('/api/desktop/apps/${r4.id}').then((r) => r.json())`);
         check('§10 (4): a BLOCKED pane\'s ✕ (verdict not-active) closes its window without asking the app — the app keeps running', !(await has(B.p, r4.id)) && recMid.state === 'ready' && D.pidAlive(r4.pids.app), { state: recMid.state });
-        if (!(await has(A.p, r4.id))) await A.p.evalJs(`app.openDesktopApp(${JSON.stringify(r4.id)}); true`); // the layout is shared: B's close took A's copy too — open it again for (5)
+        // the layout is shared: B's close takes A's copy too — WAIT for it (2.369.199 integration: B's save now leaves after the
+        // act holds of lanes desktop-move / stage-blank, ~1.6 s, past the 0.8 s this leg used to look at; the copy then vanished
+        // AFTER the re-open check and the replay leg below met no window at all), then open it again for (5) as the USER's act
+        // (a real key first: a scripted open with no input since the apply is no save of the user's — §6b guard 1)
+        await until(async () => !(await has(A.p, r4.id)), 8000, 100);
+        await A.p.cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16, modifiers: 8 });
+        await A.p.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16 });
+        if (!(await has(A.p, r4.id))) await A.p.evalJs(`app.openDesktopApp(${JSON.stringify(r4.id)}); true`);
         await until(() => has(A.p, r4.id), 5000, 100);
         // (5) the replay of a DEAD record opens NO window: the window is in the saved layout, NO client is connected when the app
         // ends (so nobody closes it), and a fresh page's layout restore meets `exited` at its first GET — never painted
-        await sleep(2600); // the layout autosave (2 s debounce) holds A's window
-        const saved = await A.p.evalJs(`fetch('/api/layouts').then((r) => r.json()).then((l) => JSON.stringify(l).includes(${JSON.stringify(r4.id)}))`);
+        // the layout autosave holds A's window — waited on the stored layout itself (the debounce + a gate's deferral), never a nap
+        const saved = !!(await until(() => A.p.evalJs(`fetch('/api/layouts').then((r) => r.json()).then((l) => JSON.stringify(l).includes(${JSON.stringify(r4.id)}))`), 8000, 250));
         await dropPage(A); await dropPage(B);
         await sleep(500);
         const st = await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/apps/${r4.id}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();

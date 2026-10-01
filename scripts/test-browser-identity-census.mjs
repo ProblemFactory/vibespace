@@ -222,6 +222,17 @@ const AGENT_ROUTES = {
   // conversation whose browser it is (routes/browser.js dialogTargetFor); no record in either answer
   'GET /api/agent/browser/dialog': null,
   'POST /api/agent/browser/dialog': null,
+  // lane site-reset (2026-09-30): the ways out (a tab of THIS conversation only — dialogTargetFor + ownsTab) and one site's
+  // stored login cleared in its own browser / proposed on a shared one; no record in either answer
+  'POST /api/agent/browser/direct': null,
+  'POST /api/agent/browser/site-reset': null,
+  // lane browser-resume B (§3.9): `vibespace-browser resume` — THIS conversation's own browser only (its key from the
+  // token; a helper's handle / a named profile refused by name), its own kept tabs' urls + titles; no record in the answer
+  'POST /api/agent/browser/resume': null,
+  // lane browser-resume C (§3.9, ruling 3): the agent's own `tab` verbs on a shared profile — judged from the TOKEN's key
+  // (never a key the body names); the answer = PURE agentTabView (its own tabs + a count — test-browser-tabs ② walks a
+  // browser holding another conversation's tab and the user's own tab)
+  'POST /api/agent/browser/tab': 'k.agentTabAct({ browserKey: f.browserKey',
 };
 function judgeAgentRoutes(src) {
   const clean = stripComments(src);
@@ -436,7 +447,15 @@ const WALK = (eph, helper) => [
   ['POST', '/api/agent/browser/site-hint', { site: 'blocked.example', tier: 2, why: 'x' }],
   ['GET', '/api/agent/browser/dialog?profile=p-secret&wait=0'], ['GET', '/api/agent/browser/dialog?profile=p-all&wait=0'], ['GET', `/api/agent/browser/dialog?profile=${eph}&wait=0`],
   ['POST', '/api/agent/browser/dialog', { profile: 'p-secret', action: 'status' }], ['POST', '/api/agent/browser/dialog', { profile: eph, action: 'dismiss' }],
+  // lane site-reset: the ways out (direct, through the watch) and one site's stored login cleared / proposed
+  ['POST', '/api/agent/browser/direct', { profile: 'p-secret', action: 'stop' }], ['POST', '/api/agent/browser/direct', { profile: eph, action: 'stop' }], ['POST', '/api/agent/browser/direct', { profile: 'p-all', action: 'close' }], ['POST', '/api/agent/browser/direct', { profile: eph, action: 'screenshot' }],
+  ['POST', '/api/agent/browser/site-reset', { profile: 'p-secret', host: 'x' }], ['POST', '/api/agent/browser/site-reset', { profile: 'p-all', host: 'x', explicit: true }], ['POST', '/api/agent/browser/site-reset', { profile: eph, host: 'x', explicit: true }],
   ['GET', '/api/agent/browser/status'], ['GET', '/api/agent/browser/profiles'],
+  // lane browser-resume B: the agent's own resume (its own browser; a helper's handle and a named profile refused by name)
+  ['POST', '/api/agent/browser/resume', {}], ['POST', '/api/agent/browser/resume', { handle: helper }], ['POST', '/api/agent/browser/resume', { handle: 'p-secret' }],
+  // lane browser-resume C: the agent's own tab verbs (a shared profile, a helper's handle, its own browser, A's key named in the body)
+  ['POST', '/api/agent/browser/tab', { handle: 'p-all', argv: ['tab', 'list', '--json'] }], ['POST', '/api/agent/browser/tab', { handle: 'p-all', argv: ['tab', 'close', 't1'] }],
+  ['POST', '/api/agent/browser/tab', { handle: helper, argv: ['tab', 'list'] }], ['POST', '/api/agent/browser/tab', { argv: ['tab'] }], ['POST', '/api/agent/browser/tab', { handle: 'p-secret', argv: ['tab', 'new', 'https://x.example/'], browserKey: A }],
 ];
 async function walkAs(jj, s, { eph = aEph && aEph.profileId, helper = helperKey } = {}) {
   const leaks = [], exceptions = [], routes = new Set();

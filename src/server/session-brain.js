@@ -16,7 +16,8 @@ function create({ engine, applyTaskToolUpdate, updateSessionTodos, getUsageHisto
   getSessionMetaStore = () => null, getSessionStatus = () => null, sessionStatusKey = null }) {
   const { kickPoolEval, markLimitBanner, maybeStopOnFallback,
     recordRateLimitEvent, resolveUsageKey, usageEstimator,
-    noteServedModel, noteModelFallback, rerouteAnnouncedBy, notePoolAuthFailure } = engine;
+    noteServedModel, noteModelFallback, rerouteAnnouncedBy, notePoolAuthFailure,
+    noteStreamRecord, recordIsLate } = engine; // + the late-record rule (lane-hot-switch) — called through `?.`: the dark-parity harness passes neither
   const usageHistory = mk(getUsageHistory);
   const metaStore = mk(getSessionMetaStore);
   const sessionStatus = mk(getSessionStatus);
@@ -161,6 +162,10 @@ function sbSeenFirst(session, rec) {
 // parse block is the drift the CS rules ban.
 function claudeSideEffects(session, sid, msg) {
   try {
+    // the stream clock sees every record of THIS feed too (lane-hot-switch):
+    // the device stream fills the parse's gaps, and a gap is exactly where a
+    // stalled bridge's backlog comes from
+    try { noteStreamRecord?.(session, msg); } catch { }
     if (msg.type === 'assistant' && msg.message?.model && msg.message.model !== '<synthetic>' && !msg.parent_tool_use_id && !msg.isSidechain) {
       // THE FACT BEFORE ITS READERS, at BOTH feeds (2026-09-13 r4): the reroute
       // this record announces is stamped before the served model is read, so
@@ -174,7 +179,7 @@ function claudeSideEffects(session, sid, msg) {
       if (announced) noteModelFallback(session, announced.from, announced.to);
       noteServedModel(session, msg.message.model); // the engine's granular consumer — same fallback rule as the parse (2026-09-13)
     }
-    if (msg.type === 'assistant' && msg.message?.usage && (msg.requestId || msg.message?.id) && !(session.host && !session._accountId)) {
+    if (msg.type === 'assistant' && msg.message?.usage && (msg.requestId || msg.message?.id) && !(session.host && !session._accountId) && !recordIsLate?.(session, msg)) {
       try {
         const u = msg.message.usage; const cc = u.cache_creation || {};
         const acctKey = resolveUsageKey(session);
@@ -191,7 +196,7 @@ function claudeSideEffects(session, sid, msg) {
       for (const b of msg.message.content) {
         if (b?.type === 'text' && typeof b.text === 'string' && /You've (?:reached|hit) your .{0,40} limit/.test(b.text)) {
           global.__vsEvent?.('cli-usage-limit');
-          markLimitBanner(session, b.text);
+          markLimitBanner(session, b.text, msg);
         } else if (b?.type === 'fallback') {
           global.__vsEvent?.('cli-model-fallback', `${b.from?.model || '?'}->${b.to?.model || '?'}`);
           if (!msg.parent_tool_use_id && !msg.isSidechain) {

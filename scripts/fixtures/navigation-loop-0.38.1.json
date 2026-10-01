@@ -1,0 +1,758 @@
+{
+ "measured": {
+  "by": "scripts/measure-navigation-loop.mjs",
+  "date": "2026-09-30",
+  "version": "agent-browser 0.38.1 (its Chrome, a headless keeper profile)",
+  "note": "main-frame events of ONE tab as the dialog watch's socket receives them; `type` = the reason of a frameRequestedNavigation / the navigationType of a frameStartedNavigating; <P> = the fixture server's port; the first event of each shape is the agent's own `open` (browser-initiated: no request event)"
+ },
+ "shapes": {
+  "pendingLogin300ms": [
+   {
+    "at": 3,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/pd/login",
+    "type": "differentDocument"
+   },
+   {
+    "at": 309,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/pd/login"
+   },
+   {
+    "at": 315,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/pd/app",
+    "type": "scriptInitiated"
+   },
+   {
+    "at": 316,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/pd/app",
+    "type": "differentDocument"
+   },
+   {
+    "at": 621,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/pd/app"
+   },
+   {
+    "at": 625,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/pd/login?next=%2Fpd%2Fapp&state=hr1gjosjxf#s",
+    "type": "scriptInitiated"
+   },
+   {
+    "at": 626,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/pd/login?next=%2Fpd%2Fapp&state=hr1gjosjxf#s",
+    "type": "differentDocument"
+   },
+   {
+    "at": 930,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/pd/login?next=%2Fpd%2Fapp&state=hr1gjosjxf"
+   },
+   {
+    "at": 934,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/pd/app",
+    "type": "scriptInitiated"
+   },
+   {
+    "at": 935,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/pd/app",
+    "type": "differentDocument"
+   },
+   {
+    "at": 1240,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/pd/app"
+   },
+   {
+    "at": 1243,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/pd/login?next=%2Fpd%2Fapp&state=a1e4orajggp#s",
+    "type": "scriptInitiated"
+   },
+   {
+    "at": 1244,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/pd/login?next=%2Fpd%2Fapp&state=a1e4orajggp#s",
+    "type": "differentDocument"
+   },
+   {
+    "at": 1549,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/pd/login?next=%2Fpd%2Fapp&state=a1e4orajggp"
+   },
+   {
+    "at": 1554,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/pd/app",
+    "type": "scriptInitiated"
+   },
+   {
+    "at": 1555,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/pd/app",
+    "type": "differentDocument"
+   },
+   {
+    "at": 1860,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/pd/app"
+   },
+   {
+    "at": 1863,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/pd/login?next=%2Fpd%2Fapp&state=nod44xfebb#s",
+    "type": "scriptInitiated"
+   },
+   {
+    "at": 1864,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/pd/login?next=%2Fpd%2Fapp&state=nod44xfebb#s",
+    "type": "differentDocument"
+   },
+   {
+    "at": 2169,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/pd/login?next=%2Fpd%2Fapp&state=nod44xfebb"
+   },
+   {
+    "at": 2173,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/pd/app",
+    "type": "scriptInitiated"
+   },
+   {
+    "at": 2174,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/pd/app",
+    "type": "differentDocument"
+   },
+   {
+    "at": 2479,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/pd/app"
+   },
+   {
+    "at": 2484,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/pd/login?next=%2Fpd%2Fapp&state=8pikk57c75q#s",
+    "type": "scriptInitiated"
+   },
+   {
+    "at": 2486,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/pd/login?next=%2Fpd%2Fapp&state=8pikk57c75q#s",
+    "type": "differentDocument"
+   },
+   {
+    "at": 2793,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/pd/login?next=%2Fpd%2Fapp&state=8pikk57c75q"
+   },
+   {
+    "at": 2797,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/pd/app",
+    "type": "scriptInitiated"
+   },
+   {
+    "at": 2798,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/pd/app",
+    "type": "differentDocument"
+   },
+   {
+    "at": 3103,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/pd/app"
+   },
+   {
+    "at": 3108,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/pd/login?next=%2Fpd%2Fapp&state=776lyjz64yv#s",
+    "type": "scriptInitiated"
+   },
+   {
+    "at": 3110,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/pd/login?next=%2Fpd%2Fapp&state=776lyjz64yv#s",
+    "type": "differentDocument"
+   },
+   {
+    "at": 3413,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/pd/login?next=%2Fpd%2Fapp&state=776lyjz64yv"
+   },
+   {
+    "at": 3417,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/pd/app",
+    "type": "scriptInitiated"
+   },
+   {
+    "at": 3418,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/pd/app",
+    "type": "differentDocument"
+   },
+   {
+    "at": 3722,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/pd/app"
+   },
+   {
+    "at": 3726,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/pd/login?next=%2Fpd%2Fapp&state=xgymkjldxbi#s",
+    "type": "scriptInitiated"
+   },
+   {
+    "at": 3727,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/pd/login?next=%2Fpd%2Fapp&state=xgymkjldxbi#s",
+    "type": "differentDocument"
+   }
+  ],
+  "slowReload1500ms": [
+   {
+    "at": 3,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/sreload",
+    "type": "differentDocument"
+   },
+   {
+    "at": 1508,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/sreload"
+   },
+   {
+    "at": 1512,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/sreload",
+    "type": "reload"
+   },
+   {
+    "at": 1513,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/sreload",
+    "type": "reload"
+   },
+   {
+    "at": 3018,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/sreload"
+   },
+   {
+    "at": 3021,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/sreload",
+    "type": "reload"
+   },
+   {
+    "at": 3023,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/sreload",
+    "type": "reload"
+   },
+   {
+    "at": 4527,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/sreload"
+   },
+   {
+    "at": 4530,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/sreload",
+    "type": "reload"
+   },
+   {
+    "at": 4531,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/sreload",
+    "type": "reload"
+   },
+   {
+    "at": 6036,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/sreload"
+   },
+   {
+    "at": 6041,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/sreload",
+    "type": "reload"
+   },
+   {
+    "at": 6042,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/sreload",
+    "type": "reload"
+   },
+   {
+    "at": 7547,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/sreload"
+   },
+   {
+    "at": 7550,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/sreload",
+    "type": "reload"
+   },
+   {
+    "at": 7551,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/sreload",
+    "type": "reload"
+   },
+   {
+    "at": 9057,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/sreload"
+   },
+   {
+    "at": 9060,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/sreload",
+    "type": "reload"
+   },
+   {
+    "at": 9061,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/sreload",
+    "type": "reload"
+   },
+   {
+    "at": 10568,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/sreload"
+   },
+   {
+    "at": 10572,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/sreload",
+    "type": "reload"
+   },
+   {
+    "at": 10573,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/sreload",
+    "type": "reload"
+   },
+   {
+    "at": 12079,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/sreload"
+   },
+   {
+    "at": 12082,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/sreload",
+    "type": "reload"
+   },
+   {
+    "at": 12083,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/sreload",
+    "type": "reload"
+   },
+   {
+    "at": 13589,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/sreload"
+   },
+   {
+    "at": 13594,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/sreload",
+    "type": "reload"
+   },
+   {
+    "at": 13595,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/sreload",
+    "type": "reload"
+   },
+   {
+    "at": 15101,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/sreload"
+   },
+   {
+    "at": 15104,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/sreload",
+    "type": "reload"
+   },
+   {
+    "at": 15106,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/sreload",
+    "type": "reload"
+   },
+   {
+    "at": 16612,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/sreload"
+   },
+   {
+    "at": 16615,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/sreload",
+    "type": "reload"
+   },
+   {
+    "at": 16617,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/sreload",
+    "type": "reload"
+   },
+   {
+    "at": 18122,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/sreload"
+   },
+   {
+    "at": 18126,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/sreload",
+    "type": "reload"
+   },
+   {
+    "at": 18127,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/sreload",
+    "type": "reload"
+   }
+  ],
+  "metaRefresh0": [
+   {
+    "at": 4,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/two/a",
+    "type": "differentDocument"
+   },
+   {
+    "at": 11,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/two/a"
+   },
+   {
+    "at": 16,
+    "method": "frameStoppedLoading"
+   },
+   {
+    "at": 16,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/two/b",
+    "type": "metaTagRefresh"
+   },
+   {
+    "at": 18,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/two/b",
+    "type": "differentDocument"
+   },
+   {
+    "at": 22,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/two/b"
+   },
+   {
+    "at": 27,
+    "method": "frameStoppedLoading"
+   },
+   {
+    "at": 27,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/two/a",
+    "type": "metaTagRefresh"
+   },
+   {
+    "at": 28,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/two/a",
+    "type": "differentDocument"
+   },
+   {
+    "at": 33,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/two/a"
+   },
+   {
+    "at": 37,
+    "method": "frameStoppedLoading"
+   },
+   {
+    "at": 38,
+    "method": "frameStoppedLoading"
+   },
+   {
+    "at": 38,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/two/b",
+    "type": "metaTagRefresh"
+   },
+   {
+    "at": 40,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/two/b",
+    "type": "differentDocument"
+   },
+   {
+    "at": 45,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/two/b"
+   },
+   {
+    "at": 49,
+    "method": "frameStoppedLoading"
+   },
+   {
+    "at": 49,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/two/a",
+    "type": "metaTagRefresh"
+   },
+   {
+    "at": 51,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/two/a",
+    "type": "differentDocument"
+   },
+   {
+    "at": 56,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/two/a"
+   },
+   {
+    "at": 60,
+    "method": "frameStoppedLoading"
+   },
+   {
+    "at": 60,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/two/b",
+    "type": "metaTagRefresh"
+   },
+   {
+    "at": 62,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/two/b",
+    "type": "differentDocument"
+   },
+   {
+    "at": 68,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/two/b"
+   },
+   {
+    "at": 73,
+    "method": "frameStoppedLoading"
+   },
+   {
+    "at": 73,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/two/a",
+    "type": "metaTagRefresh"
+   },
+   {
+    "at": 74,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/two/a",
+    "type": "differentDocument"
+   },
+   {
+    "at": 80,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/two/a"
+   },
+   {
+    "at": 86,
+    "method": "frameStoppedLoading"
+   },
+   {
+    "at": 86,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/two/b",
+    "type": "metaTagRefresh"
+   },
+   {
+    "at": 87,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/two/b",
+    "type": "differentDocument"
+   },
+   {
+    "at": 95,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/two/b"
+   }
+  ],
+  "fastLogin400ms": [
+   {
+    "at": 3,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/bank/login",
+    "type": "differentDocument"
+   },
+   {
+    "at": 10,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/bank/login"
+   },
+   {
+    "at": 15,
+    "method": "frameStoppedLoading"
+   },
+   {
+    "at": 411,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/bank/app",
+    "type": "scriptInitiated"
+   },
+   {
+    "at": 413,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/bank/app",
+    "type": "differentDocument"
+   },
+   {
+    "at": 417,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/bank/app"
+   },
+   {
+    "at": 422,
+    "method": "frameStoppedLoading"
+   },
+   {
+    "at": 423,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/bank/login?next=%2Fbank%2Fapp&t=1790806573130#top",
+    "type": "scriptInitiated"
+   },
+   {
+    "at": 424,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/bank/login?next=%2Fbank%2Fapp&t=1790806573130#top",
+    "type": "differentDocument"
+   },
+   {
+    "at": 429,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/bank/login?next=%2Fbank%2Fapp&t=1790806573130"
+   },
+   {
+    "at": 433,
+    "method": "frameStoppedLoading"
+   },
+   {
+    "at": 830,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/bank/app",
+    "type": "scriptInitiated"
+   },
+   {
+    "at": 832,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/bank/app",
+    "type": "differentDocument"
+   },
+   {
+    "at": 836,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/bank/app"
+   },
+   {
+    "at": 839,
+    "method": "frameStoppedLoading"
+   },
+   {
+    "at": 840,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/bank/login?next=%2Fbank%2Fapp&t=1790806573548#top",
+    "type": "scriptInitiated"
+   },
+   {
+    "at": 841,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/bank/login?next=%2Fbank%2Fapp&t=1790806573548#top",
+    "type": "differentDocument"
+   },
+   {
+    "at": 845,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/bank/login?next=%2Fbank%2Fapp&t=1790806573548"
+   },
+   {
+    "at": 849,
+    "method": "frameStoppedLoading"
+   },
+   {
+    "at": 1247,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/bank/app",
+    "type": "scriptInitiated"
+   },
+   {
+    "at": 1249,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/bank/app",
+    "type": "differentDocument"
+   },
+   {
+    "at": 1254,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/bank/app"
+   },
+   {
+    "at": 1258,
+    "method": "frameStoppedLoading"
+   },
+   {
+    "at": 1258,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/bank/login?next=%2Fbank%2Fapp&t=1790806573965#top",
+    "type": "scriptInitiated"
+   },
+   {
+    "at": 1260,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/bank/login?next=%2Fbank%2Fapp&t=1790806573965#top",
+    "type": "differentDocument"
+   },
+   {
+    "at": 1263,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/bank/login?next=%2Fbank%2Fapp&t=1790806573965"
+   },
+   {
+    "at": 1267,
+    "method": "frameStoppedLoading"
+   },
+   {
+    "at": 1666,
+    "method": "frameRequestedNavigation",
+    "url": "http://127.0.0.1:<P>/bank/app",
+    "type": "scriptInitiated"
+   },
+   {
+    "at": 1668,
+    "method": "frameStartedNavigating",
+    "url": "http://127.0.0.1:<P>/bank/app",
+    "type": "differentDocument"
+   },
+   {
+    "at": 1672,
+    "method": "frameNavigated",
+    "url": "http://127.0.0.1:<P>/bank/app"
+   }
+  ]
+ }
+}

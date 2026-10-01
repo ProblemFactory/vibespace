@@ -72,6 +72,12 @@ const HM = require('../browser-human.js'); // BROWSE YOURSELF (B-6ae8): the user
  *  key / entry and never sees a `holder:'user'` row in a listing. */
 const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || ''));
 const AGENT_FORBIDDEN = { error: 'the user\'s own browsing is his — an agent token may not read it', code: 'agent_forbidden' };
+/** lane browser-resume (§3.9): the housekeeping answer's KEPT browsers — a kept browser's tab titles + urls are the user's
+ *  (every conversation's pages); an agent's own token gets the counts only. */
+function keptRowsFor(req, kept) {
+  if (!Array.isArray(kept)) return [];
+  return isAgentBearer(req) ? kept.map(({ tabs, ...r }) => ({ ...r, tabs: [], tabCount: Array.isArray(tabs) ? tabs.length : 0 })) : kept;
+}
 const router = express.Router();
 
 let ctx = null;
@@ -301,12 +307,15 @@ router.get('/api/browser/housekeeping', async (req, res) => {
       r.createdBy = p ? p.createdBy || null : null;
       r.usedBy = usedByOf(r.id, convs);
     }
+    h.kept = keptRowsFor(req, h.kept); // lane browser-resume (§3.9)
     res.json({ ...h, conversations: convs.map(({ pinned, lastActive, ...c }) => c) });
   } catch (e) { fail(res, e); }
 });
 router.post('/api/browser/housekeeping/sweep', (req, res) => {
   if (refuseHost(req, res)) return;
   const tr = traceOr503(res); if (!tr) return;
+  // lane browser-resume (§3.9): the panel's Sweep also runs the kept browsers' (ends + the size bound) — it answers by its own broadcast
+  try { const ks = ctx?.keeper && typeof ctx.keeper.keptStore === 'function' ? ctx.keeper.keptStore() : null; if (ks) ks.sweep().catch((e) => console.warn('[browser-kept] sweep failed: ' + (e && e.message))); } catch (e) { console.warn('[browser-kept] sweep failed: ' + (e && e.message)); }
   try { const r = tr.sweep(); res.json({ ok: true, removed: r.removed, bytesRemoved: r.bytesRemoved, recordingsRemoved: r.recordingsRemoved, recordingBytesRemoved: r.recordingBytesRemoved, plan: r.plan, recordings: r.recordings, at: r.at }); }
   catch (e) { fail(res, e); }
 });

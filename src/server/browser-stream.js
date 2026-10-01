@@ -311,6 +311,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (relay.lastFrame) { send(ws, relay.lastFrame); viewer.lastFrameAt = now(); viewer.sent++; viewer.sentSeq = relay.frameSeq; }
     if (relay.viewport) send(ws, relay.viewport); // lane J: the page's viewport reading, replayed like the last frame
     if (relay.lastFit) send(ws, relay.lastFit); // lane S4: what the page's size is and whose pane it follows (the chip's words)
+    if (relay.lastOwners) send(ws, relay.lastOwners); // lane browser-resume C: whose each tab is (the tab row's controls), replayed like the tabs record
     // 2.369.180 (lanes H + J on one tree): a viewer that joins a relay whose upstream is ALREADY open is told so — the
     // 'upstream-open' broadcast went out before it came, and lane H's recorder taps a holder's relay before anybody
     // watches, so EVERY live view of an ephemeral browser is such a joiner. Without it the view never read itself
@@ -348,6 +349,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (relay.lastFrame) { send(ws, relay.lastFrame); viewer.lastFrameAt = now(); viewer.sent++; viewer.sentSeq = relay.frameSeq; }
     if (relay.viewport) send(ws, relay.viewport);
     if (relay.lastFit) send(ws, relay.lastFit);
+    if (relay.lastOwners) send(ws, relay.lastOwners); // lane browser-resume C: his window's tab row
     if (relay.upstream && relay.upstream.readyState === 1) send(ws, { type: 'status', state: 'upstream-open' });
     broadcastViewers(relay);
     ws.on('message', (d) => onViewerMessage(relay, viewer, d));
@@ -395,6 +397,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       inq: [], inflight: 0, fitClaim: null, copyWatch: null, lastCopy: null, copyArm: null, // copyArm: the holder's last copy GESTURE the bridge forwarded (verify: a copy leaves the server only on it — single-use)
       cmds: new Map(), // r6 A-F8: the last CMD_MEMORY `command` records by id (a confirmation's target = its paired command's params)
       acts: null, actSeq: 0, actTimer: null, // BROWSE YOURSELF: the user's input → ACTS on the taps (humanActStep's state, the synthetic ids, the burst flush)
+      lastOwners: null, ownersTimer: null, ownersBusy: false, ownersAgain: false, // lane browser-resume C: the tab row's `tab-owners` (judged by the keeper after a `tabs` record, debounced)
     };
     // P3: the keeper may already say somebody drives (an HTTP takeover, a
     // sibling relay that ended) — mirror it rather than assume Watch.
@@ -474,6 +477,11 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     try {
       if (msg.type === 'url' && typeof msg.url === 'string' && typeof keeper.noteUserUrl === 'function') keeper.noteUserUrl(relay.browserKey, pid, msg.url);
       if (msg.type === 'tabs' && Array.isArray(msg.tabs) && typeof keeper.noteUserUrl === 'function') { const act = msg.tabs.find((x) => x && x.active && typeof x.url === 'string'); if (act) keeper.noteUserUrl(relay.browserKey, pid, act.url); }
+      // lane browser-resume (§3.9): a conversation's OWN browser's live tab list (never a helper's — D6) — what its kept
+      // entry gives back after the browser stops (the recorder's tap rides this relay too, so a traced browser has it with no viewer)
+      if (msg.type === 'tabs' && Array.isArray(msg.tabs) && relay.target && relay.target.kind === 'ephemeral' && !relay.target.child && typeof keeper.noteTabs === 'function') keeper.noteTabs({ ...relay.target, browserKey: relay.browserKey }, msg.tabs);
+      // lane browser-resume C (§3.9, ruling 3): whose each tab is — the tab row draws its controls from the keeper's answer
+      if (msg.type === 'tabs' && Array.isArray(msg.tabs)) scheduleOwners(relay);
       // r6 A-F8: the `command` records are remembered by id (bounded) — a confirmation's TARGET is its paired command's params
       if (msg.type === 'command' && msg.id != null) { relay.cmds.set(String(msg.id), msg); if (relay.cmds.size > CMD_MEMORY) relay.cmds.delete(relay.cmds.keys().next().value); }
       const conf = T.confirmationFromUpstream(msg, now(), { command: msg.id != null ? relay.cmds.get(String(msg.id)) || null : null });
@@ -944,6 +952,50 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   }
   function stopResumePoll(relay) { if (relay.resumePoll) clearInterval(relay.resumePoll); relay.resumePoll = null; relay.paused = false; }
 
+  // ── lane browser-resume C (§3.9, the owner's ruling 3): THE TAB ROW — whose each tab is, and the user's switch / ✕ ──
+  const OWNERS_DEBOUNCE_MS = 250;
+  /** After a `tabs` record (debounced): the keeper judges whose each tab is (ONE CDP read for a shared profile) → ONE
+   *  `tab-owners` record to every viewer, kept for a late one. Single flight; a record meanwhile re-asks once. */
+  function scheduleOwners(relay, delay = OWNERS_DEBOUNCE_MS) {
+    if (!keeper || typeof keeper.tabOwnersFor !== 'function') return;
+    if (relay.ownersBusy) { relay.ownersAgain = true; return; }
+    if (relay.ownersTimer) clearTimeout(relay.ownersTimer);
+    relay.ownersTimer = setTimeout(() => { relay.ownersTimer = null; judgeOwners(relay).catch((e) => log.warn?.(`[browser-live] ${relay.key}: the tab owners could not be judged — ${e && e.message}`)); }, delay);
+  }
+  async function judgeOwners(relay) {
+    if (relays.get(relay.key) !== relay) return;
+    relay.ownersBusy = true;
+    try {
+      let tabs = [];
+      try { const t = relay.last.tabs ? JSON.parse(relay.last.tabs) : null; tabs = t && Array.isArray(t.tabs) ? t.tabs : []; } catch { tabs = []; }
+      const r = await keeper.tabOwnersFor(relay.target, { activeTarget: relay.activeTarget });
+      if (relays.get(relay.key) !== relay || !r || !r.ok) return;
+      const owners = {};
+      if (r.all) { for (const x of tabs) if (x && /^[0-9A-Fa-f]{32}$/.test(String(x.targetId || ''))) owners[String(x.targetId).toUpperCase()] = r.all; }
+      else Object.assign(owners, r.owners || {});
+      const text = JSON.stringify({ type: 'tab-owners', owners, mediated: !!r.mediated, adoptable: !!r.adoptable });
+      if (text === relay.lastOwners) return;
+      relay.lastOwners = text;
+      for (const v of relay.viewers.values()) send(v.ws, text);
+    } finally {
+      relay.ownersBusy = false;
+      if (relay.ownersAgain) { relay.ownersAgain = false; scheduleOwners(relay); }
+    }
+  }
+  /** The user's switch / ✕ on a tab row → the keeper (it re-reads every fact: the tab's owner, whether THIS viewer holds the
+   *  takeover, the counts) → ONE typed `tab-ack`. A switch the user made moves the takeover's ANCHOR with it (his own act,
+   *  never the `tab_switched` refusal an agent's switch earns). */
+  function tabActFor(relay, viewer, v) {
+    const ack = (o) => send(viewer.ws, { type: 'tab-ack', rid: v.rid, act: v.act, targetId: v.targetId, ...o });
+    if (!keeper || typeof keeper.userTabAct !== 'function') { ack({ ok: false, code: 'unavailable', error: 'tab acts are not available on this server' }); return; }
+    Promise.resolve().then(() => keeper.userTabAct({ target: relay.target, viewerId: viewer.id, act: v.act, targetId: v.targetId }))
+      .then((r) => {
+        if (r && r.switchedTo && relay.anchor && relays.get(relay.key) === relay) relay.anchor = S.takeoverAnchor(r.switchedTo, now());
+        ack({ ok: true, switchedTo: (r && r.switchedTo) || null, ...(r && r.noop ? { noop: true } : {}) });
+        scheduleOwners(relay, 0);
+      })
+      .catch((e) => ack({ ok: false, code: (e && e.code) || 'internal', error: String((e && e.message) || e) }));
+  }
   function onViewerMessage(relay, viewer, d) {
     let msg = null; try { msg = JSON.parse(typeof d === 'string' ? d : d.toString()); } catch { send(viewer.ws, { type: 'refused', code: 'bad-message', error: 'not JSON' }); return; }
     if (msg && msg.type === 'dialog-answer') { answerDialog(relay, viewer, msg); return; } // lane browser-stuck: the user's Accept / Dismiss on a page dialog (any viewer — the user's own chrome, not a forwarded page input)
@@ -967,6 +1019,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     }
     if (v.kind === 'ack') return;
     if (v.kind === 'ping') { send(viewer.ws, { type: 'pong', at: now() }); return; }
+    if (v.kind === 'tab-act') { if (v.refusal) send(viewer.ws, v.refusal); else tabActFor(relay, viewer, v); return; } // lane browser-resume C: the tab row's switch / ✕
     if (v.kind === 'input') {
       // lane S2 (naive study 2 T4): a record carrying `rid` is ANSWERED — an input-receipt from the browser's own
       // reply (a mediated lease: the credit minted here BEFORE the forward is what lets the user's own input past the
@@ -1249,7 +1302,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     disarmCopyWatch(relay); failQueued(relay, 'upstream_gone', why || 'the live view ended'); // lane live-input
     // lane S4: the relay's clocks end with it; the page's size we set is put back after the grace (unless somebody returns)
     if (isHuman(relay)) flushActs(relay, true); // BROWSE YOURSELF: the last burst of his acts reaches the recorder before its tap ends
-    for (const tm of ['fitTimer', 'freshTimer', 'fitHoldTimer', 'actTimer']) if (relay[tm]) { clearTimeout(relay[tm]); relay[tm] = null; }
+    for (const tm of ['fitTimer', 'freshTimer', 'fitHoldTimer', 'actTimer', 'ownersTimer']) if (relay[tm]) { clearTimeout(relay[tm]); relay[tm] = null; } // lane browser-resume C: + the owners debounce
     for (const v of relay.viewers.values()) if (v.trailTimer) { clearTimeout(v.trailTimer); v.trailTimer = null; }
     relay.fits.clear();
     armRestore(relay.key); // the keeper refuses a browser that is not running (a view never starts one); shutdown() clears the clocks

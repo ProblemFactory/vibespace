@@ -1,5 +1,5 @@
 /**
- * backlog-select.js — PURE (imports nothing; CJS so the bundle can share it)
+ * backlog-select.js — PURE (imports only the PURE belt src/peer-text.js; CJS so the bundle can share it)
  * THE BACKLOG'S PRIORITY + OWNERSHIP SELECTION (2026-09-22, owner: "没必要设
  * 上限，只要有合适的 priority 分级和 ownership，每次 push 能选择正确的条目就行").
  *
@@ -33,6 +33,9 @@
  * the field existed). Nothing here mutates its input.
  */
 
+// lane peer-census verify r4 F1: a backlog item's text is ANOTHER SESSION's words (any agent of the group parks one) and the
+// nudge quotes the oldest items' texts into every turn's reminder — the belt cuts them to the quote's width BEFORE it judges
+const { toAgentText } = require('./peer-text.js');
 const PRIORITIES = ['high', 'normal', 'low'];
 
 function normalizePriority(p) { return PRIORITIES.includes(p) ? p : 'normal'; }
@@ -144,19 +147,18 @@ function backlogNudge(items, sessionKey, { threshold = NUDGE_DEFAULT, nowMs = Da
   const stale = aged.filter((x) => now - Number(x.b.addedAt) > staleDays * DAY_MS).length;
   const oldest = aged.sort((x, y) => (Number(x.b.addedAt) - Number(y.b.addedAt)) || byId(x.b, y.b)).slice(0, 3)
     .map(({ b, ageDays }) => {
-      const t = String(b.text == null ? '' : b.text).replace(/\s+/g, ' ').trim();
-      return { id: b.id || '?', ageDays, text: t.length > 60 ? t.slice(0, 59).trimEnd() + '…' : t };
+      const t = toAgentText(String(b.text == null ? '' : b.text).replace(/\s+/g, ' ').trim(), { kind: 'line', max: 60 });   // verify r4 F1: cut to 60, then judged
+      return { id: b.id || '?', ageDays, text: t };
     });
   return { owned: owned.length, stale, oldest, threshold: th, staleDays };
 }
 
 // UTF-8 length without Buffer (the bundle shares this module)
 function utf8Bytes(s) { let n = 0; for (const ch of String(s)) { const c = ch.codePointAt(0); n += c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4; } return n; }
-const clipTo = (t, n) => (t.length > n ? t.slice(0, Math.max(0, n - 1)).trimEnd() + '…' : t);
 // the one cleanup sentence both forms end with
 const cleanupSentence = (g) => `Clean up before parking more: \`vibespace-task ${g}backlog-done <id>\` for finished ones, \`backlog-drop <id>\` for obsolete ones, `
   + 'or merge same-topic items into one with `backlog-edit <id> --detail` and drop the rest.';
-const oldestList = (nudge, textChars) => (nudge.oldest || []).map((o) => `[${o.id}] ${o.ageDays}d${textChars > 0 && o.text ? ` "${clipTo(o.text, textChars)}"` : ''}`).join(', ');
+const oldestList = (nudge, textChars) => (nudge.oldest || []).map((o) => `[${o.id}] ${o.ageDays}d${textChars > 0 && o.text ? ` "${toAgentText(o.text, { kind: 'line', max: textChars })}"` : ''}`).join(', ');   // verify r4 F1: the narrower cut is the belt's too (bound, then judged)
 // never pass the budget regardless (unreachable with sane ids)
 const hardClip = (s) => { let out = s; while (utf8Bytes(out) > NUDGE_MAX_BYTES) out = out.slice(0, -2) + '…'; return out; };
 

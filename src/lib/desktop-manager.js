@@ -1,6 +1,15 @@
 import { cssVarDefault, showContextMenu, showInputDialog, showToast, uiScale } from './utils.js';
 import { t } from './i18n.js';
 import { stageRefusalSentence } from './stage-rules.js'; // inc-muly2izg-cks3: the Stage's move refusal, in words (PURE)
+import { mergeDesktopRecord, windowIds } from './desktop-record.js'; // userW inc-mun7qjmw-iksh: a held record is a VIEW — every write merges (PURE)
+
+/** A window this page tried to build (a desktop's first visit, the boot restore) and that is still absent this long
+ *  after is one it cannot build: the record drops it, and says so to the server's belt ('unbuilt'). Before that it is
+ *  in flight and stays in the record (the 2.141.1 fast-switch protection, now bounded). */
+const BUILD_GRACE_MS = 20000;
+/** How long a window this page closed / moved / could not build stays in the evidence every layout-sync carries. */
+const DEPARTED_TTL_MS = 10 * 60 * 1000;
+const DEPARTED_CAP = 200;
 
 /**
  * DesktopManager — virtual desktop system.
@@ -15,10 +24,17 @@ export class DesktopManager {
     this._savedStates = new Map(); // desktopId → capturedState (cached layout for non-active desktops)
     this._wireIds = new Map();     // desktopId → Set of window ids its LAST record on the wire listed (sent, applied or loaded) — the base a newer remote record is diffed against (inc-mukeyzpt-lpou)
     this._restoring = false;
+    // userW inc-mun7qjmw-iksh: the desktops this page CHANGED but does not show (a move's target and source) — the
+    // next autosave sends their HELD record (never a list derived from the page); the build attempts (winId → {desk,
+    // at}); the evidence ledger (winId → {why, at}) every layout-sync carries for the server's shrink belt
+    this._dirtyDesks = new Set();
+    this._buildAttempts = new Map();
+    this._departed = new Map();
 
     // Listen for desktop metadata updates from other clients
     app.ws.onGlobal((msg) => {
       if (msg.type === 'desktop-updated') this._onRemoteDesktopUpdated(msg);
+      else if (msg.type === 'layout-sync-refused') this.onSyncRefused(msg);
     });
 
     // Taskbar resize handle (drag top edge to resize)
@@ -50,9 +66,10 @@ export class DesktopManager {
 
       const legacyState = layoutData.autoSave;
       if (legacyState?.windows?.length) {
-        this._savedStates.set(firstId, legacyState);
+        this._setRecord(firstId, legacyState); // the server's record, as it is
         await this.app.layoutManager.restoreState(legacyState);
         for (const [, win] of this.app.wm.windows) win._desktopId = firstId;
+        this._noteAttempts(firstId, windowIds(legacyState));
       }
 
       // Persist the new desktop structure to server
@@ -65,7 +82,7 @@ export class DesktopManager {
       // (pre-2.209.0 raw switchTo while staged persisted the stage's window
       // set under that key; caching it would lazy-replay slot-bounds copies)
       for (const [id, dState] of Object.entries(desktopsData)) {
-        if (id !== '__stage__' && dState.autoSave) { this._savedStates.set(id, dState.autoSave); this.noteWire(id, dState.autoSave); }
+        if (id !== '__stage__' && dState.autoSave) { this._setRecord(id, dState.autoSave); this.noteWire(id, dState.autoSave); } // the server's record, as it is
       }
 
       // Restore the active (first) desktop
@@ -75,6 +92,7 @@ export class DesktopManager {
         for (const [, win] of this.app.wm.windows) {
           if (!win._desktopId) win._desktopId = this._activeId;
         }
+        this._noteAttempts(this._activeId, windowIds(firstState)); // the boot desktop is BUILT: a window still absent after the grace is one this page cannot build
       }
     }
 
@@ -151,8 +169,18 @@ export class DesktopManager {
       }
     }
 
+    // The deleted desktop's record ENTRIES move into the target's held record and go out NOW, before the server
+    // forgets the desktop (lane desktop-move verify r1 D1: the target's record was left to the closing autosave,
+    // which the switch's gate drops when the desktop deleted was the one on show — the server deleted HR and held
+    // its 3 windows in NO record until the user's next input; a reload in between lost them). Built or not (an async
+    // opener's window is not built yet), they are the target's from here — the ONE merge door.
+    const moving = (cached?.windows || []).filter((ws) => ws && (ws.winId || ws.id));
+    for (const ws of moving) this._buildAttempts.delete(String(ws.winId || ws.id));
+    this._setRecord(targetId, mergeDesktopRecord({ record: this._savedStates.get(targetId) || { windows: [] }, add: moving }));
     this._desktops.splice(idx, 1);
     this._savedStates.delete(desktopId);
+    this._wireIds.delete(desktopId);
+    this._broadcastDesktopState(targetId, this.recordFor(targetId)); // the target holds them BEFORE the server forgets the desktop
     this.app.ws.send({ type: 'desktop-delete', desktopId });
     // Reflow positions for all now-visible windows
     this.app.wm._reflowWindows();
@@ -180,19 +208,197 @@ export class DesktopManager {
   // resurrected every closed window as a lazy replay (real report 2.151.1).
   purgeClosedWindow(winId) {
     if (!winId) return;
-    for (const [, st] of this._savedStates) {
-      if (st?.windows?.length) {
-        const kept = st.windows.filter((w) => (w.winId || w.id) !== winId);
-        if (kept.length !== st.windows.length) st.windows = kept;
-      }
+    const lm = this.app.layoutManager;
+    const byUser = !(lm?._applying || lm?._booting); // a close the apply / the boot itself made is not this page's change to send; one the user made in the cooldown after an apply is (verify r3 ③)
+    for (const [desk, st] of this._savedStates) {
+      if (!(st?.windows?.length && windowIds(st).includes(String(winId)))) continue;
+      this._setRecord(desk, mergeDesktopRecord({ record: st, remove: [winId] }));
+      if (byUser && desk !== this._activeId) this._dirtyDesks.add(desk); // a desktop not on show that listed it: its record goes out now, with the close as evidence
     }
+    this._buildAttempts.delete(String(winId));
+    this._noteDeparted(winId, 'closed'); // the evidence the server's shrink belt reads (userW inc-mun7qjmw-iksh)
+  }
+
+  // ── The held records (userW inc-mun7qjmw-iksh; PURE rule in src/lib/desktop-record.js) ──
+  // A desktop's held record (`_savedStates`) is a VIEW of the server's record plus what this page has built. The ONE
+  // writer is _setRecord, and every call hands it either a record straight off the wire (boot, a remote record) or a
+  // mergeDesktopRecord result — never a list derived from the page alone (scripts/test-desktop-record.mjs census).
+
+  /** THE ONE WRITER of a held desktop record. A desktop this page does not know (deleted meanwhile) has no held
+   *  record (verify r2 ④: the switch off a remotely deleted desktop captured a record for it and broadcast it — an
+   *  orphan record on the server, no meta naming it). */
+  _setRecord(desktopId, record) {
+    if (!desktopId || desktopId === '__stage__' || !record || typeof record !== 'object') return;
+    if (!this._desktops.some((d) => d.id === desktopId)) return;
+    this._savedStates.set(desktopId, record);
+  }
+
+  /** The record this page would WRITE for `desktopId`: the held record merged with the windows the page has built
+   *  there; a window the page tried to build and could not is dropped (evidence 'unbuilt'); every other window the
+   *  page has not built stays exactly as the record holds it. The global chrome is the page's current one; the grid
+   *  is the page's only for the desktop it shows (another desktop keeps its own). Used for every record that leaves
+   *  this page (the autosave, a switch's capture, the Stage's) — never the bare DOM capture. */
+  recordFor(desktopId) {
+    const lm = this.app.layoutManager;
+    const held = this._savedStates.get(desktopId) || { windows: [] };
+    // a window the page HAS built lives where the page says: one the record lists here that the page holds on another
+    // desktop is not this desktop's any more (it left through a path that is not a move — evidence 'moved')
+    const elsewhere = windowIds(held).filter((id) => {
+      const w = this.app.wm.windows.get(id);
+      if (!w || (w._desktopId || this._activeId) === desktopId) return false;
+      this._noteDeparted(id, 'moved');
+      return true;
+    });
+    const rec = mergeDesktopRecord({ record: held, built: lm.captureWindows(desktopId), remove: [...this._unbuilt(desktopId, held), ...elsewhere] });
+    const { grid, ...chrome } = lm.captureChrome();
+    Object.assign(rec, chrome);
+    if (desktopId === this._activeId) rec.grid = grid;
+    delete rec.updatedAt; // the server's stamp on the record it holds — it stamps every write itself
+    return rec;
+  }
+
+  /** A remote record for the desktop ON SHOW was applied (layout.js _handleRemoteSync): it is the view's base now —
+   *  minus a window this page closed that no save carried yet; a window it lists that this page does not have is
+   *  being created by that apply — an attempt like any other (still absent after the grace ⇒ dropped, with evidence). */
+  cacheShownState(desktopId, state) {
+    if (!desktopId || desktopId !== this._activeId || !state || typeof state !== 'object') return;
+    const held = this.app.layoutManager?.heldCloseIds?.() || [];
+    this._setRecord(desktopId, held.length ? mergeDesktopRecord({ record: state, remove: held }) : state);
+    this._noteAttempts(desktopId, windowIds(state).filter((id) => !this._buildAttempts.has(id)));
+  }
+
+  /** A record of `desktopId` left this page (sent to the server): it is now the view's base, and the wire's. */
+  noteSent(desktopId, state) {
+    if (!desktopId || desktopId === '__stage__' || !state) return;
+    this._setRecord(desktopId, state);
+    this.noteWire(desktopId, state);
+  }
+
+  /** The desktops this page changed but does not show — sent by the next autosave from their HELD record. A desktop stays
+   *  dirty until the server READ a record of it (`noteCarried`, the ack — verify r5 ⑤): a save that left on a socket the
+   *  server never read used to take the desk out of the set, and the re-send after the reconnect then carried the desktop on
+   *  show alone (the moved window reached no record). A desk sent twice before its ack is an idempotent duplicate write. */
+  takeDirty() {
+    return [...this._dirtyDesks].filter((d) => d && d !== this._activeId && d !== '__stage__' && this._desktops.some((x) => x.id === d));
+  }
+
+  /** The server read a record of `desktopId` (the layout manager's ack): no longer owed. */
+  noteCarried(desktopId) { if (desktopId) this._dirtyDesks.delete(desktopId); }
+
+  /** The evidence every layout-sync carries: the windows this page closed, moved, replaced or could not build lately. */
+  evidence() {
+    const now = Date.now(), out = [];
+    for (const [id, e] of this._departed) {
+      if (now - e.at > DEPARTED_TTL_MS) { this._departed.delete(id); continue; }
+      out.push({ id, why: e.why });
+    }
+    return out;
+  }
+
+  _noteDeparted(winId, why) {
+    if (winId == null) return;
+    const id = String(winId);
+    this._departed.delete(id);
+    this._departed.set(id, { why, at: Date.now() });
+    while (this._departed.size > DEPARTED_CAP) this._departed.delete(this._departed.keys().next().value);
+  }
+
+  /** The page is building these windows of `desktopId` now (a first visit's replay, the boot restore). */
+  _noteAttempts(desktopId, ids, { at = Date.now() } = {}) {
+    for (const id of ids || []) if (id != null && !this.app.wm.windows.has(String(id))) this._buildAttempts.set(String(id), { desk: desktopId, at });
+  }
+
+  /** The held windows of `desktopId` the page tried to build and could not (still absent past the grace). */
+  _unbuilt(desktopId, held) {
+    const now = Date.now(), out = [];
+    for (const id of windowIds(held)) {
+      const a = this._buildAttempts.get(id);
+      if (!a) continue;
+      if (this.app.wm.windows.has(id)) { this._buildAttempts.delete(id); continue; }
+      if (a.desk === desktopId && now - a.at > BUILD_GRACE_MS) { out.push(id); this._noteDeparted(id, 'unbuilt'); }
+    }
+    return out;
+  }
+
+  /** The server REFUSED a record of `desktopId` (its shrink belt, ws-handler layout-sync): the server kept its own
+   *  and sent it back. The view becomes that record plus what this page has built; on the desktop on show the
+   *  windows it holds that this page never opened are opened now; the corrected record goes out with the next save
+   *  (the dirty bit re-armed at the last REAL input — §6b guard 2's expiry keeps its meaning). */
+  onSyncRefused(msg) {
+    const d = msg?.desktopId;
+    // the server no longer has this desktop (verify r2 ⑦): its meta rides the refusal — the page drops the desktop
+    // as a `desktop-updated` would have made it (its windows follow the record that lists them, or the first desktop)
+    if (msg?.reason === 'no-such-desktop') { if (Array.isArray(msg.desktops)) this._onRemoteDesktopUpdated({ desktops: msg.desktops }); return; }
+    if (!d || d === '__stage__' || !this._desktops.some((x) => x.id === d)) return;
+    const lm = this.app.layoutManager;
+    const rec = msg.state && typeof msg.state === 'object' ? msg.state : { windows: [] };
+    for (const id of msg.unexplained || []) { this._buildAttempts.delete(String(id)); this._departed.delete(String(id)); }
+    this._setRecord(d, mergeDesktopRecord({ record: rec, built: lm.captureWindows(d), remove: lm.heldCloseIds?.() || [] }));
+    this.noteWire(d, rec);
+    let opened = 0;
+    if (d === this._activeId && !this.app.stage?.isActive) opened = this._replayMissing(d, this._savedStates.get(d));
+    if (d !== this._activeId) this._dirtyDesks.add(d);
+    lm.rearmSave?.();
+    this._renderSwitcher(); this.refreshSwitcher();
+    const n = (msg.unexplained || []).length;
+    const name = this._desktops.find((x) => x.id === d)?.name || d;
+    try { window.__vsOp?.('layout-sync-refused', { desk: d, n, opened }); } catch { }
+    if (n) showToast(t('{n} windows on “{desktop}” were kept — this page had not opened them yet', { n, desktop: name }), { type: 'warn', duration: 8000 });
+  }
+
+  /** Open the held windows of `desktopId` that the page does not have yet (openSpec-backed; one already being built
+   *  is left to its attempt) — a first visit (switchTo step 6), and a refused record's reconcile. Returns the count. */
+  _replayMissing(desktopId, state) {
+    let n = 0;
+    const now = Date.now();
+    const noSpec = [];
+    // a webui SESSION already open on this page under ANOTHER window id: attachSession's "already open in a live
+    // window" shortcut (_focusExistingSession, keyed on the server session id) focuses that window and builds
+    // nothing. The key is the session's `serverId`, never the conversation id (verify r2): a fork's window carries
+    // its PARENT's backendSessionId in its openSpec, so the conversation id settled the parent's own never-opened
+    // entry as a duplicate and dropped it from its desktop's record — attachSession would have built it.
+    const liveServerIds = new Set([...this.app.wm.windows.values()].map((w) => w._openSpec?.action === 'attachSession' ? w._openSpec.serverId : null).filter(Boolean));
+    for (const ws of state?.windows || []) {
+      const winId = ws.winId || ws.id;
+      if (!winId || this.app.wm.windows.has(winId)) continue;
+      if (!ws.openSpec) { noSpec.push(winId); continue; } // nothing to build it from: settled at once (dropped as before, with evidence)
+      // …nor can a second window of a session this page already shows live: settled at once too (verify r1: it
+      // lingered as a build attempt for the whole 20 s grace — a record entry nobody could build, which the server
+      // then held against every other client's write)
+      if (ws.openSpec.action === 'attachSession' && ws.openSpec.serverId && liveServerIds.has(ws.openSpec.serverId)) { noSpec.push(winId); continue; }
+      const a = this._buildAttempts.get(String(winId));
+      if (a && a.desk === desktopId && now - a.at <= BUILD_GRACE_MS) continue; // already being built
+      this.app.replayOpenSpec(ws.openSpec, winId);
+      this._noteAttempts(desktopId, [winId], { at: now });
+      n++;
+      // Tag and position after creation
+      setTimeout(() => {
+        const newWin = this.app.wm.windows.get(winId);
+        if (newWin) {
+          newWin._desktopId = desktopId;
+          if (ws.gridBounds) {
+            newWin.gridBounds = ws.gridBounds;
+            this.app.wm._applyGridBounds(newWin);
+          }
+        }
+      }, 500);
+    }
+    this._noteAttempts(desktopId, noSpec, { at: 0 });
+    return n;
   }
 
   /** The record `desktopId` was last seen as ON THE WIRE (a save this client sent, a remote record it applied or
    *  cached, the disk record it booted from): the window ids it listed. */
   noteWire(desktopId, state) {
     if (!desktopId || desktopId === '__stage__' || !state || !Array.isArray(state.windows)) return;
+    if (!this._desktops.some((d) => d.id === desktopId)) return; // a desktop this page does not know (verify r2 ④)
     this._wireIds.set(desktopId, new Set(state.windows.map((w) => String(w.winId || w.id))));
+  }
+
+  /** Did the last record of `desktopId` on the wire list `winId`? (A reconnect's re-read may close only these.) */
+  wireListed(desktopId, winId) {
+    const base = this._wireIds.get(desktopId);
+    return !!base && base.has(String(winId));
   }
 
   /** A remote record for a desktop this client is NOT showing (inc-mukeyzpt-lpou, the parked second client). It
@@ -202,17 +408,56 @@ export class DesktopManager {
    *  this client's next save wrote it back to every other client. A window the wire never listed for that desktop
    *  (moved or opened here, not yet sent) is this client's own change and stays; a window on show (the stage) is
    *  never touched. The closes are not this user's (no held close, no save: `_restoring` around them). */
-  cacheRemoteState(desktopId, state) {
+  cacheRemoteState(desktopId, state, { receivedAt = Date.now() } = {}) {
     const base = this._wireIds.get(desktopId);
     const now = new Set(((state && state.windows) || []).map((w) => String(w.winId || w.id)));
-    const gone = base ? [...this.app.wm.windows.values()].filter((w) => w._desktopId === desktopId && w._hiddenByDesktop && !w._onStage && w._openSpec && base.has(String(w.id)) && !now.has(String(w.id))) : [];
+    // …unless another desktop's record lists it now: it MOVED there (a remote move — lane desktop-move verify r1);
+    // a window this page moved here AFTER the record arrived, or whose move no save has carried yet, is the user's own
+    // act the record cannot know (verify r2; THE UNSAVED ACT, verify r4 ①: layout.js actHeld)
+    const gone = base ? [...this.app.wm.windows.values()].filter((w) => w._desktopId === desktopId && w._hiddenByDesktop && !w._onStage && w._openSpec && base.has(String(w.id)) && !now.has(String(w.id)) && !this.app.layoutManager?.actHeld?.(w._movedAt, receivedAt, w)).filter((w) => !this.adoptRemoteMove(w, desktopId)) : [];
     if (gone.length) {
       const lm = this.app.layoutManager, was = lm._restoring;
-      lm._restoring = true;
-      try { for (const w of gone) if (this.app.wm.windows.has(w.id)) this.app.wm.closeWindow(w.id); } finally { lm._restoring = was; }
+      lm._restoring = true; lm._applying = true; // these closes are the record's, not the user's (verify r3 ③)
+      try { for (const w of gone) if (this.app.wm.windows.has(w.id)) this.app.wm.closeWindow(w.id); } finally { lm._restoring = was; lm._applying = false; }
     }
-    this._savedStates.set(desktopId, state);
+    // the server's record, as it is — minus a window THIS page closed that no save has carried yet (the held close:
+    // the record is older than the close; the next switch would replay it, and a save of this desktop re-send it)
+    const held = this.app.layoutManager?.heldCloseIds?.() || [];
+    this._setRecord(desktopId, held.length ? mergeDesktopRecord({ record: state, remove: held }) : state);
     this.noteWire(desktopId, state);
+  }
+
+  /** A REMOTE MOVE (lane desktop-move verify r1, D4): a window this page holds on `from` that the wire now places
+   *  on another desktop — `to` when the caller knows it (the record of the desktop on show lists it), else the
+   *  desktop whose HELD record lists it (a move's target record is sent first, so it is there before the source's
+   *  drops it). The window is retagged and shown / hidden as its new desktop is — never closed: a close here
+   *  became 'closed' evidence and the next save of the target dropped the moved window on the server. Returns the
+   *  desktop it moved to, or null (the window is nobody else's: a real close). Stage windows are never moved. */
+  adoptRemoteMove(win, from, { to = null, rec = null } = {}) {
+    if (!win || !win.id || win._onStage || win._desktopId === '__stage__' || win._isStagePlaceholder) return null;
+    const id = String(win.id);
+    let dest = null, entry = rec;
+    if (to) {
+      // the caller KNOWS where the record places the window (the record of the desktop on show lists it): the answer
+      // is that desktop or nothing — never the held-record search below. `to === from` fell through to it and moved a
+      // window OUT of the desktop on show, listed by its record, to a desktop whose STALE held record also listed it
+      // (this page's own unsaved move, a racing double) — the window bounced Fin ⇄ HR on every record (verify r4 ②)
+      if (to === from || to === '__stage__') return null;
+      dest = to;
+    } else {
+      for (const [d, st] of this._savedStates) {
+        if (d === from || d === '__stage__' || !this._desktops.some((x) => x.id === d)) continue;
+        const e = (st?.windows || []).find((w) => String(w.winId || w.id) === id);
+        if (e) { dest = d; entry = e; break; }
+      }
+    }
+    if (!dest || dest === win._desktopId) return null;
+    win._desktopId = dest;
+    if (entry?.gridBounds) { win.gridBounds = { ...entry.gridBounds }; try { this.app.wm._applyGridBounds(win); } catch { } }
+    if (dest === this._activeId) { if (win._hiddenByDesktop) this._showWin(win); }
+    else if (!win._hiddenByDesktop) this._hideWin(win);
+    try { window.__vsOp?.('desktop-move-remote', { win: id, from: from || null, to: dest }); } catch { }
+    return dest;
   }
 
   async switchTo(desktopId) {
@@ -243,19 +488,10 @@ export class DesktopManager {
       // still lazy-replaying — chat re-attach, disk restore) may not be in the
       // DOM yet, so the fresh capture would drop it. Carry such windows forward
       // so a fast switch-away never persists a desktop MINUS its slow windows.
-      const currentState = this.app.layoutManager.captureState();
-      const prior = this._savedStates.get(this._activeId);
-      if (prior?.windows?.length) {
-        const haveIds = new Set(this.app.wm.windows.keys());
-        const capturedIds = new Set(currentState.windows.map((w) => w.winId || w.id));
-        for (const pw of prior.windows) {
-          const wid = pw.winId || pw.id;
-          if (pw.openSpec && !capturedIds.has(wid) && !haveIds.has(wid)) {
-            currentState.windows.push(pw); // not materialized yet — keep it
-          }
-        }
-      }
-      this._savedStates.set(this._activeId, currentState);
+      // (userW inc-mun7qjmw-iksh: the ONE record door — the held record merged with the built windows; a window
+      // the page tried to build and could not is the only one dropped, and it is named to the server.)
+      const currentState = this.recordFor(this._activeId);
+      this._setRecord(this._activeId, currentState);
 
       // 2. Hide all windows for current desktop
       for (const [, win] of this.app.wm.windows) {
@@ -288,26 +524,10 @@ export class DesktopManager {
       this.app.wm._reflowWindows();
 
       // 6. Create windows that exist in saved state but not yet in DOM
-      // (from other clients or disk restore)
+      // (from other clients or disk restore) — each one an ATTEMPT: still absent after the grace, it is one this page
+      // cannot build and the record drops it (with evidence); until then it stays in the record
       if (targetState?.windows) {
-        for (const ws of targetState.windows) {
-          const winId = ws.winId || ws.id;
-          if (!this.app.wm.windows.has(winId) && ws.openSpec) {
-            this.app.replayOpenSpec(ws.openSpec, winId);
-            hasWindows = true;
-            // Tag and position after creation
-            setTimeout(() => {
-              const newWin = this.app.wm.windows.get(winId);
-              if (newWin) {
-                newWin._desktopId = desktopId;
-                if (ws.gridBounds) {
-                  newWin.gridBounds = ws.gridBounds;
-                  this.app.wm._applyGridBounds(newWin);
-                }
-              }
-            }, 500);
-          }
-        }
+        if (this._replayMissing(desktopId, targetState)) hasWindows = true;
       }
 
       // 7. Update UI
@@ -343,8 +563,9 @@ export class DesktopManager {
   /** Move a window to another desktop → `{ok:true}` | `{ok:true, moved:false}` (nothing to move) | a Stage refusal
    *  `{ok:false, code:'stage-window'|'onto-stage', kind}` (PURE stage-rules.js). `speak` = a USER's act (a drop on a
    *  preview, the menu, the keyboard): a refusal is said in a toast — never silent (inc-muly2izg-cks3). Programmatic
-   *  callers (resume placement) pass nothing and read the result. */
-  moveWindowToDesktop(winId, desktopId, { speak = false } = {}) {
+   *  callers (resume placement) pass nothing and read the result. `replaces` = the id of the record entry this window
+   *  takes the place of on the target (a resumed conversation landing where its old, never-opened window was). */
+  moveWindowToDesktop(winId, desktopId, { speak = false, replaces = null } = {}) {
     let win = this.app.wm.windows.get(winId);
     if (!win) return { ok: false, code: 'no-window' };
 
@@ -368,15 +589,19 @@ export class DesktopManager {
     // desktops, and an incident bundle must be able to answer "what moved my
     // windows". Logging above the guards recorded moves that never happened.
     try { window.__vsOp?.('desktop-move', { win: win.id, from: win._desktopId, to: desktopId, chain: members.length }); } catch {}
-    for (const m of members) m._desktopId = desktopId;
+    const from = win._desktopId || null;
+    const movedAt = Date.now();
+    for (const m of members) { m._desktopId = desktopId; m._movedAt = movedAt; } // THE HELD MOVE's witness (verify r2): a record received before this instant cannot know it
 
     // If moving to a non-active desktop, hide (host element carries the group)
     if (desktopId !== this._activeId) {
       this._hideWin(win);
     }
 
-    // Update cached state for the target desktop so preview shows the new window
-    this._updateCachedDesktop(desktopId);
+    // The two held records: the target ADDS the moved windows (so its preview shows them), the source drops them —
+    // nothing else in either is touched (userW inc-mun7qjmw-iksh: this rebuilt the target from the page's built
+    // windows, which for a desktop never opened since the page loaded is nothing but the moved one)
+    this._updateCachedDesktop(desktopId, { from, ids: members.map((m) => m.id), replaces: replaces ? [replaces] : [] });
 
     this._renderSwitcher();
     this.app.updateTaskbar();
@@ -392,20 +617,18 @@ export class DesktopManager {
     return text;
   }
 
-  /** Rebuild cached state for a non-active desktop from its live windows */
-  _updateCachedDesktop(desktopId) {
-    if (desktopId === this._activeId) return;
-    const cached = this._savedStates.get(desktopId) || { windows: [] };
-    const wins = [];
-    for (const [id, win] of this.app.wm.windows) {
-      if (win._desktopId !== desktopId) continue;
-      wins.push({
-        winId: id, gridBounds: win.gridBounds,
-        isMinimized: false, openSpec: win._openSpec,
-      });
-    }
-    cached.windows = wins;
-    this._savedStates.set(desktopId, cached);
+  /** A move's two held records (userW inc-mun7qjmw-iksh). The TARGET: the moved windows (`ids`, captured whole)
+   *  are ADDED and what they `replaces` is dropped — every other window of its record stays exactly as it is, built
+   *  here or not. The SOURCE: the moved windows leave it. A desktop not on show is marked dirty: the next autosave
+   *  sends its HELD record (never a list derived from the page). The moves are evidence for the server's belt. */
+  _updateCachedDesktop(desktopId, { from = null, ids = [], replaces = [] } = {}) {
+    const lm = this.app.layoutManager;
+    const moved = ids.map((id) => this.app.wm.windows.get(id)).filter(Boolean).map((w) => lm.captureWin(w, w.id)).filter(Boolean);
+    this._setRecord(desktopId, mergeDesktopRecord({ record: this._savedStates.get(desktopId) || { windows: [] }, add: moved, remove: replaces }));
+    if (from && from !== desktopId && this._savedStates.has(from)) this._setRecord(from, mergeDesktopRecord({ record: this._savedStates.get(from), remove: ids }));
+    for (const d of [desktopId, from]) if (d && d !== this._activeId && d !== '__stage__') this._dirtyDesks.add(d);
+    for (const id of ids) { this._buildAttempts.delete(String(id)); this._noteDeparted(id, 'moved'); }
+    for (const id of replaces) { this._buildAttempts.delete(String(id)); this._noteDeparted(id, 'replaced'); }
   }
 
   // ── Remote sync ──
@@ -416,29 +639,45 @@ export class DesktopManager {
       const newIds = new Set(msg.desktops.map(d => d.id));
       this._desktops = msg.desktops;
 
-      // Reassign windows from deleted desktops to the first remaining desktop.
+      // Reassign windows from deleted desktops — to the desktop the DELETER's record put them on (verify r2 ④):
+      // deleteDesktop merges them into its target's record and broadcasts it BEFORE `desktop-delete` (b21c2d40),
+      // so the target's held record (or its record still deferred under a gate) lists them; the first remaining
+      // desktop only when nothing does. (The old rule sent them to desktop #1 on every OTHER page: a second record
+      // of the same windows on the server, and on the deleter's page they then jumped from its target to #1.)
       // STAGE-owned windows are EXEMPT ('__stage__' is never in the meta, so
       // every remote desktop create/rename/delete used to retag the whole
       // stage — placeholder included — onto a normal desktop, turning parked
       // slot-geometry ex-heroes into desktop windows at slot bounds).
+      const gone = [...oldIds].filter((id) => !newIds.has(id));
+      const homeOf = (winId) => {
+        const id = String(winId);
+        for (const [d, st] of this._savedStates) if (newIds.has(d) && (st?.windows || []).some((w) => String(w.winId || w.id) === id)) return d;
+        for (const [, m] of this.app.layoutManager?._pendingRemote || []) if (m?.desktopId && newIds.has(m.desktopId) && (m.state?.windows || []).some((w) => String(w.winId || w.id) === id)) return m.desktopId;
+        return null;
+      };
       const fallbackId = this._desktops[0]?.id;
+      let activeHome = null; // where the desktop on show's windows went — the switch follows them
       if (fallbackId) {
         for (const [, win] of this.app.wm.windows) {
           if (win._desktopId && win._desktopId !== '__stage__' && !newIds.has(win._desktopId)) {
-            win._desktopId = fallbackId;
-            if (fallbackId === this._activeId && win._hiddenByDesktop) {
-              this._showWin(win);
-            }
+            const dest = homeOf(win.id) || fallbackId;
+            if (win._desktopId === this._activeId && !activeHome) activeHome = dest;
+            win._desktopId = dest;
+            if (dest === this._activeId) { if (win._hiddenByDesktop) this._showWin(win); }
+            else if (!win._hiddenByDesktop) this._hideWin(win);
           }
         }
       }
+      // the deleted desktops' held records, wire bases and deferred records go with them — never a ghost record a
+      // late broadcast or the drain fills (verify r2 R1(b))
+      for (const id of gone) { this._savedStates.delete(id); this._wireIds.delete(id); this.app.layoutManager?._pendingRemote?.delete(id); }
 
-      // If our active desktop was deleted, switch to first. While staged,
+      // If our active desktop was deleted, switch to where its windows went (else the first). While staged,
       // _activeId is '__stage__' (never in the meta) — the old check
       // force-yanked a staged client off the stage on ANY remote desktop
       // meta change.
       if (!newIds.has(this._activeId) && this._activeId !== '__stage__' && this._desktops.length > 0) {
-        this.switchTo(this._desktops[0].id);
+        this.switchTo(activeHome || this._desktops[0].id);
       }
       this._renderSwitcher();
     }
@@ -454,9 +693,11 @@ export class DesktopManager {
   /** Broadcast a specific desktop's state (used during switch) */
   _broadcastDesktopState(desktopId, state) {
     if (desktopId === '__stage__') return; // stage state never enters desktop records
-    this.app.ws.send({ type: 'layout-sync', state, desktopId });
-    this.app.layoutManager?._releaseHeldCloses?.(desktopId); // this record carries every close made on that desktop (inc-mukeyzpt-lpou)
-    this.noteWire(desktopId, state);
+    if (!this._desktops.some((d) => d.id === desktopId)) return; // a desktop deleted meanwhile: its record is nobody's to write (verify r2 ④ — the switch off it wrote an orphan record on the server)
+    const sentAt = Date.now();
+    this.app.ws.send({ type: 'layout-sync', state, desktopId, evidence: this.evidence(), sentAt });
+    this.app.layoutManager?.noteLayoutSent?.([desktopId], sentAt); // this record carries every close made on that desktop (inc-mukeyzpt-lpou) — released once the server READ it (verify r5 ⑤)
+    this.noteSent(desktopId, state);
   }
 
   // ── UI: Ubuntu-style desktop previews in taskbar ──
@@ -494,7 +735,9 @@ export class DesktopManager {
       [...this.app.wm.windows.values()].map(w => [w._desktopId, w.isMinimized,
         !!w._hiddenByDesktop, !!w._hiddenByStage, !!w._onStage,
         !!w.element?.classList.contains('window-waiting'),
-        w.gridBounds ? [w.gridBounds.left, w.gridBounds.top, w.gridBounds.width, w.gridBounds.height] : w.element?.style.left])]);
+        w.gridBounds ? [w.gridBounds.left, w.gridBounds.top, w.gridBounds.width, w.gridBounds.height] : w.element?.style.left]),
+      // the held records draw the windows a desktop holds that the page has not built (userW inc-mun7qjmw-iksh)
+      [...this._savedStates].map(([k, st]) => [k, (st?.windows || []).map((w) => [w.winId || w.id, w.isMinimized ? 1 : 0, w.gridBounds ? [w.gridBounds.left, w.gridBounds.top, w.gridBounds.width, w.gridBounds.height] : 0])])]);
     if (digest === this._switcherDigest) return;
     this._switcherDigest = digest;
     container.innerHTML = '';
@@ -591,14 +834,17 @@ export class DesktopManager {
             if (waiting) deskHasWaiting = true;
           }
         }
-        // Fallback: if no live windows found, use cached state (e.g. after page refresh)
-        if (!winEntries.length) {
-          const cached = this._savedStates.get(desk.id);
-          if (cached?.windows) {
-            for (const ws of cached.windows) {
-              if (ws.gridBounds && !ws.isMinimized) {
-                winEntries.push({ id: ws.winId, gridBounds: ws.gridBounds, waiting: false });
-              }
+        // …and the windows its held record holds that the page has NOT built (a desktop not opened since the page
+        // loaded holds nothing else) — every one of them, beside the live ones: the preview draws the desktop's
+        // record, never just the page's part of it (userW inc-mun7qjmw-iksh: a drop onto such a desktop drew 1
+        // rect of 4 — the fallback ran only when no live window was there)
+        const cached = this._savedStates.get(desk.id);
+        if (cached?.windows) {
+          for (const ws of cached.windows) {
+            const wid = ws.winId || ws.id;
+            if (wid && this.app.wm.windows.has(wid)) continue; // built: drawn above where it lives now
+            if (ws.gridBounds && !ws.isMinimized) {
+              winEntries.push({ id: wid, gridBounds: ws.gridBounds, waiting: false });
             }
           }
         }
@@ -904,34 +1150,18 @@ export class DesktopManager {
 
   // ── Helpers ──
 
-  /** Hide a window without collapsing layout (preserves scroll, DOM state) */
+  /** Hide a window without collapsing layout (preserves scroll, DOM state): the DESKTOP REASON is added through the ONE
+   *  door (WindowManager.setWindowHidden) and every mark is derived there — visibility:hidden + pointer-events (the box
+   *  stays), aria-hidden (2.369.144), a chat's content-visibility:hidden (inc-mtd54h45: the switch repaints from the
+   *  cached rendering instead of re-measuring), the suspended ChatView (inc-mtd1d0ft). This method writes none of them
+   *  (inc-munl8jkl-gaih: the Stage's show forgot one this method wrote — a blank, unclickable window). */
   _hideWin(win) {
-    win._hiddenByDesktop = true;
-    win.element.style.visibility = 'hidden';
-    win.element.style.pointerEvents = 'none';
-    try { win.element.setAttribute('aria-hidden', 'true'); } catch { } // 2.369.144: a desktop-hidden window is not in the accessibility tree
-    // chat views SUSPEND while desktop-hidden — their geometry is meaningless
-    // and the paging machinery must make no decisions off it (inc-mtd1d0ft)
-    try { this.app.sessions?.get(win.id)?.setSuspended?.(true); } catch { }
-    // …and their subtree rendering STOPS ENTIRELY (inc-mtd54h45 "切换桌面还是
-    // 会卡顿"): under bare visibility:hidden the browser still styles/lays out
-    // the whole hidden tree every frame AND discards the content-visibility:
-    // auto items' state as "irrelevant" — the switch then re-measures
-    // everything. content-visibility:hidden skips the subtree AND preserves
-    // its cached rendering state (that is its spec'd difference from 'auto'),
-    // so a switch repaints from cache instead of re-measuring 600-message
-    // windows. Chat windows only — terminals carry WebGL canvases.
-    try { if (win.type === 'chat') win.element.style.contentVisibility = 'hidden'; } catch { }
+    this.app.wm.setWindowHidden(win, { desktop: true });
   }
 
-  /** Show a previously hidden window */
+  /** Show a previously hidden window: the desktop reason goes; the marks follow from whatever reason is left. */
   _showWin(win) {
-    win._hiddenByDesktop = false;
-    win.element.style.visibility = '';
-    win.element.style.pointerEvents = '';
-    try { win.element.removeAttribute('aria-hidden'); } catch { }
-    try { if (win.type === 'chat') win.element.style.contentVisibility = ''; } catch { }
-    try { this.app.sessions?.get(win.id)?.setSuspended?.(false); } catch { }
+    this.app.wm.setWindowHidden(win, { desktop: false });
   }
 
   _generateId() {

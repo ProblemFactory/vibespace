@@ -61,7 +61,8 @@
  * survives a restart. This module owns the first and knows nothing of the
  * other two.
  */
-const { inertFrames, inertFrameLine } = require('./channel-record.js');
+const { inertFrames } = require('./channel-record.js');
+const { toAgentText } = require('./peer-text.js');   // lane peer-census: THE belt (bound → fold → the frame rule per line / piece) every agent-facing line takes
 
 /** The CLOSED rule set. A kind outside it is refused by `validateFilter`. */
 const RULE_KINDS = Object.freeze(['mention', 'keyword', 'sender-in-group', 'from-address', 'subject', 'has-attachment', 'not-contains', 'time-window', 'reply-to-mine', 'in-thread-with-me']);
@@ -927,13 +928,14 @@ const stamp = (at) => { const d = new Date(Number(at)); return Number.isFinite(d
  *  the agent's wake block, plain ASCII), and a clip can leave one too. The
  *  same for an inline piece: the block writes more after it (` at <time>` ⏎
  *  `> …`), so an author name ending in an opener loses its `<`. */
+// lane peer-census (2026-09-29): both helpers are THE BELT (src/peer-text.js) — bound first, the hidden characters
+// folded, the frame rule per line and per inline piece — spelled once for every door peer text takes toward an agent.
 function safeLine(text, max) {
-  const t = inertFrames(clip(str(text).replace(/\r/g, ''), max));
-  return t.split('\n').map((l) => '> ' + inertFrameLine(l)).join('\n');
+  return toAgentText(text, { max, kind: 'block' }).split('\n').map((l) => '> ' + l).join('\n');
 }
 
 function safeInline(text, max) {
-  return inertFrameLine(clip(str(text).replace(/[\r\n\t]+/g, ' '), max));
+  return toAgentText(text, { max, kind: 'line' });
 }
 
 /**

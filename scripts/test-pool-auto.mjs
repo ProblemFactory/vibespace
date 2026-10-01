@@ -526,7 +526,7 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   ck('WIRING PIN: the default site does NOT pin a follower through ensureSessionPoolLink (its CLI never reads a per-session link — see the engine essay)',
     !/ensureSessionPoolLink\([^\n]*warm-soft-defer/.test(eng));
   ck('WIRING PIN: the turn-end boundary is the FIRST STOP (maybePoolAutoSwitch(session, { stop: true }) inside noteTurnEnd)',
-    /function noteTurnEnd\(session\) \{[\s\S]*?maybePoolAutoSwitch\(session, \{ stop: true \}\);[\s\S]*?\n\}/.test(eng));
+    /function noteTurnEnd\(session, rec = null\) \{[\s\S]*?maybePoolAutoSwitch\(session, \{ stop: true \}\);[\s\S]*?\n\}/.test(eng));
   ck('WIRING PIN: EVERY signalled stop of a conversation no longer in a turn forces past the eval gate, owed or not (verifier LOW-2)',
     /const force = stop\n\s*&& !conversationInTurn\(\{ isStreaming: session\._isStreaming, turnState: session\._turnState \}\);/.test(eng));
   ck('WIRING PIN: the authoritative idle record re-decides every pooled conversation\'s stop (noteTurnStopped is not gated on an owed move — LOW-2)',
@@ -537,7 +537,7 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
     (eng.match(/\$\{d\.wouldToName \|\| d\.wouldTo\}/g) || []).length === 4 && !/\$\{d\.wouldTo\}/.test(eng));
   const parse = strip('src/server/stdout/claude-stream-json.js');
   ck('WIRING PIN: the authoritative idle record is the first stop too (claude-stream-json calls noteTurnStopped on a CHANGE to idle)',
-    /if \(changed && st === 'idle'\) \{ try \{ noteTurnStopped\?\.\(session\); \} catch \{ \} \}/.test(parse) && /settleTurnLane, noteTurnStopped \} = engine;/.test(parse));
+    /if \(changed && st === 'idle'\) \{ try \{ noteTurnStopped\?\.\(session\); \} catch \{ \} \}/.test(parse) && /settleTurnLane, noteTurnStopped,\s*noteStreamRecord, recordIsLate \} = engine;/.test(parse));
   const srv = strip('server.js');
   ck('WIRING PIN: server.js destructures noteTurnStopped from the engine AND hands it to the stdout engine literal',
     /notePoolAuthFailure, noteTurnStopped,/.test(srv) && /noteTurnEnd, noteTurnStopped, noteWallSignal,/.test(srv));

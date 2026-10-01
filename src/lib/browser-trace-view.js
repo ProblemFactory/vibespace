@@ -812,9 +812,62 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     cell(row, 'bprof-age', e.startedAt ? t('started {ago}', { ago: agoText(Date.now() - Number(e.startedAt)) }) : '');
     const stop = el('button', 'file-tool-btn bprof-btn bprof-stop', t('Stop'));
     stop.disabled = !e.live;
-    stop.title = e.live ? t('Stop this browser now — the conversation\'s next command starts it again (a login in it is gone)') : t('Not running');
+    // lane browser-resume (§3.9): what a stop keeps is said from the kept fact (its logins + tabs, tabs only, or nothing)
+    stop.title = !e.live ? t('Not running') : (e.kept && e.kept.kind === 'full' ? t('Stop this browser now — its logins and tabs are kept; the conversation\'s next command starts it again') : (e.kept ? t('Stop this browser now — its tabs are kept, a login in it is not; the conversation\'s next command starts it again') : t('Stop this browser now — the conversation\'s next command starts it again (a login in it is gone)')));
     stop.onclick = async () => { stop.disabled = true; const r = await act(`/api/browser/profiles/${encodeURIComponent(String(e.profileId || ''))}/stop`, jsonInit('POST'), t('Could not stop the browser')); if (r) showToast(t('Stopped {label}', { label: String(e.label || '') }), { duration: 4000 }); load(); };
     row.appendChild(stop);
+    return row;
+  }
+  /** lane browser-resume (§3.9): why a kept browser stopped, in the device's words (the store's closed vocabulary). */
+  const keptWhyText = (w) => ({ 'turn-idle': t('released after its turn'), idle: t('idled out'), heal: t('its browser was restarted'), restart: t('VibeSpace restarted'), 'conversation-gone': t('its session ended'), user: t('stopped by you'), agent: t('closed by the agent') }[w] || '');
+  /** lane browser-resume (§3.9): ONE kept browser — a conversation's own browser's logins + tabs after it stopped. KEYED
+   *  (by its browser key, rebuilt only when what it prints moved); Forget only on a stopped one (a running one says so). */
+  const keptRows = new Map(); // browserKey → { row, sig }
+  function keptRow(k) {
+    const row = el('div', 'bprof-row bprof-kept');
+    row.dataset.browserKey = String(k.browserKey || '');
+    const ident = el('div', 'bprof-ident');
+    ident.appendChild(el('span', 'bprof-label', String(k.label || k.browserKey || '')));
+    if (k.kind !== 'full') { const c = el('span', 'bprof-chip', t('tabs only')); c.title = k.kind === 'fenced' ? t('tabs only — this conversation is fenced to allowed domains, its logins are not kept') : t('tabs only — this browser had no folder of its own, its logins are not kept'); ident.appendChild(c); }
+    ident.title = String(k.browserKey || '');
+    row.appendChild(ident);
+    const tabs = Array.isArray(k.tabs) ? k.tabs : [];
+    const tc0 = cell(row, 'bprof-kept-tabs', t('{n} tab(s)', { n: tabs.length }), tabs.map((x) => (x.active ? t('on show') + ': ' : '') + (x.title ? x.title + ' — ' : '') + x.url).join('\n'));
+    tc0.dataset.tabs = String(tabs.length);
+    cell(row, 'bprof-size', k.kind !== 'full' ? '' : (k.bytes === null || k.bytes === undefined ? t('not measured') : bytesText(k.bytes)));
+    const state = k.live ? t('running') : [k.stoppedAt ? t('kept since {ago}', { ago: agoText(Date.now() - Number(k.stoppedAt)) }) : '', keptWhyText(k.stoppedWhy), k.restore && k.restore.mode === 'auto' ? t('its next start reopens its tabs') : ''].filter(Boolean).join(' · ');
+    cell(row, 'bprof-state state-' + (k.live ? 'live' : 'kept'), state);
+    // lane browser-resume B (§3.9, the owner's ruling 2): RESUME — only while a live session carries the key (the route
+    // resolves that session; a stopped conversation's row says what to do instead: never a dead button)
+    if (!k.live && k.carried) {
+      const rs = el('button', 'file-tool-btn bprof-btn bprof-kept-resume', t('Resume'));
+      rs.title = t('Reopen this browser with its last tabs');
+      rs.onclick = async () => {
+        rs.disabled = true;
+        const res = await act(`/api/browser/kept/${encodeURIComponent(String(k.browserKey || ''))}/resume`, jsonInit('POST'), t('Could not resume the browser'));
+        rs.disabled = false;
+        if (res) {
+          const n = Number(res.restored) || 0;
+          showToast(res.already ? t('The browser is running — reconnecting') : n ? t('Resumed — {n} tab(s) reopened', { n }) : t('Resumed — the browser runs again'), { duration: 4000 });
+          if (res.sessionId) { try { app.openBrowserLive?.({ sessionId: res.sessionId }); } catch { /* the live view is optional */ } }
+        }
+        load();
+      };
+      row.appendChild(rs);
+    } else if (!k.live) row.appendChild(el('span', 'bprof-cell bprof-kept-resume-hint chat-status-dim', t('Resume the conversation to reopen its browser')));
+    if (!k.live) {
+      const fg = el('button', 'file-tool-btn bprof-btn bprof-kept-forget', t('Forget'));
+      fg.title = t('Remove this browser\'s kept logins and tabs now');
+      fg.onclick = async () => {
+        const yes = await showConfirmDialog({ title: t('Forget this browser?'), message: t('Its logins and its {n} kept tab(s) are removed. The conversation\'s next browser command starts a fresh one.', { n: tabs.length }), confirmText: t('Forget'), danger: true });
+        if (!yes) return;
+        fg.disabled = true;
+        const res = await act(`/api/browser/kept/${encodeURIComponent(String(k.browserKey || ''))}`, jsonInit('DELETE'), t('Could not forget the browser'));
+        if (res) showToast(t('Forgotten {label}', { label: String(k.label || k.browserKey || '') }), { duration: 4000 });
+        load();
+      };
+      row.appendChild(fg);
+    } else row.appendChild(el('span', 'bprof-cell bprof-kept-live chat-status-dim', t('stop it to forget it')));
     return row;
   }
   function orphanRow(o) {
@@ -887,6 +940,29 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     const erows = Array.isArray(v.ephemeralBrowsers) ? v.ephemeralBrowsers : [];
     if (!erows.length) ephs.appendChild(el('div', 'bprof-empty chat-status-dim', t('None — no conversation has browsed without a profile since its start.')));
     for (const e of erows) ephs.appendChild(ephemeralRow(e));
+    // lane browser-resume (§3.9): the KEPT browsers — keyed rows (a broadcast never rebuilds a row whose words did not move)
+    const kl = v.limits || {};
+    const keptSec = section(t('Kept browsers'), kl.keptTotal ? t('Kept until the conversation ends or the kept browsers pass {size} (each at most {per})', { size: sizeText(kl.keptTotal), per: sizeText(kl.keptPerConversation || 0) }) + (kl.keptOn === false ? ' · ' + t('keeping is off (Settings → Agent browser)') : '') : '');
+    // verify r2 (Y2): the kept sweep's report reaches the user, not only the journal — the total bound held open by
+    // running conversations (never removed) is SAID here with what frees it (a per-row Forget); nothing to free is said too
+    const ksw = v.keptSweep;
+    if (ksw && Number(ksw.used) > Number(ksw.limit) && Array.isArray(ksw.reported)) {
+      const held = ksw.reported.filter((r) => r && r.key && /conversation is running/.test(String(r.why || ''))).length;
+      const p = { used: bytesText(Number(ksw.used) || 0), limit: sizeText(Number(ksw.limit) || 0), n: held };
+      keptSec.appendChild(el('div', 'bprof-kept-report chat-status-dim', held ? t('{used} of {limit} kept — {n} kept browser(s) past the bound are held because their conversations run; Forget frees one', p) : t('{used} of {limit} kept — the running browsers alone pass the bound; nothing can be freed until one stops', p)));
+    }
+    const krows = Array.isArray(v.kept) ? v.kept : [];
+    if (!krows.length) keptSec.appendChild(el('div', 'bprof-empty chat-status-dim', t('None — no conversation\'s browser has stopped with something to keep.')));
+    const kseen = new Set();
+    for (const k of krows) {
+      kseen.add(k.browserKey);
+      const sig = JSON.stringify([k, Math.floor((Date.now() - Number(k.stoppedAt || 0)) / 60000)]);
+      const had = keptRows.get(k.browserKey);
+      let row;
+      if (had && had.sig === sig) row = had.row; else { row = keptRow(k); keptRows.set(k.browserKey, { row, sig }); }
+      keptSec.appendChild(row);
+    }
+    for (const kk of [...keptRows.keys()]) if (!kseen.has(kk)) keptRows.delete(kk);
     const orph = section(t('Unregistered directories'), v.orphansBase ? t('under {base} — a Chromium profile no record names; adopt the ones worth keeping, set the rest aside', { base: String(v.orphansBase) }) : '');
     if (v.orphansWhy) orph.appendChild(el('div', 'bprof-empty chat-status-dim', String(v.orphansWhy)));
     else if (!(v.orphans || []).length) orph.appendChild(el('div', 'bprof-empty chat-status-dim', t('None — every profile directory here is named by a record.')));
@@ -913,12 +989,12 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
   }
   const scheduleLoad = () => { if (st.timer) clearTimeout(st.timer); st.timer = setTimeout(() => { st.timer = null; load(); }, PANEL_REFRESH_DEBOUNCE_MS); };
   // (+ tasks-updated: a Task Group's title / membership on a "Who can use it" chip follows the store)
-  const onGlobal = (m) => { if (st.closed || !m) return; if (m.type === 'browser-housekeeping-updated' || m.type === 'browser-profiles-updated' || m.type === 'browser-trace-appended' || m.type === 'tasks-updated') scheduleLoad(); };
+  const onGlobal = (m) => { if (st.closed || !m) return; if (m.type === 'browser-housekeeping-updated' || m.type === 'browser-profiles-updated' || m.type === 'browser-trace-appended' || m.type === 'tasks-updated' || m.type === 'browser-kept-updated') scheduleLoad(); }; // lane browser-resume: + the kept browsers
   app.ws?.onGlobal?.(onGlobal);
   sweepBtn.onclick = async () => { sweepBtn.disabled = true; const r = await act('/api/browser/housekeeping/sweep', jsonInit('POST'), t('Sweep failed')); sweepBtn.disabled = false; if (r) showToast(t('Sweep: removed the frames of {n} action(s) ({bytes}) and {r} recording(s) ({rbytes})', { n: r.removed || 0, bytes: bytesText(r.bytesRemoved || 0), r: r.recordingsRemoved || 0, rbytes: bytesText(r.recordingBytesRemoved || 0) }), { duration: 6000 }); load(); };
   refreshBtn.onclick = () => load();
   winInfo.onClose = () => { st.closed = true; if (st.timer) clearTimeout(st.timer); try { app.ws?.offGlobal?.(onGlobal); } catch { /* optional */ } };
-  winInfo._browserProfiles = { focusRow, load, whoCell: (id) => whoCells.get(id) || null, state: () => ({ error: st.error, profiles: (st.view?.profiles || []).length, orphans: (st.view?.orphans || []).length, forgotten: (st.view?.forgotten || []).length }) };
+  winInfo._browserProfiles = { focusRow, load, whoCell: (id) => whoCells.get(id) || null, keptRow: (bk) => (keptRows.get(bk) || {}).row || null, state: () => ({ error: st.error, profiles: (st.view?.profiles || []).length, orphans: (st.view?.orphans || []).length, forgotten: (st.view?.forgotten || []).length, kept: (st.view?.kept || []).map((k) => ({ browserKey: k.browserKey, tabs: (k.tabs || []).length, kind: k.kind, live: !!k.live })) }) };
   load();
   return winInfo;
 }

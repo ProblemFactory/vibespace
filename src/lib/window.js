@@ -6,8 +6,8 @@ import { showWindowContextMenu } from './taskbar.js';
 import { installTabGroupMixin } from './tab-group.js';
 import { windowTypeIcon } from './window-types.js';
 import { createAgentKindIcon, createBackendIcon, createModeBackendIcon, getAgentKindMeta } from './agent-meta.js';
-import { HIDE_REASONS, hiddenReasons } from './view-visibility.js';
-import { placementNote } from './pool-priority-model.js'; // 2026-09-28: which rule placed a pooled conversation, in words (PURE)
+import { HIDE_REASONS, hiddenReasons, windowMarks } from './view-visibility.js';
+import { placementNote, billingAuthKey } from './pool-priority-model.js'; // 2026-09-28: which rule placed a pooled conversation, in words (PURE); 2026-09-30 THE ONE billing re-render key
 import { chipMode, chipWords, titleMinText, CHIP_MODES } from './title-chips.js'; // THE TITLE WINS (lane G): the billing chip's form per title bar / tab
 import { stageRefusalWords } from './stage-rules.js'; // inc-muly2izg-cks3: the Stage's move refusal in words (PURE)
 import { STAGE_ID } from './stage-manager.js';
@@ -113,7 +113,7 @@ class WindowManager {
 
     const winInfo = { id, element: el, titleBar, titleSpan, iconSpan, iconWrap, backendIconSlot, agentKindSlot, content, title, type,
       isMaximized: false, isMinimized: false, prevBounds: null, onResize: null, onClose: null, exited: false, minWidth: null, minHeight: null, paneMinWidth: null,
-      _typeIcon: windowTypeIcon(type), _tabChain: null, titleMeta: { ...(titleMeta || {}) },
+      _typeIcon: windowTypeIcon(type), _tabChain: null, titleMeta: { ...(titleMeta || {}) }, _bornAt: Date.now(), // _bornAt: a record received before this instant cannot know the window (layout.js's apply)
       // All document-level listeners for this window register with this signal
       // and are removed together on close (they used to leak per window).
       _listenerCtl: new AbortController() };
@@ -126,11 +126,11 @@ class WindowManager {
       if (btn.classList.contains('no-overlap')) return;
       this._showOverlapSwitcher(winInfo, e.clientX, e.clientY);
     };
-    controls.querySelector('.win-minimize').onclick = (e) => { e.stopPropagation(); this.minimize(winInfo.id); };
-    controls.querySelector('.win-maximize').onclick = (e) => { e.stopPropagation(); this.toggleMaximize(winInfo.id); };
+    controls.querySelector('.win-minimize').onclick = (e) => { e.stopPropagation(); this.witnessGeometry(winInfo.id); this.minimize(winInfo.id); }; // the user's act: witnessed (verify r4 ③)
+    controls.querySelector('.win-maximize').onclick = (e) => { e.stopPropagation(); this.witnessGeometry(winInfo.id); this.toggleMaximize(winInfo.id); };
     controls.querySelector('.win-close').onclick = (e) => { e.stopPropagation(); this.requestClose(winInfo.id); };
     el.addEventListener('mousedown', (e) => this._focusFromPointer(winInfo, e));
-    titleBar.addEventListener('dblclick', (e) => { if (!e.target.closest('.window-controls')) this.toggleMaximize(winInfo.id); });
+    titleBar.addEventListener('dblclick', (e) => { if (!e.target.closest('.window-controls')) { this.witnessGeometry(winInfo.id); this.toggleMaximize(winInfo.id); } });
     // Right-click on title bar (2.212.0): full window menu — the old direct
     // overlap-switcher popup now lives inside it as the "Switch window"
     // submenu (scope configurable via window.titlebarSwitchScope). The □
@@ -160,6 +160,20 @@ class WindowManager {
   // ── Grid Bounds Tracking ──
   // Store window position as fractions of workspace (0-1) so it scales with resize.
   // Set on grid snap or applyLayout. Updated on user resize. Cleared on manual drag or freeform.
+  /** THE GEOMETRY WITNESS of a USER's act on a window (verify r2 ⑩ / r3 ① / r4 ③): `win._boundsAt`, read by the layout
+   *  manager's held geometry (a record that cannot know the act neither undoes it nor swallows its save — actHeld).
+   *  Stamped by the act itself and ONLY by it: the drag's / the resize's pointerup (below), and the maximize, minimize,
+   *  restore, snap and move-mode placement the user asked for (the title-bar buttons and double-click, the taskbar and
+   *  the window menu, command mode) — never by a record's apply, a replay, a preset or the boot (r3 ①: a witness stamped
+   *  by what could have made the act held another client's move off this page; a replay-stamped witness would hold
+   *  that client's un-maximize for a minute and re-send the old state over it). A grouped guest's act is its host's. */
+  witnessGeometry(id) {
+    const w = this.windows.get(id); if (!w) return;
+    w._boundsAt = Date.now();
+    const host = w._tabChain && this.windows.get(w._tabChain.tabs[0]);
+    if (host && host !== w) host._boundsAt = w._boundsAt;
+  }
+
   _captureGridBounds(win) {
     // Stage slot: geometry edits on the placeholder OR the hero persist the
     // shared slot record (user decision: hero resize edits the slot).
@@ -605,6 +619,11 @@ class WindowManager {
       mouseDown = false;
       if (!dragging) return;
       dragging = false;
+      // THE HELD GEOMETRY's witness (verify r2 ⑩): a record received before this instant cannot know where the user
+      // dropped the window. Stamped only by a press that DRAGGED (past the threshold): a click-to-focus on the title
+      // bar dragged nothing, yet it held another client's move of that window off this page and this page's next
+      // save wrote the old box over it (verify r3)
+      win._boundsAt = Date.now();
       const refusal = deskRefusal; deskRefusal = null;
       clearDragVisuals();
 
@@ -838,9 +857,9 @@ class WindowManager {
         };
         // rAF-coalesce: win.onResize() per raw mousemove means an xterm fit()
         // reflow at pointer rate while resizing a terminal — cap it per frame.
-        let pendingEv = null, raf = 0;
+        let pendingEv = null, raf = 0, resized = false;
         const onMove = (e) => {
-          pendingEv = e;
+          pendingEv = e; resized = true; // a press on the handle that never moved is not a resize (verify r3)
           if (raf) return;
           raf = requestAnimationFrame(() => { raf = 0; const ev = pendingEv; pendingEv = null; if (ev) processMove(ev); });
         };
@@ -853,6 +872,7 @@ class WindowManager {
           feed?.abort();
         };
         const onUp = () => {
+          if (resized) win._boundsAt = Date.now(); // THE HELD GEOMETRY's witness (verify r2 ⑩): the resize is the user's, newer than any record received before it; a press that moved nothing holds nothing (verify r3)
           detach();
           // Update gridBounds after resize (if window was grid-tracked, keep tracking with new proportions)
           if (win.gridBounds) this._captureGridBounds(win);
@@ -1123,6 +1143,7 @@ class WindowManager {
     if (!win || !this.grid) return;
     const totalCells = this.grid.rows * this.grid.cols;
     if (cellIdx < 0 || cellIdx >= totalCells) return; // bounds check
+    this.witnessGeometry(win.id); // command mode's digits — the user's act (verify r5 ③)
     this._positionToCell(win, cellIdx, true);
     setTimeout(() => this._captureGridBounds(win), 250);
   }
@@ -1130,6 +1151,7 @@ class WindowManager {
   // Snap a window to half the workspace without changing the grid
   snapToHalf(winId, side) {
     const win = this.windows.get(winId); if (!win) return;
+    this.witnessGeometry(winId); // command mode's ← → ↑ ↓ — the user's act (verify r4 ③: a record deferred under the cooldown snapped it back)
     const r = { width: this.workspace.offsetWidth, height: this.workspace.offsetHeight }, g = 4; // layout px (F1)
     const el = win.element;
     const zones = {
@@ -1244,7 +1266,7 @@ class WindowManager {
     const host = (ch && this.windows.get(ch.tabs[0])) || win;
     // the stage materializes FRAMES: a group member goes on stage as its host (a member's own element is never displayed)
     const focusId = ch && host.id !== id && this._app?.stage?.shouldIntercept?.(win) ? host.id : id;
-    if (host.isMinimized) this.restore(focusId);
+    if (host.isMinimized) { this.witnessGeometry(focusId); this.restore(focusId); } // the user named it: its restore is the user's act (verify r4 ③)
     else this.focusWindow(focusId);
     return true;
   }
@@ -1301,30 +1323,89 @@ class WindowManager {
    *  windows). ONE derivation (src/lib/view-visibility.js) over the classes
    *  this manager writes, called at every site that changes them (focus, tab
    *  switch, minimize/restore, a view registering, the breakpoint flipping);
-   *  the view keeps a reason SET so the desktop hider and these compose. */
+   *  the view keeps a reason SET so every hider composes.
+   *  inc-munl8jkl-gaih: the SAME derivation now also owns the element's marks
+   *  (visibility / pointer-events / aria-hidden / a chat's content-visibility)
+   *  and the two visibility hiders' reasons (a desktop, the Stage) — see
+   *  setWindowHidden / _deriveHiders below. */
   syncHiddenViews() {
-    const app = this._app; if (!app?.sessions) return;
     const mobile = this._mobileLayout();
-    for (const w of this.windows.values()) {
-      const sess = app.sessions.get(w.id);
-      if (!sess || typeof sess.setHidden !== 'function') continue;
-      const top = (w._tabChain && this.windows.get(w._tabChain.tabs[0])) || w; // a guest is displayed through its host
-      // §4.6: on the narrow layout a split shows only its focused pane (CSS) — the other pane is a hidden tab
-      const narrowHidden = !!(mobile && w._tabChain && w._tabChain.layout === 'split' && !displayedPanes(w._tabChain, { narrow: true }).includes(w.id));
-      const reasons = hiddenReasons({
-        mobile,
-        active: !!top.element?.classList?.contains('window-active'),
-        tabHidden: !!w.content?.classList?.contains('tab-hidden') || narrowHidden,
-        minimized: !!top.isMinimized,
-      });
+    for (const w of this.windows.values()) this._deriveHiders(w, mobile);
+  }
+
+  /** THE ONE DOOR A VISIBILITY HIDER USES (inc-munl8jkl-gaih, 2026-09-30, userW: a conversation brought onto the Stage
+   *  from another desktop came up as an empty box that ignored clicks). A desktop that goes off screen, the Stage that
+   *  parks or borrows a window — each only ADDS or REMOVES its reason here (`{desktop, stage}`, a key left out is left
+   *  as it is); every mark on the element and the ChatView's suspension is then DERIVED, for the window's whole frame
+   *  (a tab chain's members are drawn by its host). Before, each hider wrote the marks itself and the Stage's show
+   *  forgot the desktop's content-visibility: the whole window, title bar included, went undrawn. test-stage-visibility
+   *  holds every writer of the flags and of content-visibility / aria-hidden on a window to this door and the one
+   *  derivation, by name. */
+  setWindowHidden(win, reasons = {}) {
+    if (!win) return;
+    if (reasons && Object.prototype.hasOwnProperty.call(reasons, 'desktop')) win._hiddenByDesktop = !!reasons.desktop;
+    if (reasons && Object.prototype.hasOwnProperty.call(reasons, 'stage')) win._hiddenByStage = !!reasons.stage;
+    this.syncFrameHiders(win);
+  }
+
+  /** Re-derive one window's FRAME: the window and every member of the chain it shows in (a guest's content lives in
+   *  its host's element, so a host's hider is its guests' hider). */
+  syncFrameHiders(win) {
+    if (!win) return;
+    const mobile = this._mobileLayout();
+    const ch = win._tabChain;
+    const frame = [win, ...(ch && Array.isArray(ch.tabs) ? ch.tabs.map((id) => this.windows.get(id)) : [])];
+    const seen = new Set();
+    for (const w of frame) { if (w && !seen.has(w)) { seen.add(w); this._deriveHiders(w, mobile); } }
+  }
+
+  /** THE ONE DERIVATION of a window's hidden state: its reason set (view-visibility.js hiddenReasons — the FRAME's
+   *  desktop / Stage / minimized flags, a guest being drawn through its host; the narrow layout; its own tab) → the
+   *  element's marks (PURE windowMarks) and the ChatView's per-reason suspension. Nobody else writes those marks. */
+  _deriveHiders(w, mobile = this._mobileLayout()) {
+    if (!w) return null;
+    const top = (w._tabChain && this.windows.get(w._tabChain.tabs[0])) || w; // a guest is displayed through its host
+    // §4.6: on the narrow layout a split shows only its focused pane (CSS) — the other pane is a hidden tab
+    const narrowHidden = !!(mobile && w._tabChain && w._tabChain.layout === 'split' && !displayedPanes(w._tabChain, { narrow: true }).includes(w.id));
+    const reasons = hiddenReasons({
+      desktop: !!top._hiddenByDesktop,
+      stage: !!top._hiddenByStage,
+      mobile,
+      active: !!top.element?.classList?.contains('window-active'),
+      tabHidden: !!w.content?.classList?.contains('tab-hidden') || narrowHidden,
+      minimized: !!top.isMinimized,
+    });
+    this._applyHiderMarks(w, windowMarks(reasons, { type: w.type }));
+    const sess = this._app?.sessions?.get(w.id);
+    if (sess && typeof sess.setHidden === 'function') {
       for (const r of HIDE_REASONS) { try { sess.setHidden(r, reasons[r]); } catch { } }
+    }
+    return reasons;
+  }
+
+  /** Write the derived marks where the element differs (a stray mark is healed, an equal one is not touched — no
+   *  style / accessibility invalidation for nothing). A window under a live title-bar drag LENDS its visibility and
+   *  pointer-events to the drag's preview ghost (the drag over a desktop preview hides it and gives them back at the
+   *  drop): a derivation that finds it shown never takes them back mid-drag. */
+  _applyHiderMarks(w, m) {
+    const el = w.element; if (!el || !el.style) return;
+    const lent = !m.ariaHidden && !!el.classList?.contains?.('dragging');
+    if (!lent) {
+      if ((el.style.visibility || '') !== m.visibility) el.style.visibility = m.visibility;
+      if ((el.style.pointerEvents || '') !== m.pointerEvents) el.style.pointerEvents = m.pointerEvents;
+    }
+    if ((el.style.contentVisibility || '') !== m.contentVisibility) el.style.contentVisibility = m.contentVisibility;
+    const aria = typeof el.getAttribute === 'function' && el.getAttribute('aria-hidden') === 'true';
+    if (aria !== m.ariaHidden) {
+      if (m.ariaHidden) el.setAttribute('aria-hidden', 'true'); // 2.369.144: a hidden window is not in the accessibility tree
+      else el.removeAttribute('aria-hidden');
     }
   }
 
   // Move mode: window attaches to cursor, click to place (for recovering off-screen windows)
   startMoveMode(id) {
     const win = this.windows.get(id); if (!win) return;
-    if (win.isMinimized) this.restore(id);
+    if (win.isMinimized) { this.witnessGeometry(id); this.restore(id); }
     this.focusWindow(id);
     const el = win.element;
 
@@ -1385,6 +1466,7 @@ class WindowManager {
       el.style.zIndex = this.zIndex++;
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mousedown', onClick, true);
+      this.witnessGeometry(win.id); // the placement click is the user's act (verify r4 ③)
       this._captureGridBounds(win);
       this._notify();
     };
@@ -1624,7 +1706,7 @@ class WindowManager {
   // (the CLI's init record) or change across a resume.
   setAuthBadge(id, auth) {
     const win = this.windows.get(id); if (!win) return;
-    const key = auth ? `${auth.source}:${auth.name || ''}:${auth.poolTarget || ''}:${auth.hostName || ''}:${auth.guessed ? 1 : 0}:${placementNote(auth, t)}` : '';
+    const key = billingAuthKey(auth, t); // THE ONE key (PURE, shared with the phone's status-bar chip): a census of what the chip prints
     win._authBadge = auth; // kept for re-apply after tab-bar rebuilds
     // No-op guard, but SELF-HEALING: tab-bar re-renders (switch/merge/detach/
     // drag) rebuild the tab DOM and destroy the badge span — with a pure key
@@ -1881,6 +1963,15 @@ class WindowManager {
       if (value == null || value === '') delete nextMeta[key];
       else nextMeta[key] = value;
     }
+    // No-op guard (setTitle's twin, lane badge-stale 2026-09-30): app.syncSessionIdentity writes EVERY session
+    // window's meta on EVERY merge (the 5 s poll + every active-sessions frame). Unguarded, each call re-built the
+    // icon slots, re-rendered the WHOLE tab strip of a grouped window — every tab's billing chip destroyed and
+    // re-made from `_authBadge` (never the same node twice; a hover / a press on a tab lost every 5 s) — and
+    // re-notified the manager (taskbar, autosave) per window per merge. A caller that wants a strip re-drawn
+    // without a meta change calls _renderTabBar itself (desktop-app-window.js's app icon).
+    const prevMeta = win.titleMeta || {};
+    const prevKeys = Object.keys(prevMeta), nextKeys = Object.keys(nextMeta);
+    if (prevKeys.length === nextKeys.length && nextKeys.every((k) => prevMeta[k] === nextMeta[k])) return;
     win.titleMeta = nextMeta;
     this._applyTitleMeta(win);
     if (win._tabChain) this._renderTabBar(win._tabChain);
@@ -1920,6 +2011,7 @@ class WindowManager {
     // Round-robin: all windows get a cell, wrapping around if more windows than cells
     visible.forEach((w, i) => {
       const cellIdx = i % totalCells;
+      this.witnessGeometry(w.id); // a preset is the user's act on every window it places (verify r5 ③: a record deferred under the second after it put every window back)
       this._positionToCell(w, cellIdx, true);
       setTimeout(() => { this._captureGridBounds(w); if (w._tabChain) this._syncChainBounds(w._tabChain); }, 250);
     });

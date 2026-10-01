@@ -108,7 +108,7 @@ function openInterruption(prev, { takenAt = 0, inFlight = [], aborted = [] } = {
   // a CLOSED previous cycle hands on the ids it already counted (`seen`): a command whose result the trace never got is
   // told once, never again at every later takeover
   const seen = open ? (open.seen || []) : p ? (p.seen || []).concat(p.inFlight.map((x) => x.id)).slice(-SEEN_CAP) : [];
-  const base = open || { openedAt: num(takenAt), inFlight: [], aborted: [], refused: [], takeovers: 0, closedAt: 0, seen };
+  const base = open || { openedAt: num(takenAt), inFlight: [], aborted: [], refused: [], userActs: [], takeovers: 0, closedAt: 0, seen };
   const ids = new Set(base.inFlight.map((x) => x.id).concat(seen));
   const inF = base.inFlight.slice();
   for (const x of Array.isArray(inFlight) ? inFlight : []) { if (!x || x.id == null || ids.has(String(x.id))) continue; ids.add(String(x.id)); inF.push({ id: String(x.id), verb: String(x.verb || verbOfAction(x.action)), at: num(x.at) }); }
@@ -124,6 +124,28 @@ function noteRefused(cycle, { verb = '', at = 0 } = {}) {
   if (!v) return cycle;
   const refused = cycle.refused.concat([{ verb: v, at: num(at) }]).slice(-RING);
   return { ...cycle, refused };
+}
+/** lane browser-resume C (the owner's ruling 3): what the USER did to the agent's tabs while he drove — a switch, a close
+ *  from the live view's tab row — goes on the open cycle (bounded, the newest kept) and is SAID at the handback (never a
+ *  delivery of its own). `act` = {kind:'tab-close'|'tab-switch', title, url, at} (the keeper passes the page's words
+ *  through the kept store's doors first). */
+const USER_ACT_KINDS = Object.freeze(['tab-close', 'tab-switch']);
+const USER_ACTS_CAP = 16;
+function noteUserAct(cycle, act) {
+  if (!cycle || typeof cycle !== 'object' || cycle.closedAt) return cycle || null;
+  const a = act && typeof act === 'object' && USER_ACT_KINDS.includes(act.kind) ? { kind: act.kind, title: String(act.title || '').slice(0, 300), url: String(act.url || '').slice(0, 2048), at: num(act.at) } : null;
+  if (!a) return cycle;
+  return { ...cycle, userActs: (Array.isArray(cycle.userActs) ? cycle.userActs : []).concat([a]).slice(-USER_ACTS_CAP) };
+}
+/** verify F3: an act recorded at its check whose exec then FAILED is taken back (the newest record of that kind + instant
+ *  + url) — the handback never tells the agent of a close that did not happen. A closed cycle is left as it is. */
+function dropUserAct(cycle, act) {
+  if (!cycle || typeof cycle !== 'object' || cycle.closedAt || !act || typeof act !== 'object') return cycle || null;
+  const list = Array.isArray(cycle.userActs) ? cycle.userActs : [];
+  let i = list.length - 1;
+  for (; i >= 0; i--) { const a = list[i]; if (a && a.kind === act.kind && a.at === num(act.at) && a.url === String(act.url || '').slice(0, 2048)) break; }
+  if (i < 0) return cycle;
+  return { ...cycle, userActs: list.slice(0, i).concat(list.slice(i + 1)) };
 }
 /** The handback CLOSES the cycle (a closed cycle takes no more refusals; the next takeover opens a new one). */
 function closeInterruption(cycle, { at = 0 } = {}) {
@@ -154,7 +176,7 @@ function interruptionView(cycle) {
   // verify r6: `terminated` = the CDP sessions a Runtime.terminateExecution went to (one per session that had an aborted
   // SCRIPT call — the mediator's plan) — the live view tells the human that a script running in the page was stopped
   const terminated = new Set(c.aborted.filter((a) => SCRIPT_METHODS.includes(a.method)).map((a) => a.sessionId || '(page)')).size;
-  return { openedAt: num(c.openedAt), takeovers: num(c.takeovers), n: ops.n, verbs: ops.verbs, aborted: c.aborted.length, terminated, refused: uniq(c.refused.map((r) => r.verb)), rerun: interruptedVerbs(c), closedAt: num(c.closedAt) };
+  return { openedAt: num(c.openedAt), takeovers: num(c.takeovers), n: ops.n, verbs: ops.verbs, aborted: c.aborted.length, terminated, refused: uniq(c.refused.map((r) => r.verb)), rerun: interruptedVerbs(c), userActs: Array.isArray(c.userActs) ? c.userActs.slice() : [], closedAt: num(c.closedAt) };
 }
 
 const listText = (verbs, max = 8) => { const v = uniq(verbs); return v.length > max ? `${v.slice(0, max).join(', ')} and ${v.length - max} more` : v.join(', '); };
@@ -180,5 +202,6 @@ function rerunSentence(verbs) {
 module.exports = {
   INTERRUPTED_CODE, INTERRUPTED_TEXT, interruptedText, SCRIPT_METHODS, NOT_AN_OPERATION, VERB_OF_ACTION, verbOfAction, isOperation, IN_FLIGHT_MAX_MS, SEEN_CAP,
   noteRecord, inFlightAt, openInterruption, noteRefused, closeInterruption, operationsOf, interruptedVerbs, interruptionView,
+  USER_ACT_KINDS, USER_ACTS_CAP, noteUserAct, dropUserAct, // lane browser-resume C: the user's tab acts while he drove
   takeoverText, rerunSentence,
 };

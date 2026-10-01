@@ -49,6 +49,12 @@
 // returns at once, `[dialog_open]`, its sentence FIRST (what the page asks, and `vibespace-browser dialog accept [text]
 // | dismiss`), and every verb after it says the same until it is answered; `dialog status|accept|dismiss` answer it.
 //
+// A PAGE THAT WILL NOT SETTLE IS A FACT OF YOUR VERB (lane site-reset, 2026-09-30): a tab that keeps navigating by
+// itself (a stale stored login bouncing a sign-in page and its app) is judged a NAVIGATION LOOP by VibeSpace's watch —
+// the verb that runs into it returns at once, `[navigation_loop]`, its sentence FIRST (the cycle's addresses and the
+// ways out: `stop`, `tab close`, `site-reset <host>`); every page-waiting verb after it says the same while it stands,
+// and the ways out still run (a screenshot of it is bounded: a page that never draws has no picture to take).
+//
 // EXIT CODES: 0 ok · 1 a typed refusal, or the page command itself failed ·
 // 2 usage / not in a session / unknown_verb · 3 the server is unreachable.
 'use strict';
@@ -104,9 +110,15 @@ PAGE VERBS (your own browser, or the attachment you name):
   vibespace-browser get text|html|value|title|url @ref · is visible @ref · find role button click --name …
   vibespace-browser screenshot <path> [--annotate] · pdf <path> · eval "<js to READ the page>"
                                                   (files are written under the project, /tmp or ~/Downloads only)
-  vibespace-browser tab list|new|close|<n> · back · forward · reload · wait <ms|@ref> · scroll down 600
+  vibespace-browser tab list|new [url]|close [id]|<id> · back · forward · reload · wait <ms|@ref> · scroll down 600
+                                                  (YOUR tabs only: on a shared profile another conversation's or the
+                                                  user's tab is counted, never listed, switched to or closed — not_your_tab)
   vibespace-browser dialog status | accept [text] | dismiss   a page dialog (confirm / prompt / leave-page) holds the page
                                                   until answered — a verb that meets one says [dialog_open] and names it
+  vibespace-browser stop                          stop the current tab loading (at once, even while it loops)
+  vibespace-browser site-reset <host> | --host <h>   clear ONE site's stored login (its cookies + its storage) in your
+                                                  own browser; on a shared profile it is a proposal the user approves
+                                                  (a verb that meets a page looping by itself says [navigation_loop])
   vibespace-browser cookies|storage|state save <f>  (their OUTPUT is a secret — never echo it)
   vibespace-browser batch "open <url>" "snapshot -i"   several verbs, judged line by line before any runs
                                                   (or on stdin: one command per line, or [["open","<url>"],["snapshot","-i"]])
@@ -126,6 +138,9 @@ YOURS:
                                                   tab); --sharing instance = each conversation sees only its own tabs
   vibespace-browser use <label|id> [--alias <h>]  attach to it; your page verbs then run there (one conversation
                                                   drives a shared browser at a time: browser_busy names who does)
+  vibespace-browser resume                        start THIS conversation's own browser again with its kept tabs (same
+                                                  order, the same tab on show) — or, while it runs, reopen the tabs a
+                                                  close kept (its logins stay either way; a command's note names them)
   vibespace-browser detach [--profile <handle>]   drop my lease (the browser idles out once nobody holds it;
                                                   this conversation's own ephemeral browser stops at once);
                                                   refused [browser_paused] while the user has taken it over
@@ -134,7 +149,8 @@ YOURS:
   vibespace-browser providers [--host <machine>]  which providers can run here (or there), and why not
   vibespace-browser backend [<name>] [--confirm-downgrade]   which backend; PROPOSE a switch (the user decides)
   vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2|3] [--remember]
-                                                  I was blocked on this page — a CLAIM, not a detection
+                                                  I was blocked on this page — a CLAIM, not a detection; tier 2 puts ONE
+                                                  proposal card (switch to CloakBrowser) in the user's chat for their Approve
   vibespace-browser watch                         how the user's live view / takeover works (browser_paused,
                                                   browser_interrupted)
   --profile <handle> (any command) names one attachment; ≥2 attachments ⇒ required (or VIBESPACE_BROWSER)
@@ -188,11 +204,47 @@ const handlesLine = (handles) => (handles && handles.length ? handles.map((h) =>
 /** A refusal from /resolve is TYPED (§3.8): print the code, the handles and — for profile_changed — was → now. */
 /** P4 (§7.4): the verbs that navigate — their URL is stamped on the lease (what a backend switch re-opens) and their output is read for the 403/429 HINT. */
 const NAV_VERBS = new Set(['open', 'goto', 'navigate', 'nav']);
+/** lane site-reset: the loop's ways out where the rules file beside this one predates the loop (the same list as
+ *  src/browser-stuck.js LOOP_PASS_VERBS — pinned equal by test-browser-stuck), and a looping tab's screenshot bound. */
+const LOOP_PASS_FALLBACK = new Set(['stop', 'site-reset', 'tab', 'close', 'screenshot', 'dialog', 'open', 'goto', 'navigate', 'nav', 'back', 'forward', 'reload']);
+/** verify r4 #4: the READING verbs (src/browser-stuck.js LOOP_READ_VERBS, pinned equal) — they run on a loop whose pages load between hops. */
+const LOOP_READ_FALLBACK = new Set(['snapshot', 'get', 'is', 'console', 'errors']);
+const LOOP_SHOT_MS = 4000;
 /** A real 403/429 in a navigation's output yields a HINT that names its source — worded so it cannot be read as a detection (§7.6 rule 5). */
 function navHint(text) {
   const m = /\b(?:HTTP\s*|status(?:Code)?\W{0,3})(403|429)\b/i.exec(String(text || ''));
   if (!m) return null;
   return `hint: may-need-cloak — HTTP ${m[1]} is a hint from the status code, not a detection: the page may need a tier-2 backend; \`vibespace-browser blocked --url <u> --why http-${m[1]}\` records your claim (the user decides)`;
+}
+/** lane browser-propose step 2: a navigation's FINAL url + title off the browser CLI's own result — `--json`'s
+ *  `{data:{url,title}}`, else its text form (0.38.1: "✓ <title>\n  <url>"). The server judges them against its sign-in
+ *  refusal table (the audit answer's `hint`); null when neither form reads. */
+function navFacts(outText) {
+  const s = String(outText || '');
+  for (const line of s.split('\n').reverse()) {
+    const l = line.trim();
+    if (!l.startsWith('{')) continue;
+    try { const j = JSON.parse(l); const d = j && j.data; if (d && typeof d.url === 'string') return { url: d.url.slice(0, 4096), title: typeof d.title === 'string' ? d.title.slice(0, 4096) : '' }; } catch { /* not the result line */ }
+  }
+  const m = /^✓ ?(.*)\r?\n[ \t]+(\S+)[ \t]*$/m.exec(s);
+  return m ? { title: m[1].trim().slice(0, 4096), url: m[2].slice(0, 4096) } : null;
+}
+/** lane site-reset verify r4 #1: a `tab new` that succeeded NAMES its tab — the binary's own `--json` ack (`data.targetId`),
+ *  else the session's `tab list --json` active tab (0.38.1: a new tab becomes the session's active one; measured ≤ 80 ms,
+ *  bounded here) — handed to the server with the audit so the watch binds the tab to THIS conversation, never to the verb
+ *  that happened to be in flight (two commands at once left it nobody's: a loop in it was never told, `stop` found nothing). */
+function tabNewAck(outText, { bin, env, cwd, wantsJson }) {
+  const idOf = (x) => (typeof x === 'string' && /^[0-9A-Za-z_-]{4,64}$/.test(x) ? x : null);
+  const lastJson = (text, pick) => { for (const line of String(text || '').split('\n').reverse()) { const l = line.trim(); if (!l.startsWith('{')) continue; try { const v = pick(JSON.parse(l)); if (v) return v; } catch { /* not the result line */ } } return null; };
+  if (wantsJson) return Promise.resolve(lastJson(outText, (j) => idOf(j && j.data && j.data.targetId)) ? { targetId: lastJson(outText, (j) => idOf(j && j.data && j.data.targetId)), via: 'json' } : null);
+  return new Promise((resolve) => {
+    let out = ''; let c = null;
+    try { c = spawn(bin, ['tab', 'list', '--json'], { stdio: ['ignore', 'pipe', 'ignore'], env, cwd }); } catch { return resolve(null); }
+    const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch { /* ended */ } resolve(null); }, 3000);
+    c.stdout.on('data', (d) => { out += d; });
+    c.on('error', () => { clearTimeout(t); resolve(null); });
+    c.on('exit', () => { clearTimeout(t); const id = lastJson(out, (j) => { const tabs = j && j.data && Array.isArray(j.data.tabs) ? j.data.tabs : null; const act = tabs ? tabs.find((x) => x && x.active) : null; return idOf(act && act.targetId); }); resolve(id ? { targetId: id, via: 'list' } : null); });
+  });
 }
 function printRefusal(r) {
   console.error(`${r.error || r.code} [${r.code}]`);
@@ -249,6 +301,16 @@ function printInterrupted(it, code) {
   else if (code === 0) console.error('  this browser is not shared instance-wide, so nothing stood between your command and the page: it ran to its end while the user drove — check the page before relying on its result');
 }
 
+/** lane browser-resume C: the profile an attachment answer names (the audit line's). */
+function profileId0(r) { return r && r.profile && r.profile.id ? r.profile.id : null; }
+/** lane browser-resume B: ONE note line per kept-browser fact of an answer (the server's own sentence). */
+function printKept(r) {
+  if (!r || typeof r !== 'object') return;
+  if (r.resumed && r.resumed.text) console.error(`note: ${r.resumed.text} [browser_resumed]`);
+  if (r.restored && r.restored.text) console.error(`note: ${r.restored.text} [browser_restored]`);
+  if (r.kept && typeof r.kept === 'object' && r.kept.text) console.error(`note: ${r.kept.text} [browser_kept]`);
+  if (r.notKept && typeof r.notKept === 'object' && r.notKept.text) console.error(`note: ${r.notKept.text} [browser_not_kept]`); // verify r2 (D6): a helper's first answer
+}
 /** A LOCAL refusal (never a server call): the words, the code, the way out. */
 function refuseLocally(r, exitCode = 1) {
   console.error(`${r.error} [${r.code}]`);
@@ -535,6 +597,9 @@ async function runPage(c) {
   if (r.minted) console.error(`note: this session had no browser yet — VibeSpace gave it one now (${r.minted.origin === 'conversation' ? 'its conversation\'s own, kept from before' : 'new'}); nothing needs restarting [browser_key_minted]`);
   // lane headless-fallback: THIS command launched the browser headless (the machine has no desktop session) — said once per launch
   if (r.displayNote) console.error(`note: ${r.displayNote}`);
+  // lane browser-resume B (§3.9): what this command's start did with the conversation's KEPT browser — its tabs reopened by
+  // themselves, the user resumed it / handed it back (the tab that is current), or its tabs kept for `resume`
+  printKept(r);
   // lane browser-stuck: what the dialog watch sees on this browser BEFORE the verb runs — a dialog still open (rule 2:
   // said FIRST, the verb does not run behind it), the notes not told yet (an alert accepted, a user's answer), an
   // unresponsive page. `words` = the verb as typed (its positional words).
@@ -554,10 +619,67 @@ async function runPage(c) {
     else console.log(open.text + (lead ? '\n' + lead : ''));
     console.error('[dialog_open]');
   };
+  // lane browser-resume C (§3.9, the owner's ruling 3): on a SHARED profile's browser (an attachment that is not "separate
+  // tabs") every session lists every page and the binary's `tab close <ref>` closes ANY tab (measured on 0.38.1) — the
+  // `tab` verbs are the SERVER's there (its own tabs only, judged before anything runs), and a batch never carries one
+  const tabFenced = r.kind === 'attachment' && !r.mediated;
+  if (tabFenced && cls.verb === 'batch') {
+    let cmds = [];
+    if (framed.stdinJson != null) { try { cmds = JSON.parse(framed.stdinJson).map((c) => (Array.isArray(c) ? c.map(String) : [])); } catch { cmds = []; } }
+    else { const vi = V.verbAt(cls.argv); cmds = cls.argv.filter((t, i) => i > vi && !(typeof t === 'string' && t.length > 1 && t[0] === '-')).map((l) => V.splitWords(String(l).trim())).filter((w) => w.length && !String(w[0]).startsWith('#')); }
+    if (cmds.some((w) => w[V.verbAt(w)] === 'tab')) refuseLocally({ code: 'tab_in_batch', error: 'a `tab` line cannot run inside a batch on a shared profile\'s browser — its tabs are judged one command at a time (yours only); nothing ran', remedy: 'run the tab verb on its own (`vibespace-browser tab list`), then the batch' });
+  }
+  if (tabFenced && words0[0] === 'tab') { // (a page dialog never lets the binary's unfenced `tab` run instead — the server lists and closes by the CDP's own)
+    // integration 2.369.199 (lane site-reset × lane browser-resume): while a NAVIGATION LOOP stands on this conversation's
+    // tab, a bare `tab close` is site-reset's way out — DIRECT through VibeSpace's own socket, this conversation's tab only
+    // (the direct route's own ownership judge); the server's tab list would read through the same looping daemon and wait.
+    // The loop gone meanwhile (no_loop) ⇒ the server's tab verb below, as on any shared profile — never the binary.
+    if (dlg && dlg.loop && typeof dlg.loop === 'object' && profileId0(r) && words0.length === 2 && words0[1] === 'close') {
+      const done = await runDirect('close', { r, head, profileId: profileId0(r), wantsJson });
+      if (done) return;
+    }
+    const t = await call('POST', '/api/agent/browser/tab', { handle: handle || '', argv: rest }, { soft: true });
+    if (!(t && !t._failed && t.passthrough)) {
+      for (const h of head) console.error(h);
+      const audit = (ok) => call('POST', '/api/agent/browser/audit', { profile: profileId0(r), verb: 'tab', ok, ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}) }, { soft: true }).catch(() => null);
+      if (t._failed) { printRefusal(t); await audit(false); process.exit(1); }
+      const au = await audit(true);
+      const v = t.view || { tabs: [], others: 0 };
+      if (wantsJson) console.log(JSON.stringify({ success: true, data: { tabs: v.tabs, others: v.others || 0, ...(t.opened ? { opened: t.opened } : {}), ...(t.switched ? { switched: t.switched } : {}), ...(t.closed ? { closed: t.closed } : {}) }, error: null }));
+      else {
+        if (t.opened) console.log(`opened ${t.opened.url} — it is your current tab now`);
+        if (t.switched) console.log('switched — that tab is your current tab now');
+        if (t.closed) console.log(`closed that tab${t.closed.current ? ' (your current one)' : ''}`);
+        for (const l of t.lines || []) console.log(l);
+      }
+      if (t.note) console.error(`note: ${t.note} [tab_closed_current]`);
+      if (au && !au._failed && au.interrupted) { printInterrupted(au.interrupted, 0); process.exit(1); }
+      process.exit(0);
+    }
+  }
   if (dlg && dlg.open && !DIALOG_PASS.has(words0[0] || '')) {
     const reading = words0[0] === 'snapshot' || (words0[0] === 'get' && (words0[1] === 'url' || words0[1] === 'title'));
     printDialogOpen(dlg, { lead: reading ? (words0[0] === 'get' && words0[1] === 'url' && dlg.open.url ? `url: ${dlg.open.url} (the page that opened the dialog)` : '(the page cannot be read while the dialog is open — answer it first)') : '' });
     for (const h of head) console.error(h);
+    process.exit(1);
+  }
+  // lane site-reset: a NAVIGATION LOOP standing on this conversation's tab — a verb that waits for the page to settle is
+  // answered at once with it (it would only time out); the ways out (stop, tab …, close, screenshot, site-reset, a
+  // navigation elsewhere) still run. An older copy of the rules beside this file (a host) knows no loop: nothing is judged there.
+  const loopStand = dlg && dlg.loop && typeof dlg.loop === 'object' ? dlg.loop : null;
+  const loopPass = (v) => (DS && typeof DS.loopPasses === 'function' ? DS.loopPasses(v) : LOOP_PASS_FALLBACK.has(v));
+  const loopRead = (v) => (DS && typeof DS.loopReads === 'function' ? DS.loopReads(v) : LOOP_READ_FALLBACK.has(v));
+  const printLoop = (l) => {
+    if (wantsJson) console.log(JSON.stringify({ success: false, data: null, code: 'navigation_loop', loop: DS && typeof DS.loopBlock === 'function' ? DS.loopBlock(l) : l, error: l.text || '' }));
+    else console.log(l.text || 'The page keeps navigating by itself (a navigation loop).');
+    console.error('[navigation_loop]');
+  };
+  // verify r4 #4: a READING verb still runs on a loop whose pages LOAD between hops (a dashboard refreshing itself; the fast
+  // bounce) — the loop rides as a note beside its answer; on a loop whose pages never load it is answered with the loop at once
+  if (loopStand && !loopPass(words0[0] || '') && !(loopStand.readable && loopRead(words0[0] || ''))) {
+    printLoop(loopStand);
+    for (const h of head) console.error(h);
+    await call('POST', '/api/agent/browser/audit', { profile: dlg.profileId, verb: words0[0] || null, ok: false, loop: true, ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}) }, { soft: true }).catch(() => null);
     process.exit(1);
   }
   // `dialog status | accept [text] | dismiss` — answered through the watch (the one client that saw the dialog open; the
@@ -641,6 +763,15 @@ async function runPage(c) {
   // (r5: an argument-form batch whose lines carry a path arrives here as the binary's stdin JSON — `framed.stdinJson`)
   const stdinJson = framed.stdinJson;
   const stdio = [stdinJson != null ? 'pipe' : 'inherit', 'pipe', 'pipe'];
+  // lane site-reset: `stop` / `site-reset` are OURS on the page road — the resolve above chose the browser and its env; the
+  // verb itself goes to the server (never to the binary as a verb)
+  if (cls.ours) return runOursPage(cls, { r, head, profileId, wantsJson });
+  // lane site-reset: while a loop stands, a bare `tab close` and a `screenshot` go through VibeSpace's own socket (measured:
+  // a verb the loop cut keeps the session's daemon waiting until its own 25 s timeout — the binary's queue would hold them)
+  if (loopStand && profileId && ((words[0] === 'tab' && words[1] === 'close' && words.length === 2) || words[0] === 'screenshot')) {
+    const done = await runDirect(words[0] === 'screenshot' ? 'screenshot' : 'close', { r, head, profileId, wantsJson, shotPath: words[0] === 'screenshot' && framed.writes[0] ? (() => { const rw = resolveWord(framed.writes[0]); return rw.ok ? rw.path : null; })() : null });
+    if (done) return;
+  }
   // r5 F1 (b): the binary (and a daemon this spawn starts) runs in the private directory, never this shell's
   const child = spawn(bin.path, argv, { stdio, env, cwd: runCwd.dir });
   if (stdinJson != null) child.stdin.end(stdinJson);
@@ -650,19 +781,36 @@ async function runPage(c) {
   child.on('error', (e) => { for (const h of head) console.error(h); console.error(`vibespace-browser: could not run the browser CLI (${e.message}) [binary_absent]`); process.exit(1); });
   // lane browser-stuck, rule 1: while the verb runs, the dialog watch is asked (a long-poll the SERVER answers at the
   // event) — a dialog that holds the page ends this command AT ONCE with [dialog_open], never after the 30 s timeout
-  let childDone = false, dialogHit = null;
+  let childDone = false, dialogHit = null, loopHit = null, shotCut = null;
   const pollAbort = new AbortController();
+  // lane site-reset: which verbs a LOOP ends — every page-waiting verb, and a navigation verb by a loop that began after its
+  // own start (`after` = the server's resolve instant: the old page's loop is not this verb's); the ways out never
+  const shotVerb = words[0] === 'screenshot';
+  const readVerb = loopRead(words[0] || ''); // verify r4 #4: never cut by a loop whose pages load (its answer is the page; the audit tells the loop)
+  const loopNav = navVerb || words[0] === 'back' || words[0] === 'forward' || words[0] === 'reload'; // a way out that navigates: cut only by a loop of ITS OWN page
+  const loopWake = !!(dlg && dlg.watched && dlg.profileId && !dialogVerb) && (!loopPass(words[0] || '') || loopNav || shotVerb);
+  // a SCREENSHOT of a looping tab is bounded (measured on 0.38.1: the never-painting shape has no frame — the CLI sat 30 s)
+  const tStart = Date.now();
+  let shotTimer = null;
+  const boundShot = (l) => {
+    if (!shotVerb || shotTimer || childDone) return;
+    shotTimer = setTimeout(() => { if (childDone) return; shotCut = l; try { child.kill('SIGTERM'); } catch { /* ended */ } }, Math.max(0, tStart + LOOP_SHOT_MS - Date.now()));
+  };
+  if (loopStand) boundShot(loopStand);
   if (dlg && dlg.watched && dlg.profileId && !dialogVerb) {
     (async () => {
       while (!childDone) {
-        const w = await peek(`/api/agent/browser/dialog?profile=${encodeURIComponent(dlg.profileId)}&wait=20000`, pollAbort.signal);
+        const w = await peek(`/api/agent/browser/dialog?profile=${encodeURIComponent(dlg.profileId)}&wait=20000${loopWake ? `&loop=1&after=${loopNav && Number(r.at) > 0 ? Number(r.at) : 0}` : ''}`, pollAbort.signal);
         if (childDone || !w || w._failed) return;
         if (w.open) { dialogHit = w; try { child.kill('SIGTERM'); } catch { /* ended */ } return; }
+        if (w.loop && readVerb && w.loop.readable) return; // verify r4 #4: a reading verb on a readable loop answers on its own
+        if (w.loop && shotVerb) { boundShot(w.loop); return; }
+        if (w.loop) { loopHit = w.loop; try { child.kill('SIGTERM'); } catch { /* ended */ } return; }
       }
     })();
   }
   child.on('exit', async (code) => {
-    childDone = true; pollAbort.abort();
+    childDone = true; pollAbort.abort(); if (shotTimer) clearTimeout(shotTimer);
     const outText = Buffer.concat(outChunks).toString('utf8'), errText = Buffer.concat(errChunks).toString('utf8');
     const tail = (outText + errText).slice(-4000);
     // §3.7's audit: who used which browser, when, to do WHAT (the verb only —
@@ -675,7 +823,10 @@ async function runPage(c) {
     // `timedOut` / `dialog` feed the unresponsive verdict (the browser CLI's own timeout words, measured on 0.38.1)
     const timedOut = DS ? DS.timedOutText(outText + '\n' + errText) : /CDP command timed out|tab is not responding/.test(outText + errText);
     let au = null;
-    try { au = await call('POST', '/api/agent/browser/audit', { profile: profileId, verb: words[0] || null, ok: code === 0 && !dialogHit, ...(navUrl ? { url: navUrl } : {}), ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}), ...(r.kind === 'child' && r.handle ? { handle: r.handle } : {}), ...(timedOut ? { timedOut: true } : {}), ...(dialogHit ? { dialog: true } : {}) }, { soft: true }); } catch { au = null; }
+    const nav = navVerb && code === 0 ? navFacts(outText) : null; // lane browser-propose: the final url + title the server judges for the sign-in hint
+    // verify r4 #1: a `tab new` that succeeded names its tab (the ack) — the server binds it to this conversation
+    const tabAck = words[0] === 'tab' && words[1] === 'new' && code === 0 && profileId ? await tabNewAck(outText, { bin: bin.path, env, cwd: runCwd.dir, wantsJson }) : null;
+    try { au = await call('POST', '/api/agent/browser/audit', { profile: profileId, verb: words[0] || null, ok: code === 0 && !dialogHit && !loopHit && !shotCut, ...(navUrl ? { url: navUrl } : {}), ...(tabAck ? { tab: { new: true, targetId: tabAck.targetId } } : {}), ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}), ...(r.kind === 'child' && r.handle ? { handle: r.handle } : {}), ...(timedOut && !loopHit && !shotCut ? { timedOut: true } : {}), ...(dialogHit ? { dialog: true } : {}), ...(loopHit ? { loop: 'cut' } : shotCut ? { loop: true } : {}), ...(nav ? { nav } : {}) }, { soft: true }); } catch { au = null; }
     const after = au && !au._failed && au.dialog && typeof au.dialog === 'object' ? au.dialog : null;
     // THE VERDICT: a dialog holds the page (the long-poll's hit, else the watch's fact after the verb, else — where no watch
     // runs — the browser CLI's own line) ⇒ the sentence FIRST, exit 1 [dialog_open]
@@ -690,14 +841,41 @@ async function runPage(c) {
     const notes = after && Array.isArray(after.notes) ? after.notes : [];
     const strip = !!DS && !dialogVerb && !!(open || notes.length); // verify r1 A5: the browser CLI's own `dialog` verb (the fallback) prints ITS dialog lines — they are the answer
     if (open) printDialogOpen(open);
+    // lane site-reset: the verb ran into a NAVIGATION LOOP (the watch judged it while the verb waited) — the sentence FIRST,
+    // the binary's own timeout words never; a screenshot the loop left without a picture says so by name
+    else if (loopHit || shotCut) {
+      if (loopHit) { printLoop(loopHit); if (DS && typeof DS.busyText === 'function') { const left = tStart + (DS.CLI_ACTION_TIMEOUT_MS || 25000) - Date.now(); if (left > 1000) console.error(`note: ${DS.busyText(left)} [session_busy]`); } }
+      else { const w = DS && typeof DS.noPictureText === 'function' ? DS.noPictureText(shotCut) : 'no picture: the page never drew a frame (a navigation loop) — stop it first (vibespace-browser stop)'; if (wantsJson) console.log(JSON.stringify({ success: false, data: null, code: 'no_picture', loop: DS && typeof DS.loopBlock === 'function' ? DS.loopBlock(shotCut) : shotCut, error: w })); else console.log(w); console.error('[no_picture]'); }
+      for (const h of head) console.error(h);
+      for (const n of notes) console.error(`note: ${n} [page_dialog]`);
+      if (after && after.loop && !loopHit) console.error(`note: ${after.loop.text} [navigation_loop]`);
+      const interrupted0 = au && !au._failed && au.interrupted ? au.interrupted : null;
+      if (interrupted0) printInterrupted(interrupted0, code);
+      process.exit(1);
+    }
     for (const h of head) if (!(after && h === stuckLine)) console.error(h);
     for (const n of notes) console.error(`note: ${n} [page_dialog]`);
     if (after && after.loading) console.error(`note: ${after.loading} [page_loading]`); // verify r2 #5: a timeout while the tab loads is SAID (the time so far)
     if (after && after.stuck) console.error(`note: ${after.stuck} [page_unresponsive]`);
+    // lane site-reset: a way-out verb (a tab switch, a close, a screenshot) that ran beside a loop still standing is told it
+    if (after && after.loop && !navVerb) console.error(`note: ${after.loop.text} [navigation_loop]`);
+    // verify r1: on a SHARED browser whose tab of yours VibeSpace cannot tell, a verb that failed or timed out beside a looping
+    // tab is told that much (no address — another conversation's page) with the way out; before, only the binary's timeout line
+    if (after && after.loopShared && !after.loop && (code !== 0 || timedOut) && DS && typeof DS.loopSharedText === 'function') console.error(`note: ${DS.loopSharedText()} [navigation_loop_shared]`);
     const outShown = strip ? DS.stripDaemonDialogLines(outText) : outText, errShown = strip ? DS.stripDaemonDialogLines(errText) : errText;
     if (!(open && wantsJson)) process.stdout.write(outShown); // --json with a dialog: the ONE JSON object on stdout is ours
     process.stderr.write(errShown);
     if (navVerb) { const h = navHint(tail); if (h) console.error(h); }
+    // lane browser-propose step 2: the server's hint for this navigation's final page (a known vendor's sign-in refusal) —
+    // printed exactly as the 403/429 one is
+    if (navVerb && au && !au._failed && au.hint && au.hint.text) console.error(`hint: ${au.hint.hint || 'may-need-cloak'} — ${au.hint.text}`);
+    // lane browser-propose step 3: the user REJECTED the switch this conversation proposed for that host — said ONCE, here
+    if (navVerb && au && !au._failed && au.proposalRejected && au.proposalRejected.text) console.error(`note: ${au.proposalRejected.text} [proposal_rejected]`);
+    // verify r1 V1 (lane browser-propose): the sites CloakBrowser's list refused while this verb ran — by name, any page verb
+    if (au && !au._failed && au.egressRefused && au.egressRefused.text) console.error(`note: ${au.egressRefused.text} [egress_refused]`);
+    // lane browser-resume C: the tab this session was bound to is GONE (closed — by the user while he drove, by you, or with the
+    // browser) — the binary's own words name its hidden CLI; the way out is this tool's
+    if (code !== 0 && /\btab_gone\b/.test(outText + errText)) console.error('note: your tab is gone (it was closed) — `vibespace-browser tab list` names your tabs; `vibespace-browser tab <id>` switches to one, `vibespace-browser tab new <url>` opens one [tab_gone]');
     const interrupted = au && !au._failed && au.interrupted ? au.interrupted : null; // said LAST (after a close's own bookkeeping), exit 1
     if (open) { if (interrupted) printInterrupted(interrupted, code); process.exit(1); }
     if (rest[0] === 'close' && profileId && r.kind === 'attachment') {
@@ -715,6 +893,66 @@ async function runPage(c) {
     if (interrupted) { printInterrupted(interrupted, code); process.exit(1); }
     process.exit(code == null ? 1 : code);
   });
+}
+
+/** lane site-reset: a way out through VibeSpace's own socket (`/api/agent/browser/direct`) — `stop` always, a bare `tab close`
+ *  and a `screenshot` while a loop stands. → true when it answered (printed, audited, exited), false = run the binary. */
+async function runDirect(action, { r, head, profileId, wantsJson, shotPath = null }) {
+  const verbName = action === 'close' ? 'tab' : action;
+  const audit = (ok) => call('POST', '/api/agent/browser/audit', { profile: profileId, verb: verbName, ok, ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}) }, { soft: true }).catch(() => null);
+  const a = await call('POST', '/api/agent/browser/direct', { profile: profileId, action }, { soft: true });
+  if (a._failed && a.code === 'no_loop' && action !== 'stop') return false; // the loop ended meanwhile: the binary's own verb
+  for (const h of head) console.error(h);
+  if (a._failed) {
+    if (a.code === 'no_picture') { if (wantsJson) console.log(JSON.stringify({ success: false, data: null, code: 'no_picture', loop: a.loop || null, error: a.error || '' })); else console.log(a.error || 'no picture'); console.error('[no_picture]'); await audit(false); process.exit(1); }
+    if (wantsJson) console.log(JSON.stringify({ success: false, data: null, code: a.code || 'refused', error: a.error || '' }));
+    console.error(`${a.error || 'HTTP ' + a._status} [${a.code || 'refused'}]`);
+    if (a.remedy) console.error(`  remedy: ${a.remedy}`);
+    await audit(false);
+    process.exit(1);
+  }
+  if (action === 'screenshot') {
+    const file = shotPath || path.join(os.tmpdir(), `vibespace-screenshot-${Date.now()}.png`);
+    try { fs.writeFileSync(file, Buffer.from(String(a.data || ''), 'base64')); } catch (e) { console.error(`the picture could not be written to ${file} (${e.message}) [write_failed]`); await audit(false); process.exit(1); }
+    if (wantsJson) console.log(JSON.stringify({ success: true, data: { path: file, loop: a.loop || null }, error: null }));
+    else console.log(`✓ Screenshot saved to ${file}`);
+    if (a.loop && DS && typeof DS.loopText === 'function') console.error(`note: ${DS.loopText(a.loop)} [navigation_loop]`);
+  } else if (wantsJson) console.log(JSON.stringify({ success: true, data: action === 'stop' ? { stopped: !a.nothing, url: a.url || '', title: a.title || '', loop: a.loop || null } : { closed: true, url: a.url || '', opened: !!a.opened, loop: a.loop || null }, error: null }));
+  else console.log(a.text || 'done');
+  await audit(true);
+  process.exit(0);
+}
+/** lane site-reset: `stop` and `site-reset <host> | --host <host>` — after the one /resolve, the server acts through its
+ *  watch (never the browser CLI's queue); the answer is printed, the audit written like every verb's. */
+async function runOursPage(cls, { r, head, profileId, wantsJson }) {
+  const verbName = cls.verb;
+  const words = cls.argv.filter((x) => !x.startsWith('-'));
+  if (verbName === 'stop') {
+    if (words.length > 1) refuseLocally({ code: 'bad-request', error: '`stop` takes nothing — it stops your tab that is loading (or looping)', remedy: 'vibespace-browser stop' }, 2);
+    return runDirect('stop', { r, head, profileId, wantsJson });
+  }
+  if (verbName === 'site-reset') {
+    // `site-reset <host>` (a site of one of your own tabs) | `site-reset --host <host>` (named on purpose)
+    const hi = cls.argv.indexOf('--host');
+    const explicit = hi >= 0;
+    const host = explicit ? (cls.argv[hi + 1] || '') : (words[1] || '');
+    if (!host || host.startsWith('-') || words.length > (explicit ? 2 : 2)) refuseLocally({ code: 'bad-request', error: '`site-reset` takes ONE host: `site-reset <host>` (the site of your current tab) or `site-reset --host <host>`', remedy: 'vibespace-browser site-reset <host>' }, 2);
+    const audit = (ok) => call('POST', '/api/agent/browser/audit', { profile: profileId, verb: 'site-reset', ok, ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}) }, { soft: true }).catch(() => null);
+    const a = await call('POST', '/api/agent/browser/site-reset', { profile: profileId, host, explicit }, { soft: true });
+    for (const h of head) console.error(h);
+    if (a._failed) {
+      if (wantsJson) console.log(JSON.stringify({ success: false, data: null, code: a.code || 'refused', error: a.error || '' }));
+      console.error(`${a.error || 'HTTP ' + a._status} [${a.code || 'refused'}]`);
+      if (a.remedy) console.error(`  remedy: ${a.remedy}`);
+      await audit(false);
+      process.exit(1);
+    }
+    if (wantsJson) console.log(JSON.stringify({ success: true, data: a.proposal ? { proposal: a.proposal } : { cleared: a.cleared }, error: null }));
+    else console.log(a.text || 'done');
+    await audit(true);
+    process.exit(0);
+  }
+  refuseLocally({ code: 'unknown_verb', error: `unknown verb "${verbName}"` }, 2);
 }
 
 (async () => {
@@ -804,7 +1042,7 @@ async function runPage(c) {
     const set = r.attachments || [];
     const eph = r.ephemeral || null;
     const ephWords = eph ? `ephemeral: ${eph.state === 'not-started' ? 'not started yet' : eph.state}${eph.startedAt ? ', started ' + ago(eph.startedAt) : ''}${eph.live && eph.pid ? ', pid ' + eph.pid : ''}` : 'ephemeral: not started yet — your first command starts it';
-    if (!set.length && !(r.children || []).length) console.log(r.shared ? 'no profile attached — this session drives the machine\'s SHARED browser (per-session browsers are off here): never `close --all`.' : `no profile attached — this session browses its own managed browser (${ephWords}); a login in it is gone after it idles out.`);
+    if (!set.length && !(r.children || []).length) console.log(r.shared ? 'no profile attached — this session drives the machine\'s SHARED browser (per-session browsers are off here): never `close --all`.' : `no profile attached — this session browses its own managed browser (${ephWords}); its logins and tabs are kept for this conversation when it closes (a browser fenced to allowed domains keeps its tabs only).`);
     else if (eph && !r.shared) console.log(`this conversation's own managed browser: ${ephWords} (a bare verb lands on it only while nothing is attached)`);
     for (const a of set) {
       const l = r.leases.find((x) => x.profileId === a.profileId) || {};
@@ -857,9 +1095,23 @@ async function runPage(c) {
     if (!url) { console.error('usage: vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2|3] [--remember]'); process.exit(2); }
     const r = await call('POST', '/api/agent/browser/blocked', { url, why: flag('--why'), evidence: flag('--evidence'), tier: flag('--tier'), profile: handle || undefined, remember: has('--remember') });
     console.log(`recorded your claim: ${r.text}. ${r.next}`);
+    // lane browser-propose step 3: a tier-2 claim is ONE proposal — its card waits in the user's chat (never a second one)
+    if (r.proposal) console.log(`proposal ${r.proposal.id}: ${r.proposal.state === 'unavailable' ? 'nothing can be offered here' : r.proposal.state}${r.duplicate ? ' (the same card — none added)' : ''}${r.rejected ? ' — the user rejected it' : ''}`);
     if (r.remembered && !r.remembered.error) console.log(`remembered: ${r.remembered.host} needs tier ${r.remembered.tier} (by agent)`);
     else if (r.remembered && r.remembered.error) console.log(`not remembered: ${r.remembered.error}`);
     if (r.hint) console.log(`site hint already on file: ${r.hint.host} → ${r.hint.backend || 'tier ' + r.hint.tier} (by ${r.hint.by})`);
+    return;
+  }
+
+  // lane browser-resume B (§3.9): THIS conversation's own browser, started again with its kept tabs (same order, the same tab
+  // on show) — or, when it runs, the tabs still waiting from a deliberate stop reopened as new tabs
+  if (verb === 'resume') {
+    const r = await call('POST', '/api/agent/browser/resume', handle ? { handle } : {});
+    printKept(r);
+    const rs = r.restored || null;
+    if (rs) console.log(`resumed — ${rs.opened} tab(s) reopened${rs.current ? `; current: ${rs.current.title ? rs.current.title + ' — ' : ''}${rs.current.url}` : ''}${(rs.skipped || []).length ? `; not reopened: ${rs.skipped.map((x) => x.url + ' (' + x.why + ')').join(', ')}` : ''}. Re-read the page first (\`vibespace-browser snapshot -i\`).`);
+    else if (r.resumed) console.log('resumed — the user had already reopened it; re-read the page first (`vibespace-browser snapshot -i`).');
+    else console.log(r.already ? 'your browser runs — nothing was waiting to reopen' : 'resumed — your browser runs again (its logins are there; it had no web page to reopen)');
     return;
   }
 

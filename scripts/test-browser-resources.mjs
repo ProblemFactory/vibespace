@@ -306,11 +306,13 @@ console.log('\nⓐ two sessions, one machine (I1 + I2)');
   // PRE-FIX CONTROL — today's shape, reproduced inside our OWN namespace so it
   // can never reach the machine's real default daemon.
   const ctlNs = `vs-ctl-${TAG}`;
+  const ctlConfig = path.join(path.dirname(A.env.AGENT_BROWSER_CONFIG), `ctl-${TAG}.json`);
+  { const c = JSON.parse(fs.readFileSync(A.env.AGENT_BROWSER_CONFIG, 'utf8')); delete c.profile; fs.writeFileSync(ctlConfig, JSON.stringify(c), { mode: 0o600 }); }
   const ctlEnv = () => {
     const e = { ...process.env, HOME: USER_HOME };
     delete e.AGENT_BROWSER_SESSION;            // ← THE MISSING NAME, the whole point
     e.AGENT_BROWSER_NAMESPACE = ctlNs;         // ← shared, as today: one daemon
-    e.AGENT_BROWSER_CONFIG = A.env.AGENT_BROWSER_CONFIG; // user-data-dir held constant
+    e.AGENT_BROWSER_CONFIG = ctlConfig;        // user-data-dir held constant (A's config WITHOUT A's kept directory — lane browser-resume §3.9: A's own browser still runs on it)
     // …but the MISSING NAME is the only variable under test. Round 1 copied
     // `process.env` and set nothing else, so the control daemon inherited NO
     // idle timeout and a missed reap became a PERMANENT orphan (measured: one
@@ -489,7 +491,8 @@ console.log('\nⓒ two real sessions on a real server (the exit criterion)');
       ok(e1.AGENT_BROWSER_NAMESPACE === e1.AGENT_BROWSER_SESSION, 'and the matching namespace (§3.2.4: context AND daemon socket)');
       ok(Number(e1.AGENT_BROWSER_IDLE_TIMEOUT_MS) > 0, `and an EXPLICIT idle timeout (${e1.AGENT_BROWSER_IDLE_TIMEOUT_MS} ms)`);
       ok(!!e1.AGENT_BROWSER_CONFIG && fs.existsSync(e1.AGENT_BROWSER_CONFIG), 'and a generated config that EXISTS on disk');
-      ok(!('profile' in JSON.parse(fs.readFileSync(e1.AGENT_BROWSER_CONFIG, 'utf8'))), '…with no user-data-dir in it (ephemeral, variant D)');
+      // lane browser-resume (§3.9): rung D's user-data-dir is the conversation's OWN kept directory (named by its key)
+      ok(JSON.parse(fs.readFileSync(e1.AGENT_BROWSER_CONFIG, 'utf8')).profile === path.join(wt, 'data', 'browser-profiles', String(e1.AGENT_BROWSER_SESSION).replace(/^vs-/, '')), '…whose user-data-dir is the conversation\'s OWN kept directory (data/browser-profiles/<key>, variant D — lane browser-resume §3.9)');
       ok(e1.AGENT_BROWSER_SESSION !== e2.AGENT_BROWSER_SESSION,
         `THE EXIT CRITERION: two live sessions on one instance carry DIFFERENT browsers (${e1.AGENT_BROWSER_SESSION} vs ${e2.AGENT_BROWSER_SESSION})`);
       ok(e1.AGENT_BROWSER_PROFILE === undefined && !String(e1.AGENT_BROWSER_CONFIG).includes('ambient-should-never-appear'),

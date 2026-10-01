@@ -129,6 +129,18 @@ const Blocks = require('../channel-blocks.js');
 const Thr = require('../channel-thread.js');
 const Rx = require('../channel-reactions.js');
 const { validateSide, inertFrames, inertFrameLine, peerName } = require('../channel-record.js');   // verify r2: peerName = THE ONE door for a NAME
+const { toAgentText: agentText } = require('../peer-text.js');   // lane peer-census: THE belt on every record's text as it leaves the store toward an agent (read / thread / search)
+// verify r1 F2: a conversation TITLE the index holds (written by discovery through peerName — before the line rule for a
+// title stored earlier) is answered to an agent by read / thread read / list / search and the CLI prints it before the
+// next line: judged on its way out as one inline piece, like every name.
+const agentTitle = (en, fallback) => agentText((en && en.title) || fallback, { kind: 'line', max: 300 });
+// verify r3 F6 (lane peer-census): AN ID IS A LINE PIECE TOO. Every id the agent's answers carry is the vendor's (or a hostile
+// adapter's) — makeRecord bounds them by LENGTH only (`str` / `peerText`), never the line rule — so a vendor id (`(id …)` on
+// the record's line), an UNNAMED author's id (`<id>: > yes` on one line), a mention / replyTo / threadKey id and the
+// conversation KEY (`<key> — <title>` on the read head and every list row) were printed raw before the next line's `> …`
+// (reproduced over the real engine). The belt is a no-op on a real id (no frame, no hidden character), so `--to <id>`
+// round-trips; a hostile id is neutered in the agent's COPY only — the store keeps what a fetch needs (r2 F6's rule).
+const agentId = (v, max = 512) => (v == null ? v : agentText(v, { kind: 'line', max }));
 const { threadsOf: threadsRow, reactionsOf: reactionsRow } = require('../channels/index.js');
 // lane lark-search-poll (B-5aab, 2026-09-28 — design §27): THE CHANGE FEED's PURE arithmetic (the window, the page's
 // trust verdict, the fold into owed marks / births, the measurement); the scheduling is drain rule 21, the one lane
@@ -1204,16 +1216,51 @@ function create(deps = {}) {
   function feedDecl(rec) { return caps.changeFeedRow(registry.capsOf(rec.kind)); }
   /** The adapter record's `feed` half, healed (born lazily — no migration). */
   function feedRow(rec) {
-    if (!rec.feed || typeof rec.feed !== 'object') rec.feed = {};
+    const born = !rec.feed || typeof rec.feed !== 'object';
+    if (born) rec.feed = {};
     const f = rec.feed;
-    for (const k of ['firstRunAt', 'backlogUntil', 'cursorAt', 'window', 'catchUp', 'promotedAt', 'demotedAt', 'refused', 'backoffUntil', 'backoffWhy', 'lastOkAt', 'lastRunAt', 'lastFlip']) if (!(k in f)) f[k] = null;
+    // lane lark-p2p: a row born now is written by THIS reader (no restart); an older row is healed first
+    if (born) { const d = feedDecl(rec); f.readerRev = (d && d.reader) || 1; }
+    else feedReaderHeal(rec);
+    for (const k of ['firstRunAt', 'backlogUntil', 'cursorAt', 'window', 'catchUp', 'promotedAt', 'demotedAt', 'refused', 'backoffUntil', 'backoffWhy', 'lastOkAt', 'lastRunAt', 'lastFlip', 'strikeWhy', 'shapeRun']) if (!(k in f)) f[k] = null;
     if (!caps.FEED_MODES.includes(f.mode)) f.mode = 'measuring';
     if (!Array.isArray(f.samples)) f.samples = [];
     if (!(Number(f.strikes) >= 0)) f.strikes = 0;
     if (!f.counters || typeof f.counters !== 'object') f.counters = {};
     for (const k of ['malformed', 'stripped', 'unlistedHits', 'births', 'describeFailed', 'threadOwedDropped', 'pages']) if (!(Number(f.counters[k]) >= 0)) f.counters[k] = 0;
     if (!f.counters.missedTypes || typeof f.counters.missedTypes !== 'object') f.counters.missedTypes = {};
+    if (!Array.isArray(f.counters.malformedFields)) f.counters.malformedFields = [];
+    if (!Array.isArray(f.counters.unreadableRecent)) f.counters.unreadableRecent = [];   // verify r2: the last hour's ring
     return f;
+  }
+  /**
+   * A FEED ROW THE OLD HIT READER WROTE STARTS OVER (lane lark-p2p, 2026-09-30). The adapter declares its reader's
+   * revision (`caps.changeFeed.reader`); a row written by an older one carries that reader's cursor, its window in
+   * flight, its catch-up, its measurement and its back-off — all of them what a reader that could not read the hits
+   * decided (production: a window from the previous afternoon still in flight after 8 043 pages, a catch-up that never
+   * ran, strikes 7). It restarts as a FIRST RUN: a fresh window, the 7-day single-chat catch-up (born READ — never news,
+   * never a wake: the first run of a reader that works is now), the measurement from zero. A scope refusal (`forbidden`)
+   * is the sign-in's, kept; conversations already born keep their rows. In memory — the next adapters write persists it
+   * (`start()` writes it at boot). → true when the row was restarted.
+   */
+  function feedReaderHeal(rec) {
+    const d = feedDecl(rec);
+    const f = rec && rec.feed;
+    if (!d || !f || typeof f !== 'object') return false;
+    const want = Number(d.reader) || 1;
+    const had = Number(f.readerRev) || 1;
+    if (had >= want) { if (f.readerRev !== had) f.readerRev = had; return false; }
+    const hadAny = !!(f.cursorAt || f.window || f.catchUp || (f.counters && Number(f.counters.pages) > 0));
+    for (const k of ['firstRunAt', 'backlogUntil', 'cursorAt', 'window', 'catchUp', 'promotedAt', 'demotedAt', 'backoffUntil', 'backoffWhy', 'lastOkAt', 'lastRunAt', 'lastFlip', 'strikeWhy', 'shapeRun']) f[k] = null;
+    if (f.refused && f.refused.code !== 'forbidden') f.refused = null;
+    f.mode = 'measuring'; f.samples = []; f.strikes = 0;
+    const c = f.counters && typeof f.counters === 'object' ? f.counters : {};
+    f.counters = { ...c, malformed: 0, malformedFields: [], missedTypes: {}, unreadableRecent: [] };
+    f.readerRev = want;
+    const e = live.get(rec.id);
+    if (e) { e.feedTokens = { steady: null, catchUp: null }; e.feedPrevSig = null; e.feedPending = []; e.feedMemStart = null; }
+    if (hadAny) log.log(`[channels] ${rec.id}: the change feed's hit reader changed (revision ${had} → ${want}) — the feed starts over: a fresh window and the single-chat catch-up of the last ${setting('channels.feedBackfillDays')} days`);
+    return true;
   }
   /** THE ONE ANSWER (channel-caps `feedState`) with this instance's settings. */
   function feedStateOf(rec, t = now()) { return caps.feedState(registry.capsOf(rec.kind), rec, t, feedOpts()); }
@@ -1222,6 +1269,7 @@ function create(deps = {}) {
   function feedDue(rec, e, t = now()) {
     const decl = feedDecl(rec);
     if (!decl) return false;
+    feedReaderHeal(rec);   // lane lark-p2p: an old reader's back-off / park never holds the new reader off
     const fs = feedStateOf(rec, t);
     if (!fs.on) return false;
     const f = rec.feed || {};
@@ -1247,15 +1295,18 @@ function create(deps = {}) {
     const t = now();
     const d = (err && err.detail) || {};
     let skip = code;
+    // lane lark-p2p: a strike counts IN A ROW of its own kind (`strikeWhy`) — the card's "did not answer 3× in a row" is
+    // true only while every strike is the same failure; an answered page ends a transport / rate / unparseable run
+    const strike = (kind) => { f.strikes = (f.strikeWhy === kind ? Number(f.strikes) || 0 : 0) + 1; f.strikeWhy = kind; };
     if (code === 'rate-limited') {
-      f.strikes = (Number(f.strikes) || 0) + 1;
+      strike('rate-limited');
       const hint = Number(d.retryAfterSec);
       f.backoffUntil = t + (Number.isFinite(hint) && hint > 0 ? Math.min(RATE_RETRY_AFTER_MAX_MS, Math.max(1e3, Math.ceil(hint * 1000))) : RATE_BACKOFF_MS[Math.min(f.strikes - 1, RATE_BACKOFF_MS.length - 1)]);
       f.backoffWhy = 'rate-limited';
       if (f.strikes === RATE_STRIKES_LOUD) log.warn(`[channels] ${rec.id}: the vendor limited the change feed ${f.strikes} times in a row — per-conversation polling carries on; the search resumes by itself`);
     } else if (code === 'transport') {
       // the search's own failure ladder (30 s → 15 min), inside the feed only — the per-conversation polling carries on
-      f.strikes = (Number(f.strikes) || 0) + 1;
+      strike('transport');
       f.backoffUntil = t + BACKOFF_MS[Math.min(f.strikes, BACKOFF_MS.length - 1)];
       f.backoffWhy = 'failed';
       if (f.strikes === FAILURES_BEFORE_LOUD) log.warn(`[channels] ${rec.id}: the change feed's search did not answer ${f.strikes} times in a row (${String((err && err.message) || err).slice(0, 200)}) — each conversation is polled on its own; the search is retried by itself`);
@@ -1268,18 +1319,28 @@ function create(deps = {}) {
       // U8: a page token the vendor no longer honours — the SAME window restarts from page 1 (the dedup absorbs it)
       e.feedTokens[kind === 'catchUp' ? 'catchUp' : 'steady'] = null;
       if (f.window && kind !== 'catchUp') f.window = { ...f.window, pages: 0 };
-      f.strikes = (Number(f.strikes) || 0) + 1;
+      strike('token');
       if (f.strikes >= 3) { f.backoffUntil = t + BACKOFF_MS[Math.min(f.strikes - 2, BACKOFF_MS.length - 1)]; f.backoffWhy = 'failed'; }
+      // verify r3: said ONCE in the journal (at the outage line's count) with the vendor's own reason — a continuation
+      // answering something that is not a search page included; this ladder never wrote a line
+      if (f.strikes === FAILURES_BEFORE_LOUD) log.warn(`[channels] ${rec.id}: the change feed's continuation page was refused ${f.strikes} times in a row (${String((err && err.message) || err).slice(0, 200)}) — the window restarts from its first page each time; each conversation is polled on its own; the search is retried by itself`);
       skip = 'token';
     } else if (code === 'vendor-error' && d.contract) {
       f.refused = { at: t, code: 'contract', requiredScopes: [], retryAt: t + 24 * 3600e3 };
       f.window = null;
       log.warn(`[channels] ${rec.id}: the change feed answered outside its contract (${d.contract}) — parked for 24 h; each conversation is polled on its own`);
     } else if (code === 'vendor-error') {
-      // an unparseable page climbs the account's failure numbers (30 s → 15 min) INSIDE the feed only
-      f.strikes = (Number(f.strikes) || 0) + 1;
+      // an unparseable page climbs the account's failure numbers (30 s → 15 min) INSIDE the feed only.
+      // verify r3: a 200 that is NOT A SEARCH PAGE (r2's `detail.envelope` — a changed API, a proxy page, a captive portal)
+      // is a strike KIND of its own: the card says "answered N× in a row with something that is not a search page" (never
+      // "is not answering" — it answers) and the journal names the missing field ONCE at the loud count. A vendor answering
+      // that for ever used to climb this ladder as "failed N× in a row" with not one journal line (measured: 15 searches in
+      // 3 h, the words "not a search page" nowhere — the r2 judge's own reason discarded here).
+      const envelope = typeof d.envelope === 'string' && /^[A-Za-z0-9_.]{1,64}$/.test(d.envelope) ? d.envelope : null;
+      strike(envelope ? 'envelope' : 'vendor-error');
       f.backoffUntil = t + BACKOFF_MS[Math.min(f.strikes, BACKOFF_MS.length - 1)];
       f.backoffWhy = 'failed';
+      if (f.strikes === FAILURES_BEFORE_LOUD) log.warn(`[channels] ${rec.id}: the change feed's search answered ${f.strikes} times in a row with ${envelope ? `something that is not a search page (no ${envelope})` : 'a page this version cannot read'} (${String((err && err.message) || err).slice(0, 200)}) — each conversation is polled on its own; the search is retried by itself`);
     } else {
       f.refused = { at: t, code: 'vendor-error', requiredScopes: [], retryAt: t + 24 * 3600e3 };
       f.window = null;
@@ -1303,7 +1364,7 @@ function create(deps = {}) {
     const t = now();
     const f = feedRow(rec);
     const opts = feedOpts();
-    if (f.refused) { if (feedStateOf(rec, t).state === 'refused') return { noCall: true }; f.refused = null; f.strikes = 0; }   // lifted: a Re-authorize, or its own retry instant
+    if (f.refused) { if (feedStateOf(rec, t).state === 'refused') return { noCall: true }; f.refused = null; f.strikes = 0; f.strikeWhy = null; f.shapeRun = null; }   // lifted: a Re-authorize, or its own retry instant
     if (Number(f.backoffUntil) > t) return { noCall: true };
     let kind = null, win = null, token = null;
     if (f.window) {
@@ -1329,6 +1390,13 @@ function create(deps = {}) {
         // a stop longer than the window's reach: its older span is the SAME single-chat catch-up (groups are covered by
         // their own polls; a gap's thread replies load when the thread is opened)
         f.catchUp = { from: w.gap.from, to: w.gap.to, pages: 0, found: 0, done: false, bounded: false, days: Math.max(1, Math.round((w.gap.to - w.gap.from) / 86400e3)), gap: true };
+      } else if (w.gap && decl.catchUp && f.catchUp && !f.catchUp.done && Number(w.gap.to) > Number(f.catchUp.to)) {
+        // lane lark-p2p: a gap while a catch-up is still PENDING (a park lifted after a day, a back-off that outlived the
+        // window's reach) WIDENS it — the gap's single chats were silently dropped (neither the steady window nor the
+        // pending span holds them; they would appear only with their next message). The widened span starts from page 1.
+        const cu = f.catchUp;
+        f.catchUp = { ...cu, from: Math.min(Number(cu.from), Number(w.gap.from)), to: Number(w.gap.to), pages: 0, bounded: false, days: Math.max(1, Math.round((Number(w.gap.to) - Math.min(Number(cu.from), Number(w.gap.from))) / 86400e3)), gap: true };
+        e.feedTokens.catchUp = null;
       }
     } else if (f.catchUp && !f.catchUp.done) {
       kind = 'catchUp'; win = { from: f.catchUp.from, to: f.catchUp.to };
@@ -1346,11 +1414,24 @@ function create(deps = {}) {
     }
     if (outlived(rec, e)) return { skip: 'account-changed' };
     f.counters.pages++;
+    // lane lark-p2p (the 504 path): the search ANSWERED — a run of "did not answer" / "limited" / "unparseable" strikes is
+    // over (it used to end only when a whole window completed: a window paging for hours kept every 504 of the day on one
+    // count, strikes 7, and each new 504 waited the ladder's top 15 min). A refused page TOKEN is judged per window (its
+    // belt against a vendor that refuses every continuation: page 1 answers each time) — kept until the window completes.
+    if (f.strikeWhy !== 'token' && (Number(f.strikes) > 0 || f.strikeWhy)) { f.strikes = 0; f.strikeWhy = null; }
     // verify r1 (U9): a continuation page is judged against the token we SENT and the previous page of THIS window — a
     // vendor that ignores the token answers the same page for ever (the window never completes)
     const wkey = `${kind}:${win.from}:${win.to}`;
-    const verdict = Feed.pageVerdict(page, win, { pageSize: decl.pageSize, now: t, sent: token, prevSig: token && e.feedPrevSig && e.feedPrevSig.key === wkey ? e.feedPrevSig.sig : null });
-    if (verdict.ok) e.feedPrevSig = { key: wkey, sig: verdict.sig || '' };
+    // lane lark-p2p verify r1: the pages THIS window already read — the count's own ceiling (a vendor answering
+    // `has_more` for ever with fresh ids and no `total` paged one window at the feed's whole minute for ever)
+    const pagesBefore = kind === 'steady' ? Number(f.window.pages) || 0 : Number(f.catchUp.pages) || 0;
+    // verify r3: a continuation is judged against EVERY page of this window since its page 1 (a bounded list of signatures,
+    // restarted with every page 1 — a restart re-reads the same pages legitimately): a vendor looping with a period of two
+    // (A → B → A …, fresh tokens) repeated nothing the PREVIOUS page held and paged 161 times in 77 minutes before the
+    // count's ceiling parked it as "ignored its time window" — parked `contract` at its third page now
+    const sigList = token && e.feedPrevSig && e.feedPrevSig.key === wkey && Array.isArray(e.feedPrevSig.sigs) ? e.feedPrevSig.sigs : null;
+    const verdict = Feed.pageVerdict(page, win, { pageSize: decl.pageSize, now: t, sent: token, prevSig: sigList, pages: pagesBefore });
+    if (verdict.ok) e.feedPrevSig = { key: wkey, sigs: (sigList || []).concat([verdict.sig || '']).slice(-Feed.PAGE_SIGS_MAX) };
     if (!verdict.ok) {
       // BOUND BEFORE TRUST (§2.6): an ignored time range would turn "since the cursor" into "the whole history" — PARKED
       // by name after ONE page, retried in 24 h (a vendor fix); every conversation is polled on its own meanwhile
@@ -1363,6 +1444,32 @@ function create(deps = {}) {
       return { skip: verdict.park };
     }
     f.counters.malformed += verdict.malformed;
+    // verify r2: the card's unreadable line is about NOW — the ring of pages of the last hour that held an unreadable hit
+    // (PURE `recentUnreadable`); the cumulative counter stays for diagnostics. Two stray items in one minute used to put
+    // "4 search hits could not be read" on the card for ever (a day and 2 884 clean pages later, still there).
+    if (verdict.malformed > 0) f.counters.unreadableRecent = Feed.recentUnreadable(f.counters.unreadableRecent, t, verdict.malformed);
+    // lane lark-p2p: WHAT was unreadable (field names, the first three lists since this reader) — the card says them
+    if (Array.isArray(page.malformedFields) && page.malformedFields.length) f.counters.malformedFields = Feed.mergeFieldLists(f.counters.malformedFields, page.malformedFields);
+    // THE SHAPE VERDICT (lane lark-p2p, 2026-09-30): a run of pages this reader cannot read (≥ 90 % of their items) proves
+    // nothing — not the time window, not the page token (every guard above judges readable hits) — and paging it on pages
+    // the vendor's whole history (production: 241 260 unreadable hits, 8 043 pages, ten hours, the card silent). PARKED by
+    // name with the fields it could not read; the catch-up stays pending (it runs once a reader that reads them arrives —
+    // `feedReaderHeal` — or the 24-h retry reads a readable page); every conversation is polled on its own meanwhile.
+    // lane lark-p2p verify r1: the run is judged PER WINDOW — it restarts with every window that starts from page 1 (a new
+    // window, a restart, the catch-up's start). A run that outlived windows counted the same stray unreadable item on every
+    // overlapping tick (a 60 s overlap on a 30 s tick reads a message ~3 times): TWO odd items in a quiet minute reached
+    // the 5-item park and turned the single-chat feed off for 24 h. A page of 30 unreadable still parks on page 1.
+    if (f.shapeRun && (f.shapeRun.key !== wkey || pagesBefore === 0)) f.shapeRun = null;
+    const sv = Feed.shapeVerdict(f.shapeRun, { items: verdict.hits.length + verdict.malformed, malformed: verdict.malformed, fields: page.malformedFields });
+    f.shapeRun = sv.run ? { ...sv.run, key: wkey } : null;
+    if (sv.park) {
+      f.refused = { at: t, code: 'shape', requiredScopes: [], retryAt: t + 24 * 3600e3, fields: sv.fields };
+      f.window = null; e.feedTokens.steady = null; e.feedTokens.catchUp = null; f.shapeRun = null;
+      log.warn(`[channels] ${rec.id}: the change feed is parked — ${sv.run.malformed} of ${sv.run.items} search items have a shape this version does not read (missing or unreadable: ${sv.fields.map((l) => l.join(' + ')).join(' | ')}); each conversation is polled on its own (retried in 24 h)`);
+      await store.adapters.update(() => {});
+      notify([]);
+      return { skip: 'shape' };
+    }
     if (page.stripped) { f.counters.stripped += page.stripped; log.warn(`[channels] ${rec.id}: the change feed's adapter handed ${page.stripped} hit(s) with fields outside the closed list — stripped (a contract violation)`); }
     const separate = threadsRow(registry.capsOf(rec.kind)).listing === 'separate';
     const liveIx = store.index.live();
@@ -1434,7 +1541,7 @@ function create(deps = {}) {
       if (!durable) e.feedTokens.steady = null;
       else if (page.more) { e.feedTokens.steady = { token: page.pageToken, at: t }; more = true; }
       else {
-        f.cursorAt = f.window.to; f.window = null; e.feedTokens.steady = null; f.lastOkAt = t; f.strikes = 0; f.backoffUntil = null;
+        f.cursorAt = f.window.to; f.window = null; e.feedTokens.steady = null; f.lastOkAt = t; f.strikes = 0; f.strikeWhy = null; f.backoffUntil = null;
         // a window that completed an OLD span (a restart re-read it, a pass cut it) is followed by a fresh one in the same
         // pass when a tick's worth of time has passed — the feed catches up inside the rule-21 bound, never a pass late
         if (t - (Number(f.lastRunAt) || 0) >= opts.everySec * 1000) more = true;
@@ -1560,10 +1667,14 @@ function create(deps = {}) {
     return {
       state: fs.state, why: fs.why || null, mode: fs.mode || f.mode || null, on: !!fs.on, carrying: !!fs.carrying, scope: decl.scope || null,
       requiredScopes: fs.requiredScopes || [], until: fs.until || null, retryAt: fs.retryAt || null,
+      // lane lark-p2p: the back-off's count and kind ("did not answer 3× in a row … until 03:28"), a shape park's fields
+      strikes: Number(f.strikes) || 0, strikeWhy: f.strikeWhy || null, fields: fs.fields || [],
       everySec: o.everySec, overlapSec: o.overlapSec, relaxedSec: setting('channels.relaxedPollSec'), promoteMin: Feed.PROMOTE_MIN,
       measured: { total: m.total, missed: m.missed, rate: m.rate }, lastOkAt: f.lastOkAt || null, cursorAt: f.cursorAt || null,
       catchUp: cu, lastFlip: f.lastFlip || null,
-      counters: f.counters ? { malformed: f.counters.malformed || 0, births: f.counters.births || 0, unlistedHits: f.counters.unlistedHits || 0, pages: f.counters.pages || 0, missedTypes: { ...(f.counters.missedTypes || {}) } } : null,
+      // verify r2: `malformedRecent` / `malformedAt` = the last hour's unreadable hits (the card's line reads these, never the
+      // cumulative `malformed`, which is diagnostics)
+      counters: f.counters ? { malformed: f.counters.malformed || 0, malformedFields: Feed.mergeFieldLists(f.counters.malformedFields, []), ...(() => { const r = Feed.recentUnreadableCount(f.counters.unreadableRecent, t); return { malformedRecent: r.n, malformedAt: r.at }; })(), births: f.counters.births || 0, unlistedHits: f.counters.unlistedHits || 0, pages: f.counters.pages || 0, missedTypes: { ...(f.counters.missedTypes || {}) } } : null,
     };
   }
   /** What unlocks the CHANGE FEED on this account — the module's `feedGrant` against the held scopes (like reactions). */
@@ -2194,10 +2305,14 @@ function create(deps = {}) {
   function agentCopy(r) {
     const x = withoutBlocks(r);
     if (!x || typeof x !== 'object') return x;
-    const out = { ...x, text: inertFrames(String(x.text || '')) };
-    if (x.author && typeof x.author === 'object') out.author = { ...x.author, name: peerName(x.author.name, 200) || '' };
-    if (Array.isArray(x.mentions)) out.mentions = x.mentions.map((m) => (m && typeof m === 'object' ? { ...m, name: peerName(m.name, 200) || '' } : m));
-    if (Array.isArray(x.attachments)) out.attachments = x.attachments.map((a) => (a && typeof a === 'object' ? { ...a, name: peerName(a.name, 256) || '' } : a));
+    const out = { ...x, text: agentText(x.text, { kind: 'block' }) };   // lane peer-census: bound → folded → the frame rule per line (a legacy record re-judged on its way out)
+    for (const k of ['id', 'vendorId', 'convId', 'replyTo', 'threadKey', 'root']) if (typeof x[k] === 'string') out[k] = agentId(x[k]);   // verify r3 F6: every id as a line piece
+    if (x.author && typeof x.author === 'object') out.author = { ...x.author, id: agentId(x.author.id, 256), name: peerName(x.author.name, 200) || '' };
+    if (Array.isArray(x.mentions)) out.mentions = x.mentions.map((m) => (m && typeof m === 'object' ? { ...m, id: agentId(m.id, 256), name: peerName(m.name, 200) || '' } : m));
+    // verify r2 F6 (lane peer-census): an attachment's MIME and ID are the sender's too (a mail part's Content-Type /
+    // Content-ID) and the CLI prints them on the name's line (`attachment: <name|id> (<mime>), N bytes`) before the next
+    // record's `> …`; the store keeps them under the complete-tag rule (an id must fetch), the agent's copy takes the line rule
+    if (Array.isArray(x.attachments)) out.attachments = x.attachments.map((a) => (a && typeof a === 'object' ? { ...a, name: peerName(a.name, 256) || '', id: agentText(a.id, { kind: 'line', max: 256 }), mime: agentText(a.mime, { kind: 'line', max: 128 }) } : a));
     return out;
   }
   function titleOf(c, title) {
@@ -3129,7 +3244,7 @@ function create(deps = {}) {
     const e = adapterFor(rec);
     const r = await Promise.race([requestRefresh(rec, e, en.key, { origin: 'agent', principal: ctx }), new Promise((res) => { const tm = setTimeout(() => res({ ok: true, pending: true }), 15000); if (tm.unref) tm.unref(); })]);
     if (!stillSees(ctx, adapterId, convId)) return ACL.notFound();   // verify r2: the revoke may have landed while the refresh ran
-    if (r && r.ok) return { ok: true, appended: r.appended || 0, pending: !!r.pending, polledAt: r.polledAt || null, conversation: { key: en.key, adapterId, id: convId, title: en.title || convId } };
+    if (r && r.ok) return { ok: true, appended: r.appended || 0, pending: !!r.pending, polledAt: r.polledAt || null, conversation: { key: agentId(en.key), adapterId, id: agentId(convId), title: agentTitle(en, convId) } };   // verify r3 F6: the key + id as line pieces; verify r2 F4: the refresh answer's title through the belt (an agent-facing answer, whether or not the CLI prints it today)
     return r;
   }
 
@@ -3603,7 +3718,7 @@ function create(deps = {}) {
     if (!whose.size) return;
     const t = now();
     const tag = inertFrames(`(${rec.id}/${convId})`);
-    const title = inertFrames(String(en.title || convId)).replace(/[\r\n\t]+/g, ' ').slice(0, 120);
+    const title = agentText(en.title || convId, { kind: 'line', max: 120 });   // lane peer-census: a vendor title as one inline piece
     // verify r1 (continued, IDENTITY): REACH FIRST, like every agent-facing path — the digest is new information
     // FROM the conversation (who else reacts to the agent's old message, how many, the title), so an agent whose
     // access the owner removed after it sent hears nothing more from here (it used to keep receiving counts)
@@ -3862,7 +3977,7 @@ function create(deps = {}) {
     // a thread this conversation never named is the SAME uniform not-found as a conversation it may not see (no
     // existence oracle for another chat's thread ids — verify r1)
     if (r && !r.ok && r.code === 'thread-not-loaded') return ACL.notFound();
-    return r && r.ok ? { ...r, conversation: { key: en.key, adapterId, id: convId, title: en.title || convId } } : r;
+    return r && r.ok ? { ...r, conversation: { key: agentId(en.key), adapterId, id: agentId(convId), title: agentTitle(en, convId) } } : r;   // verify r1 F2: the title through the belt; r3 F6: the key + id
   }
   /** `POST …/thread/:msg/older`: the thread's local page before the boundary; past its start (and where replies
    *  are walked separately) ONE walk from the newest back (the rule-19 belt: the per-thread floor), then the page.
@@ -6508,8 +6623,22 @@ function create(deps = {}) {
   const scopeConvOf = (p) => (p && !p.compose && p.convId ? p.convId : null);
   function agentProposalView(ctx, p) {
     if (!p) return p;
+    const v = agentProposalViewRaw(ctx, p);
+    return ctx && ctx.kind === 'agent' ? agentIdsOf(v) : v;   // verify r3 F6: an AGENT's view carries its ids as line pieces (the user's window keeps them as they are)
+  }
+  /** the drafter's view (whole while it still sees, else the fate) — its two lines are test-channels-engine's control pins, kept verbatim */
+  function agentProposalViewRaw(ctx, p) {
     if (!ctx || ctx.kind !== 'agent' || stillSees(ctx, p.adapterId, scopeConvOf(p))) return proposalView(p);
     return withheldProposal(p);
+  }
+  /** verify r3 F6: the ids a proposal's AGENT view carries — the target conversation, its thread, the answered message, the
+   *  sent message's vendor id (the receipt), a reaction's message + its quote's author (a name, else an id) — as line pieces */
+  function agentIdsOf(v) {
+    if (!v || typeof v !== 'object') return v;
+    const out = { ...v, convId: agentId(v.convId), threadKey: agentId(v.threadKey), replyTo: agentId(v.replyTo) };
+    if (v.receipt && typeof v.receipt === 'object') out.receipt = { ...v.receipt, vendorMessageId: agentId(v.receipt.vendorMessageId) };
+    if (v.reaction && typeof v.reaction === 'object') out.reaction = { ...v.reaction, msg: agentId(v.reaction.msg), ...(v.reaction.quote && typeof v.reaction.quote === 'object' ? { quote: { ...v.reaction.quote, author: agentText(v.reaction.quote.author, { kind: 'line', max: 200 }) } } : {}) };
+    return out;
   }
   function withheldProposal(p) {
     return {
@@ -6869,7 +6998,7 @@ function create(deps = {}) {
       await store.outbox.update((ob) => {
         const id = store.outbox.nextId();
         created = ob.proposals[id] = {
-          id, adapterId, convId, key: en.key, title: en.title || convId,
+          id, adapterId, convId, key: en.key, title: agentTitle(en, convId),   // verify r1 F2: the proposal's title is printed by `vibespace-channels status`
           text: v.proposal.text, originalText: v.proposal.text, replyTo: v.proposal.replyTo, why: v.proposal.why, attachments: v.proposal.attachments,
           replyAnchor: ra.anchor, replyEnvelope: ra.envelope,
           placement, ...(placement !== 'chat' ? { replyQuote } : {}), ...(pv.defaulted && placement !== 'chat' ? { placementDefaulted: pv.rule } : {}),
@@ -6954,7 +7083,7 @@ function create(deps = {}) {
     await store.outbox.update((ob) => {
       const id = store.outbox.nextId();
       created = ob.proposals[id] = {
-        id, kind: 'reaction', adapterId, convId, key: en.key, title: en.title || convId,
+        id, kind: 'reaction', adapterId, convId, key: en.key, title: agentTitle(en, convId),   // verify r1 F2: the same for a reaction proposal
         reaction: { msg: v.proposal.msg, key: v.proposal.key, op, glyph: v.proposal.glyph, label: v.proposal.label, quote: P.reactionQuote(target) },
         text: '', originalText: '', replyTo: v.proposal.msg, why: v.proposal.why, attachments: [],
         draftedBy: drafter, ...drafterGroupsOf(ctx), authority, at: t, updatedAt: t, state: 'proposed',
@@ -7115,7 +7244,7 @@ function create(deps = {}) {
     for (const rec of adapterRecords().adapters) {
       if (rec.enabled === false || (adapterId && rec.id !== adapterId)) continue;
       const visible = new Map();
-      for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id && ACL.canSee(reachFor(ctx, rec, en).level)) visible.set(en.id, en.title || en.id);
+      for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id && ACL.canSee(reachFor(ctx, rec, en).level)) visible.set(en.id, agentTitle(en, en.id));   // verify r1 F2: the title through the belt
       if (!visible.size) continue;
       // only the VISIBLE conversations' logs are read at all
       const r = await store.search(rec.id, query, { limit: 200, convIds: [...visible.keys()] });
@@ -7126,7 +7255,7 @@ function create(deps = {}) {
         if (!visible.has(x0.convId)) continue;
         const x = viewOf(rec, x0);   // lane channel-rich: the same read-time view (a bot's name, markup read)
         const ax = agentCopy(x);   // verify r3: judged on the way out; the 400-character cut leaves no dangling opener
-        results.push({ key: `${rec.id}/${x.convId}`, adapterId: rec.id, adapter: rec.label || rec.id, convId: x.convId, title: visible.get(x.convId), at: x.at || null, author: ax.author || null, text: inertFrameLine(String(ax.text || '').slice(0, 400)), vendorId: x.vendorId || null });
+        results.push({ key: agentId(`${rec.id}/${x.convId}`), adapterId: rec.id, adapter: rec.label || rec.id, convId: agentId(x.convId), title: visible.get(x.convId), at: x.at || null, author: ax.author || null, text: agentText(ax.text, { kind: 'block', max: 400 }), vendorId: agentId(x.vendorId || null) });   // verify r3 F6: the key, the conversation id and the message id as line pieces
         if (results.length >= n) break;
       }
       if (results.length >= n) { truncated = true; break; }
@@ -8099,7 +8228,7 @@ function create(deps = {}) {
       const capsL = acc.length ? authorityCapsFor(rec, en, t) : null;
       const authority = acc.length ? (acc.some((x) => F.effectiveAuthority(x.row, capsL).authority === 'send') ? 'send' : 'draft') : null;
       out.push({
-        key: en.key, adapterId: en.adapterId, adapter: rec.label || rec.id, id: en.id, title: en.title || en.id, kind: en.kind,
+        key: agentId(en.key), adapterId: en.adapterId, adapter: rec.label || rec.id, id: agentId(en.id), title: agentTitle(en, en.id), kind: en.kind,   // verify r1 F2: the title through the belt; r3 F6: the key + id
         level: reach.level, unread: en.unread || 0, lastAt: en.lastAt || null, polledAt: (en.lane && en.lane.lastPollAt) || null,
         canSend: !!who.as, sendWhy: who.why, sendAs: who.as, identityMarking: c.identityMarking,
         policy: policyFor(rec, en).mode,
@@ -8127,7 +8256,7 @@ function create(deps = {}) {
     stampAgentRead(en.key, ctx, upTo);
     // §25: an agent reads `text` — the render tree is for the eye only (never a second copy of the body in its context)
     // lane channel-threads (§5.1 / §6.4): the agent's copy — no tree, the place as words, reactions WITHOUT `by`
-    return { ok: true, conversation: { key: en.key, adapterId, id: convId, title: en.title || convId, polledAt: (en.lane && en.lane.lastPollAt) || null }, records: withView(rec, records, { convId, agent: true }) };
+    return { ok: true, conversation: { key: agentId(en.key), adapterId, id: agentId(convId), title: agentTitle(en, convId), polledAt: (en.lane && en.lane.lastPollAt) || null }, records: withView(rec, records, { convId, agent: true }) };   // verify r1 F2: the title through the belt; r3 F6: the key + id
   }
   /**
    * STAMP AN AGENT'S READ (R3 §23 — the owner: "某个agent刚刚读取了的"): `en.
@@ -8175,8 +8304,8 @@ function create(deps = {}) {
     const recs = r.records || [];
     return {
       ok: true,
-      conversation: { key: en.key, adapterId, id: convId, title: en.title || convId, polledAt: (en.lane && en.lane.lastPollAt) || null },
-      thread: { key: th.key || null, count: Number(th.count) || 0, lastAt: th.lastAt || null, walked: !!th.walked },
+      conversation: { key: agentId(en.key), adapterId, id: agentId(convId), title: agentTitle(en, convId), polledAt: (en.lane && en.lane.lastPollAt) || null },   // verify r2 F4: the thread READ's title (printed by `read --thread`) through the belt — r1 F2 took the thread REFRESH's; r3 F6: the key + id
+      thread: { key: agentId(th.key || null), count: Number(th.count) || 0, lastAt: th.lastAt || null, walked: !!th.walked },   // verify r3 F6: the thread key (printed on the head line) as a line piece
       records: recs,
       ...(r.code === 'not-a-thread' ? { note: `(${NOT_A_THREAD})` } : th.walked ? {} : { note: '(thread not loaded here — the user\'s window loads it; ask again after)' }),
     };
@@ -8512,7 +8641,7 @@ function create(deps = {}) {
       const acct = accountGrainOf(rec.id);
       if (acct) push('account', F.grainOf(acct));
       for (const pa of patternsOf(rec.id)) push('pattern', F.grainOf(pa), { patternId: pa.id, rule: F.patternSummary(pa.pattern) });
-      for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id) { const g = convGrainOf(en); if (g.access.length) push('conversation', g, { key: en.key, title: en.title || en.id }); }
+      for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id) { const g = convGrainOf(en); if (g.access.length) push('conversation', g, { key: agentId(en.key), title: agentTitle(en, en.id) }); }   // verify r3 F6: the key as a line piece; verify r2 F4: the seventh title answer (`vibespace-channels status` prints it before the next row) through the belt
     }
     return { ok: true, access: out };
   }
@@ -8883,6 +9012,13 @@ function create(deps = {}) {
     // inc-muk9jj0j-rel3: a verdict judged before the account's LAST credential change (a re-authorization that landed
     // before this code) is re-judged once at boot — the read path re-judges on the way out anyway; this persists it
     for (const rec of adapterRecords().adapters) rejudgeConvCaps(rec, 'boot').catch(() => {});
+    // lane lark-p2p: a change-feed row an older hit reader wrote starts over NOW (never waits out that reader's back-off
+    // or park) — written at once so the card says "searching for the first time", not the old reader's state
+    try {
+      let healed = 0;
+      for (const rec of adapterRecords().adapters) if (feedReaderHeal(rec)) healed++;
+      if (healed) store.adapters.update(() => {}).then(() => notify([])).catch((err) => log.warn(`[channels] boot feed-reader heal write failed: ${(err && err.message) || err}`));
+    } catch (err) { log.warn(`[channels] boot feed-reader heal failed: ${(err && err.message) || err}`); }
     // P4: a proposal the previous process died on mid-send is `unknown`, not
     // "not sent" — and never re-sent.
     sweepSending().catch((err) => log.warn(`[channels] boot outbox sweep failed: ${(err && err.message) || err}`));

@@ -13,7 +13,11 @@
 //      bar takes them back (after the button's own focus) · a terminal (xterm's screen → its helper textarea) · a
 //      synthetic press · a press on the picture then a script focus · a press elsewhere then a script focus · a stale
 //      press · a touch tap (the focus at its END) · two views driving (the yield per claim; the pressed view re-claims) ·
-//      a handback while yielded · the words follow a new text box.
+//      a handback while yielded · the words follow a new text box. Lane dialog-keys (the owner's "ok", 2026-09-30): APP MODALS
+//      built and ANNOUNCED as utils.js builds them (createModalShell + the confirm / input dialogs, the static overlay) — a
+//      dialog the user's own act opened TAKES the keys (Enter answers it, the page gets nothing, its close returns them to the
+//      page / the composer / the older dialog; nested, two views, a chain, a focusless one, a <select>, a script's close); one
+//      that opens by itself (no press, a synthetic or stale press, a press on the picture) is taken back and said once.
 //   §2 PATCHED-COPY CONTROLS (scripts/mutant-copy.mjs): the yield ignoring the press (userW's bug), a same-input check
 //      that matches anything (the password guard gone), the touch re-stamp removed, the trust check removed — each turns
 //      exactly its scenarios red.
@@ -48,13 +52,25 @@ function makeDom() {
     node.listeners.push(rec);
     if (signal) signal.addEventListener('abort', () => { const i = node.listeners.indexOf(rec); if (i >= 0) node.listeners.splice(i, 1); });
   };
+  // lane dialog-keys: a MutationObserver as the view uses it — childList on a node (an overlay appended / removed) and a
+  // node's own attributes (the static overlay's `hidden` class); the callback runs as a microtask, once per checkpoint
+  const observers = [];
+  class MO {
+    constructor(cb) { this.cb = cb; this.targets = []; this.pending = false; }
+    observe(node, opts = {}) { this.targets.push({ node, opts }); if (!observers.includes(this)) observers.push(this); }
+    disconnect() { this.targets = []; const i = observers.indexOf(this); if (i >= 0) observers.splice(i, 1); }
+  }
+  const notify = (node, kind) => { for (const m of observers.slice()) if (!m.pending && m.targets.some((t) => t.node === node && !!t.opts[kind])) { m.pending = true; queueMicrotask(() => { m.pending = false; if (observers.includes(m)) m.cb([]); }); } };
   class El {
     constructor(tag, { cls = '', type, ce = false, tabindex = null } = {}) {
       this.nodeType = 1; this.tagName = String(tag).toUpperCase(); this.className = cls; this.type = type; this._ce = ce;
-      this.tabIndex = tabindex; this.readOnly = false; this.disabled = false; this.value = ''; this.parent = null; this.children = []; this.listeners = [];
+      this.tabIndex = tabindex; this.readOnly = false; this.disabled = false; this.value = ''; this.parent = null; this.children = []; this.listeners = []; this.style = {};
     }
     get isContentEditable() { let n = this; while (n && n.nodeType === 1) { if (n._ce) return true; n = n.parent; } return false; }
-    append(...cs) { for (const c of cs) { c.parent = this; this.children.push(c); } return this; }
+    append(...cs) { for (const c of cs) { c.parent = this; this.children.push(c); } notify(this, 'childList'); return this; }
+    /** lane dialog-keys: Chrome's removal — the focused element inside goes with it and the focus falls to <body> WITHOUT a blur */
+    remove() { const p = this.parent; if (!p) return; const i = p.children.indexOf(this); if (i >= 0) p.children.splice(i, 1); this.parent = null; if (doc.activeElement && this.contains(doc.activeElement)) doc.activeElement = body; notify(p, 'childList'); }
+    get classList() { const self = this; const list = () => String(self.className || '').split(/\s+/).filter(Boolean); return { contains: (c) => list().includes(c), add: (c) => { if (!list().includes(c)) { self.className = [...list(), c].join(' '); notify(self, 'attributes'); } }, remove: (c) => { if (list().includes(c)) { self.className = list().filter((x) => x !== c).join(' '); notify(self, 'attributes'); } } }; }
     contains(o) { let n = o; while (n) { if (n === this) return true; n = n.parent; } return false; }
     closest(sel) { const wants = String(sel).split(',').map((x) => x.trim()); let n = this; while (n && n.nodeType === 1) { const cls = String(n.className).split(/\s+/); if (wants.some((w) => (w.startsWith('.') ? cls.includes(w.slice(1)) : n.tagName === w.toUpperCase()))) return n; n = n.parent; } return null; } // a list of classes (verify r2: INPUT_HOSTS) or tags (verify r4: `label`)
     addEventListener(type, fn, opts) { addL(this, type, fn, opts); }
@@ -66,7 +82,7 @@ function makeDom() {
   const doc = { nodeType: 9, parent: null, listeners: [], activeElement: null, addEventListener(type, fn, opts) { addL(doc, type, fn, opts); } };
   const body = new El('body'); body.parent = doc; doc.body = body; doc.activeElement = body;
   function dispatch(target, type, init = {}) {
-    const ev = { type, target, isTrusted: init.isTrusted === true, pointerType: init.pointerType || 'mouse', defaultPrevented: false, stopped: false, immediate: false,
+    const ev = { type, target, isTrusted: init.isTrusted === true, pointerType: init.pointerType || 'mouse', detail: init.detail, key: init.key, defaultPrevented: false, stopped: false, immediate: false, // (lane dialog-keys: a CustomEvent's detail, a keydown's key)
       preventDefault() { this.defaultPrevented = true; }, stopPropagation() { this.stopped = true; }, stopImmediatePropagation() { this.stopped = true; this.immediate = true; } };
     const chain = []; for (let n = target; n; n = n.parent) chain.push(n);
     const fire = (node, phase) => { for (const l of node.listeners.slice()) { if (l.type !== type || (phase !== null && l.capture !== phase)) continue; l.fn.call(node, ev); if (ev.immediate) break; } };
@@ -99,7 +115,7 @@ function makeDom() {
     }
     await flush();
   }
-  return { El, doc, body, dispatch, press };
+  return { El, doc, body, dispatch, press, MO };
 }
 
 // ═══ THE WORLD: two live views (the second only when asked), a chat composer, a terminal, a sidebar ═══════════
@@ -142,12 +158,12 @@ async function scenarios(KY) {
       // verify r1 (K3): the view's TAB in a strip — outside its root; the WM's tab handlers cancel the press's default focus
       const tab = new El('div', { cls: 'tab-item' }); const tabLabel = new El('span', { cls: 'tab-label' }); tab.append(tabLabel); body.append(tab);
       tab.addEventListener('mousedown', (e) => e.preventDefault());
-      const st = { mode: 'watch', mine: false, connected: true, displayed: true, claimed: false, closed: false, reclaims: 0, yields: 0, page: '', caretMoves: 0, strayKeys: 0, redraws: 0, held: new Set(), released: [], cues: 0, frameCues: 0, dialogCues: 0 };
+      const st = { mode: 'watch', mine: false, connected: true, displayed: true, claimed: false, closed: false, reclaims: 0, yields: 0, page: '', caretMoves: 0, strayKeys: 0, redraws: 0, held: new Set(), released: [], cues: 0, frameCues: 0, dialogCues: 0, dialogTakes: 0, dialogReturns: 0 };
       /** the view's releaseHeld (r1 K4 / r2 H3): a keyup to the page for every key still held there */
       const releaseHeld = () => { st.released.push(...[...st.held].reverse()); st.held.clear(); };
       const facts = () => ({ mode: st.mode, mine: st.mine, connected: st.connected, displayed: st.displayed, closed: st.closed });
-      const ky = KY.createKeyboardYield({ root, sink: kbd, drives: () => st.claimed && T.keyboardOwnership(facts()).owns, mine: () => st.claimed && !st.closed, now: clock.now, ownChrome: (el) => tab.contains(el) });
-      const ownsKeyboard = () => T.keyboardOwnership({ ...facts(), yielded: ky.yielded }).owns;
+      const ky = KY.createKeyboardYield({ root, sink: kbd, drives: () => st.claimed && T.keyboardOwnership(facts()).owns, mine: () => st.claimed && !st.closed, now: clock.now, ownChrome: (el) => tab.contains(el), picture: canvas }); // lane dialog-keys: the picture (a press there is the page's)
+      const ownsKeyboard = () => T.keyboardOwnership({ ...facts(), yielded: ky.yielded, dialog: !!ky.dialogHolds }).owns; // lane dialog-keys: …nor while a dialog the user opened holds the keys
       const yieldedKeyboard = () => !!ky.yielded && st.claimed && !st.closed;
       const claimRec = () => ({ id, owns: ownsKeyboard, yielded: yieldedKeyboard });
       const iOwn = () => { const o = KO.keyboardOwner(); return !!o && o.id === id; };
@@ -161,7 +177,7 @@ async function scenarios(KY) {
         syncing = true;
         try {
           if (st.claimed && typeof ky.settle === 'function' && ky.settle({ drives: st.claimed && T.keyboardOwnership(facts()).owns, active: doc.activeElement }) === 'end') { KO.claimKeyboard(claimRec()); st.homeless = (st.homeless || 0) + 1; st.caretMoves++; focusSink(); } // verify r2 (H1b'): the view's settle
-          const r = ky.sync({ owns: st.claimed && iOwn(), yielded: st.claimed && yieldedKeyboard(), active: doc.activeElement }); if (!r.changed) return; if (r.moveCaret) { st.caretMoves++; focusSink(); } if (r.release) releaseHeld(); st.redraws++; KO.keyboardChanged(); } finally { syncing = false; }
+          const r = ky.sync({ owns: st.claimed && iOwn(), yielded: st.claimed && yieldedKeyboard(), dialog: st.claimed && !!ky.dialogHolds, active: doc.activeElement }); if (!r.changed) return; if (r.moveCaret) { st.caretMoves++; focusSink(); } if (r.release) releaseHeld(); st.redraws++; KO.keyboardChanged(); } finally { syncing = false; }
       };
       const offSync = KO.onKeyboardChange(sync);
       const ctl = new AbortController();
@@ -193,18 +209,41 @@ async function scenarios(KY) {
           if (st.closed || !iOwn()) return;
           const bv = typeof KY.sinkBlurVerdict === 'function' ? KY.sinkBlurVerdict(doc.activeElement, { sink: kbd, root, body }) : 'take-back';
           if (bv === 'keep') return;
-          const a = doc.activeElement;
           focusSink();
-          if (bv === 'frame') st.frameCues++;
-          else if (typeof ky.dialogCue === 'function' && ky.dialogCue(a)) st.dialogCues++; // verify r3 (F4)
+          if (bv === 'frame') st.frameCues++; // (verify r3 F4's cue here: retired by lane dialog-keys — a dialog is judged at its OPEN)
         }, 0);
+      }, { signal: ctl.signal });
+      // lane dialog-keys: THE MODAL ANNOUNCEMENT and the dialogs' watch, as browser-live-window.js wires them (pinned in §3)
+      const dialogMo = new D.MO(() => settleDialogs());
+      const watchDialogs = () => { dialogMo.disconnect(); if (st.closed || !ky.dialogHolds) return; dialogMo.observe(body, { childList: true }); for (const ov of ky.dialogOverlays()) dialogMo.observe(ov, { attributes: true }); };
+      const focusDialog = (ov) => { const tgt = KY.dialogFocusTarget(ov); if (tgt === ov && ov.tabIndex == null) ov.tabIndex = -1; tgt.focus(); }; // (verify r1: ONE door — the take's tick and the 'older' return)
+      const settleDialogs = () => {
+        const r = ky.settleDialogs({ active: doc.activeElement });
+        if (!r) return;
+        watchDialogs(); st.dialogReturns++;
+        if (r.to === 'sink') { if (iOwn()) focusSink(); }
+        else if (r.to === 'older' && r.el) focusDialog(r.el);
+        else if ((r.to === 'back' || r.to === 'yield') && r.el) r.el.focus();
+        sync();
+      };
+      doc.addEventListener('vs-modal-open', (e) => {
+        if (!st.claimed || st.closed) return;
+        settleDialogs();
+        const ov = e.detail ? e.detail.overlay : null;
+        const v = ky.onDialogOpen(ov, { active: doc.activeElement });
+        if (v === 'take') {
+          st.dialogTakes++; watchDialogs(); sync();
+          setTimeout(() => { if (st.closed || !ky.dialogHolds || !ky.dialogOverlays().includes(ov)) return; const a = doc.activeElement; if (a && a !== body && ov.contains(a)) return; focusDialog(ov); }, 0);
+          return;
+        }
+        if (v === 'reclaim' && iOwn() && ky.dialogCue(v)) st.dialogCues++;
       }, { signal: ctl.signal });
       // the picture's own pointerdown while driving: preventDefault (no mouse events, no default focus) + the sink
       img.addEventListener('pointerdown', (e) => { if (!(st.mode === 'takeover' && st.mine)) return; e.preventDefault(); focusSink(); });
       const v = {
         id, root, img, takeBtn, kbd, tab, tabLabel, st, ky,
-        takeover() { st.mode = 'takeover'; st.mine = true; if (!st.claimed) { st.claimed = true; ky.reset('claim'); KO.claimKeyboard(claimRec()); } if (!ky.yielded) focusSink(); KO.keyboardChanged(); },
-        handback() { st.mode = 'watch'; st.mine = false; if (st.claimed) { st.claimed = false; ky.reset('release'); KO.releaseKeyboard(id); if (doc.activeElement === kbd) doc.focus(body); } KO.keyboardChanged(); },
+        takeover() { st.mode = 'takeover'; st.mine = true; if (!st.claimed) { st.claimed = true; ky.reset('claim'); KO.claimKeyboard(claimRec()); watchDialogs(); } if (!ky.yielded && !ky.dialogHolds) focusSink(); KO.keyboardChanged(); }, // (lane dialog-keys: a mode record re-applied never pulls the keys out of a dialog the user opened)
+        handback() { st.mode = 'watch'; st.mine = false; if (st.claimed) { st.claimed = false; ky.reset('release'); KO.releaseKeyboard(id); watchDialogs(); if (doc.activeElement === kbd) doc.focus(body); } KO.keyboardChanged(); },
         dispose() { ctl.abort(); offSync(); KO.releaseKeyboard(id); },
         /** verify r2 (H1): a HIDER (minimize, a desktop, a tab) / the STREAM — the view's own signals for a transition */
         show(on) { st.displayed = !!on; sync(); },
@@ -218,11 +257,37 @@ async function scenarios(KY) {
       };
       V.push(v);
     }
-    /** Typing, as the views' document capture keydown routes it: the OWNING view's page gets the key; nobody owns ⇒
-     *  the focused text box does. */
-    const type = (text) => { for (const ch of text) { const o = KO.keyboardOwner(); const v = o && V.find((x) => x.id === o.id); if (v) { if (typeof v.ky.caretOutside === 'function' && v.ky.caretOutside(doc.activeElement)) { v.st.strayKeys++; doc.focus(v.kbd); KO.keyboardChanged(); continue; } v.st.page += ch; if (doc.activeElement !== v.kbd) doc.focus(v.kbd); } else if (KY.isEditable(doc.activeElement)) doc.activeElement.value += ch; } }; // verify r2 (H1): the view's BELT — the owner's key while a text box outside holds the caret goes nowhere, the caret moves; verify r4: onDocKey ends with focusSink() — after a key the sink holds the caret (a <select> that kept the focus of a press loses it at the first key: measured, the closing key's keyup)
+    /** Typing, as the views' document capture keydown routes it: the OWNING view's page gets the key; nobody owns ⇒ a keydown
+     *  to the focused element (lane dialog-keys: the dialog's own Enter / Escape handlers run) and, unless one cancelled it,
+     *  the text box gets the character. A key while a dialog holds is the user's act on the app (the view's onDocKey stamps it). */
+    const KEYS = { '\n': 'Enter', '\x1b': 'Escape', '\t': 'Tab' };
+    const type = (text) => { for (const ch of text) { for (const w of V) if (w.ky.dialogHolds) w.ky.onAppKey({ isTrusted: true }); const o = KO.keyboardOwner(); const v = o && V.find((x) => x.id === o.id); if (v) { if (typeof v.ky.caretOutside === 'function' && v.ky.caretOutside(doc.activeElement)) { v.st.strayKeys++; doc.focus(v.kbd); KO.keyboardChanged(); continue; } v.st.page += ch; if (doc.activeElement !== v.kbd) doc.focus(v.kbd); } else { const a = doc.activeElement; const ev = D.dispatch(a || body, 'keydown', { isTrusted: true, key: KEYS[ch] || ch }); if (!ev.defaultPrevented && doc.activeElement === a && KY.isEditable(a) && ch !== '\x1b') a.value += ch; } } }; // verify r2 (H1): the view's BELT — the owner's key while a text box outside holds the caret goes nowhere, the caret moves; verify r4: onDocKey ends with focusSink() — after a key the sink holds the caret (a <select> that kept the focus of a press loses it at the first key: measured, the closing key's keyup)
     const at = () => { const a = doc.activeElement; if (a === ta) return 'composer'; if (a === helper) return 'terminal'; for (const v of V) if (a === v.kbd) return 'sink' + (V.length > 1 ? v.id.slice(-1) : ''); if (a === xIme) return 'xpra-ime'; if (a === vCanvas) return 'vnc-canvas'; return a === body ? 'body' : String(a && (a.className || a.tagName)); };
-    const ctx = { D, doc, ta, helper, cvs, sidebar, sendBtn, line, chatFocus, V, clock, type, at, xCanvas, xIme, vCanvas, press: (el, o = {}) => D.press(el, { clock, ...o }) };
+    /** lane dialog-keys: THE APP'S MODAL, built as src/lib/utils.js builds it — createModalShell (an overlay appended to <body>,
+     *  then ANNOUNCED in the same task: announceModal), showConfirmDialog (Enter ⇒ true, Escape ⇒ false on the overlay, OK
+     *  focused a tick later) and showInputDialog (its box focused a tick later; Enter ⇒ the value, Escape ⇒ null on the box);
+     *  a press on OK / Cancel answers it (the mini's click = the release). `focusOwn: false` = a createModalShell dialog that
+     *  focuses nothing itself; `select` = a <select> in it; `m.open` / `m.answer` = the promise's fate. */
+    const modal = ({ input = false, focusOwn = true, select = false } = {}) => {
+      const ov = new El('div', { cls: 'dialog-overlay' }); const dlg = new El('div', { cls: 'dialog' });
+      const box = input ? new El('input', { cls: 'dialog-input', type: 'text' }) : null; const sel = select ? new El('select', { cls: 'dialog-select' }) : null;
+      const cancel = new El('button', { cls: 'btn-cancel' }); const okb = new El('button', { cls: 'btn-create' });
+      dlg.append(...[box, sel].filter(Boolean), cancel, okb); ov.append(dlg); body.append(ov);
+      D.dispatch(doc, 'vs-modal-open', { detail: { overlay: ov } }); // createModalShell: announceModal(overlay), right after the append
+      const m = { ov, dlg, box, sel, okb, cancel, open: true, answer: undefined };
+      const done = (v) => { if (!m.open) return; m.open = false; m.answer = v; ov.remove(); };
+      okb.addEventListener('pointerup', () => done(input ? box.value : true)); cancel.addEventListener('pointerup', () => done(input ? null : false));
+      if (input) {
+        box.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); done(box.value); } if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(null); } });
+        if (focusOwn) setTimeout(() => box.focus(), 0);
+      } else {
+        ov.tabIndex = -1;
+        ov.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); done(true); } if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(false); } });
+        if (focusOwn) setTimeout(() => okb.focus(), 0);
+      }
+      return m;
+    };
+    const ctx = { D, doc, ta, helper, cvs, sidebar, sendBtn, line, chatFocus, V, clock, type, at, xCanvas, xIme, vCanvas, modal, press: (el, o = {}) => D.press(el, { clock, ...o }) };
     try { return await fn(ctx); } finally { for (const v of V) v.dispose(); offLine(); }
   }
 
@@ -651,52 +716,326 @@ async function scenarios(KY) {
     r.ok = r.w1 === 'chat' && r.focus === 'chat-view' && r.w2 === 'none' && r.w3 === 'chat' && r.composer === 'l1' && r.page === '' && r.yielded;
     return r;
   });
-  // verify r3 (F4): a DIALOG the user's own press opened (the explorer's Delete → the confirm dialog, which focuses its default
-  // button a tick later) — taken back (its Enter goes to the page: a dialog that opens by itself must never get the keys) and
-  // SAID once; a press ON its button answers it by the pointer, silently; a dialog opening by itself is never said
-  out.dialogConfirm = await world(async ({ V: [A], D, press, type, at, clock }) => {
+  // ── lane dialog-keys (the owner's "ok", 2026-09-30, on takeover-keyboard r4's proposal): A DIALOG YOUR OWN ACT OPENED TAKES
+  // THE KEYS; one that opens by itself never does. Before (verify r3 F4): EVERY app modal was taken back — Delete → the confirm
+  // → Enter went to the PAGE (its textarea got a line break, the file was kept), said once. Every dialog below is built and
+  // ANNOUNCED as src/lib/utils.js builds it (the world's `modal`: createModalShell + showConfirmDialog / showInputDialog).
+  const menuItem = (D, open) => { const item = new D.El('div', { cls: 'context-menu-item' }); D.body.append(item); item.addEventListener('pointerup', open); return item; }; // (a menu row: its action runs at the release, like the click)
+  // (1) THE RULE: Take over, "p1" to the page, Shift held there; a real press on a menu's Delete opens the confirm — it TAKES the
+  // keys: its own focus stays (OK), the chip says "in the dialog", nobody owns, the Shift held in the page is let go; Enter
+  // ANSWERS it (true) and the page gets NOTHING; its close gives the keys back to the page: the sink holds the caret, the view
+  // owns again, "x" reaches the page; nothing said; the takeover went on
+  out.dialogUserPress = await world(async ({ V: [A], D, press, type, at, modal }) => {
+    A.takeover(); await flush(); type('p1'); A.hold('Shift');
+    let m = null; const item = menuItem(D, () => { m = modal(); });
+    await press(item); await flush();
+    const open = { focus: at(), where: A.ky.whereNow(D.doc.activeElement), owned: KO.keyboardOwned(), held: A.ky.dialogHolds, released: [...A.st.released], takes: A.st.dialogTakes, why: A.ky.dialogWhy };
+    type('\n'); await flush();
+    const closed = { answer: m && m.answer, open: m && m.open, focus: at(), owner: KO.keyboardOwner() && KO.keyboardOwner().id, held: A.ky.dialogHolds, returns: A.st.dialogReturns };
+    type('x');
+    const r = { open, closed, page: A.st.page, cues: A.st.dialogCues, mode: A.st.mode, mine: A.st.mine };
+    r.ok = r.open.focus === 'btn-create' && r.open.where === 'dialog' && !r.open.owned && r.open.held && JSON.stringify(r.open.released) === '["Shift"]' && r.open.takes === 1 && r.open.why === 'pressed'
+      && r.closed.answer === true && r.closed.open === false && r.closed.focus === 'sink' && r.closed.owner === A.id && !r.closed.held && r.closed.returns === 1
+      && r.page === 'p1x' && r.cues === 0 && r.mode === 'takeover' && r.mine;
+    return r;
+  });
+  // (2) THE PASSWORD GUARD: a confirm that opens BY ITSELF (a broadcast, a timer — nothing pressed) while "pw" is typed into the
+  // page is TAKEN BACK (the caret stays in the sink, its Enter is the page's, it stays open) and SAID once; an input dialog
+  // opening by itself a second later gets none of the typing and is not said again (one rate limit)
+  out.dialogScript = await world(async ({ V: [A], type, at, clock, modal }) => {
+    A.takeover(); await flush(); type('pw');
+    const m1 = modal(); await flush(); await flush();
+    const f1 = at(); const c1 = A.st.dialogCues; const why = A.ky.dialogWhy; type('\n');
+    clock.advance(1000); const m2 = modal({ input: true }); await flush(); await flush();
+    const f2 = at(); const c2 = A.st.dialogCues; type('ab');
+    const r = { f1, c1, why, f2, c2, page: A.st.page, open: [m1.open, m2.open], box: m2.box.value, held: A.ky.dialogHolds, owned: KO.keyboardOwned(), takes: A.st.dialogTakes };
+    r.ok = r.f1 === 'sink' && r.c1 === 1 && r.why === 'no press' && r.f2 === 'sink' && r.c2 === 1 && r.page === 'pw\nab' && JSON.stringify(r.open) === '[true,true]' && r.box === '' && !r.held && r.owned && r.takes === 0;
+    return r;
+  });
+  // (3) A SCRIPT CANNOT FAKE THE OPENER: a SYNTHETIC press (isTrusted false) on the menu row opens the confirm — not his act:
+  // taken back and said; its Enter is the page's
+  out.dialogSynthetic = await world(async ({ V: [A], D, press, type, at, modal }) => {
     A.takeover(); await flush();
-    const item = new D.El('div', { cls: 'context-menu-item' }); D.body.append(item);
-    const open = () => { const ov = new D.El('div', { cls: 'dialog-overlay', tabindex: -1 }); const dlg = new D.El('div', { cls: 'dialog' }); const okb = new D.El('button', { cls: 'btn-ok' }); ov.append(dlg.append(okb)); D.body.append(ov); setTimeout(() => ov.focus(), 0); setTimeout(() => okb.focus(), 0); return okb; };
-    let okb = null; item.addEventListener('pointerup', () => { okb = open(); });
-    await press(item); await flush(); await flush(); const focus = at(); const c1 = A.st.dialogCues;
-    type('\n'); // the Enter meant for the dialog
-    await press(okb); await flush(); await flush(); const c2 = A.st.dialogCues;
-    clock.advance(T.RECLAIM_CUE_MS + 10); open(); await flush(); await flush(); const c3 = A.st.dialogCues; // a dialog opening by itself
-    const r = { focus, page: A.st.page, cues: [c1, c2, c3] };
-    r.ok = r.focus === 'sink' && r.page === '\n' && JSON.stringify(r.cues) === '[1,1,1]';
+    let m = null; const item = menuItem(D, () => { m = modal(); });
+    await press(item, { trusted: false }); await flush(); await flush();
+    const f = at(); type('\n');
+    const r = { f, page: A.st.page, cues: A.st.dialogCues, open: m && m.open, held: A.ky.dialogHolds, why: A.ky.dialogWhy };
+    r.ok = r.f === 'sink' && r.page === '\n' && r.cues === 1 && r.open && !r.held && r.why === 'synthetic press';
+    return r;
+  });
+  // (4) a press on the PICTURE went to the PAGE — a confirm opening by itself 50 ms later is not his: taken back and said
+  out.dialogPicture = await world(async ({ V: [A], press, type, at, clock, modal }) => {
+    A.takeover(); await flush();
+    await press(A.img); clock.advance(50); const m = modal(); await flush(); await flush();
+    const f = at(); type('\n');
+    const r = { f, page: A.st.page, cues: A.st.dialogCues, open: m.open, held: A.ky.dialogHolds, why: A.ky.dialogWhy };
+    r.ok = r.f === 'sink' && r.page === '\n' && r.cues === 1 && r.open && !r.held && r.why === 'pressed the page';
+    return r;
+  });
+  // (5) a STALE press: the sidebar pressed, the confirm opens 400 ms after the release (a slow fetch, a broadcast) — judged as
+  // opening by itself (declared: a dialog opened after an await past USER_PRESS_MS is taken back and said)
+  out.dialogStale = await world(async ({ V: [A], sidebar, press, type, at, clock, modal }) => {
+    A.takeover(); await flush();
+    await press(sidebar); clock.advance(T.USER_PRESS_MS + 150); const m = modal(); await flush(); await flush();
+    const f = at(); type('\n');
+    const r = { f, page: A.st.page, cues: A.st.dialogCues, open: m.open, held: A.ky.dialogHolds, why: A.ky.dialogWhy };
+    r.ok = r.f === 'sink' && r.page === '\n' && r.cues === 1 && r.open && !r.held && r.why === 'stale press';
+    return r;
+  });
+  // (6) YIELDED to the chat composer ("hi"), a press on a chat button opens an INPUT dialog — his act: it takes the keys ("nm" +
+  // Enter answer it), and its close gives them back to the COMPOSER (the yield's home — not the button he pressed): "!" lands
+  // there, the line above the composer is on, the chip says the chat again; the page gets nothing
+  out.dialogYielded = await world(async ({ V: [A], D, ta, press, type, at, modal, line }) => {
+    A.takeover(); await flush();
+    await press(ta); type('hi');
+    const btn = new D.El('button', { cls: 'chat-title-btn' }); D.body.append(btn);
+    let m = null; btn.addEventListener('pointerup', () => { m = modal({ input: true }); });
+    await press(btn); await flush();
+    const open = { focus: at(), where: A.ky.whereNow(D.doc.activeElement), held: A.ky.dialogHolds };
+    type('nm\n'); await flush();
+    const closed = { answer: m && m.answer, focus: at(), yielded: A.ky.yielded, where: A.ky.whereNow(D.doc.activeElement), held: A.ky.dialogHolds };
+    type('!');
+    const r = { open, closed, composer: ta.value, page: A.st.page, line: !line.hidden };
+    r.ok = r.open.focus === 'dialog-input' && r.open.where === 'dialog' && r.open.held && r.closed.answer === 'nm' && r.closed.focus === 'composer' && r.closed.yielded && r.closed.where === 'chat' && !r.closed.held && r.composer === 'hi!' && r.page === '' && r.line;
+    return r;
+  });
+  // (7) TWO DIALOGS — a confirm over an input dialog: the newest holds; its close returns to the older (to what held the caret
+  // when it opened: the older's button he pressed); the older's close returns to the page
+  out.dialogNested = await world(async ({ V: [A], D, press, type, at, modal }) => {
+    A.takeover(); await flush();
+    let mA = null; const item = menuItem(D, () => { mA = modal({ input: true }); });
+    await press(item); await flush(); type('ab');
+    const more = new D.El('button', { cls: 'dialog-more' }); mA.dlg.append(more);
+    let mB = null; more.addEventListener('pointerup', () => { mB = modal(); });
+    await press(more); await flush();
+    const inB = { focus: at(), owned: KO.keyboardOwned() };
+    type('\n'); await flush();
+    const backA = { answerB: mB && mB.answer, focus: at(), held: A.ky.dialogHolds, owned: KO.keyboardOwned() };
+    await press(mA.box); type('c\x1b'); await flush();
+    const out = { answerA: mA.answer, boxA: mA.box.value, focus: at(), owned: KO.keyboardOwned() };
+    type('z');
+    const r = { inB, backA, out, page: A.st.page };
+    r.ok = r.inB.focus === 'btn-create' && !r.inB.owned && r.backA.answerB === true && r.backA.focus === 'dialog-more' && r.backA.held && !r.backA.owned
+      && r.out.answerA === null && r.out.boxA === 'abc' && r.out.focus === 'sink' && r.out.owned && r.page === 'z';
+    return r;
+  });
+  // (8) NO ORPHAN HOLD: a dialog he opened, then REMOVED by a script (no answer) — the keys go back to the page ("q"); a nested
+  // pair whose OLDER one a script removes — the newest still holds; its close returns to the page ("r"), the older's field gone
+  out.dialogScriptClose = await world(async ({ V: [A], D, press, type, at, modal }) => {
+    A.takeover(); await flush();
+    let m = null; const item = menuItem(D, () => { m = modal(); });
+    await press(item); await flush();
+    const held0 = A.ky.dialogHolds; m.ov.remove(); await flush();
+    const a1 = { held0, focus: at(), owner: KO.keyboardOwner() && KO.keyboardOwner().id, held: A.ky.dialogHolds };
+    type('q');
+    let mA = null; const item2 = menuItem(D, () => { mA = modal({ input: true }); });
+    await press(item2); await flush();
+    const more = new D.El('button', { cls: 'dialog-more' }); mA.dlg.append(more);
+    let mB = null; more.addEventListener('pointerup', () => { mB = modal(); });
+    await press(more); await flush();
+    mA.ov.remove(); await flush();
+    const a2 = { held: A.ky.dialogHolds, owned: KO.keyboardOwned(), focus: at() };
+    type('\n'); await flush();
+    const a3 = { answerB: mB && mB.answer, focus: at(), owned: KO.keyboardOwned(), held: A.ky.dialogHolds };
+    type('r');
+    const r = { a1, a2, a3, page: A.st.page };
+    r.ok = r.a1.held0 && r.a1.focus === 'sink' && r.a1.owner === A.id && !r.a1.held && r.a2.held && !r.a2.owned && r.a2.focus === 'btn-create'
+      && r.a3.answerB === true && r.a3.focus === 'sink' && r.a3.owned && !r.a3.held && r.page === 'qr';
+    return r;
+  });
+  // (9) TWO VIEWS driving (the last claim owns): one press opens the confirm — BOTH views give it the keys (nobody owns); its
+  // close gives them back as they were: B owns, B's sink, "b" to B's page
+  out.dialogTwoViews = await world(async ({ V: [A, B], D, press, type, at, modal }) => {
+    A.takeover(); B.takeover(); await flush();
+    let m = null; const item = menuItem(D, () => { m = modal(); });
+    await press(item); await flush();
+    const open = { owner: KO.keyboardOwner(), a: A.ky.dialogHolds, b: B.ky.dialogHolds, focus: at() };
+    type('\n'); await flush();
+    const closed = { answer: m && m.answer, owner: KO.keyboardOwner() && KO.keyboardOwner().id, focus: at(), a: A.ky.dialogHolds, b: B.ky.dialogHolds };
+    type('b');
+    const r = { open, closed, pageA: A.st.page, pageB: B.st.page };
+    r.ok = r.open.owner === null && r.open.a && r.open.b && r.open.focus === 'btn-create' && r.closed.answer === true && r.closed.owner === B.id && r.closed.focus === 'sink1' && !r.closed.a && !r.closed.b && r.pageB === 'b' && r.pageA === '';
+    return r;
+  }, { views: 2 });
+  // (10) A KEY THE APP TOOK — command mode (Ctrl+\ then a key: the app's route, the view's onDocKey stamps it) opens an input
+  // dialog: his act, it takes the keys ("3x3" + Enter); a SYNTHETIC key is not his (the next dialog is taken back, said)
+  out.dialogAppKey = await world(async ({ V: [A], type, at, clock, modal }) => {
+    A.takeover(); await flush();
+    A.ky.onAppKey({ isTrusted: true }); const m = modal({ input: true }); await flush();
+    const f1 = at(); type('3x3\n'); await flush();
+    const a1 = { answer: m.answer, focus: at() };
+    clock.advance(T.USER_PRESS_MS + 50); A.ky.onAppKey({ isTrusted: false }); const m2 = modal(); await flush(); await flush();
+    const r = { f1, a1, f2: at(), cues: A.st.dialogCues, open2: m2.open, page: A.st.page };
+    r.ok = r.f1 === 'dialog-input' && r.a1.answer === '3x3' && r.a1.focus === 'sink' && r.f2 === 'sink' && r.cues === 1 && r.open2 && r.page === '';
+    return r;
+  });
+  // (11) A CHAIN: Enter answers a dialog he opened and its answer opens the next one (an "Overwrite?" after a rename) — the Enter
+  // typed into his dialog is his act on the app: the next one takes the keys too ("ok" + Enter answer it); the page gets nothing
+  out.dialogChain = await world(async ({ V: [A], D, press, type, at, modal }) => {
+    A.takeover(); await flush();
+    let m1 = null, m2 = null; const item = menuItem(D, () => { m1 = modal(); m1.ov.addEventListener('keydown', (e) => { if (e.key === 'Enter') Promise.resolve().then(() => { m2 = modal({ input: true }); }); }); });
+    await press(item); await flush();
+    type('\n'); await flush();
+    const f2 = at(); type('ok\n'); await flush();
+    const r = { a1: m1 && m1.answer, f2, a2: m2 && m2.answer, focus: at(), page: A.st.page, cues: A.st.dialogCues, takes: A.st.dialogTakes };
+    r.ok = r.a1 === true && r.f2 === 'dialog-input' && r.a2 === 'ok' && r.focus === 'sink' && r.page === '' && r.cues === 0 && r.takes === 2;
+    return r;
+  });
+  // (12) A DIALOG THAT FOCUSES NOTHING ITSELF (a createModalShell form): a tick later its first text box gets the keys; a confirm
+  // with none gets them on its overlay (never a button he did not choose) — Enter answers it
+  out.dialogFocusless = await world(async ({ V: [A], D, press, type, at, modal }) => {
+    A.takeover(); await flush();
+    let m = null; const item = menuItem(D, () => { m = modal({ input: true, focusOwn: false }); });
+    await press(item); await flush();
+    const f1 = at(); type('k\n'); await flush();
+    let m2 = null; const item2 = menuItem(D, () => { m2 = modal({ focusOwn: false }); });
+    await press(item2); await flush();
+    const f2 = at(); type('\n'); await flush();
+    const r = { f1, a1: m && m.answer, f2, a2: m2 && m2.answer, focus: at(), page: A.st.page };
+    r.ok = r.f1 === 'dialog-input' && r.a1 === 'k' && r.f2 === 'dialog-overlay' && r.a2 === true && r.focus === 'sink' && r.page === '';
+    return r;
+  });
+  // (13) a CHOICE control inside a dialog he opened: its <select> keeps the focus of his press (nothing takes it back while the
+  // dialog holds), a key is the select's, never the page's; a press on OK answers it and the keys go back to the page
+  out.dialogSelect = await world(async ({ V: [A], D, press, type, at, modal }) => {
+    A.takeover(); await flush();
+    let m = null; const item = menuItem(D, () => { m = modal({ select: true }); });
+    await press(item); await flush(); const f1 = at();
+    await press(m.sel); await flush(); const f2 = at(); type('k'); await flush(); const f2k = at();
+    await press(m.okb); await flush(); const f3 = at();
+    const r = { f1, f2, f2k, f3, answer: m.answer, page: A.st.page, cues: A.st.dialogCues, yielded: A.ky.yielded };
+    r.ok = r.f1 === 'btn-create' && r.f2 === 'dialog-select' && r.f2k === 'dialog-select' && r.f3 === 'sink' && r.answer === true && r.page === '' && r.cues === 0 && !r.yielded;
+    return r;
+  });
+  // (14) THE STATIC OVERLAY (index.html's #dialog-overlay: app._showDialog shows it by its class and announces; hideDialogs closes
+  // it by the class): the New-session press opens it — its box takes "/w"; hidden, the keys go back to the page ("z")
+  out.dialogStatic = await world(async ({ V: [A], D, press, type, at }) => {
+    A.takeover(); await flush();
+    const sov = new D.El('div', { cls: 'dialog-overlay hidden' }); const sd = new D.El('div', { cls: 'dialog' }); const cwd = new D.El('input', { cls: 'ns-cwd', type: 'text' }); sov.append(sd.append(cwd)); D.body.append(sov);
+    const newBtn = new D.El('button', { cls: 'toolbar-new' }); D.body.append(newBtn);
+    newBtn.addEventListener('pointerup', () => { sov.classList.remove('hidden'); D.dispatch(D.doc, 'vs-modal-open', { detail: { overlay: sov } }); cwd.focus(); });
+    await press(newBtn); await flush(); const f1 = at(); type('/w');
+    sov.classList.add('hidden'); await flush();
+    const f2 = at(); const owned = KO.keyboardOwned(); type('z');
+    const r = { f1, cwd: cwd.value, f2, owned, page: A.st.page, held: A.ky.dialogHolds };
+    r.ok = r.f1 === 'ns-cwd' && r.cwd === '/w' && r.f2 === 'sink' && r.owned && r.page === 'z' && !r.held;
+    return r;
+  });
+  // (15) the agent's PAGE dialog (the live view's own Accept / Dismiss bar, lane browser-stuck) is no app modal: announced or not,
+  // it is never taken — the view keeps the keys
+  out.dialogPageBar = await world(async ({ V: [A], D, type }) => {
+    A.takeover(); await flush();
+    const bar = new D.El('div', { cls: 'browser-live-dialog' }); A.root.append(bar);
+    D.dispatch(D.doc, 'vs-modal-open', { detail: { overlay: bar } }); await flush();
+    type('pg');
+    const r = { verdict: A.ky.onDialogOpen(bar, {}), held: A.ky.dialogHolds, owned: KO.keyboardOwned(), page: A.st.page };
+    r.ok = r.verdict === null && !r.held && r.owned && r.page === 'pg';
+    return r;
+  });
+  // ── lane dialog-keys verify r1 (the keyboard-authority class): THE KEYS NEVER FALL TO NOWHERE WHILE A DIALOG HOLDS ──
+  // (16) a confirm B over an input dialog A, opened from A's button; the button is REPLACED (a keyed re-render of A's body)
+  // while B is up; Enter answers B — its return element is gone: A's OWN field gets the keys ("cd" lands in A's box), never
+  // <body> (before: 'stay' — the focus fell to <body> with B's removal, the typing went nowhere, the chip said "in the dialog")
+  out.dialogBackGone = await world(async ({ V: [A], D, press, type, at, modal }) => {
+    A.takeover(); await flush(); type('pg');
+    let mA = null; const item = menuItem(D, () => { mA = modal({ input: true }); });
+    await press(item); await flush(); type('ab');
+    const more = new D.El('button', { cls: 'dialog-more' }); mA.dlg.append(more);
+    let mB = null; more.addEventListener('pointerup', () => { mB = modal(); });
+    await press(more); await flush();
+    more.remove(); mA.dlg.append(new D.El('button', { cls: 'dialog-more' })); await flush();
+    const inB = { focus: at(), held: A.ky.dialogHolds, n: A.ky.dialogOverlays().length };
+    type('\n'); await flush(); await flush();
+    const backA = { answerB: mB && mB.answer, focus: at(), held: A.ky.dialogHolds, n: A.ky.dialogOverlays().length, owned: KO.keyboardOwned(), where: A.ky.whereNow(D.doc.activeElement) };
+    type('cd'); await flush();
+    const r = { inB, backA, boxA: mA.box.value, page: A.st.page };
+    r.ok = r.inB.focus === 'btn-create' && r.inB.held && r.inB.n === 2 && r.backA.answerB === true && r.backA.focus === 'dialog-input' && r.backA.held && r.backA.n === 1 && !r.backA.owned && r.backA.where === 'dialog' && r.boxA === 'abcd' && r.page === 'pg';
+    return r;
+  });
+  // (17) a dialog he opened HOLDS ("ab" typed into its box); a modal opens BY ITSELF over it (a broadcast, 2 s later — not
+  // his: 'allow', never held, nothing said) and focuses its own OK; Enter answers THAT one and the focus falls to <body> with
+  // its removal — the held dialog gets the keys back ("cd" lands in its box); the page gets nothing throughout
+  out.dialogSelfOverHeld = await world(async ({ V: [A], D, press, type, at, clock, modal }) => {
+    A.takeover(); await flush(); type('pg');
+    let m1 = null; const item = menuItem(D, () => { m1 = modal({ input: true }); });
+    await press(item); await flush(); type('ab');
+    clock.advance(2000); const m2 = modal(); await flush(); await flush();
+    const over = { focus: at(), why: A.ky.dialogWhy, n: A.ky.dialogOverlays().length, cues: A.st.dialogCues, owned: KO.keyboardOwned() };
+    type('\n'); await flush(); await flush();
+    const back = { answer2: m2.answer, open1: m1.open, focus: at(), held: A.ky.dialogHolds, where: A.ky.whereNow(D.doc.activeElement) };
+    type('cd'); await flush();
+    const r = { over, back, box1: m1.box.value, page: A.st.page };
+    r.ok = r.over.focus === 'btn-create' && r.over.why === 'stale press' && r.over.n === 1 && r.over.cues === 0 && !r.over.owned && r.back.answer2 === true && r.back.open1 && r.back.focus === 'dialog-input' && r.back.held && r.back.where === 'dialog' && r.box1 === 'abcd' && r.page === 'pg';
+    return r;
+  });
+  // (18) THREE dialogs he opened, A < B < C; a script removes B (the middle one): C still holds (the focus stays on its OK —
+  // never pulled down to A under it); Enter answers C — its return element was inside B, gone: A's own field gets the keys ("z")
+  out.dialogThreeMiddleGone = await world(async ({ V: [A], D, press, type, at, modal }) => {
+    A.takeover(); await flush();
+    let mA = null; const item = menuItem(D, () => { mA = modal({ input: true }); });
+    await press(item); await flush(); type('a');
+    const moreA = new D.El('button', { cls: 'more-a' }); mA.dlg.append(moreA);
+    let mB = null; moreA.addEventListener('pointerup', () => { mB = modal({ input: true }); });
+    await press(moreA); await flush(); type('b');
+    const moreB = new D.El('button', { cls: 'more-b' }); mB.dlg.append(moreB);
+    let mC = null; moreB.addEventListener('pointerup', () => { mC = modal(); });
+    await press(moreB); await flush();
+    const s0 = { focus: at(), n: A.ky.dialogOverlays().length };
+    mB.ov.remove(); await flush(); await flush();
+    const s1 = { focus: at(), n: A.ky.dialogOverlays().length, held: A.ky.dialogHolds };
+    type('\n'); await flush(); await flush();
+    const s2 = { answerC: mC && mC.answer, focus: at(), n: A.ky.dialogOverlays().length, held: A.ky.dialogHolds };
+    type('z');
+    const r = { s0, s1, s2, boxA: mA.box.value, boxB: mB.box.value, page: A.st.page };
+    r.ok = r.s0.focus === 'btn-create' && r.s0.n === 3 && r.s1.focus === 'btn-create' && r.s1.n === 2 && r.s1.held && r.s2.answerC === true && r.s2.focus === 'dialog-input' && r.s2.n === 1 && r.s2.held && r.boxA === 'az' && r.boxB === 'b' && r.page === '';
+    return r;
+  });
+  // ── lane dialog-keys verify r1 K6: three product parts no scenario reddened (the revert table) — each gets its scenario ──
+  // (19) a TOUCH tap HELD 400 ms on a menu row that opens the confirm at its release: the pointerup re-stamps the opener (a
+  // click opens at the release) — his act, the dialog takes the keys; without the re-stamp the 400 ms-old pointerdown is stale
+  out.dialogTouchHeld = await world(async ({ V: [A], D, press, type, at, modal }) => {
+    A.takeover(); await flush(); type('pg');
+    let m = null; const item = menuItem(D, () => { m = modal(); });
+    await press(item, { pointerType: 'touch', holdMs: 400 }); await flush();
+    const f = at(); const why = A.ky.dialogWhy; const held = A.ky.dialogHolds; type('\n'); await flush();
+    const r = { f, why, held, answer: m && m.answer, page: A.st.page, cues: A.st.dialogCues };
+    r.ok = r.f === 'btn-create' && r.why === 'pressed' && r.held && r.answer === true && r.page === 'pg' && r.cues === 0;
+    return r;
+  });
+  // (20) YIELDED to the composer, a chat button opens a CONFIRM (no text box: its OK holds the focus); the view is hidden and
+  // shown (a desktop switch) while it holds — the yield's home rule keeps out (the caret is in the dialog, not homeless): no
+  // sink steal, Enter answers it, the keys go back to the composer
+  out.dialogConfirmOverYieldHidden = await world(async ({ V: [A], D, ta, press, type, at, modal }) => {
+    A.takeover(); await flush(); await press(ta); type('hi');
+    const btn = new D.El('button', { cls: 'chat-title-btn' }); D.body.append(btn);
+    let m = null; btn.addEventListener('pointerup', () => { m = modal(); });
+    await press(btn); await flush();
+    A.show(false); await flush(); A.show(true); await flush();
+    const s1 = { focus: at(), held: A.ky.dialogHolds, yielded: A.ky.yielded, homeless: A.st.homeless || 0, owned: KO.keyboardOwned(), caretMoves: A.st.caretMoves };
+    type('\n'); await flush(); await flush();
+    const s2 = { answer: m && m.answer, focus: at(), yielded: A.ky.yielded, where: A.ky.whereNow(D.doc.activeElement) };
+    type('!');
+    const r = { s1, s2, composer: ta.value, page: A.st.page };
+    r.ok = r.s1.focus === 'btn-create' && r.s1.held && r.s1.yielded && r.s1.homeless === 0 && !r.s1.owned && r.s1.caretMoves === 0 && r.s2.answer === true && r.s2.focus === 'composer' && r.s2.yielded && r.s2.where === 'chat' && r.composer === 'hi!' && r.page === '';
+    return r;
+  });
+  // (21) ONE ACT, ONE DIALOG: his press opens A (the opener is spent); a modal opening BY ITSELF 50 ms later — still inside the
+  // press's 250 ms — is not his: not held (A alone holds), nothing said (the keys are not the page's); A's Enter answers A
+  // (the self-opened one, never held, is left as it is), the keys go back to the page
+  out.dialogOneActOneDialog = await world(async ({ V: [A], D, press, type, at, clock, modal }) => {
+    A.takeover(); await flush(); type('pg');
+    let mA = null; const item = menuItem(D, () => { mA = modal({ input: true }); });
+    await press(item); await flush();
+    clock.advance(50); const mB = modal({ focusOwn: false }); await flush(); await flush();
+    const s1 = { n: A.ky.dialogOverlays().length, why: A.ky.dialogWhy, focus: at(), cues: A.st.dialogCues, takes: A.st.dialogTakes };
+    type('k\n'); await flush(); await flush();
+    const s2 = { answerA: mA && mA.answer, openB: mB.open, held: A.ky.dialogHolds, focus: at(), owned: KO.keyboardOwned() };
+    type('z');
+    const r = { s1, s2, page: A.st.page };
+    r.ok = r.s1.n === 1 && r.s1.why === 'no press' && r.s1.focus === 'dialog-input' && r.s1.cues === 0 && r.s1.takes === 1 && r.s2.answerA === 'k' && r.s2.openB && !r.s2.held && r.s2.focus === 'sink' && r.s2.owned && r.page === 'pgz';
     return r;
   });
   // ── verify r4: ATTACKS ON r3's RULES ──
-  // (attack 1) a CHOICE control INSIDE a dialog: the dialog's own focus at open is taken back and said once (F4); the user's
-  // press on its <select> KEEPS the focus (F1 — the choice rule wins inside a dialog too, silently); the first key hands the
-  // caret to the sink (onDocKey's trailing focusSink — measured: an open list's closing keyup); a press on OK is silent
-  out.dialogSelect = await world(async ({ V: [A], D, press, type, at }) => {
-    A.takeover(); await flush();
-    const item = new D.El('div', { cls: 'context-menu-item' }); D.body.append(item);
-    const ov = new D.El('div', { cls: 'dialog-overlay', tabindex: -1 }); const dlg = new D.El('div', { cls: 'dialog' }); const sel = new D.El('select', { cls: 'dialog-select' }); const okb = new D.El('button', { cls: 'btn-ok' }); ov.append(dlg.append(sel, okb));
-    item.addEventListener('pointerup', () => { D.body.append(ov); setTimeout(() => ov.focus(), 0); setTimeout(() => okb.focus(), 0); });
-    await press(item); await flush(); await flush(); const f1 = at(); const c1 = A.st.dialogCues;
-    await press(sel); await flush(); const f2 = at(); const c2 = A.st.dialogCues; type('k'); const f2k = at();
-    await press(okb); await flush(); await flush(); const f3 = at(); const c3 = A.st.dialogCues;
-    const r = { f1, f2, f2k, f3, cues: [c1, c2, c3], page: A.st.page, yielded: A.ky.yielded };
-    r.ok = r.f1 === 'sink' && r.f2 === 'dialog-select' && r.f2k === 'sink' && r.f3 === 'sink' && JSON.stringify(r.cues) === '[1,1,1]' && r.page === 'k' && !r.yielded;
-    return r;
-  });
-  // (attack 4) a SECOND dialog the user's press opens inside RECLAIM_CUE_MS is not said again (one rate limit with the Q1 cue)
-  // and its Enter is the page's too — declared (LOW): the first said it seconds ago; the words on screen are the same
-  out.dialogTwice = await world(async ({ V: [A], D, press, type, clock }) => {
-    A.takeover(); await flush();
-    const item = new D.El('div', { cls: 'context-menu-item' }); D.body.append(item);
-    let okb = null;
-    item.addEventListener('pointerup', () => { const ov = new D.El('div', { cls: 'dialog-overlay', tabindex: -1 }); const dlg = new D.El('div', { cls: 'dialog' }); okb = new D.El('button', { cls: 'btn-ok' }); ov.append(dlg.append(okb)); D.body.append(ov); setTimeout(() => ov.focus(), 0); setTimeout(() => okb.focus(), 0); });
-    await press(item); await flush(); await flush(); const c1 = A.st.dialogCues; type('\n');
-    await press(okb); await flush(); clock.advance(1500);
-    await press(item); await flush(); await flush(); const c2 = A.st.dialogCues; type('\n');
-    const r = { cues: [c1, c2], page: A.st.page };
-    r.ok = JSON.stringify(r.cues) === '[1,1]' && r.page === '\n\n';
-    return r;
-  });
   // (attack 2) a box focused, REPLACED and focused again in ONE task (a keyed patch of the For-you row under a broadcast, the
   // box re-created with its key): two reclaims; the gone box is never said (F2) and the box that STAYED is said once. Before
   // (41312584): the first reader consumed the one flag the second needed — reclaimed twice, said never
@@ -824,16 +1163,16 @@ console.log('§2 patched-copy controls: each rule removed turns exactly its scen
 const M = mutantCopies('tkbd', REPO);
 const KYSRC = fs.readFileSync(path.join(REPO, 'src/lib/keyboard-yield.js'), 'utf8');
 const CONTROLS = [
-  { tag: 'no-press', why: 'the yield ignores the press (every focus reclaimed — userW\'s bug)', from: 'const u = userPressFocus({ press: p, sameInput: !!p && sameInput(p.target, el), focusAt: now() }), byUserPress = u.byUserPress;', to: 'const u = userPressFocus({ press: p, sameInput: !!p && sameInput(p.target, el), focusAt: now() }), byUserPress = false;', red: ['userW', 'picture', 'bar', 'terminal', 'touch', 'twoViews', 'handback', 'follow', 'ownTab', 'hiddenTab', 'h1PressHidden', 'h1Reconnect', 'n1Xpra', 'n1Vnc', 'q1Cue', 'homeGone', 'widgetYielded', 'textSearch', 'textCm', 'labelPress', 'focusStorm', 'twoViewsEnd', 'socketWhileYielded', 'streamWhileYielded'] }, // (verify r4: every scenario that needs the yield)
-  { tag: 'any-input', why: 'a same-input check that matches anything (the password guard gone)', from: 'export function sameInput(pressed, focused) {\n  if (!pressed || !focused) return false;', to: 'export function sameInput(pressed, focused) {\n  return true;', red: ['elsewhereThenScript', 'alreadyFocusedGuard', 'q1Cue', 'helperCopy', 'dialogConfirm', 'dialogSelect', 'dialogTwice', 'cueRecreated'] }, // (verify r3: the copy fallback's scratch box would take the keys too; a dialog's own focus reads as pressed) (a press INSIDE the view is never remembered — pictureThenScript stays green by that rule, not this one)
-  { tag: 'no-restamp', why: 'the touch tap\'s release does not re-stamp the press', from: '    onPointerUp(e) { if (s.press && e.target === s.press.target && e.isTrusted === true) s.press.at = now(); },', to: '    onPointerUp(e) { },', red: ['touch'] },
+  { tag: 'no-press', why: 'the yield ignores the press (every focus reclaimed — userW\'s bug)', from: 'const u = userPressFocus({ press: p, sameInput: !!p && sameInput(p.target, el), focusAt: now() }), byUserPress = u.byUserPress;', to: 'const u = userPressFocus({ press: p, sameInput: !!p && sameInput(p.target, el), focusAt: now() }), byUserPress = false;', red: ['userW', 'picture', 'bar', 'terminal', 'touch', 'twoViews', 'handback', 'follow', 'ownTab', 'hiddenTab', 'h1PressHidden', 'h1Reconnect', 'n1Xpra', 'n1Vnc', 'q1Cue', 'homeGone', 'widgetYielded', 'textSearch', 'textCm', 'labelPress', 'focusStorm', 'twoViewsEnd', 'socketWhileYielded', 'streamWhileYielded', 'dialogYielded', 'dialogConfirmOverYieldHidden'] }, // (verify r4: every scenario that needs the yield; lane dialog-keys: a dialog opened FROM a yield)
+  { tag: 'any-input', why: 'a same-input check that matches anything (the password guard gone)', from: 'export function sameInput(pressed, focused) {\n  if (!pressed || !focused) return false;', to: 'export function sameInput(pressed, focused) {\n  return true;', red: ['elsewhereThenScript', 'alreadyFocusedGuard', 'q1Cue', 'helperCopy', 'cueRecreated'] }, // (verify r3: the copy fallback's scratch box would take the keys too; lane dialog-keys: a dialog is judged at its OPEN by the opener, never by the same-input rule — no dialog leg here) (a press INSIDE the view is never remembered — pictureThenScript stays green by that rule, not this one)
+  { tag: 'no-restamp', why: 'the touch tap\'s release does not re-stamp the press', from: '      if (s.press && e.target === s.press.target && e.isTrusted === true) s.press.at = now();\n', to: '', red: ['touch'] },
   { tag: 'trust-any', why: 'a synthetic press counts as the user\'s', from: 's.press = { target: e.target, at: now(), trusted: e.isTrusted === true };', to: 's.press = { target: e.target, at: now(), trusted: true };', red: ['synthetic', 'alreadyFocusedGuard'] },
   { tag: 'no-chrome', why: 'verify r1 K3 pre-fix: only the view\'s root counts (its tab is "elsewhere")', from: 'const namesView = (el) => { if (inView(el)) return true; try { return !!el && !!ownChrome(el); } catch { return false; } };', to: 'const namesView = (el) => inView(el);', red: ['hiddenTab', 'ownTab'] },
   { tag: 'no-press-focused', why: 'verify r1 pre-fix: a press on the text box that already holds the caret is never judged', from: '    onPressFocused(active) {\n', to: '    onPressFocused(active) { return null;\n', red: ['alreadyFocused'] },
   { tag: 'hidden-keeps', why: 'verify r1 K3 pre-fix: a press while the view is off screen is ignored', from: '      if (s.yielded && namesView(e.target)) {', to: '      if (s.yielded && namesView(e.target) && driving()) {', red: ['hiddenTab'] },
   // verify r2 (H1)
   { tag: 'h1-no-mine', why: 'verify r2 H1 pre-fix: a press while the takeover is mine but the view does not drive is not judged', from: '      if (!driving() && !isMine()) { s.press = null; return null; }', to: '      if (!driving()) { s.press = null; return null; }', red: ['h1PressHidden', 'h1Reconnect', 'homeGone'] },
-  { tag: 'h1-no-move', why: 'verify r2 H1 pre-fix: a transition to the page leaves the caret where it was (the keys merely routed)', from: 'const r = keyboardTransition({ was: s.last, now: { owns, yielded }, caretOutside: caretOutside(active) });', to: 'const r = keyboardTransition({ was: s.last, now: { owns, yielded }, caretOutside: false });', red: ['h1ScriptHidden', 'h1Frame', 'hiddenTab'] },
+  { tag: 'h1-no-move', why: 'verify r2 H1 pre-fix: a transition to the page leaves the caret where it was (the keys merely routed)', from: 'const r = keyboardTransition({ was: s.last, now: { owns, yielded, dialog }, caretOutside: caretOutside(active) });', to: 'const r = keyboardTransition({ was: s.last, now: { owns, yielded, dialog }, caretOutside: false });', red: ['h1ScriptHidden', 'h1Frame', 'hiddenTab'] },
   { tag: 'h1-frame-blind', why: 'verify r2 H1/H5: a frame holding the focus is not a caret outside', from: 'const caretOutside = (el) => !!el && el !== sink && !inView(el) && (takesKeys(el) || isFrame(el));', to: 'const caretOutside = (el) => !!el && el !== sink && !inView(el) && takesKeys(el);', red: ['h1Frame'] },
   { tag: 'h1-belt-blind', why: 'verify r2 H1: the belt never sees the caret outside', from: '    caretOutside,\n', to: '    caretOutside: () => false,\n', red: ['belt'] },
   // verify r2 (N1)
@@ -849,12 +1188,26 @@ const CONTROLS = [
   { tag: 'no-contenteditable', why: 'verify r3: a contenteditable (CodeMirror) is not a text box', from: '  if (el.isContentEditable) return true;\n', to: '', red: ['textCm'] },
   { tag: 'no-search-type', why: 'verify r3: an <input type=search> is not a text box', from: "const TEXT_INPUT_TYPES = new Set(['', 'text', 'search',", to: "const TEXT_INPUT_TYPES = new Set(['', 'text',", red: ['textSearch'] },
   // verify r3 (the sink's blur)
-  { tag: 'no-dialog-cue', why: 'verify r3 F4 pre-fix: a dialog the user opened is taken back silently', from: '    dialogCue(a) {\n', to: '    dialogCue(a) { return false;\n', red: ['dialogConfirm', 'dialogSelect', 'dialogTwice'] },
   { tag: 'where-kind', why: 'verify r3 (r2\'s held) pre-fix: the chip names the text box the keys were given to, wherever the focus went', from: "      if (active && active !== sink && !inView(active)) { if (takesKeys(active)) return yieldKindOf(active); if (isFrame(active)) return 'other'; }\n      return 'none';", to: '      return s.kind;', red: ['widgetYielded', 'focusStorm'] },
-  { tag: 'no-choice', why: 'verify r3 F1 pre-fix: a <select> is taken back like any other focus (its list closes)', from: "export function isChoiceControl(el) { try { return !!el && el.nodeType === 1 && el.tagName === 'SELECT' && !el.disabled; } catch { return false; } }", to: 'export function isChoiceControl(el) { return false; }', red: ['choiceSelect', 'dialogSelect'] },
+  { tag: 'no-choice', why: 'verify r3 F1 pre-fix: a <select> is taken back like any other focus (its list closes)', from: "export function isChoiceControl(el) { try { return !!el && el.nodeType === 1 && el.tagName === 'SELECT' && !el.disabled; } catch { return false; } }", to: 'export function isChoiceControl(el) { return false; }', red: ['choiceSelect'] }, // (lane dialog-keys: a <select> in a dialog he opened is the dialog's — no choice rule there)
   { tag: 'blur-frame-blind', why: 'verify r3: a frame is taken back like any other focus (never said)', from: "  try { if (isFrame(a) && !(root && root.contains(a))) return 'frame'; } catch { /* detached */ }", to: '', red: ['frameSink'] },
-  { tag: 'blur-keeps-all', why: 'verify r3: the sink never takes a focus back (a press on a control / list / frame keeps it)', from: "  if (isEditable(a) || isChoiceControl(a)) return 'keep';", to: "  return 'keep';", red: ['frameSink', 'controlCheckbox', 'widgetList', 'dialogConfirm', 'textCm', 'controlSummary', 'dialogSelect', 'dialogTwice'] }, // (textCm: the gutter's scroller would keep the focus)
+  { tag: 'blur-keeps-all', why: 'verify r3: the sink never takes a focus back (a press on a control / list / frame keeps it)', from: "  if (isEditable(a) || isChoiceControl(a)) return 'keep';", to: "  return 'keep';", red: ['frameSink', 'controlCheckbox', 'widgetList', 'textCm', 'controlSummary', 'dialogScript', 'dialogSynthetic', 'dialogPicture', 'dialogStale', 'dialogAppKey'] }, // (textCm: the gutter's scroller would keep the focus; lane dialog-keys: a dialog that opened BY ITSELF keeps its OK button's focus — its Enter would answer it)
   { tag: 'n1-no-surface', why: 'verify r2 N1 pre-fix: noVNC\'s canvas is not a place keys go', from: "  try { return !!el && el.nodeType === 1 && el.tagName === 'CANVAS' && typeof el.closest === 'function' && !!el.closest('.picture-shell'); } catch { return false; }", to: '  return false;', red: ['n1Vnc', 'n1Script'] },
+  // lane dialog-keys: a dialog the user's own act opened takes the keys; one that opens by itself never does
+  { tag: 'dialog-no-rule', why: 'lane dialog-keys pre-fix: every modal judged as opening by itself (taken back, said) — Enter reaches the page', from: 'const v = dialogVerdict({ owns: driving(), yielded: s.yielded, held, byUserPress: o.byUserPress, opener: \'app\' });', to: 'const v = dialogVerdict({ owns: driving(), yielded: s.yielded, held, byUserPress: false, opener: \'app\' });', red: ['dialogUserPress', 'dialogYielded', 'dialogNested', 'dialogScriptClose', 'dialogTwoViews', 'dialogAppKey', 'dialogChain', 'dialogFocusless', 'dialogSelect', 'dialogStatic', 'dialogBackGone', 'dialogSelfOverHeld', 'dialogThreeMiddleGone', 'dialogTouchHeld', 'dialogConfirmOverYieldHidden', 'dialogOneActOneDialog'] },
+  { tag: 'dialog-trust-any', why: 'lane dialog-keys: a synthetic press counts as the opener (the isTrusted check gone)', from: 's.opener = { at: now(), trusted: e.isTrusted === true, picture: onPicture(e.target) };', to: 's.opener = { at: now(), trusted: true, picture: onPicture(e.target) };', red: ['dialogSynthetic'] },
+  { tag: 'dialog-app-key-any', why: 'lane dialog-keys: a synthetic key counts as the app\'s', from: '    onAppKey(e) { if (e && e.isTrusted === true)', to: '    onAppKey(e) { if (e)', red: ['dialogAppKey'] },
+  { tag: 'dialog-no-picture', why: 'lane dialog-keys: a press on the picture (the page\'s) counts as the opener', from: 'const onPicture = (el) => { try { return !!el && !!picture && (el === picture || picture.contains(el)); } catch { return false; } };', to: 'const onPicture = () => false;', red: ['dialogPicture'] },
+  { tag: 'dialog-orphan', why: 'lane dialog-keys: a closed dialog never leaves the stack (an orphan hold — the keys never come back)', from: '      const open = heldOpen();\n', to: '      const open = s.holds;\n', red: ['dialogUserPress', 'dialogYielded', 'dialogNested', 'dialogScriptClose', 'dialogTwoViews', 'dialogAppKey', 'dialogChain', 'dialogFocusless', 'dialogSelect', 'dialogStatic', 'dialogBackGone', 'dialogThreeMiddleGone', 'dialogConfirmOverYieldHidden', 'dialogOneActOneDialog'] }, // (verify r1: dialogSelfOverHeld stays green — the self-opened modal was never held, the nowhere rule alone answers it)
+  { tag: 'dialog-back-base', why: 'lane dialog-keys: the newest\'s close skips the older dialog (nothing returns to it)', from: '      const back = all.filter((h) => !open.includes(h)).reverse().map((h) => h.back).find(inOpen) || null;', to: '      const back = null;', red: ['dialogNested'] },
+  { tag: 'dialog-home-active', why: 'lane dialog-keys: a dialog opened from a yield returns to whatever held the focus (the button pressed), not the yield\'s text box', from: 'el: active && active !== sink && !inView(active) && takesKeys(active) ? active : s.home }', to: 'el: active }', red: ['dialogYielded', 'dialogConfirmOverYieldHidden'] },
+  { tag: 'dialog-no-cue', why: 'lane dialog-keys: a modal that opened by itself is taken back silently', from: '      if (!dialogReclaimCue({ verdict, at: now(), lastCueAt: s.lastCueAt })) return false;\n', to: '      return false;\n', red: ['dialogScript', 'dialogSynthetic', 'dialogPicture', 'dialogStale', 'dialogAppKey'] },
+  // lane dialog-keys verify r1: the keys never fall to nowhere while a dialog holds
+  { tag: 'dialog-nowhere-stays', why: 'verify r1 pre-fix: a settle that closed nothing moves nothing — the focus fallen to <body> (a self-opened modal answered over the held one) stays there, the typing goes nowhere', from: "      if (open.length === all.length) return nowhere(active) ? { to: 'older', el: top.overlay } : null;", to: '      if (open.length === all.length) return null;', red: ['dialogSelfOverHeld'] },
+  // verify r1 K6: the three parts the revert table found no scenario for
+  { tag: 'dialog-no-up-restamp', why: 'verify r1 K6: the opener is not re-stamped at the release — a touch tap held past 250 ms opens a dialog judged stale', from: "      if (e.isTrusted === true) s.opener = { at: now(), trusted: true, picture: onPicture(e.target) };", to: '', red: ['dialogTouchHeld'] },
+  { tag: 'dialog-settle-no-keep', why: 'verify r1 K6: settle ignores a held dialog — a confirm over a yield, the view hidden and shown, is judged homeless and the sink steals the keys', from: "      if (s.holds.length) return 'keep'; // lane dialog-keys", to: "      if (false) return 'keep'; // lane dialog-keys", red: ['dialogConfirmOverYieldHidden'] },
+  { tag: 'dialog-opener-unspent', why: 'verify r1 K6: the opener is not spent at a take — a modal opening by itself inside the same 250 ms is held too (two dialogs for one act)', from: "      s.holds.push({ overlay: ov, back: held ? active : null });\n      s.opener = null;", to: "      s.holds.push({ overlay: ov, back: held ? active : null });", red: ['dialogOneActOneDialog'] },
 ];
 for (const c of CONTROLS) {
   const found = KYSRC.split(c.from).length === 2;
@@ -882,13 +1235,10 @@ ok(R.controlCheckbox.ok, 'verify r3 (the census\'s control row): a press on a ch
 ok(R.widgetList.ok, 'verify r3 (the census\'s widget row, declared): a press on a keyboard-navigable list takes no keys while you drive — the sink takes the focus back, "pw" reaches the page', J(R.widgetList));
 ok(R.helperCopy.ok, 'verify r3 (F2): "Copy Path" on plain http — the copy fallback\'s scratch textarea (appended, selected, copied, removed in one task) is taken back and NEVER announced (no box to click); the Q1 cue for a box that stays is unchanged', J(R.helperCopy));
 ok(R.widgetYielded.ok, 'verify r3 (r2\'s held): yielded, a press on the chat\'s message list (its container takes the focus, no keys) — the yield stays, whereNow says "none" (the chip: not in a text box), "nn" goes nowhere; a press back on the composer says "chat"', J(R.widgetYielded));
-ok(R.dialogConfirm.ok, 'verify r3 (F4): a DIALOG the user\'s own press opened (Delete → the confirm dialog focusing its default button) is taken back — its Enter still reaches the page — and SAID once; a press on its button answers it silently; a dialog opening by itself is never said', J(R.dialogConfirm));
 ok(R.textSearch.ok, 'verify r3 (the census\'s text row): a SEARCH box (<input type=search> — the palette, the pickers) yields to the user\'s own press; "ab" lands in it', J(R.textSearch));
 ok(R.textCm.ok, 'verify r3 (the census\'s text row): the CODE EDITOR — a press on a line yields to CodeMirror\'s .cm-content ("zz" in the doc); a press on its gutter focuses the scroller, the sink takes it back ("g" to the page — without a takeover the gutter takes no typing either)', J(R.textCm));
 ok(R.noneCanvas.ok, 'verify r3 (the census\'s none row): a chart\'s canvas takes no keys — a press on it leaves them the page\'s; only a picture shell\'s canvas is a keyboard surface', J(R.noneCanvas));
 // ── verify r4: attacks on r3's rules ──
-ok(R.dialogSelect.ok, 'verify r4 (attack 1): a <select> INSIDE a dialog — the dialog\'s own focus taken back and said once (F4); the press on the select keeps the focus (F1 wins, silently); the first key hands the caret to the sink; OK by a press is silent', J(R.dialogSelect));
-ok(R.dialogTwice.ok, 'verify r4 (attack 4, declared): a second dialog the user opens inside RECLAIM_CUE_MS is not said again (one rate limit with the Q1 cue); its Enter is the page\'s too', J(R.dialogTwice));
 ok(R.cueRecreated.ok, 'verify r4 (attack 2): a box focused, REPLACED and focused again in one task (a keyed patch) — the gone box never said, the box that stayed said ONCE (before: reclaimed twice, said never — the one flag consumed by the wrong reader)', J(R.cueRecreated));
 ok(R.cueStaleSame.ok, 'verify r4 (attack 2, declared): a press ON the box whose focus lands after USER_PRESS_MS (a blocked render) is reclaimed and not said — the cue is for a press elsewhere', J(R.cueStaleSame));
 ok(R.labelPress.ok, 'verify r4 (attack 2): a press on the box\'s LABEL (<label for>, or a label wrapping it) is a press on the box — it YIELDS ("ab" / "cd" land there), nothing said (before: reclaimed, "click the text box itself")', J(R.labelPress));
@@ -897,15 +1247,31 @@ ok(R.twoViewsEnd.ok, 'verify r4 (attack 7): two views yielded to one press; one 
 ok(R.socketWhileYielded.ok, 'verify r4 (attack 7): the socket closes while yielded — the takeover ends as the server ends it, the yield with it, the caret stays in the composer, the line goes, no claim is left', J(R.socketWhileYielded));
 ok(R.streamWhileYielded.ok, 'verify r4 (attack 8): a mode record re-applied while yielded moves no caret — the stream has no way to the keys (renderMode keeps its hands off while yielded)', J(R.streamWhileYielded));
 ok(R.controlSummary.ok, 'verify r4 (the census\'s control row): a <summary> toggles by the press, the sink takes the focus back, Enter stays the page\'s', J(R.controlSummary));
-ok(Object.values(R).every((r) => r.ok) && Object.keys(R).length === 51, `…and the real module passes all ${Object.keys(R).length} scenarios under the same harness`);
+// ── lane dialog-keys: a dialog your own act opened takes the keys; one that opens by itself never does ──
+ok(R.dialogUserPress.ok, 'lane dialog-keys (THE RULE): Take over, a real press on a menu\'s Delete opens the confirm — it TAKES the keys (its own focus on OK stays, the chip says "in the dialog", nobody owns, Shift held in the page let go); Enter ANSWERS it and the page gets nothing; its close gives the keys back to the page ("x"), nothing said, the takeover went on', J(R.dialogUserPress));
+ok(R.dialogScript.ok, 'lane dialog-keys (THE PASSWORD GUARD): a confirm that opens BY ITSELF while "pw" is typed into the page is TAKEN BACK (its Enter is the page\'s, it stays open) and SAID once; an input dialog opening by itself a second later gets none of the typing, not said again', J(R.dialogScript));
+ok(R.dialogSynthetic.ok, 'lane dialog-keys (a script cannot fake the opener): a SYNTHETIC press (isTrusted false) that opens the confirm is not the user\'s — taken back and said, its Enter the page\'s', J(R.dialogSynthetic));
+ok(R.dialogPicture.ok, 'lane dialog-keys: a press on the PICTURE went to the page — a confirm opening by itself 50 ms later is not his: taken back and said', J(R.dialogPicture));
+ok(R.dialogStale.ok, `lane dialog-keys (declared): a confirm opening ${T.USER_PRESS_MS + 150} ms after the user\'s release (a slow fetch) is judged as opening by itself — taken back and said`, J(R.dialogStale));
+ok(R.dialogYielded.ok, 'lane dialog-keys: YIELDED to the composer, a press on a chat button opens an input dialog — it takes the keys ("nm" + Enter answer it), its close gives them back to the COMPOSER (the yield\'s home): "!" lands there, the line is on, the chip says the chat; the page gets nothing', J(R.dialogYielded));
+ok(R.dialogNested.ok, 'lane dialog-keys: a confirm OVER an input dialog — the newest holds; its close returns to the older (what held the caret when it opened); the older\'s close returns to the page ("z")', J(R.dialogNested));
+ok(R.dialogScriptClose.ok, 'lane dialog-keys (no orphan hold): a dialog he opened REMOVED by a script returns the keys to the page ("q"); the OLDER of two removed by a script — the newest still holds, its close returns to the page ("r")', J(R.dialogScriptClose));
+ok(R.dialogTwoViews.ok, 'lane dialog-keys: two views driving — one press opens the confirm, BOTH give it the keys (nobody owns); its close gives them back as they were (B owns, B\'s sink, "b" to B\'s page)', J(R.dialogTwoViews));
+ok(R.dialogAppKey.ok, 'lane dialog-keys: a key the APP took (command mode) opens an input dialog — his act, it takes the keys ("3x3" + Enter); a SYNTHETIC key is not his (the next dialog taken back, said)', J(R.dialogAppKey));
+ok(R.dialogChain.ok, 'lane dialog-keys: Enter answers his dialog and its answer opens the next ("Overwrite?") — the Enter typed into his dialog is his act: the next one takes the keys too ("ok" + Enter), the page gets nothing', J(R.dialogChain));
+ok(R.dialogFocusless.ok, 'lane dialog-keys: a dialog he opened that focuses nothing itself gets the keys a tick later — its first text box ("k" + Enter), else its overlay (never a button he did not choose: Enter answers it)', J(R.dialogFocusless));
+ok(R.dialogSelect.ok, 'lane dialog-keys: a <select> in a dialog he opened keeps the focus of his press (nothing takes it back while the dialog holds), its key never reaches the page; a press on OK answers it and the keys go back to the page', J(R.dialogSelect));
+ok(R.dialogStatic.ok, 'lane dialog-keys: the STATIC overlay (#dialog-overlay: shown by its class and announced, closed by the class) — its box takes "/w", hidden it gives the keys back to the page ("z")', J(R.dialogStatic));
+ok(R.dialogPageBar.ok, 'lane dialog-keys: the agent\'s PAGE dialog on the live view\'s own bar is no app modal — announced or not, never taken; the view keeps the keys', J(R.dialogPageBar));
+ok(Object.values(R).every((r) => r.ok) && Object.keys(R).length === 69, `…and the real module passes all ${Object.keys(R).length} scenarios under the same harness`);
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: CONTROLS.length, label: '§2 ' })) ok(r.pass, r.name, r.detail);
 
 // ═══ §3 WIRING PINS ═══════════════════════════════════════════════════════════
 console.log('§3 wiring: the live view registers the three listeners and acts as this harness does; the composer\'s line; the words');
 const src = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const LW = src('src/lib/browser-live-window.js');
-ok(/import \{ createKeyboardYield, isEditable, sinkBlurVerdict \} from '\.\/keyboard-yield\.js';/.test(LW) && !/\nfunction isEditable\(/.test(LW) && /const ky = createKeyboardYield\(\{ root, sink: kbd, drives: \(\) => drivesKeyboard\(\), mine: \(\) => !!st\.claimed && !st\.closed, ownChrome: namesThisView \}\);/.test(LW),
-  'the live view builds its yield from keyboard-yield.js over its root + sink (ONE isEditable — the view\'s own copy is gone)');
+ok(/import \{ createKeyboardYield, isEditable, sinkBlurVerdict \} from '\.\/keyboard-yield\.js';/.test(LW) && !/\nfunction isEditable\(/.test(LW) && /const ky = createKeyboardYield\(\{ root, sink: kbd, drives: \(\) => drivesKeyboard\(\), mine: \(\) => !!st\.claimed && !st\.closed, ownChrome: namesThisView, picture: canvas \}\);/.test(LW),
+  'the live view builds its yield from keyboard-yield.js over its root + sink + picture (ONE isEditable — the view\'s own copy is gone; lane dialog-keys: a press on the picture is the page\'s)');
 /** one registration's text: from `document.addEventListener('<ev>', (e) => {` to the end of its call (`\n  }, …);` or a one-liner's `);`) */
 const reg = (ev) => { const i = LW.indexOf(`document.addEventListener('${ev}', (e) => {`); if (i < 0) return ''; const nl = LW.indexOf('\n', i); const one = LW.slice(i, nl); if (/\);( \/\/.*)?$/.test(one) && !/\{\s*$/.test(one)) return one; const j = LW.indexOf('\n  }, ', i); const e = j < 0 ? -1 : LW.indexOf('\n', j + 1); return LW.slice(i, e < 0 ? i + 1200 : e); };
 const pd = reg('pointerdown'), pu = reg('pointerup'), fi = reg('focusin');
@@ -928,13 +1294,13 @@ ok(!/press Hand back to type here/.test(LW) && !/lastReclaimHintAt|RECLAIM_HINT_
 }
 ok(/import \{ heldReleases \} from '\.\.\/browser-takeover\.js';/.test(LW) && /function releaseHeld\(\) \{ for \(const r of heldReleases\(\[\.\.\.st\.pressed\.values\(\)\]\)\) sendInput\(keyRecord\(r\)\); st\.pressed\.clear\(\); \}/.test(LW),
   'verify r1 (K4): a yield RELEASES in the page what is still held there (PURE heldReleases → the view\'s own input path) before it forgets the held keys');
-ok(/const claimRec = \(\) => \(\{ id: winInfo\.id, owns: ownsKeyboard, yielded: yieldedKeyboard \}\);/.test(LW) && /function ownsKeyboard\(\) \{ return keyboardOwnership\(\{ \.\.\.kbFacts\(\), yielded: ky\.yielded \}\)\.owns; \}/.test(LW) && /function drivesKeyboard\(\) \{ return !!st\.claimed && keyboardOwnership\(kbFacts\(\)\)\.owns; \}/.test(LW),
-  'the claim: owns() answers false while yielded (so ChatInput / TerminalSession behave normally), yielded() says so');
+ok(/const claimRec = \(\) => \(\{ id: winInfo\.id, owns: ownsKeyboard, yielded: yieldedKeyboard \}\);/.test(LW) && /function ownsKeyboard\(\) \{ return keyboardOwnership\(\{ \.\.\.kbFacts\(\), yielded: ky\.yielded, dialog: ky\.dialogHolds \}\)\.owns; \}/.test(LW) && /function drivesKeyboard\(\) \{ return !!st\.claimed && keyboardOwnership\(kbFacts\(\)\)\.owns; \}/.test(LW),
+  'the claim: owns() answers false while yielded or while a dialog the user opened holds the keys (so ChatInput / TerminalSession behave normally), yielded() says so');
 // the .197 integration: the three pins below read the MERGED lines (browse-yourself's address-row exemption and first-claim caret, lane-pairing r6's wake count)
-ok(/if \(first\) \{ st\.claimed = true; st\.sent = 0; st\.pressed\.clear\(\); ky\.reset\('claim'\); claimKeyboard\(claimRec\(\)\); \}/.test(LW) && /else if \(!ky\.yielded && !\(H && document\.activeElement === addrInput\)\) focusSink\(\);/.test(LW) && /ky\.reset\('release'\); releaseKeyboard\(winInfo\.id\);/.test(LW) && /ky\.reset\('release'\); keyboardChanged\(\);/.test(LW),
-  'a re-render while yielded never pulls the focus back; a fresh claim and the release (and a closed window) clear the yield');
-ok(/const yielded = !own && st\.claimed && yieldedKeyboard\(\);/.test(LW) && /const text = yielded \? yieldChipText\(ky\.whereNow\(document\.activeElement\)\) :/.test(LW) && /document\.addEventListener\('focusout', \(\) => \{ if \(st\.claimed && ky\.yielded\) setTimeout\(\(\) => \{ if \(!st\.closed\) renderKbd\(\); \}, 0\); \}, capture\);/.test(LW) && /priority: key === 'kbd' && st\.claimed && ky\.yielded \? LIVE_BAR_PRIORITY\.badge : LIVE_BAR_PRIORITY\[key\]/.test(LW),
-  'the bar says where the keys are while yielded (the chip patched in place, at the badge\'s fold rank)');
+ok(/if \(first\) \{ st\.claimed = true; st\.sent = 0; st\.pressed\.clear\(\); ky\.reset\('claim'\); claimKeyboard\(claimRec\(\)\); watchDialogs\(\); \}/.test(LW) && /else if \(!ky\.yielded && !ky\.dialogHolds && !\(H && document\.activeElement === addrInput\)\) focusSink\(\);/.test(LW) && /ky\.reset\('release'\); releaseKeyboard\(winInfo\.id\); watchDialogs\(\);/.test(LW) && /ky\.reset\('release'\); keyboardChanged\(\);/.test(LW),
+  'a re-render while yielded — or while a dialog the user opened holds the keys — never pulls the focus back; a fresh claim and the release (and a closed window) clear the yield and the dialogs\' watch');
+ok(/const dialogHeld = !own && !!st\.claimed && ky\.dialogHolds && !st\.closed;\n    const yielded = !own && st\.claimed && \(yieldedKeyboard\(\) \|\| dialogHeld\);/.test(LW) && /const text = yielded \? yieldChipText\(ky\.whereNow\(document\.activeElement\)\) :/.test(LW) && /if \(kind === 'dialog'\) return t\('Keyboard is in the dialog — it goes back when you answer it'\);/.test(LW) && /document\.addEventListener\('focusout', \(\) => \{ if \(st\.claimed && ky\.yielded\) setTimeout\(\(\) => \{ if \(!st\.closed\) renderKbd\(\); \}, 0\); \}, capture\);/.test(LW) && /priority: key === 'kbd' && st\.claimed && \(ky\.yielded \|\| ky\.dialogHolds\) \? LIVE_BAR_PRIORITY\.badge : LIVE_BAR_PRIORITY\[key\]/.test(LW),
+  'the bar says where the keys are while yielded or while a dialog the user opened holds them (in the dialog — they go back when you answer it; the chip patched in place, at the badge\'s fold rank)');
 // verify r4 (attack 3): the chip is WRITTEN only on change — a yielded view re-reads it on every focus move (focusout + focusin), and a
 // same-text write is a mutation record + an accessibility event (measured: 300 focus moves ⇒ 1 200 records, the words never changing)
 ok(/if \(kbdText\.textContent !== text\) kbdText\.textContent = text;\n    if \(kbdChip\.title !== title\) kbdChip\.title = title;/.test(LW), 'verify r4 (attack 3): renderKbd writes the chip\'s words and title only when they CHANGE');
@@ -953,12 +1319,12 @@ ok(/st\.connected = false; renderKbd\(\); syncKeyboard\(\);[^\n]*\n[^\n]*\n[^\n]
   const userAct = (ctx) => (/^\n  addrInput\.addEventListener\('keydown'/.test(ctx) && /if \(driving\(\)\) $/.test(ctx)) || /^\n  (kbdBtn|takeBtn)\.onclick = /.test(ctx);
   const sites = []; let i = -1; while ((i = LW.indexOf('focusSink();', i + 1)) >= 0) { if (/function focusSink\(\)/.test(LW.slice(i - 30, i))) continue; const head = Math.max(...HEADS.map((h) => LW.lastIndexOf(h, i))); const ctx = LW.slice(head, i); sites.push({ at: LW.slice(0, i).split('\n').length, guarded: /iOwn\(\)|!ky\.yielded|!driving\(\)|ky\.settle\(|r\.moveCaret|st\.copying = false/.test(ctx) || userAct(ctx) }); } // (the guard is read inside the site's OWN handler / function)
   const om = LW.slice(LW.indexOf('  function onMessage(m) {'), LW.indexOf('\n  }\n', LW.indexOf('  function onMessage(m) {')));
-  ok(sites.length === 17 && sites.every((s) => s.guarded) && om.length > 2000 && !/focusSink\(|\.focus\(/.test(om), `verify r4 (attack 8): every focusSink() site (${sites.length}) is guarded by ownership / not-yielded / a transition / the user's press / a copy of ours; onMessage never focuses`, J(sites.filter((s) => !s.guarded)));
+  ok(sites.length === 18 && sites.every((s) => s.guarded) && om.length > 2000 && !/focusSink\(|\.focus\(/.test(om), `verify r4 (attack 8): every focusSink() site (${sites.length}) is guarded by ownership / not-yielded / a transition / the user's press / a copy of ours; onMessage never focuses`, J(sites.filter((s) => !s.guarded)));
 }
 { // verify r2 (H1): the view's transition sync — the same acts as this harness's sync, run on every signal of a transition
   const fnBody = (head) => { const i = LW.indexOf(head); return i < 0 ? '' : LW.slice(i, LW.indexOf('\n  }\n', i) + 4); };
   const sk = fnBody('  function syncKeyboard() {');
-  ok(/watchHiders\(!!st\.claimed\);/.test(sk) && /if \(st\.claimed && ky\.settle\(\{ drives: drivesKeyboard\(\), active: document\.activeElement \}\) === 'end'\) \{ claimKeyboard\(claimRec\(\)\); st\.homeless\+\+; if \(!st\.copying\) \{ st\.caretMoves\+\+; focusSink\(\); \} \}\n      const r = ky\.sync/.test(sk) && /const r = ky\.sync\(\{ owns: !!\(st\.claimed && iOwn\(\)\), yielded: !!\(st\.claimed && yieldedKeyboard\(\)\), active: document\.activeElement \}\);\n      if \(!r\.changed\) return;\n      if \(r\.moveCaret && !st\.copying\) \{ st\.caretMoves\+\+; focusSink\(\); \}\n      if \(r\.release\) releaseHeld\(\);[^\n]*\n      renderKbd\(\); keyboardChanged\(\);/.test(sk),
+  ok(/watchHiders\(!!st\.claimed\);/.test(sk) && /if \(st\.claimed && ky\.settle\(\{ drives: drivesKeyboard\(\), active: document\.activeElement \}\) === 'end'\) \{ claimKeyboard\(claimRec\(\)\); st\.homeless\+\+; if \(!st\.copying\) \{ st\.caretMoves\+\+; focusSink\(\); \} \}\n      const r = ky\.sync/.test(sk) && /const r = ky\.sync\(\{ owns: !!\(st\.claimed && iOwn\(\)\), yielded: !!\(st\.claimed && yieldedKeyboard\(\)\), dialog: !!\(st\.claimed && ky\.dialogHolds\), active: document\.activeElement \}\);\n      if \(!r\.changed\) return;\n      if \(r\.moveCaret && !st\.copying\) \{ st\.caretMoves\+\+; focusSink\(\); \}\n      if \(r\.release\) releaseHeld\(\);[^\n]*\n      renderKbd\(\); keyboardChanged\(\);/.test(sk),
     'verify r2 (H1 / H3): syncKeyboard — ky.sync over the live facts; a change redraws the chip and signals the composers at once; keys moving to the page move the CARET to the sink; keys leaving it let go of what is held there', sk.slice(0, 700));
   ok(/handBtn\.onclick = \(\) => \{ if \(st\.claimed\) releaseHeld\(\); send\(\{ type: 'handback', \.\.\.\(Number\.isInteger\(st\.wakes\) && st\.wakes > 0 \? \{ expectWakes: st\.wakes \} : \{\}\) \}\); \};/.test(LW) && /    if \(st\.claimed\) releaseHeld\(\);[^\n]*\n    releaseKeyboard\(winInfo\.id\); st\.claimed = false;/.test(LW),
     'verify r2 (H3): Hand back lets go of the keys held in the page BEFORE the handback is sent (after it this viewer\'s input is refused); a closing window lets go before its socket closes');
@@ -972,7 +1338,7 @@ ok(/st\.connected = false; renderKbd\(\); syncKeyboard\(\);[^\n]*\n[^\n]*\n[^\n]
 }
 { // verify r2 (H5): the sink's blur — a focus that LEFT the document for a frame is taken back, and said (rate-limited)
   const i = LW.indexOf("kbd.addEventListener('blur', () => {"); const bl = i < 0 ? '' : LW.slice(i, LW.indexOf('}, sig);', i));
-  ok(/const v = sinkBlurVerdict\(a, \{ sink: kbd, root, body: document\.body \}\);\n      if \(v === 'keep'\) return;/.test(bl) && /const frame = v === 'frame';\n      focusSink\(\);\n      if \(frame\) \{\n        st\.frameReclaims\+\+;/.test(bl) && /now - st\.lastFrameCueAt >= RECLAIM_CUE_MS\) \{ st\.lastFrameCueAt = now; showToast\(t\('Typing still goes to the browser — to type in another page, hand back first'\), \{ duration: 3500 \}\); \}/.test(bl) && /\} else if \(ky\.dialogCue\(a\)\) \{ st\.dialogCues\+\+; showToast\(t\('Typing still goes to the browser — click the dialog’s buttons to answer it'\), \{ duration: 3500 \}\); \}/.test(bl),
+  ok(/const v = sinkBlurVerdict\(a, \{ sink: kbd, root, body: document\.body \}\);\n      if \(v === 'keep'\) return;/.test(bl) && /const frame = v === 'frame';\n      focusSink\(\);\n      if \(frame\) \{\n        st\.frameReclaims\+\+;/.test(bl) && /now - st\.lastFrameCueAt >= RECLAIM_CUE_MS\) \{ st\.lastFrameCueAt = now; showToast\(t\('Typing still goes to the browser — to type in another page, hand back first'\), \{ duration: 3500 \}\); \}/.test(bl) && !/dialogCue/.test(bl), // lane dialog-keys: the F4 cue at the blur is retired (a dialog is judged at its OPEN)
     'verify r2 (H5): a focus that left the document for a FRAME is taken back by the sink and SAID (rate-limited, the one way that works: hand back first)', bl.slice(0, 600));
 }
 const CI = src('src/lib/chat-input.js');
@@ -986,10 +1352,49 @@ const WORDS = ['Keyboard is in the chat box — click the picture to keep using 
   'Typing still goes to the browser — click the text box itself to type there', // verify r2 (Q1): the reclaim cue's census row
   'Typing still goes to the browser — to type in another page, hand back first', // verify r2 (H5): the frame cue's
   'Keyboard is not in a text box — click one to type there, or the picture to use the page', // verify r3 (r2's held): yielded, nothing that takes keys holds the focus
-  'Typing still goes to the browser — click the dialog’s buttons to answer it']; // verify r3 (F4): a dialog the user's own press opened
+  'Typing still goes to the browser — click the dialog’s buttons to answer it', // verify r3 (F4); lane dialog-keys: said for a dialog that opened BY ITSELF
+  'Keyboard is in the dialog — it goes back when you answer it', // lane dialog-keys: the chip while a dialog the user opened holds the keys
+  'A dialog you opened has the keyboard: Enter, Escape and typing go to it. When it closes your keys go back where they were — you still drive the browser, the agent waits.'];
 const zh = src('src/lib/i18n-zh.js'), ja = src('src/lib/i18n-ja.js');
 const miss = WORDS.filter((w) => !(LW + CI).includes(`t('${w}')`) || !zh.includes(JSON.stringify(w) + ':') || !ja.includes(JSON.stringify(w) + ':'));
 ok(miss.length === 0 && zh.includes('"键盘在对话框 — 点画面继续操作网页"') && zh.includes('"你在给 agent 打字（浏览器仍由你接管）"'), `the words (${WORDS.length}) are t() literals with zh + ja — "键盘在对话框 — 点画面继续操作网页" · "你在给 agent 打字（浏览器仍由你接管）"`, miss.join(' | '));
+
+{ // lane dialog-keys: THE ANNOUNCEMENT + the view's dialog wiring — the same acts as this harness's world (read off the real files)
+  const body = (text, head) => { const i = text.indexOf(head); return i < 0 ? '' : text.slice(i, text.indexOf('\n  }\n', i) + 4); };
+  const U = src('src/lib/utils.js'), AP = src('src/lib/app.js');
+  const shell = U.slice(U.indexOf('export function createModalShell('), U.indexOf('\n}\n', U.indexOf('export function createModalShell(')));
+  ok(/export const MODAL_OPEN_EVENT = 'vs-modal-open';/.test(U) && /export function announceModal\(overlay\) \{\n  try \{ document\.dispatchEvent\(new CustomEvent\(MODAL_OPEN_EVENT, \{ detail: \{ overlay \} \}\)\); \}/.test(U)
+    && /\n  document\.body\.appendChild\(overlay\);\n  announceModal\(overlay\);/.test(shell),
+    'utils.js: createModalShell ANNOUNCES its overlay right after the append (the opening act\'s own task, before the caller focuses anything in it); the event carries the overlay only — no evidence of its own, so a forged one hands nothing the keys');
+  const sd = body(AP, '  _showDialog(id) {');
+  ok(/document\.getElementById\(id\)\.classList\.remove\('hidden'\);\n    announceModal\(overlay\);/.test(sd) && /hideDialogs\(\) \{ document\.getElementById\('dialog-overlay'\)\.classList\.add\('hidden'\);/.test(AP) && /import \{[^}]*\bannounceModal \} from '\.\/utils\.js';/.test(AP),
+    'app.js: the static #dialog-overlay announces when _showDialog shows it; hideDialogs closes it by its class (the dialogs\' watch reads the class)', sd.slice(0, 400));
+  // every app modal is announced: the one `.dialog-overlay` the client builds is createModalShell's + index.html's static one
+  const walkLib = (d) => fs.readdirSync(path.join(REPO, d), { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walkLib(path.join(d, e.name)) : [path.join(d, e.name)]);
+  const MAKER = /className\s*=\s*['"`][^'"`]*\bdialog-overlay\b|classList\.add\(\s*['"]dialog-overlay['"]|class=\\?["'][^"']*\bdialog-overlay\b/;
+  const makersOf = (files) => files.filter(([, t]) => MAKER.test(t)).map(([f]) => f);
+  const libFiles = walkLib('src/lib').filter((f) => f.endsWith('.js')).map((f) => [f, src(f)]);
+  const makers = makersOf(libFiles);
+  ok(JSON.stringify(makers) === '["src/lib/utils.js"]' && /<div id="dialog-overlay" class="dialog-overlay hidden">/.test(src('public/index.html')),
+    'every app modal is ANNOUNCED: the one `.dialog-overlay` the client builds is createModalShell\'s (src/lib/utils.js) + index.html\'s static #dialog-overlay (app._showDialog) — a hand-rolled overlay would never be judged', makers.join(' | '));
+  ok(JSON.stringify(makersOf([...libFiles, ['src/lib/x.js', "const ov = document.createElement('div'); ov.className = 'dialog-overlay my';"]])) === '["src/lib/utils.js","src/lib/x.js"]', 'NEGATIVE CONTROL (a hand-rolled overlay added): the census names its maker');
+  const mo = LW.slice(LW.indexOf('  document.addEventListener(MODAL_OPEN_EVENT, (e) => {'), LW.indexOf('  }, { signal: winInfo._listenerCtl?.signal });', LW.indexOf('  document.addEventListener(MODAL_OPEN_EVENT')));
+  ok(/import \{ MODAL_OPEN_EVENT \} from '\.\/utils\.js';/.test(LW) && /if \(!st\.claimed \|\| st\.closed\) return;\n    settleDialogs\(\);/.test(mo) && /const v = ky\.onDialogOpen\(ov, \{ active: document\.activeElement \}\);\n    if \(v === 'take'\) \{\n      st\.dialogTakes\+\+;\n      watchDialogs\(\);\n      syncKeyboard\(\);/.test(mo)
+    && /if \(a && a !== document\.body && typeof ov\.contains === 'function' && ov\.contains\(a\)\) return;\n        focusDialog\(ov\);\n      \}, 0\);/.test(mo) && /if \(v === 'reclaim' && iOwn\(\) && ky\.dialogCue\(v\)\) \{ st\.dialogCues\+\+; showToast\(t\('Typing still goes to the browser — click the dialog’s buttons to answer it'\), \{ duration: 3500 \}\); \}/.test(mo),
+    'the live view: MODAL_OPEN_EVENT (document, the window\'s signal) — settle first, then the yield\'s verdict: take ⇒ the watch armed + the transition (chip, held keys let go) + the focus tick (its first text box / its overlay, never a button); reclaim ⇒ THE owner says it once', mo.slice(0, 700));
+  const fdv = body(LW, '  function focusDialog(ov) {');
+  ok(/const tgt = dialogFocusTarget\(ov\);\n    try \{ if \(tgt === ov && \(typeof ov\.hasAttribute === 'function' \? !ov\.hasAttribute\('tabindex'\) : ov\.tabIndex == null\)\) ov\.tabIndex = -1; tgt\.focus\(\{ preventScroll: true \}\); \} catch \{ \/\* gone \*\/ \}/.test(fdv) && (LW.match(/dialogFocusTarget\(/g) || []).length === 1,
+    'verify r1: ONE door gives a held dialog its own field (its first visible text box, else its overlay with tabIndex -1 — never a button): the take\'s focus tick and the \'older\' return both go through focusDialog', fdv.slice(0, 400));
+  const sdv = body(LW, '  function settleDialogs() {');
+  ok(/const r = ky\.settleDialogs\(\{ active: document\.activeElement \}\);[^\n]*\n    if \(!r\) return;\n    watchDialogs\(\);/.test(sdv) && /if \(r\.to === 'sink'\) \{ if \(iOwn\(\) && !st\.copying\) focusSink\(\); \}\n    else if \(r\.to === 'older' && r\.el\) focusDialog\(r\.el\);[^\n]*\n    else if \(\(r\.to === 'back' \|\| r\.to === 'yield'\) && r\.el\) \{ try \{ r\.el\.focus\(\{ preventScroll: true \}\); \} catch \{ \/\* gone \*\/ \} \}\n    syncKeyboard\(\);/.test(sdv)
+    && /const dialogMo = typeof MutationObserver === 'function' \? new MutationObserver\(\(\) => settleDialogs\(\)\) : null;/.test(LW) && /dialogMo\.observe\(document\.body, \{ childList: true \}\);\n    for \(const ov of ky\.dialogOverlays\(\)\) dialogMo\.observe\(ov, \{ attributes: true, attributeFilter: \['class', 'hidden'\] \}\);/.test(LW)
+    && /if \(dialogMo\) dialogMo\.disconnect\(\); \/\/ lane dialog-keys/.test(LW),
+    'the live view: ONE MutationObserver, armed only while a dialog holds (the body\'s children + each held overlay\'s class) — any close (an answer, a backdrop press, a script\'s removal, the static overlay\'s class) settles: the sink / the older dialog\'s field / the yield\'s text box, then the transition redraws; disconnected when the window closes', sdv.slice(0, 500));
+  ok(/if \(st\.claimed && e\.type === 'keydown' && \(ky\.dialogHolds \|\| keyRoute\(e, \{ appMode: appMode\(\) \}\)\.to === 'app'\)\) ky\.onAppKey\(e\);\n    if \(!iOwn\(\)\)/.test(LW),
+    'onDocKey: a key the APP takes (typed into a dialog he opened, a reserved chord, command mode) stamps the opener in EVERY view BEFORE the owner test; a key the page gets never does');
+  const rd = LW.slice(LW.indexOf('  const renderDialog = () => {'), LW.indexOf('  function answerDialog('));
+  ok(rd.length > 400 && !/announceModal|MODAL_OPEN_EVENT|dialog-overlay/.test(rd), 'the agent\'s PAGE dialog (the view\'s own Accept / Dismiss bar) is never announced as an app modal — its handling is the view\'s, unchanged');
+}
 
 // ═══ §4 THE INPUT-SURFACE CENSUS (verify r3) ═══════════════════════════════════
 // N1's class (a surface that takes keys for the user, unknown to the yield — userW's report in another window) closed by a
@@ -1008,7 +1413,7 @@ const SURFACE_CLASSES = {
   choice:  { press: 'DECLARED — the pointer picks', focus: 'the <select> keeps it (its list open); its keys stay the page\'s (F1)', script: 'kept (a script cannot open a list)', legs: ['choiceSelect'], controls: ['no-choice'] },
   control: { press: 'DECLARED — the pointer works', focus: 'the sink takes it back (a checkbox / radio / range / colour / file / read-only field, a role=button chip, a <details> fold\'s summary: its Space / Enter / arrows stay the page\'s; verify r4 measured: the colour picker stays open, a summary toggles)', script: 'taken back', legs: ['controlCheckbox', 'controlSummary'], controls: ['blur-keeps-all'] },
   widget:  { press: 'DECLARED — not typing', focus: 'the sink takes it back while the view owns (a list\'s arrows / Enter stay the page\'s — a listbox / combobox widget of ours too); yielded, the keys stay where they were and the chip says "not in a text box" (r2\'s held)', script: 'taken back', legs: ['widgetList', 'widgetYielded', 'focusStorm'], controls: ['blur-keeps-all', 'where-kind'] },
-  dialog:  { press: 'TAKEN BACK — said', focus: 'the sink (a dialog\'s own focus / default button: its Enter / Escape stay the page\'s; said once when the user\'s own press opened it — F4, once per RECLAIM_CUE_MS; its input is a text row, its select a choice row)', script: 'taken back, silent', legs: ['dialogConfirm', 'dialogSelect', 'dialogTwice'], controls: ['no-dialog-cue'] },
+  dialog:  { press: 'TAKES THE KEYS when the user\'s OWN act opened it (lane dialog-keys, the owner\'s rule) — else TAKEN BACK, said', focus: 'the dialog\'s own choice (a confirm\'s OK, an input dialog\'s box; one that focuses nothing: its first text box, else its overlay — never a button it did not choose); Enter / Escape / Tab / typing are the dialog\'s and the takeover goes on; its close (an answer, a backdrop press, a script\'s removal) gives the keys back where they were — the sink, the yield\'s text box, the older dialog. Its select is the dialog\'s too', script: 'OPENS BY ITSELF ⇒ taken back, SAID once (the password guard: no press — or a synthetic, stale or picture press — never moves the keys out of the page); its Enter is the page\'s', legs: ['dialogUserPress', 'dialogScript', 'dialogSynthetic', 'dialogPicture', 'dialogStale', 'dialogNested', 'dialogScriptClose', 'dialogYielded', 'dialogTwoViews', 'dialogChain', 'dialogFocusless', 'dialogSelect', 'dialogStatic', 'dialogPageBar'], controls: ['dialog-no-rule', 'dialog-trust-any', 'dialog-orphan', 'dialog-no-cue', 'dialog-no-picture', 'dialog-back-base', 'dialog-home-active'] },
   helper:  { press: 'TAKEN BACK — silent', focus: 'the sink (a script-only box: a copy fallback\'s scratch textarea and its execCommand, the terminal\'s paste target — never announced, F2)', script: 'taken back', legs: ['helperCopy', 'cueRecreated'], controls: ['cue-gone-said', 'cue-flag'] },
   view:    { press: 'THE VIEW', focus: 'its own sink (the keys go to the page)', script: '—', legs: ['picture', 'bar', 'ownTab'], controls: ['no-chrome'] },
   none:    { press: 'NOT A KEY SURFACE', focus: 'nothing (a chart, a measuring context, a shadow root that holds paper)', script: '—', legs: ['noneCanvas'], controls: [] },
@@ -1128,7 +1533,7 @@ const CENSUS = [
   ['usage-window.js', 'canvas', 'none', 'charts'],
   ['user-todos-row.js', 'textarea', 'text', 'THE FOR-YOU REPLY BOX'],
   ['utils.js', 'textarea', 'text+helper', 'THE INPUT DIALOG\'s box (showInputDialog, multi-line) · copyText\'s fallback scratch'],
-  ['utils.js', 'tabindex', 'dialog', 'createModalShell\'s overlay (-1), a confirm\'s own focus'],
+  ['utils.js', 'tabindex', 'dialog', 'createModalShell\'s overlay (-1), a confirm\'s own focus — every modal ANNOUNCES its open (announceModal, lane dialog-keys)'],
   ['vnc-view.js', 'novnc', 'picture', 'THE DESKTOP / a VNC app (noVNC\'s canvas)'],
   ['window-share.js', 'input', 'control', 'the wake / hold checkboxes'],
   ['window-share.js', 'textarea', 'text', 'the share note'],

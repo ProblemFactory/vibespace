@@ -28,8 +28,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { startWorkMeter, linear, LINEAR_BOUND } from './work-meter.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+startWorkMeter(); // BEFORE the module loads — a complexity claim is counted in WORK, never the clock (lane-mirror-198)
 const DF = require(path.join(REPO, 'src/dial-facts.js'));
 const src0 = fs.readFileSync(path.join(REPO, 'src/dial-facts.js'), 'utf8');
 
@@ -535,12 +537,12 @@ console.log('verify-r2 the dial endpoint: ONE answer for an unknown name and a w
   // rotation: 50 000 knocks over 800 /64s in one window ⇒ ≤ globalMax + 1 lines, O(1) per hit, the map bounded
   {
     const b = DF.refusalBudget({ keys: 256 });
-    const t0 = Date.now(); let lines = 0;
+    let lines = 0;
     for (let i = 0; i < 50000; i++) { const x = b.hit(`2001:db8:${(i >> 6).toString(16)}::${i.toString(16)}`, '', t + i); if (x.log || x.summary) lines++; }
-    const ms = Date.now() - t0;
     ok(lines <= B.globalMax + 1, `50 000 refusals rotating over 782 /64s write ${lines} lines (≤ ${B.globalMax + 1}: the window's ceiling holds whatever the keys)`);
     ok(b.size() <= 256, `…the map holds ≤ its cap (${b.size()} of 256)`);
-    ok(ms < 1500, `…in ${ms} ms (O(1) per hit — the WIP's whole-map sweep past 4 096 keys was quadratic: 3.3 s for 40 000)`);
+    const hitsL = linear((n) => Array.from({ length: n }, (_, i) => `2001:db8:${(i >> 6).toString(16)}::${i.toString(16)}`), (ips) => { const bb = DF.refusalBudget({ keys: 256 }); for (let i = 0; i < ips.length; i++) bb.hit(ips[i], '', t + i); }, 25000, ['src/dial-facts.js']);
+    ok(hitsL.ok, `…O(1) per hit: 25 000 hits ${hitsL.w1} ops, 50 000 hits ${hitsL.w2} ops, ×${hitsL.r.toFixed(2)} ≤ ${LINEAR_BOUND} — counted in work, never the clock (the WIP's whole-map sweep past 4 096 keys was quadratic: 3.3 s for 40 000)`);
   }
   // the ceiling counts LINES, not knocks: one noisy address spends its own 30, never the others' share
   {

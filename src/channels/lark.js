@@ -156,6 +156,41 @@ const RECONCILE_SCAN_MAX = 200;
 const REQUEST_TIMEOUT_MS = 20000;
 /** lane lark-search-poll: the message search's field NAMES are said once per process (U1's check against reality). */
 let feedFieldsSaid = false;
+/**
+ * THE ONE READER OF A MESSAGE-SEARCH HIT (lane lark-p2p, 2026-09-30) — PURE. The shape is READ from the vendor's own
+ * answer: the production probe of 2026-09-30 printed `display_info, id, meta_data; meta_data: chat_id, create_time,
+ * from_id, is_p2p_chat, message_id, position, type`, and the vendor's doc (im-v1/message/search) spells the same item —
+ *   { id, display_info, meta_data: { message_id, type, create_time (ISO 8601), update_time?, position, chat_id,
+ *     from_id, thread_id?, thread_position?, is_p2p_chat (boolean) } }
+ * Tolerant of both spellings the two carry (the message id in `meta_data.message_id` or the item's own `id`;
+ * `is_p2p_chat` a boolean or its string); bounded BEFORE parse (an object, `meta_data` an object, every id through the
+ * feed module's bounded id reader, the instant through its bounded ISO reader in the DECLARED form); `display_info`
+ * (the snippet — unbounded peer text) is never read. A hit it cannot read is malformed BY NAME: `fields` = the fields
+ * that are missing or unreadable (names only, never a value), so the account card can say WHAT, not just how many.
+ *   → { ok: true, hit } | { ok: false, why, fields: [name…] }
+ */
+function readSearchHit(item, { now = 0, unit = caps.changeFeed.timeUnit } = {}) {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return { ok: false, why: 'not-an-object', fields: ['item'] };
+  const m = item.meta_data;
+  if (!m || typeof m !== 'object' || Array.isArray(m)) return { ok: false, why: 'no-meta-data', fields: ['meta_data'] };
+  const fields = [];
+  if (!Feed.idOf(m.chat_id)) fields.push('meta_data.chat_id');
+  const vendorId = [m.message_id, item.id].find((x) => Feed.idOf(x) !== null);
+  if (vendorId === undefined) fields.push('meta_data.message_id', 'id');
+  if (Feed.readTime(m.create_time, unit, now) === null) fields.push('meta_data.create_time');
+  const thread = m.thread_id === null || m.thread_id === undefined || m.thread_id === '' ? null : m.thread_id;
+  if (thread !== null && !Feed.idOf(thread)) fields.push('meta_data.thread_id');
+  if (fields.length) return { ok: false, why: 'unreadable', fields };
+  const v = Feed.normalizeHit({ convId: m.chat_id, vendorId, createTime: m.create_time, updateTime: m.update_time, threadKey: thread, isP2p: m.is_p2p_chat === true || m.is_p2p_chat === 'true', fromId: m.from_id || null }, { unit, now });
+  if (!v.ok) return { ok: false, why: v.why, fields: [{ 'no-conversation': 'meta_data.chat_id', 'no-message-id': 'meta_data.message_id', 'bad-thread': 'meta_data.thread_id' }[v.why] || 'meta_data.create_time'] };
+  return v;
+}
+/** The FORM of a field's value, never the value (the probe's words): `iso8601` | `digits(13)` | `number` | `text` | … */
+function valueFormOf(v) {
+  if (typeof v === 'string') { if (v.length > 64) return 'text'; if (Feed.isoMs(v) !== null) return 'iso8601'; return /^\d{1,20}$/.test(v) ? `digits(${v.length})` : 'text'; }
+  if (typeof v === 'number') return 'number';
+  return v === null ? 'null' : typeof v;
+}
 /** A fresh conversation has no anchor: its first ingest walks newest-first
  *  this far and then reports a COMPLETE pass with the newest id as the
  *  anchor. Older history is the vendor's (a "load older" is P5). Without
@@ -235,9 +270,12 @@ const caps = Object.freeze({
   // lane lark-search-poll (B-5aab, design §1.3): THE CHANGE FEED — `im/v1/messages/search` with an EMPTY query and a
   // `time_range` (V1): one page of ≤ 30 hits names every conversation with a new message the user can see (groups,
   // single chats, thread replies). 10 pages per sliding minute = 10 % of the vendor's 100/min TENANT tier (V3); the
-  // window never reaches further back than an hour (a long stop's older span is a single-chat catch-up); a hit's
-  // `create_time` is read in MILLISECONDS (the `im/v1` unit — ONE declared unit, never guessed: U5)
-  changeFeed: Object.freeze({ via: 'search', scope: SEARCH_SCOPE, option: 'search', pageSize: 30, pagesPerPass: 5, perMin: 10, maxWindowSec: 3600, catchUp: Object.freeze({ chatType: 'p2p', pagesMax: 20 }), describes: true, timeUnit: 'ms' }),
+  // window never reaches further back than an hour (a long stop's older span is a single-chat catch-up).
+  // lane lark-p2p (2026-09-30): a hit's `create_time` is an ISO 8601 STRING (`2026-03-21T16:15:30+08:00`) — the vendor's
+  // doc (im-v1/message/search, response `meta_data.create_time` "创建时间(iso8601)") and the production answer agree; the
+  // .197 declaration `ms` read every one of 241 260 hits malformed. `reader: 2` = the hit reader's revision (a feed row
+  // the old reader wrote starts over — the engine's `feedReaderHeal`)
+  changeFeed: Object.freeze({ via: 'search', scope: SEARCH_SCOPE, option: 'search', pageSize: 30, pagesPerPass: 5, perMin: 10, maxWindowSec: 3600, catchUp: Object.freeze({ chatType: 'p2p', pagesMax: 20 }), describes: true, timeUnit: 'iso', reader: 2 }),
 });
 /**
  * THE REACTION VOCABULARY (lane channel-threads, 2026-09-28; vendor fact L9):
@@ -1213,47 +1251,74 @@ function create(record = {}, deps = {}) {
     /**
      * THE CHANGE FEED'S PAGE (lane lark-search-poll, design §2 / §4): `POST /im/v1/messages/search` with an EMPTY query
      * and the window as `time_range` (ISO 8601, whole seconds) — the pagination rides the query string like every Lark
-     * list (`page_size` ≤ 30, `page_token`; U9 — a refused shape parks the feed by name), `chat_type` only for the
-     * single-chat catch-up. Each item's `meta_data` becomes ONE hit through the PURE `normalizeHit` in the DECLARED unit
-     * (ms); `display_info` — the snippet, unbounded peer text, possibly markup — is never read, kept or logged here. The
-     * field NAMES (never values) of the first page this process reads are logged once (the fixture's check against
-     * reality — U1: which field carries the message id).
+     * list (`page_size` ≤ 30, `page_token`; U9 — a refused shape parks the feed by name); the window and the chat type
+     * (the single-chat catch-up only) ride the body's `filter` (lane lark-p2p). Each item becomes ONE hit through THE ONE
+     * reader `readSearchHit` in the DECLARED form (ISO 8601); an unreadable one is counted with the fields it lacked
+     * (`malformedFields`); `display_info` — the snippet, unbounded peer text, possibly markup — is never read, kept or
+     * logged here. The field NAMES and the `create_time` FORM (never values) of the first page this process reads are
+     * logged once (the fixture's check against reality).
      */
     async changes({ from, to, pageToken = null, chatType = null, pageSize = 30 } = {}) {
       const size = Math.min(caps.changeFeed.pageSize, Math.max(1, Number(pageSize) || caps.changeFeed.pageSize));
       const q = new URLSearchParams({ user_id_type: 'open_id', page_size: String(size) });
       if (pageToken) q.set('page_token', String(pageToken));
-      const body = { query: '', time_range: { start_time: Feed.isoSec(from), end_time: Feed.isoSec(to) } };
-      if (chatType === 'p2p' || chatType === 'group') body.chat_type = chatType;
+      // lane lark-p2p (2026-09-30): `time_range` and `chat_type` are fields of the request's `filter` object (the vendor's
+      // doc: `{query, filter: {time_range, chat_type, …}}`). The .197 request put them at the TOP LEVEL, where the vendor
+      // does not read them — every page answered the whole searchable history (production: 8 043 pages, the window
+      // never completed), which no guard saw because every hit was also unreadable (the shape verdict now parks that)
+      const filter = { time_range: { start_time: Feed.isoSec(from), end_time: Feed.isoSec(to) } };
+      if (chatType === 'p2p' || chatType === 'group') filter.chat_type = chatType;
+      const body = { query: '', filter };
       const d = await api(`/im/v1/messages/search?${q}`, { method: 'POST', what: 'lark message search', body });
       const data = (d && d.data) || {};
+      // lane lark-p2p verify r2: THE ENVELOPE IS JUDGED BEFORE THE PAGE IS TRUSTED. `has_more` is the doc's one REQUIRED
+      // field of a search page and a `page_token` rides every `has_more: true`. A 200 that carried neither ({}, {code:0},
+      // data:{}, or has_more:true with no token) was read as "this window is complete": the engine moved its cursor past
+      // everything the window still held (measured: 470 of 500 hits on a page that said has_more with no token — every
+      // single chat among them born only with its next message, silently). Refused as the search's OWN failure —
+      // `vendor-error`, retryable: the feed's 30 s → 15 min ladder, the card "failed N× in a row", the cursor held — never
+      // the 24-h contract park (a gateway's empty answer is not a vendor that changed). `items` absent or null on a page
+      // that says has_more:false is an empty page (tolerated); anything but an array is not a page.
+      const envelope = (field, why) => new ChannelError('vendor-error', `lark message search: ${why} — not a search page`, { retryable: true, detail: { envelope: field } });
+      if (!data || typeof data !== 'object' || Array.isArray(data)) throw envelope('data', 'the answer carries no data');
+      if (typeof data.has_more !== 'boolean') throw envelope('has_more', 'the answer carries no has_more (the page contract)');
+      const next = nextToken(data);
+      if (data.has_more === true && !next) throw envelope('page_token', 'has_more with no page_token (the rest of the window cannot be asked for)');
+      if (data.items !== undefined && data.items !== null && !Array.isArray(data.items)) throw envelope('items', 'items is not a list');
       const items = Array.isArray(data.items) ? data.items : [];
       // verify r1: a page LARGER than asked is the vendor ignoring `page_size` — refused as the page contract (the feed parks
       // by name, design §2.6 (a)); it used to be cut to the first 30 with the rest counted "malformed" and silently lost
       if (items.length > size) throw new ChannelError('vendor-error', `lark message search: ${items.length} items for a page size of ${size} — the vendor ignored page_size`, { retryable: false, detail: { contract: 'page-size' } });
-      if (!feedFieldsSaid && items.length) {
-        feedFieldsSaid = true;
-        // names only, each bounded to the field alphabet (a vendor key is never logged whole)
-        const nameOk = (k) => /^[A-Za-z0-9_.]{1,64}$/.test(k);
-        const top = [...new Set(items.flatMap((it) => (it && typeof it === 'object' ? Object.keys(it).filter(nameOk) : [])))].slice(0, 20);
-        const meta = [...new Set(items.flatMap((it) => (it && it.meta_data && typeof it.meta_data === 'object' ? Object.keys(it.meta_data).filter(nameOk) : [])))].slice(0, 30);
-        log.log && log.log(`[channels] lark: the message search's first page carries fields ${top.join(', ')}; meta_data: ${meta.join(', ')} (names only — the fixture's check against reality)`);
-      }
       const t = now();
       const hits = [];
       let malformed = 0;
+      const malformedFields = [];
       for (const it of items) {
-        const m = it && typeof it.meta_data === 'object' && it.meta_data ? it.meta_data : null;
-        if (!m) { malformed++; continue; }
-        // U1: the message id — the doc sample's `meta_data.message_id`, else the item's own id
-        const v = Feed.normalizeHit({ convId: m.chat_id, vendorId: m.message_id != null ? m.message_id : (it.message_id != null ? it.message_id : it.id), createTime: m.create_time, updateTime: m.update_time, threadKey: m.thread_id || null, isP2p: m.is_p2p_chat === true || m.is_p2p_chat === 'true', fromId: m.from_id || null }, { unit: caps.changeFeed.timeUnit, now: t });
-        if (!v.ok) { malformed++; continue; }
+        // lane lark-p2p: THE ONE hit reader (the measured shape); an unreadable hit is counted WITH the fields it lacked
+        const v = readSearchHit(it, { now: t, unit: caps.changeFeed.timeUnit });
+        if (!v.ok) {
+          malformed++;
+          if (malformedFields.length < Feed.SHAPE_FIELDS_MAX && !malformedFields.some((l) => l.join() === v.fields.join())) malformedFields.push(v.fields);
+          continue;
+        }
         if (v.hit.isP2p) { p2pIds.add(v.hit.convId); if (p2pIds.size > 5000) p2pIds.delete(p2pIds.values().next().value); }
         hits.push(v.hit);
       }
-      const next = nextToken(data);
+      if (!feedFieldsSaid && items.length) {
+        feedFieldsSaid = true;
+        // names only, each bounded to the field alphabet (a vendor key is never logged whole) — plus the FORM of the one
+        // field whose form decides everything (`create_time`: iso8601 / digits(13) / …, never its value) and what this
+        // version could not read: the probe that prints the vendor's shape is the parser's check against reality
+        const nameOk = (k) => /^[A-Za-z0-9_.]{1,64}$/.test(k);
+        const top = [...new Set(items.flatMap((it) => (it && typeof it === 'object' ? Object.keys(it).filter(nameOk) : [])))].slice(0, 20);
+        const meta = [...new Set(items.flatMap((it) => (it && it.meta_data && typeof it.meta_data === 'object' ? Object.keys(it.meta_data).filter(nameOk) : [])))].slice(0, 30);
+        const first = items.find((it) => it && it.meta_data && typeof it.meta_data === 'object' && 'create_time' in it.meta_data);
+        const form = first ? valueFormOf(first.meta_data.create_time) : 'absent';
+        const unread = malformed ? `; ${malformed} of ${items.length} unreadable by this version (${malformedFields.map((l) => l.join(' + ')).join(' | ')})` : `; all ${items.length} readable`;
+        log.log && log.log(`[channels] lark: the message search's first page carries fields ${top.join(', ')}; meta_data: ${meta.join(', ')}; create_time form: ${form}${unread} (names and forms only — the fixture's check against reality)`);
+      }
       const total = Number.isFinite(Number(data.total)) ? Number(data.total) : null;
-      return { hits, more: data.has_more === true && !!next, pageToken: next, total, malformed };
+      return { hits, more: data.has_more === true && !!next, pageToken: next, total, malformed, malformedFields };
     },
 
     /**
@@ -1504,4 +1569,6 @@ module.exports = {
   LARK_EMOJI, LARK_QUICK, capsOfScopes, REACTIONS_GRANT, REACTIONS_READ_SCOPES, REACTIONS_WRITE_SCOPES, REACTION_PAGES_MAX, TOPIC_FORBIDDEN_TTL_MS, OPTIONAL_SCOPES, optionOf,
   // lane lark-search-poll: the change feed's scopes, the ordered optional groups, what unlocks it, the refusal's scope reader
   SEARCH_SCOPE, P2P_READ_SCOPE, OPTIONAL_SCOPE_GROUPS, FEED_GRANT, requiredScopesOf,
+  // lane lark-p2p: THE ONE search-hit reader (the measured shape) + the probe's value-form words
+  readSearchHit, valueFormOf,
 };

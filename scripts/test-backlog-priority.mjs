@@ -102,9 +102,8 @@ check('priorityMarker: ! high · ↓ low · none for normal/unknown', sel.priori
   // NEGATIVE CONTROL — a patched copy that sorts OLDEST first must fail the order leg
   const src = fs.readFileSync(path.join(REPO, 'src/backlog-select.js'), 'utf8');
   const patched = src.replace('(num(b.addedAt) - num(a.addedAt))', '(num(a.addedAt) - num(b.addedAt))');
-  const f = path.join(tmp, 'backlog-select-oldest-first.js');
-  fs.writeFileSync(f, patched);
-  const bad = require(f);
+  // the copy's relative require (the PURE belt, lane peer-census verify r4 F1) pointed back at the tree, like every patched copy here
+  const bad = loadPatched('src/backlog-select.js', [['(num(b.addedAt) - num(a.addedAt))', '(num(a.addedAt) - num(b.addedAt))']]);
   check('negative control: the patch applied', patched !== src);
   check('negative control: an oldest-first copy FAILS the order leg', !orderLeg(bad));
 }
@@ -431,7 +430,7 @@ check('done/drop echo the resolved item by id', /backlog\[r\]\.resolvedAt = Date
 {
   // raw source (the '/**' string literal in renderTaskMd defeats the comment stripper — see below)
   const raw = fs.readFileSync(path.join(REPO, 'src/task-groups.js'), 'utf8');
-  check('the repo-file writer + TASK.md + reminders print through markedText; the reader gates markers on the frontmatter key', /body\.push\(`- \[\$\{b\.status === 'done'[^\n]*\} \$\{markedText\(b\)\}`\);/.test(raw) && /lines\.push\(`- \[\$\{b\.id \|\| '\?'\}\] \$\{markedText\(b\)\}/.test(raw) && /out\.push\(`- \[\$\{b\.id \|\| '\?'\}\] \$\{markedText\(\{ priority: b\.priority/.test(raw) && /'backlog_priority: markers',/.test(raw) && /const markersOn = fm\.backlog_priority === 'markers';/.test(raw));
+  check('the repo-file writer + TASK.md + reminders print through markedText; the reader gates markers on the frontmatter key', /body\.push\(`- \[\$\{b\.status === 'done'[^\n]*\} \$\{markedText\(b\)\}`\);/.test(raw) && /lines\.push\(`- \[\$\{b\.id \|\| '\?'\}\] \$\{markedText\(\{ priority: b\.priority, text: agentLine\(b\.text\) \}\)\}/.test(raw) && /out\.push\(`- \[\$\{b\.id \|\| '\?'\}\] \$\{markedText\(\{ priority: b\.priority/.test(raw) && /'backlog_priority: markers',/.test(raw) && /const markersOn = fm\.backlog_priority === 'markers';/.test(raw));
 }
 {
   // (the raw source: renderTaskMd holds a '/**' string literal the comment stripper would eat through)
@@ -440,11 +439,12 @@ check('done/drop echo the resolved item by id', /backlog\[r\]\.resolvedAt = Date
   check('renderTaskMd lists through sortBacklog', /\n\s*const openBl = sortBacklog\(\(t\.backlog \|\| \[\]\)\.filter/.test(body));
 }
 check('update() normalizes priority', /priority: normalizePriority\(it\?\.priority\),/.test(tg));
-check('agent-routes requires backlog-select and GET task sorts with it', /require\('\.\/backlog-select\.js'\)/.test(ar) && /const openSorted = sortBacklog\(\(t\.backlog \|\| \[\]\)\.filter\(\(b\) => b\.status === 'open'\)\);/.test(ar) && /backlog: openSorted,/.test(ar));
+check('agent-routes requires backlog-select and GET task sorts with it', /require\('\.\/backlog-select\.js'\)/.test(ar) && /const openSorted = sortBacklog\(\(t\.backlog \|\| \[\]\)\.filter\(\(b\) => b\.status === 'open'\)\);/.test(ar) && /task: taskShowAnswer\(t, openSorted\)/.test(ar));   // verify r4 F1 (lane peer-census): the answer leaves through the task door, the sorted open list inside it
 check('findIdx numbers the SAME sorted open list (never the store order)', /const ids = shown \|\| sortBacklog\(backlog\.filter\(\(b\) => b\.status === 'open'\)\)\.map\(\(b\) => b\.id\);/.test(ar));
 check('the route refuses a priority outside the set', /!BACKLOG_PRIORITIES\.includes\(priority\)\) return res\.status\(400\)/.test(ar));
 check('the CLI passes `priority` on backlog-add and backlog-edit', /\{ add: arg, [^\n]*\{ priority \}/.test(cli) && /body\.priority = priority;/.test(cli));
-check('backlog-select.js is PURE (imports nothing)', !/require\(/.test(bs.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')));
+// lane peer-census verify r4 F1: the ONE import allowed is the PURE belt (the nudge quotes other sessions' item texts and cuts them — a cut is followed by the rule where the cut is)
+check('backlog-select.js is PURE (imports nothing but the PURE belt ./peer-text.js)', (bs.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '').match(/require\(/g) || []).length === 1 && /require\('\.\/peer-text\.js'\)/.test(bs));
 
 // ── (7) the Backlog tab (src/lib/task-log.js) shows and sets priority ──
 // The tab is DOM-bound (no DOM library in the tree), so its legs are: the

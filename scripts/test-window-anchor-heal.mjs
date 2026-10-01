@@ -164,22 +164,24 @@ console.log('§4 apiWitnessEligibility: OTel disagreement vs a hot-switched sess
   });
   const now = Date.now();
   const slot = { key: 'sub-1', slotOk: true, shadowed: false };
-  const disagree = { agree: false, observed: 'sub-2' };
+  // THE OTel LEG IS RETIRED (lane-hot-switch, 2026-09-30): inc-mu6djxxt-8166
+  // lifted it for a hot-switched session and kept it for a never-switched one
+  // ("its OTel IS its identity"); the measurement (claude 2.1.281) says the org
+  // is ~/.claude.json's machine-wide label for EVERY session — so a
+  // never-switched session on any member but the label's was vetoed from its
+  // own member's witness ring. Eligibility is the slot, the shadow, the
+  // re-point and the pin legs — nothing about a label.
   const fresh = { _webuiId: 'sess-never', _accountId: 'pool-1', claudeSessionId: 'c-never', createdAt: now - 3 * 3600e3 };
-  const e1 = eng.apiWitnessEligibility(fresh, slot, 'sub-1', disagree);
-  ok('a session the pool NEVER re-pointed: OTel disagreement still vetoes (its OTel IS its identity)', e1.ok === false && /OTel observed/.test(e1.why), JSON.stringify(e1));
-  // the pool moved this conversation 2 h ago (a pool-wide default move: sessionId null) — outside the 10-min lag shadow
+  const e1 = eng.apiWitnessEligibility(fresh, slot, 'sub-1');
+  ok('a session the pool NEVER re-pointed, on a validated slot: a witness candidate (no label can veto it)', e1.ok === true && e1.why === 'slot-verified', JSON.stringify(e1));
   app.locals.slotTransitions.record({ sessionId: null, poolId: 'pool-1', from: 'sub-2', to: 'sub-1', at: now - 2 * 3600e3, why: 'test' });
   const switched = { _webuiId: 'sess-switched', _accountId: 'pool-1', claudeSessionId: 'c-switched', createdAt: now - 3 * 3600e3 };
-  const e2 = eng.apiWitnessEligibility(switched, slot, 'sub-1', disagree);
-  ok('THE INCIDENT: a session hot-switched since spawn: OTel disagreement is the spawn-time identity — the reading IS a witness candidate', e2.ok === true && /hot-switched/.test(e2.why), JSON.stringify(e2));
-  const spawnedAfter = { _webuiId: 'sess-late', _accountId: 'pool-1', claudeSessionId: 'c-late', createdAt: now - 3600e3 };
-  const e3 = eng.apiWitnessEligibility(spawnedAfter, slot, 'sub-1', disagree);
-  ok('NEGATIVE CONTROL: a session spawned AFTER that move was never switched — the veto stands', e3.ok === false, JSON.stringify(e3));
+  const e2 = eng.apiWitnessEligibility(switched, slot, 'sub-1');
+  ok('THE INCIDENT (inc-mu6djxxt-8166): a session hot-switched since spawn is a witness candidate too', e2.ok === true, JSON.stringify(e2));
   app.locals.slotTransitions.record({ sessionId: null, poolId: 'pool-1', from: 'sub-1', to: 'sub-2', at: now - 60e3, why: 'test' });
-  const e4 = eng.apiWitnessEligibility({ ...switched, _webuiId: 'sess-recent', claudeSessionId: 'c-recent' }, slot, 'sub-1', disagree);
+  const e4 = eng.apiWitnessEligibility({ ...switched, _webuiId: 'sess-recent', claudeSessionId: 'c-recent' }, slot, 'sub-1');
   ok('NEGATIVE CONTROL: a re-point inside the lag shadow (1 min ago) still vetoes through the re-point leg', e4.ok === false && /re-pointed/.test(e4.why), JSON.stringify(e4));
-  const e5 = eng.apiWitnessEligibility(switched, { key: 'sub-1', slotOk: false }, 'sub-1', null);
+  const e5 = eng.apiWitnessEligibility(switched, { key: 'sub-1', slotOk: false }, 'sub-1');
   ok('the slot leg is untouched: an unvalidated slot is never a witness', e5.ok === false && /slot not validated/.test(e5.why));
 }
 
@@ -190,7 +192,7 @@ console.log('§5 wiring pins');
   const eng = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
   ok('usage-routes: the ⟳ route treats an archived control reading as a skipped rung (falls through)', /const viaWritten = parsedVia && !\(viaSession && typeof viaSession === 'object' && 'target' in viaSession && !viaSession\.target\);/.test(ur) && /if \(parsedVia\) skipped\.push\(/.test(ur));
   ok('usage-routes: the panel consults the PURE verdict before touching a sidecar, writes verifiedBy isolated-panel + provisional, archives a re-anchored legacy stamp', /isolatedPanelAnchorVerdict\(\{ anchor, panelWindow: w, apiWindow: idv\.apiWindow \|\| null \}\)/.test(ur) && /verifiedBy: 'isolated-panel', provisional: true/.test(ur) && /migration: 'legacy-anchor-reanchored'/.test(ur));
-  ok('engine: the OTel leg asks switchedSinceSpawn, memoised per session (no new session field)', /corr\.agree === false && !switchedSinceSpawn\(session, now\)/.test(eng) && /const _switchedSince = new WeakMap\(\);/.test(eng) && /lastRepointRow\(session, \{ at: now, minAt: born \}\)/.test(eng));
+  ok('engine: the witness eligibility asks no OTel label (the leg and its switchedSinceSpawn memo are retired — lane-hot-switch)', !/switchedSinceSpawn|corr\.agree/.test(eng.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')) && /function apiWitnessEligibility\(session, slot, key\) \{/.test(eng));
   ok('ci.mjs runs this suite', /'test-window-anchor-heal'/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8')));
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

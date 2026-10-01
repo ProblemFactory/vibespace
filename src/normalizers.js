@@ -254,10 +254,52 @@ function redactGroupCards(session, keys, text) {
 // every rebuild name the SAME card, so a card fed while the rebuild ran is never drawn twice.
 let browserCardSource = null;
 function setBrowserCardSource(fn) { browserCardSource = typeof fn === 'function' ? fn : null; }
+// lane browser-propose step 3: the conversation's PROPOSAL cards (the keeper's claim records carrying a proposal, as
+// SW.proposalCardBlock blocks) — the SAME seam: a rebuild and a view-only history place them by time with the session cards
+let proposalCardSource = null;
+function setProposalCardSource(fn) { proposalCardSource = typeof fn === 'function' ? fn : null; }
 /** The cards of a conversation (`{session}` live, `{conversationId}` for a view-only history) — never throws. */
 function browserCardsFor(q) {
-  if (!browserCardSource) return [];
-  try { const r = browserCardSource(q || {}); return Array.isArray(r) ? r : []; } catch (e) { console.warn('[normalizer] browser session cards not read:', e && e.message); return []; }
+  const out = [];
+  if (browserCardSource) { try { const r = browserCardSource(q || {}); if (Array.isArray(r)) out.push(...r); } catch (e) { console.warn('[normalizer] browser session cards not read:', e && e.message); } }
+  if (proposalCardSource) { try { const r = proposalCardSource(q || {}); if (Array.isArray(r)) out.push(...r.filter(isProposalBlock)); } catch (e) { console.warn('[normalizer] browser proposal cards not read:', e && e.message); } }
+  return out;
+}
+// ── BROWSER PROPOSAL CARDS (lane browser-propose step 3, the owner 2026-09-30: the agent proposes, the user approves
+// with one click) — ONE VibeSpace card per proposal at the claim's position, keyed by the claim id
+// (`{view id}:bp:{claim id}`: the live op and every rebuild name the SAME card), PATCHED IN PLACE on every change (an
+// `edit` op carrying the new block — never a status, so the client patches the element it has instead of swapping it;
+// feedback: a card re-created per update blinks). The block is SW.proposalCardBlock's (structure, never markup).
+const isProposalBlock = (c) => !!(c && c.type === 'browser_proposal' && /^(?:bl|sr)-[0-9a-f]{8}$/.test(String(c.id || ''))); // lane site-reset: + `sr-…` (a site-reset proposal, the same card)
+function placeProposalCard(mm, block, { emit = false } = {}) {
+  if (!mm || !Array.isArray(mm.messages) || !mm.messageIndex || !isProposalBlock(block)) return null;
+  const id = `${mm.sessionId || 'view'}:bp:${block.id}`;
+  if (mm.messageIndex.has(id)) return null;
+  const msg = { id, role: 'system', status: 'complete', content: [{ ...block }], ts: Number(block.at) || Date.now(), srcLine: null, uuid: null, turnIndex: mm.turnIndex || 0,
+    toolCallId: null, toolName: null, toolStatus: null, permission: null, usage: null, taskInfo: null, meta: null, noticeKind: 'browser-proposal' };
+  mm.messages.push(msg);
+  mm.messageIndex.set(id, msg);
+  if (emit && typeof mm._emit === 'function') mm._emit({ op: 'create', message: msg });
+  return msg;
+}
+/** The card already drawn gets the new block IN PLACE (an `edit` op with `content` only); false = not drawn (or unchanged). */
+function patchProposalCard(mm, block) {
+  if (!mm || !mm.messageIndex || !isProposalBlock(block)) return false;
+  const msg = mm.messageIndex.get(`${mm.sessionId || 'view'}:bp:${block.id}`);
+  if (!msg) return false;
+  if (JSON.stringify(msg.content && msg.content[0]) === JSON.stringify(block)) return false;
+  msg.content = [{ ...block }];
+  if (typeof mm._emit === 'function') mm._emit({ op: 'edit', id: msg.id, fields: { content: msg.content } });
+  return true;
+}
+/** The live card (the runner's every change): through the same gate as every live writer — held in the rebuild's queue
+ *  while one runs; before the first attach nothing is written (that attach's rebuild places it from the source). */
+function feedProposalCard(session, block) {
+  const mm = session && session._normalizer;
+  if (!mm || !isProposalBlock(block)) return false;
+  if (session._rebuildQueue) { session._rebuildQueue.push({ kind: 'pcard', card: block }); return true; }
+  if (!session._historyLoaded) return false;
+  return patchProposalCard(mm, block) || !!placeProposalCard(mm, block, { emit: true });
 }
 /** THE ONE writer of a browser-session card into a normalizer (any harness: every normalizer keeps `messages`,
  *  `messageIndex`, `turnIndex`, `_emit`). Idempotent by id. `emit` = a live op; a history conversion emits nothing. */
@@ -281,9 +323,9 @@ function recordAt(raw) { const t = raw && typeof raw.timestamp === 'string' ? Da
 // lane group-report-card: the list may also hold GROUP cards (the ring's report cards) — each placed at its own
 // instant (`GC.placeAt`: the injection + the slack, so the turn's user record comes first) through its own writer.
 const cardPlaceAt = (c) => (GC.isGroupCard(c) ? GC.placeAt(c) : (Number(c && c.at) || 0));
-const placeAnyCard = (mm, c) => (GC.isGroupCard(c) ? placeGroupCard(mm, c) : placeBrowserCard(mm, c));
+const placeAnyCard = (mm, c) => (GC.isGroupCard(c) ? placeGroupCard(mm, c) : isProposalBlock(c) ? placeProposalCard(mm, c) : placeBrowserCard(mm, c));
 async function convertWithCards(mm, records, cards, opts = {}) {
-  const due = (cards || []).filter((c) => GC.isGroupCard(c) || browserCardBlock(c)).slice().sort((a, b) => cardPlaceAt(a) - cardPlaceAt(b));
+  const due = (cards || []).filter((c) => GC.isGroupCard(c) || isProposalBlock(c) || browserCardBlock(c)).slice().sort((a, b) => cardPlaceAt(a) - cardPlaceAt(b));
   if (!due.length) return mm.convertHistoryAsync(records, opts);
   let i = 0;
   const beforeRecord = (raw) => { const at = recordAt(raw); if (!at) return; while (i < due.length && cardPlaceAt(due[i]) <= at) placeAnyCard(mm, due[i++]); };
@@ -407,6 +449,7 @@ function drainQueue(session, mm, ctx = null) {
       if (e.kind === 'peer') { if (mm.injectPeerCard) replayCard(mm, e.card, ctx); }
       else if (e.kind === 'bcard') placeBrowserCard(mm, e.card, { emit: true }); // a card the rebuild's markers already held is the same id — never twice
       else if (e.kind === 'gcard') placeGroupCard(mm, e.card, { emit: true }); // lane group-report-card: the ring's card is the same id — never twice
+      else if (e.kind === 'pcard') { if (!patchProposalCard(mm, e.card)) placeProposalCard(mm, e.card, { emit: true }); } // lane browser-propose: the rebuild's card is the same id — patched, never twice
       else if (e.kind === 'perm-stale') applyPermissionStale(mm, e.requestId, e.staleBy);
       else if (e.kind === 'helper-result') applyHelperResults(session, mm, e.msg);
       else { mm.processLive(e.msg); if (session._normalizer === mm) routeToHelperView(session, e.msg); }
@@ -501,4 +544,5 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
 
 module.exports = { createMessageManager, NORMALIZERS, feedLive, feedPeerCard, rebuildHistory, taskReplayRecords, pendingPermissions, pendingHelperApprovals, notePermissionStale, routeToHelperView, seedHelperView, setAsksObserver, noteHelperResults, HELD_PEER_CARDS_CAP,
   setBrowserCardSource, browserCardsFor, placeBrowserCard, convertWithCards, feedBrowserCard,
+  setProposalCardSource, placeProposalCard, patchProposalCard, feedProposalCard, // lane browser-propose: the proposal card
   setGroupCardPersist, feedGroupCard, placeGroupCard, upgradeWakeCards, redactGroupCards };

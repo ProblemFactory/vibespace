@@ -40,7 +40,7 @@ const { SlotTransitions } = require('./slot-transitions.js');
 const { OAT_TTL_MS: OAT_TTL_MS_SHARED } = require('./login-state.js');
 
 class AccountManager {
-  constructor({ dataDir, onChange, platform = process.platform }) {
+  constructor({ dataDir, onChange, onSessionLinks, platform = process.platform }) {
     this.dataDir = dataDir;
     this._file = path.join(dataDir, 'accounts.json');
     this._keyFile = path.join(dataDir, '.accounts-key');
@@ -61,6 +61,7 @@ class AccountManager {
     // codex 0.142.5 (symlinks survive a run; rollout written to shared dir).
     this._codexSubsDir = path.join(dataDir, 'codex-subs');
     this._onChange = onChange || (() => {});
+    this._onSessionLinks = onSessionLinks || (() => {}); // a per-session link moved (see _notifyLinks)
     this.slotTransitions = new SlotTransitions({ dataDir });
     this._state = { version: 1, defaultAccountId: null, defaultCodexAccountId: null, accounts: [] };
     this._load();
@@ -195,6 +196,22 @@ class AccountManager {
   }
 
   _notify() { try { this._onChange(this.list()); } catch { } }
+  /** A PER-SESSION credential link moved (lane badge-stale, 2026-09-30 — the owner's window said
+   *  "全部 → Mat Max" 30+ minutes after the pool engine had moved the conversation to UCI Max).
+   *  The link's target IS a fact every client caches: the `active-sessions` payload's
+   *  `auth.poolTarget` reads it (server.js poolAuth → poolMemberOfSession → poolCurrentFor →
+   *  readlink), and that frame is the page's ONLY source of `auth` (/api/sessions carries none).
+   *  `setPoolTarget` notifies through `_notify`; the per-session writer said nothing, so the page
+   *  kept the member of the last frame until some unrelated broadcast happened to go out (a
+   *  running turn publishes none). THE entry point notifies — never a call site (the engine's
+   *  per-session switch, a pin, a partial gather, an auth-failure move, a removed-member
+   *  eviction all write through here). ONE notification per burst: a pool pass re-pointing N
+   *  conversations in one tick sends one frame (setImmediate after the synchronous pass). */
+  _notifyLinks() {
+    if (this._linksNotifyArmed) return;
+    this._linksNotifyArmed = true;
+    setImmediate(() => { this._linksNotifyArmed = false; try { this._onSessionLinks(); } catch { } }).unref?.();
+  }
 
   _key() {
     try { return Buffer.from(fs.readFileSync(this._keyFile, 'utf-8').trim(), 'hex'); }
@@ -1028,6 +1045,7 @@ class AccountManager {
     fs.mkdirSync(path.dirname(link), { recursive: true });
     require('./account-material.js').repointPoolSymlink(link, this.subDir(memberId), this.subCredsPath(memberId));
     this._noteSlot({ sessionId: sessKey, poolId, from, to: memberId, why });
+    this._notifyLinks(); // the payload's auth.poolTarget just changed — every client caches it (lane badge-stale)
     return link;
   }
   /** Append one credential re-point to the transition ledger. Never throws —
@@ -1070,7 +1088,11 @@ class AccountManager {
       const fromId = fromBase && this.get(fromBase) ? fromBase : null; // unresolvable ⇒ say nothing, never guess
       const ts = Number(at) || Date.now();
       if (this.slotTransitions.all().some((r) => r.at === ts && r.to === to && (r.sessionId || null) === sessionId)) return null;
-      return this.slotTransitions.record({ sessionId, poolId, from: fromId, to, at: ts, why });
+      const row = this.slotTransitions.record({ sessionId, poolId, from: fromId, to, at: ts, why });
+      // the daemon moved a link this server's clients still show on its OLD member (lane badge-stale):
+      // a per-session link is the payload's auth.poolTarget, the pool default is also the list's `current`
+      if (sessionId) this._notifyLinks(); else this._notify();
+      return row;
     } catch { return null; }
   }
   /** The real account THIS session bills to: its own link's target, else the
@@ -1211,6 +1233,8 @@ class AccountManager {
         // priority order > automatic — the "everything now" act included)
         if (skipSessKeys && typeof skipSessKeys.has === 'function' && skipSessKeys.has(sessKey)) continue;
         const fromLink = this.poolCurrentFor(id, sessKey);
+        // no bump here: the pool DEFAULT re-point above already bumped this same target's creds
+        // (account-material.js — the bump is load-bearing; test-hot-switch-incident §C pins it)
         try { mat.repointPoolSymlink(lp, this.subDir(subId), null); swept++; this._noteSlot({ sessionId: sessKey, poolId: id, from: fromLink, to: subId, why: why + '-sweep' }); } catch { }
       }
       if (swept) console.log(`[pool] manual target → ${target.name}: repointed ${swept} live session link(s)`);

@@ -947,7 +947,8 @@ async function standaloneLegs(W, { S, pid, tag }) {
 }
 /** verify r3 (lane takeover-keyboard): THE INPUT-SURFACE CENSUS's chrome asserts — a real press on the CODE EDITOR and on the
  *  CHANNEL COMPOSER yields to it — and the round's findings, each by the user's own real presses and keys: F1 a <select>
- *  stays open, F2 "Copy Path" says nothing about a box, F4 a dialog the user opened says its Enter is the page's, r2's held
+ *  stays open, F2 "Copy Path" says nothing about a box, (lane dialog-keys, replacing F4's cue) a dialog the user's press
+ *  opened TAKES the keys — Enter confirms it, the page gets no line break — and one a script opens is taken back and said, r2's held
  *  (a press on the message list while yielded) says the keys are in no text box. Its own client, standalone windows. Run in
  *  the main flow and, alone, on the r3 pre-fix control tree. */
 async function newBrowserSession(W, tag) {
@@ -966,7 +967,7 @@ async function r3Legs(W, { S, pid, tag }) {
   const C = `const cw = [...window.app.wm.windows.values()].find((x) => x.type === 'chat' && window.app.sessions.get(x.id) && window.app.sessions.get(x.id).sessionId === ${JSON.stringify(sid)}); const cv = cw && window.app.sessions.get(cw.id); const ta = cv && cv._chatInput && cv._chatInput._textarea;`;
   const LQ = `const w = [...window.app.wm.windows.values()].filter((x) => x.type === 'browser-live' && x._browserLive && x._browserLive.state().sessionId === ${JSON.stringify(sid)})[0]; const L = w && w._browserLive;`;
   const q = (js) => P.ev(`(() => { ${C} ${LQ} ${js} })()`).catch((e) => ({ error: String(e && e.message) }));
-  const view = () => q('const s = L.state(); const chip = L.el().querySelector(".browser-live-kbd-chip"); const a = document.activeElement; return { mode: s.mode, mine: s.mine, owns: L.ownsKeyboard(), yielded: s.kbdYielded, where: s.yieldWhere, cues: s.cues, dialogCues: s.dialogCues, reclaims: s.reclaims, active: a === (cv && cv._chatInput && cv._chatInput._textarea) ? "composer" : a === L.kbd() ? "sink" : String((a && a.className) || (a && a.tagName)), chip: chip && chip.style.display !== "none" ? chip.textContent : null, composer: ta ? ta.value : null, toasts: [...document.querySelectorAll("#global-toasts .global-toast")].map((x) => x.textContent).join(" | ") };');
+  const view = () => q('const s = L.state(); const chip = L.el().querySelector(".browser-live-kbd-chip"); const a = document.activeElement; return { mode: s.mode, mine: s.mine, owns: L.ownsKeyboard(), yielded: s.kbdYielded, where: s.yieldWhere, cues: s.cues, dialogCues: s.dialogCues, dialogTakes: s.dialogTakes, dialogHeld: s.dialogHeld, dialogReturns: s.dialogReturns, dialogWhy: s.dialogWhy, reclaims: s.reclaims, active: a === (cv && cv._chatInput && cv._chatInput._textarea) ? "composer" : a === L.kbd() ? "sink" : String((a && a.className) || (a && a.tagName)), chip: chip && chip.style.display !== "none" ? chip.textContent : null, composer: ta ? ta.value : null, toasts: [...document.querySelectorAll("#global-toasts .global-toast")].map((x) => x.textContent).join(" | ") };');
   const page = () => (W.inner(tag) || {}).b || '';
   const place = (x, l, t, wd, h) => `(() => { const x = ${x}; if (x.isMaximized) window.app.wm.toggleMaximize(x.id); x.gridBounds = null; x.element.style.left = '${l}px'; x.element.style.top = '${t}px'; x.element.style.width = '${wd}px'; x.element.style.height = '${h}px'; x.onResize && x.onResize(); return 1; })()`;
   const I = (p) => P.call('Input.dispatchMouseEvent', p);
@@ -1000,7 +1001,7 @@ async function r3Legs(W, { S, pid, tag }) {
     await q(`${EQ} window.app.wm.closeWindow(ew.id); return 1;`); await sleep(400); // (its list goes with it)
   }
   // ── F2: "Copy Path" (the explorer's context menu) on the plain-http viewer — copyText's scratch box, taken back, never said ──
-  fs.writeFileSync(path.join(S.cwd, `copyme-${tag}.txt`), 'x'); fs.writeFileSync(path.join(S.cwd, `keepme-${tag}.txt`), 'x');
+  fs.writeFileSync(path.join(S.cwd, `copyme-${tag}.txt`), 'x'); fs.writeFileSync(path.join(S.cwd, `delme-${tag}.txt`), 'x');
   const XQ = `const fw = [...window.app.wm.windows.values()].find((x) => x.type === 'files');`;
   await q(`window.app.openFileExplorer(${JSON.stringify(S.cwd)}); return 1;`);
   o.exUp = !!(await until(() => q(`${XQ} return fw && fw.element.querySelectorAll('.file-item').length >= 2 ? true : null;`), 15000, 200));
@@ -1013,17 +1014,34 @@ async function r3Legs(W, { S, pid, tag }) {
     o.copyPress = await P.clickEl(`return [...document.querySelectorAll('.context-menu-item')].find((x) => x.textContent.trim() === 'Copy Path');`); await sleep(600);
     const v1 = await view();
     o.copy = { reclaims: v1.reclaims - v0.reclaims, cues: v1.cues - v0.cues, toasts: v1.toasts, active: v1.active, owns: v1.owns };
-    // ── F4: Delete → the confirm dialog (it focuses its default button a tick later): taken back — SAID once; its Enter is the page's ──
+    // ── lane dialog-keys (the owner's rule; before: verify r3 F4 — taken back, said, its Enter the page's): Delete → the confirm
+    // dialog — HIS real press opened it: it TAKES the keys (its OK focused, the chip says so, the view owns none); a real Enter
+    // CONFIRMS it (the file goes) and the page's textarea gets NO line break; the close gives the keys back to the page ("dk") ──
     await P.click(sid, 200, 140); await sleep(300);
     const d0 = await view(); const bd = page();
-    await menuOn(`keepme-${tag}`);
+    await menuOn(`delme-${tag}`);
     o.delPress = await P.clickEl(`return [...document.querySelectorAll('.context-menu-item')].find((x) => x.textContent.trim() === 'Delete');`); await sleep(600);
     const d1 = await view();
-    o.dialog = { open: await q(`return !!document.querySelector('.dialog-overlay:not(.hidden) .btn-cancel');`), cues: d1.dialogCues - d0.dialogCues, toasts: d1.toasts, active: d1.active, owns: d1.owns };
+    o.dialog = { open: await q(`return !!document.querySelector('.dialog-overlay:not(.hidden) .btn-cancel');`), cues: d1.dialogCues - d0.dialogCues, takes: d1.dialogTakes - d0.dialogTakes, held: d1.dialogHeld, why: d1.dialogWhy, toasts: d1.toasts, active: d1.active, owns: d1.owns, chip: d1.chip, mode: d1.mode, mine: d1.mine };
+    await P.key('Enter', { code: 'Enter', vk: 13, text: '\r' });
+    const gone = !!(await until(() => (!fs.existsSync(path.join(S.cwd, `delme-${tag}.txt`)) ? true : null), 5000, 100)); await sleep(500);
+    const d2 = await view();
+    o.dialogEnter = { page: page(), b: bd, stillOpen: await q(`return !!document.querySelector('.dialog-overlay:not(.hidden) .btn-cancel');`), gone, active: d2.active, owns: d2.owns, chip: d2.chip, held: d2.dialogHeld, returns: d2.dialogReturns - d0.dialogReturns };
+    if (o.dialogEnter.stillOpen) { o.cancelPress = await P.clickEl(`return [...document.querySelectorAll('.dialog-overlay:not(.hidden) .btn-cancel')].pop();`); await sleep(500); } // (the pre-fix tree: its Enter went to the page, the dialog is still up)
+    await P.click(sid, 200, 140); await sleep(300); const bk = page();
+    await P.type('dk'); await sleep(700);
+    o.dialogAfter = { page: page(), b: bk, owns: (await view()).owns };
+    // ── the password guard, in chrome: a dialog that opens BY ITSELF (a script's timer, 400 ms after nothing he pressed in the
+    // app — the static New-session dialog, which focuses its own field) while the page has the keys: TAKEN BACK and SAID once;
+    // its Enter is the page's ──
+    await P.click(sid, 200, 140); await sleep(300);
+    const s0 = await view(); const bs = page();
+    await q('setTimeout(() => window.app.showNewSessionDialog(), 400); return 1;'); await sleep(1300);
+    const s1 = await view();
+    o.selfDialog = { open: await q("return !document.getElementById('dialog-overlay').classList.contains('hidden');"), cues: s1.dialogCues - s0.dialogCues, takes: s1.dialogTakes - s0.dialogTakes, why: s1.dialogWhy, active: s1.active, owns: s1.owns, toasts: s1.toasts };
     await P.key('Enter', { code: 'Enter', vk: 13, text: '\r' }); await sleep(700);
-    o.dialogEnter = { page: page(), b: bd, stillOpen: await q(`return !!document.querySelector('.dialog-overlay:not(.hidden) .btn-cancel');`), kept: fs.existsSync(path.join(S.cwd, `keepme-${tag}.txt`)) };
-    o.cancelPress = await P.clickEl(`return [...document.querySelectorAll('.dialog-overlay:not(.hidden) .btn-cancel')].pop();`); await sleep(500);
-    o.dialogClosed = { open: await q(`return !!document.querySelector('.dialog-overlay:not(.hidden) .btn-cancel');`), cues: (await view()).dialogCues - d0.dialogCues, kept: fs.existsSync(path.join(S.cwd, `keepme-${tag}.txt`)) };
+    o.selfEnter = { page: page(), b: bs, open: await q("return !document.getElementById('dialog-overlay').classList.contains('hidden');") };
+    await q('window.app.hideDialogs(); return 1;'); await sleep(300);
     await q(`${XQ} window.app.wm.closeWindow(fw.id); return 1;`); await sleep(300);
   }
   // ── the census: THE CHANNEL COMPOSER (the fake adapters' named seam: fake-poll · Ops) — a real press yields, "ch" lands ──
@@ -1213,8 +1231,13 @@ if (want('r3')) {
     `verify r3 (F1): the editor's language <select>, pressed while you drive, is focused and OPEN 150 ms later (its list the pointer's; the view still owns the keys) — before, the sink took the focus back and the list closed at once`, JSON.stringify({ press: r.selPress, sel: r.sel }));
   ok(r.exUp && r.copyPress && r.copyPress.ok && r.copy.reclaims >= 1 && r.copy.cues === 0 && !/click the text box itself/.test(r.copy.toasts) && r.copy.active === 'sink' && r.copy.owns,
     `verify r3 (F2): "Copy Path" on the plain-http viewer — copyText's scratch box taken back (${r.copy && r.copy.reclaims} reclaim), and NOTHING says "click the text box itself" (toasts: ${JSON.stringify(r.copy && r.copy.toasts)})`, JSON.stringify({ up: r.exUp, press: r.copyPress, copy: r.copy }));
-  ok(r.delPress && r.delPress.ok && r.dialog.open && r.dialog.cues === 1 && /Typing still goes to the browser — click the dialog’s buttons to answer it/.test(r.dialog.toasts) && r.dialog.active === 'sink' && r.dialogEnter.page === r.dialogEnter.b + '\n' && r.dialogEnter.stillOpen && r.dialogEnter.kept && r.cancelPress.ok && !r.dialogClosed.open && r.dialogClosed.cues === 1 && r.dialogClosed.kept,
-    `verify r3 (F4): Delete → the confirm dialog while you drive: taken back and SAID once ("${(String(r.dialog && r.dialog.toasts).match(/Typing still goes to the browser — click the dialog’s buttons to answer it/) || ['—'])[0]}"); Enter is still the PAGE's (declared: a dialog never takes the keys by itself — the file kept), a real press on Cancel answers it, silently`, JSON.stringify({ press: r.delPress, dialog: r.dialog, enter: r.dialogEnter, cancel: r.cancelPress, closed: r.dialogClosed }));
+  ok(r.delPress && r.delPress.ok && r.dialog.open && r.dialog.takes === 1 && r.dialog.held && r.dialog.cues === 0 && r.dialog.why === 'pressed' && /btn-create/.test(String(r.dialog.active)) && !r.dialog.owns && r.dialog.chip === 'Keyboard is in the dialog — it goes back when you answer it' && r.dialog.mode === 'takeover' && r.dialog.mine
+    && r.dialogEnter.page === r.dialogEnter.b && !r.dialogEnter.stillOpen && r.dialogEnter.gone && r.dialogEnter.active === 'sink' && r.dialogEnter.owns && !r.dialogEnter.held && r.dialogEnter.returns === 1 && /^Typing (goes|is sent) to the browser$/.test(String(r.dialogEnter.chip))
+    && r.dialogAfter.page === r.dialogAfter.b + 'dk' && r.dialogAfter.owns,
+    `lane dialog-keys (THE RULE, the owner's): a real press on Delete → the confirm dialog TAKES the keys while you drive ("${r.dialog && r.dialog.chip}"); a real Enter CONFIRMS it (the file is gone) and the page's textarea gets NO line break; its close gives the keys back to the page ("dk" lands there, the chip "${r.dialogEnter && r.dialogEnter.chip}")`, JSON.stringify({ press: r.delPress, dialog: r.dialog, enter: r.dialogEnter, after: r.dialogAfter }));
+  ok(r.selfDialog.open && r.selfDialog.takes === 0 && r.selfDialog.cues === 1 && r.selfDialog.why === 'pressed the page' && /Typing still goes to the browser — click the dialog’s buttons to answer it/.test(r.selfDialog.toasts) && r.selfDialog.active === 'sink' && r.selfDialog.owns
+    && r.selfEnter.page === r.selfEnter.b + '\n' && r.selfEnter.open,
+    `lane dialog-keys (THE PASSWORD GUARD, in chrome): the New-session dialog opened BY A SCRIPT 400 ms after nothing he pressed in the app is TAKEN BACK — its own field focus reclaimed, SAID once ("Typing still goes to the browser — click the dialog’s buttons to answer it"); its Enter reaches the PAGE (the dialog stays up — nothing submitted)`, JSON.stringify({ self: r.selfDialog, enter: r.selfEnter }));
   ok(r.chanUp && r.chanPress && r.chanPress.ok && r.chan.active === true && r.chan.view.yielded && !r.chan.view.owns && r.chanTyped.value === 'ch' && r.chanTyped.page === r.chanTyped.b0,
     `the census (text row): THE CHANNEL COMPOSER (fake-poll · Ops) — a real press YIELDS to it ("${r.chan && r.chan.view.chip}"), "ch" lands there, the page keeps ${JSON.stringify(r.chanTyped && r.chanTyped.b0)}`, JSON.stringify({ up: r.chanUp, press: r.chanPress, chan: r.chan, typed: r.chanTyped }));
   ok(r.listComposer.ok && r.listYielded.yielded && r.listYielded.composer === 'l1' && r.listPress.ok && r.list.yielded && r.list.where === 'none' && r.list.chip === 'Keyboard is not in a text box — click one to type there, or the picture to use the page' && r.listTyped.view.composer === 'l1' && r.listTyped.page === r.listTyped.b,
@@ -1319,7 +1342,7 @@ if (want('split')) {
     { name: 'pre-fix: a press on the focused composer is never judged', file: 'src/lib/browser-live-window.js', from: "    if (r === 'noted') { if (st.claimed && !st.copying && ky.onPressFocused(document.activeElement) === 'yield') { releaseHeld(); renderKbd(); keyboardChanged(); } return; }", to: "    if (r === 'noted') return;" },
     // verify r2 (H1): the pre-fix reverse direction — a press while the view does not drive is not judged; a return to the page moves no caret
     { name: 'H1 pre-fix: a press while not driving is ignored', file: 'src/lib/keyboard-yield.js', from: '      if (!driving() && !isMine()) { s.press = null; return null; }', to: '      if (!driving()) { s.press = null; return null; }' },
-    { name: 'H1 pre-fix: the return merely routes the keys', file: 'src/lib/keyboard-yield.js', from: 'const r = keyboardTransition({ was: s.last, now: { owns, yielded }, caretOutside: caretOutside(active) });', to: 'const r = keyboardTransition({ was: s.last, now: { owns, yielded }, caretOutside: false });' },
+    { name: 'H1 pre-fix: the return merely routes the keys', file: 'src/lib/keyboard-yield.js', from: 'const r = keyboardTransition({ was: s.last, now: { owns, yielded, dialog }, caretOutside: caretOutside(active) });', to: 'const r = keyboardTransition({ was: s.last, now: { owns, yielded, dialog }, caretOutside: false });' }, // (lane dialog-keys: the transition reads `dialog` too)
     // verify r2 (Q1): the pre-fix reclaim of a focus the user's own press elsewhere caused — said by nothing
     { name: 'Q1 pre-fix: a reclaim is never said', file: 'src/lib/keyboard-yield.js', from: '    takeCue(el) { const c = !!el && s.cue === el && el.isConnected !== false; if (s.cue === el) s.cue = null; if (c) s.lastCueAt = now(); return c; },', to: '    takeCue() { return false; },' },
     // verify r2 (H5): the pre-fix frame reclaim — said by nothing
@@ -1389,7 +1412,7 @@ if (want('r3')) {
     { name: 'F1 pre-fix: a <select> is taken back like any other focus', file: 'src/lib/keyboard-yield.js', from: "  if (isEditable(a) || isChoiceControl(a)) return 'keep';", to: "  if (isEditable(a)) return 'keep';" },
     { name: 'F2 pre-fix: a box already gone is announced', file: 'src/lib/keyboard-yield.js', from: '    takeCue(el) { const c = !!el && s.cue === el && el.isConnected !== false; if (s.cue === el) s.cue = null; if (c) s.lastCueAt = now(); return c; },', to: '    takeCue() { const c = !!s.cue; s.cue = null; if (c) s.lastCueAt = now(); return c; },' },
     { name: 'r2 held pre-fix: the chip names the box the keys were given to', file: 'src/lib/keyboard-yield.js', from: "      if (active && active !== sink && !inView(active)) { if (takesKeys(active)) return yieldKindOf(active); if (isFrame(active)) return 'other'; }\n      return 'none';", to: '      return s.kind;' },
-    { name: 'F4 pre-fix: a dialog the user opened is taken back silently', file: 'src/lib/keyboard-yield.js', from: '    dialogCue(a) {\n', to: '    dialogCue(a) { return false;\n' },
+    { name: 'lane dialog-keys pre-fix: every modal judged as opening by itself (taken back, said)', file: 'src/lib/keyboard-yield.js', from: "const v = dialogVerdict({ owns: driving(), yielded: s.yielded, held, byUserPress: o.byUserPress, opener: 'app' });", to: "const v = dialogVerdict({ owns: driving(), yielded: s.yielded, held, byUserPress: false, opener: 'app' });" },
     { name: 'r4 pre-fix: the chip written on every re-read', file: 'src/lib/browser-live-window.js', from: '    if (kbdText.textContent !== text) kbdText.textContent = text;\n    if (kbdChip.title !== title) kbdChip.title = title;', to: '    kbdText.textContent = text;\n    kbdChip.title = title;' },
   ] });
   ok(w3.rebuilt === true && w3.booted, `the r3 control tree: 5 patches, its bundle rebuilt, its server booted (${String(w3.rebuilt)})`);
@@ -1402,8 +1425,8 @@ if (want('r3')) {
       `NEGATIVE CONTROL (F2 pre-fix): "Copy Path" says "click the text box itself to type there" — about a box that no longer exists (${JSON.stringify(c.copy && c.copy.toasts)})`, JSON.stringify(c.copy));
     ok(c.list && c.list.yielded && c.list.chip === 'Keyboard is in the chat box — click the picture to keep using the page' && c.listTyped.view.composer === 'l1' && c.listTyped.page === c.listTyped.b,
       `NEGATIVE CONTROL (r2's held pre-fix): after the press on the message list the chip still says "${c.list && c.list.chip}" while "nn" goes nowhere`, JSON.stringify({ after: c.list, typed: c.listTyped }));
-    ok(c.dialog && c.dialog.open && c.dialog.cues === 0 && !/click the dialog’s buttons/.test(c.dialog.toasts) && c.dialogEnter.page === c.dialogEnter.b + '\n',
-      `NEGATIVE CONTROL (F4 pre-fix): the confirm dialog is taken back and nothing says so — the Enter meant for it reaches the page (${JSON.stringify(c.dialogEnter && c.dialogEnter.page.slice(-6))})`, JSON.stringify({ dialog: c.dialog, enter: c.dialogEnter }));
+    ok(c.dialog && c.dialog.open && c.dialog.takes === 0 && c.dialog.owns && c.dialog.active === 'sink' && c.dialogEnter.page === c.dialogEnter.b + '\n' && c.dialogEnter.stillOpen && !c.dialogEnter.gone,
+      `NEGATIVE CONTROL (lane dialog-keys pre-fix): the confirm his press opened is taken back — the real Enter meant for it puts a LINE BREAK into the page's textarea (${JSON.stringify(c.dialogEnter && c.dialogEnter.page.slice(-6))}), the dialog stays up, the file is kept`, JSON.stringify({ dialog: c.dialog, enter: c.dialogEnter }));
     await w3.closePage(c.P);
     const c4 = await r4Legs(w3, { S: nb.S, pid: nb.pid, tag: 'r3c', only: 'storm' });
     ok(c4.yielded && c4.yielded.yielded && c4.storm && c4.storm.n === 300 && c4.storm.writes >= 600 && c4.storm.active === 'r4row', `NEGATIVE CONTROL (r4 pre-fix): 300 focus moves while yielded write the chip ${c4.storm && c4.storm.writes} times for words that never change (the measurement sees them)`, JSON.stringify({ yielded: c4.yielded, storm: c4.storm }));

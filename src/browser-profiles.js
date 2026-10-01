@@ -59,6 +59,10 @@
 // takeover r3: the ONE config rule (the sibling PURE verb table the shipped CLI
 // carries — a remote CLI composes a command's config by the same words)
 const VERBS = require('./browser-verbs.js');
+// verify r5 F3 (lane peer-census): a profile LABEL is another conversation's words once an agent names one
+// (`vibespace-browser new <label>` — every conversation of the owner's may use it, the user pins it to another), so the
+// ONE label cleaner is THE belt (src/peer-text.js): bound, hidden characters folded, the frame rule after the cut
+const PT = require('./peer-text.js');
 
 // ── names ───────────────────────────────────────────────────────────────────
 /** The agent-browser session/namespace name for a browser key. ONE spelling:
@@ -632,13 +636,16 @@ function remoteBrowserPrelude({ browserKey, staleDays = REMOTE_SCRATCH_STALE_DAY
  * symlink — and the caller must not have to re-derive which.
  */
 const PIN_APPLIES_FROM = 'next command (the CLI relaunches the browser on the new directory; pages open in the running browser are lost)';
-function pinResolution({ variant, pinnedDir, ephemeralDir }) {
+function pinResolution({ variant, pinnedDir, ephemeralDir, keptDir = null }) {
   const dir = pinnedDir ? String(pinnedDir) : null;
   return {
     variant,
     // variant D: rewrite the per-session config. `null` means "emit a config
-    // with NO profile key", which is what makes D ephemeral in the first place.
-    configProfile: variant === VARIANTS.D ? dir : null,
+    // with NO profile key" (the binary's own throw-away directory). lane
+    // browser-resume (§3.9): with the conversation's browser KEPT, an unpin goes
+    // BACK to the conversation's own kept directory (`keptDir`, named by its
+    // browser key), never to "no profile" — its logins stay its own.
+    configProfile: variant === VARIANTS.D ? (dir || (keptDir ? String(keptDir) : null)) : null,
     // variant C: re-point the symlink at either the pin or the scratch dir.
     linkTarget: variant === VARIANTS.C ? (dir || (ephemeralDir ? String(ephemeralDir) : null)) : null,
     pinned: !!dir,
@@ -655,7 +662,14 @@ function pinResolution({ variant, pinnedDir, ephemeralDir }) {
  * drop `--no-sandbox` / `--ozone-platform=wayland` and the browser does not
  * start at all.
  *
- * `profile` is present ONLY when pinned. Its ABSENCE is the ephemerality.
+ * `profile` is present when pinned, or — lane browser-resume (§3.9, the owner's
+ * ruling 1: "state survives the process") — when the conversation's own browser
+ * is KEPT: `keptDir` = `data/browser-profiles/<browserKey>` (browser-env's
+ * `scratchDirFor`), a directory named by the key, kept after the browser stops
+ * until the conversation ends or the size bound (src/browser-kept.js). Its
+ * ABSENCE is the ephemerality (the setting off, or a fenced config — the CLI
+ * refuses a profile beside `allowedDomains`, so a fenced conversation keeps its
+ * tabs only).
  *
  * IT IS A DENY, NOT AN ALLOW, AND THE DENY IS DERIVED (r2). Round 1 carried
  * across an enumerated list of seven keys, which SILENTLY DELETED the user's
@@ -762,7 +776,7 @@ function pinFenceConflict({ userConfig = {}, pinnedDir = null }) {
  * watched browser (measured). `userConfig` alone (no `projectConfig`) is the
  * pre-r3 call shape and composes the same way.
  */
-function generatedConfigParts({ userConfig = {}, projectConfig = null, pinnedDir = null, headed = null, mark = null, holdDialogs = false }) {
+function generatedConfigParts({ userConfig = {}, projectConfig = null, pinnedDir = null, keptDir = null, headed = null, mark = null, holdDialogs = false, automationFlag = false }) {
   const r = VERBS.sanctionedConfig({ user: userConfig, project: projectConfig, deny: Object.keys(EPHEMERAL_DENY) });
   const out = r.config;
   // OUR value is ours to coerce; the user's rides across verbatim.
@@ -772,10 +786,17 @@ function generatedConfigParts({ userConfig = {}, projectConfig = null, pinnedDir
   // watch (src/server/browser-dialogs.js) reports it and accepts an alert itself. A launch-view key: set at a launch.
   if (holdDialogs) out.noAutoDialog = true;
   if (pinnedDir) out.profile = String(pinnedDir);
+  // lane browser-resume (§3.9): the conversation's OWN kept directory — never beside a fence (the CLI refuses a profile
+  // with allowedDomains, measured; the caller passes none then, and this belt drops one handed in anyway)
+  else if (keptDir && !configFence(out)) out.profile = String(keptDir);
+  // lane browser-propose (step 1): the chromium launch stops announcing automation (`browser.automationFlag`, default
+  // on — the caller passes the setting) unless the user's own args already spell an AutomationControlled value
+  const flag = automationFlagVerdict(out.args, { on: !!automationFlag });
+  if (flag.add) out.args = withAutomationFlag(out.args, { on: true });
   // lane H verify r4: the keeper's launch MARK (the browser key this config's browser runs for) — how its Chrome is
   // proven VibeSpace's by its command line after its daemon is gone (a user/project file's own mark was dropped above)
   if (mark) out.args = withKeeperMark(out.args, mark);
-  return { config: out, dropped: r.dropped };
+  return { config: out, dropped: r.dropped, automationFlag: flag.why };
 }
 function generatedConfig(args) { return generatedConfigParts(args).config; }
 
@@ -1209,9 +1230,19 @@ function cloakservePlan({ enabled = false, proof = CLOAK_EGRESS_PROOF, allowlist
   };
 }
 const LABEL_MAX = 80;
+/** THE ONE label / notes cleaner — and THE BELT (verify r5 F3, lane peer-census). A label an AGENT chose (`vibespace-browser
+ *  new <label>` — usable by every conversation of the owner's, pinned by the user onto another) reached every other
+ *  conversation raw: `vibespace-browser profiles` / `status` / `pin` print it, the `browser-pin` / `browser-profile` notice
+ *  quotes it INSIDE the product's own `<system-reminder>` (a `</system-reminder>` in the label closed it, the words after it
+ *  sat at the top level — reproduced over the real keeper), the takeover / handback notices name it. Now: hidden
+ *  characters folded (hidden-chars.js: a control / separator a space, a format character out), whitespace collapsed,
+ *  trimmed, cut to LABEL_MAX (never inside a surrogate pair — r3 F7), THEN the frame rule (bound, then judged — r2 F1);
+ *  idempotent, so `normalizeRegistry` re-judges every stored label at load (a legacy record). */
 function cleanLabel(v) {
-  // eslint-disable-next-line no-control-regex
-  return String(v == null ? '' : v).replace(/[\x00-\x1f\x7f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, LABEL_MAX);
+  const folded = PT.foldHidden(v == null ? '' : String(v), { line: true }).replace(/\s+/g, ' ').trim();
+  let n = Math.min(folded.length, LABEL_MAX);
+  if (n > 0 && n < folded.length && /[\uD800-\uDBFF]/.test(folded.charAt(n - 1))) n -= 1;
+  return PT.toAgentText(folded.slice(0, n), { kind: 'line', max: LABEL_MAX }).trim();
 }
 /** A proxy is `scheme://[user:pass@]host[:port]` for http/https/socks4/socks5,
  *  or nothing. The SECRET half (user:pass) never leaves the server:
@@ -1346,7 +1377,8 @@ function normalizeRegistry(doc) {
     // takeover C3: a managed ephemeral record is admitted only in its own
     // shape (owner = a conversation's browser key) — a record claiming
     // `ephemeral` with anything else is not ours to reap and is dropped
-    profiles: list(d.profiles, (p) => isProfileId(p.id) && (!p.ephemeral || isEphemeralProfile(p))),
+    // verify r5 F3: every stored label / notes RE-JUDGED at load (a record written before the belt) — cleanLabel is idempotent
+    profiles: list(d.profiles, (p) => isProfileId(p.id) && (!p.ephemeral || isEphemeralProfile(p))).map((p) => ({ ...p, label: cleanLabel(p.label), ...(typeof p.notes === 'string' ? { notes: cleanLabel(p.notes) } : {}) })),
     leases: list(d.leases, (l) => isProfileId(l.profileId) && (isBrowserKey(l.browserKey) || isChildKey(l.browserKey))),
     siteHints: list(d.siteHints, (h) => typeof h.host === 'string'),
     browsers: obj(d.browsers),
@@ -1382,6 +1414,9 @@ function normalizeRegistry(doc) {
     seats: obj(d.seats),
     majors: obj(d.majors),
     blocked: list(d.blocked, (b) => typeof b.url === 'string' && b.by === 'agent'),
+    // lane site-reset step 3: the agent's proposals to clear ONE site's stored login in a SHARED profile (the same record
+    // shape as a switch proposal, `kind: 'site-reset'`, `sr-…`; bounded like the claims)
+    siteResets: list(d.siteResets, (b) => /^sr-[0-9a-f]{8}$/.test(String(b.id || '')) && b.proposal && typeof b.proposal === 'object' && b.proposal.kind === 'site-reset'),
     // BROWSE YOURSELF verify r1 (H4): the USER's own holder per profile (profileId → {key, since, launched, ownTab, state,
     // awaySince}) — persisted so a server restart inside his keep neither idles the browser out under his page nor
     // orphans his tab; the keeper restores each AWAY (its window re-attaches) and drops one whose browser did not survive
@@ -1443,7 +1478,7 @@ function isEphemeralProfile(p) {
 }
 /** The label a managed ephemeral record carries: `(ephemeral) <session name>`. */
 function ephemeralLabel(sessionName) {
-  const n = String(sessionName == null ? '' : sessionName).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+  const n = cleanLabel(String(sessionName == null ? '' : sessionName).slice(0, 60));   // verify r5 F3: a session's NAME through the belt (cut, then judged)
   return `(ephemeral) ${n || 'this conversation'}`;
 }
 /**
@@ -1512,12 +1547,17 @@ function pairsIdleMs(pairs) {
   }
   return null;
 }
-/** The directory a managed ephemeral browser writes, when the rung names one
- *  (rung C's per-session scratch dir) — null on D/N (the CLI's own temp dir).
- *  Recorded, never deleted here: browser-env's sweep owns it. */
-function ephemeralDirOf(pairs) {
+/** The directory a managed ephemeral browser writes, when the rung names one:
+ *  rung C's per-session scratch dir (the pairs' AGENT_BROWSER_PROFILE), or —
+ *  lane browser-resume (§3.9) — rung D's generated config's `profile` when the
+ *  CALLER has proven it is the conversation's own kept directory
+ *  (`configProfile`: the keeper reads the config the pairs name and accepts it
+ *  only when it equals `data/browser-profiles/<browserKey>`); null on N and on a
+ *  D config naming none (the CLI's own temp dir). Recorded, never deleted here:
+ *  browser-env's sweep and the kept store own it. */
+function ephemeralDirOf(pairs, { configProfile = null } = {}) {
   for (const s of Array.isArray(pairs) ? pairs : []) if (typeof s === 'string' && s.startsWith('AGENT_BROWSER_PROFILE=')) return s.slice('AGENT_BROWSER_PROFILE='.length) || null;
-  return null;
+  return configProfile ? String(configProfile) : null;
 }
 // ── OWNER RULING A (2026-09-26, after two naive-user studies failed the same task — "A吧"): a named profile is USABLE
 // BY ALL of the owner's conversations by default. WHO MAY USE a profile is ONE field, `owner`; `sharing` is NOT it —
@@ -2349,6 +2389,38 @@ function withKeeperMark(args, value) {
   const kept = args.split(/[,\n]/).map((x) => x.trim()).filter((x) => x && !isMark(x));
   return [...kept, mark].join(sep);
 }
+/**
+ * LANE BROWSER-PROPOSE (step 1, userW's fleet pod 2026-09-30: a FRESH Google sign-in refused with "This browser or app
+ * may not be secure"): THE ONE LAUNCH FLAG that stops Chromium announcing automation. A CDP-launched Chromium turns the
+ * `AutomationControlled` blink feature on, and that feature is what makes `navigator.webdriver` read true; the upstream
+ * CLI names this very switch as its `--args` example and ships no stealth of its own (design §7.6). Measured on
+ * agent-browser 0.38.1 (scripts/measure-automation-flag.mjs, the kb entry of browser-env.js): `navigator.webdriver` reads
+ * false with it, headed AND headless; true without it. It hides ONE signal — a headless user agent still says
+ * `HeadlessChrome` (the keeper's hidden-window rung is the answer to that) — so a site that still refuses is a proposal
+ * the agent files (`blocked`), never something this flag promises.
+ */
+const AUTOMATION_FLAG = '--disable-blink-features=AutomationControlled';
+const argListOf = (args) => (Array.isArray(args) ? args.map(String) : (typeof args === 'string' ? args.split(/[,\n]/) : [])).map((x) => x.trim()).filter(Boolean);
+/** Should a config's `args` gain the flag? `{add, why}` — `off` (browser.automationFlag is off), `theirs` (the user's own
+ *  args already spell an AutomationControlled value: theirs wins, whichever way it points), `their-switch` (their own
+ *  `--disable-blink-features=…` switch: Chromium keeps ONE value per switch, so a second one would silently drop theirs —
+ *  theirs wins, untouched), `added`. PURE. */
+function automationFlagVerdict(args, { on = true } = {}) {
+  if (!on) return { add: false, why: 'off' };
+  const list = argListOf(args);
+  if (list.some((x) => /AutomationControlled/.test(x))) return { add: false, why: 'theirs' };
+  if (list.some((x) => /^--disable-blink-features(=|$)/.test(x))) return { add: false, why: 'their-switch' };
+  return { add: true, why: 'added' };
+}
+/** A config's `args` WITH the flag when the verdict adds it — a string stays a string (joined the way it is separated),
+ *  a list a list; nothing ⇒ the flag alone. Composed BEFORE `withKeeperMark` (the mark rides last, its rule unchanged). */
+function withAutomationFlag(args, { on = true } = {}) {
+  if (!automationFlagVerdict(args, { on }).add) return args;
+  if (Array.isArray(args)) return [...args, AUTOMATION_FLAG];
+  if (typeof args !== 'string' || !args.trim()) return AUTOMATION_FLAG;
+  const sep = args.includes('\n') ? '\n' : ',';
+  return [...args.split(/[,\n]/).map((x) => x.trim()).filter(Boolean), AUTOMATION_FLAG].join(sep);
+}
 /** The PRE-MARK fallback (the upgrade window): the browser CLI launches every Chrome with `--remote-debugging-port=0`
  *  (measured on 0.32.0 and 0.38.1) — a Chrome the user opened by hand carries none. Read like the mark: exact on a
  *  NUL-separated cmdline, as a word on a title-rewritten one. */
@@ -2843,22 +2915,51 @@ function normAbsPath(p) {
  * "Shared (legacy)" record, never a session's; a directory another owner already
  * registered is theirs (`use` it by handle); one THIS session already owns is
  * idempotent. Every refusal is typed and carries the remedy.
+ *
+ * THE REAL PATH IS JUDGED (lane browser-resume verify F1): a symlink under ~/.agent-browser/ pointing at another
+ * conversation's kept directory passed the lexical prefix test and registered that conversation's logins as a profile
+ * every conversation may use. The route hands `realDir` (the realpath of the EXISTING directory; null = it does not
+ * exist / cannot be resolved) and the roots' own realpaths (`realHomeDir` / `realDataDir`); every rule is judged on
+ * the spelling AND on the real path (either spelling of a root counts), and the answer's `dir` is the CANONICAL path —
+ * what the keeper registers, so every later "is this directory a profile's" compare sees one identity. `realDir`
+ * undefined = a caller with no filesystem (the lexical rules alone — never the route).
  */
-function adoptDirVerdict({ dir, homeDir = null, dataDir = null, existing = null, browserKey = null } = {}) {
+function adoptDirVerdict({ dir, realDir, homeDir = null, dataDir = null, realHomeDir = null, realDataDir = null, existing = null, browserKey = null } = {}) {
   const raw = typeof dir === 'string' ? dir : '';
   if (!raw || !raw.startsWith('/')) return { ok: false, code: 'adopt_failed', error: 'adopt needs an absolute directory path' };
   const d = normAbsPath(raw);
-  const roots = [homeDir ? normAbsPath(homeDir) + '/.agent-browser' : null, dataDir ? normAbsPath(dataDir) + '/browser-profiles' : null].filter(Boolean);
+  const uniq = (xs) => [...new Set(xs.filter((x) => typeof x === 'string' && x.startsWith('/')).map(normAbsPath))];
+  const homes = uniq([homeDir, realHomeDir]), datas = uniq([dataDir, realDataDir]);
+  const roots = [...homes.map((h) => h + '/.agent-browser'), ...datas.map((x) => x + '/browser-profiles')];
   if (!roots.length) return { ok: false, code: 'adopt_failed', error: 'no adoptable roots are configured on this instance' };
-  if (!roots.some((r) => d.startsWith(r + '/'))) return { ok: false, code: 'adopt_outside_roots', error: `${raw} is outside the adoptable roots (${roots.join(', ')}) — a profile a session owns lives under ~/.agent-browser/; a browser directory of the user's own is theirs to keep, never a session's to register` };
-  if (homeDir && d === normAbsPath(homeDir) + '/.agent-browser/default-profile') return { ok: false, code: 'adopt_legacy_refused', error: `${raw} is the legacy shared profile — the migration's "Shared (legacy)" record, never a session's; \`vibespace-browser use "Shared (legacy)"\` attaches it` };
   // owner ruling A: THIS conversation's own adopt (it is the record's creator, or the one it is kept to) is idempotent; a
   // directory registered by anybody else is theirs — attach it by handle (it is usable by every conversation unless the
   // user kept it to one)
   const bk = browserKey ? parentKeyOf(String(browserKey)) : '';
+  /** One spelling judged against every root spelling → a refusal or null. `said` names the path in the words. */
+  const refusalFor = (x, said) => {
+    if (!roots.some((r) => x.startsWith(r + '/'))) return { ok: false, code: 'adopt_outside_roots', error: `${said} is outside the adoptable roots (${roots.join(', ')}) — a profile a session owns lives under ~/.agent-browser/; a browser directory of the user's own is theirs to keep, never a session's to register` };
+    if (homes.some((h) => x === h + '/.agent-browser/default-profile')) return { ok: false, code: 'adopt_legacy_refused', error: `${said} is the legacy shared profile — the migration's "Shared (legacy)" record, never a session's; \`vibespace-browser use "Shared (legacy)"\` attaches it` };
+    // lane browser-resume (§3.9): `data/browser-profiles/<key>` is the KEPT browser of the conversation that key names —
+    // its logins. Another conversation never registers it (a session's own is adopted through the user's adopt route)
+    for (const dr of datas) {
+      const pr = dr + '/browser-profiles/';
+      const seg = x.startsWith(pr) ? x.slice(pr.length).split('/')[0] : '';
+      if (isBrowserKey(parentKeyOf(seg)) && parentKeyOf(seg) !== bk) return { ok: false, code: 'adopt_not_yours', error: `${said} is another conversation's own kept browser — never a profile of yours to register; \`vibespace-browser new <label>\` makes one of your own` };
+    }
+    return null;
+  };
+  const lex = refusalFor(d, raw);
+  if (lex) return lex;
+  let canon = d;
+  if (realDir !== undefined) {
+    if (typeof realDir !== 'string' || !realDir.startsWith('/')) return { ok: false, code: 'adopt_failed', error: `${raw} does not exist (or cannot be resolved) — adopt registers a directory that is already there` };
+    canon = normAbsPath(realDir);
+    if (canon !== d) { const real = refusalFor(canon, `${raw} (it resolves to ${canon})`); if (real) return real; }
+  }
   const mine = !!(existing && bk && ((existing.owner && existing.owner.kind === 'session' && existing.owner.id === bk) || existing.createdBy === bk));
   if (existing && !mine) return { ok: false, code: 'adopt_registered', error: `${raw} is already registered as "${existing.label}" (${existing.id}) — \`vibespace-browser use ${existing.id}\` attaches it; it is not yours to adopt again` };
-  return { ok: true, code: null, error: null, dir: d };
+  return { ok: true, code: null, error: null, dir: canon };
 }
 
 // ── D1: the version floor ──────────────────────────────────────────────────
@@ -2949,6 +3050,7 @@ module.exports = {
   pidVerdict, adoptVerdict, attachedEnvFor, isLoopbackCdpUrl,
   pidLiveness, userDataDirsOf, sameDir, profileLockVerdict, profileLockedRefusal, // lane H verify r2: liveness vs signalling, the orphaned-browser lock
   keeperMarksOf, keeperMarkArg, withKeeperMark, launchedByCli, // lane H verify r4: the keeper's launch mark (ownership by cmdline, never by directory)
+  AUTOMATION_FLAG, automationFlagVerdict, withAutomationFlag, // lane browser-propose: the one launch flag that stops Chromium announcing automation
   HEAL_BUDGET, HEAL_WINDOW_MS, HEAL_RETRY_MS, healLedger, healBudgetVerdict, unstableText, unstableNotice, // lane H verify r5: the heal ledger + budget
   HEAL_FAIL_BUDGET, HEAL_FAIL_SPAN_MS, failedAskVerdict, // lane H verify r6: a failed relaunch ask is not a relaunch — its own streak + cap
   // P4 (§7.1–§7.3): provider rows + capability gating, the §7.2.1 egress record, the cdp env pair, the cloakserve plan

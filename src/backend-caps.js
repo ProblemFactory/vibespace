@@ -4,11 +4,21 @@
 // 这些冷切热切之类的feature"). The pool engine consults THIS instead of
 // backend-id special cases; a future backend adds a row, never an if-chain.
 //
-// hotSwitch is a VERDICT, not a wish:
-//   'verified'   — forensically proven live re-read (claude: dir-symlink
-//                  survives atomic cred writes, env re-resolved per syscall,
-//                  CLI re-reads .credentials.json per request —
-//                  scripts/test-creds-symlink-swap.mjs).
+// hotSwitch is a VERDICT, not a wish — and since 2026-09-30 a verdict carries
+// its MEASUREMENT (`hotSwitchEvidence`: the CLI version, the date, the
+// mechanism, the record, the gate that re-measures it), because the first
+// 'verified' (2.368.21) rested on a file-system test and a reading of
+// decompiled code, and a telemetry label later read as its refutation
+// (lane-hot-switch — kb-bugfix-invariants):
+//   'verified'   — MEASURED on a live process: the CLI sends the NEW member's
+//                  token on the next turn after the per-session link is
+//                  re-pointed (claude 2.1.281: every turn it statx()es the
+//                  creds file THROUGH the link and re-reads it when the mtime
+//                  differs; an equal-mtime replacement is NOT seen, so
+//                  account-material's utimes bump is load-bearing).
+//                  test-architecture §67 refuses a 'verified' row without a
+//                  record that shows the link followed; scripts/test-claude-
+//                  hot-switch.mjs (heavy) re-measures the installed CLI.
 //   'impossible' — experimentally REFUTED (codex, 2026-08-24 P3: the
 //                  app-server canonicalizes CODEX_HOME at startup — a symlink
 //                  repoint never reaches a running process — AND a turn
@@ -299,6 +309,17 @@ const BACKEND_CAPS = {
   claude: {
     pool: true,
     hotSwitch: 'verified',
+    // THE MEASUREMENT BEHIND 'verified' (lane-hot-switch, 2026-09-30): fake
+    // credentials + a loopback mock that recorded the Authorization header of
+    // every request + strace, in a loopback-only network namespace.
+    hotSwitchEvidence: Object.freeze({
+      cli: '2.1.281', measuredAt: '2026-09-30',
+      record: 'scripts/fixtures/claude-cred-read-2.1.281.json',
+      script: 'scripts/measure-claude-cred-read.mjs',
+      gate: 'scripts/test-claude-hot-switch.mjs',
+      mechanism: 'every turn the CLI statx()es $CLAUDE_SECURESTORAGE_CONFIG_DIR/.credentials.json THROUGH the per-session link and re-reads it when mtimeMs differs from the last it saw — the next request carries the member the link names',
+      blindSpot: 'a replacement whose mtime EQUALS the previous one is not seen: repointPoolSymlink bumps the target creds mtime, and that bump is load-bearing',
+    }),
     planC: true,          // per-session pool links (model-family projection)
     sealedOrders: true,   // device-side offline fallback switch
     resetCredit: false,   // NEVER (§ban-safety): the CLI's own limit reset is the hidden interactive `/limit-reset`,
@@ -337,6 +358,7 @@ const BACKEND_CAPS = {
   codex: {
     pool: true,
     hotSwitch: 'impossible',
+    hotSwitchEvidence: null, // the 2026-08-24 P3 experiment (above) predates the record form; 'impossible' grants nothing
     planC: false,
     sealedOrders: false,
     resetCredit: true,    // account/rateLimitResetCredit/consume (stored resets)
@@ -378,7 +400,7 @@ const BACKEND_CAPS = {
     autoResume: NO_AUTO_RESUME, // placeholder — the registry derives it
   },
   shell: {
-    pool: false, hotSwitch: 'unverified', planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false,
+    pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false,
     forkAtMessage: false, review: false, renameWriteback: false,
     streamProtocol: null, // terminal-only: no chat parse pipeline
     peerDelivery: 'stash-only',
@@ -398,7 +420,7 @@ const BACKEND_CAPS = {
   // claude flag — so review/renameWriteback/forkAtMessage stay false until a
   // PROBE proves otherwise (setVerifiedCap is how `fork` flips), never guessed.
   opencode: {
-    pool: false, hotSwitch: 'unverified', planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false,
+    pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false,
     streamProtocol: 'acp-events',
     peerDelivery: 'stash-only',
     frameFile: true,
@@ -436,7 +458,7 @@ const BACKEND_CAPS = {
 // row whose `steer` disagrees with its `queueVerbs`.
 for (const row of Object.values(BACKEND_CAPS)) row.inputModes = deriveInputModes(row.inputModes);
 
-const NO_CAPS = Object.freeze({ pool: false, hotSwitch: 'unverified', planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME });
+const NO_CAPS = Object.freeze({ pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME });
 
 function capsOf(backend) {
   return BACKEND_CAPS[backend || 'claude'] || NO_CAPS;
@@ -487,6 +509,9 @@ function notificationDelivery(caps) {
 function setVerifiedCap(backend, key, value) {
   const row = BACKEND_CAPS[backend];
   if (!row || typeof key !== 'string' || !(key in row)) return false;
+  // the SWITCHING verdict is a measurement with a record (hotSwitchEvidence),
+  // never something a runtime prober flips (lane-hot-switch)
+  if (key === 'hotSwitch' || key === 'hotSwitchEvidence') return false;
   row[key] = value;
   return true;
 }

@@ -693,26 +693,37 @@ console.log('— ⑩ version markers resolve; this branch squats nothing');
   const GIT_MAXBUF = 64 * 1024 * 1024;
   const git = (...a) => execFileSync('git', ['-C', REPO, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: GIT_MAXBUF });
   const REF = ['origin/master', 'master'].find((r) => { try { git('rev-parse', '--verify', r); return true; } catch { return false; } });
+  // THE RELEASE RECORD MOVED (2026-09-30): CHANGELOG.md became the user's file
+  // (one plain line per change under `## <version> — <date>` headings that name
+  // no topic) and the old record — whose headings these claim checks read a
+  // release's topic from — moved verbatim to docs/changelog-engineering.md,
+  // where every release keeps writing its section. A REF from before the move
+  // still carries the record as CHANGELOG.md.
+  const refLogOf = (ref) => { try { git('cat-file', '-e', `${ref}:docs/changelog-engineering.md`); return `${ref}:docs/changelog-engineering.md`; } catch { return `${ref}:CHANGELOG.md`; } };
+  const REF_LOG = REF ? refLogOf(REF) : null;
+  const TREE_LOG = 'docs/changelog-engineering.md';
   // REGRESSION (round 7): the helper must SURVIVE the biggest read it makes.
   // Measured as the consequence — the read either returns the whole file or
   // this leg says so; before the explicit maxBuffer it threw and the process
   // died, so nothing below here ever ran.
   let refChangelog = null, refErr = null;
-  if (REF) { try { refChangelog = git('show', `${REF}:CHANGELOG.md`); } catch (e) { refErr = e; } }
+  if (REF) { try { refChangelog = git('show', REF_LOG); } catch (e) { refErr = e; } }
   if (REF) {
-    ok(`the integration branch's CHANGELOG reads through the git helper (${refChangelog ? refChangelog.length : 0} bytes) — a suite that CRASHES here reports nothing at all`,
-      typeof refChangelog === 'string' && refChangelog.length > 0, `${refErr?.code || refErr?.message || 'empty'}`);
+    // (2026-09-30: these two asserts passed their NAME as the condition since
+    // round 7 — `ok` is (cond, name, detail) — so they could never fail.)
+    ok(typeof refChangelog === 'string' && refChangelog.length > 0,
+      `the integration branch's release record (${REF_LOG}) reads through the git helper (${refChangelog ? refChangelog.length : 0} bytes) — a suite that CRASHES here reports nothing at all`, `${refErr?.code || refErr?.message || 'empty'}`);
     if (refChangelog && refChangelog.length > 1024 * 1024) {
       // NEGATIVE CONTROL: the file really is over the default, and the default
       // really does fail — so the explicit bound above is load-bearing, not
       // decoration. (SKIPs loudly if the CHANGELOG ever shrinks back under
       // 1 MiB: the control would then be measuring nothing.)
       let defErr = null;
-      try { execFileSync('git', ['-C', REPO, 'show', `${REF}:CHANGELOG.md`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch (e) { defErr = e; }
-      ok(`NEGATIVE CONTROL: the SAME read with node's DEFAULT maxBuffer fails with ENOBUFS (${refChangelog.length} bytes > 1 MiB) — the explicit bound is what keeps this suite runnable`,
-        defErr?.code === 'ENOBUFS', `${defErr?.code || 'no error at all'}`);
+      try { execFileSync('git', ['-C', REPO, 'show', REF_LOG], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch (e) { defErr = e; }
+      ok(defErr?.code === 'ENOBUFS',
+        `NEGATIVE CONTROL: the SAME read with node's DEFAULT maxBuffer fails with ENOBUFS (${refChangelog.length} bytes > 1 MiB) — the explicit bound is what keeps this suite runnable`, `${defErr?.code || 'no error at all'}`);
     } else {
-      console.log(`  SKIP: ${REF}:CHANGELOG.md is ${refChangelog ? refChangelog.length : 0} bytes — under node's 1 MiB default, so the ENOBUFS control would measure nothing`);
+      console.log(`  SKIP: ${REF_LOG} is ${refChangelog ? refChangelog.length : 0} bytes — under node's 1 MiB default, so the ENOBUFS control would measure nothing`);
     }
   }
   /** Everything on the INTEGRATION BRANCH that already claims this number:
@@ -726,7 +737,7 @@ console.log('— ⑩ version markers resolve; this branch squats nothing');
     for (const line of git('log', '--format=%s', '-400', REF).split('\n')) {
       const t = line.trim(); if (re.test(t)) out.push(t);
     }
-    for (const line of git('show', `${REF}:CHANGELOG.md`).split('\n')) {
+    for (const line of git('show', REF_LOG).split('\n')) {
       const m = /^## (.+)$/.exec(line.trim());
       if (m && re.test(m[1].trim())) out.push(m[1].trim());
     }
@@ -752,7 +763,7 @@ console.log('— ⑩ version markers resolve; this branch squats nothing');
     //    the branch, never declared: highest released 2.369.N on REF, plus one.
     const releasedNs = [];
     for (const line of git('log', '--format=%s', '-400', REF).split('\n')) { const m = /^2\.369\.(\d+)(?![\d.])/.exec(line.trim()); if (m) releasedNs.push(+m[1]); }
-    for (const line of git('show', `${REF}:CHANGELOG.md`).split('\n')) { const m = /^## 2\.369\.(\d+)(?![\d.])/.exec(line.trim()); if (m) releasedNs.push(+m[1]); }
+    for (const line of git('show', REF_LOG).split('\n')) { const m = /^## 2\.369\.(\d+)(?![\d.])/.exec(line.trim()); if (m) releasedNs.push(+m[1]); }
     const latestN = Math.max(...releasedNs);
     // THE RELEASE BEING CUT IS CLAIMED BY THIS TREE (2.369.70 gate, the second
     // time this leg blocked a release for naming ITSELF): every release names
@@ -770,7 +781,7 @@ console.log('— ⑩ version markers resolve; this branch squats nothing');
     // reported (negative control D′).
     const CURRENT = JSON.parse(read('package.json')).version;
     const curN = Number((/^2\.369\.(\d+)$/.exec(CURRENT) || [])[1]);
-    const headsEntry = (v) => new RegExp(`^## ${v.replace(/\./g, '\\.')}(?![\\d.])`, 'm').test(read('CHANGELOG.md'));
+    const headsEntry = (v) => new RegExp(`^## ${v.replace(/\./g, '\\.')}(?![\\d.])`, 'm').test(read(TREE_LOG));
     const CLAIMED_HERE = new Set();
     if (Number.isFinite(curN)) for (let n = latestN + 1; n <= curN; n++) { const v = `2.369.${n}`; if (headsEntry(v)) CLAIMED_HERE.add(v); }
     const cutting = CLAIMED_HERE.has(CURRENT);
@@ -821,7 +832,7 @@ console.log('— ⑩ version markers resolve; this branch squats nothing');
   }
   // …and the CHANGELOG rule (test-harness-honesty's belt, kept): unreleased =
   // no entry (fine); released under the number we take = the entry must be OURS.
-  const changelog = read('CHANGELOG.md');
+  const changelog = read(TREE_LOG);
   const entries = changelog.split(/\n(?=## )/).filter((e) => /^## 2\.369\./.test(e));
   const shipped = entries.find((e) => describesThisChange(e));
   if (shipped) {

@@ -34,17 +34,32 @@
  *   to the folded items) clipped out of the bar; the view now keeps its pane at ≥ its bar's floor
  *   (WindowManager.setPaneMinWidth) and lets its badge fold (last) so the floor is the toggle + the ⋯.
  */
-export function barLayout({ widthPx = 0, items = [], gapPx = 0, overflowPx = 0 } = {}) {
+export function barLayout({ widthPx = 0, items = [], gapPx = 0, overflowPx = 0, groups = null } = {}) {
   const width = Math.max(0, Number(widthPx) || 0);
   const gap = Math.max(0, Number(gapPx) || 0);
   const more = Math.max(0, Number(overflowPx) || 0);
+  // GROUPS (lane toolbar-fold, 2026-09-30): the top toolbar's items live in ZONES (☰+title · the center · the right
+  // cluster), each zone a flex box with its OWN gap, the zones separated by the bar's gap and ALWAYS present as boxes
+  // (an empty zone still takes the bar's gap on each side); the ⋯ is a direct child of the bar AFTER the zones. Without
+  // `groups` the bar is flat (every item a direct child) — exactly the lane I arithmetic.
+  const G = Array.isArray(groups) && groups.length ? groups.map((g) => ({ key: String(g && g.key), gap: Math.max(0, Number(g && g.gapPx) || 0) })) : null;
+  const known = G ? new Set(G.map((g) => g.key)) : null;
   const list = (Array.isArray(items) ? items : [])
     .filter((it) => it && it.key != null && Number(it.px) > 0)
-    .map((it, i) => ({ key: String(it.key), px: Number(it.px), priority: Math.max(0, Number(it.priority) || 0), i }));
-  const sum = (arr) => arr.reduce((s, it) => s + it.px, 0) + gap * Math.max(0, arr.length - 1);
+    .map((it, i) => ({ key: String(it.key), px: Number(it.px), priority: Math.max(0, Number(it.priority) || 0), i, g: G && known.has(String(it.group)) ? String(it.group) : null }));
+  const flat = (arr) => arr.reduce((s, it) => s + it.px, 0) + gap * Math.max(0, arr.length - 1);
+  // grouped: every declared group is a box (bar gaps between them); inside a group its own gap; an item naming no
+  // declared group is charged as a direct child of the bar (its px + one bar gap — never less than it occupies)
+  const sum = !G ? flat : (arr) => {
+    let s = gap * (G.length - 1);
+    for (const g of G) { const m = arr.filter((it) => it.g === g.key); s += m.reduce((x, it) => x + it.px, 0) + g.gap * Math.max(0, m.length - 1); }
+    for (const it of arr) if (it.g === null) s += it.px + gap;
+    return s;
+  };
+  const moreCost = (arr) => more + (G || arr.length ? gap : 0);
   let shown = list.slice();
   const folded = new Set();
-  const cost = () => sum(shown) + (folded.size ? more + (shown.length ? gap : 0) : 0);
+  const cost = () => sum(shown) + (folded.size ? moreCost(shown) : 0);
   if (cost() > width) {
     const order = list.filter((it) => it.priority > 0).sort((a, b) => b.priority - a.priority || b.i - a.i);
     for (const it of order) {
@@ -55,8 +70,47 @@ export function barLayout({ widthPx = 0, items = [], gapPx = 0, overflowPx = 0 }
   }
   const need = cost();
   const fixed = list.filter((it) => it.priority === 0);
-  const floor = sum(fixed) + (list.length > fixed.length ? more + (fixed.length ? gap : 0) : 0);
+  const floor = sum(fixed) + (list.length > fixed.length ? moreCost(fixed) : 0);
   return { shown: shown.map((it) => it.key), overflow: list.filter((it) => folded.has(it.key)).map((it) => it.key), need, fits: need <= width, floor };
+}
+
+/**
+ * THE ICON STEP BEFORE THE FOLD (lane toolbar-fold, 2026-09-30 — the owner: the top-right cluster of green buttons
+ * "takes too much width on a low-resolution screen and overlaps other chrome"). An item that has a SHORTER form
+ * (`compactPx`: the toolbar's create buttons without their words — the glyph alone, the words its tooltip and
+ * accessible name) gives up its words BEFORE anything folds, one item at a time in the fold's own order (priority
+ * desc, equal priorities right-to-left; never-fold items last, right-to-left); only when every such item is compact
+ * and the bar still does not fit does barLayout fold — over the compact widths.
+ *
+ * barLadder({ widthPx, items:[{ key, px, compactPx?, priority, group? }], gapPx, overflowPx, groups? })
+ *   → barLayout's { shown, overflow, need, fits } + { compact: keys drawn compact (shown ones, DOM order), floor }
+ *   · nothing is compact while the whole bar fits at full width; compaction is MINIMAL (the last item made compact,
+ *     back at full width, would make something fold) and MONOTONE (a wider bar never compacts or folds more);
+ *   · nothing folds while a compactable item still shows its words;
+ *   · floor = barLayout's floor over the all-compact widths — a bar at least that wide always fits;
+ *   · with no `compactPx` anywhere it IS barLayout (same verdict, compact []).
+ */
+export function barLadder({ widthPx = 0, items = [], gapPx = 0, overflowPx = 0, groups = null } = {}) {
+  const base = (Array.isArray(items) ? items : [])
+    .filter((it) => it && it.key != null && Number(it.px) > 0)
+    .map((it) => ({ key: String(it.key), px: Number(it.px), priority: Math.max(0, Number(it.priority) || 0), group: it.group, cpx: Number(it.compactPx) > 0 && Number(it.compactPx) < Number(it.px) ? Number(it.compactPx) : 0 }));
+  const run = (arr) => barLayout({ widthPx, gapPx, overflowPx, groups, items: arr });
+  const small = base.map((it) => ({ ...it, px: it.cpx || it.px }));
+  const floor = run(small).floor;
+  let v = run(base);
+  const compact = new Set();
+  if (v.overflow.length) {
+    const order = base.map((it, i) => ({ it, i })).filter((o) => o.it.cpx).sort((a, b) => b.it.priority - a.it.priority || b.i - a.i);
+    const cur = base.map((it) => ({ ...it }));
+    for (const o of order) {
+      compact.add(o.it.key);
+      cur[o.i].px = o.it.cpx;
+      v = run(cur);
+      if (!v.overflow.length) break;
+    }
+  }
+  const shown = new Set(v.shown);
+  return { ...v, floor, compact: base.filter((it) => compact.has(it.key) && shown.has(it.key)).map((it) => it.key) };
 }
 
 /** The mode badge's SHORT words (the bar's never-fold item; the full sentence — "…— agent asked to pause" —

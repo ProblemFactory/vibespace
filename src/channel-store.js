@@ -316,17 +316,32 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     // NOW — the debounce is gone, and an unflushed hold was a lost message
     if (closed) { try { flush(); } catch (e) { warn('[channels] index.json not written after close:', (e && e.message) || e); } return; }
     if (debounce) return;
-    debounce = setTimeout(() => { debounce = null; flush(); }, FLUSH_DEBOUNCE_MS);
+    debounce = setTimeout(flushFromTimer, FLUSH_DEBOUNCE_MS);
     if (debounce.unref) debounce.unref();
+  }
+
+  // THE DEBOUNCED WRITE MAY NOT THROW (lane-dead-bridge, measured: a server whose table was full died HERE —
+  // `EMFILE … index.json.tmp-…` from this timer — the same death session-status's timer caused at 12:03:17).
+  // A failed write keeps the index dirty and retries (1 s … 60 s); a refusal is said, the server keeps running.
+  let failures = 0;
+  function flushFromTimer() {
+    debounce = null;
+    try { flush(); failures = 0; }
+    catch (e) {
+      failures++;
+      const retryMs = Math.min(60000, 1000 * 2 ** Math.min(6, failures - 1));
+      if (failures === 1 || failures % 10 === 0) warn(`[channels] index.json not written (${(e && e.code) || (e && e.message) || e}; attempt ${failures}) — kept in memory, retrying in ${Math.round(retryMs / 1000)} s`);
+      if (!debounce && !closed) { debounce = setTimeout(flushFromTimer, retryMs); if (debounce.unref) debounce.unref(); }
+    }
   }
 
   function flush() {
     if (!dirty) return false;
     // every refusal is said (r3: a once-only line went silent after the first)
     if (ixBlocked) { warn('[channels] index.json not written: ' + ixBlocked); return false; }
-    dirty = false;
     ix.updatedAt = now();
     writeJsonAtomic(indexFile, ix);
+    dirty = false;   // only once it is on disk — a failed write stays owed (lane-dead-bridge)
     return true;
   }
 
@@ -1226,7 +1241,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     return out.slice(-Math.max(1, limit));
   }
 
-  interval = setInterval(flush, FLUSH_INTERVAL_MS);
+  interval = setInterval(() => { if (dirty && !debounce) flushFromTimer(); }, FLUSH_INTERVAL_MS);   // the same guarded write (lane-dead-bridge)
   if (interval.unref) interval.unref();
 
   function close() {

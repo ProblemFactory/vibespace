@@ -269,15 +269,22 @@ function accountLines(app, a, kinds) {
     }
     // lane lark-search-poll: THE CHANGE FEED's line (its state, the measurement, a park by name) + the catch-up's count
     if (a.feed) {
-      const fl = chanCaps.feedText(a.feed, { t, vendor: vendorW, now: Date.now() });
+      // lane lark-p2p: a back-off names its END on this device's clock face ("until 03:28")
+      const clock = (ms) => { try { return new Date(ms).toLocaleTimeString(deviceLocale(), { hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
+      const fl = chanCaps.feedText(a.feed, { t, vendor: vendorW, now: Date.now(), clock });
       if (fl) {
-        const n = noteLine('chan-sec-note', fl, { warn: a.feed.state === 'refused' || a.feed.state === 'demoted' });
+        const n = noteLine('chan-sec-note', fl, { warn: a.feed.state === 'refused' || a.feed.state === 'demoted' || (a.feed.state === 'backoff' && a.feed.why === 'failed') });
         n.dataset.chanFeed = a.id;
         // U3's answer, said where it is asked: which message types the search did not find (the measurement's diagnostic)
         const mt = a.feed.counters && a.feed.counters.missedTypes ? Object.entries(a.feed.counters.missedTypes).filter(([, v]) => Number(v) > 0) : [];
         if (mt.length) n.title = t('Not found by the search: {types}', { types: mt.map(([k, v]) => `${k} ×${v}`).join(', ') });
         if (a.feed.state === 'refused' && a.feed.why === 'forbidden') { const v = btn(t('Re-authorize'), reauth); v.classList.add('chan-sec-verb'); n.appendChild(v); }
         out.push(n);
+        // lane lark-p2p verify r1: the hits the search returned that this version could not read are SAID on the card, with
+        // the fields — its own line below the feed's (it used to be the line's tooltip: invisible on a phone, unread on a
+        // desktop, while a feed dropping 89 % of what it finds is a silent failure); the shape park's line says them itself
+        const un = a.feed.state === 'refused' && a.feed.why === 'shape' ? '' : chanCaps.feedUnreadableText(a.feed, { t });
+        if (un) { const u = noteLine('chan-sec-note', un); u.dataset.chanFeedUnreadable = a.id; out.push(u); }
       }
       const cl = chanCaps.feedCatchUpText(a.feed.catchUp, { t });
       if (cl) { const n = noteLine('chan-sec-note', cl); n.dataset.chanFeedCatchup = a.id; out.push(n); }

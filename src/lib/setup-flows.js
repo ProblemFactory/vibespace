@@ -434,8 +434,13 @@ export function installSetupFlows(App) {
       <div class="usage-note">${escHtml(t('Each entry is the layout as it was BEFORE a change. Restoring reloads the page; your sessions are not touched.'))}</div>
       <div class="lh-list">${entries.map((e) => {
         const per = Object.entries(e.summary || {}).map(([n, c]) => `${escHtml(n)} ${c}`).join(' · ');
+        // what changed right after this point ("HR 3 → 1") — the row a loss FOLLOWS is the one to restore (userW
+        // inc-mun7qjmw-iksh); a point from before the field existed has none
+        const change = Array.isArray(e.change) && e.change.length
+          ? e.change.map(([n, a, b]) => `${n || t('Desktop')} ${a} → ${b}`).join(' · ') : '';
         return `<div class="lh-row"><div class="lh-main"><b>${escHtml(new Date(e.at).toLocaleString())}</b>
-            <div class="lh-sub">${escHtml(t('{n} windows', { n: e.totalWindows || 0 }))}${per ? ' — ' + escHtml('') + per : ''}</div></div>
+            <div class="lh-sub">${escHtml(t('{n} windows', { n: e.totalWindows || 0 }))}${per ? ' — ' + escHtml('') + per : ''}</div>${change ? `
+            <div class="lh-sub lh-change">${escHtml(t('Then: {changes}', { changes: change }))}</div>` : ''}</div>
           <button class="agent-btn lh-restore" data-id="${escHtml(e.id)}">${escHtml(t('Restore'))}</button></div>`;
       }).join('')}</div>`;
     body.querySelectorAll('.lh-restore').forEach((b) => {

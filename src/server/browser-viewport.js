@@ -215,7 +215,8 @@ async function browserTargets(cdpUrl, { timeoutMs = READ_MS, WebSocketImpl = Web
   const r = await pageCommand(String(cdpUrl), 'Target.getTargets', {}, timeoutMs, WebSocketImpl);
   if (!r.ok) return { ok: false, error: r.error };
   const infos = r.result && Array.isArray(r.result.targetInfos) ? r.result.targetInfos : [];
-  return { ok: true, targets: infos.map((t) => ({ targetId: String(t.targetId || ''), type: String(t.type || ''), openerId: t.openerId ? String(t.openerId) : null, url: String(t.url || '') })) };
+  // lane browser-resume: + each page's title (the kept tab list a conversation's browser gives back after it stops)
+  return { ok: true, targets: infos.map((t) => ({ targetId: String(t.targetId || ''), type: String(t.type || ''), openerId: t.openerId ? String(t.openerId) : null, url: String(t.url || ''), title: String(t.title || '') })) };
 }
 
 module.exports = { readViewport, captureFrame, watchCopies, copyWatchSource, browserTargets, COPY_TEXT_MAX, READ_MS };

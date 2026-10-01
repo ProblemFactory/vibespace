@@ -903,14 +903,31 @@ html, body {
   border-bottom: 1px solid var(--border); display: flex; align-items: center;
   padding: 6px 8px; gap: 8px; flex-shrink: 0;
 }
-.toolbar-left { display: flex; align-items: center; gap: 6px; min-width: 160px; }
+/* lane toolbar-fold (2026-09-30, the owner: the green cluster "overlaps other chrome" on a low-resolution screen —
+   measured: `.toolbar-right { min-width: 160px }` replaced the flex item's `min-width: auto`, the zone shrank to 160 px
+   and its flex-end buttons overflowed LEFTWARD over the layout presets, the title and — sidebar open — under the
+   sidebar). The zones now keep their content's width (nothing shrinks but the title), and what does not fit gives up
+   its words, then folds into the ⋯ (src/lib/toolbar-fold.js over lane I's barLadder). */
+.toolbar-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto; }
 .toolbar-center { flex: 1; display: flex; justify-content: center; }
-.toolbar-right { display: flex; align-items: center; gap: 4px; min-width: 160px; justify-content: flex-end; }
+.toolbar-right { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; justify-content: flex-end; }
+#toolbar .toolbar-left > *, #toolbar > [data-zone] > *, #toolbar > .toolbar-more { flex-shrink: 0; }
 .toolbar-title {
   font-weight: 600; font-size: 13px;
   background: linear-gradient(135deg, var(--accent), var(--accent-hover));
   -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
 }
+/* THE flexible item: the title yields first (an ellipsis), before any button gives up its words */
+#toolbar .toolbar-left > .toolbar-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#toolbar .toolbar-left > .toolbar-title[data-squeezed] { visibility: hidden; } /* narrower than TITLE_MIN_PX: a sliver of a glyph */
+/* the fold's classes, scoped to the toolbar (an element Customize moves out keeps nothing of them) */
+#toolbar .bar-folded { display: none !important; }
+#toolbar .toolbar-action.tb-compact { padding: 0 7px; gap: 0; }
+#toolbar .toolbar-action.tb-compact > span { display: none; }
+/* while Customize mode edits the chrome the fold is suspended: every element full and shown, the bar may wrap */
+body.customize-mode #toolbar { flex-wrap: wrap; row-gap: 4px; }
+body.customize-mode #toolbar > .toolbar-right { flex: 0 1 auto; flex-wrap: wrap; row-gap: 4px; min-width: 0; }
+body.customize-mode #toolbar > .toolbar-center { flex-wrap: wrap; row-gap: 4px; }
 .layout-presets { display: flex; gap: 1px; flex-wrap: nowrap; }
 #custom-grids-container { display: contents; }
 .layout-btn {
@@ -3711,7 +3728,13 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .ucl-list .empty-hint { padding: 12px 0; }
 .ucl-entry { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; }
 .ucl-ver { font-size: 12px; font-weight: 600; color: var(--accent); margin-bottom: 4px; }
-.ucl-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: 11px; line-height: 1.5; color: var(--text-secondary); }
+/* an entry = `v<version> — <date>`, then small section headings and lists (2026-09-30: the
+   changelog is one plain line per change, in the device's language); any other line is a
+   paragraph (an old-format entry) — text only, never a pre-formatted wall */
+.ucl-sec { margin: 6px 0 2px; font-size: 11px; font-weight: 600; color: var(--text); }
+.ucl-items { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.5; color: var(--text-secondary); overflow-wrap: anywhere; }
+.ucl-items li + li { margin-top: 2px; }
+.ucl-para { margin: 2px 0; font-size: 11px; line-height: 1.5; color: var(--text-secondary); overflow-wrap: anywhere; }
 
 /* Inbox readability (user request): selectable text; the ⤢ opens THE For-you window (design-user-inbox-reply §9 — the viewer modal is retired) */
 .ut-text, .ut-detail, .ut-hist-msg { user-select: text; cursor: text; }
@@ -4331,6 +4354,7 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .lh-row:last-child { border-bottom: none; }
 .lh-main { flex: 1; min-width: 0; font-size: 12px; }
 .lh-sub { color: var(--text-secondary); font-size: 11px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lh-change { color: var(--text); } /* what changed right after this point ("HR 3 → 1") — the row a loss follows */
 .lh-restore { flex-shrink: 0; }
 
 /* ── Background Work (2.342.x) ── */
@@ -5235,6 +5259,24 @@ label.chan-cap-row { cursor: default; }
 .context-menu-item .chan-menu-check svg { width: 1em; height: 1em; }
 /* ── Agent browser P2: the live view window (src/lib/browser-live-window.js, design §4.4 / §3.7) ── */
 .browser-live { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); }
+/* lane browser-resume C (§3.9, the owner's ruling 3): THE TAB ROW — one keyed chip per tab of the browser on show: the host's
+   initial on its hue (the channel avatar's rule, no network), the title (≤ 24), whose it is, ✕ only where the verdict allows;
+   a ▾+N fold; the row's end "Close all…" (the browser's Stop / Quit, confirmed by name). Theme vars only. */
+.browser-live-tabrow { display: flex; align-items: center; gap: 4px; padding: 3px 6px; flex-shrink: 0; overflow: hidden; border-bottom: 1px solid var(--border); background: var(--bg-toolbar); min-height: 28px; box-sizing: border-box; }
+.browser-live-tabrow-list { display: flex; gap: 3px; flex: 1 1 auto; min-width: 0; overflow: hidden; }
+.browser-live-tabchip { --av-size: 16px; --av-surface: var(--bg-toolbar); display: inline-flex; align-items: center; gap: 5px; max-width: 240px; padding: 2px 4px 2px 5px; font-size: 11px; color: var(--text-secondary); border: 1px solid transparent; border-radius: var(--radius-sm); white-space: nowrap; flex: none; user-select: none; }
+.browser-live-tabchip.switchable { cursor: pointer; }
+.browser-live-tabchip.switchable:hover { background: var(--hover-overlay); }
+.browser-live-tabchip.active { color: var(--text); background: var(--bg-window); border-color: var(--border); }
+.browser-live-tabchip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.browser-live-tabchip-title { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.browser-live-tabchip-mark { font-size: 10px; color: var(--text-dim); padding: 0 4px; border-radius: var(--radius-sm); background: var(--hover-overlay); flex: none; }
+.browser-live-tabchip[data-owner="agent"] .browser-live-tabchip-mark { color: var(--accent); }
+.browser-live-tabchip-close { width: 16px; height: 16px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: var(--text-dim); border-radius: var(--radius-sm); cursor: pointer; flex: none; }
+.browser-live-tabchip-close:hover { color: var(--text); background: var(--hover-overlay); }
+.browser-live-tabchip-close svg { width: 10px; height: 10px; }
+.browser-live-tabrow-more { font-size: 11px; padding: 2px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); cursor: pointer; flex: none; }
+.browser-live-tabrow > .browser-live-tabrow-quit { width: auto; height: 22px; font-size: 11px; padding: 0 8px; flex: none; white-space: nowrap; } /* over .file-tool-btn's 24 px square */
 .browser-live-strip { display: flex; align-items: flex-end; gap: 4px; padding: 3px 6px 0; flex-shrink: 0; overflow: hidden; border-bottom: 1px solid var(--border); background: var(--bg-secondary); }
 /* MULTIVIEW (design-browser-multiview §2 A1): the tabs fold by priority into ▾+N (src/lib/live-strip-layout.js); the tab you look at never folds */
 .browser-live-strip-tabs { display: flex; gap: 2px; flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
@@ -5318,6 +5360,12 @@ label.chan-cap-row { cursor: default; }
 /* BROWSE YOURSELF (B-6ae8): the user's own browsing window — Close (his tab only) is the plain act, Quit the whole browser
    the red one; the ADDRESS ROW under the bar (Back · Forward · Reload · the address: the screencast has no omnibox); the
    end line (who else uses this browser, when it closes by itself); his Tabs pane rows are clickable (the tab he goes to) */
+/* lane browser-resume B (§3.9, the owner's ruling 2): RESUME in place of Reconnect (the play glyph + its word — an
+   accent act, the stopped picture's one way on) and "Hand back and continue…" (the between-turns hand-back: the amber of
+   Hand back as its border, the text in the theme's text colour) */
+.browser-live-bar > .file-tool-btn.browser-live-reconnect[data-mode="resume"] { display: inline-flex; align-items: center; gap: 4px; width: auto; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.browser-live-bar > .file-tool-btn.browser-live-reconnect[data-mode="resume"] svg { width: 12px; height: 12px; }
+.file-tool-btn.browser-live-continue { color: var(--text); border-color: var(--yellow, #e5c07b); width: auto; height: 22px; padding: 0 8px; font-size: 10px; }
 .browser-live-bar > .file-tool-btn.browser-live-close { color: var(--text); border-color: var(--border); }
 .browser-live-bar > .file-tool-btn.browser-live-quit { color: var(--red, #e55); border-color: color-mix(in srgb, var(--red, #e55) 55%, transparent); }
 .browser-live-bar > .file-tool-btn.browser-live-kbd-btn { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
@@ -5407,6 +5455,9 @@ label.chan-cap-row { cursor: default; }
 .browser-live-dialog-actions > .mounts-btn, .browser-live-dialog > .mounts-btn { white-space: nowrap; flex: 0 0 auto; }
 .browser-live-dialog-actions > .mounts-btn.danger { color: var(--warn-text); border-color: var(--warn-text); }
 .browser-live-dialog-hint { font-size: 11px; color: var(--text-secondary); flex: 1 1 12em; min-width: 0; }
+/* lane site-reset: the navigation-loop banner — the cycle's addresses, one per line, never wrapped into the canvas */
+.browser-live-loop-cycle { margin: 0; padding: 0 0 0 16px; flex: 1 1 100%; min-width: 0; font-family: var(--font-mono, monospace); font-size: 11px; }
+.browser-live-loop-cycle > li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .browser-live-blocked { display: flex; flex-direction: column; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--yellow, #e5c07b) 12%, transparent); flex-shrink: 0; }
 .browser-live-blocked-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
 .browser-live-blocked-row > .mounts-btn { white-space: nowrap; flex: 0 0 auto; } /* the house text button (2026-09-28): a banner button says what it does */
@@ -5587,6 +5638,9 @@ label.chan-cap-row { cursor: default; }
 .bprof-row.bprof-orphan { grid-template-columns: minmax(200px, 2fr) 90px minmax(120px, 1fr) auto auto; }
 .bprof-row.bprof-forgotten { grid-template-columns: minmax(200px, 2fr) 90px minmax(120px, 1fr) auto; }
 .bprof-row.bprof-ephemeral-browser { grid-template-columns: minmax(180px, 1.6fr) minmax(120px, 1fr) minmax(90px, .8fr) minmax(100px, .8fr) auto; } /* takeover C3: the managed ephemeral browsers */
+.bprof-row.bprof-kept { grid-template-columns: minmax(180px, 1.6fr) minmax(70px, .5fr) 90px minmax(140px, 1.2fr) auto auto; } /* lane browser-resume (§3.9): the kept conversation browsers (B: Resume | its hint, then Forget) */
+.bprof-kept-live { font-size: 11px; }
+.bprof-kept-resume-hint { font-size: 11px; } /* lane browser-resume B: a stopped conversation's kept row says how to reopen it (no dead Resume) */
 .bprof-row.focus { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .bprof-ident { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
 .bprof-label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
@@ -5660,7 +5714,7 @@ label.chan-cap-row { cursor: default; }
 .bprof-row.deleted { opacity: .6; }
 .bprof-empty, .bprof-sweep { padding: 6px 4px; font-size: 11px; }
 .bprof-error { padding: 12px; color: var(--red, #e55); }
-@media (max-width: 768px) { .bprof-row, .bprof-row.bprof-orphan, .bprof-row.bprof-forgotten { grid-template-columns: 1fr 1fr; } .bprof-ident { grid-column: 1 / -1; } }
+@media (max-width: 768px) { .bprof-row, .bprof-row.bprof-orphan, .bprof-row.bprof-forgotten, .bprof-row.bprof-kept { grid-template-columns: 1fr 1fr; } .bprof-ident { grid-column: 1 / -1; } }
 
 /* ── TAB CHAIN SPLIT (agent browser P7, docs/design-agent-browser-v2.md §4.6) ──
    A split is a RENDERING of the chain: the host's element becomes a grid — the
@@ -5862,12 +5916,17 @@ label.chan-cap-row { cursor: default; }
 .ut-exit-cmd { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px; color: var(--text); background: var(--bg-input); border-radius: var(--radius-sm); padding: 3px 6px; margin: 3px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; } /* verify-r4 F4: the WHOLE command, lines kept, all of it above Allow — no inner scroll box (a macOS overlay scrollbar is invisible until scrolled: a clipped box read as the whole command); a command is ≤ 4 096 bytes, the popup itself scrolls */
 .iw-exit-cmd { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; color: var(--text); background: var(--bg-input); border-radius: var(--radius-sm); padding: 6px 8px; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .ut-exit-note { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.ut-proposal-plan { font-size: 11px; color: var(--text); margin-top: 3px; white-space: pre-line; overflow-wrap: anywhere; user-select: text; } /* lane browser-propose: what Approve runs, the card's words line for line, ABOVE the buttons (never folded) */
+.ut-action-proposal { width: auto; padding: 0 8px; font-size: 11px; font-weight: 600; border-radius: var(--radius-sm); } /* lane browser-propose: a WORDED button on the 24 px .ut-act icon box — its own width (the exit ask's rule) */
+.ut-proposal-answer .ut-action-proposal { height: 24px; min-width: 64px; }
+.ut-proposal-answer .ut-proposal-approve { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 @media (max-width: 768px) {
   .dialog-body label.dap-row, .dap-row { min-height: 44px; }
   .device-pair-copy { flex: 1 1 100%; }
   .dialog-body label.exit-access-mode, .dialog-body label.exit-access-ask, .exit-access-mode, .exit-access-ask { min-height: 44px; }
   .exit-access-modes { flex-direction: column; gap: 0; }
   .ut-exit-answer .ut-action-exit, .ut-action-exit { min-height: 36px; min-width: 72px; }
+  .ut-proposal-answer .ut-action-proposal, .ut-action-proposal { min-height: 36px; min-width: 72px; }
   .exit-access-dialog .pp-row { min-height: 40px; }
   .exit-access-dialog .pp-chip { min-height: 36px; }
   .exit-access-actions { position: sticky; bottom: 0; background: var(--bg-dialog); padding-top: 6px; }

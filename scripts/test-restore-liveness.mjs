@@ -675,6 +675,107 @@ e2e: {
     ws.close();
   }
   srv.kill('SIGKILL'); servers.delete(srv);
+
+  // ⑤ THE EMFILE-SHAPED RESTART (lane-dead-bridge, 2026-09-30 12:03:17). The production server died of an EMFILE
+  //    thrown from session-status's debounce timer. Here the server runs at a limit it cannot raise (prlimit soft =
+  //    hard), its table is FILLED with open connections, and a status write lands: the fixed server keeps running,
+  //    names who ran out and retries until the write lands; the PRE-FIX copy of the store dies of it — and after
+  //    either, the restored session streams with ZERO input (the promise this suite exists for).
+  emfile: {
+    let prlimitBin = null; try { prlimitBin = execFileSync('/usr/bin/which', ['prlimit'], { encoding: 'utf8' }).trim(); } catch { }
+    if (!prlimitBin) { console.log('  ⊘ SKIP e2e ⑤: no prlimit — a server limit node cannot raise cannot be set here'); break emfile; }
+    const http = await import('node:http');
+    const LIM = 640;
+    const ssFile = path.join(wt, 'src/session-status.js');
+    const ssFixed = fs.readFileSync(ssFile, 'utf8');
+    const ssPre = ssFixed.replace('this._writeTimer = setTimeout(() => { this._writeTimer = null; this._flushFromTimer(); }, 500);', 'this._writeTimer = setTimeout(() => { this._writeTimer = null; this._flush(); }, 500);');
+    ok(ssPre !== ssFixed, 'e2e ⑤ setup: the pre-fix session-status copy took its patch (the timer calls the bare write)');
+    const bootLimited = () => { const c = spawn(prlimitBin, [`--nofile=${LIM}:${LIM}`, 'node', 'server.js'], { cwd: wt, env: bootEnv, stdio: ['ignore', 'pipe', 'pipe'] }); servers.add(c); return c; };
+    const fdCount = (pid) => { try { return fs.readdirSync(`/proc/${pid}/fd`).length; } catch { return null; } };
+    /** fill the server's table with ws connections until it refuses one; returns the open sockets */
+    const fill = async (pid) => {
+      const open = [];
+      for (let i = 0; i < LIM + 50; i++) {
+        const w = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+        const r = await new Promise((res) => { const t = setTimeout(() => res('timeout'), 3000); w.once('open', () => { clearTimeout(t); res('open'); }); w.once('error', () => { clearTimeout(t); res('error'); }); w.once('close', () => { clearTimeout(t); res('close'); }); });
+        if (r !== 'open') break;
+        w.on('error', () => { }); open.push(w);
+        await new Promise((res) => setTimeout(res, 5));
+        if (w.readyState !== 1) break;   // accepted, then closed by libuv's EMFILE trick
+      }
+      return open;
+    };
+    const keep = new http.Agent({ keepAlive: true, maxSockets: 1 });
+    const req = (method, p, body) => new Promise((res) => {
+      const r = http.request({ host: '127.0.0.1', port: PORT, path: p, method, agent: keep, headers: { 'Content-Type': 'application/json' } }, (resp) => { let d = ''; resp.on('data', (c) => { d += c; }); resp.on('end', () => res({ status: resp.statusCode, body: d })); });
+      r.on('error', (e) => res({ status: 0, body: String(e.message) })); r.end(body ? JSON.stringify(body) : undefined);
+    });
+    const streams = async (label) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+      const up = await new Promise((r) => { ws.once('open', () => r(true)); ws.once('error', () => r(false)); });
+      if (!up) return false;
+      ws.on('error', () => { });
+      const got = []; ws.on('message', (d) => { try { const m = JSON.parse(d); if (m.type === 'output' && m.sessionId === sid && /VSTICK/.test(m.data || '')) got.push(m); } catch { } });
+      ws.send(JSON.stringify({ type: 'attach', sessionId: sid, cols: 80, rows: 24 }));
+      const t0 = Date.now(); while (Date.now() - t0 < 12000 && !got.length) await sleep(200);
+      ws.close();
+      return got.length > 0;
+    };
+
+    // (a) the FIXED store under a full table
+    installStale();
+    srv = bootLimited(); jrn = journal(srv); await waitReady(srv);
+    ok(new RegExp(`\\[fd\\] open-files limit: soft ${LIM} / hard ${LIM}`).test(jrn()), `e2e ⑤ the boot line says the limit it really runs at (soft ${LIM} / hard ${LIM})`, (jrn().match(/\[fd\][^\n]*/) || [''])[0]);
+    await req('GET', '/api/session-status');   // the keep-alive connection the status write will ride (no new accept needed)
+    await req('POST', '/api/session-status', { sessionKey: 'webui:warm', state: 'done' });   // the JSON body parser loads its charset module lazily — on a full table that require() itself is refused
+    const conns = await fill(srv.pid);
+    const held = fdCount(srv.pid);
+    ok(held >= LIM - 2, `e2e ⑤ setup: the server's table is full (${held} of ${LIM} after ${conns.length} connections)`);
+    const r1 = await req('POST', '/api/session-status', { sessionKey: 'webui:emfile-probe', state: 'working', reason: 'emfile' });
+    // HOLD the table full for a minute: every debounced writer that fires meanwhile meets the EMFILE (measured: the
+    // session-status write, the channels index, port-forwards, the usage cursors, the fd gauge itself) — none may end the server
+    for (let k = 0; k < 12 && srv.exitCode === null; k++) await sleep(5000);
+    ok(r1.status === 200 && srv.exitCode === null, `FIX e2e ⑤ a minute at a FULL table, the status write included, did NOT kill the server (POST ${r1.status}, exit ${srv.exitCode})`,
+      jrn().split('\n').filter((l) => /EMFILE|Error|\[fd\]|\[channels\]/.test(l)).slice(-12).join('\n'));
+    const failLine = (jrn().match(/\[fd\] a background write failed \(EMFILE[^\n]*/) || [''])[0];
+    ok(/This server ran out of file handles \(EMFILE\)/.test(failLine) && new RegExp(`holds ${LIM} of ${LIM}`).test(failLine), `FIX e2e ⑤ …and it said WHO ran out: ${JSON.stringify(failLine.slice(0, 220))}`);
+    for (const w of conns) { try { w.terminate(); } catch { } }
+    const landed = await (async () => { const t0 = Date.now(); while (Date.now() - t0 < 70000) { try { if (/emfile-probe/.test(fs.readFileSync(path.join(wt, 'data/session-status.json'), 'utf8'))) return true; } catch { } await sleep(500); } return false; })();
+    ok(landed, 'FIX e2e ⑤ the pressure gone, the retry LANDED (data/session-status.json carries the write)');
+    ok(await streams('after-pressure'), 'FIX e2e ⑤ the session still streams to a new client after the pressure');
+    srv.kill('SIGKILL'); servers.delete(srv);
+    await sleep(800);
+    installStale();
+    srv = boot(); jrn = journal(srv); await waitReady(srv);
+    ok(await streams('restored'), 'FIX e2e ⑤ after a kill at the end of the EMFILE episode the restored session streams with ZERO input');
+    srv.kill('SIGKILL'); servers.delete(srv);
+    await sleep(800);
+
+    // (b) CONTROL: the pre-fix store — the same write kills the server (the 12:03 crash), and the crash path ends its attach
+    fs.writeFileSync(ssFile, ssPre);
+    installStale();
+    srv = bootLimited(); jrn = journal(srv); await waitReady(srv);
+    const sockOf = (() => { const d = path.join(wt, 'data', 'sockets'); for (const f of fs.readdirSync(d)) { const m = path.join(wt, 'data', 'session-meta', f + '.json'); try { if (JSON.parse(fs.readFileSync(m, 'utf8')).webuiSessionId === sid) return path.join(d, f); } catch { } } return null; })();
+    const clientsOf = (sock) => fs.readdirSync('/proc').filter((n) => /^\d+$/.test(n)).filter((n) => { try { const a = fs.readFileSync(`/proc/${n}/cmdline`, 'utf8').split('\0'); const st = fs.readFileSync(`/proc/${n}/stat`, 'utf8'); return /dtach$/.test(a[0]) && ['-a', '-c'].includes(a[1]) && a[2] === sock && Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[4]) > 0; } catch { return false; } }).map(Number);
+    await req('GET', '/api/session-status');
+    await req('POST', '/api/session-status', { sessionKey: 'webui:warm', state: 'done' });
+    const conns2 = await fill(srv.pid);
+    const before = clientsOf(sockOf).filter((p) => { try { return Number(fs.readFileSync(`/proc/${p}/stat`, 'utf8').split(') ')[1].split(' ')[1]) === srv.pid; } catch { return false; } });
+    const exited = new Promise((r) => srv.once('exit', (code) => r(code)));
+    await req('POST', '/api/session-status', { sessionKey: 'webui:emfile-probe-2', state: 'working' });
+    const code = await Promise.race([exited, sleep(8000).then(() => 'alive')]);
+    servers.delete(srv);
+    for (const w of conns2) { try { w.terminate(); } catch { } }
+    ok(code === 1 && /EMFILE: too many open files, open '[^']*session-status\.json\.tmp'/.test(jrn()), `PRE-FIX CONTROL e2e ⑤ the same write KILLS the server: exit ${code}, ${JSON.stringify((jrn().match(/Error: EMFILE[^\n]*/) || [''])[0].slice(0, 140))}`);
+    ok(/\[fd\] This server ran out of file handles \(EMFILE\)/.test(jrn()), 'e2e ⑤ …the crash handler named who ran out before dying');
+    await sleep(500);
+    ok(before.length >= 1 && before.every((p) => { try { process.kill(p, 0); return false; } catch { return true; } }), `e2e ⑤ …and ended its attach client(s) on the way out (${JSON.stringify(before)} gone) — a crash leaves no orphan to hold the next server's attach`);
+    fs.writeFileSync(ssFile, ssFixed);
+    installStale();
+    srv = boot(); jrn = journal(srv); await waitReady(srv);
+    ok(await streams('restored-after-crash'), 'e2e ⑤ after the EMFILE crash the restored session streams with ZERO input');
+    srv.kill('SIGKILL'); servers.delete(srv);
+  }
 }   // the worktree is removed by cleanup() — see `worktrees` above
 
 // ── § 5 ONE HEALER, TWO TRIGGERS ───────────────────────────────────────────
@@ -684,7 +785,7 @@ console.log('— §5 the attach probe and the input detector share ONE re-attach
   // the detector moved with THE typing path into src/server/user-input.js
   // (design-user-inbox-reply D1.1: the ws chat-input case + the For-you reply share it)
   const uiSrc = fs.readFileSync(path.join(REPO, 'src/server/user-input.js'), 'utf-8');
-  ok(/reattachLocalPty\(sessionId, session, 'Broken pty stdin detected'/.test(uiSrc) && /sendUserInput\(data\.sessionId, data\.text/.test(wsSrc),
+  ok(/reattachLocalPty\(sessionId, session, `Broken pty stdin detected \(/.test(uiSrc) && /sendUserInput\(data\.sessionId, data\.text/.test(wsSrc),
     'WIRING PIN: the broken-stdin detector calls the shared reattachLocalPty');
   ok(!/pty\.spawn\(DTACH_CMD/.test(wsSrc),
     'WIRING PIN: ws-handler no longer spawns its own dtach attach (one implementation, not two)');

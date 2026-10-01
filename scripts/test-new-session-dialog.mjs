@@ -365,7 +365,19 @@ try {
   check('C3 ONE real click on Allow', await realClick(`${card(1)} .chat-perm-allow`));
   const got2 = await (async () => { for (let i = 0; i < 50; i++) { const r = responsesFor('req-lane-1'); if (r.length) return r; await sleep(100); } return responsesFor('req-lane-1'); })();
   check('C3 the stub is answered by that ONE click (no second click needed)', got2.length === 1 && got2[0].response?.response?.behavior === 'allow' && !got2[0].response?.response?.updatedPermissions, got2);
-  check('C3 the card shows it resolved, its buttons gone', await waitFor(`!document.querySelector('${card(1)} .chat-perm-allow') && /Allowed/.test(document.querySelector('${card(1)}')?.textContent || '')`, 5000));
+  // lane-mirror-198 (the Actions mirror of 2.369.198, red on both attempts): the click renders "✓ Allowed" AT ONCE
+  // (the optimistic overlay in the click handler), then the stub's tool_result COMPLETES the card and renderToolMsg
+  // drops the overlay BY RULE (resolved + complete ⇒ no overlay — the ✓ label and the output say it ran), taking
+  // `data-request-id` with it. The old judge asserted that transient through `data-request-id` and lost the race to
+  // the completion edit under the runner's load (two orders: the judge's first sample vs the round trip
+  // click → stdin → tool_result → edit → swap). The judge now keys the MESSAGE (its id `<sid>:t:<toolUseId>` rides
+  // the swap) and waits on the card's own settled evidence — its buttons gone AND (the overlay says Allowed OR the
+  // card is complete) — then on the completed card, each with a deadline.
+  const msg1 = `.chat-msg[data-msg-id$=":t:toolu_lane_1"]`;
+  const cardFacts = `(() => { const m = document.querySelector(${JSON.stringify(msg1)}); if (!m) return null; return { buttons: !!m.querySelector('.chat-perm-btn'), allowedChip: /Allowed/.test(m.querySelector('.chat-permission-resolved')?.textContent || ''), pending: !!m.querySelector('.chat-tool-output-pending'), overlay: !!m.querySelector('.chat-permission-inline') }; })()`;
+  check('C3 the card shows it resolved, its buttons gone (✓ Allowed while the result is pending, the completed card once it lands)', await waitFor(`(() => { const f = ${cardFacts}; return !!f && !f.buttons && (f.allowedChip || !f.pending); })()`, 10000), await evalJs(cardFacts));
+  check('C3 …and it COMPLETES on the stub\'s tool_result (the ✓ card, no overlay, no buttons — the rule the old judge raced)', await waitFor(`(() => { const f = ${cardFacts}; return !!f && !f.buttons && !f.pending && !f.overlay; })()`, 10000), await evalJs(cardFacts));
+  check('C3 CONTROL: the old judge\'s transient (`data-request-id` + "Allowed") reads FALSE on the completed card — the race it lost', !(await evalJs(`!document.querySelector('${card(1)} .chat-perm-allow') && /Allowed/.test(document.querySelector('${card(1)}')?.textContent || '')`)));
   await sleep(800);
   check('C3 and it stays exactly one response (nothing re-sent)', responsesFor('req-lane-1').length === 1);
 
