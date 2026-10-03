@@ -15,7 +15,7 @@
 //      events, grid off ⇒ the window follows the pointer from the PRESS point; the drop's re-capture), a CANCEL puts
 //      it back, beginResizeFromPointer is the handles' own resize (the window's minimum holds) and a CANCEL
 //      restores; a tab guest drags its chain's host;
-//   §5 wiring pins: the setting (Window category, auto|off, liveApply) is READ by the window; the view's
+//   §5 wiring pins: the setting (Desktop apps category since 2.369.202, auto|off, liveApply) is READ by the window; the view's
 //      onMoveResize reaches the WindowManager seams; the CSS folds with a class (never display:none of the bars);
 //      the taskbar menu rows; every t() key of desktop-seamless.js / the seamless block has zh + ja;
 //   §6 lane D (a) item C — Chrome (MEASURED, Chrome 153 under xpra 6.5.3): its main-window metadata by default
@@ -250,7 +250,7 @@ console.log('§4 the REAL WindowManager seams over a fake DOM (the title bar\'s 
 console.log('§5 wiring pins');
 {
   const schema = read('src/lib/settings-schema.js');
-  ok(/'desktop\.seamless': \{\s*type: 'enum', default: 'auto', options: \[\s*\{ value: 'auto'[^\]]*\{ value: 'off'[^\]]*\],[\s\S]*?category: t\('Window'\), liveApply: true,/.test(schema), 'the setting: desktop.seamless, enum auto | off, default auto, category Window, liveApply');
+  ok(/'desktop\.seamless': \{\s*type: 'enum', default: 'auto', options: \[\s*\{ value: 'auto'[^\]]*\{ value: 'off'[^\]]*\],[\s\S]*?category: t\('Desktop apps'\), liveApply: true,/.test(schema), 'the setting: desktop.seamless, enum auto | off, default auto, category Window, liveApply');
   const daw = read('src/lib/desktop-app-window.js');
   ok(/app\.settings\.get\('desktop\.seamless'\)/.test(daw) && /app\.settings\.on\('desktop\.seamless', applySeamless\)/.test(daw), 'the setting is READ by the window and re-applied live (a setting with working code — §10)');
   ok(/entry\.started = a\.op === 'move' \? app\.wm\.beginDragFromPointer\(winInfo\.id, opts\) : app\.wm\.beginResizeFromPointer\(winInfo\.id, a\.dir, opts\);/.test(daw) && /app\.wm\.cancelPointerOp\(winInfo\.id\)/.test(daw) && /onMoveResize: onAppMoveResize/.test(daw), 'WIRING PIN: the view\'s onMoveResize → PURE moveResizeAction → WindowManager.beginDragFromPointer / beginResizeFromPointer / cancelPointerOp');

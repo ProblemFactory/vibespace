@@ -303,10 +303,10 @@ async function visibilityOf(cdpUrl, targetId, { timeoutMs = READ_MS, WebSocketIm
  */
 async function watchTarget(cdpUrl, targetId, { onFrame = () => {}, onMode = () => {}, onEnd = () => {}, maxWidth = 1600, maxHeight = 1600, firstFrameMs = 1000, pollMs = 500, timeoutMs = READ_MS, WebSocketImpl = WebSocket } = {}) {
   const u = pageUrlOf(cdpUrl, targetId);
-  if (!u) return { ok: false, error: 'no such tab' };
+  if (!u) return { ok: false, code: 'no_tab', error: 'no such tab' }; // live-watch-polish G5: every refusal carries a code the client words
   let ws = null; try { ws = new WebSocketImpl(u, { maxPayload: 64 * 1024 * 1024, handshakeTimeout: timeoutMs }); } catch (e) { return { ok: false, error: e.message }; }
   const opened = await new Promise((resolve) => { const t = setTimeout(() => resolve(false), timeoutMs); ws.once('open', () => { clearTimeout(t); resolve(true); }); ws.once('error', () => { clearTimeout(t); resolve(false); }); });
-  if (!opened) { try { ws.terminate(); } catch { /* */ } return { ok: false, error: 'the tab could not be reached' }; }
+  if (!opened) { try { ws.terminate(); } catch { /* */ } return { ok: false, code: 'unreachable', error: 'the tab could not be reached' }; }
   let id = 100, ended = false, mode = 'screencast', lastFrameAt = 0, pollTimer = null, busy = false;
   const startedAt = Date.now();
   const waiting = new Map();
@@ -326,7 +326,8 @@ async function watchTarget(cdpUrl, targetId, { onFrame = () => {}, onMode = () =
   ws.on('error', () => end('the tab is gone'));
   await call('Page.enable');
   const sc = await call('Page.startScreencast', { format: 'jpeg', quality: 70, maxWidth, maxHeight, everyNthFrame: 1 });
-  if (sc && sc.error) { end('the tab refused a screencast'); return { ok: false, error: String(sc.error.message || 'no screencast') }; }
+  // live-watch-polish G5: a refused screencast is the ANSWER (said by its code) — not an end (onEnd would say "gone" first)
+  if (sc && sc.error) { onEnd = () => {}; end('the tab refused a screencast'); return { ok: false, code: 'no_screencast', error: String(sc.error.message || 'no screencast') }; }
   const W = require('../browser-windows.js');
   pollTimer = setInterval(async () => {
     if (ended || busy) return;

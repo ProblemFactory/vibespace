@@ -310,9 +310,9 @@ try {
   console.log('#3 "+" long-press sheet');
   await longPress('#mobile-nav-new');
   const createSheet = await evalJs(`(() => { const m = document.querySelector('.context-menu.mobile-sheet'); if (!m) return null; const r = m.getBoundingClientRect(); return { l: Math.round(r.left), r: Math.round(r.right), t: Math.round(r.top), rows: [...m.querySelectorAll('.context-menu-item')].map((el) => ({ txt: el.textContent.trim(), h: Math.round(el.getBoundingClientRect().height), svg: !!el.querySelector('svg') })), vnc: !!app._vncAvailable, apps: !!app._desktopAppsAvailable, prof: !!app._browserProfiles }; })()`);
-  // the three browser faces (design-browser-faces direction B, D5): Web view always; Desktop app… when /api/desktop/apps has a backend; Agent browser when the profile digest is held
-  const wantRows = ['Agent session', 'Terminal', 'Files', 'Web view', ...(createSheet?.vnc ? ['Desktop'] : []), ...(createSheet?.apps ? ['Desktop app…'] : []), ...(createSheet?.prof ? ['Agent browser'] : [])];
-  check(`a real 700 ms press on "+" opens the create sheet with ${wantRows.join(' / ')} (Desktop only when /api/vnc/status says available; Desktop app… / Agent browser gated like their ⚙ rows)`, createSheet && JSON.stringify(createSheet.rows.map((r) => r.txt)) === JSON.stringify(wantRows), createSheet);
+  // the three browser faces (design-browser-faces direction B, D5): Web view always; Apps… (design 009 §B6: one word) when /api/desktop/apps has a backend; Agent browser when the profile digest is held
+  const wantRows = ['Agent session', 'Terminal', 'Files', 'Web view', ...(createSheet?.vnc ? ['Desktop'] : []), ...(createSheet?.apps ? ['Apps…'] : []), ...(createSheet?.prof ? ['Agent browser'] : [])];
+  check(`a real 700 ms press on "+" opens the create sheet with ${wantRows.join(' / ')} (Desktop only when /api/vnc/status says available; Apps… / Agent browser gated like their ⚙ rows)`, createSheet && JSON.stringify(createSheet.rows.map((r) => r.txt)) === JSON.stringify(wantRows), createSheet);
   check('the sheet is full-width under the nav and every row is ≥ 44 px with an SVG icon', createSheet && createSheet.l <= 12 && createSheet.r >= VW - 12 && createSheet.t >= 40 && createSheet.rows.length >= 4 && createSheet.rows.every((r) => r.h >= 44 && r.svg), createSheet);
   check('no window opened yet (the press did not also fire the tap)', await evalJs('app.wm.windows.size') === 0);
   await evalJs(`[...document.querySelectorAll('.mobile-sheet .context-menu-item')].find((el) => el.textContent.trim() === 'Files').click(); true`);
@@ -588,6 +588,15 @@ try {
   const nav = await evalJs(`(() => { const n = document.querySelector('.settings-window .settings-nav'); const items = [...n.querySelectorAll('.settings-nav-item')]; return { scroll: n.scrollWidth, client: n.clientWidth, wrap: getComputedStyle(n).flexWrap, n: items.length, inside: items.every((i) => i.getBoundingClientRect().right <= innerWidth + 1), minH: Math.min(...items.map((i) => Math.round(i.getBoundingClientRect().height))) }; })()`);
   check(`the settings nav wraps (${nav.n} categories, scrollWidth ${nav.scroll} ≤ ${nav.client}, every item inside the viewport, rows ≥ 36 px)`, nav.wrap === 'wrap' && nav.scroll <= nav.client + 1 && nav.inside && nav.minH >= 36, nav);
   await shot('settings-nav-phone.png');
+  // B-df40 part 2: the header's ONE "Show advanced settings" switch at phone width — inside the window, clear of
+  // Reset All; off, categories end with "N advanced settings hidden · Show"; on, advanced rows draw with their chip
+  const advQ = `(() => { const w = document.querySelector('.settings-window'); const sw = w && w.querySelector('.settings-adv-switch'); const rb = w && w.querySelector('.settings-header-btn'); if (!sw || !rb) return null; const a = sw.getBoundingClientRect(), b = rb.getBoundingClientRect(), win = w.getBoundingClientRect(); return { inside: a.width > 0 && a.left >= win.left - 1 && a.right <= win.right + 1, overlap: !(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top), on: sw.querySelector('input').checked, lines: w.querySelectorAll('.settings-adv-hidden').length, chips: w.querySelectorAll('.settings-chip-advanced').length, vw: innerWidth }; })()`;
+  const adv0 = await evalJs(advQ);
+  check(`the "Show advanced settings" switch sits inside the ${adv0 && adv0.vw} px window, clear of Reset All; off, categories end with a hidden-count line (${adv0 && adv0.lines})`, !!adv0 && adv0.inside && !adv0.overlap && !adv0.on && adv0.lines >= 5 && adv0.chips === 0, adv0);
+  await evalJs(`(() => { document.querySelector('.settings-window .settings-adv-switch input').click(); return true; })()`);
+  const adv1 = await evalJs(advQ);
+  check(`…switched on: no hidden-count line, the advanced rows draw with their chip (${adv1 && adv1.chips})`, !!adv1 && adv1.on && adv1.lines === 0 && adv1.chips >= 40, adv1);
+  await evalJs(`(() => { document.querySelector('.settings-window .settings-adv-switch input').click(); return localStorage.getItem('vibespace.settingsAdvanced'); })()`);
   // 2.369.133 (owner "手机上这个配置层级渲染有点问题"): .132 flattened the groups with
   // display:contents, so the heads sat INLINE among the categories and folded on a tap.
   // The phone strip is SECTIONED: every group head is a full-width label on a line of its

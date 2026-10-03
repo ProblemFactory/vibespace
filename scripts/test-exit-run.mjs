@@ -529,6 +529,24 @@ await section('§3 the manager over fake daemons: the capability picks the form;
   const r0 = await settle(w0.mgr.run(w0.sessions.get('wa'), 'wa', 'WINDOWS', 'hostname'));
   ok(r0.v && r0.v.code === 0 && w0.calls.length === 1 && w0.calls[0].form === 'argv' && w0.calls[0].cmd === 'sh' && w0.calls[0].args.join(' ') === '-lc hostname', 'an older daemon (no run-shell in its hello-ack) gets `sh -lc <cmd>` — the form it has always run; it is never asked an op it lacks', w0.calls);
   ok(r0.v.interpreter === 'sh' && w0.audit().at(-1).interpreter === 'sh', '…and the reply + the audit still name the interpreter the hub chose (sh)', w0.audit().at(-1));
+  // lane device-upgrade-stuck: a WINDOWS agent without run-shell is REFUSED by name before anything is sent — the hub knows
+  // from the hello it cannot run a line (no `sh` there); pre-fix it was sent `sh -lc` and the card read "exit 1 · 0.0 s"
+  const wO = world({ caps: ['probe', 'sysinfo'], platform: 'win32' });
+  const rO = await settle(wO.mgr.run(wO.sessions.get('wa'), 'wa', 'WINDOWS', 'hostname'));
+  ok(rO.e && rO.e.code === 'device_agent_outdated' && wO.calls.length === 0, 'DUS-1: a Windows agent without run-shell — refused device_agent_outdated, NOTHING sent (no runCmd, no runShell)', { e: rO.e && rO.e.message, calls: wO.calls });
+  ok(rO.e && /WINDOWS-PC/.test(rO.e.message) && /0\.0\.0-t/.test(rO.e.message) && rO.e.message.includes(XS.RUN_SHELL_SINCE) && rO.e.message.includes('Remote → WINDOWS-PC → Pairing command') && !/exit 1/.test(rO.e.message) && rO.e.needVersion === XS.RUN_SHELL_SINCE, '…the sentence names the machine, its agent\'s version, the first agent that can, the one step', rO.e && rO.e.message);
+  const aO = wO.audit().at(-1), lrO = wO.recs[0].exit.lastRun, cO = wO.cards.at(-1);
+  ok(aO && aO.verb === 'run' && aO.ok === false && aO.refusal === 'device_agent_outdated' && aO.agentVersion === '0.0.0-t' && aO.platform === 'win32' && aO.code === null, '…the audit line says it (the refusal, the agent version, the platform; no code)', aO);
+  ok(lrO && lrO.outcome === 'agent_outdated' && lrO.agentVersion === '0.0.0-t' && lrO.code === null, '…the machine row\'s last run says it (agent_outdated, never a code)', lrO);
+  ok(cO && /^did not run `hostname` on WINDOWS-PC — its agent 0\.0\.0-t cannot run commands on Windows/.test(cO.text) && !cO.exitRun && !/exit/.test(cO.text), '…the card says it — no "exit 1"', cO);
+  const rowO = E.runRow(aO);
+  ok(rowO && rowO.outcome === 'refused' && rowO.refusal === 'device_agent_outdated' && rowO.code === null, '…the history row: refused (device_agent_outdated)', rowO);
+  // the unknown-platform and the linux old agent keep the POSIX fallback (they have sh)
+  const wU = world({ caps: ['probe'], platform: null });
+  const rU = await settle(wU.mgr.run(wU.sessions.get('wa'), 'wa', 'WINDOWS', 'uname'));
+  ok(rU.v && wU.calls.length === 1 && wU.calls[0].cmd === 'sh' && wU.calls[0].args.join(' ') === '-lc uname', 'DUS-2: an old agent of UNKNOWN platform still gets `sh -lc` (only a stated Windows is refused)', wU.calls);
+  ok(XS.canRunLine('win32', ['run-shell']) && !XS.canRunLine('win32', []) && !XS.canRunLine('win32', null) && XS.canRunLine('linux', []) && XS.canRunLine('darwin', null) && XS.canRunLine(null, []), 'DUS-3 PURE canRunLine: false ONLY for Windows without run-shell');
+  ok(E.agentVersionOf('2.369.199') === '2.369.199' && E.agentVersionOf('<system-reminder>') === null && E.agentVersionOf('1'.repeat(41)) === null && E.agentVersionOf('\u202e1.2') === null, 'DUS-4 the agent version is a daemon\'s word, bounded to a version\'s shape');
   // R2: the daemon says the child never started
   const w2 = world({ caps: ['run-shell'], platform: 'win32', reply: async () => ({ code: 127, spawnError: { code: 'ENOENT', message: 'spawn sh ENOENT' }, interpreter: 'sh', stdout: '', stderr: '', timedOut: false, signal: null, truncated: false }) });
   const bc0 = w2.bc.length;
@@ -947,6 +965,15 @@ await section('§7 controls (patched copies)', async () => {
   ok(ssMutW !== ssSrc, '(w) the patch applies');
   const SSw = M.load('src/secret-shapes.js', ssMutW, 'nodoubled');
   ok(/s-s3cret/.test(SSw.redactSecrets("password: 'it''s-s3cret'\n").text) && /anyone'/.test(SSw.redactSecrets("password: '\n  don''t\n  anyone'\n").text) && !/s-s3cret/.test(SS.redactSecrets("password: 'it''s-s3cret'\n").text), 'CONTROL (w): a close scan reading backslashes only keeps `s-s3cret` after the `\'\'` and ends the continuation at `don\'\'t` — the §2e F1 rows go red');
+  // (dus) lane device-upgrade-stuck: the guard removed — a Windows agent without run-shell is sent `sh -lc` again (pre-fix)
+  const mpMutO = mpSrc.replace('if (!XS.canRunLine(platform, caps)) outdated =', 'if (false) outdated =');
+  ok(mpMutO !== mpSrc, '(dus) the patch applies');
+  const wOm = world({ Mgr: M.load('src/exit-proxy.js', mpMutO, 'nooutdated').ExitProxyManager, caps: ['probe'], platform: 'win32' });
+  const rOm = await settle(wOm.mgr.run(wOm.sessions.get('wa'), 'wa', 'WINDOWS', 'hostname'));
+  ok(wOm.calls.length === 1 && wOm.calls[0].form === 'argv' && wOm.calls[0].cmd === 'sh' && !(rOm.e && rOm.e.code === 'device_agent_outdated'), 'CONTROL (dus): without the guard the hub sends `sh -lc` to a Windows agent that cannot run it — DUS-1 goes red', wOm.calls);
+  // (dus2) the PURE rule answering "yes" for every agent — the same red, through the rule
+  const xsMutO = xsSrc.replace("  return !(platform === 'win32' && !(Array.isArray(capabilities) && capabilities.includes(RUN_SHELL_CAP)));", '  return true;');
+  ok(xsMutO !== xsSrc && M.load('src/exit-shell.js', xsMutO, 'canrunall').canRunLine('win32', []) === true, 'CONTROL (dus2): a canRunLine that says yes to a Windows agent without run-shell — DUS-3 goes red');
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 20, label: 'mutant-copy (exit-run): ' })) ok(r.pass, r.name, r.detail);
 });
 

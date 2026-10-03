@@ -50,6 +50,11 @@
 //   ③f (lane R5 verify) a request filed DURING a pace wait is judged at sight:
 //      the sleeping pass is woken, a refusal never waits out the ≤ 1 s sleep;
 //      the no-wake engine (the R5 build) is the control
+//   ③h (B-df40 part 3) the vendor rows DECLARED once (src/channel-settings.js): every
+//      real adapter's budget / pace key has its derived schema row and back; today's
+//      numbers (V1); a stored out-of-range value clamped + said once through the
+//      derived bound (V2; an engine copy without the derivation is the control); the
+//      engine's budgetDecl / paceDecl read the default the schema shows (V4)
 //   ⑪ negative controls (patched copies outside the tree): the old discovery
 //      bound hides conversation 501+; a scheduler that polls everything each
 //      pass breaks the arithmetic
@@ -69,6 +74,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
 const CH = require(path.join(REPO, 'src/channels/index.js'));
+const CS0 = require(path.join(REPO, 'src/channel-settings.js'));
+/** B-df40 part 3: a scripted module that reads a budget key of ITS OWN (changed live mid-leg) declares it in a
+ *  suite-only table for its kind — registration refuses an undeclared key; the registry's `channelSettings` seam
+ *  (never passed in production: test-channel-adapter-contract ⑦). The engine bounds it with its sanity range
+ *  (1..1e6), exactly as before. */
+const ownKey = (kind, key, dflt) => ({ channelSettings: { ...CS0.CHANNEL_SETTINGS, [kind]: { vendor: kind, vendorName: kind, rows: [{ key, role: 'budget', type: 'number', default: dflt, min: 1, max: 1e6, label: kind, description: kind }] } } });
 const fake = require(path.join(REPO, 'src/channels/fake.js'));
 const caps = require(path.join(REPO, 'src/channel-caps.js'));
 const { makeRecord, makeConversation } = require(path.join(REPO, 'src/channel-record.js'));
@@ -247,8 +258,8 @@ function worldModule(kind, worlds, { receive = 'poll', unitsPerHistory = 1, budg
     },
   };
 }
-function mkEngine(name, { kinds, settings = {}, now, deliver = null, sessions = [], dataDir = null, env = {}, log = quiet, extra = {}, mod = ENG } = {}) {
-  const registry = CH.createChannelRegistry();
+function mkEngine(name, { kinds, settings = {}, now, deliver = null, sessions = [], dataDir = null, env = {}, log = quiet, extra = {}, mod = ENG, registryOpts } = {}) {
+  const registry = CH.createChannelRegistry(registryOpts);
   for (const m of kinds) registry.register(m);
   const events = [];
   const dir = dataDir || path.join(ROOT, name);
@@ -836,10 +847,12 @@ async function toggleBurst(ENGmod, label) {
 // sleep advances together with the logical one (as real time moves both).
 console.log('③e the per-second pace in the real engine: 873 first reads at 40 units — ≤ 80 in any second, ≤ 2440 in any minute, the first-read line mid-way');
 async function pacedIngest(label, { pace = true } = {}) {
+  // (B-df40 part 3: a scripted module reads NO setting — registration refuses a key no vendor table declares; the
+  // keys these modules named were never set, so the 3000 / 40 defaults are what the engine read before too)
   const Wp = makeWorld(clock, { n: 873, hot: 0, warm: 0 });
   let pt = 0;
   Wp.sends = []; Wp.paceNow = () => pt;
-  const kp = worldModule('pc', Wp, { unitsPerHistory: 40, budgetDefault: 3000, budgetSettingKey: 'channels.budgetPcTestPerMin', pace: pace ? { unitsPerSec: 40, settingKey: 'channels.pcTestUnitsPerSec', cost: { fetch: 40, discover: 1, scanHost: 1 } } : null, vendorName: 'Google' });
+  const kp = worldModule('pc', Wp, { unitsPerHistory: 40, budgetDefault: 3000, budgetSettingKey: null, pace: pace ? { unitsPerSec: 40, settingKey: null, cost: { fetch: 40, discover: 1, scanHost: 1 } } : null, vendorName: 'Google' });
   const dirP = path.join(ROOT, `paced-${label}`);
   seedAccounts(dirP, [['pc', 'pc']]);
   const sleeps = [];
@@ -888,7 +901,7 @@ console.log('③f a request filed during a pace wait is judged at sight: the sle
 async function judgedAtSight(ENGmod, label) {
   const Wj = makeWorld(Date.now(), { n: 4, hot: 0, warm: 0 });
   Wj.delayMs = 20;
-  const kj = worldModule('js', Wj, { unitsPerHistory: 40, budgetDefault: 3000, budgetSettingKey: 'channels.budgetJsTestPerMin', pace: { unitsPerSec: 40, settingKey: 'channels.jsTestUnitsPerSec', cost: { fetch: 40, discover: 1, scanHost: 1 } }, vendorName: 'Google' });
+  const kj = worldModule('js', Wj, { unitsPerHistory: 40, budgetDefault: 3000, budgetSettingKey: null, pace: { unitsPerSec: 40, settingKey: null, cost: { fetch: 40, discover: 1, scanHost: 1 } }, vendorName: 'Google' });
   const dirJ = path.join(ROOT, `sight-${label}`);
   seedAccounts(dirJ, [['js', 'js']]);
   const { eng: ej } = mkEngine(`sight-${label}`, { kinds: [kj], settings: { 'channels.agentRefreshFloorSec': 60 }, now: () => Date.now(), dataDir: dirJ, mod: ENGmod });
@@ -932,7 +945,7 @@ console.log('③c channel settings: the input clamps to the schema and says so; 
   ok(/clampToSchema\(schema, num\)/.test(numBranch) && /showToast\(/.test(numBranch) && /input\.value = /.test(numBranch), 'the Settings number input clamps through clampToSchema, writes the clamped value back into the field and TOASTS it');
   const B = ENG.SETTING_BOUNDS || {};
   const rows = Object.entries(S).filter(([k, v]) => /^channels\./.test(k) && v.type === 'number' && k !== 'channels.pushCoalesceSeconds');
-  const drift = rows.filter(([k, v]) => !B[k] || B[k].min !== v.min || B[k].max !== v.max || (B[k].dflt !== null && B[k].dflt !== v.default)).map(([k, v]) => `${k}: schema ${v.default}/${v.min}/${v.max} engine ${JSON.stringify(B[k] || null)}`);
+  const drift = rows.filter(([k, v]) => !B[k] || B[k].min !== v.min || B[k].max !== v.max || B[k].dflt !== v.default).map(([k, v]) => `${k}: schema ${v.default}/${v.min}/${v.max} engine ${JSON.stringify(B[k] || null)}`);
   ok(rows.length >= 11 && drift.length === 0, `every channels.* number setting (${rows.length}) is read by the engine with the schema's own default and bounds`, drift.join('; '));
   const logged = [];
   const cap = { log: (m) => logged.push(String(m)), warn: (m) => logged.push(String(m)), error() {} };
@@ -947,6 +960,59 @@ console.log('③c channel settings: the input clamps to the schema and says so; 
   const lines = logged.filter((m) => /channels\.pollColdSec/.test(m));
   ok(c1.seconds === 900 && lines.length === 1 && /1800/.test(lines[0]) && /900/.test(lines[0]) && /maximum/.test(lines[0]), 'the engine runs 900 for a stored 1800 and SAYS it once (the key, the stored value, the maximum it used)', JSON.stringify({ c1, lines }));
   ek.stop();
+}
+
+// ═══ ③h the vendor rows DECLARED once (B-df40 part 3) ═══════════════════════
+// The design desk's settings-cleanup §2 P3 (verifier controls V1 / V2 / V4): the four per-vendor rows are declared
+// ONCE in src/channel-settings.js — the schema row, the engine's bound + default and the adapter's caps all derive
+// from it. The REAL lark / gmail modules (the engine registers them itself), seeded accounts, no vendor call.
+console.log('③h the vendor rows declared once: schema row ⇄ adapter caps ⇄ engine bounds, one set of numbers (V1 V2 V4)');
+{
+  const CS = require(path.join(REPO, 'src/channel-settings.js'));
+  const S = (await import(path.join(REPO, 'src/lib/settings-schema.js'))).SETTINGS_SCHEMA;
+  const B = ENG.SETTING_BOUNDS;
+  const readBy = new Map();
+  for (const m of ENG.REAL_ADAPTERS) for (const role of ['budget', 'pace']) { const k = m.caps[role] && m.caps[role].settingKey; if (k) readBy.set(k, m.kind); }
+  const derived = Object.entries(S).filter(([, r]) => r.channel).map(([k, r]) => [k, r.channel]);
+  const noRow = [...readBy].filter(([k, kind]) => !S[k] || S[k].channel !== kind);
+  const unread = derived.filter(([k, v]) => readBy.get(k) !== v);
+  ok(readBy.size === 4 && derived.length === 4 && !noRow.length && !unread.length, `every REAL adapter's budget / pace key (${[...readBy.keys()].join(', ')}) has its derived schema row (channel = the adapter's kind) — and every derived row is read by a REAL adapter`, JSON.stringify({ noRow, unread }));
+  // V1 — the numbers at base 798d938a: SETTING_BOUNDS min / max literal, `dflt: null` = the adapter's caps default
+  const BEFORE = { 'channels.budgetLarkPerMin': [60, 5, 1000, 5], 'channels.budgetGmailPerMin': [3000, 100, 6000, 100], 'channels.gmailUnitsPerSec': [40, 5, 100, 5], 'channels.larkRequestsPerSec': [5, 1, 50, 1] };
+  const diff = Object.entries(BEFORE).flatMap(([k, [d, mn, mx, st]]) => [
+    ...(!B[k] || B[k].dflt !== d || B[k].min !== mn || B[k].max !== mx ? [`${k} engine ${JSON.stringify(B[k] || null)}`] : []),
+    ...(!S[k] || S[k].default !== d || S[k].min !== mn || S[k].max !== mx || S[k].step !== st ? [`${k} schema ${S[k] ? [S[k].default, S[k].min, S[k].max, S[k].step].join('/') : 'none'}`] : []),
+  ]);
+  ok(!diff.length, 'V1: the derived defaults are today\'s 60 / 3000 / 5 / 40 and the bounds today\'s (5–1000 · 100–6000 · 5–100 · 1–50) — in the engine\'s SETTING_BOUNDS and in the schema rows, the step too', diff.join('; '));
+  ok(Object.values(B).every((b) => typeof b.dflt === 'number'), 'no SETTING_BOUNDS entry says `dflt: null` any more — every default is the number the schema row shows');
+  const run = (ENGmod, label, settings) => {
+    const logged = [];
+    const dirV = path.join(ROOT, `declared-${label}`);
+    seedAccounts(dirV, [['lk', 'lark'], ['gm', 'gmail']]);
+    const { eng: ev } = mkEngine(`declared-${label}`, { kinds: [], settings, now, dataDir: dirV, log: { log: (m) => logged.push(String(m)), warn: (m) => logged.push(String(m)), error() {} }, mod: ENGmod });
+    const recs = ev.adapterRecords().adapters;
+    const view = (id) => ev.adapterView(recs.find((a) => a.id === id));
+    const out = { lk: view('lk'), gm: view('gm') };
+    view('lk'); view('gm');   // read again: a clamp is said ONCE per key / value
+    ev.stop();
+    return { ...out, said: logged.filter((m) => /\[channels\] setting /.test(m)) };
+  };
+  const d = run(ENG, 'defaults', {});
+  const nums = (r) => ({ lark: [r.lk.budget.limit, r.lk.pace.perSec], gmail: [r.gm.budget.limit, r.gm.pace.perSec] });
+  ok(d.lk.budget.limit === S['channels.budgetLarkPerMin'].default && d.lk.pace.perSec === S['channels.larkRequestsPerSec'].default && d.gm.budget.limit === S['channels.budgetGmailPerMin'].default && d.gm.pace.perSec === S['channels.gmailUnitsPerSec'].default && d.lk.budget.settingKey === 'channels.budgetLarkPerMin' && d.gm.pace.settingKey === 'channels.gmailUnitsPerSec' && !d.said.length,
+    `V4: nothing stored ⇒ the engine's budgetDecl / paceDecl (the account card's budget.limit / pace.perSec) read the default the schema row shows — Lark ${d.lk.budget.limit}/min ${d.lk.pace.perSec}/s, Gmail ${d.gm.budget.limit}/min ${d.gm.pace.perSec}/s (one number, two readers)`, JSON.stringify(nums(d)));
+  const OUT = { 'channels.budgetLarkPerMin': 5000, 'channels.gmailUnitsPerSec': 1, 'channels.budgetGmailPerMin': 50, 'channels.larkRequestsPerSec': 80 };
+  const SAID = ['channels.budgetLarkPerMin = 5000 is above its maximum 1000 — using 1000', 'channels.gmailUnitsPerSec = 1 is below its minimum 5 — using 5', 'channels.budgetGmailPerMin = 50 is below its minimum 100 — using 100', 'channels.larkRequestsPerSec = 80 is above its maximum 50 — using 50'];
+  const clamped = (r) => r.lk.budget.limit === 1000 && r.gm.pace.perSec === 5 && r.gm.budget.limit === 100 && r.lk.pace.perSec === 50 && r.said.length === 4 && SAID.every((w) => r.said.some((m) => m.includes(w) && m.includes('(change it in Settings → Channels)')));
+  const c = run(ENG, 'clamped', OUT);
+  ok(clamped(c), 'V2: a stored out-of-range vendor value is still CLAMPED through the derived bound and SAID once per key / value (the lane R2 sentence) — Lark 5000/min runs 1000, 80/s runs 50; Gmail 50/min runs 100, 1/s runs 5; the second read says nothing', JSON.stringify({ ...nums(c), said: c.said }));
+  const DERIVE = 'const SETTING_BOUNDS = Object.freeze({ ...ENGINE_BOUNDS, ...ChannelSettings.boundsOf(ChannelSettings.CHANNEL_SETTINGS) });';
+  ok(ENGINE_SRC.includes(DERIVE), 'the patch site of the derived-bounds control is in channels-engine.js (a moved line would make the control vacuous)');
+  const Md = mutantCopies('chan-agg-declared', REPO);
+  const ENGnb = Md.load('src/server/channels-engine.js', ENGINE_SRC.replace(DERIVE, 'const SETTING_BOUNDS = Object.freeze({ ...ENGINE_BOUNDS });'), 'no-vendor-bounds');
+  const cm = run(ENGnb, 'clamped-mut', OUT);
+  ok(!clamped(cm) && cm.lk.budget.limit === 5000 && !cm.said.length, `NEGATIVE CONTROL — an engine copy whose SETTING_BOUNDS does not derive the vendor rows runs the stored 5000/min UNCLAMPED (${cm.lk.budget.limit}) and says nothing: the clamp rides on the derivation`, JSON.stringify({ ...nums(cm), said: cm.said }));
+  for (const r of copiesCensus(Md.files, Md.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
 }
 
 // ═══ ④ the owner's override ═════════════════════════════════════════════════
@@ -1122,7 +1188,7 @@ console.log('⑥c agent refreshes are a share of the vendor budget; the owner\'s
     seedAccounts(dirS, [['share', 'share']]);
     const SS = { 'channels.budgetShareTestPerMin': 100000 };
     if (sharePct !== null) SS['channels.agentBudgetSharePct'] = sharePct;
-    const { eng: es } = mkEngine(`share-${label}`, { kinds: [ks], settings: SS, now, dataDir: dirS, sessions: [{ cid: 'agent-X', name: 'Xi', groups: [] }] });
+    const { eng: es } = mkEngine(`share-${label}`, { kinds: [ks], settings: SS, now, dataDir: dirS, sessions: [{ cid: 'agent-X', name: 'Xi', groups: [] }], registryOpts: ownKey('share', 'budgetShareTestPerMin', 60) });
     await ingestAll(es, 'share');
     await es.setScopeAssignment('share', { kind: 'account' }, { principal: { kind: 'agent', id: 'agent-X', name: 'Xi' }, mode: 'all', notify: 'digest', digestMinutes: 30 });
     SS['channels.budgetShareTestPerMin'] = 60;
@@ -1148,7 +1214,7 @@ console.log('⑥c agent refreshes are a share of the vendor budget; the owner\'s
   ok(base.hot === 40, `FIXTURE: with no agent the 20 hot rows get 40 timer polls in the minute (${base.hot})`);
   ok(shared.hot >= 0.75 * base.hot, `with an agent looping refreshes over cold rows the hot rows still get ${shared.hot} of ${base.hot} polls (≥ 75 %)`);
   const named = shared.refusals.find((r) => r.code === 'vendor-budget' && r.share);
-  ok(named && /agent refreshes/.test(named.error) && /25 %/.test(named.error) && named.share.pct === 25 && named.share.limit === 15, 'the refusal names the AGENT share (25 % = 15 of 60 requests a minute) and the wait', JSON.stringify(named || shared.refusals[0]));
+  ok(named && /agents' refreshes and fetches/.test(named.error) && /25 %/.test(named.error) && named.share.pct === 25 && named.share.limit === 15, 'the refusal names the AGENT share (25 % = 15 of 60 requests a minute) and the wait', JSON.stringify(named || shared.refusals[0]));
   ok(shared.budgetAt30 && shared.budgetAt30.spentBy && shared.budgetAt30.spentBy.agent === 15 && shared.budgetAt30.spentBy.timer >= 20, 'the budget view says who spent this minute (agent 15, the timer the rest)', JSON.stringify(shared.budgetAt30 && shared.budgetAt30.spentBy));
   // CONTROL (a runtime neuter): the share at 100 % is the pre-fix engine — the agent takes the minute
   const open = await scenario('open', { agent: true, sharePct: 100 });
@@ -1319,7 +1385,7 @@ async function prep6f(ENGmod, cell, label) {
   const dirF = path.join(ROOT, `tab-${label}`);
   seedAccounts(dirF, [['tab', 'tab']]);
   const SF = { 'channels.budgetTabTestPerMin': 100000 };
-  const regF = CH.createChannelRegistry(); regF.register(kf);
+  const regF = CH.createChannelRegistry(ownKey('tab', 'budgetTabTestPerMin', 1000)); regF.register(kf);
   const ef = ENGmod.create({ dataDir: dirF, registry: regF, env: {}, now, broadcast: () => {}, serverSetting: (k) => SF[k], liveSessions: () => SESS, deliver: null, log: quiet });
   await ingestAll(ef, 'tab');
   await ef.setScopeAssignment('tab', { kind: 'account' }, { principal: { kind: 'agent', id: 'agent-A', name: 'Alpha' }, mode: 'all', notify: 'digest', digestMinutes: 30 });
@@ -1638,7 +1704,7 @@ console.log('⑥g the request set under attack: a storm cannot starve the timer,
     const dirB = path.join(ROOT, `atk-cut-${label}`);
     seedAccounts(dirB, [['atk', 'atk']]);
     const SB = { 'channels.budgetCutTestPerMin': 100000 };
-    const regB = CH.createChannelRegistry(); regB.register(kb);
+    const regB = CH.createChannelRegistry(ownKey('atk', 'budgetCutTestPerMin', 100000)); regB.register(kb);
     const eb = ENGx.create({ dataDir: dirB, registry: regB, env: {}, now, broadcast: () => {}, serverSetting: (k) => SB[k], liveSessions: () => SESS, deliver: null, log: quiet });
     await ingestAll(eb, 'atk');
     const b0 = [...Wb.calls.history.values()].reduce((x, v) => x + v, 0);   // the ingest's own calls
@@ -2121,7 +2187,7 @@ console.log('⑧ attachments: nosniff, sandbox, attachment unless a raster image
   // CONCURRENT first fetches of ONE attachment (the blob is written async): each write has its own temp
   // file, every answer is whole, nothing half-written is left behind
   {
-    const h = require('crypto').createHash('sha1').update('c0001-svg').digest('hex');
+    const h = require('crypto').createHash('sha1').update(`${rec.vendorId}\nc0001-svg`).digest('hex');   // verify r1 (channel-attach-read): the cache slot names the message
     for (const f of [h, h + '.json']) fs.unlinkSync(path.join(dir, f));
     const rs = await Promise.all([1, 2, 3].map(() => get('c0001-svg').then(async (r) => ({ status: r.status, body: Buffer.from(await r.arrayBuffer()).toString('hex') }))));
     const left0 = fs.readdirSync(dir);
@@ -2174,7 +2240,8 @@ console.log('⑨ assignment grains reach exactly their sets; ledgers per assignm
   const listA = eng.listFor(A).conversations.filter((c) => c.adapterId === 'many');
   const listB = eng.listFor(B).conversations.map((c) => c.key).sort();
   const listC = eng.listFor(C).conversations.map((c) => c.key);
-  ok(listA.length === 873, 'the ACCOUNT grant makes all 873 visible to Alpha', String(listA.length));
+  const moreA = eng.listFor(A).more;   // design 008 S6 (lane channels-followups): the agent's list is the newest 200 + a count of the rest
+  ok(listA.length === 200 && moreA === 673, 'the ACCOUNT grant makes all 873 visible to Alpha (the newest 200 listed, the other 673 counted)', JSON.stringify({ listed: listA.length, more: moreA }));
   ok(eng.listFor(A).conversations.every((c) => c.adapterId === 'many'), '…and nothing of the other account of the same kind');
   ok(JSON.stringify(listB) === JSON.stringify(gpu) && gpu.length === 18, `the PATTERN reaches EXACTLY its ${gpu.length} matching conversations for Beta`, JSON.stringify(listB.slice(0, 3)));
   ok(listC.length === 1 && listC[0] === 'many/c0001', 'the CONVERSATION grant reaches exactly c0001 for Gamma');

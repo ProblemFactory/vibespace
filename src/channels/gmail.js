@@ -79,11 +79,13 @@
  */
 const { makeRecord, makeConversation } = require('../channel-record.js');
 const { ChannelError, retryAfterSeconds, sentSecrets, withoutSent } = require('./index.js');
+const { CHANNEL_SETTINGS, budgetOf, paceOf } = require('../channel-settings.js');   // B-df40 part 3: the budget + pace rows are DECLARED there (the schema row, the engine bound and this caps all read it)
 const { namelessSentence, looksLikeEmail } = require('../channel-identity.js');   // verify r6: a consent must name its account; r7: an address by the ONE rule
 const { createGmailLive, PUBSUB_SCOPE } = require('./live/gmail.js');
 // §25 (2026-09-27): THE MAIL RUNG — the quoted history folded with its
 // attribution, ticket banners and signatures set apart; `text` stays whole.
 const Blocks = require('../channel-blocks.js');
+const SR = require('../channel-search.js');   // design 010 S6: THE snippet reader + the search bounds (PURE)
 
 const KIND = 'gmail';
 const LABEL = 'Gmail';
@@ -126,6 +128,24 @@ function sendCapsOf(scopes) {
  *  its PROPOSAL without trusting Gmail to keep our Message-ID (R4 verify). */
 const PROPOSAL_HEADER = 'X-VibeSpace-Proposal';
 const API = 'https://gmail.googleapis.com/gmail/v1/users/me';
+/** design 005 §2.B (B-fd1f): the UPLOAD form of drafts.create / messages.send (the same host, declared in EGRESS). Google
+ *  documents a 5 MB cap (5 242 880 bytes) on a JSON request body — the base64url `raw` inside it — and up to 35 MB through
+ *  `/upload/…?uploadType=multipart` (the JSON metadata + the message/rfc822 bytes). A message whose `raw` passes
+ *  JSON_RAW_MAX goes the upload way. NOT measured on the owner's account (a lane makes no live call): set under the
+ *  documented cap, so the JSON form keeps every message it carried before. */
+const UPLOAD_API = 'https://gmail.googleapis.com/upload/gmail/v1/users/me';
+const JSON_RAW_MAX = 4 * 1024 * 1024;
+/** `[pathq, opts]` for a POST carrying `raw` (a base64url RFC 822 message): a DRAFT (drafts.create — the Message
+ *  inside `{message}`) or a Message (messages.send — `raw` at the top), with its thread when it has one — PURE */
+function rawRequest(pathq, raw, { draft = false, threadId = null } = {}) {
+  const thread = threadId ? { threadId } : {};
+  if (String(raw).length <= JSON_RAW_MAX) return [pathq, { json: draft ? { message: { ...thread, raw } } : { ...thread, raw } }];
+  const msg = Buffer.from(String(raw), 'base64url');
+  const b = `vs_upload_${msg.length.toString(36)}`;   // a line of our MIME never starts with `--vs_upload_` (its own boundary is `=_vs_…`, bodies are base64)
+  const meta = draft ? (threadId ? { message: thread } : {}) : thread;
+  const head = `--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${b}\r\nContent-Type: message/rfc822\r\n\r\n`;
+  return [`${pathq}?uploadType=multipart`, { upload: true, raw: { type: `multipart/related; boundary=${b}`, body: Buffer.concat([Buffer.from(head, 'utf-8'), msg, Buffer.from(`\r\n--${b}--\r\n`, 'utf-8')]) } }];
+}
 /** THE DECLARED EGRESS (§3.1). `www.googleapis.com` and `mail.google.com`
  *  are SCOPE identifiers, not request targets — declared because they are
  *  host literals in a file that constructs requests, and the census reads
@@ -194,6 +214,13 @@ const META_PER_LIST = 10;
 const META_TTL_MS = 6 * 60 * 60 * 1000;
 /** Past this many changed threads the memory says "everything changed". */
 const CHANGED_CAP = 5000;
+/** design 010 S6: a full-search page — `messages.list` answers this many ids, each one the person is shown costs ONE
+ *  metadata read, so the page's worst cost is the list + this many reads (the row's `cost`). */
+const SEARCH_PAGE = 10;
+/** verify r1 (V2): the ids page of a caller limited by REACH (an agent's `--full`) — the list's price is the same 5 units
+ *  at any size, the reads stay ≤ SEARCH_PAGE shown hits; only this many NEWER hidden mails holding all its words could
+ *  push a visible hit off the page (at 10, ten did — the hit's absence counted mail the agent may not see). */
+const SEARCH_IDS_NARROW = 100;
 
 const caps = Object.freeze({
   receive: 'push',
@@ -228,10 +255,19 @@ const caps = Object.freeze({
   // (`messages.get` → the part → `attachments.get`), no "older" paging (a
   // thread's first walk is the whole thread), and every request METERED in
   // Gmail's quota units against the account's budget (6000 units/min per
-  // user is the vendor's cap; the default 3000 leaves the other half)
+  // user is the vendor's cap; the default 3000 leaves the other half — the
+  // default and the setting come from the gmail table of src/channel-settings.js)
   attachments: 'fetch',
+  // lane message-facts (B-f066, design 007): the per-message FACTS every record carries from its headers (the closed
+  // kinds of src/channel-facts.js — the contract suite holds every emit to this list), and `factsOf(convId)` — ONE
+  // metadata read of a thread stored before them, asked only by a person's Details click (the engine's `messageFacts`)
+  facts: Object.freeze(['to', 'cc', 'bcc', 'reply-to', 'sender', 'list', 'delivered-to', 'subject', 'importance', 'automated']),
+  factsOf: true,
+  // design 005 §2.B (B-fd1f): an agent's files ride ONE mail (multipart/mixed) with its text — 25 MB together (the
+  // design's bound; Gmail's own limit on the encoded message answers by name if it is lower)
+  sendAttachments: Object.freeze({ maxCount: 10, maxTotalBytes: 25e6, withText: true }),
   olderHistory: 'none',
-  budget: { unit: 'quota-unit', default: 3000, settingKey: 'channels.budgetGmailPerMin', metered: true },
+  budget: { unit: 'quota-unit', metered: true, ...budgetOf(CHANNEL_SETTINGS.gmail) },
   // lane R5 (2026-09-26, the owner: "gmail一直被限速 你可能要控制下gmail默认的读
   // 取速度"): the vendor refused whole passes that stayed under the minute's
   // budget but spent ~2 000–2 800 units in ~20 s (100–200 units/s) — it meters
@@ -240,7 +276,7 @@ const caps = Object.freeze({
   // request awaited on the account's bucket before it is sent. `cost` = what
   // the drain expects one action to charge: a thread read (threads.get 40), a
   // discovery page (threads.list 10 + up to META_PER_LIST metadata reads).
-  pace: { unitsPerSec: 40, settingKey: 'channels.gmailUnitsPerSec', cost: { fetch: 40, discover: 10 + 40 * 10, scanHost: 1 } },
+  pace: { ...paceOf(CHANNEL_SETTINGS.gmail), cost: { fetch: 40, discover: 10 + 40 * 10, scanHost: 1 } },
   vendorName: i18nKey('Google'),
   // lane channel-threads (2026-09-28): the mail THREAD is the conversation (threadKey === convId — kind
   // `conversation`, the window draws nothing new) and mail has no reactions — declared, so no control appears
@@ -248,6 +284,16 @@ const caps = Object.freeze({
   // thread's newest message, `quote` a named one (In-Reply-To / References); nothing is a separate thread
   threads: Object.freeze({ read: 'none', replyInto: false, listing: 'none', placements: Object.freeze(['chat', 'quote']), rootReply: 'quote' }),
   reactions: Object.freeze({ read: 'none', add: false, remove: 'none', vocabulary: 'names', custom: 'none', perMessageMax: null }),
+  // design 010 S6 (B-c9be, lane channels-followups): THE OWNER'S FULL SEARCH over the WHOLE mailbox — `messages.list` with
+  // the words as `q` (all mail but spam and trash: also the threads outside the synced scope, F3's second gap), on a
+  // person's press only; per hit the person will be SHOWN (not held here, inside the caller's reach) ONE
+  // `messages.get format=metadata` for its instant, sender and Gmail's snippet; a hit read in context = its THREAD, read
+  // once (`around`, one threads.get), never stored. Gmail's search matches WORDS (its query language), so `tokens`: the
+  // words say "may be related". `cost` = the page's worst case in quota units (the list + SEARCH_PAGE reads), so the
+  // budget verdict never sends a page the minute cannot pay; 2 pages a press, 6 a sliding minute (≤ 1 230 of 3 000).
+  // A hit ADDS mail the copy here never saved (outside the synced scope, or a reply newer than its stored thread) —
+  // `adds: 'unsaved'`: the words say "not saved here", never "older" (verify r1 F2).
+  search: Object.freeze({ via: 'query', scope: null, pageSize: SEARCH_PAGE, pagesPerPress: 2, perMin: 6, cost: unitsFor('/messages') + SEARCH_PAGE * unitsFor('/messages/id'), snippet: true, context: 'thread', match: 'tokens', adds: 'unsaved' }),
 });
 
 /** THE QUOTA COST of one Gmail API call (units, the vendor's published table
@@ -414,7 +460,7 @@ function walkParts(payload) {
 }
 /** ONE vendor message → ONE ChannelRecord. `selfEmail` is the authorizing
  *  user's address (from `users.getProfile`). */
-function toRecord(adapterId, convId, m, { selfEmail = null, onBody = null } = {}) {
+function toRecord(adapterId, convId, m, { selfEmail = null, onBody = null, threadSubject = null } = {}) {
   const headers = (m.payload && m.payload.headers) || [];
   const from = parseAddress(header(headers, 'From'));
   const parts = walkParts(m.payload);
@@ -438,8 +484,106 @@ function toRecord(adapterId, convId, m, { selfEmail = null, onBody = null } = {}
     threadKey: String(m.threadId || convId),
     raw: { subject, labelIds: Array.isArray(m.labelIds) ? m.labelIds.slice(0, 20) : [], messageId: header(headers, 'Message-ID') || null, to: header(headers, 'To') || null },
     blocks: Blocks.emailToBlocks(text, { subject, attachments: parts.attachments }),
+    // lane message-facts (B-f066): the envelope — To / Cc / Bcc (own sent mail) / Reply-To / Sender / List-Id /
+    // Delivered-To / Subject / Importance / Automated — from the headers `format=full` already carries (`raw.to` stays)
+    facts: factsFromHeaders(headers, { selfEmail, threadSubject, sent: sentLabel(m) }),
   });
 }
+
+// ── a message's FACTS from its headers (lane message-facts, B-f066 — design 007 "Gmail now"; PURE) ─────────
+/** RFC 2047 encoded-words left in a display name (`=?UTF-8?B?…?=`, `=?ISO-8859-1?Q?…?=`) decoded — Gmail's API hands
+ *  most names decoded, a malformed or an unusual charset one is not. Whitespace between two encoded-words is dropped
+ *  (§6.2); an unknown charset or a broken word stays as written. ONE pass, bounded quantifiers (linear). */
+const ENC_WORD_RE = /=\?([A-Za-z0-9_.:-]{1,40})(?:\*[A-Za-z-]{1,20})?\?([BbQq])\?([^?\s]{0,1000})\?=/g;
+function decodeWords(v) {
+  const s = String(v == null ? '' : v);
+  if (!s.includes('=?')) return s;
+  return s.replace(/(\?=)[ \t]+(?==\?)/g, '$1').replace(ENC_WORD_RE, (m, cs, enc, txt) => {
+    try {
+      const bytes = /b/i.test(enc) ? Buffer.from(txt, 'base64') : Buffer.from(txt.replace(/_/g, ' ').replace(/=([0-9A-Fa-f]{2})/g, (x, h) => String.fromCharCode(parseInt(h, 16))), 'latin1');
+      return new TextDecoder(cs.toLowerCase(), { fatal: false }).decode(bytes);
+    } catch { return m; }
+  });
+}
+/** An address header as PARTIES (`addressList` + `addressParts` — never the last `<` of a comment): each `{id: the
+ *  address, lower-cased, name: the decoded display words, self}`; `null` = no header; a header over ADDRESS_LIST_MAX is
+ *  the fact with no parties and `cut: true` ("too long to list") — refused, never a parse of a megabyte. */
+function partiesOfHeader(v, self) {
+  if (!v) return null;
+  const list = addressList(v);
+  if (list === null) return { v: [], cut: true };
+  const v2 = [];
+  for (const item of list) {
+    const { addr, words } = addressParts(item);
+    if (!addr) continue;
+    const id = addr.toLowerCase();
+    v2.push({ id, name: decodeWords(words) || id, ...(self && id === self ? { self: true } : {}) });
+  }
+  return v2.length ? { v: v2 } : null;
+}
+const IMPORTANCE = Object.freeze({ high: 'high', low: 'low', urgent: 'urgent', 'non-urgent': 'low' });
+/** Importance / Priority / X-Priority → low | high | urgent (normal ⇒ none). */
+function importanceOf(headers) {
+  const imp = IMPORTANCE[header(headers, 'Importance').trim().toLowerCase()];
+  if (imp) return imp;
+  const pri = header(headers, 'Priority').trim().toLowerCase();
+  if (pri === 'urgent') return 'urgent';
+  if (pri === 'non-urgent') return 'low';
+  const x = /^\s*([1-5])\b/.exec(header(headers, 'X-Priority').slice(0, 64));
+  if (x) return x[1] === '1' || x[1] === '2' ? 'high' : x[1] === '4' || x[1] === '5' ? 'low' : null;
+  return null;
+}
+/** Auto-Submitted / Precedence → auto-reply | bulk | notification (a person's own mail ⇒ none). */
+function automatedOf(headers) {
+  const a = header(headers, 'Auto-Submitted').trim().toLowerCase().slice(0, 64);
+  if (a.startsWith('auto-replied')) return 'auto-reply';
+  if (a.startsWith('auto-generated') || a.startsWith('auto-notified')) return 'notification';
+  const p = header(headers, 'Precedence').trim().toLowerCase().slice(0, 64);
+  if (p === 'auto_reply') return 'auto-reply';
+  if (p === 'bulk' || p === 'list' || p === 'junk') return 'bulk';
+  return null;
+}
+/**
+ * THE FACTS OF ONE MAIL from its headers (PURE): `to`, `cc`, `bcc` (ONLY on mail the account itself sent — From is the
+ * account), `reply-to`, `sender` (when it is not From: "sent by … for …"), `list` (List-Id's id), `delivered-to` (when it
+ * is not the account's own address — an alias), `subject` (when it differs from the thread's, `threadSubject`; Re: /
+ * Fwd: prefixes do not count), `importance`, `automated`. `self: true` marks the account's own address. Every string is
+ * judged again by `validateFacts` (the record's door) — this reads, it does not trust.
+ */
+function factsFromHeaders(headers, { selfEmail = null, threadSubject = null, sent = null } = {}) {
+  const h = Array.isArray(headers) ? headers : [];
+  const self = selfEmail ? String(selfEmail).toLowerCase() : null;
+  const out = [];
+  const from = partiesOfHeader(header(h, 'From'), self);
+  const fromId = from && from.v && from.v[0] ? from.v[0].id : null;
+  // verify r1 F2: From is a STRANGER's word — inbound mail that spoofs From = the account carried its own Bcc header onto
+  // the window and the agent's read. Our own sent mail is the mail Gmail labels SENT (`sent`: the message's labels, both
+  // reads carry them); From = the account decides alone only when the labels are unknown (`sent` null)
+  const ours = !!self && fromId === self && sent !== false;
+  for (const [k, name] of [['to', 'To'], ['cc', 'Cc'], ['bcc', 'Bcc'], ['reply-to', 'Reply-To']]) {
+    if (k === 'bcc' && !ours) continue;
+    const p = partiesOfHeader(header(h, name), self);
+    if (p) out.push({ k, ...p });
+  }
+  const sender = partiesOfHeader(header(h, 'Sender'), self);
+  if (sender && sender.v && sender.v[0] && sender.v[0].id !== fromId) out.push({ k: 'sender', v: sender.v[0] });
+  const lid = header(h, 'List-Id').slice(0, ADDRESS_MAX).trim();
+  if (lid) { const m = /<([^<>]{1,255})>/.exec(lid); out.push({ k: 'list', v: (m ? m[1] : lid).trim() }); }
+  const dto = partiesOfHeader(header(h, 'Delivered-To'), self);
+  if (dto && dto.v && dto.v[0] && !dto.v[0].self) out.push({ k: 'delivered-to', v: dto.v[0] });
+  const subject = header(h, 'Subject');
+  const same = (x) => String(x).replace(/^(?:\s*(?:re|fwd?|aw|sv|wg|回复|答复|转发)\s*[:：])+/i, '').replace(/\s+/g, ' ').trim().toLowerCase();   // "RE: plan" is the thread "Plan"
+  if (subject && threadSubject && same(subject) !== same(threadSubject)) out.push({ k: 'subject', v: subject });
+  const imp = importanceOf(h);
+  if (imp) out.push({ k: 'importance', v: imp });
+  const auto = automatedOf(h);
+  if (auto) out.push({ k: 'automated', v: auto });
+  return out;
+}
+/** verify r1 F2: Gmail's SENT label of a message — true / false, null when the message carries no label list. */
+const sentLabel = (m) => (m && Array.isArray(m.labelIds) ? m.labelIds.includes('SENT') : null);
+/** The headers a stored thread's facts are read from (`factsOf` — one `format=metadata` read). */
+const FACT_HEADERS = Object.freeze(['Subject', 'From', 'To', 'Cc', 'Bcc', 'Reply-To', 'Sender', 'List-Id', 'Delivered-To', 'Importance', 'Priority', 'X-Priority', 'Auto-Submitted', 'Precedence']);
 /** §25: the render tree of a record stored BEFORE this layer (read time —
  *  the store is never rewritten): the same mail rung over its `text`. */
 function blocksOf(record) {
@@ -457,7 +601,7 @@ function encodeHeader(s) {
  * THE MIME the draft carries: text/plain, base64, CRLF; From/To/Cc/Subject and
  * the two threading headers when the anchor has a Message-ID. PURE.
  */
-function buildMime({ from = null, to, cc = null, subject = '', inReplyTo = null, references = null, messageId = null, text = '', extraHeaders = null } = {}) {
+function buildMime({ from = null, to, cc = null, subject = '', inReplyTo = null, references = null, messageId = null, text = '', extraHeaders = null, attachments = null } = {}) {
   const lines = [];
   if (from) lines.push(`From: ${encodeHeader(from)}`);
   lines.push(`To: ${encodeAddressHeader(to)}`);
@@ -469,8 +613,30 @@ function buildMime({ from = null, to, cc = null, subject = '', inReplyTo = null,
   for (const [k, v] of Object.entries(extraHeaders && typeof extraHeaders === 'object' ? extraHeaders : {})) if (/^X-[A-Za-z0-9-]+$/.test(k) && v != null) lines.push(`${k}: ${String(v).replace(/[\r\n]+/g, ' ').slice(0, 200)}`);
   if (inReplyTo) lines.push(`In-Reply-To: ${String(inReplyTo).replace(/[\r\n]+/g, ' ')}`);
   if (references) lines.push(`References: ${String(references).replace(/[\r\n]+/g, ' ')}`);
-  lines.push('MIME-Version: 1.0', 'Content-Type: text/plain; charset="UTF-8"', 'Content-Transfer-Encoding: base64', '');
-  lines.push(Buffer.from(String(text == null ? '' : text), 'utf-8').toString('base64').replace(/(.{76})/g, '$1\r\n'));
+  const b64 = (buf) => buf.toString('base64').replace(/(.{76})/g, '$1\r\n');
+  const body = b64(Buffer.from(String(text == null ? '' : text), 'utf-8'));
+  const files = Array.isArray(attachments) ? attachments.filter((a) => a && Buffer.isBuffer(a.data)) : [];
+  if (!files.length) {
+    lines.push('MIME-Version: 1.0', 'Content-Type: text/plain; charset="UTF-8"', 'Content-Transfer-Encoding: base64', '');
+    lines.push(body);
+    return lines.join('\r\n');
+  }
+  // design 005 §2.B (B-fd1f): multipart/mixed — the text part as above, then one part per file: the SNIFFED type, an
+  // attachment disposition with an ASCII fallback name and the RFC 2231 `filename*` (continued in ≤ 60-character pieces,
+  // so no line passes RFC 5322's 998), base64 in 76-column lines. No header value carries a control character; the
+  // boundary holds `_`, which a base64 line never does.
+  const boundary = `=_vs_${files.map((f) => String(f.sha256 || '').replace(/[^0-9a-f]/g, '').slice(0, 8)).join('').slice(0, 40)}_${files.length}`;
+  lines.push('MIME-Version: 1.0', `Content-Type: multipart/mixed; boundary="${boundary}"`, '', `--${boundary}`, 'Content-Type: text/plain; charset="UTF-8"', 'Content-Transfer-Encoding: base64', '', body);
+  for (const f of files) {
+    const name = String(f.name || 'attachment').replace(/\p{Cc}+/gu, ' ').slice(0, 200);
+    const ascii = name.replace(/[^ -~]/g, '_').replace(/["\\]/g, '_');
+    const star = encodeURIComponent(name).replace(/['()*!]/g, (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`);
+    const pieces = star.match(/(?:%[0-9A-F]{2}|[^%]){1,60}/g) || [''];
+    const ext = pieces.length === 1 ? `filename*=UTF-8''${star}` : pieces.map((x, i) => `filename*${i}*=${i === 0 ? "UTF-8''" : ''}${x}`).join(';\r\n ');
+    const type = /^[a-z0-9][a-z0-9.+-]*\/[a-z0-9][a-z0-9.+-]*$/.test(String(f.mime || '')) ? f.mime : 'application/octet-stream';
+    lines.push(`--${boundary}`, `Content-Type: ${type}; name="${ascii}"`, `Content-Disposition: attachment; filename="${ascii}";\r\n ${ext}`, 'Content-Transfer-Encoding: base64', '', b64(f.data));
+  }
+  lines.push(`--${boundary}--`, '');
   return lines.join('\r\n');
 }
 /** An address-list header (To / Cc / Reply-To) as its addresses, each kept as written (PURE), by RFC 5322's grammar:
@@ -621,15 +787,15 @@ function typedFailure(status, body, what, retryAfterSec = null) {
   if (status >= 500) return new ChannelError('transport', `${what}: ${msg} (${status})`, { retryable: true, detail: { status, ...(Number.isFinite(retryAfterSec) && retryAfterSec > 0 ? { retryAfterSec } : {}) } });
   return new ChannelError('vendor-error', `${what}: ${msg} (${status})`, { retryable: false, detail: { status, reason } });
 }
-async function callJson(fetchFn, url, { method = 'GET', headers = {}, form = null, json = null, what = 'gmail', signal = null } = {}) {
+async function callJson(fetchFn, url, { method = 'GET', headers = {}, form = null, json = null, raw = null, what = 'gmail', signal = null } = {}) {
   // client-from-mount verify r4: what this request CARRIES in its secret fields (the client secret, a refresh
   // token, the Bearer) never comes back in a refusal's words — scrubbed by exact value before the error is built
   const sent = sentSecrets({ fields: form || json, headers });
   let r;
   try {
     r = await fetchFn(url, {
-      method, headers: { Accept: 'application/json', ...(form ? { 'Content-Type': 'application/x-www-form-urlencoded' } : json != null ? { 'Content-Type': 'application/json; charset=utf-8' } : {}), ...headers },
-      body: form ? new URLSearchParams(form).toString() : json != null ? JSON.stringify(json) : undefined,
+      method, headers: { Accept: 'application/json', ...(raw ? { 'Content-Type': raw.type } : form ? { 'Content-Type': 'application/x-www-form-urlencoded' } : json != null ? { 'Content-Type': 'application/json; charset=utf-8' } : {}), ...headers },
+      body: raw ? raw.body : form ? new URLSearchParams(form).toString() : json != null ? JSON.stringify(json) : undefined,
       signal: signal || AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (e) {
@@ -841,7 +1007,7 @@ function create(record = {}, deps = {}) {
     await pace(units);   // lane R5: the per-SECOND shape — the bucket holds this request's cost (or is full) before it goes
     meter(units);        // …charged the moment it is sent, no await in between
     if (bearerExpired()) at = await accessToken();   // verify r5: the bearer EXPIRED while the request waited — one refresh before the send, never an expired bearer on the wire
-    return callJson(fetchFn, `${API}${pathq}`, { ...opts, headers: { Authorization: `Bearer ${bearerNow(at)}`, ...(opts.headers || {}) } });
+    return callJson(fetchFn, `${opts.upload ? UPLOAD_API : API}${pathq}`, { ...opts, headers: { Authorization: `Bearer ${bearerNow(at)}`, ...(opts.headers || {}) } });
   };
   const selfEmail = () => { const t = readToken().token; return (t && t.email) || mailbox.self || null; };
   /** D2 (lane channel-rich): the formatted bodies read at ingest, held until the engine takes them —
@@ -1102,8 +1268,25 @@ function create(record = {}, deps = {}) {
       // B-a085: `all` is ECHOED — the engine refuses a reply-all whose answer does not say it resolved everyone
       return { anchorId: String(anchor.id), to: h.to, cc: h.cc, subject: h.subject, inReplyTo: h.inReplyTo, references: h.references, ...(h.all ? { all: true } : {}) };
     },
+    /**
+     * THE FACTS OF A STORED THREAD (lane message-facts, B-f066): ONE `threads.get?format=metadata` through the gate (the
+     * read `anchorThread` makes, with the fact headers) → `{facts: {[messageId]: [...]}}` for EVERY message of the thread.
+     * Asked only by the engine's `messageFacts` — a person's Details click on a message stored before its facts (never at
+     * ingest, never by an agent's read); the engine writes the answer to the side log once.
+     */
+    async factsOf(convId) {
+      const q = FACT_HEADERS.map((x) => `metadataHeaders=${encodeURIComponent(x)}`).join('&');
+      const t = await api(`/threads/${encodeURIComponent(convId)}?format=metadata&${q}`, { what: 'gmail thread facts' });
+      const msgs = (Array.isArray(t.messages) ? t.messages : []).filter((m) => m && m.id)
+        .sort((a, b) => (Number(a.internalDate) || 0) - (Number(b.internalDate) || 0) || String(a.id).localeCompare(String(b.id)));
+      const threadSubject = msgs.length ? header(msgs[0].payload && msgs[0].payload.headers, 'Subject') || null : null;
+      const self = selfEmail();
+      const out = {};
+      for (const m of msgs.slice(0, 500)) out[String(m.id)] = factsFromHeaders(m.payload && m.payload.headers, { selfEmail: self, threadSubject, sent: sentLabel(m) });
+      return { facts: out };
+    },
 
-    async send(convId, { text, replyTo = null, idemKey, as = 'user', onHandle = null, envelope = null } = {}) {
+    async send(convId, { text, replyTo = null, idemKey, as = 'user', onHandle = null, envelope = null, attachments = null } = {}) {
       if (as !== 'user') throw new ChannelError('send-not-available', `gmail: sending as '${as}' is not declared (caps.sendAs: user)`, { retryable: false, detail: { sendAs: caps.sendAs } });
       if (!hasReplyScope()) throw new ChannelError('forbidden', 'gmail: the held token carries no scope covering drafts + sending (gmail.compose) — reconnect to request it', { retryable: false, detail: { why: 'send-scope-not-granted', held: heldVerbs() } });
       // r6 verify F3: the recipients were decided when the reply was PROPOSED and shown on the card; nothing is
@@ -1117,9 +1300,10 @@ function create(record = {}, deps = {}) {
       if (!anchor) throw new ChannelError('not-found', `gmail: the message this reply answers (${env.anchorId}) is no longer in thread ${convId} — nothing was sent`, { retryable: false, detail: { why: 'reply-anchor-gone', anchorId: String(env.anchorId) } });
       const self = selfEmail();
       const h = { to: String(env.to), cc: env.cc ? String(env.cc) : null, subject: String(env.subject || ''), inReplyTo: env.inReplyTo || null, references: env.references || null };
-      const raw = Buffer.from(buildMime({ from: self, to: h.to, cc: h.cc, subject: h.subject, inReplyTo: h.inReplyTo, references: h.references, text }), 'utf-8').toString('base64url');
+      const raw = Buffer.from(buildMime({ from: self, to: h.to, cc: h.cc, subject: h.subject, inReplyTo: h.inReplyTo, references: h.references, text, attachments }), 'utf-8').toString('base64url');
+      const [draftPath, draftBody] = rawRequest('/drafts', raw, { draft: true, threadId: convId });
       let d;
-      try { d = await api('/drafts', { method: 'POST', what: 'gmail draft create', json: { message: { threadId: convId, raw } } }); }
+      try { d = await api(draftPath, { method: 'POST', what: 'gmail draft create', ...draftBody }); }
       catch (e) {
         if (e instanceof ChannelError && e.code === 'transport') throw new ChannelError('transport', `${e.message} — nothing was sent (a stray draft may exist)`, { retryable: true, detail: { ...(e.detail || {}), phase: 'draft', draftMayExist: true } });
         throw e;
@@ -1157,7 +1341,7 @@ function create(record = {}, deps = {}) {
      * attempt (R4 verify: the idempotency never depends on the Message-ID
      * surviving). A transport failure after the request left is `detail.lost`.
      */
-    async compose({ to = [], cc = [], subject = '', text, idemKey, as = 'user', onHandle = null } = {}) {
+    async compose({ to = [], cc = [], subject = '', text, idemKey, as = 'user', onHandle = null, attachments = null } = {}) {
       if (as !== 'user') throw new ChannelError('send-not-available', `gmail: sending as '${as}' is not declared (caps.sendAs: user)`, { retryable: false, detail: { sendAs: caps.sendAs } });
       if (!hasComposeScope()) throw new ChannelError('forbidden', 'gmail: the held token carries no scope covering sending (gmail.compose) — reconnect to request it', { retryable: false, detail: { why: 'send-scope-not-granted', held: heldVerbs() } });
       const self = selfEmail();
@@ -1167,11 +1351,12 @@ function create(record = {}, deps = {}) {
       const ccList = (Array.isArray(cc) ? cc : [cc]).filter(Boolean);
       if (!toList.length) throw new ChannelError('vendor-error', 'gmail: a new message needs at least one recipient', { retryable: false });
       const proposalHeader = String(idemKey || '').replace(/[^A-Za-z0-9._-]/g, '').slice(0, 120) || null;
-      const raw = Buffer.from(buildMime({ from: self, to: toList.join(', '), cc: ccList.length ? ccList.join(', ') : null, subject, messageId, text, extraHeaders: proposalHeader ? { [PROPOSAL_HEADER]: proposalHeader } : null }), 'utf-8').toString('base64url');
+      const raw = Buffer.from(buildMime({ from: self, to: toList.join(', '), cc: ccList.length ? ccList.join(', ') : null, subject, messageId, text, extraHeaders: proposalHeader ? { [PROPOSAL_HEADER]: proposalHeader } : null, attachments }), 'utf-8').toString('base64url');
       const handle = { messageIdHeader: messageId, proposalHeader, to: toList[0], at: now(), compose: true };
       if (typeof onHandle === 'function') await onHandle(handle);
       let s2;
-      try { s2 = await api('/messages/send', { method: 'POST', what: 'gmail send (new message)', json: { raw } }); }
+      const [sendPath, sendBody] = rawRequest('/messages/send', raw);
+      try { s2 = await api(sendPath, { method: 'POST', what: 'gmail send (new message)', ...sendBody }); }
       catch (e) {
         if (e instanceof ChannelError && e.code === 'transport') throw new ChannelError('transport', `${e.message} — the send request left and the answer was lost`, { retryable: true, detail: { ...(e.detail || {}), lost: true, phase: 'send', handle } });
         throw e;
@@ -1295,13 +1480,84 @@ function create(record = {}, deps = {}) {
       const drained = page.length === pending.length;
       if (drained) { if (mailbox.changed.delete(convId)) persistCursor(); mailbox.walked.add(convId); threads.delete(convId); }
       const self = selfEmail();
+      const threadSubject = msgs.length ? header(msgs[0].payload && msgs[0].payload.headers, 'Subject') || null : null;   // lane message-facts: a message's own subject is a fact only when it differs
       return {
-        records: page.map((m) => toRecord(adapterId, convId, m, { selfEmail: self, onBody: holdBody })),
+        records: page.map((m) => toRecord(adapterId, convId, m, { selfEmail: self, onBody: holdBody, threadSubject })),
         anchor: page.length ? String(page[page.length - 1].id) : (anchor || (msgs.length ? String(msgs[msgs.length - 1].id) : null)),
         reachedAnchor: drained,
         complete: drained,
         changed: hint(),
       };
+    },
+
+    /**
+     * THE OWNER'S FULL SEARCH, ONE PAGE (design 010 S6): `messages.list` with the words as `q` over the WHOLE mailbox
+     * (never the record's scope query — the point is the mail outside it), ≤ SEARCH_PAGE ids on its `pageToken`. The
+     * answer is judged as a page (not an object, a `messages` that is not a list, more ids than a page ⇒ refused). Then
+     * the engine's two HINTS per id, BEFORE any read: `shows(convId)` false — the caller may not see that thread ⇒
+     * dropped, NO read of any kind (an agent's `--full`: neither the vendor's units nor the local log, so no timing
+     * counts it); `storedAt(convId, vendorId)` > 0 — the local copy holds it ⇒ the hit at its stored instant, NO read
+     * (section one shows it; the merge drops it).
+     * Every other id = ONE `messages.get format=metadata` (From only): the instant (`internalDate`), the sender's address
+     * and Gmail's `snippet` through THE ONE snippet reader (`SR.snippetOf`: cut, markup, entities, the name door, ≤ 400).
+     * A message gone between the list and its read (404) is counted malformed; a RATE refusal re-throws (the engine
+     * backs the account's search off).
+     */
+    async search({ query, pageToken = null, storedAt = null, shows = null } = {}) {
+      // verify r1 (V2): a caller limited by reach (`shows`) asks WORDS — each one quoted, so Gmail's operators are inert
+      // (`OR`, `from:`, `after:`, `label:` …): with them `(from:x after:y) OR <a word of a visible mail>` made that mail's
+      // place on the page count the hidden mail the operators named. Its ids page is wide (SEARCH_IDS_NARROW, same price).
+      const narrow = typeof shows === 'function';
+      const words = String(query || '').trim().slice(0, SR.QUERY_MAX);
+      const q = narrow ? words.split(/\s+/).map((w) => w.replace(/"/g, '')).filter(Boolean).map((w) => `"${w}"`).join(' ') : words;
+      if (!q) return { hits: [], next: null, malformed: 0 };
+      const max = narrow ? SEARCH_IDS_NARROW : SEARCH_PAGE;
+      const p = new URLSearchParams({ q, maxResults: String(max) });
+      if (pageToken) p.set('pageToken', String(pageToken));
+      const d = await api(`/messages?${p}`, { what: 'gmail message search' });
+      const envelope = (field, why) => new ChannelError('vendor-error', `gmail message search: ${why} — not a search page`, { retryable: true, detail: { envelope: field } });
+      if (!d || typeof d !== 'object' || Array.isArray(d)) throw envelope('body', 'the answer is not an object');
+      if (d.messages !== undefined && d.messages !== null && !Array.isArray(d.messages)) throw envelope('messages', 'messages is not a list');
+      const items = Array.isArray(d.messages) ? d.messages : [];
+      if (items.length > max) throw new ChannelError('vendor-error', `gmail full search: ${items.length} messages for a page of ${max} — maxResults ignored`, { retryable: false, detail: { contract: 'page-size' } });
+      const next = !narrow && typeof d.nextPageToken === 'string' && d.nextPageToken ? d.nextPageToken : null;
+      const idOk = (v) => typeof v === 'string' && v.length > 0 && v.length <= 256 && /^[A-Za-z0-9_-]+$/.test(v);
+      const hits = [];
+      let malformed = 0;
+      for (const it of items) {
+        if (hits.length >= SEARCH_PAGE) break;   // a page shows ≤ SEARCH_PAGE hits (≤ that many reads) whatever the ids page
+        if (!it || !idOk(it.id) || !idOk(it.threadId)) { malformed++; continue; }
+        if (typeof shows === 'function' && !shows(it.threadId)) continue;
+        const held = typeof storedAt === 'function' ? Number(storedAt(it.threadId, it.id)) || 0 : 0;
+        if (held > 0) { hits.push({ convId: it.threadId, vendorId: it.id, at: held, fromId: null, threadKey: null, snippet: null }); continue; }
+        let m;
+        try { m = await api(`/messages/${encodeURIComponent(it.id)}?format=metadata&metadataHeaders=From`, { what: 'gmail search hit' }); }
+        catch (e) { if (e && e.code === 'rate-limited') throw e; if (!(e instanceof ChannelError && e.code === 'not-found')) throw e; malformed++; continue; }
+        const at = Number(m && m.internalDate) || 0;
+        if (!(at > 0) || String((m && m.threadId) || it.threadId) !== it.threadId) { malformed++; continue; }
+        const from = parseAddress(header(m.payload && m.payload.headers, 'From'));
+        hits.push({ convId: it.threadId, vendorId: it.id, at, fromId: from.id || null, threadKey: null, snippet: SR.snippetOf(typeof m.snippet === 'string' ? m.snippet : null) });
+      }
+      return { hits, next, malformed };
+    },
+
+    /**
+     * A HIT IN CONTEXT (design 010 S6, `context: 'thread'`): the mail's THREAD, read once (`threads.get format=full`,
+     * the history's own read, 40 units) — no memo, no title cache, no formatted body held: the caller shows the records
+     * for the dialog's life and stores nothing (F8). Ordered by (internalDate, id), ≤ SR.AROUND_MAX centred on the hit
+     * (by its id, else the first message at or after its instant).
+     */
+    async around(convId, { vendorId = null, at = null } = {}) {
+      const t = await api(`/threads/${encodeURIComponent(convId)}?format=full`, { what: 'gmail thread around' });
+      const msgs = (t && Array.isArray(t.messages) ? t.messages : []).filter((m) => m && m.id && String(m.threadId || convId) === String(convId))
+        .sort((a, b) => (Number(a.internalDate) || 0) - (Number(b.internalDate) || 0) || String(a.id).localeCompare(String(b.id)));
+      let i = msgs.findIndex((m) => String(m.id) === String(vendorId));
+      const target = i >= 0;
+      if (i < 0) i = Math.max(0, msgs.findIndex((m) => (Number(m.internalDate) || 0) >= Number(at)));
+      const from = Math.max(0, Math.min(i - Math.floor(SR.AROUND_MAX / 2) + 1, msgs.length - SR.AROUND_MAX));
+      const win = msgs.slice(from, from + SR.AROUND_MAX);
+      const self = selfEmail();
+      return { records: win.map((m) => toRecord(adapterId, convId, m, { selfEmail: self })), requests: 1, facts: { before: Math.max(0, i - from), after: Math.max(0, from + win.length - i - 1), target } };
     },
 
     /**
@@ -1370,5 +1626,7 @@ module.exports = {
   kind: KIND, caps, create, adapter, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS, UNGATED, RATE_OK,
   EGRESS, SCOPE, SCOPE_SEND, SCOPE_COMPOSE, SCOPE_MODIFY, SCOPE_MAIL, sendVerbsOf, PROPOSAL_HEADER, PUBSUB_SCOPE, TOKEN_URL, AUTH_URL, API, MAILBOX_MEMO_MS, THREAD_MEMO_MS, META_PER_LIST, unitsFor, queryOf, scopeOf, effectiveOptions,
   toRecord, walkParts, parseAddress, addressList, stripHtml, typedFailure, buildMime, replyHeaders, encodeHeader, encodeAddressHeader,
+  rawRequest, JSON_RAW_MAX, UPLOAD_API,   // design 005 §2.B: the upload form past the JSON body's cap
   blocksOf, sendCapsOf,
+  factsFromHeaders, decodeWords, FACT_HEADERS,   // lane message-facts (B-f066)
 };

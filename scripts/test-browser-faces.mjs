@@ -36,7 +36,7 @@ console.log('① the faces are named for who drives them — labels at their sou
   const mn = read('src/lib/mobile-nav.js');
   const sheet = /_showCreateSheet\(\) \{([\s\S]*?)\n  \}/.exec(mn)?.[1] || '';
   ok(/row\(UI_ICONS\.globe, t\('Web view'\), \(\) => app\.openBrowser\(\)\)/.test(sheet), "phone '+' sheet: the globe row is 'Web view'");
-  ok(/const APPS_ICON = getCommand\('desktopApps\.open'\)\?\.icon \|\| UI_ICONS\.monitor;/.test(sheet) && /if \(app\._desktopAppsAvailable\) items\.push\(row\(APPS_ICON, t\('Desktop app…'\), \(\) => runCommand\('desktopApps\.open', \{ app \}\)\)\);/.test(sheet), "phone '+' sheet: 'Desktop app…' gated on the desktop-apps probe, through the one command");
+  ok(/const APPS_ICON = getCommand\('desktopApps\.open'\)\?\.icon \|\| UI_ICONS\.monitor;/.test(sheet) && /if \(app\._desktopAppsAvailable\) items\.push\(row\(APPS_ICON, t\('Apps…'\), \(\) => runCommand\('desktopApps\.open', \{ app \}\)\)\);/.test(sheet), "phone '+' sheet: 'Apps…' (design 009 §B6: one word) gated on the desktop-apps probe, through the one command");
   ok(/if \(app\._browserProfiles\) items\.push\(row\(UI_ICONS\.browserLive, t\('Agent browser'\), \(\) => this\._openAgentBrowser\(\)\)\);/.test(sheet), "phone '+' sheet: 'Agent browser' gated on the profile digest, on the window-with-a-dot");
   const pick = /_openAgentBrowser\(\) \{([\s\S]*?)\n  \}/.exec(mn)?.[1] || '';
   ok(/app\.sessions\??\.get\??\.?\(app\.wm\.activeWindowId\)/.test(pick) && /s\.browserKey && !s\.host/.test(pick) && /openBrowserLive\(\{ sessionId: /.test(pick) && /_sheet\(/.test(pick) && /openBrowserProfiles\(\)/.test(pick),
@@ -47,15 +47,15 @@ console.log('① the faces are named for who drives them — labels at their sou
   ok(/const brSec = section\(t\('Agent browser'\)\);/.test(sp) && /brBtn\.textContent = t\('Agent browser profile…'\);/.test(sp), "Session Properties: the section is 'Agent browser'");
   const ss = read('src/lib/settings-schema.js');
   const cats = [...ss.matchAll(/category: t\('([^']+)'\), liveApply: true/g)].map((m) => m[1]);
-  ok(!/category: t\('Browser'\)/.test(ss) && ss.split("category: t('Agent browser')").length - 1 === 24, `Settings: the 24 agent-browser rows sit in category 'Agent browser' (none left in 'Browser'; ${cats.filter((c) => c === 'Agent browser').length} counted — 12 + MULTIVIEW's browser.defaultPerConversationCap / browser.idleReleaseAfterTurnMs + lane S4's browser.fitPageToView + 2026-09-27's browser.traceBytesPerProfile + B-6ae8's browser.humanKeepMs + lane headless-fallback's browser.noDisplayMode + lane browser-propose's browser.automationFlag + lane browser-resume's browser.keepConversationBrowser / keptBytesPerConversation / keptBytesTotal + lane browser-admin's browser.cli + lane browser-windows's browser.maxRunning)`);
-  ok(/^  t\('Agent browser'\),$/m.test(ss) && !/^  t\('Browser'\),$/m.test(ss) && /categories: \[t\('Integration'\), t\('Channels'\), t\('Background Work'\), t\('Agent browser'\)\]/.test(ss), 'Settings: SETTINGS_CATEGORIES and the Services group name the renamed category');
+  ok(!/category: t\('Browser'\)/.test(ss) && ss.split("category: t('Agent browser')").length - 1 === 23, `Settings: the 23 agent-browser rows (window.realDesktopTargets moved to Desktop apps, 2.369.202) sit in category 'Agent browser' (none left in 'Browser'; ${cats.filter((c) => c === 'Agent browser').length} counted — 12 + MULTIVIEW's browser.defaultPerConversationCap / browser.idleReleaseAfterTurnMs + lane S4's browser.fitPageToView + 2026-09-27's browser.traceBytesPerProfile + B-6ae8's browser.humanKeepMs + lane headless-fallback's browser.noDisplayMode + lane browser-propose's browser.automationFlag + lane browser-resume's browser.keepConversationBrowser / keptBytesPerConversation / keptBytesTotal + lane browser-admin's browser.cli + lane browser-windows's browser.maxRunning)`);
+  ok(/^  t\('Agent browser'\),$/m.test(ss) && !/^  t\('Browser'\),$/m.test(ss) && /categories: \[t\('Integration'\), t\('Channels'\), t\('Background Work'\), t\('Agent browser'\), t\('Desktop apps'\)\]/.test(ss), 'Settings: SETTINGS_CATEGORIES and the Services group name the renamed category');
   ok(/'toolbar\.showBrowserButton': \{\s*type: 'boolean', default: true, label: t\('Show Web view button'\)/.test(ss) && /'browser\.isolateSessions'/.test(ss), "Settings: the toolbar row reads 'Show Web view button' (keys toolbar.showBrowserButton / browser.* unchanged)");
   ok(/\{ id: 'btn-browser',\s+label: 'Web view button',\s+hideKey: 'toolbar\.showBrowserButton'/.test(read('src/lib/customize-mode.js')), "customize mode names the element 'Web view button'");
   ok(/check\(t\('Web view button'\), s\.get\('toolbar\.showBrowserButton'\)\)/.test(read('src/lib/app.js')), "the toolbar context menu's toggle reads 'Web view button'");
   const dl = read('src/lib/desktop-app-launcher.js');
   ok(/you drive with your mouse and keyboard — agents cannot see it unless you share it\./.test(dl), "Apps dialog intro says who operates it: you, with mouse and keyboard; agents cannot see it unless you share it (desktop lane E, D1)");
   ok(/escHtml\(row\.browser && !isLaunching && !unavailable \? `\$\{t\('Browser app'\)\} · \$\{sub\}` : sub\)/.test(dl), "Apps catalog card: 'Browser app ·' sub-label gated on row.browser (a startable browser row — a dimmed one keeps only its short reason, the B-bfe6 Browsers section's layout)");
-  ok(!/Settings → Browser'/.test(dl) && dl.split("t('Off — turn it on in Settings → Agent browser')").length - 1 === 3, "Apps dialog's desktop-consent pointer names Settings → Agent browser (three sites)");
+  ok(!/Settings → Browser'/.test(dl) && dl.split("t('Off — turn it on in Settings → Desktop apps')").length - 1 === 2, "Apps dialog's desktop-consent pointer names Settings → Desktop apps (two sites — the consent row moved there in 2.369.203: the footer line, said ONCE since design 009 §B3, and the read-error fallback)");
   const tv = read('src/lib/browser-trace-view.js');
   ok(tv.split("t('action trace is off (Settings → Agent browser)')").length - 1 === 2 && /Settings → Agent browser → Action trace/.test(tv) && /\(Agent browser\)'\)/.test(tv), "the trace pointers name Settings → Agent browser / the Agent browser window");
   const lw = read('src/lib/browser-live-window.js');
@@ -77,11 +77,11 @@ const ja = (await import('../src/lib/i18n-ja.js')).default;
     'Agent browser…': ['Agent 浏览器…', 'エージェントブラウザ…'],
     'Agent browser (live)': ['Agent 浏览器(实时)', 'エージェントブラウザ(ライブ)'],
     'Browser app': ['浏览器应用', 'ブラウザアプリ'],
-    'Desktop app…': ['桌面应用…', 'デスクトップアプリ…'],
+    'Apps…': ['应用…', 'アプリ…'],
     'Show Web view button': ['显示网页视图按钮', 'ウェブビューボタンを表示'],
     'Web view button': ['网页视图按钮', 'ウェブビューボタン'],
     'Open this URL in a web view': ['在网页视图里打开这个网址', 'このURLをウェブビューで開く'],
-    'Off — turn it on in Settings → Agent browser': null,
+    'Off — turn it on in Settings → Desktop apps': null,
     'Agent browser profile…': null,
     'Agent browser — live view': null,
     'Hand the agent browser back': null,

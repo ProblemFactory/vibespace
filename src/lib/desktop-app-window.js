@@ -119,6 +119,12 @@
 // "Forget this app's default". A record launched at that default says "1.5× · App default". Both per-app maps (frame +
 // scale) come from ONE loader, src/lib/desktop-app-prefs.js.
 //
+// THE BAR WITHOUT JARGON (design 009 §B2, lane apps-interface, 2026-10-03 — the owner's screenshot "xpra · 1.5× · 已选 ·
+// 50 MB (PSS)"): the strip holds status · Stop · ⋯ · Paste. The backend and the memory are ONE line at the top of the ⋯
+// ("About this window: 131 MB memory · shown with xpra", PURE aboutWindowText); their chips stay in the DOM, never shown,
+// as the facts the heavy suites read. The scale chip appears only when the scale is NOT automatic, in words ("Larger
+// 1.5×" / "Actual size" — never "chosen"); an automatic scale lives under ⋯ (Scale ▸ Auto (n×)).
+//
 // SHARING WITH AGENTS (desktop lane E, docs/design-desktop-apps-seamless §3.6 — the owner's D1–D7): every window is
 // HIDDEN from every agent until the user shares it. The ⋯ (now on EVERY rung — before lane E it held only xpra rows)
 // and the title-bar / taskbar menu carry "Share with agent…" and "Ask an agent to take control…" (src/lib/window-
@@ -160,11 +166,24 @@ export function scaleChipText(rec) {
   if (!rec || rec.stream !== 'xpra') return '';
   const s = Number(rec.scale);
   if (!(Number.isFinite(s) && s > 0)) return '';
-  const o = scaleOriginWord(rec.scaleOrigin);
-  return o ? `${s}× · ${o}` : `${s}×`;
+  // design 009 §B2: only a scale somebody CHOSE is on the strip, in words (its origin is the tooltip's); automatic (or a
+  // record from before round 3, which has no origin) lives under ⋯
+  if (!rec.scaleOrigin || rec.scaleOrigin === 'auto') return '';
+  return s > 1 ? t('Larger {scale}×', { scale: s }) : t('Actual size');
 }
-function scaleOriginWord(origin) {
-  return origin === 'auto' ? t('auto') : origin === 'chosen' ? t('chosen') : origin === 'setting' ? t('Settings') : origin === 'app' ? t('App default') : '';
+/** Design 009 §B2: the ⋯ menu's first line — what the bar's jargon chips said, in words: the memory the app takes and how
+ *  its window reaches you ("About this window: 131 MB memory · shown with xpra"); '' before either is known. */
+export function aboutWindowText(rec) {
+  if (!rec) return '';
+  const l = rec.live, parts = [];
+  if (l && Number.isFinite(l.memBytes) && l.memBytes >= 0) parts.push(t('{size} memory', { size: memSize(l.memBytes) }));
+  if (rec.backend) parts.push(rec.fallbackWhy ? t('shown with {backend} — {why}', { backend: rec.backend, why: rec.fallbackWhy }) : t('shown with {backend}', { backend: rec.backend }));
+  return parts.length ? t('About this window: {facts}', { facts: parts.join(' · ') }) : '';
+}
+/** A footprint in plain units — "131 MB" / "1.4 GB" (the metric's name stays in the tooltip). */
+export function memSize(bytes) {
+  const mb = Math.max(0, Number(bytes) || 0) / 1048576;
+  return mb >= 1024 ? `${Math.round(mb / 102.4) / 10} GB` : `${Math.max(1, Math.round(mb))} MB`;
 }
 /** The chip's tooltip: the numbers behind the scale (dpr × UI scale for auto, GDK_SCALE and the font dpi) — and, lane D,
  *  what a click does: `why` = the relaunch verdict's CODE when the window cannot change its scale (the chip is plain
@@ -415,7 +434,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     const bar = view.bar;
     barFold = createBarFold(bar, {
       more: moreBtn,
-      moreAlways: () => !!rec && (rec.stream === 'xpra' || shareable()), // xpra's own rows, or lane E's share rows (a local app, every rung); read in a frame, never during this body
+      moreAlways: () => !!rec && (rec.stream === 'xpra' || shareable() || !!aboutWindowText(rec)), // xpra's own rows, lane E's share rows (a local app, every rung), or design 009's about line; read in a frame, never during this body
       items: () => [...bar.children].filter((el) => el !== moreBtn && !el.classList.contains('bar-ruler-host')).map((el, i) => ({
         key: DESK_BAR_KEY.get(el) || `shell-${i}-${String(el.className || el.tagName).split(/\s+/)[0]}`, el,
         priority: DESK_BAR_PRIORITY.get(el) || 0,
@@ -515,7 +534,9 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   };
 
   // ── the bar: backend rung, CPU/RSS, idle countdown, Keep running, Stop ──
-  const backendChip = document.createElement('span'); backendChip.className = 'desktop-app-chip desktop-app-chip-backend';
+  // design 009 §B2: the backend and memory chips are never shown — their words are the ⋯'s "About this window" line; they
+  // stay in the DOM (display none = absent for the fold) as the facts the heavy suites read
+  const backendChip = document.createElement('span'); backendChip.className = 'desktop-app-chip desktop-app-chip-backend'; backendChip.style.display = 'none';
   const hostChip = document.createElement('span'); hostChip.className = 'desktop-app-chip desktop-app-chip-host'; // lane C2: which machine the app runs on (a paired one only)
   const scaleChip = document.createElement('span'); scaleChip.className = 'desktop-app-chip desktop-app-chip-scale'; // HiDPI: the app's scale, fixed at launch; lane D: a CONTROL (role=button) whenever the window can relaunch
   const fitChip = document.createElement('span'); fitChip.className = 'desktop-app-chip desktop-app-chip-fit'; // P8-2 x4: names a display that cannot follow the window
@@ -609,7 +630,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     winInfo._desktopAppStream = rec.stream || null;
     barFold?.schedule(); // lane I: bar-fold.js decides the ⋯ — shown for xpra (Show window frame ▸ / Scale ▸), for a shareable app on EVERY rung (lane E: Share with agent… / Ask an agent…) and while anything is folded
     const ft = fitChipText(rec); fitChip.textContent = ft; fitChip.style.display = ft ? '' : 'none';
-    const lt = liveChipText(rec); liveChip.textContent = lt; liveChip.style.display = lt ? '' : 'none';
+    liveChip.textContent = liveChipText(rec); liveChip.style.display = 'none'; // design 009 §B2: said by the ⋯'s about line
     liveChip.title = rec.live && rec.live.over ? String(rec.live.over) : ''; // the keeper's report (never a stop) — the sentence names the metric
     const it = idleChipText(rec); idleChip.textContent = it; idleChip.style.display = it ? '' : 'none';
     keepBtn.style.display = rec.state === 'ready' && rec.idleTimeoutMs > 0 ? '' : 'none';
@@ -705,7 +726,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   scaleChip.addEventListener('click', openScaleMenu, { signal: lsig });
   scaleChip.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); openScaleMenu(e); } }, { signal: lsig });
   function applyScaleChipControl(text) {
-    const why = text ? scaleChipWhy(rec) : 'not-xpra';
+    const why = rec && rec.stream === 'xpra' ? scaleChipWhy(rec) : 'not-xpra'; // design 009 §B2: an automatic scale hides the chip, never its verdict
     const control = !why;
     scaleChip.classList.toggle('is-control', control);
     if (control) { scaleChip.setAttribute('role', 'button'); scaleChip.tabIndex = 0; scaleChip.setAttribute('aria-haspopup', 'menu'); scaleChip.setAttribute('aria-label', `${text} — ${t('Click to change the scale')}`); }
@@ -719,6 +740,8 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     // lane I: first the strip's FOLDED facts (their live words; Keep running / Stop are rows below already), then the window's own rows
     const folded = barFold ? barFold.folded() : [];
     const items = [];
+    const about = aboutWindowText(rec); // design 009 §B2: what the backend + memory chips said, one line
+    if (about) items.push({ label: about, title: [backendChip.title, liveChip.title].filter(Boolean).join(' — '), disabled: true });
     for (const [el, key] of DESK_BAR_KEY) if (folded.includes(key) && key !== 'keep' && key !== 'stop' && el.textContent) items.push({ label: el.textContent, title: el.title || '', disabled: true });
     if (items.length) items.push({ separator: true });
     if (rec && rec.stream === 'xpra') items.push({ label: t('Show window frame'), children: frameItems() }, { label: t('Scale'), children: scaleItems() });
@@ -803,7 +826,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
       if (r && r.code === 'not-found') { forgotten(); return; }
       if (!r || r.error) { ensureView('rfb').setStatus(r?.error ? `${t('Desktop app unavailable')}: ${r.error}` : t('Desktop app unavailable'), { error: true, reconnect: false }); return; }
       applyRecord(r); refetchReach();
-      if (rec && rec.state === 'launching') view.setStatus(t('Starting application…'));
+      if (rec && rec.state === 'launching') { if (view.starting) view.starting(); else view.setStatus(t('Starting application…')); } // design 009 §B8: an xpra pane counts the seconds
     });
   }
 
@@ -975,7 +998,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     if (r && !r.error) { if (followReplacement(r) || decideExit(r)) return; reveal(); rec = r; ensureView(streamKindOf(r)); render(); refetchReach(); } // a dead record replayed: closed before it ever painted; a replaced one follows its successor
     else { reveal(); ensureView('rfb').setStatus(r?.error ? `${t('Desktop app unavailable')}: ${r.error}` : t('Desktop app unavailable'), { error: true, reconnect: false }); return; }
     if (rec.state === 'launching') {
-      view.setStatus(t('Starting application…'));
+      if (view.starting) view.starting(); else view.setStatus(t('Starting application…')); // design 009 §B8: an xpra pane counts the seconds
       // the broadcast flips it to ready; connect then (applyRecord)
     } else if (rec.state === 'ready') view.connect();
   });

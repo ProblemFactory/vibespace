@@ -124,6 +124,8 @@ function refuseHost(req, res) {
   return true;
 }
 const STATUS = { 'not-found': 404, no_lease: 404, 'bad-request': 400, label_required: 400, label_taken: 409, provider_unknown: 400, provider_unavailable: 400, 'unsupported-host': 400, sharing_refused: 400, fence_refused: 409, bad_proxy: 400, ambiguous: 409, not_owner: 403, leased: 409, running: 409, cap: 409, launch_failed: 502, dir_unwritable: 500, unavailable: 503,
+  // lane chrome-builds-download (design 004): the download's refusals by name
+  build_platform_unsupported: 400, disk: 507, build_present: 409, build_version_invalid: 400, build_version_unknown: 404, build_list_invalid: 502, build_list_unreachable: 502, build_url_offhost: 502, build_fetch_failed: 502, build_check_failed: 502, build_zip_shape: 502, build_unpack_failed: 500, build_verify_failed: 502, build_in_use: 409, build_not_downloaded: 409, build_removing: 409, unzip_unavailable: 503, build_stalled: 504,
   // P4 (§7.1–§7.3): the provider rows' typed refusals, the paired-machine rungs, the cdp provider
   provider_needs_local_key: 400, provider_local_only: 400, provider_lacks_capability: 400, cdp_port_required: 400,
   // P10 (§7.6 tier 3, D27 (b)): the consent gate on the local-window row, and "tier 3 is not a profile"
@@ -492,6 +494,7 @@ const INSTALL_IS_USERS = 'installing a program is the user\'s act — an agent t
 const BUILD_IS_USERS = 'which Chrome build a profile runs is the user\'s choice (Agent browser panel → Change build…) — an agent token may not set it; `vibespace-browser providers` lists the builds';
 const USE_IS_USERS = 'who may use a profile is the user\'s choice (Agent browser panel → Who can use it) — an agent token may not set it; an agent\'s own `new` makes a profile every conversation can use'; // verify r1 (F6)
 const ADOPT_IS_USERS = 'a persistent profile made from a conversation\'s browser is the user\'s act (the picker\'s "New persistent profile…") — an agent token may not adopt a conversation\'s kept browser, its own or another\'s; an agent\'s `new --adopt` is the door for a folder of its own'; // verify r3 (Y4)
+const BUILDS_DOWNLOAD_IS_USERS = 'downloading or removing a Chrome build is the user\'s act (Agent browser panel → Change build… → Download another build…) — an agent token may not do it, nor read Google\'s lists through VibeSpace; `vibespace-browser providers` lists the builds this machine has';
 const RESTART_IS_USERS = 'restarting a browser is the user\'s act — an agent token may not do it; tell the user which page is not responding';
 function refuseAgentBearer(req, res, error = OWN_BROWSING_IS_USERS) { if (!isAgentBearer(req)) return false; res.status(403).json({ error, code: 'agent_forbidden' }); return true; }
 router.post('/api/browser/profiles/:id/browse', async (req, res) => {
@@ -564,6 +567,37 @@ router.post('/api/browser/profiles/:id/build', async (req, res) => {
   if (typeof k.setBrowserChoice !== 'function') return res.status(503).json({ error: 'this keeper cannot choose a Chrome build', code: 'unavailable' });
   try { res.json(await k.setBrowserChoice({ profileId: req.params.id, choice: req.body?.choice, confirmed: req.body?.confirmed === true, by: 'user' })); }
   catch (e) { if (e && (e.needsConfirm || e.waysOut || e.restored !== undefined)) return res.status(STATUS[e.code] || 409).json({ error: String(e.message || e), code: e.code || 'launch_failed', needsConfirm: !!e.needsConfirm, waysOut: e.waysOut || [], ...(e.restored !== undefined ? { restored: !!e.restored } : {}), ...(e.wrote != null ? { wrote: e.wrote } : {}) }); fail(res, e); }
+});
+/** lane chrome-builds-download (design 004, B-80c1): DOWNLOAD ANOTHER BUILD — every route cookie-only (a list read is an egress
+ *  too: only a PERSON opening the picker reads Google's lists — never an agent, a timer or a boot). GET = the facts, no fetch
+ *  (the progress poll) | `?lists=channels` (the 10 KB channel list, fresh) | `?lists=older` (the majors of the known-good list,
+ *  kept 24 h) | `?major=N` (its versions) | `?version=X` (ONE HEAD: its size + the disk row); `profile=<id>` adds that profile's
+ *  row. POST `{version}` = the download, in THE install slot (the CLI's and CloakBrowser's); DELETE = remove a build VibeSpace
+ *  downloaded (its witness, nobody choosing or running it). A refusal carries its facts as `build`. */
+const failBuild = (res, e) => res.status(STATUS[e && e.code] || 500).json({ error: String((e && e.message) || e), code: (e && e.code) || null, ...(e && e.build ? { build: e.build } : {}) });
+router.get('/api/browser/builds/available', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, BUILDS_DOWNLOAD_IS_USERS)) return;
+  const k = keeperOr503(res); if (!k) return;
+  if (typeof k.chromeBuildsAvailable !== 'function') return res.status(503).json({ error: 'this keeper cannot download Chrome builds', code: 'unavailable' });
+  const q = req.query || {};
+  const lists = q.lists === 'channels' || q.lists === 'older' ? q.lists : null;
+  const major = /^\d{2,4}$/.test(String(q.major || '')) ? Number(q.major) : null;
+  try { res.json(await k.chromeBuildsAvailable({ lists, major, version: q.version ? String(q.version).slice(0, 40) : null, profileId: ID_RE.test(String(q.profile || '')) ? String(q.profile) : null })); } catch (e) { failBuild(res, e); }
+});
+router.post('/api/browser/builds/download', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, BUILDS_DOWNLOAD_IS_USERS)) return;
+  const k = keeperOr503(res); if (!k) return;
+  if (typeof k.installChromeBuild !== 'function') return res.status(503).json({ error: 'this keeper cannot download Chrome builds', code: 'unavailable' });
+  try { res.json(await k.installChromeBuild({ version: String((req.body && req.body.version) || '').slice(0, 40) })); } catch (e) { failBuild(res, e); }
+});
+router.delete('/api/browser/builds/:version', (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, BUILDS_DOWNLOAD_IS_USERS)) return;
+  const k = keeperOr503(res); if (!k) return;
+  if (typeof k.removeChromeBuild !== 'function') return res.status(503).json({ error: 'this keeper cannot remove Chrome builds', code: 'unavailable' });
+  try { res.json(k.removeChromeBuild({ version: String(req.params.version || '').slice(0, 40) })); } catch (e) { failBuild(res, e); }
 });
 router.post('/api/browser/attach', async (req, res) => {
   if (refuseHost(req, res)) return;

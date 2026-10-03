@@ -42,7 +42,7 @@ import { overageState, spendControlState } from '../spend-authorizer.js'; // the
 import { installVerdictWords, installOutcomeWords, installConfirmWords } from './browser-switcher-model.js'; // the CloakBrowser row's words = the switch dialog's (PURE)
 import { dialRowState } from '../dial-facts.js'; // lane-pairing ③: THE one dial state (the machine row, this card, the pairing sheet)
 import { dialStateText, dialHistoryLine } from './dial-address-picker.js';
-import { openExitAccessDialog, exitSummaryText, exitCodeWords } from './exit-access-dialog.js'; // lane-pairing ⑥: "Who can use it" 
+import { openExitAccessDialog, exitSummaryText, exitCodeWords, agentUpgradeText } from './exit-access-dialog.js'; // lane-pairing ⑥: "Who can use it" 
 import { openExitRunsDialog } from './exit-runs-dialog.js'; // lane-exit-run-output E4: the machine's command list
 import { platformLabel } from '../exit-shell.js'; // lane-exit-run-output E1: the device's stated platform on its row (its shell follows it)
 
@@ -2002,7 +2002,7 @@ export function installManageAgents(App, ctx = {}) {
             l2.dataset.dialState = drs ? drs.state : '';
             // lane-exit-run-output E1: the device's STATED platform (its hello / dial headers) — a Windows machine runs commands under cmd.exe
             const plat = platformLabel(h.dial && h.dial.lastAccept && h.dial.lastAccept.platform);
-            l2.textContent = [dialWords, plat, exitSummaryText(h.exit)].filter(Boolean).join(' · '); // no `exit` ⇒ nobody / nobody (the ONE reader)
+            l2.textContent = [dialWords, plat, exitSummaryText(h.exit), agentUpgradeText(h)].filter(Boolean).join(' · '); // no `exit` ⇒ nobody / nobody (the ONE reader)
             sum.appendChild(l2);
           }
           det.appendChild(sum);

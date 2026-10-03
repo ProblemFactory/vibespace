@@ -54,9 +54,11 @@ const TOML_BARE_RE = /^[A-Za-z0-9_-]+$/;
 // THE KEY IS A LEGACY SPELLING, THE FEATURE IS NOT (owner ruling 2026-09-08):
 // auto-resume is generic (every harness that can classify a limit and restart
 // a turn), so its instance default is NOT a row of the claude table — it stays
-// a hand-written Chat-category row in settings-schema.js under the persisted
-// key it has always had (renaming a persisted key is a migration, and every
-// per-session override is recorded against this one). The server reads it by
+// a hand-written row in settings-schema.js under the persisted key it has
+// always had (renaming a persisted key is a migration, and every per-session
+// override is recorded against this one). Its category is Spending since
+// 2.369.202 (it starts billed turns); test-architecture 46c pins the KEY,
+// never the category. The server reads it by
 // THIS name so no server file spells a `claude.` literal (test-architecture's
 // literal-id census).
 const GENERIC_LEGACY_KEYS = Object.freeze({ autoResumeOnLimit: 'claude.autoResumeOnLimit' });
@@ -137,6 +139,7 @@ const HARNESS_SETTINGS = {
       type: "text", default: "",
       label: t("Default extra args"),
       description: t("Extra Claude CLI args appended when starting a Claude session."),
+      tier: 'advanced',
       apply: { kind: 'spawn', how: 'appended argv', via: 'extraArgs' },
     },
     {
@@ -191,6 +194,7 @@ const HARNESS_SETTINGS = {
       type: "number", default: 36500, min: 0, max: 36500, step: 30,
       label: t("Keep Claude Code conversations for (days)"),
       description: t("Claude Code deletes conversation transcripts older than this at every start (its own default is 30 days). VibeSpace writes the value into ~/.claude/settings.json (cleanupPeriodDays) at start-up and whenever it changes, and onto remote hosts when their agent tools are installed. 0 = leave Claude Code's own setting alone."),
+      tier: 'advanced',
       apply: { kind: 'cli-config', file: 'settings', path: ['cleanupPeriodDays'], off: 0, onUninstall: 'keep' },
     },
     {
@@ -210,6 +214,7 @@ const HARNESS_SETTINGS = {
       ],
       label: t("System prompt snapshot (--system-prompt-snapshot)"),
       description: t("Passes the CLI's --system-prompt-snapshot flag to new Claude sessions: \"on\" records the system prompt once per conversation and reuses it verbatim on every request and resume, which keeps the prompt cache warm across resumes. Blank = leave the CLI's own default alone."),
+      tier: 'advanced',
       apply: { kind: 'spawn', how: '--system-prompt-snapshot' },
     },
     {
@@ -217,6 +222,7 @@ const HARNESS_SETTINGS = {
       type: "boolean", default: false,
       label: t("Move per-machine prompt sections into the first message"),
       description: t("Passes --exclude-dynamic-system-prompt-sections: the cwd, environment info, memory paths and git status move out of the system prompt and into the first user message, so the cached prefix is identical across machines and users. Only applies with the default system prompt. Off by default — measure before turning it on."),
+      tier: 'advanced',
       apply: { kind: 'spawn', how: '--exclude-dynamic-system-prompt-sections' },
     },
     {
@@ -231,6 +237,7 @@ const HARNESS_SETTINGS = {
       ],
       label: t("Auto-compact window size (--autocompact)"),
       description: t("Passes --autocompact to new Claude sessions. \"auto\", or a token budget between 100k and 1M (e.g. 500k, 200000). A smaller window compacts sooner, which keeps each request cheaper at the cost of more compaction. Blank = the CLI decides. A value the CLI would reject is ignored rather than passed on."),
+      tier: 'advanced',
       apply: { kind: 'spawn', how: '--autocompact' },
     },
     {
@@ -243,6 +250,7 @@ const HARNESS_SETTINGS = {
       ],
       label: t("Terminal TUI renderer"),
       description: t("Renderer for terminal-mode Claude sessions. \"Fullscreen\" forces the flicker-free alternate-screen renderer with virtualized scrollback (CLAUDE_CODE_NO_FLICKER=1, same as /tui fullscreen); \"Classic\" forces the main-screen renderer; \"Auto\" follows the preference saved by the CLI (/tui). Applies to newly started sessions."),
+      tier: 'advanced',
       apply: { kind: 'spawn', how: 'CLAUDE_CODE_NO_FLICKER / CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN', mode: 'terminal' },
     },
     ],
@@ -250,6 +258,7 @@ const HARNESS_SETTINGS = {
   codex: {
     prefix: 'codex',
     category: t('Codex'),
+    when: { harness: 'codex' }, // the whole section only where that CLI is installed (settings-view.js)
     files: {
       hooks: { rel: ['.codex', 'hooks.json'], format: 'json' },
       // ~/.codex/config.toml — WRITABLE since 2.369.123 (owner D4: build the
@@ -340,6 +349,7 @@ const HARNESS_SETTINGS = {
       type: "text", default: "",
       label: t("Default extra args"),
       description: t("Extra Codex CLI args appended when starting a Codex session."),
+      tier: 'advanced',
       apply: { kind: 'spawn', how: 'appended argv', via: 'extraArgs' },
     },
     {
@@ -372,6 +382,7 @@ const HARNESS_SETTINGS = {
   opencode: {
     prefix: 'opencode',
     category: t('OpenCode'),
+    when: { harness: 'opencode' }, // the whole section only where that CLI is installed (settings-view.js)
     files: {},
     rows: [
     {
@@ -401,6 +412,7 @@ const HARNESS_SETTINGS = {
       type: "text", default: "",
       label: t("Default extra args"),
       description: t("Extra OpenCode CLI args appended when starting an OpenCode session."),
+      tier: 'advanced',
       apply: { kind: 'spawn', how: 'appended argv', via: 'extraArgs' },
     },
     ],

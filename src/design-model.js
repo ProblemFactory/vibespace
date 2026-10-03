@@ -15,9 +15,27 @@
  *   commentText(quote, text)          `[Design comment] <quote>: <text>` — the hub puts the WHOLE line through
  *                                     src/peer-text.js toAgentText at its one door (src/server/design-engine.js): the
  *                                     quoted element text is an artboard's, and an artboard may be another agent's
+ *   validateQuestions(json)           ask first (lane design-ask): ≤ 8 questions {id, q, help?, kind, options, other?}, closed
+ *                                     keys, refusals by NAME — what the questions sheet draws
+ *   answersVerdict(questions, body)   the sheet's answers against the PENDING questions (an option is named by its index —
+ *                                     its words are the agent's, never the wire's); a question left out = "decide for me"
+ *   answersText(verdict)              `[Design answers] platform: iOS phone · variations: 2 · accent: decide for me` —
+ *                                     composes only; THE belt is the hub's door, like commentText's
+ *   changesVerdict(items) / changesText(items)  the changes strip's ONE message (lane design-changes, design 003 §2.2):
+ *                                     ≤ 30 chips — a text edit, a style nudge (CHANGE_PROPS, styleValueOk) or a
+ *                                     comment — → `[Design changes] N changes:` + one numbered line per chip; the
+ *                                     engine's door belts the whole block (the same door as the comment)
+ *   tweaks (validateManifest) / tweakSay  the free knobs (lane design-tweaks, design 003 §2 S4): the list's shape
+ *                                     (≤ 12) and the frame fence's `design-tweak` word (tweakWordOk: a value that cannot
+ *                                     close a style block). Each knob's rules — validateManifest(json, {tweaks}) — the
+ *                                     user's layer and baking it in: src/design-user-layer.js, kept OUT of this file,
+ *                                     which the published page's viewer bundles whole
  *   bundleCanvas / readBundle         the published page: our shell + the state block
  *                                     `<script type="application/json" id="vibespace-design-doc">` (every `<` escaped)
  *   sizeVerdict(bytes)                warn past 8 MB, refuse at 25 MB (the published-pages cap)
+ *   (design systems, lane design-systems-home: design.json's `system: {name}` is validated here; the token check —
+ *    tokens.css against the artboards — is src/design-tokens.js, the hub's alone: this file is bundled into the
+ *    published page's viewer, whose size is budgeted)
  *
  * Every scan here is LINEAR in its input (a hand tokenizer, `indexOf`, sticky literal regexes — never a nested
  * quantifier over the raw HTML) and bounded by the caller's size verdict first: an artboard is agent-written text.
@@ -31,6 +49,7 @@ const LIMITS = Object.freeze({
   artboards: 40, pages: 40, notes: 200, noteText: 5000, title: 120, pageName: 80,
   readBytes: 24 * MiB, warnBytes: 8 * MiB, refuseBytes: 25 * MiB,
   quoteText: 120, quotePath: 200, commentText: 4000,
+  changes: 30, changeText: 500, changeComment: 1000, changeValue: 60,
   defaultW: 1280, defaultH: 800, gapRow: 80, gapRows: 120, rowMaxW: 8000,
 });
 const MANIFEST_FILE = 'design.json';
@@ -43,7 +62,8 @@ const IMAGE_TYPES = Object.freeze({ png: 'image/png', jpg: 'image/jpeg', jpeg: '
 const NOTE_COLORS = Object.freeze(['gray', 'red', 'orange', 'green', 'teal', 'blue', 'purple', 'pink']);
 const PRINT_MODES = Object.freeze(['fixed', 'flow']);
 const KEYS = Object.freeze({
-  top: Object.freeze(['title', 'pages', 'artboards', 'notes', 'launch']),
+  top: Object.freeze(['title', 'pages', 'artboards', 'notes', 'launch', 'tweaks', 'system']),
+  system: Object.freeze(['name']),   // lane design-systems-home: the design system this design follows (`new --system`)
   page: Object.freeze(['id', 'name']),
   artboard: Object.freeze(['file', 'x', 'y', 'w', 'h', 'title', 'page', 'print']),
   note: Object.freeze(['id', 'x', 'y', 'w', 'text', 'color', 'page']),
@@ -93,7 +113,7 @@ function emptyManifest() { return { title: '', pages: [], artboards: [], notes: 
 
 /** `design.json` (a string or a parsed value) → {ok:true, manifest} | {ok:false, refusals:[{code, where, why}]}.
  *  Closed keys at every level: a key the loader would drop is refused BY NAME, never ignored. */
-function validateManifest(input) {
+function validateManifest(input, { tweaks: tweaksOf = null } = {}) {
   const refusals = [];
   const no = (code, where, why) => { if (refusals.length < 50) refusals.push({ code, where, why }); };
   let j = input;
@@ -202,8 +222,27 @@ function validateManifest(input) {
       else launch = { view: 'focused', file: l.file };
     } else no('bad_value', 'launch.view', 'launch.view must be "canvas" or "focused"');
   }
+  // lane design-tweaks: the knobs' SHAPE here; each knob's rules are src/design-user-layer.js tweaksOf, which the hub
+  // hands in (a reader without them — the published viewer, a bundle — keeps no knobs: their values are baked in)
+  let tweaks = [];
+  if (j.tweaks !== undefined) {
+    if (!Array.isArray(j.tweaks)) no('bad_type', 'tweaks', 'tweaks must be a list of knobs [{"id", "label", "kind", "var" | "attr", "default"}]');
+    else if (j.tweaks.length > TWEAK_LIMITS.tweakCount) no('too_many', 'tweaks', `tweaks holds ${j.tweaks.length} — at most ${TWEAK_LIMITS.tweakCount} (3–8 is the craft rule)`);
+    else if (typeof tweaksOf === 'function') tweaks = tweaksOf(j.tweaks, no);
+  }
+  // system (lane design-systems-home): `{name}` — the design system this design follows; its tokens.css sits beside it
+  let system = null;
+  if (j.system !== undefined) {
+    if (!isObj(j.system)) no('bad_type', 'system', 'system must be an object — {"name": "<the design system>"}');
+    else {
+      closed(j.system, KEYS.system, 'system', 'system');
+      const nm = str(j.system.name, 'system.name', LIMITS.title, { required: true });
+      if (nm !== undefined && !nm.trim()) no('empty', 'system.name', 'system.name is empty — name the design system (vibespace-design systems lists them)');
+      else if (nm !== undefined) system = { name: nm };
+    }
+  }
   if (refusals.length) return { ok: false, refusals };
-  return { ok: true, manifest: { title: title || '', pages, artboards, notes, launch } };
+  return { ok: true, manifest: { title: title || '', pages, artboards, notes, launch, ...(tweaks.length ? { tweaks } : {}), ...(system ? { system } : {}) } };
 }
 
 // ── the layout ──────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -316,7 +355,7 @@ function urlRefs(s, from, to, refs) {
 function scanHtml(html) {
   const s = String(html == null ? '' : html);
   const n = s.length;
-  const out = { hasHtml: false, hasBody: false, hasBase: false, refs: [] };
+  const out = { hasHtml: false, hasBody: false, hasBase: false, refs: [], css: [] };
   let i = 0;
   while (i < n) {
     const lt = seek(s, 60, i, n);
@@ -352,12 +391,12 @@ function scanHtml(html) {
     else if (tag === 'base') out.hasBase = true;
     for (const a of attrs) {
       if (a.kind === 'src') out.refs.push({ kind: 'src', start: a.vs, end: a.ve, value: s.slice(a.vs, a.ve) });
-      else urlRefs(s, a.vs, a.ve, out.refs);
+      else { urlRefs(s, a.vs, a.ve, out.refs); out.css.push([a.vs, a.ve]); }
     }
     i = k + 1;
     if (RAW_TEXT.has(tag)) {
       const end = rawEnd(s, i, tag);
-      if (tag === 'style') urlRefs(s, i, end, out.refs);
+      if (tag === 'style') { urlRefs(s, i, end, out.refs); out.css.push([i, end]); }
       i = end;
     }
   }
@@ -498,6 +537,226 @@ function commentText(quote, text) {
   return `[Design comment] ${q}: ${t}`;
 }
 
+// ── ask first: the questions form (lane design-ask — design 003 §2 S1) ──────────────────────────────────────────────
+
+const ASK_LIMITS = Object.freeze({ questions: 8, optionCount: 8, question: 200, help: 400, option: 80, other: 500, input: 64 * 1024 });
+const QUESTION_KEYS = Object.freeze(['id', 'q', 'help', 'kind', 'options', 'other']);
+const ANSWER_KEYS = Object.freeze(['picks', 'other', 'decide']);
+const QUESTION_KINDS = Object.freeze(['one', 'many']);
+/** One line of words (the agent's question, the user's "Other…"): controls folded to a space, hidden characters
+ *  dropped, runs of space to one. */
+/** Characters that reorder a line or are not drawn (bidi overrides / isolates, zero-width, soft hyphen, BOM, fillers) — the
+ *  sheet must draw the agent's words in the order the agent reads them back (v1's quote-line rule, design-canvas-model
+ *  HIDDEN_RE; design-joint verify r1). */
+const ASK_HIDDEN = /[\u00ad\u061c\u115f\u1160\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff0-\ufffb]/g;
+const oneLine = (v) => String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ').replace(ASK_HIDDEN, '').replace(/\s+/g, ' ').trim();
+/** Our heads stay ours: a `[Design answers]` / `[Design comment]` inside a piece is softened to parentheses. */
+const softenHeads = (s) => s.replace(/\[(design (?:answers|comment))\]/gi, '($1)');
+
+/** `vibespace-design ask`'s JSON (a string or a parsed value: a list, or `{"questions": [...]}`) → {ok:true, questions}
+ *  | {ok:false, refusals:[{code, where, why}]}. At most 8 questions `{id, q, help?, kind: one|many, options: [≤ 8],
+ *  other?}`; closed keys, every refusal BY NAME. `kind` defaults to one; `other` to true (every question ends in "Decide
+ *  for me" and "Other…") — false drops "Other…", and then the question needs options. */
+function validateQuestions(input) {
+  const refusals = [];
+  const no = (code, where, why) => { if (refusals.length < 50) refusals.push({ code, where, why }); };
+  let j = input;
+  if (typeof input === 'string') {
+    if (input.length > ASK_LIMITS.input) return { ok: false, refusals: [{ code: 'too_big', where: 'questions', why: `the questions are over ${ASK_LIMITS.input / 1024} KB — ask at most ${ASK_LIMITS.questions} short questions` }] };
+    try { j = JSON.parse(input); } catch (e) { return { ok: false, refusals: [{ code: 'bad_json', where: 'questions', why: `the questions are not valid JSON (${shown(e && e.message, 120)})` }] }; }
+  }
+  if (isObj(j)) {
+    for (const k of Object.keys(j)) if (k !== 'questions') no('unknown_key', shown(k, 40), `unknown key "${shown(k, 40)}" — the form takes {"questions": [...]}`);
+    j = j.questions;
+  }
+  if (!Array.isArray(j)) return { ok: false, refusals: [...refusals, { code: 'bad_type', where: 'questions', why: 'the questions must be a list [{"id", "q", "kind", "options"}, …]' }] };
+  if (!j.length) return { ok: false, refusals: [...refusals, { code: 'empty', where: 'questions', why: 'ask at least one question' }] };
+  if (j.length > ASK_LIMITS.questions) no('too_many', 'questions', `${j.length} questions — ask at most ${ASK_LIMITS.questions} (3–6 is the craft rule)`);
+  const ids = new Set();
+  const questions = [];
+  j.slice(0, ASK_LIMITS.questions).forEach((x, i) => {
+    const w = `questions[${i}]`;
+    if (!isObj(x)) { no('bad_type', w, `${w} must be an object {"id", "q", "kind", "options"}`); return; }
+    for (const k of Object.keys(x)) if (!QUESTION_KEYS.includes(k)) no('unknown_key', `${w}.${shown(k, 40)}`, `unknown key "${shown(k, 40)}" — a question takes ${QUESTION_KEYS.join(', ')}`);
+    const id = typeof x.id === 'string' && ID_RE.test(x.id) ? x.id : null;
+    if (!id) { no('bad_value', `${w}.id`, `${w}.id must be 1–40 letters, digits, _ or -`); return; }
+    if (ids.has(id)) { no('duplicate', `${w}.id`, `question id "${id}" is used twice`); return; }
+    ids.add(id);
+    let bad = false;
+    const words = (v, where, max, required) => {
+      if (v === undefined && !required) return '';
+      if (typeof v !== 'string') { no('bad_type', where, `${where} must be a string`); bad = true; return ''; }
+      const s = oneLine(v);
+      if (!s && required) { no('empty', where, `${where} is empty`); bad = true; return ''; }
+      if (s.length > max) { no('too_long', where, `${where} is ${s.length} characters — at most ${max}`); bad = true; return ''; }
+      return s;
+    };
+    const q = words(x.q, `${w}.q`, ASK_LIMITS.question, true);
+    const help = words(x.help, `${w}.help`, ASK_LIMITS.help, false);
+    let kind = 'one';
+    if (x.kind !== undefined) { if (QUESTION_KINDS.includes(x.kind)) kind = x.kind; else { no('bad_value', `${w}.kind`, `${w}.kind must be "one" or "many"`); bad = true; } }
+    let other = true;
+    if (x.other !== undefined) { if (typeof x.other === 'boolean') other = x.other; else { no('bad_type', `${w}.other`, `${w}.other must be true or false`); bad = true; } }
+    const options = [];
+    const seen = new Set();
+    if (x.options !== undefined && !Array.isArray(x.options)) { no('bad_type', `${w}.options`, `${w}.options must be a list of strings`); bad = true; }
+    const raw = Array.isArray(x.options) ? x.options : [];
+    if (raw.length > ASK_LIMITS.optionCount) { no('too_many', `${w}.options`, `${w}.options holds ${raw.length} — at most ${ASK_LIMITS.optionCount}`); bad = true; }
+    raw.slice(0, ASK_LIMITS.optionCount).forEach((o, k) => {
+      const s = words(o, `${w}.options[${k}]`, ASK_LIMITS.option, true);
+      if (!s) return;
+      if (seen.has(s.toLowerCase())) { no('duplicate', `${w}.options[${k}]`, `option "${shown(s)}" is offered twice`); bad = true; return; }
+      seen.add(s.toLowerCase());
+      options.push(s);
+    });
+    if (!bad && !options.length && !other) { no('missing', `${w}.options`, `${w} offers nothing to pick — give options, or leave "other" on so the user can write an answer`); bad = true; }
+    if (!bad) questions.push(help ? { id, q, help, kind, options, other } : { id, q, kind, options, other });
+  });
+  return refusals.length ? { ok: false, refusals } : { ok: true, questions };
+}
+
+/** The sheet's answers against the PENDING questions → {ok:true, skip, answers:[{id, picks:[words], other, decide}]} |
+ *  {ok:false, code, why}. `{skip:true}` = decide everything; else `answers: {<id>: {picks:[index], other:"…",
+ *  decide:true}}` — an index names one of the agent's own options (an option's words never come from the wire); a
+ *  question left out, or answered with nothing, = "decide for me". */
+function answersVerdict(questions, body) {
+  const qs = Array.isArray(questions) ? questions : [];
+  const b = isObj(body) ? body : {};
+  if (b.skip === true) return { ok: true, skip: true, answers: qs.map((q) => ({ id: q.id, picks: [], other: '', decide: true })) };
+  const a = b.answers === undefined || b.answers === null ? {} : b.answers;
+  if (!isObj(a)) return { ok: false, code: 'bad_type', why: 'answers must be an object {"<question id>": {"picks": [index], "other": "…", "decide": true}}' };
+  for (const k of Object.keys(a)) if (!qs.some((q) => q.id === k)) return { ok: false, code: 'unknown_key', why: `"${shown(k, 40)}" is not one of the questions` };
+  const out = [];
+  for (const q of qs) {
+    const x = hasOwn(a, q.id) ? a[q.id] : null;
+    if (x === null || x === undefined) { out.push({ id: q.id, picks: [], other: '', decide: true }); continue; }
+    if (!isObj(x)) return { ok: false, code: 'bad_type', why: `the answer to "${q.id}" must be an object` };
+    for (const k of Object.keys(x)) if (!ANSWER_KEYS.includes(k)) return { ok: false, code: 'unknown_key', why: `the answer to "${q.id}" has an unknown key "${shown(k, 40)}" — it takes ${ANSWER_KEYS.join(', ')}` };
+    const picks = x.picks === undefined ? [] : x.picks;
+    if (!Array.isArray(picks) || picks.length > q.options.length || picks.some((i) => !Number.isInteger(i) || i < 0 || i >= q.options.length) || new Set(picks).size !== picks.length) return { ok: false, code: 'bad_value', why: `the answer to "${q.id}" picks an option the question does not offer` };
+    if (x.other !== undefined && typeof x.other !== 'string') return { ok: false, code: 'bad_type', why: `the written answer to "${q.id}" must be text` };
+    if (x.decide !== undefined && typeof x.decide !== 'boolean') return { ok: false, code: 'bad_type', why: `"decide" on "${q.id}" must be true or false` };
+    const other = oneLine(x.other);
+    if (other.length > ASK_LIMITS.other) return { ok: false, code: 'too_long', why: `the written answer to "${q.id}" is ${other.length} characters — at most ${ASK_LIMITS.other}` };
+    if (other && !q.other) return { ok: false, code: 'bad_value', why: `"${q.id}" takes no written answer` };
+    const n = picks.length + (other ? 1 : 0);
+    if (x.decide === true && n) return { ok: false, code: 'bad_value', why: `the answer to "${q.id}" both picks and leaves it to the agent` };
+    if (q.kind === 'one' && n > 1) return { ok: false, code: 'bad_value', why: `"${q.id}" takes one answer` };
+    out.push({ id: q.id, picks: picks.slice().sort((m, k) => m - k).map((i) => q.options[i]), other, decide: n === 0 });
+  }
+  return { ok: true, skip: false, answers: out };
+}
+
+/** The line the agent receives as the user's own message (answersVerdict's result):
+ *  `[Design answers] platform: iOS phone · variations: 2 · accent: decide for me`. COMPOSES only — the hub's one door
+ *  belts the whole line (the options are the agent's words, an "Other…" answer the user's). */
+function answersText(verdict) {
+  const v = isObj(verdict) ? verdict : {};
+  if (v.skip) return '[Design answers] skipped — decide everything yourself';
+  const parts = (Array.isArray(v.answers) ? v.answers : []).map((a) => {
+    const said = (Array.isArray(a.picks) ? a.picks : []).map((p) => softenHeads(oneLine(p)));
+    if (a.other) said.push(`"${softenHeads(oneLine(a.other))}"`);
+    return `${cleanIdent(a.id) || 'question'}: ${a.decide || !said.length ? 'decide for me' : said.join(', ')}`;
+  });
+  return `[Design answers] ${parts.length ? parts.join(' · ') : 'decide for me'}`;
+}
+
+// ── the changes strip (lane design-changes) ─────────────────────────────────────────────────────────────────────────
+/** THE CLOSED SET of what a style nudge may touch (the popover's four: text colour, background, font size, spacing). */
+const CHANGE_PROPS = Object.freeze(['color', 'background-color', 'font-size', 'padding']);
+const CHANGE_EDITS = Object.freeze(['text', 'style', 'comment']);
+/** A value a nudge may SET: a colour is `#rrggbb` (what an <input type=color> says), a size `<0–400>px`. */
+function styleValueOk(prop, v) {
+  if (typeof v !== 'string') return false;
+  if (prop === 'color' || prop === 'background-color') return /^#[0-9a-fA-F]{6}$/.test(v);
+  if (prop === 'font-size') return /^[0-9]{1,3}px$/.test(v) && +v.slice(0, -2) >= 1 && +v.slice(0, -2) <= 400;
+  if (prop === 'padding') return /^[0-9]{1,3}px$/.test(v) && +v.slice(0, -2) <= 400;
+  return false;
+}
+/** One inline piece of a change line: one line, bounded, and a head of ours inside it softened. */
+const piece = (v, max) => cutText(String(v == null ? '' : v).slice(0, 4 * max + 64).replace(/\s+/g, ' ').replace(/\[(design [a-z]+)\]/gi, '($1)').trim(), max);
+/** A computed CSS value a frame reported (`rgb(17, 24, 39)`, `16px`, `8px 16px`) — its characters only. */
+const cssValue = (v) => piece(String(v == null ? '' : v).slice(0, 400).replace(/[^A-Za-z0-9#.,()% -]+/g, ''), LIMITS.changeValue);
+/** The strip's chips → {ok:true, items} (each bounded, the closed sets kept) | {ok:false, code, why, index}. */
+function changesVerdict(items) {
+  if (!Array.isArray(items) || !items.length) return { ok: false, code: 'empty', why: 'add at least one change' };
+  if (items.length > LIMITS.changes) return { ok: false, code: 'too_many', why: `at most ${LIMITS.changes} changes go in one message — send these, then the rest` };
+  const out = [];
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    const bad = (code, why) => ({ ok: false, code, why: `change ${i + 1}: ${why}`, index: i });
+    if (!isObj(it)) return bad('bad_change', 'not an object');
+    if (!CHANGE_EDITS.includes(it.edit)) return bad('bad_change', `"${shown(it.edit, 20)}" is not a change kind (${CHANGE_EDITS.join(', ')})`);
+    const row = { edit: it.edit, file: isArtboardName(it.file) ? it.file : 'artboard', path: String(it.path == null ? '' : it.path).slice(0, 1000), tag: cleanIdent(it.tag).toLowerCase(), text: piece(it.text, LIMITS.quoteText) };
+    if (it.edit === 'text') {
+      row.from = piece(it.from, LIMITS.changeText);
+      row.to = piece(it.to, LIMITS.changeText);
+      if (row.from === row.to) return bad('no_change', 'the text is the same before and after');
+    } else if (it.edit === 'style') {
+      if (!CHANGE_PROPS.includes(it.prop)) return bad('bad_change', `"${shown(it.prop, 30)}" is not a property a nudge may touch (${CHANGE_PROPS.join(', ')})`);
+      if (!styleValueOk(it.prop, it.to)) return bad('bad_change', `"${shown(it.to, 30)}" is not a ${it.prop} value (a #rrggbb colour or a size in px)`);
+      row.prop = it.prop; row.from = cssValue(it.from); row.to = it.to;
+    } else {
+      const c = typeof it.comment === 'string' ? it.comment.replace(/\r\n?/g, '\n').trim() : '';
+      if (!c) return bad('empty', 'write what should change');
+      if (c.length > LIMITS.changeComment) return bad('too_long', `a comment in a list of changes is at most ${LIMITS.changeComment} characters`);
+      row.comment = piece(c, LIMITS.changeComment);
+    }
+    out.push(row);
+  }
+  return { ok: true, items: out };
+}
+/** One chip's line: the element named as a comment's quote names it, then what changes. */
+function changeLine(it) {
+  const o = isObj(it) ? it : {};
+  if (o.edit === 'text') return `${pickQuote({ file: o.file, path: o.path, tag: o.tag })}: text ${JSON.stringify(piece(o.from, LIMITS.changeText))} → ${JSON.stringify(piece(o.to, LIMITS.changeText))}`;
+  const q = pickQuote({ file: o.file, path: o.path, tag: o.tag, text: o.text }).replace(/\[(design [a-z]+)\]/gi, '($1)');
+  if (o.edit === 'style') return `${q}: ${CHANGE_PROPS.includes(o.prop) ? o.prop : 'style'} ${cssValue(o.from) || '(unset)'} → ${cssValue(o.to)}`;
+  return `${q}: ${piece(o.comment, LIMITS.changeComment)}`;
+}
+/** The message the agent receives as the user's own: `[Design changes] N changes:` + one numbered line per chip.
+ *  COMPOSES only (from `changesVerdict`'s items) — the hub's one door belts the whole block. */
+function changesText(items) {
+  const list = (Array.isArray(items) ? items : []).slice(0, LIMITS.changes);
+  return `[Design changes] ${list.length} change${list.length === 1 ? '' : 's'}:\n` + list.map((it, i) => `${i + 1}. ${changeLine(it)}`).join('\n');
+}
+
+// ── Tweaks: the free knobs (lane design-tweaks — design 003 §2 S4) ──────────────────────────────────────────────────
+// The agent DECLARES knobs in design.json (`tweaks`) and writes its CSS to read them: ONE custom property on :root
+// (`var: "--accent"`) or ONE data attribute on the root element (`attr: "data-density"`) each. The owner moves them in
+// the window's Tweaks panel; the hub keeps the values in `user.json` (THE USER'S LAYER) and bakes them into what it
+// serves. Each knob's rules, the user's layer and the baking live in src/design-user-layer.js (the hub hands its
+// `tweaksOf` to validateManifest): THIS file is bundled whole into the published page's viewer, so only the list's
+// shape and the frame fence's word live here.
+
+const USER_FILE = 'user.json';
+const TWEAK_LIMITS = Object.freeze({ tweakCount: 12, wordChars: 80 });
+const TWEAK_HIDDEN = new RegExp(ASK_HIDDEN.source);
+const TWEAK_BAD = /[\u0000-\u001f\u007f-\u009f\u2028\u2029<>{};\\`!]/;
+const isTweakVar = (v) => typeof v === 'string' && /^--[A-Za-z_][A-Za-z0-9_-]{0,39}$/.test(v);
+/** A root data attribute — never our own marker's name (`data-vibespace-…`). */
+const isTweakAttr = (v) => typeof v === 'string' && /^data-[a-z][a-z0-9-]{0,39}$/.test(v) && !v.startsWith('data-vibespace');
+/** A word a tweak writes into CSS (`--x: <word>`) or a root attribute (an option, a colour, a number with its unit): one
+ *  line, at most 80 characters, no markup or rule / declaration delimiter (`< > { } ;`), no escape, comment or `!` (the
+ *  importance is ours), no hidden character, quotes closed — it cannot close the style block, end its declaration or
+ *  swallow the next one. */
+function tweakWordOk(v) {
+  if (typeof v !== 'string' || !v.trim() || v.length > TWEAK_LIMITS.wordChars || TWEAK_BAD.test(v) || v.includes('/*') || v.includes('*/') || TWEAK_HIDDEN.test(v)) return false;
+  let q = 0;
+  for (let i = 0; i < v.length; i++) { const c = v.charCodeAt(i); if (q) { if (c === q) q = 0; } else if (c === 34 || c === 39) q = c; }
+  return q === 0;
+}
+/** The canvas's word to a frame for one knob (design-canvas-model.js frameSay): ONE custom property or ONE root data
+ *  attribute, a value of the tweak grammar → the bounded message, or null. */
+function tweakSay(msg) {
+  if (!isObj(msg) || msg.kind !== 'design-tweak' || !tweakWordOk(msg.value)) return null;
+  if (isTweakVar(msg.var) && msg.attr === undefined) return { kind: 'design-tweak', var: msg.var, value: msg.value };
+  if (isTweakAttr(msg.attr) && msg.var === undefined) return { kind: 'design-tweak', attr: msg.attr, value: msg.value };
+  return null;
+}
+/** The walker pieces src/design-user-layer.js finds the root and head tags with (one walker, never a twin). */
+const WALK = Object.freeze({ seek, commentEnd, rawEnd, isAlpha, isNameCh, RAW_TEXT });
+
 // ── the published page ──────────────────────────────────────────────────────────────────────────────────────────────
 
 const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -573,5 +832,8 @@ module.exports = {
   isArtboardName, isAssetName, stemOf, mimeOf, utf8Bytes, cutText, emptyManifest,
   validateManifest, layoutOf, scanHtml, refOf, artboardVerdict, assetRefsOf, inlineAssets,
   elementPath, pickQuote, commentVerdict, commentText,
+  ASK_LIMITS, validateQuestions, answersVerdict, answersText,
+  CHANGE_PROPS, CHANGE_EDITS, styleValueOk, changesVerdict, changeLine, changesText,
+  USER_FILE, TWEAK_LIMITS, isTweakVar, isTweakAttr, tweakWordOk, tweakSay, oneLine, WALK,
   bundleCanvas, readBundle, PLACEHOLDER_RUNTIME, sizeVerdict, readCapsVerdict,
 };

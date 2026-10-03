@@ -309,6 +309,9 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
     const title = escapeHtml(rec.name || 'Published page');
     const bridge = '<script nonce="' + nonce + '">(function(){\n'
       + "var f=document.querySelector('iframe'),watchId=null,PFX='vp_" + rec.id + "_';\n"
+      // PRESENT (lane design-present): a design's link ending in #present opens presenting — the fragment never
+      // reaches a server, so the shell hands exactly that one to its frame (nothing else of the address is passed)
+      + "if(location.hash==='#present')f.src=f.getAttribute('src')+'#present';\n"
       + "function send(m){try{f.contentWindow.postMessage(m,'*')}catch(e){}}\n"
       + "function fix(p){send({vibeGeo:'pos',lat:p.coords.latitude,lng:p.coords.longitude,accuracy:p.coords.accuracy,heading:p.coords.heading,speed:p.coords.speed,ts:p.timestamp})}\n"
       + "function fail(e){send({vibeGeo:'err',code:(e&&e.code)||0,message:(e&&e.message)||''})}\n"
@@ -358,7 +361,7 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
       + '})()</scr' + 'ipt>';
     res.send('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>' + title + '</title>'
       + '<style>html,body{margin:0;height:100%;background:#faf9f5}iframe{border:0;display:block;width:100%;height:100%}</style></head>'
-      + '<body><iframe src="/p/' + rec.id + '/raw" sandbox="allow-scripts allow-popups allow-downloads allow-modals allow-forms allow-popups-to-escape-sandbox" allow="clipboard-write" title="' + title + '"></iframe>' + bridge + '</body></html>');
+      + '<body><iframe src="/p/' + rec.id + '/raw" sandbox="allow-scripts allow-popups allow-downloads allow-modals allow-forms allow-popups-to-escape-sandbox" allow="clipboard-write; fullscreen" title="' + title + '"></iframe>' + bridge + '</body></html>');
   }
 
   /** GET /p/:id/raw — the published HTML itself: sandbox CSP (opaque origin)
@@ -470,4 +473,4 @@ self.addEventListener('fetch', (e) => {
   return { publish, publishContent, setFlags, remove, list, bySrcPath, serve, serveRaw, urlFor, originOf, registerRoutes, STORAGE_SHIM, injectShim };
 }
 
-module.exports = { create, injectShim, COMPAT_PRELUDE, STORAGE_SHIM };
+module.exports = { create, injectShim, COMPAT_PRELUDE, STORAGE_SHIM, CSP }; // CSP: the design preview's header too (lane design-ask)

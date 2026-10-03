@@ -43,6 +43,7 @@
  * a user's panel is empty rather than full of invented conversations.
  */
 const { makeRecord, makeConversation } = require('../channel-record.js');
+const SR = require('../channel-search.js');   // design 010: the fake's snippets take THE reader too
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -395,6 +396,9 @@ function fakeR5Caps(receive, env = process.env) {
  *  listing never names, exactly Lark's shape). Declared only when asked (`feed: true`, or the NAMED seam
  *  `VIBESPACE_CHANNELS_FAKE_FEED=1` for fake-poll, read once at module load like the R5 seams): every existing suite
  *  that drives fake-poll through the engine keeps its arithmetic. */
+/** design 010 (lane channels-full-search): the vendor-free FULL SEARCH leg — declared by the poll fake when the NAMED seam
+ *  VIBESPACE_CHANNELS_FAKE_SEARCH=1 is set (module load, like the feed's). Small pages so a press leaves more to scroll to. */
+const FAKE_SEARCH = Object.freeze({ via: 'query', scope: null, pageSize: 10, pagesPerPress: 2, perMin: 30, cost: 1, snippet: true, context: 'around', match: 'substring', adds: 'older' });
 const FAKE_FEED = Object.freeze({ via: 'search', scope: null, option: null, pageSize: 30, pagesPerPass: 5, perMin: 10, maxWindowSec: 3600, catchUp: Object.freeze({ chatType: 'p2p', pagesMax: 20 }), describes: true, timeUnit: 'ms' });
 const FAKE_DMS = Object.freeze([{ id: 'dm-ada', peer: PEOPLE[0] }, { id: 'dm-brook', peer: PEOPLE[1] }, { id: 'dm-cass', peer: PEOPLE[2] }]);
 
@@ -410,7 +414,7 @@ function readFakeTopics(file) {
   if (!file) return {};
   try { const j = JSON.parse(fs.readFileSync(file, 'utf8')); return j && j.topics && typeof j.topics === 'object' ? j.topics : {}; } catch { return {}; }
 }
-function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.now(), feed = false, topicsFile = null }) {
+function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.now(), feed = false, topicsFile = null, search = false }) {
   const caps = {
     receive,
     pushTransport: receive === 'push' ? 'ws-long-conn' : null,
@@ -441,6 +445,7 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
     compose: receive === 'poll' && sendAs.length > 0,
     ...fakeR5Caps(receive),
     ...(feed ? { changeFeed: FAKE_FEED } : {}),
+    ...(search ? { search: FAKE_SEARCH } : {}),
     // lane channel-threads (spec §2.2 / §7.2): the conformance driver implements EVERY row so the chrome legs and
     // the contract suite have a vendor-free leg — vendor threads whose replies ride the listing (`inline`), a reply
     // INTO a thread where the adapter can send (fake-push is read-only: validateCaps refuses replyInto there), a
@@ -554,6 +559,35 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
       },
       /** The account's own user id (the fold's `mine`). */
       selfId() { return FAKE_SELF; },
+      // design 010: THE VENDOR'S OWN SEARCH over the world + an ARCHIVE the history never served (older than every
+      // stored record: 400 days back; `VIBESPACE_CHANNELS_FAKE_SEARCH_N` more of them, default 30) — one conversation
+      // of it the account never listed (`<kind>-archived-chat`). A snippet is the vendor's: highlight markup around the words.
+      ...(caps.search ? {
+        async search({ query, pageToken = null } = {}) {
+          meter(1);
+          const q = String(query || '').trim().toLowerCase();
+          const all = [];
+          for (const c of getWorld().values()) for (const m of c.records) if (String(m.text || '').toLowerCase().includes(q)) all.push({ convId: c.meta.id, m });
+          for (const a of fakeArchive(kind, clock(), deps.env || process.env)) if (String(a.m.text).toLowerCase().includes(q)) all.push(a);
+          all.sort((x, y) => y.m.at - x.m.at);
+          const from = /^p:\d{1,6}$/.test(String(pageToken || '')) ? Number(String(pageToken).slice(2)) : 0;
+          const size = FAKE_SEARCH.pageSize;
+          const page = all.slice(from, from + size);
+          const mark = (text) => String(text).replace(new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), (w) => `<em>${w}</em>`);
+          const hits = page.map(({ convId, m }) => ({ convId, vendorId: m.vendorId, at: m.at, fromId: m.author.id, threadKey: m.threadKey || null, snippet: SR.snippetOf(mark(m.text)) }));
+          return { hits, next: from + size < all.length ? `p:${from + size}` : null, facts: { shape: SR.snippetShape(page.length ? mark(page[0].m.text) : undefined), holding: hits.filter((h) => SR.holdsQuery(h.snippet, q)).length, of: hits.filter((h) => h.snippet).length } };
+        },
+        async around(convId, { vendorId = null, at = null } = {}) {
+          meter(2);
+          const c = getWorld().get(convId);
+          const raw = [...(c ? c.records : []), ...fakeArchive(kind, clock(), deps.env || process.env).filter((a) => a.convId === convId).map((a) => a.m)].sort((x, y) => x.at - y.at);
+          let i = raw.findIndex((m) => m.vendorId === vendorId);
+          if (i < 0) i = Math.max(0, raw.findIndex((m) => m.at >= Number(at)));
+          const half = Math.floor(SR.AROUND_MAX / 2);
+          const win = raw.slice(Math.max(0, i - half + 1), Math.max(0, i - half + 1) + SR.AROUND_MAX);
+          return { records: win.map((m) => toRecord(adapterId, convId, m)), requests: 2, facts: { before: Math.min(half, i + 1), after: Math.min(half, raw.length - i), target: i >= 0 && !!raw[i] && raw[i].vendorId === vendorId } };
+        },
+      } : {}),
 
       /**
        * Pages BACKWARD from the newest toward `anchor`, returning at most
@@ -848,7 +882,20 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
 }
 
 /** The three modules P0 registers. `fake-push` is deliberately READ-ONLY. */
-const fakePoll = makeFakeAdapter({ kind: 'fake-poll', receive: 'poll', sendAs: ['user'], feed: String(process.env.VIBESPACE_CHANNELS_FAKE_FEED || '') === '1', topicsFile: String(process.env.VIBESPACE_CHANNELS_FAKE_TOPICS || '') || null });
+const fakePoll = makeFakeAdapter({ kind: 'fake-poll', receive: 'poll', sendAs: ['user'], feed: String(process.env.VIBESPACE_CHANNELS_FAKE_FEED || '') === '1', topicsFile: String(process.env.VIBESPACE_CHANNELS_FAKE_TOPICS || '') || null, search: String(process.env.VIBESPACE_CHANNELS_FAKE_SEARCH || '') === '1' });
+/** design 010: the fake vendor's ARCHIVE — messages its history pages never served (invented words, 400+ days old). */
+function fakeArchive(kind, t, env) {
+  const n = Math.min(500, Math.max(0, Number(env && env.VIBESPACE_CHANNELS_FAKE_SEARCH_N) || 30));
+  const base = Math.floor((Number(t) || Date.now()) / 60e3) * 60e3 - 400 * 86400e3;
+  const who = [{ id: 'ou_fake_ada', name: 'Ada' }, { id: 'ou_fake_brook', name: 'Brook' }];
+  const out = [
+    { convId: `${kind}-ops`, m: { vendorId: `${kind}-ops-old-1`, at: base + 60e3, author: who[0], text: 'Quarterly budget review: the travel line moves to Q3' } },
+    { convId: `${kind}-ops`, m: { vendorId: `${kind}-ops-old-2`, at: base + 120e3, author: who[1], text: 'Budget sign-off is due Friday' } },
+    { convId: `${kind}-archived-chat`, m: { vendorId: `${kind}-arch-1`, at: base + 180e3, author: who[1], text: 'The budget from last year, for the record' } },
+  ];
+  for (let i = 1; i <= n; i++) out.push({ convId: `${kind}-ops`, m: { vendorId: `${kind}-ops-older-${i}`, at: base - i * 3600e3, author: who[i % 2], text: `Budget line ${i} of the old plan` } });
+  return out;
+}
 const fakePush = makeFakeAdapter({ kind: 'fake-push', receive: 'push', sendAs: [] });
 const fakeScan = makeFakeAdapter({ kind: 'fake-scan', receive: 'scan', sendAs: ['user'] });
 
@@ -868,4 +915,4 @@ async function integrationTest({ resolved } = {}) {
   return { ok: true, detail: { source: r.source, region: (r.values && r.values.region) || null } };
 }
 
-module.exports = { makeFakeAdapter, fakePoll, fakePush, fakeScan, worldFor, syntheticKey, toRecord, integrationTest, fixturePng, fixtureMailHtml, FAKE_KINDS: ['fake-poll', 'fake-push', 'fake-scan'], FAKE_EMOJI, FAKE_SELF, seedThreads, seedReactions, FAKE_FEED, FAKE_DMS };
+module.exports = { fakeArchive, FAKE_SEARCH, makeFakeAdapter, fakePoll, fakePush, fakeScan, worldFor, syntheticKey, toRecord, integrationTest, fixturePng, fixtureMailHtml, FAKE_KINDS: ['fake-poll', 'fake-push', 'fake-scan'], FAKE_EMOJI, FAKE_SELF, seedThreads, seedReactions, FAKE_FEED, FAKE_DMS };

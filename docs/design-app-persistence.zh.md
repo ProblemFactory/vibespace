@@ -129,6 +129,8 @@ App: app.gimp — open it with: vibespace-window open app.gimp
 
 **手动 .deb（owner D4，2026-09-27）**："Install from a .deb file…"：从资源管理器选一个 .deb（或输入那台机器上的路径）→ 计划 = `dpkg-deb -I` + `apt-get -s install ./file.deb`（依赖闭包、大小、维护者脚本存在与否）→ 同一个批准门 → `apt-get install ./file.deb`（自动解依赖）→ 该 .deb **复制进本地仓库**并记 sha256，重放 / Rebase 都能重装；来源栏写 "local file"。第三方 apt 源同 §3.1（每个源单独提议、URL + 密钥指纹）。
 
+**D4 修订（owner 2026-10-02 22:22 PDT，设计 009 / lane apps-install-core）**：agent 现在可以**提议**厂商的安装包——`vibespace-app install --from <https 地址>`（VibeSpace 以用户身份下载：只认 https + 公网域名，每一跳重定向都重新判定、连接到判定过的那个地址，≤ 5 跳、≤ 2 GiB）或 `--file <那台机器上的文件>`（复制）；种类按字节判定（.deb / AppImage，其它一律删掉并说出原因），sha256 绑定，应用自己的 .desktop（名字、`Name[zh_CN]`/`Name[ja]`、图标）不安装就读出来。卡片一张、点一次；点击运行的就是展示过的那些字节（文件变了 = `changed`，什么都不运行）。拒绝 / 撤回 / 24 小时过期 / 装完 ⇒ 暂存文件立即删除。用户那一次点击仍是唯一能让它运行的东西。
+
 **漂移绊线**：`/etc/apt/apt.conf.d/99vibespace-apps` 的 `DPkg::Post-Invoke` 触碰一个标记 ⇒ 桌面应用对话框显示"这些包是在 VibeSpace 之外装的，pod 重启会丢 — [Adopt] 进清单"。`~/.vibespace-init.sh` 保留为逃生口，一次性提示"把这几行 apt 挪进 Apps"。
 
 **磁盘底线**：可用空间 < 已装体积 + 2 GiB 时拒绝安装并报数字；缓存每包只留一个版本（Refresh 期间短暂两个）。
@@ -163,6 +165,8 @@ App: app.gimp — open it with: vibespace-window open app.gimp
 listen 之后（readiness 不变）：读清单 → 读临时 rootfs 上的标记 `/var/lib/vibespace/apps-replayed`（服务器重启/崩溃重生一律命中，1 ms）→ 新 rootfs 才起分离 runner（`sudo -n sh -c`，setsid，pidfile，flock）：还原源/密钥/pin → **rung 1 离线**（`file:` 本地仓库，`apt-get install <顶层包>`；P15 实测：GIMP 117 包 / 92 MB 下载 / 397 MB 离线 8.9 s，几个小包约 1 s——瓶颈是 dpkg 解包不是下载，联网装同一套 9.9 s）→ 底座变了/rung 1 失败/Refresh 才 **rung 2 联网**（重解析、刷新缓存、GC 旧版）→ 逐条失败点名（state.json + 一条 For you 通知），从不阻塞别的条目。重放期间目录行灰显 `restoring…`；标了 `after: apps` 的后台服务任务等重放完再放行。pod 在重放中被杀无害（下次从干净 rootfs 再来，没有"dpkg 被中断"的状态可继承）。
 
 ### §3.4 用户级种类（两层都不需要重放）
+
+**AppImage（设计 009 S2）**：不再是 agent 自己的 `add --kind appimage`（解到 agent 的 cwd、没有目录行、删不掉）——它是一种**提议**：点击后由 VibeSpace 自己的 SquashFS 读取器（`src/app-squashfs.js`，gzip / zstd；从不运行 AppImage 本身）解到 `~/.vibespace/apps/appimage/<id>/root/`，AppImage 文件随即删除，目录行来自它自己的 .desktop（以 `AppRun` 运行）；`remove` 按种类删掉它自己的目录（uv / npm 用它们自己的卸载命令）。
 `uv tool`（uv 自管 Python，底座无关）、`npm --prefix ~/.local`（node ABI 变了才 `npm rebuild -g`）、AppImage 一次解压到 `~/.local/opt/<id>`（运行时不需要 FUSE）。清单记录它们（谁装的、为什么），不需要 For you 批准（它们不授予 agent 的 Bash 没有的东西），只有 HELD CLI 卡。
 
 ### §3.5 服务类包（v1 明确的边界）
@@ -253,3 +257,10 @@ postgresql/redis 之类：postinst 在没有 systemd 时能完成，但没人在
 - **PVC 共享**：应用系统和 `data/` 同一块盘，装满了 VibeSpace 自己也写不了；底线 + 每条目大小可见。
 - **重放层的启动延迟**只在没有挂载权限的 pod 上存在，且在 listen 之后；heavy 用户可能等几分钟才见到应用——P15 实测后写进对话框的那行字。
 - **内核共享**：需要内核模块的东西（DKMS、VirtualBox）两层都做不了；无 GPU ⇒ GL 只有 llvmpipe。
+
+---
+
+## §9 落地记录（as-built）
+- **第三方源的 pin（2.369.203，verify-r1 H1）**：每个批准的源一份 `/etc/apt/preferences.d/vibespace-<id>.pref`（root 的副本是 `~/.vibespace/apps/sys/sources/<id>.pref`，不是 §3.1 写的 `etc/preferences/`）：该源主机（`Pin: origin "<host>"`，不带端口）的一切包优先级 1——只有一个版本都没装时才会取；用户从它装的包优先级 500，照常拿它的更新。"从它装的包" = 安装前 `--print-uris` 归属到该源 URI 之下的包，记在 `sys/entries/<id>.pin`。每次 root 运行结束都重写（finish），两档重放在 apt 之前都还原源/密钥/pin（rung 1 也是）；清单 `sources[].pin.packages` 镜像 root 的记录。Refresh 卡片给每条更新标出来源（批准源的名字，否则主机名）。实测（Debian 12 容器，签名的 https 源 `https://vs-fixture.test:8443/repo` 另带一个更新版的 hello 2.10-99）：有 pin 时 Refresh 保留 Debian 的 2.10-3、只把从该源装的 capp-third 升到 1.1，再装 hello 也不取源里的版本；pins() 写空的对照副本把 hello 升成了 2.10-99。已知边界：2.369.203 之前从某个源装的条目没有 .pin，它在该源的更新被 pin 挡住，重装（或 Adopt）一次即补上；Refresh 新带进来的依赖不加入允许列表。 每次 root 运行都在第一个 apt-get 之前重写 pin；source 模式先写 pin、再让源生效；源的主机若是本机自己的 apt 源在用的主机，直接拒绝（`shared-host`）——`Pin: origin` 只按主机匹配，否则会把本机自己的软件仓库一起压低。
+- **.deb / 密钥只读一次（H2）**：机器半边以 O_NONBLOCK 打开、在 fd 上判类型与大小、边复制边算 sha256（不会有 libuv 线程卡在 FIFO 上）；root 用 `dd iflag=nofollow,nonblock` 读进自己的副本，再校验哈希、检查、安装同一份字节。用户可写的暂存副本在"算哈希"与"dpkg-deb 检查"之间仍可被同一用户换掉——root 只装哈希对得上的字节。
+- **启动重放遇到忙的槽（H3）**：每 15 s 重试同一档，最多 10 分钟；仍忙才算这一档失败（一条通知）。

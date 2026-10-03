@@ -83,8 +83,10 @@ const JOB_VERBS = Object.freeze(['list', 'show', 'poll', 'answers', 'logs', 'pro
 /** vibespace-page's pre-approved verbs (r2): `publish` is held AND an ask rule. */
 const PAGE_VERBS = Object.freeze(['list']);
 /** vibespace-design's pre-approved verbs (lane design-core): every verb but `publish`, which is held AND an ask rule
- *  (the vibespace-page precedent — a page under the user's name). */
-const DESIGN_VERBS = Object.freeze(['new', 'add', 'check', 'sync', 'open', 'show', 'list']);
+ *  (the vibespace-page precedent — a page under the user's name). Lane design-ask: `ask` (questions on the agent's own
+ *  design — the user answers or not; nothing is sent anywhere) and `preview` (a read of its own folder). Lane
+ *  design-systems-home: `systems` (lists the design systems — a read). */
+const DESIGN_VERBS = Object.freeze(['new', 'add', 'check', 'sync', 'open', 'show', 'list', 'ask', 'preview', 'systems']);
 /** vibespace-app's pre-approved verbs (Layer 0 apps, docs/design-app-persistence.zh.md §3.1): nothing here EXECUTES —
  *  `install` / `remove` only PROPOSE (one For-you item; the user installs); `add` (a user-level installer run as the
  *  user) is held. */
@@ -628,7 +630,8 @@ function toolStep(tool, args) {
       return args.includes('--public') ? S(i18nKey('Publish a page anyone with the link can open')) : S(i18nKey('Publish a page on this VibeSpace'));
     case 'vibespace-design':
       if (verb === 'publish') return args.includes('--public') ? S(i18nKey('Publish a design anyone with the link can open')) : S(i18nKey('Publish a design on this VibeSpace'));
-      if (verb === 'list' || verb === 'show' || verb === 'check') return S(i18nKey('Read its design drafts'));
+      if (verb === 'list' || verb === 'show' || verb === 'check' || verb === 'preview' || verb === 'systems') return S(i18nKey('Read its design drafts'));
+      if (verb === 'ask') return S(i18nKey('Ask you a few questions before drawing a design'));
       return S(i18nKey('Draft a design and show it in the Design window'));
     case 'vibespace-job':
       if (verb === 'run' || verb === 'start') return S(i18nKey('Start a background shell command'));

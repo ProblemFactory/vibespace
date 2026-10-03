@@ -15,6 +15,9 @@
  *              somebody typed) | 'wake' (it started a turn), `more` = the older messages of that group the report
  *              did not show (counted on its oldest card: "… and N more (vibespace-msg read <group>)"), `cut` = the
  *              agent saw this one cut short (the text IS what it saw).
+ *              A wake that carried SEVERAL messages (lane peer-card-sender, B-9fd6) adds `authors` ([{name, self}], ≤
+ *              AUTHORS_SHOWN, report order) + `authorsMore` (the further senders, counted): the head says "A, B, C and
+ *              N more → <group>" and the text holds each message as "<sender>: <words>" (`reportCardOf`).
  *   THE KEY    `<group id>:<record instant>` — a message carded once is never carded again in that conversation (a
  *              re-report after a restart whose marker write was lost, a wake over the same log range).
  *   THE RING   `session._groupCards` = `[{k, at, card}]`, oldest first, bounded (RING_MAX), persisted in the
@@ -37,6 +40,8 @@ const RING_MAX = 120;             // the newest keys + cards a conversation keep
  *  the card sits under the user's message, and the rebuild must say the same. */
 const PLACE_SLACK_MS = 2000;
 const VIAS = Object.freeze(['report', 'wake']);
+/** A card head names at most this many senders of one delivered report; the rest are counted ("and N more"). */
+const AUTHORS_SHOWN = 3;
 
 const CTRL_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
 function oneLine(v, max) {
@@ -59,7 +64,17 @@ function groupOf(g) {
     self: g.self === true,
     via: VIAS.includes(g.via) ? g.via : 'report',
     more, cut: g.cut === true,
+    ...authorsOfGroup(g),
   };
+}
+/** `authors` + `authorsMore` of a card's group, sanitized — only for a report of two or more senders (a one-sender
+ *  card is exactly what it was before lane peer-card-sender). */
+function authorsOfGroup(g) {
+  const list = (Array.isArray(g.authors) ? g.authors : []).slice(0, AUTHORS_SHOWN)
+    .map((a) => (a && typeof a === 'object' ? { name: oneLine(a.name, NAME_MAX) || null, self: a.self === true } : null))
+    .filter((a) => a && (a.self || a.name));
+  const more = Math.max(0, Math.min(1e6, Math.floor(Number(g.authorsMore) || 0)));
+  return list.length + more > 1 ? { authors: list, authorsMore: more } : {};
 }
 /** THE KEY: one card per (group, record) in a conversation. */
 function cardKey(g) { const x = groupOf(g); return x ? `${x.id}:${x.at}` : null; }
@@ -145,4 +160,89 @@ function pendingEntry(p) {
   return { source: 'group', fromName: from, text: from ? `${from} · ${first}` : first, ts: at, groupId: String(p.groupId || '') };
 }
 
-module.exports = { GROUP_ID_RE, NAME_MAX, TEXT_MAX, RECORDED_HEAD_MAX, RING_MAX, PLACE_SLACK_MS, VIAS, groupOf, cardKey, cardId, normalizeCard, recordedHeadOf, ringHas, ringAdd, ringCards, ringWakeCards, redactRing, placeAt, isGroupCard, pendingEntry };
+// ── WHO WROTE A DELIVERED REPORT (lane peer-card-sender, B-9fd6; the owner 2026-10-02 20:25 PDT: "可以把你这些助手在
+// vibespace里的名字都改一下吗 我看到的全是another啥啥啥"). A wake posts the member's whole pending report into its CLI
+// inbox; the CLI records it as a NAME-LESS peer record ({kind:'peer', from:'unknown'} — the server is an unregistered
+// poster) wrapped "Another Claude session sent a message: …". Two readers of one shape:
+//   · reportCardOf — the card of a report the ENGINE delivered (its shown lines, the facts the ladder carries live)
+//   · readReport   — the same facts read back off the record's own text, for a transcript record no ring entry
+//                    names (a wake older than the ring's 120 entries, a conversation opened in another window): the
+//                    fallback only — the delivery's own facts always win (normalizers upgradeWakeCards)
+/** The card of one delivered report from its MESSAGE lines `[{from, self, text}]` (oldest first): `authors` = the
+ *  distinct senders in report order (the first AUTHORS_SHOWN; `authorsMore` counts the rest), `text` = the words —
+ *  one message ⇒ its words, one sender ⇒ the messages a blank line apart, several ⇒ each as "<sender>: <words>". */
+function reportCardOf(lines) {
+  const msgs = (Array.isArray(lines) ? lines : []).filter((l) => l && String(l.text == null ? '' : l.text).trim());
+  const seen = new Set();
+  const all = [];
+  for (const l of msgs) {
+    const name = l.self === true ? null : (oneLine(l.from, NAME_MAX) || null);
+    const k = l.self === true ? '\u0000self' : name || '\u0000unknown';
+    if (!seen.has(k)) { seen.add(k); all.push({ name, self: l.self === true }); }
+  }
+  const several = all.length > 1;
+  const text = msgs.map((l) => {
+    const words = String(l.text).trim();
+    return several ? `${l.self === true ? 'User' : (oneLine(l.from, NAME_MAX) || 'unknown')}: ${words}` : words;
+  }).join('\n\n');
+  return { authors: all.slice(0, AUTHORS_SHOWN), authorsMore: Math.max(0, all.length - AUTHORS_SHOWN), text };
+}
+const REPORT_READ_MAX = 64 * 1024;   // a wake's report is ≤ its budget (a few KB) — a longer text is not one
+const R_CLI_HEAD = /^\s*Another Claude session sent a message:[ \t]*\n/;
+const R_CLI_TAIL = /\n+This came from another Claude session[\s\S]*$/;
+const R_ENV_OPEN = /^\s*<cross-session-message\b[^>\n]*>[ \t]*\n?/;
+const R_ENV_CLOSE = /\n?[ \t]*<\/cross-session-message>\s*$/;
+const R_LEAD = /^[^\n]{1,200}(?: — group messages \(vibespace-msg\):|…)$/;   // the engine's lead (clipped: the tight form)
+const R_HEAD = /^#### Group "(.*)" \((g-[0-9a-f]{8})\) — \d+ new\b/;
+const R_LINE = /^- \[\d{2}-\d{2}T\d{2}:\d{2}Z\] (.*)$/;
+const R_SYS = /^\(([a-z][a-z-]{0,30})\) ?(.*)$/;
+const R_EARLIER = /^\((\d+) earlier\b/;
+const R_CUT = /^\(\d+ (?:message\(s\) above cut short|cut)\b/;
+const R_ADDED = /^You were added by (.+?)(?: — context: (.*)|\.)$/;
+const R_FOOT = /^Reply: vibespace-msg send /;
+/**
+ * A delivered report read back off its record's text → `{id, name, lines:[{kind, from, text}], more, cut, inviter,
+ * context, added}` or null. The report must OPEN the delivery (after the CLI's frame and an optional lead line) — anywhere
+ * else it is somebody quoting one, which never names a card (`added` = an invite's own line). Tolerant by design (a structured mention, a line the
+ * budget cut, the short head of the tight form): an unknown line is skipped, never guessed at.
+ */
+function readReport(text) {
+  let s = String(text == null ? '' : text);
+  if (s.length > REPORT_READ_MAX) return null;
+  s = s.replace(R_CLI_HEAD, '').replace(R_CLI_TAIL, '').replace(R_ENV_OPEN, '').replace(R_ENV_CLOSE, '');
+  const rows = s.replace(/\r\n?/g, '\n').split('\n');
+  let i = 0;
+  while (i < rows.length && !rows[i].trim()) i++;
+  if (i < rows.length && R_LEAD.test(rows[i])) i++;
+  const h = R_HEAD.exec(rows[i] || '');
+  if (!h || !GROUP_ID_RE.test(h[2])) return null;
+  const out = { id: h[2], name: h[1], lines: [], more: 0, cut: false, inviter: null, context: '', added: '' };
+  for (i++; i < rows.length; i++) {
+    const r = rows[i];
+    if (R_FOOT.test(r) || R_HEAD.test(r)) break;
+    let m;
+    if ((m = R_LINE.exec(r))) {
+      const sys = R_SYS.exec(m[1]);
+      const c = m[1].indexOf(': ');
+      if (sys) out.lines.push({ kind: sys[1], from: null, text: sys[2] });
+      else if (c > 0) out.lines.push({ kind: 'message', from: m[1].slice(0, c) === 'unknown' ? null : m[1].slice(0, c), text: m[1].slice(c + 2) });
+    } else if ((m = R_EARLIER.exec(r))) out.more = Number(m[1]) || 0;
+    else if (R_CUT.test(r)) out.cut = true;
+    else if ((m = R_ADDED.exec(r)) && !out.inviter) { out.inviter = m[1]; out.context = m[2] || ''; out.added = r; }
+  }
+  return out;
+}
+/** A record's report as THE CARD it would have been live: `{fromName, text, group}` (via 'wake' — a recorded post is
+ *  always a wake; `at` = the record's instant) or null. The sender = the newest message's (the one that woke it), an
+ *  invite's inviter when no message rode it. */
+function cardOfReport(rep, at) {
+  if (!rep || !GROUP_ID_RE.test(String(rep.id || ''))) return null;
+  const msgs = rep.lines.filter((l) => l.kind === 'message');
+  const rc = reportCardOf(msgs);
+  const from = msgs.length ? (msgs[msgs.length - 1].from || null) : (rep.inviter || null);
+  const text = rc.text || String(rep.added || '').trim() || rep.lines.map((l) => l.text).filter(Boolean).join('\n');   // an invite: its own line (who, the context)
+  const group = groupOf({ id: rep.id, name: rep.name, at, from, via: 'wake', more: rep.more, cut: rep.cut, authors: rc.authors, authorsMore: rc.authorsMore });
+  return group && text.trim() ? { fromName: group.from, text, group } : null;
+}
+
+module.exports = { AUTHORS_SHOWN, reportCardOf, readReport, cardOfReport, GROUP_ID_RE, NAME_MAX, TEXT_MAX, RECORDED_HEAD_MAX, RING_MAX, PLACE_SLACK_MS, VIAS, groupOf, cardKey, cardId, normalizeCard, recordedHeadOf, ringHas, ringAdd, ringCards, ringWakeCards, redactRing, placeAt, isGroupCard, pendingEntry };

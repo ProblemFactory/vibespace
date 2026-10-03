@@ -29,9 +29,9 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
   const r = R.makeRecord(base);
   ok(JSON.stringify(Object.keys(r)) === JSON.stringify(R.RECORD_FIELDS), 'the record carries exactly the declared fields, in order', JSON.stringify(Object.keys(r)));
   const rb = R.makeRecord({ ...base, blocks: [{ k: 'p', runs: [{ k: 't', text: 'hello' }] }] });
-  ok(JSON.stringify(Object.keys(rb)) === JSON.stringify([...R.RECORD_FIELDS, 'blocks']) && R.OPTIONAL_FIELDS.join() === 'blocks,root', 'a record WITH a render tree carries the declared fields, then the optional `blocks` (§25) — nothing else; the optional set is exactly blocks + root (R4)', JSON.stringify(Object.keys(rb)));
+  ok(JSON.stringify(Object.keys(rb)) === JSON.stringify([...R.RECORD_FIELDS, 'blocks']) && R.OPTIONAL_FIELDS.join() === 'blocks,root,facts', 'a record WITH a render tree carries the declared fields, then the optional `blocks` (§25) — nothing else; the optional set is exactly blocks + root (R4) + facts (lane message-facts, B-f066)', JSON.stringify(Object.keys(rb)));
   const rr = R.makeRecord({ ...base, blocks: [{ k: 'p', runs: [{ k: 't', text: 'hello' }] }], replyTo: 'p1', threadKey: 't1', root: 'r1' });
-  ok(JSON.stringify(Object.keys(rr)) === JSON.stringify([...R.RECORD_FIELDS, ...R.OPTIONAL_FIELDS]) && rr.root === 'r1', 'a record with a tree AND a root carries both optionals in their declared order (the stored-line census: 3 184 stored records keep their 12 fields)', JSON.stringify(Object.keys(rr)));
+  ok(JSON.stringify(Object.keys(rr)) === JSON.stringify([...R.RECORD_FIELDS, 'blocks', 'root']) && rr.root === 'r1', 'a record with a tree AND a root carries both optionals in their declared order (the stored-line census: 3 184 stored records keep their 12 fields)', JSON.stringify(Object.keys(rr)));
   ok(r.id === 'a:c:v1' && r.replyTo === null && r.threadKey === null, 'a missing id is derived from (adapter, conv, vendor); absent optionals are NULL, not undefined');
   ok(r.author.isSelf === false && r.author.isBot === false && r.author.name === '', 'author is always the full four-field shape');
   const big = R.makeRecord({ ...base, text: 'x'.repeat(R.MAX_TEXT + 500) });
@@ -240,7 +240,7 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
     // because it matched nothing.
     ok(judge([...names, 'brand-new-frame']).join(',') === 'brand-new-frame',
       'NEGATIVE CONTROL: the census FLAGS a hyphenated name that is neither neutered nor classified as prose', judge([...names, 'brand-new-frame']).join(','));
-    ok(R.FRAME_TAGS.includes('local-command-stdout') && R.FRAME_TAGS.includes('command-name') && R.FRAME_TAGS.includes('command-args'),
+    ok(R.FRAME_TAGS.includes('local-command-stdout') && R.FRAME_TAGS.includes('command-name') && R.FRAME_TAGS.includes('command-args') && R.FRAME_TAGS.includes('cross-session-message') /* apps-joint r1 F7 */,
       'the fixed list carries the names the CLI\'s own injection paths speak (r2: it used to hold three of seven)', R.FRAME_TAGS.join(','));
     // ── ④d′ THE SAME CENSUS, SPLIT (lane lark-search-poll verify r3 — r2's frame-inert TEXT gap): every covered tag
     // again with a character nobody sees inside it — a zero-width space between EVERY two of its characters, the same
@@ -487,6 +487,7 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
     ['src/channels/fake.js', "name: String((r.author && r.author.name) || 'Ada')", 'lane lark-threads: the fake topics seam\'s reply author — a record makeRecord builds (the door)'],
     ['src/channels/lark.js', "name: String((m && m.name) || '')", 'a record\'s mentions — makeRecord\'s door'],
     ['src/channels/lark.js', "names.set(String(m.member_id), String(m.name || ''))", 'the members\' names map — read only into makeRecord\'s author and a tree\'s @ (both doors)'],
+    ['src/channels/lark.js', "name: String(appName || '')", 'lane message-facts-lark: the `via` fact\'s app name — a record makeRecord builds (validateFacts\' party door)'],
     ['src/server/channels-engine.js', 'en.title = c.title', 'makeConversation\'s output — the door'],
     ['src/server/channels-engine.js', 'en.participants = c.participants', 'makeConversation\'s output — the door'],
     ['src/server/channels-engine.js', "en.title = null; en.bornBy = 'feed'", 'no name (the client words "Single chat")'],

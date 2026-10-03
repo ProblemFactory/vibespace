@@ -50,6 +50,7 @@ const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
 const CH = require(path.join(REPO, 'src/channels/index.js'));
 const fake = require(path.join(REPO, 'src/channels/fake.js'));
 const routes = require(path.join(REPO, 'src/routes/channels.js'));
+const FO8 = require(path.join(REPO, 'src/channel-focus.js'));   // design 008: the page order
 
 const ROOT = scratch('chan-engine');
 const cleanup = () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {} };
@@ -4452,6 +4453,8 @@ console.log('\n㉑ verify r3 (money/memory): the per-account memories — the ce
     feedSeen: 'the message ids the change feed saw — FEED_SEEN_MAX (20 000) / 2 h, trimmed after every page (channel-feed trimSeen)',
     feedGroups: 'the groups the feed found before discovery listed them — ≤ 200, cleared by a complete discovery walk',
     feedUnlisted: 'verify r1: the chats a complete listing did not list — FEED_UNLISTED_MAX (500), oldest first; each for one cold cycle',
+    searchAgentAt: 'design 010: the last --full of each agent conversation (the 20 s floor) — 500, the oldest dropped',
+    searchFlights: 'design 010: the full searches in flight on the account — the owner + one per agent conversation, each removed in its finally',
     feedMissing: 'lane lark-threads (A4): the feed hits behind an owed chat read — FEED_MISSING_MAX (500), oldest first; each leaves when its read found it or its by-id read ran',
     byIdMem: 'lane lark-threads (A4): the by-id answers remembered per message id — FEED_MISSING_MAX (500), oldest first; each for BYID_MEMORY_MS (6 h)',
   };
@@ -6282,6 +6285,88 @@ console.log('\n㉔ lane lark-threads PART B: the owner\'s names for authors, at 
   const CC = require(path.join(REPO, 'src/channel-caps.js'));
   ok(g && JSON.stringify(g.missing) === JSON.stringify(['contact:contact.base:readonly']) && CC.grantsText(view.grants, { vendor: 'Lark' }).text === 'One Re-authorize adds: reading people\'s profiles', 'the account card says it while the sign-in lacks the measured scope: "One Re-authorize adds: reading people\'s profiles" — never a silent refusal per person', JSON.stringify(view.grants));
   eng.stop();
+}
+
+// design 008 (B-3cf8, userW's first Channels open — GET /api/channels answered ≈ 50 000 rows, 77.5 MB): the list is
+// the FIRST READ (scopes), every other row comes from GET /api/channels/rows — paged without a row twice or a row lost
+// while rows move under it (V3), its bounds refused by name, both routes the owner's.
+console.log('\n§ design 008: the first read\'s scopes, the paged rows, their bounds, the owner\'s routes');
+{
+  const http8 = require('node:http');
+  const express8 = require(path.join(REPO, 'node_modules/express'));
+  const q8 = { log() {}, warn() {}, error() {} };
+  let c8 = Date.UTC(2026, 9, 3, 7, 0, 0);
+  const e8 = ENG.create({ dataDir: path.join(ROOT, 'first-read'), env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: () => {}, now: () => c8, log: q8 });
+  const x8 = e8.store.index;
+  const A8 = 'fake-poll';
+  const id8 = (i) => `p${String(i).padStart(4, '0')}`;
+  // 700 rows, two per instant (the key breaks the tie), 7 of them saying "the needle line"
+  await x8.update(() => { for (let i = 0; i < 700; i++) Object.assign(x8.entry(A8, id8(i)), { title: `Paged ${i}`, kind: 'group', lastAt: c8 - 86400e3 - (i % 350) * 1000, unread: 0, lastText: i % 100 === 7 ? 'The NEEDLE line' : 'hay' }); });
+  const builtin = new Set(e8.adapterRecords().adapters.filter((r) => r.builtin).map((r) => r.id));
+  const listed = () => Object.values(x8.live()).filter((en) => en && !en.unlistedAt && !builtin.has(en.adapterId)).map((en) => en.key);
+  const every = new Set(listed());
+  // V3: page through All 60 at a time; between page 2 and page 3, 500 rows move to the top (250 already read, 250
+  // not yet) and 20 are born — the broadcast names those (`changed`); the pages never repeat a row and, with the
+  // broadcast, miss none
+  const seen = new Map(), changed = new Set();
+  let before = null, pages = 0;
+  for (;;) {
+    const r = e8.rows({ limit: 60, before });
+    pages++;
+    for (const row of r.rows) seen.set(row.key, (seen.get(row.key) || 0) + 1);
+    if (pages === 2) {
+      const read = [...seen.keys()].filter((k) => k.startsWith(`${A8}/p`)).slice(0, 250);
+      const unread = [...every].filter((k) => k.startsWith(`${A8}/p`) && !seen.has(k)).slice(0, 250);
+      c8 += 1000;
+      await x8.update(() => {
+        let j = 0;
+        for (const k of [...read, ...unread]) { x8.entry(A8, k.slice(A8.length + 1), { create: false }).lastAt = c8 + (j++ % 7); changed.add(k); }
+        for (let b = 0; b < 20; b++) { Object.assign(x8.entry(A8, `born${b}`), { title: `Born ${b}`, kind: 'group', lastAt: c8 + b, unread: 1, lastText: 'new' }); changed.add(`${A8}/born${b}`); }
+      });
+    }
+    if (!r.next) break;
+    before = r.next;
+    if (pages > 40) break;
+  }
+  const twice = [...seen].filter(([, n]) => n > 1).map(([k]) => k);
+  const lost = [...every, ...[...changed]].filter((k) => !seen.has(k) && !changed.has(k));
+  ok(pages > 3 && twice.length === 0 && lost.length === 0 && [...seen.keys()].length + [...changed].filter((k) => !seen.has(k)).length === listed().length, `V3: ${pages} pages under churn (500 rows moved to the top, 20 born between pages 2 and 3) — no row twice, and pages + the broadcast's rows = all ${listed().length}`, { twice: twice.slice(0, 5), lost: lost.slice(0, 5) });
+  const order = e8.rows({ limit: 200 }).rows;
+  ok(order.every((r, i) => i === 0 || FO8.pageOrder(order[i - 1], r) < 0), 'one order everywhere: lastAt desc, then key (two rows per instant, never ambiguous)');
+  // the routes
+  const routes8 = require(path.join(REPO, 'src/routes/channels.js'));
+  routes8.setup({ getEngine: () => e8 });
+  const app8 = express8(); app8.use(express8.json()); app8.use(routes8.router);
+  const srv8 = http8.createServer(app8);
+  await new Promise((r) => srv8.listen(0, '127.0.0.1', r));
+  const get8 = (u, headers = {}) => new Promise((resolve) => {
+    const req = http8.request({ host: '127.0.0.1', port: srv8.address().port, method: 'GET', path: u, headers }, (res) => { let b = ''; res.on('data', (d) => { b += d; }); res.on('end', () => { let j = null; try { j = JSON.parse(b); } catch {} resolve({ status: res.statusCode, body: j, bytes: Buffer.byteLength(b) }); }); });
+    req.on('error', (e) => resolve({ status: 0, body: null, raw: String(e.message) }));
+    req.end();
+  });
+  const first = await get8('/api/channels');
+  ok(first.status === 200 && first.body.scope === 'first' && first.body.counts.all === listed().length && first.body.conversations.length < 100 && first.body.heads[A8].length === 30, `GET /api/channels = the first read: ${first.body && first.body.conversations.length} rows of ${listed().length}, ${(first.bytes / 1024).toFixed(1)} KB, counts.all ${first.body && first.body.counts.all}, ${A8}'s head 30`);
+  const tot = await get8('/api/channels?scope=totals'), acc = await get8('/api/channels?scope=accounts'), bad = await get8('/api/channels?scope=everything');
+  ok(tot.status === 200 && Object.keys(tot.body).sort().join() === 'at,awaitingTotal,scope,unreadTotal' && acc.status === 200 && Array.isArray(acc.body.adapters) && !('conversations' in acc.body) && bad.status === 400 && bad.body.code === 'bad-request' && /scope must be first, accounts or totals/.test(bad.body.error), `?scope=totals → the two numbers; ?scope=accounts → no row; an unknown scope → 400 by name ("${bad.body && bad.body.error}")`);
+  const refusals = {
+    'limit=201': await get8('/api/channels/rows?limit=201'), 'limit=0': await get8('/api/channels/rows?limit=0'), 'limit=abc': await get8('/api/channels/rows?limit=abc'),
+    'q×101': await get8('/api/channels/rows?q=' + 'x'.repeat(101)), 'view=bogus': await get8('/api/channels/rows?view=bogus'),
+    'before=NaN': await get8('/api/channels/rows?beforeAt=abc&beforeKey=x'), 'conv×401': await get8('/api/channels/rows?conv=' + 'c'.repeat(401)),
+    'key×201': await get8('/api/channels/rows?' + Array.from({ length: 201 }, (_, i) => `key=${encodeURIComponent(`${A8}/${id8(i)}`)}`).join('&')),
+  };
+  const nf = await get8('/api/channels/rows?adapter=nobody');
+  ok(Object.values(refusals).every((r) => r.status === 400 && r.body.code === 'bad-request' && r.body.error) && nf.status === 404 && nf.body.code === 'not-found', `every bound is refused BY NAME (400 bad-request): ${Object.entries(refusals).map(([k, r]) => `${k} → "${r.body && r.body.error}"`).join(' · ')}; an unknown account → 404`);
+  const q100 = await get8('/api/channels/rows?q=' + encodeURIComponent('needle'.padEnd(100, ' ')));
+  const needle = await get8('/api/channels/rows?q=NeEdLe'), title = await get8('/api/channels/rows?q=' + encodeURIComponent('paged 107'));
+  ok(q100.status === 200 && needle.body.total === 7 && needle.body.rows.every((r) => /needle/i.test(r.lastText)) && title.body.total === 1 && title.body.rows[0].id === 'p0107', `q: case-insensitive over the last line (7 "needle") and the title a person reads ("paged 107" → p0107); 100 characters (trimmed) is in bounds`);
+  const keys = await get8(`/api/channels/rows?key=${encodeURIComponent(`${A8}/p0003`)}&key=${encodeURIComponent(`${A8}/p0004`)}&key=nobody%2Fx`);
+  const conv = await get8('/api/channels/rows?conv=p0005'), acct = await get8(`/api/channels/rows?adapter=${A8}&limit=200`);
+  ok(keys.status === 200 && keys.body.rows.map((r) => r.id).sort().join() === 'p0003,p0004' && conv.body.rows.length === 1 && conv.body.rows[0].adapterId === A8 && acct.body.rows.length === 200 && acct.body.rows.every((r) => r.adapterId === A8) && acct.body.next, 'keys reads the named rows (an unknown key is simply absent); conv finds an id across accounts; adapter narrows to one account (200, then a cursor)');
+  const AGB = { Authorization: 'Bearer vsst_fake-agent-token' }, JBB = { Authorization: 'Bearer jbt_fake-job-token' };
+  const ag1 = await get8('/api/channels', AGB), ag2 = await get8('/api/channels/rows?q=needle', AGB), ag3 = await get8('/api/channels?scope=totals', JBB);
+  ok([ag1, ag2, ag3].every((r) => r.status === 403 && r.body.code === 'agent-forbidden'), `an agent's session / job bearer is refused on both routes by name ("${ag1.body && ag1.body.error}")`);
+  await new Promise((r) => srv8.close(r));
+  e8.stop && e8.stop();
 }
 
 console.log('\ntree: the patched copies never touch the tree');

@@ -46,6 +46,18 @@ export function msgBarActions({ sys = false, cleared = false, group = false, inP
   return out;
 }
 
+/** THE MESSAGE MENU (lane channel-touch-menu, 2.369.203): the bar's actions + `copy` when the message has words — what
+ *  the touch … button, a long press on the row's chrome and a desktop right click open. The bar itself never draws
+ *  `copy` (desktop hover unchanged); on a touch-first device the words are selectable, Copy text takes the whole message. */
+export function msgMenuActions(barIds, { text = '' } = {}) {
+  const ids = Array.isArray(barIds) ? barIds.filter((x) => MSG_ACTIONS.includes(x)) : [];
+  return String(text || '').trim() ? [...ids, 'copy'] : ids;
+}
+
+/** A TOUCH-FIRST device — the bar is never drawn there, the … button is (never "hover: none" alone: headless Chrome and
+ *  a pen report it on a fine pointer, where the bar is the door). */
+export const TOUCH_QUERY = '(hover: none) and (pointer: coarse)';
+
 /** The key a set of bars is drawn from — the window re-syncs its drawn bars only when this changes. */
 export function barKey({ conv = null, composer = null, note = '' } = {}) {
   const o = (conv && conv.offers) || {};

@@ -17,6 +17,10 @@
 //      keeper over a scratch HOME whose browsers/ is a symlink to the account's (nothing else copied) launches a profile
 //      pinned to chrome-146.0.7680.153 while the CLI's default is newer — the running browser's own /json/version and its
 //      process both name 146: the env reached the real CLI on every call (a call without it would relaunch the default).
+//   ③b lane chrome-builds-download: Change build… → "Download another build…" → the picker over a loopback Chrome for Testing
+//      (the scratch copy's record names reserved `.test` hosts, VIBESPACE_TEST_EGRESS_MAP points them at it): the Stable row's
+//      chips and THE confirm in zh / ja / en; in en the download runs through the UI (the progress line) and Change build…
+//      comes back with the new build picked.
 // Artifacts: PNG per leg under <tmpdir>/vibespace-badm-shots/run-<pid>-<time>/ (the newest three kept). SKIPs without
 // chrome or dtach. Run: node scripts/test-browser-profiles-ui.mjs
 import fs from 'node:fs';
@@ -158,12 +162,28 @@ if (['open', 'snapshot', 'get', 'click'].includes(a)) { daemon(); out({ success:
 out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.exit(1);
 `, { mode: 0o755 });
 
+  // ── lane chrome-builds-download: the loopback "Chrome for Testing" behind reserved `.test` names (never a real host) ──
+  const CFT_PORT = await freePort();
+  const { chromeZip } = await import('./fixtures/chrome-for-testing/fake-zip.mjs');
+  const crypto = await import('node:crypto');
+  const LKG = JSON.parse(fs.readFileSync(path.join(repo, 'scripts/fixtures/chrome-for-testing/last-known-good-versions-with-downloads.json'), 'utf8').replaceAll('https://storage.googleapis.com/', `https://storage.test:${CFT_PORT}/`));
+  const STABLE = LKG.channels.Stable.version, CFT_ZIP = chromeZip(STABLE), CFT_MD5 = crypto.createHash('md5').update(CFT_ZIP).digest();
+  const cftHits = [];
+  const cft = http.createServer((req, res) => {
+    cftHits.push(req.method + ' ' + req.url);
+    if (req.url === '/chrome-for-testing/last-known-good-versions-with-downloads.json') { const b = Buffer.from(JSON.stringify(LKG)); res.writeHead(200, { 'content-type': 'application/json', 'content-length': b.length }); return res.end(b); }
+    if (req.url === `/chrome-for-testing-public/${STABLE}/linux64/chrome-linux64.zip`) { res.writeHead(200, { 'content-length': CFT_ZIP.length, etag: `"${CFT_MD5.toString('hex')}"` }); if (req.method === 'HEAD') return res.end(); let i = 0; const step = () => { if (i >= CFT_ZIP.length) return res.end(); res.write(CFT_ZIP.subarray(i, i + 1024)); i += 1024; setTimeout(step, 60); }; return step(); }
+    res.writeHead(404); res.end();
+  });
+  await new Promise((r) => cft.listen(CFT_PORT, '127.0.0.1', r));
+  procs.add({ kill: () => cft.close() });
+  { const vf = path.join(WT, 'src/browser-verbs.js'); const v0 = fs.readFileSync(vf, 'utf8'); const v1 = v0.replace("listHost: 'googlechromelabs.github.io', fileHost: 'storage.googleapis.com'", `listHost: 'cft.test:${CFT_PORT}', fileHost: 'storage.test'`); ok(v1 !== v0, 'the scratch copy\'s CHROME_BUILDS_RECORD names the reserved `.test` hosts of the loopback Chrome for Testing'); fs.writeFileSync(vf, v1); }
   // ── the server ──
   const PORT = await freePort(), CDP = await freePort();
   const baseEnv = { ...process.env };
   for (const k of Object.keys(baseEnv)) if (k.startsWith('AGENT_BROWSER_')) delete baseEnv[k];
   let journal = '';
-  const srv = spawn(process.execPath, ['server.js'], { cwd: WT, env: { ...baseEnv, ...VNC_ENV, PATH: `${FAKE_BIN}:${baseEnv.PATH || '/usr/bin:/bin'}`, PORT: String(PORT), HOME: HOME_DIR, CLAUDE_CMD: STUB, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const srv = spawn(process.execPath, ['server.js'], { cwd: WT, env: { ...baseEnv, ...VNC_ENV, PATH: `${FAKE_BIN}:${baseEnv.PATH || '/usr/bin:/bin'}`, PORT: String(PORT), HOME: HOME_DIR, CLAUDE_CMD: STUB, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_TEST_EGRESS_MAP: 'cft.test=127.0.0.1,storage.test=127.0.0.1' }, stdio: ['ignore', 'pipe', 'pipe'] });
   procs.add(srv);
   srv.stdout.on('data', (d) => { journal = (journal + d).slice(-60000); }); srv.stderr.on('data', (d) => { journal = (journal + d).slice(-60000); });
   if (!ok(await until(() => journal.includes('Ready.'), 60000, 200), 'the scratch server booted', journal.slice(-800))) return;
@@ -304,6 +324,44 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
       await shot(`3-change-build-${lang}`);
       await ev("document.querySelector('#browser-build-dialog .bbuild-cancel').click()");
     }
+  }
+
+  // ═══ ③b lane chrome-builds-download: Download another build… ═══
+  console.log('— ③b Download another build…: the picker from Change build…, the chips and THE confirm in zh / ja / en, a download through the UI');
+  if (VP) for (const lang of ['zh', 'ja', 'en']) {
+    await load(lang, 1280, 800);
+    await openPanel();
+    await until(() => ev(`!!document.querySelector('.bprof-profile[data-profile-id=${J(VP)}] .bprof-build-btn')`), 10000, 100);
+    await click(`.bprof-profile[data-profile-id=${J(VP)}] .bprof-build-btn`);
+    const row = await until(() => ev(`(() => { const r = document.querySelector('#browser-build-dialog .bbuild-download'); return r ? { head: r.querySelector('.bwho-answer-head').textContent, last: r === [...r.parentElement.children].at(-1) } : null; })()`), 15000, 100);
+    ok(row && row.head === tr(lang, 'Download another build…') && row.last, `${lang}: Change build… ends with the row "Download another build…"`, row);
+    const lists0 = cftHits.filter((h) => h.includes('last-known-good')).length;
+    await click('#browser-build-dialog .bbuild-download');
+    const pk = await until(() => ev(`(() => { const d = document.querySelector('#browser-build-dialog'); const rows = [...d.querySelectorAll('.bdl-row')]; if (!rows.length) return null; const st = rows.find((x) => x.dataset.version === ${J(STABLE)}); return { intro: d.querySelector('.bdl-intro').textContent, n: rows.length, head: st && st.querySelector('.bwho-answer-head').textContent, chips: st ? [...st.querySelectorAll('.bdl-chip')].map((x) => x.textContent) : [], rowsHidden: getComputedStyle(d.querySelector('.bbuild-rows')).display === 'none', free: (d.querySelector('.bdl-free') || {}).textContent || '' }; })()`), 20000, 150);
+    ok(pk && pk.n === 4 && pk.rowsHidden && pk.intro === tr(lang, "Chrome for Testing builds, from Google. Once a profile is opened by a Chrome version, every older major is refused for it. Canary and Dev change weekly; Stable is what the browser CLI's own install picks.") && pk.head === `Stable · ${STABLE}` && cftHits.filter((h) => h.includes('last-known-good')).length === lists0 + 1
+      && pk.chips.includes(tr(lang, 'Newer than the census ({census}): what it adds is refused by name while you drive the browser; everything else works', { census: '154.0.8037.57' })) && pk.chips.includes(tr(lang, "A profile opened with it can't switch to CloakBrowser later (Free {free} / Pro {pro}): switching down is refused", { free: 146, pro: 151 })),
+      `${lang}: the picker opens IN the dialog (the rows step aside), reads the channel list once, four rows; Stable's chips say the census and CloakBrowser in the device's words`, pk);
+    await shot(`3b-picker-${lang}`);
+    await click(`#browser-build-dialog .bdl-row[data-version="${STABLE}"]`);
+    const cf = await until(() => ev(`(() => { const p = [...document.querySelectorAll('p.dialog-hint')].find((x) => x.textContent.includes('storage.test')); if (!p) return null; let ov = p; while (ov.parentElement && ov.parentElement !== document.body) ov = ov.parentElement; const bs = [...ov.querySelectorAll('button')]; return { title: (ov.querySelector('h3') || {}).textContent || '', msg: p.textContent, buttons: bs.map((b) => b.textContent) }; })()`), 15000, 100);
+    ok(cf && cf.title === tr(lang, 'Download Chrome {version}?', { version: STABLE }) && cf.msg.includes(tr(lang, "It is checked against the server's own length and checksum — Google publishes no separate one. Nothing restarts; it becomes a build you can pick. Chrome for Testing never auto-updates.")) && cf.buttons.includes(tr(lang, 'Download')),
+      `${lang}: THE confirm — the version, the host, how it is checked, one Download button`, cf);
+    await shot(`3b-confirm-${lang}`);
+    if (lang !== 'en') {
+      await ev(`(() => { const p = [...document.querySelectorAll('p.dialog-hint')].find((x) => x.textContent.includes('storage.test')); let ov = p; while (ov.parentElement && ov.parentElement !== document.body) ov = ov.parentElement; [...ov.querySelectorAll('button')].find((b) => b.textContent !== ${J(tr(lang, 'Download'))} && b.textContent.trim()).click(); })()`);
+      await ev("document.querySelector('#browser-build-dialog .bdl-back').click()");
+      const back = await until(() => ev("(() => { const d = document.querySelector('#browser-build-dialog'); return d && getComputedStyle(d.querySelector('.bbuild-rows')).display !== 'none' && !d.querySelector('.bdl-row'); })()"), 5000, 100);
+      ok(back, `${lang}: Back puts the build rows back`);
+      await ev("document.querySelector('#browser-build-dialog .bbuild-cancel').click()");
+      continue;
+    }
+    await ev(`(() => { const p = [...document.querySelectorAll('p.dialog-hint')].find((x) => x.textContent.includes('storage.test')); let ov = p; while (ov.parentElement && ov.parentElement !== document.body) ov = ov.parentElement; [...ov.querySelectorAll('button')].find((b) => b.textContent === 'Download').click(); })()`);
+    const prog = await until(() => ev("(() => { const p = document.querySelector('#browser-build-dialog .bdl-progress'); return p && p.style.display !== 'none' && /Downloading Chrome .* MB of .* MB|Unpacking|Checking|Verifying/.test(p.textContent) ? p.textContent : null; })()"), 15000, 50);
+    ok(!!prog, 'en: the progress line while it downloads ("Downloading Chrome … N MB of M MB" → checking → unpacking → verifying)', prog);
+    const picked = await until(() => ev(`(() => { const d = document.querySelector('#browser-build-dialog'); const r = d && d.querySelector('.bbuild-row[data-key="v:${STABLE}"] input'); return r && r.checked && !d.querySelector('.bdl-row') ? true : null; })()`), 30000, 150);
+    ok(picked && fs.existsSync(path.join(HOME_DIR, '.agent-browser', 'browsers', `chrome-${STABLE}`, 'vibespace-download.json')), `en: it landed in the CLI's builds folder (witnessed) and Change build… came back with Chrome ${STABLE} picked`, journal.slice(-1500));
+    await shot('3b-picked-en');
+    await ev("document.querySelector('#browser-build-dialog .bbuild-cancel').click()");
   }
 
   // ═══ ④ 390 px ═══

@@ -1,4 +1,5 @@
-import { SETTINGS_SCHEMA, SETTINGS_CATEGORIES, harnessSectionFor, harnessFileRel, orderedCategories, settingsGroupOf, settingsGroups, clampToSchema } from './settings-schema.js';
+import { SETTINGS_SCHEMA, SETTINGS_CATEGORIES, harnessSectionFor, harnessFileRel, harnessCategory, channelVendorName, orderedCategories, settingsGroupOf, settingsGroups, clampToSchema } from './settings-schema.js';
+import { settingsViewModel, hiddenAdvancedText, whenClauses, clauseKind, SHOW_ADVANCED_KEY } from './settings-view.js'; // PURE: what is drawn — tiers, `when`, search, modified (B-df40 part 2)
 import { showConfirmDialog, fetchJson, showToast } from './utils.js';
 import { receiptLine, offLine, applyHead, refusalLine, recoveredLine } from './cli-config-chips.js';
 import { machineDisplayText } from './browser-display-words.js'; // lane headless-fallback: the display fact beside the headed preference
@@ -16,6 +17,46 @@ class SettingsUI {
     this.app = app;
     this.settings = app.settings;
     this._search = '';
+    this._facts = {};
+  }
+
+  /** The facts a row's `when` reads (settings-view.js), built ONCE per open: the display probes the app already
+   *  ran, the harness CLIs /api/home reported, and — only when some row asks about a channel vendor — ONE read of
+   *  the linked accounts (GET /api/channels/adapters, never on a timer). A fact not known yet stays undefined /
+   *  null, and an unknown fact hides nothing. */
+  _buildFacts(rerender) {
+    const app = this.app || {};
+    const facts = {
+      vnc: typeof app._vncAvailable === 'boolean' ? app._vncAvailable : undefined,
+      desktopApps: app._desktopAppsAvailable === true ? true : app._desktopAppsKnown ? false : undefined,
+      harnesses: app._harnessesHere instanceof Set ? app._harnessesHere : null,
+      channels: null,
+    };
+    const asksChannel = Object.values(SETTINGS_SCHEMA).some((r) => whenClauses(r.when).some((c) => clauseKind(c) === 'channel'));
+    if (asksChannel) {
+      Promise.resolve(fetchJson('/api/channels/adapters')).then((d) => {
+        if (!d || !Array.isArray(d.adapters)) return; // a 401, a timeout, an older server: the fact stays unknown
+        facts.channels = new Set(d.adapters.filter((a) => a && !a.builtin && a.kind).map((a) => String(a.kind)));
+        if (this._facts === facts) rerender();
+      }).catch(() => {});
+    }
+    return facts;
+  }
+
+  /** The context the view model reads a row's `when` through. */
+  _viewCtx() {
+    return {
+      get: (k) => (SETTINGS_SCHEMA[k] ? this.settings.get(k) : undefined),
+      facts: this._facts || {},
+      nameOf: (kind, id) => (kind === 'setting' ? SETTINGS_SCHEMA[id]?.label : kind === 'harness' ? harnessCategory(id) : kind === 'channel' ? channelVendorName(id) : null),
+    };
+  }
+
+  /** The header's ONE switch for advanced rows (persisted per device, beside the nav folds). */
+  _setShowAdvanced(on) {
+    this._showAdvanced = !!on;
+    try { localStorage.setItem(SHOW_ADVANCED_KEY, this._showAdvanced ? '1' : '0'); } catch { }
+    if (this._advInput) this._advInput.checked = this._showAdvanced;
   }
 
   open({ syncId, search } = {}) {
@@ -52,6 +93,27 @@ class SettingsUI {
     title.textContent = t('Settings');
     const headerRight = document.createElement('div');
     headerRight.className = 'settings-header-actions';
+    // "Show advanced settings" (B-df40 part 2): off = each category draws its everyday rows and ends with
+    // "N advanced settings hidden · Show"; a search and a modified row draw regardless (settings-view.js)
+    try { this._showAdvanced = localStorage.getItem(SHOW_ADVANCED_KEY) === '1'; } catch { this._showAdvanced = false; }
+    const advSwitch = document.createElement('label');
+    advSwitch.className = 'settings-adv-switch';
+    advSwitch.title = t('Advanced settings: timers, budgets, paces and operator switches');
+    const advToggle = document.createElement('span');
+    advToggle.className = 'settings-toggle';
+    const advInput = document.createElement('input');
+    advInput.type = 'checkbox';
+    advInput.checked = this._showAdvanced;
+    this._advInput = advInput;
+    advInput.onchange = () => { this._setShowAdvanced(advInput.checked); this._renderContent(content, nav); };
+    const advSlider = document.createElement('span');
+    advSlider.className = 'settings-toggle-slider';
+    advToggle.append(advInput, advSlider);
+    const advText = document.createElement('span');
+    advText.className = 'settings-adv-switch-text';
+    advText.textContent = t('Show advanced settings');
+    advSwitch.append(advToggle, advText);
+    headerRight.append(advSwitch);
     const resetAllBtn = document.createElement('button');
     resetAllBtn.className = 'settings-header-btn';
     resetAllBtn.textContent = t('Reset All');
@@ -82,6 +144,10 @@ class SettingsUI {
 
     dialog.append(header, searchWrap, body);
 
+    this._facts = this._buildFacts(() => { if (content.isConnected) this._rerenderKeepingPlace(content, nav); });
+    // the rows other rows' `when` reads: changing one re-draws, so a dependent row appears / goes at once
+    this._content = content; this._nav = nav;
+    this._governors = new Set(Object.values(SETTINGS_SCHEMA).flatMap((r) => whenClauses(r.when)).filter((c) => clauseKind(c) === 'setting').map((c) => c.setting));
     this._renderContent(content, nav);
     searchInput.focus();
   }
@@ -96,18 +162,14 @@ class SettingsUI {
     this._cliConfigPromise = null;
 
     // Group settings by category (SETTINGS_CATEGORIES is the census of what
-    // renders — test-architecture §44; the ORDER is the groups' — 2.369.132)
+    // CAN render — test-architecture §44; the ORDER is the groups' — 2.369.132).
+    // WHAT is drawn is the view model's answer (settings-view.js, PURE, B-df40
+    // part 2): a search shows every match, a modified row always shows, a row
+    // whose `when` is false is hidden, advanced rows wait for the header switch;
+    // a category with nothing to draw is not drawn — nor its nav item.
+    const vm = settingsViewModel(SETTINGS_SCHEMA, { categories: SETTINGS_CATEGORIES, query, showAdvanced: this._showAdvanced, ctx: this._viewCtx(), isModified: (p) => this.settings.isModified(p), t });
     const grouped = {};
-    for (const cat of SETTINGS_CATEGORIES) grouped[cat] = [];
-    for (const [path, schema] of Object.entries(SETTINGS_SCHEMA)) {
-      if (query) {
-        const haystack = (schema.label + ' ' + schema.description + ' ' + path).toLowerCase();
-        if (!haystack.includes(query)) continue;
-      }
-      const cat = schema.category || 'Other';
-      if (!grouped[cat]) grouped[cat] = [];
-      grouped[cat].push({ path, schema });
-    }
+    for (const cat of SETTINGS_CATEGORIES) grouped[cat] = vm.byCategory[cat];
 
     // THE NAV IS A TREE (2.369.132, owner "设置分级"): one head per group, the
     // categories under it. Desktop heads fold (persisted per device); a search
@@ -119,7 +181,7 @@ class SettingsUI {
     const saveFolds = () => { try { localStorage.setItem('vibespace.settingsNavFolds', JSON.stringify([...folds])); } catch { } };
     const groupEls = new Map();
     for (const g of settingsGroups()) {
-      const cats = orderedCategories().filter((c) => settingsGroupOf(c) === g.id && grouped[c] && grouped[c].length);
+      const cats = orderedCategories().filter((c) => settingsGroupOf(c) === g.id && grouped[c] && grouped[c].show);
       if (!cats.length) continue;
       const box = document.createElement('div');
       box.className = 'settings-nav-group';
@@ -138,8 +200,9 @@ class SettingsUI {
     }
 
     for (const cat of orderedCategories()) {
-      const items = grouped[cat];
-      if (!items || !items.length) continue;
+      const sec = grouped[cat];
+      if (!sec || !sec.show) continue;
+      const items = sec.rows;
 
       // Nav item (inside its group)
       const navItem = document.createElement('div');
@@ -182,16 +245,27 @@ class SettingsUI {
           const st = document.createElement('div'); st.className = 'settings-subsection-title'; st.dataset.applyKind = b.kind; st.textContent = b.title;
           const sn = document.createElement('div'); sn.className = 'settings-subsection-note'; sn.textContent = b.note;
           section.append(st, sn);
-          for (const { path, schema } of own) section.appendChild(this._renderSetting(path, schema));
+          for (const { path, schema, chips } of own) section.appendChild(this._renderSetting(path, schema, chips));
         }
-        for (const { path, schema } of rest) section.appendChild(this._renderSetting(path, schema));
+        for (const { path, schema, chips } of rest) section.appendChild(this._renderSetting(path, schema, chips));
+        if (sec.hiddenAdvanced) section.appendChild(this._hiddenAdvancedLine(sec.hiddenAdvanced, content, nav));
         content.appendChild(section);
         continue;
       }
 
-      for (const { path, schema } of items) {
-        section.appendChild(this._renderSetting(path, schema));
+      // the per-VENDOR rows (derived from src/channel-settings.js, B-df40 part 3) draw after the category's own rows,
+      // in one "Per vendor" sub-block — the way a harness section has its blocks
+      const vendorRows = items.filter((it) => it.schema.channel);
+      for (const { path, schema, chips } of items) {
+        if (!schema.channel) section.appendChild(this._renderSetting(path, schema, chips));
       }
+      if (vendorRows.length) {
+        const st = document.createElement('div'); st.className = 'settings-subsection-title'; st.dataset.channelBlock = 'vendor'; st.textContent = t('Per vendor');
+        const sn = document.createElement('div'); sn.className = 'settings-subsection-note'; sn.textContent = t('Each service\'s own request budget and pace, per linked account. A service\'s rows show while one of its accounts is linked.');
+        section.append(st, sn);
+        for (const { path, schema, chips } of vendorRows) section.appendChild(this._renderSetting(path, schema, chips));
+      }
+      if (sec.hiddenAdvanced) section.appendChild(this._hiddenAdvancedLine(sec.hiddenAdvanced, content, nav));
 
       content.appendChild(section);
     }
@@ -219,7 +293,33 @@ class SettingsUI {
     spy();
   }
 
-  _renderSetting(path, schema) {
+  /** "N advanced settings hidden · Show" — the end of a category while the header switch is off. Show turns the
+   *  switch on and keeps this category where it was on screen. */
+  _hiddenAdvancedLine(n, content, nav) {
+    const line = document.createElement('div');
+    line.className = 'settings-adv-hidden';
+    const words = document.createElement('span');
+    words.textContent = hiddenAdvancedText(n, t);
+    const show = document.createElement('button');
+    show.className = 'settings-link-btn settings-adv-show';
+    show.textContent = t('Show');
+    show.onclick = () => { this._setShowAdvanced(true); this._rerenderKeepingPlace(content, nav, line.closest('.settings-section')?.dataset.category); };
+    line.append(words, ' · ', show);
+    return line;
+  }
+
+  /** Re-render without the view jumping: the anchor category (or the first one on screen) keeps its offset. */
+  _rerenderKeepingPlace(content, nav, anchorCat) {
+    const top = () => content.getBoundingClientRect().top;
+    const secOf = (c) => [...content.querySelectorAll('.settings-section')].find((x) => x.dataset.category === c) || null;
+    const cat = anchorCat || [...content.querySelectorAll('.settings-section')].find((x) => x.getBoundingClientRect().bottom > top())?.dataset.category;
+    const before = cat && secOf(cat) ? secOf(cat).getBoundingClientRect().top - top() : null;
+    this._renderContent(content, nav);
+    const after = cat ? secOf(cat) : null;
+    if (after && before !== null) content.scrollTop += after.getBoundingClientRect().top - top() - before;
+  }
+
+  _renderSetting(path, schema, chips = null) {
     const row = document.createElement('div');
     row.className = 'settings-row';
     if (this.settings.isModified(path)) row.classList.add('modified');
@@ -229,12 +329,17 @@ class SettingsUI {
     const label = document.createElement('div');
     label.className = 'settings-row-label';
     label.textContent = schema.label;
-    if (!schema.liveApply) {
+    // the chips (settings-view.js): `reload` stays the badge inside the label; `advanced` and
+    // `not in use here: <why>` get their own line under it (the label's text stays the row's name)
+    const list = chips || (schema.liveApply ? [] : [{ kind: 'reload', text: t('reload'), title: t('Requires page reload to take effect') }]);
+    const chipLine = document.createElement('div');
+    chipLine.className = 'settings-row-chips';
+    for (const c of list) {
       const badge = document.createElement('span');
-      badge.className = 'settings-reload-badge';
-      badge.textContent = t('reload');
-      badge.title = t('Requires page reload to take effect');
-      label.appendChild(badge);
+      badge.className = c.kind === 'reload' ? 'settings-reload-badge' : `settings-chip settings-chip-${c.kind}`;
+      badge.textContent = c.text;
+      if (c.title) badge.title = c.title;
+      (c.kind === 'reload' ? label : chipLine).appendChild(badge);
     }
     const desc = document.createElement('div');
     desc.className = 'settings-row-desc';
@@ -242,8 +347,11 @@ class SettingsUI {
     const pathEl = document.createElement('div');
     pathEl.className = 'settings-row-path';
     pathEl.textContent = path;
-    info.append(label, desc, pathEl);
+    info.append(label);
+    if (chipLine.childNodes.length) info.append(chipLine);
+    info.append(desc, pathEl);
     if (schema.apply) this._renderApplyChip(info, path, schema);
+    else if (schema.channel) this._renderChannelChip(info, schema);
     if (schema.fact === 'browser-display') this._renderDisplayFact(info);
 
     const controlWrap = document.createElement('div');
@@ -251,6 +359,7 @@ class SettingsUI {
 
     const control = this._createControl(path, schema, row);
     controlWrap.appendChild(control);
+    if (this._governors?.has(path)) controlWrap.addEventListener('change', () => setTimeout(() => { if (this._content?.isConnected) this._rerenderKeepingPlace(this._content, this._nav); }, 0));
 
     // Reset button (only shown when modified)
     if (this.settings.isModified(path)) {
@@ -258,7 +367,7 @@ class SettingsUI {
       resetBtn.className = 'settings-reset-btn';
       resetBtn.textContent = '↺';
       resetBtn.title = t('Reset to default');
-      resetBtn.onclick = () => { this.settings.reset(path); row.classList.remove('modified'); this._refreshControl(row, path, schema); };
+      resetBtn.onclick = () => { this.settings.reset(path); row.classList.remove('modified'); this._refreshControl(row, path, schema); if (this._governors?.has(path) && this._content?.isConnected) this._rerenderKeepingPlace(this._content, this._nav); };
       controlWrap.appendChild(resetBtn);
     }
 
@@ -275,6 +384,18 @@ class SettingsUI {
     line.textContent = t('checking…');
     info.appendChild(line);
     fetchJson('/api/browser/display').then((r) => { if (line.isConnected || line.parentNode) line.textContent = machineDisplayText(r); });
+  }
+
+  /** The apply-chip slot of a DERIVED per-vendor channel row (B-df40 part 3): who reads the value — the Channels
+   *  engine, live, for every account of that vendor. */
+  _renderChannelChip(info, schema) {
+    const box = document.createElement('div');
+    box.className = 'settings-row-apply';
+    const head = document.createElement('div');
+    head.className = 'settings-row-apply-head';
+    head.textContent = t('Read by the Channels engine · {vendor}', { vendor: channelVendorName(schema.channel) });
+    box.appendChild(head);
+    info.appendChild(box);
   }
 
   /** The apply chip under a DERIVED harness row (design §4.3): what the value

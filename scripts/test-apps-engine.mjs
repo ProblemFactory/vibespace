@@ -64,7 +64,8 @@ console.log('§1 normRequest — the closed kinds; what an agent may propose');
   ok(n({ kind: 'apt', packages: 'gimp, gimp-data' }).ok && same(n({ kind: 'apt', packages: 'gimp, gimp-data' }).request.packages, ['gimp', 'gimp-data']), 'apt: packages as a list or a comma/space string');
   ok(n({ kind: 'apt', packages: ['$(x)'] }).code === 'bad_name' && n({ kind: 'apt', packages: [] }).code === 'bad_name', 'a bad / missing name is bad_name');
   ok(n({ kind: 'format' }).code === 'bad-request', 'an unknown kind is refused');
-  for (const k of ['deb', 'refresh', 'replay', 'adopt', 'source-remove']) ok(n({ kind: k, debPath: '/x.deb', packages: ['x'], sourceId: 'x' }, { agent: true }).code === 'agent_forbidden', `an agent cannot propose ${k} (agent_forbidden — the user's door)`);
+  ok(n({ kind: 'deb', debPath: '/home/u/x.deb' }, { agent: true }).request.kind === 'installer' && n({ kind: 'installer', url: 'https://dl.example.com/x.deb' }, { agent: true }).ok && n({ kind: 'deb', staged: '0123456789abcdef.deb', sha256: 'a'.repeat(64) }, { agent: true }).code === 'agent_forbidden', 'design 009 (D4 overturned): an agent\'s .deb is an INSTALLER by address or file — never a file VibeSpace staged');
+  for (const k of ['refresh', 'replay', 'adopt', 'source-remove']) ok(n({ kind: k, debPath: '/x.deb', packages: ['x'], sourceId: 'x' }, { agent: true }).code === 'agent_forbidden', `an agent cannot propose ${k} (agent_forbidden — the user's door)`);
   for (const k of ['apt', 'remove']) ok(n({ kind: k, packages: ['xx'], entryId: 'xx' }, { agent: true }).ok, `an agent may propose ${k}`);
   ok(n({ kind: 'source', source: { id: 's', uris: ['https://e.example/r'], suites: ['stable'], components: ['main'], key: 'https://e.example/k.asc' } }, { agent: true }).ok && n({ kind: 'source', source: { id: 's', uris: ['http://e.example/r'], suites: ['stable'], key: 'https://e.example/k.asc' } }, { agent: true }).code === 'bad_source', 'a package source: its OWN proposal, https + a key or bad_source');
   ok(n({ kind: 'deb', debPath: 'relative.deb' }).code === 'bad_name' && n({ kind: 'deb', debPath: '/home/u/x.deb' }).ok, 'a .deb: an absolute path on that machine (the user\'s door)');
@@ -129,8 +130,8 @@ console.log('§4 the run\'s refusals');
   ok(e1 && e1.code === 'plan_changed' && W.engine.get(p.id).state === 'proposed', 'a plan that changed since it was shown: plan_changed, nothing run, the proposal stays open (Install again)');
   const nf = await W.engine.propose({ request: { kind: 'apt', packages: ['no-such-pkg'] }, by: agentBy(S1, 'w1') }).then(() => null, (e) => e);
   ok(nf && nf.code === 'not_found' && W.userTodos.snapshot().open.filter((i) => i.action && i.action.type === 'app-install').length === 1, 'a plan the machine refuses (not_found) is never filed — the agent hears the refusal by name');
-  const bad = await W.engine.propose({ request: { kind: 'deb', debPath: '/home/u/x.deb' }, by: agentBy(S1, 'w1') }).then(() => null, (e) => e);
-  ok(bad && bad.code === 'agent_forbidden', 'an agent cannot propose a .deb (the user\'s file — D4 is the user\'s door)');
+  const bad = await W.engine.propose({ request: { kind: 'deb', staged: '0123456789abcdef.deb', sha256: 'a'.repeat(64) }, by: agentBy(S1, 'w1') }).then(() => null, (e) => e);
+  ok(bad && bad.code === 'agent_forbidden', 'an agent cannot name a file VibeSpace staged (design 009: it names an address or its own file — the machine fetches)');
   const noConv = await W.engine.propose({ request: { kind: 'apt', packages: ['hello'] }, by: { kind: 'agent' } }).then(() => null, (e) => e);
   ok(noConv && noConv.code === 'bad-request', 'a proposal names its conversation');
 }
@@ -315,7 +316,7 @@ console.log('§2b verify-r1 F2 — the same ask again is the open proposal; one 
   ok(real.srcCards === 2 && /a\.example/.test(real.card1Detail || ''), 'two package sources under one name (two different addresses) are two cards — the second never re-points the first card\'s Install or its words', real);
   ok(real.nothing === 'nothing', 'an app VibeSpace already keeps there, with nothing to install, is refused by name — never a card that does nothing', real);
   const eSrc = fs.readFileSync(path.join(repo, 'src/server/apps-engine.js'), 'utf8');
-  const noDedup = MUT.load('src/server/apps-engine.js', eSrc.replace('if (openOne()) return again(openOne());\n    const shown', 'const shown').replace('if (openOne()) return again(openOne());\n    // …and', '// …and'), 'no-dedup');
+  const noDedup = MUT.load('src/server/apps-engine.js', eSrc.replace('if (openOne()) return again(openOne());\n    // design 009', '// design 009').replace('if (openOne()) { await drop([fetched && fetched.staged, pl.app && pl.app.icon]); return again(openOne()); }\n    // …and', '// …and'), 'no-dedup');
   const ctlA = await probe(noDedup, UserTodoManager, 'f2a');
   ok(new Set(ctlA.ids).size === 3 && ctlA.gimpCards === 3, 'CONTROL (no-dedup): the same ask three times = three proposals and three cards', ctlA);
   const uSrc = fs.readFileSync(path.join(repo, 'src/user-todos.js'), 'utf8');
@@ -365,6 +366,33 @@ console.log('§6 after a rebuild — the replay, its rungs, ONE notice, restorin
   ok(notes.length === 1 && /could not be put back after this machine was rebuilt: gimp/.test(notes[0].text) && notes[0].i18n.text.key === E.WORDS.restoreFailed, 'ONE For-you notice (origin apps) names the entry that did not come back — hello is not blocked by it', notes.map((n) => n.text));
   ok(W2.engine.decorate('local', { registry: [{ id: 'app.gimp', app: 'gimp', available: false, reasonCode: 'app-missing' }] }).registry[0].reasonCode === 'app-missing' || true, 'after the replay the row is no longer "restoring"');
   ok(!W2.engine.isReplaying('local'), 'the replay is over');
+  // verify-r1 H3: the boot replay meets the package slot BUSY (another install holds it) — it waits it out and runs
+  const busyProbe = async (Eng, tag, busyN, opts = {}) => {
+    const d = path.join(dir, tag); fs.mkdirSync(d, { recursive: true });
+    const userTodos = new UserTodoManager({ dataDir: d, onChange: () => { }, expirySweepMs: 0 });
+    const access = STUB.create({ log: quiet, delayMs: 5 });
+    const callA = access.call;
+    let runs = 0, tries = 0, slept = 0;
+    access.call = async (host, op, params) => {
+      if (op === 'app-status') { const r = await callA(host, op, params); r.status.entries = [{ id: 'hello', packages: ['hello'] }]; r.status.replay.decision = { run: true, rung: 1, why: 'fresh-rootfs' }; return r; }
+      if (op === 'app-refresh') { runs++; return { ok: true, state: {}, run: { ok: true, partial: null, entries: { hello: { ok: true } } } }; }
+      return callA(host, op, params);
+    };
+    const ipA = access.installPackage;
+    access.installPackage = async (host, o) => { if (++tries <= busyN) { const e = new Error('an install is already running'); e.code = tries % 2 ? 'busy' : 'not_run'; throw e; } return ipA(host, o); };
+    const eng = Eng.create({ access, userTodos, deliver: fakeDeliver(), activeSessions: () => sessions, sessionStatusKey: (s) => keyOf(s), broadcast: () => { }, dataDir: d, log: quiet, sleep: async () => { slept++; }, ...opts });
+    const r = await eng.afterListen();
+    return { r, runs, tries, slept, notes: userTodos.snapshot().open.filter((i) => i.origin === 'apps' && i.kind === 'notice').map((n) => n.text) };
+  };
+  const b1 = await busyProbe(E, 'h3', 3);
+  ok(b1.r.ran && b1.r.failed.length === 0 && !b1.r.error && b1.runs === 1 && b1.slept === 3 && b1.notes.length === 0, 'verify-r1 H3: the slot busy three times (busy / a followed run\'s not_run) → the replay waits and runs rung 1 once — no "every app" notice', b1);
+  const b2 = await busyProbe(E, 'h3b', 99, { busyWaitMs: 0 });
+  ok(b2.r.ran && ['busy', 'not_run'].includes(b2.r.error) && b2.slept === 0 && b2.notes.length === 1 && /every app/.test(b2.notes[0]), '…a slot still busy past the bound fails the rung by name: ONE notice (the next boot / Put back retries)', b2);
+  const MH = mutantCopies('apps-engine-h3', repo);
+  const noWait = MH.load('src/server/apps-engine.js', fs.readFileSync(path.join(repo, 'src/server/apps-engine.js'), 'utf8').replace("(e.code === 'busy' || e.code === 'not_run') && now() - t0 < busyWaitMs", 'false'), 'no-busy-wait');
+  const bc = await busyProbe(noWait, 'h3c', 3);
+  ok(bc.runs === 0 && bc.notes.length === 1 && /every app/.test(bc.notes[0]), 'CONTROL (no-busy-wait): the pre-fix replay gives up on the busy slot — rung 1 and rung 2 both "fail", ONE "every app" notice, nothing put back', bc);
+  for (const r of copiesCensus(MH.files, MH.dir, repo, { minCopies: 1 })) ok(r.pass, '§6 tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 }
 
 console.log('§7 the wiring\'s stub seam — a throwaway server only');
@@ -386,7 +414,7 @@ console.log('§8 i18n — every sentence the new files word has its zh + ja entr
 {
   // the WHOLE of the files this lane created, and the ADDED lines of the client files it touched (their older sentences
   // are the older lanes' census)
-  const NEW = ['src/server/apps-engine.js', 'src/lib/app-install-dialog.js'].filter((f) => fs.existsSync(path.join(repo, f)));
+  const NEW = ['src/server/apps-engine.js', 'src/lib/app-install-dialog.js', 'src/lib/app-card-model.js'].filter((f) => fs.existsSync(path.join(repo, f)));
   const TOUCHED = ['src/inbox-origin.js', 'src/lib/desktop-app-launcher.js', 'src/lib/user-todos-actions.js', 'src/lib/user-todos-row.js', 'src/lib/inbox-window.js', 'src/lib/inbox-window-layout.js', 'src/lib/user-todos-panel.js', 'src/lib/file-explorer-ops.js'];
   const { execFileSync } = require('child_process');
   const { gitEnvFrom } = await import('./git-env.mjs');
@@ -402,6 +430,253 @@ console.log('§8 i18n — every sentence the new files word has its zh + ja entr
   const ja = (await import(path.join(repo, 'src/lib/i18n-ja.js'))).default || {};
   const missing = [...keys].filter((k) => !(k in zh) || !(k in ja));
   ok(keys.size >= 5 && missing.length === 0, `every t() / i18nKey sentence this lane added (${files.length} files) has zh + ja (${keys.size} keys)`, missing);
+}
+
+console.log('§10 design 009 — THE ONE CLICK: the card\'s Install runs the stored plan; a stale card runs nothing');
+{
+  const AC = require('../src/app-card.js');
+  const W = world('p10');
+  const items = () => W.userTodos.snapshot().open.filter((i) => i.action && i.action.type === 'app-install');
+  const installs = () => W.access.calls.filter(([, op]) => op === 'app-install').length;
+  const p = await W.engine.propose({ request: { kind: 'apt', packages: ['hello'] }, why: 'a friendly greeting program', by: agentBy(S1, 'w1') });
+  const it = items().find((i) => i.action.id === p.id);
+  ok(it && it.card && it.card.state === 'proposed' && it.card.kind === 'package' && it.card.app.name === 'hello' && it.card.by.name === 'Session One' && it.card.why === 'a friendly greeting program' && it.card.from.kind === 'sources' && it.card.bytes.download > 0,
+    'the For-you item carries the proposal\'s VIEW as structure (kind, name, who and why, where from, sizes)', it && it.card);
+  ok(AC.shownDigest(it.card) === AC.shownDigest(W.engine.card(p.id)), 'the digest of the card the client holds is the digest of the proposal as it stands');
+  const stale = (() => { try { W.engine.approve(p.id, { shown: 'a1:0000000000000000:1' }); return null; } catch (e) { return e; } })();
+  ok(stale && stale.code === 'plan_changed' && stale.card && stale.card.id === p.id && W.engine.get(p.id).state === 'proposed' && installs() === 0, 'a stale card (another digest): plan_changed + the current card, NOTHING ran', stale && stale.code);
+  const none = (() => { try { W.engine.approve(p.id, {}); return null; } catch (e) { return e; } })();
+  ok(none && none.code === 'plan_changed' && installs() === 0, 'a click that names no card runs nothing');
+  const p2 = await W.engine.propose({ request: { kind: 'apt', packages: ['gimp'] }, why: 'an image editor', by: agentBy(S2, 'w2') });
+  const cross = (() => { try { W.engine.approve(p.id, { shown: AC.shownDigest(items().find((i) => i.action.id === p2.id).card) }); return null; } catch (e) { return e; } })();
+  ok(cross && cross.code === 'plan_changed' && installs() === 0, 'V4: conversation B\'s card cannot approve conversation A\'s proposal (the digest binds the id)');
+  const r = W.engine.approve(p.id, { shown: AC.shownDigest(it.card) });
+  ok(r.proposal.state === 'installing' && W.userTodos.get(it.id).card.state === 'installing', 'ONE click: the run starts at once and the card says installing…', r.proposal);
+  const busy = (() => { try { W.engine.approve(p2.id, { shown: AC.shownDigest(items().find((i) => i.action.id === p2.id).card) }); return null; } catch (e) { return e; } })();
+  ok(busy && busy.code === 'busy' && W.engine.get(p2.id).state === 'proposed', 'another card clicked while the machine\'s ONE slot runs: busy, nothing started', busy && busy.code);
+  await r.done;
+  const after = W.userTodos.get(it.id);
+  ok(W.engine.get(p.id).state === 'done' && installs() === 1 && after.status === 'done' && after.card.state === 'done' && after.card.result && Array.isArray(after.card.result.rows), 'installed through the slot and recorded; the card follows: installed (the item resolved by apps)', after.card);
+  const again = (() => { try { W.engine.approve(p.id, { shown: AC.shownDigest(after.card) }); return null; } catch (e) { return e; } })();
+  ok(again && again.code === 'proposal_state', 'a second click on an installed card: proposal_state, nothing runs again');
+  ok(W.deliver.stashEntries(S1.claudeSessionId).some((e) => /approved by the user and is done/.test(e.text)), 'the proposer hears the outcome on its next turn (free), as before');
+
+  // the machine's plan moved between the card and the click → nothing ran, the proposal takes the new plan, the card says so
+  const orig = W.access.installPackage;
+  W.access.installPackage = async (h, o) => {
+    const pl = (await W.access.call(h, 'app-plan', o.planOpts)).plan;
+    const now = { ...pl, commands: [...pl.commands, 'apt-get install -y gimp-extra'], downloadBytes: pl.downloadBytes + 4096 };
+    const dg = W.access.planDigest(now);
+    if (o.expectDigest != null && dg !== String(o.expectDigest)) { const e = new Error('what would run changed after it was shown — nothing ran'); e.code = 'plan_changed'; e.plan = now; e.digest = dg; throw e; }
+    return orig(h, { ...o, expectDigest: null });
+  };
+  const c2 = items().find((i) => i.action.id === p2.id).card;
+  const r2 = W.engine.approve(p2.id, { shown: AC.shownDigest(c2) });
+  await r2.done;
+  const c2b = W.userTodos.get(items().find((i) => i.action.id === p2.id).id).card;
+  ok(W.engine.get(p2.id).state === 'proposed' && c2b.planChanged === true && c2b.bytes.download === c2.bytes.download + 4096 && c2b.digest !== c2.digest && installs() === 1, 'V8: a plan that moved after the card was shown — nothing ran; the card re-reads itself ("the plan changed") with the NEW plan', c2b);
+  const old = (() => { try { W.engine.approve(p2.id, { shown: AC.shownDigest(c2) }); return null; } catch (e) { return e; } })();
+  ok(old && old.code === 'plan_changed' && installs() === 1, '…the old card\'s click runs nothing');
+  const r3 = W.engine.approve(p2.id, { shown: AC.shownDigest(c2b) });
+  await r3.done;
+  ok(W.engine.get(p2.id).state === 'done' && installs() === 2, '…and the click on the card that shows the new plan installs it');
+  W.access.installPackage = orig;
+
+  // a failure names its step; Try again is the same click on the same stored plan
+  const p3 = await W.engine.propose({ request: { kind: 'apt', packages: ['hello', 'gimp'] }, by: agentBy(S1, 'w1') });
+  const c3 = () => W.userTodos.get(items().concat(W.userTodos.snapshot().resolved).find((i) => i.action && i.action.id === p3.id).id).card;
+  let once = true;
+  W.access.installPackage = async (h, o) => { if (once) { once = false; const e = new Error('the install exited 100 on this machine — the log above says why'); e.code = 'install_failed'; throw e; } return orig(h, o); };
+  await W.engine.approve(p3.id, { shown: AC.shownDigest(c3()) }).done;
+  const f = c3();
+  ok(W.engine.get(p3.id).state === 'failed' && f.state === 'failed' && f.result.step === 'install' && f.result.code === 'install_failed' && W.userTodos.get(W.engine.get(p3.id).todoId).status === 'open', 'a failure: the card names the step (it stopped while installing) and stays open', f);
+  await W.engine.approve(p3.id, { shown: AC.shownDigest(f) }).done;
+  ok(W.engine.get(p3.id).state === 'done' && c3().state === 'done', 'Try again: the same card\'s click runs the same stored plan → installed');
+  W.access.installPackage = orig;
+
+  // Mark done / Ignore on a card still DECLINE it (nothing installs)
+  const p4 = await W.engine.propose({ request: { kind: 'apt', packages: ['hello'] }, why: 'again', by: agentBy(S2, 'w2') }).catch((e) => e);
+  const it4 = p4 && p4.id ? items().find((i) => i.action.id === p4.id) : null;
+  if (it4) { W.userTodos.setStatus(it4.id, 'done', 'user'); ok(W.engine.get(p4.id).state === 'rejected' && W.userTodos.get(it4.id).card.state === 'rejected', 'Mark done (in the card\'s ⋯) still declines it — the card says so, nothing installs'); }
+  else ok(p4 && p4.code === 'nothing', 'hello is installed now — a proposal of it is no proposal (nothing to install)', p4 && p4.code);
+}
+{
+  // the route: the one click is the user's door (an agent's token 403), a stale card 409 + the current card
+  const R = require('../src/routes/apps.js');
+  const AC = require('../src/app-card.js');
+  const express = require('express');
+  const W = world('p10r');
+  R.setup({ engine: W.engine, access: W.access, activeSessions: () => sessions, sessionStatusKey: (s) => keyOf(s) });
+  const appx = express(); appx.use(express.json()); appx.use(R.router);
+  const srv = await new Promise((res) => { const s = appx.listen(0, '127.0.0.1', () => res(s)); });
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  const post = (u, body, h = {}) => fetch(base + u, { method: 'POST', headers: { 'Content-Type': 'application/json', ...h }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, j: await r.json() }));
+  try {
+    const p = await W.engine.propose({ request: { kind: 'apt', packages: ['hello'] }, by: agentBy(S1, 'w1') });
+    const card = W.userTodos.snapshot().open.find((i) => i.action && i.action.id === p.id).card;
+    const ag = await post(`/api/apps/proposals/${p.id}/approve`, { shown: AC.shownDigest(card) }, { Authorization: 'Bearer vsst_s1' });
+    ok(ag.status === 403 && ag.j.code === 'agent_forbidden' && W.engine.get(p.id).state === 'proposed', 'POST …/approve with an agent\'s token: 403 agent_forbidden — the click is the user\'s', ag);
+    const st = await post(`/api/apps/proposals/${p.id}/approve`, { shown: 'a1:x:1' });
+    ok(st.status === 409 && st.j.code === 'plan_changed' && st.j.card && st.j.card.id === p.id && W.engine.get(p.id).state === 'proposed', 'a stale card: 409 plan_changed + the current card (the client re-reads it)', st);
+    const go = await post(`/api/apps/proposals/${p.id}/approve`, { shown: AC.shownDigest(card) });
+    ok(go.status === 200 && go.j.ok && go.j.proposal.state === 'installing', 'the card\'s click: 200, installing — the card follows the run', go);
+    for (let i = 0; i < 100 && W.engine.get(p.id).state === 'installing'; i++) await new Promise((r) => setTimeout(r, 20));
+    ok(W.engine.get(p.id).state === 'done', '…and it finishes in the background (no stream held open)');
+  } finally { srv.close(); }
+}
+
+console.log('§11 design 009 — an installer by ADDRESS or FILE: fetched as the user (a loopback https "vendor" by a .test name), ONE card, one click, the staged file gone');
+{
+  const AS = require('../src/app-serve.js');
+  const https = require('https');
+  const { execFileSync } = require('child_process');
+  const d = path.join(dir, 'p10'); fs.mkdirSync(d, { recursive: true });
+  let tls = null;
+  try { execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', path.join(d, 'k.pem'), '-out', path.join(d, 'c.pem'), '-days', '2', '-subj', '/CN=vendor.test', '-addext', 'subjectAltName=DNS:vendor.test,DNS:mirror.test'], { stdio: 'ignore' }); tls = { key: fs.readFileSync(path.join(d, 'k.pem')), cert: fs.readFileSync(path.join(d, 'c.pem')) }; } catch { tls = null; }
+  if (!tls) console.log('  SKIP §10 — no openssl to mint the loopback vendor\'s certificate (evidence: execFileSync openssl failed)');
+  else {
+    const FX = path.join(repo, 'scripts/fixtures/apps-installers');
+    const deb = Buffer.concat([Buffer.from('!<arch>\ndebian-binary   0           0     0     100644  4         `\n2.0\n'), Buffer.alloc(4000, 7)]); // a Debian archive by its bytes (dpkg-deb itself is the heavy gate's)
+    const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
+    const DESK = '[Desktop Entry]\nType=Application\nName=WeChat\nName[zh_CN]=微信\nName[zh_TW]=微信TW\nName[ja]=ウィーチャット\nExec=/opt/wechat/wechat %U\nIcon=wechat\n';
+    let port = 0;
+    const vendor = https.createServer(tls, (q, r) => {
+      const u = q.url;
+      if (u === '/wechat.deb') { r.writeHead(200, { 'Content-Length': deb.length }); return r.end(deb); }
+      if (u === '/chat.AppImage') return r.end(fs.readFileSync(path.join(FX, 'capp-chat.AppImage')));
+      if (u === '/hop') { r.writeHead(302, { Location: `https://mirror.test:${port}/chat.AppImage` }); return r.end(); }
+      if (u === '/page.deb') { r.writeHead(200, { 'Content-Type': 'text/html' }); return r.end('<!doctype html><html><body>Download WeChat</body></html>'); }
+      if (u === '/huge.deb') { r.writeHead(200, { 'Content-Length': String(3 * 1024 ** 3) }); return r.end(); }
+      if (u.startsWith('/loop')) { r.writeHead(302, { Location: `/loop${u.length}` }); return r.end(); }
+      if (u === '/to-private') { r.writeHead(302, { Location: `https://127.0.0.1:${port}/wechat.deb` }); return r.end(); }
+      if (u === '/slow') { r.writeHead(200); r.write('!<arch>\n'); return; } // a slow-loris body: never ends
+      r.writeHead(404); r.end();
+    });
+    await new Promise((res) => vendor.listen(0, '127.0.0.1', res));
+    port = vendor.address().port;
+    const V = `https://vendor.test:${port}`;
+    const fxa = (f) => fs.readFileSync(path.join(repo, 'scripts/fixtures/apt', f), 'utf8');
+    const runner = async (cmd, args) => {
+      if (cmd === 'dpkg') return { code: 0, stdout: 'amd64\n', stderr: '' };
+      if (cmd === 'dpkg-deb' && args[0] === '-I') return { code: 0, stdout: fxa('debian-deb.info.txt'), stderr: '' };
+      if (cmd === 'dpkg-deb' && args[0] === '-f') return { code: 0, stdout: 'Package: hello\nVersion: 2.10-3\nArchitecture: amd64\nMaintainer: Tencent <x@example.invalid>\n', stderr: '' };
+      if (cmd === 'dpkg-deb' && args[0] === '-c') return { code: 0, stdout: ['-rw-r--r-- root/root      4113 2025-01-01 00:00 ./usr/share/applications/wechat.desktop', 'lrwxrwxrwx root/root         0 2025-01-01 00:00 ./usr/share/applications/evil.desktop -> /etc/passwd', '-rw-r--r-- root/root      1000 2025-01-01 00:00 ./usr/share/icons/hicolor/256x256/apps/wechat.png'].join('\n'), stderr: '' };
+      if (cmd === 'sh') return args[4] === './usr/share/applications/wechat.desktop' ? { code: 0, stdout: Buffer.from(DESK), stderr: '' } : args[4] === './usr/share/icons/hicolor/256x256/apps/wechat.png' ? { code: 0, stdout: PNG, stderr: '' } : { code: 2, stdout: Buffer.alloc(0), stderr: 'not found' };
+      if (cmd === 'apt-get' && args.includes('-s')) return { code: 0, stdout: fxa('debian-deb.sim.txt'), stderr: '' };
+      return { code: 0, stdout: '', stderr: '' };
+    };
+    const home = path.join(d, 'home');
+    const mh = AS.create({ home, stateDir: path.join(d, 'state'), binOnPath: (n) => `/usr/bin/${n}`, runner, log: quiet, fetchSeam: { hosts: { 'vendor.test': '127.0.0.1', 'mirror.test': '127.0.0.1' }, ca: tls.cert, limits: { idleMs: 1500, totalMs: 6000 } } });
+    const staging = () => { try { return fs.readdirSync(mh.stagingDir); } catch { return []; } };
+    const real = (op, p) => AS.runAppOp(mh, op, p).then((x) => { if (!x.ok) { const e = new Error(x.error); e.code = x.code; throw e; } return x; });
+    const mkWorld = (tag, nowFn = Date.now) => {
+      const W = world(tag);
+      const stub = W.access, calls = [];
+      const access = { ...stub, calls,
+        call: async (host, op, params = {}) => {
+          calls.push(op);
+          if (op === 'app-install' && params.kind === 'deb') { await mh.unstage({ names: [params.staged, params.icon] }); return { ok: true, entry: { id: params.entryId }, rows: [{ id: `app.${params.entryId}`, label: params.label }], run: {} }; } // ROOT's record of a .deb is the heavy gate's (test-app-install)
+          if (['app-fetch', 'app-unstage', 'app-plan', 'app-install', 'app-remove', 'app-status'].includes(op)) return real(op, params);
+          return stub.call(host, op, params);
+        },
+        installPackage: async (host, { planOpts, expectDigest = null, onData = () => { } }) => {
+          const pl = (await real('app-plan', planOpts)).plan;
+          if (!pl.ok) { const e = new Error(pl.error); e.code = pl.code; e.plan = pl; throw e; }
+          if (expectDigest != null && stub.planDigest(pl) !== String(expectDigest)) { const e = new Error('what would run changed'); e.code = 'plan_changed'; throw e; }
+          onData(Buffer.from('= ok\n')); calls.push('slot-ran');
+          return { ok: true, plan: pl, reattached: false };
+        } };
+      const engine = E.create({ access, userTodos: W.userTodos, deliver: W.deliver, activeSessions: () => sessions, sessionStatusKey: (s) => keyOf(s), dataDir: W.d, log: quiet, now: nowFn });
+      return { ...W, access, calls, engine };
+    };
+    const cards = (W) => W.userTodos.snapshot().open.filter((i) => i.action && i.action.type === 'app-install');
+    // ① a vendor's .deb by its address
+    const W1 = mkWorld('p10a');
+    const p1 = await W1.engine.propose({ request: { kind: 'installer', url: `${V}/wechat.deb` }, why: 'you asked me to install WeChat', by: agentBy(S1, 'w1') });
+    ok(p1.kind === 'deb' && p1.app.name === 'WeChat' && p1.app.labels.zh === '微信' && p1.app.labels.ja === 'ウィーチャット' && /^\/api\/apps\/proposals\/ap-[0-9a-f]{6}\/icon$/.test(p1.app.icon) && p1.label === 'WeChat', 'a .deb by address: the card names the app by ITS OWN desktop file (zh from Name[zh_CN], never zh_TW), its icon read out of the archive — the agent\'s words are not the title', p1.app);
+    ok(p1.from.kind === 'download' && p1.from.host === 'vendor.test' && !p1.from.recipe && p1.bytes.download >= deb.length && p1.keeps === 'replay' && p1.details.sha256 === require('crypto').createHash('sha256').update(deb).digest('hex') && Array.isArray(p1.details.scripts) && typeof p1.digest === 'string', 'the view (design 009 §4): from the vendor\'s host (no recipe vouches for it), the bytes, keeps=replay, Details carry the sha256 of the bytes staged and the maintainer scripts', { from: p1.from, bytes: p1.bytes, keeps: p1.keeps, d: p1.details });
+    ok(cards(W1).length === 1 && staging().some((n) => n.endsWith('.deb')) && staging().some((n) => /\.icon\.png$/.test(n)) && !W1.calls.includes('slot-ran'), 'ONE For-you card; the download + its icon sit in staging; nothing ran (no slot)', { cards: cards(W1).length, staging: staging() });
+    // the WORD CENSUS (design 009 / owner: no package-format or root words on the card — they live in its Details)
+    const JARGON = /\b(?:deb|apt|apt-get|dpkg|appimage|root|sudo|sha-?256)\b|\.deb|管理员|ルート/i;
+    const zhD = (await import(path.join(repo, 'src/lib/i18n-zh.js'))).default || {}, jaD = (await import(path.join(repo, 'src/lib/i18n-ja.js'))).default || {};
+    const it1 = cards(W1)[0];
+    const fill = (tpl, prm) => String(tpl || '').replace(/\{(\w+)\}/g, (_, k) => (prm && prm[k] != null ? prm[k] : ''));
+    const words = [it1.text, ...[E.WORDS.wants, E.WORDS.wantsOne, E.WORDS.wantsRemove, 'Install app · {request}'].flatMap((k) => [fill(k, { name: 'S', app: '微信', n: 2, size: '1 MB', request: '装微信' }), fill(zhD[k], { name: 'S', app: '微信', n: 2, size: '1 MB', request: '装微信' }), fill(jaD[k], { name: 'S', app: '微信', n: 2, size: '1 MB', request: '装微信' })])];
+    ok(words.every((w) => w && !JARGON.test(w)) && JARGON.test('Install the .deb') && /sha256/.test(it1.detail), 'WORD CENSUS: the card line and every template this lane fills (en / zh / ja) name no deb / apt / AppImage / root / sudo / sha256 — those live in Details only (planted control: ".deb" is caught)', words);
+    const again = await W1.engine.propose({ request: { kind: 'installer', url: `${V}/wechat.deb` }, why: 'again', by: agentBy(S1, 'w1') });
+    ok(again.again && again.id === p1.id && cards(W1).length === 1 && staging().filter((n) => n.endsWith('.deb')).length === 1, 'the same address asked again answers the open proposal — one card, one staged file (the second download is deleted)', staging());
+    const settle = () => new Promise((r) => setTimeout(r, 150)); // the decided proposal's files go on a microtask after the state move
+    const done1 = await W1.engine.run({ proposalId: p1.id, expectDigest: p1.digest }); await settle();
+    ok(done1.done && W1.engine.get(p1.id).state === 'done' && W1.calls.includes('slot-ran') && staging().length === 0, 'the click: the stored plan through the slot, then the staged copy deleted at once (root keeps its own)', { staging: staging(), calls: W1.calls });
+    ok(/^Installed: WeChat — open it with `vibespace-window open app\.[a-z0-9-]+`/.test((W1.deliver.q.get(S1.claudeSessionId) || []).map((e) => e.text).join('\n')), 'the proposer hears "Installed: WeChat — open it with …" on its next turn', W1.deliver.q.get(S1.claudeSessionId));
+    // ② an AppImage through a redirect: no root, unpacked in its own directory, removed by kind
+    const cwd0 = process.cwd(); const elsewhere = path.join(d, 'agent-cwd'); fs.mkdirSync(elsewhere, { recursive: true }); process.chdir(elsewhere);
+    const p2 = await W1.engine.propose({ request: { kind: 'installer', url: `${V}/hop` }, why: 'chat', by: agentBy(S1, 'w1') });
+    ok(p2.kind === 'appimage' && p2.app.name === 'Capp Chat' && p2.app.labels.zh === '卡普聊天' && p2.from.host === 'vendor.test' && JSON.stringify(p2.from.via) === '["mirror.test"]' && p2.keeps === 'home' && p2.details.commands.join(' ').includes('nothing runs as root'), 'an AppImage by address (one redirect, re-judged): the name + icon read out of its SquashFS WITHOUT running it; keeps=home; nothing as root', p2);
+    const done2 = await W1.engine.run({ proposalId: p2.id, expectDigest: p2.digest }); await settle();
+    process.chdir(cwd0);
+    const man = JSON.parse(fs.readFileSync(mh.manifestFile, 'utf8'));
+    const e2 = man.entries.find((e) => e.kind === 'appimage');
+    const adir = path.join(mh.appsDir, 'appimage', e2 && e2.id);
+    ok(done2.done && e2 && e2.rows[0].labels.zh === '卡普聊天' && e2.rows[0].exec === path.join(adir, 'root', 'AppRun') && fs.existsSync(path.join(adir, 'root', 'usr/bin/capp-chat')) && fs.readdirSync(elsewhere).length === 0 && !fs.readdirSync(adir).some((n) => /\.AppImage$/.test(n)) && staging().length === 0, 'the click: unpacked into appimage/<id>/root (the cwd elsewhere stays EMPTY), the row from its own desktop file with the localized label, the AppImage file and the staged copy deleted', { e2, elsewhere: fs.readdirSync(elsewhere), staging: staging() });
+    const rows2 = (await real('app-status', {})).status.rows.filter((r) => r.app === e2.id);
+    ok(rows2.length === 1 && rows2[0].env && rows2[0].env.APPDIR === path.join(adir, 'root'), 'the catalog serves the AppImage\'s row (run as its AppRun, APPDIR set)', rows2);
+    const pr = await W1.engine.propose({ request: { kind: 'remove', entryId: e2.id }, why: 'not needed', by: agentBy(S1, 'w1') });
+    const rm2 = await W1.engine.run({ proposalId: pr.id, expectDigest: pr.digest });
+    ok(rm2.done && !fs.existsSync(adir) && fs.existsSync(mh.appsDir) && !JSON.parse(fs.readFileSync(mh.manifestFile, 'utf8')).entries.some((e) => e.id === e2.id) && pr.keeps === 'home', 'removal by kind: an AppImage\'s directory and row go (no root, no slot) — nothing else', { rm2 });
+    // ③ refusals by name: nothing filed, nothing left in staging
+    const W3 = mkWorld('p10c');
+    const refusal = async (request) => W3.engine.propose({ request, why: 'x', by: agentBy(S1, 'w1') }).then(() => null, (e) => e.code);
+    const fifo = path.join(d, 'secret'); fs.writeFileSync(fifo, 'x'); fs.chmodSync(fifo, 0);
+    const pagef = path.join(d, 'page.deb'); fs.writeFileSync(pagef, '<!DOCTYPE html><html></html>');
+    const codes = { page: await refusal({ kind: 'installer', url: `${V}/page.deb` }), huge: await refusal({ kind: 'installer', url: `${V}/huge.deb` }), loop: await refusal({ kind: 'installer', url: `${V}/loop` }), priv: await refusal({ kind: 'installer', url: `${V}/to-private` }), local: await refusal({ kind: 'installer', url: 'https://localhost/x.deb' }), http: await refusal({ kind: 'installer', url: 'http://vendor.test/x.deb' }), slow: await refusal({ kind: 'installer', url: `${V}/slow` }), unreadable: process.getuid && process.getuid() === 0 ? 'not_found' : await refusal({ kind: 'installer', file: fifo }), pagefile: await refusal({ kind: 'installer', file: pagef }), dev: await refusal({ kind: 'installer', file: '/dev/zero' }), hostile: await refusal({ kind: 'installer', file: path.join(FX, 'hostile.AppImage') }), xz: await refusal({ kind: 'installer', file: path.join(FX, 'capp-chat-xz.AppImage') }), staged: await refusal({ kind: 'deb', staged: '0123456789abcdef.deb', sha256: 'a'.repeat(64) }) };
+    ok(JSON.stringify(codes) === JSON.stringify({ page: 'not_an_installer', huge: 'too_large', loop: 'bad_address', priv: 'bad_address', local: 'bad_address', http: 'bad_address', slow: 'fetch_failed', unreadable: 'not_found', pagefile: 'not_an_installer', dev: 'bad_name', hostile: 'hostile', xz: 'unsupported', staged: 'agent_forbidden' }) && cards(W3).length === 0 && staging().length === 0, 'refused BY NAME, nothing filed, nothing kept: an HTML page named .deb, a 3 GiB answer, > 5 redirects, a redirect to an IP, localhost, http, a slow-loris body, a file you may not read, a device, a hostile tree (`..`), an xz AppImage, a staged name from an agent', { codes, staging: staging() });
+    // ④ declined / expired / changed bytes
+    const pA = await W3.engine.propose({ request: { kind: 'installer', url: `${V}/wechat.deb` }, why: 'x', by: agentBy(S1, 'w1') });
+    W3.engine.reject(pA.id); await new Promise((r) => setTimeout(r, 100));
+    ok(W3.engine.get(pA.id).state === 'rejected' && staging().length === 0, 'Not now ⇒ the staged file and its icon deleted at once', staging());
+    let clock = Date.now();
+    const W4 = mkWorld('p10d', () => clock);
+    const pB = await W4.engine.propose({ request: { kind: 'installer', url: `${V}/wechat.deb` }, why: 'x', by: agentBy(S2, 'w2') });
+    clock += E.EXPIRE_MS + 60000; W4.engine.sweep(); await new Promise((r) => setTimeout(r, 100));
+    ok(W4.engine.get(pB.id).state === 'withdrawn' && W4.engine.get(pB.id).result.code === 'expired' && cards(W4).length === 0 && staging().length === 0 && /expired unanswered/.test((W4.deliver.q.get(S2.claudeSessionId) || []).map((e) => e.text).join(' ')), 'unanswered for 24 h ⇒ withdrawn (expired): the card goes, the file goes, the agent is told', staging());
+    const pC = await W4.engine.propose({ request: { kind: 'installer', url: `${V}/wechat.deb` }, why: 'x', by: agentBy(S2, 'w2') });
+    fs.appendFileSync(path.join(mh.stagingDir, pC.request.staged), 'tampered');
+    const eC = await W4.engine.run({ proposalId: pC.id, expectDigest: pC.digest }).then(() => null, (e) => e);
+    ok(eC && eC.code === 'changed' && !W4.calls.includes('slot-ran') && W4.engine.get(pC.id).state === 'failed', 'the staged bytes changed after the card was shown ⇒ `changed`, nothing ran', eC && eC.code);
+    vendor.close();
+  }
+}
+
+console.log('§12 apps-joint r1 — a crash mid-install settles (F3), a failed download\'s file expires (F6), a vendor\'s names carry no hidden character (F4)');
+{
+  const HC = require('../src/hidden-chars.js');
+  const d = path.join(dir, 'p12'); fs.mkdirSync(d, { recursive: true });
+  const calls = [];
+  const RLO = String.fromCodePoint(0x202e), ZW = String.fromCodePoint(0x200b);
+  const access = { planDigest: () => 'd'.repeat(16), call: async (host, op, p) => {
+    calls.push([op, p]);
+    if (op === 'app-status') return { status: { entries: [], rows: [], manifest: { entries: [] }, replay: { decision: { run: false, why: 'x' } } } };
+    if (op === 'app-fetch') return { staged: '3333333333333333.deb', sha256: 'c'.repeat(64), size: 1000, kind: 'deb', hosts: ['vendor.example'], url: p.url };
+    if (op === 'app-plan') return { plan: { ok: true, kind: 'deb', label: 'x', app: { name: `We${ZW}Chat${RLO}exe.`, labels: { zh: `微${ZW}信\t` } }, closure: [{ package: 'x' }], packages: ['x'], origins: [], downloadBytes: 1000, installedBytes: 1000, commands: [] }, facts: {} };
+    return { ok: true };
+  } };
+  const old = Date.now() - 2 * 3600e3;
+  const mk = (id, state, staged, extra = {}) => ({ id, host: 'local', request: { kind: 'deb', staged, sha256: 'a'.repeat(64) }, label: 'wechat', by: { kind: 'agent', conversation: 'c12', name: 'x' }, why: '', state, summary: {}, card: { app: { name: 'wechat', icon: staged.replace('.deb', '.icon.png') }, from: { kind: 'download', host: 'h.example' }, keeps: 'replay' }, digest: 'd', createdAt: old, decidedAt: old, ...extra });
+  fs.writeFileSync(path.join(d, E.STORE_FILE), JSON.stringify({ proposals: [mk('ap-c12001', 'installing', '1111111111111111.deb'), mk('ap-c12002', 'failed', '2222222222222222.deb', { finishedAt: Date.now() - E.EXPIRE_MS - 60000, result: { code: 'install_failed', step: 'install' } })], helpers: [] }));
+  const userTodos = new UserTodoManager({ dataDir: d, onChange: () => { }, expirySweepMs: 0 });
+  const told = [];
+  const eng = E.create({ access, dataDir: d, userTodos, deliver: { stashFor: (c, m) => { told.push(m.text); return { stored: true }; } }, log: quiet });
+  await eng.afterListen(); await new Promise((r) => setTimeout(r, 50));
+  const keep = (calls.find(([op, p]) => op === 'app-unstage' && p && p.keep) || [])[1];
+  const c1 = eng.get('ap-c12001');
+  ok(c1.state === 'failed' && c1.result.code === 'install_interrupted' && c1.result.step === 'install' && keep && !keep.keep.includes('1111111111111111.deb') && told.some((t) => /ap-c12001/.test(t)), 'F3: a proposal the hub was installing when it went down settles at boot — failed (Try again), the agent told, its file no longer kept', { state: c1.state, keep, told });
+  const un = calls.filter(([op, p]) => op === 'app-unstage' && p && p.names).flatMap(([, p]) => p.names);
+  ok(eng.get('ap-c12002').state === 'withdrawn' && eng.get('ap-c12002').result.code === 'expired' && un.includes('2222222222222222.deb'), 'F6: a FAILED download past EXPIRE_MS expires — its staged file deleted (never kept for a Try again forever)', { st: eng.get('ap-c12002'), un });
+  const v = await eng.propose({ request: { kind: 'installer', url: 'https://vendor.example/x.deb' }, why: 'x', by: { kind: 'agent', conversation: 'c12b', name: 'n', sessionKey: 'c12b' } });
+  const it = userTodos.snapshot().open.find((i) => i.action && i.action.id === v.id);
+  const faces = [v.app.name, v.app.labels && v.app.labels.zh, it && it.card.app.name, it && it.card.app.labels.zh, it && it.text];
+  ok(it && faces.every((s) => { HC.HIDDEN_RE.lastIndex = 0; return typeof s === 'string' && !HC.HIDDEN_RE.test(s) && !/[\u0000-\u001f]/.test(s); }) && it.card.app.labels.zh === '微信', 'F4 (V3): a vendor\'s .desktop names reach the view, the card and the For-you line with no hidden / reordering / control character', faces);
 }
 
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}) in ${Date.now() - T0} ms`);

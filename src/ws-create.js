@@ -715,24 +715,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // toggle that gates sending; repo/managed settings can tighten.
             // LOCAL spawns only (the remote field is data.hostId — a data.host
             // guard was a dead check, caught by the 2.344.0 review): accept
-            // only where our peer-messaging can actually deliver, and never
-            // ship channel flags to a machine that lacks the script.
+            // only where our peer-messaging can actually deliver.
             acceptPeerMessages: (() => { try { return !data.hostId && serverSetting('agents.jobNotify') !== false; } catch { return !data.hostId; } })(),
-            // EXPERIMENTAL VibeSpace channel (default OFF; local claude only —
-            // the channel script + socket live on THIS machine)
-            vibespaceChannel: (() => {
-              try {
-                if (serverSetting('agents.vibespaceChannel') !== true || data.hostId) return null;
-                const sockDir = path.join(__dirname, '..', 'data', 'channel-socks');
-                fs.mkdirSync(sockDir, { recursive: true, mode: 0o700 });
-                const sock = path.join(sockDir, id + '.sock');
-                // the socket-path census (src/sock-path.js, lane-pairing ④): a checkout deep enough to put this
-                // socket over the platform's sun_path gets NO channel for this session (said by name, the session starts)
-                const fit = require('./sock-path.js').socketPathFits(sock, process.platform);
-                if (!fit.fits) { console.log(`[channel] not offered for ${id}: its socket path would be ${fit.bytes} bytes (limit ${fit.max}) — ${sock}`); return null; }
-                return { script: path.join(__dirname, '..', 'data', 'bin', 'vibespace-channel.js'), sock };
-              } catch { return null; }
-            })(),
           });
           // For codex resume: inherit forkedFrom chain from old session's JSONL.
           // MODEL CONTINUITY (2.369.32) and EFFORT CONTINUITY (B-21e4 item 4)
@@ -805,7 +789,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 // the default bills the CODEX default) — the caller never re-derives it (verify r2: a re-derivation here
                 // asked the claude default for a codex resume and nothing noticed)
                 // (…and the pool DEFAULT the store self-heals is the POOL's choice: the conversation's pin rides only its own link)
-                chooseMember: (poolId, how = {}) => poolChooser?.(poolId, { model: data.model || data._placementModelHint || null, ...(data._poolPin && !how.forDefault ? { pin: data._poolPin.memberId } : {}) }),
+                // (`hinted`: the family is the instance default standing in for a resume that commands none — no spare-lane placement on a guess, B-8a65 verify r1)
+                chooseMember: (poolId, how = {}) => poolChooser?.(poolId, { model: data.model || data._placementModelHint || null, hinted: !data.model, ...(data._poolPin && !how.forDefault ? { pin: data._poolPin.memberId } : {}) }),
                 pinned: !!data._poolPin, // a codex pool spawns straight onto the chooser's answer only for a pinned conversation
               });
             }
@@ -949,6 +934,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             mode: sessionMode,
             pty: null, clients: new Map([[ws, { cols: data.cols || 120, rows: data.rows || 30 }]]),
             cwd, name: data.sessionName || `Session ${seq}`, // seq, not a re-read — two concurrent creates otherwise BOTH default to 'Session N'
+            // lane peer-card-sender: a name GIVEN at creation (the client sends `sessionName` only for one — its 'Session N' default
+            // stays client-side) outranks the first message on the sidebar card; persisted as meta `nameExplicit`
+            _nameExplicit: typeof data.sessionName === 'string' && !!data.sessionName.trim(),
             createdAt: Date.now(),
             // Per-session bearer for the agent-facing API (vibespace-status):
             // spawned into the CLI's env, scopes writes to this session only
@@ -2237,6 +2225,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
 
           writeSessionMeta(sockName, {
             name: session.name,
+            nameExplicit: session._nameExplicit || undefined, // lane peer-card-sender: restored by boot-restore
             cwd,
             spawnModel: data.model || null, // plan C model ladder's floor — survives restarts
             agentdPipe: r6Handle ? true : undefined, // R6: daemon-owned pipe session (restore re-opens it, no dtach socket exists)

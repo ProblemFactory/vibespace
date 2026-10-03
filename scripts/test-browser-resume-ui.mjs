@@ -25,6 +25,9 @@
 //      ✕ on the tab on show moves the agent to a neighbour first; the last tab has no ✕; a refused close names why; the
 //      handback carries his acts (the journal); "Close all…" asks by the browser's name (cancelled: nothing stopped); zh +
 //      ja: the row whole at 360 px, the tab on show never folded
+//   ⑦ (lane live-watch-polish, design 006 G1–G4) zh at 360 px: a FOLDED tab watched from the ▾+N menu ("查看 — …", no greyed
+//      row), the line names both tabs, the watched chip kept on the row, the agent's tab untouched; the view's socket dropped ⇒
+//      the watch re-sent (one truth). A fake CDP page endpoint (cdp.json → the fake's cdp-url) answers the capture.
 // SKIPs with evidence without chrome / dtach. Free ports, scratch dirs only; ZERO vendor calls (a stub CLI).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -86,7 +89,7 @@ if (a === 'tab') { const s = read(); if (!(s && alive(s.pid))) { out({ success: 
   const t = s.tabs.find((x) => x.tabId === rest[0] || x.targetId === rest[0]); if (!t) { out({ success: false, error: 'fake: no tab ' + rest[0] }); process.exit(1); }
   for (const x of s.tabs) x.active = x === t; write(s); out({ success: true, data: { tabId: t.tabId, targetId: t.targetId } }); process.exit(0); }
 if (a === 'get' && b === 'url') { const s = read(); const act = s && (s.tabs.find((t) => t.active) || s.tabs[0]); out({ success: true, data: { url: act ? act.url : '' } }); process.exit(0); }
-if (a === 'get' && b === 'cdp-url') { out({ success: true, data: { cdpUrl: 'ws://127.0.0.1:1/devtools/browser/fake-' + ns } }); process.exit(0); }
+if (a === 'get' && b === 'cdp-url') { out({ success: true, data: { cdpUrl: 'ws://127.0.0.1:' + (readJ('cdp.json')[ns] || 1) + '/devtools/browser/fake-' + ns } }); process.exit(0); }
 if (a === 'stream' && b === 'status') { const port = readJ('ports.json')[ns] || null; if (!port) { out({ success: false, data: null, error: 'fake: no stream for ' + ns }); process.exit(1); } out({ success: true, data: { connected: true, enabled: true, port, screencasting: false } }); process.exit(0); }
 if (a === 'stream' && b === 'enable') { out({ success: false, data: null, error: 'Streaming is already enabled for this session' }); process.exit(1); }
 if (a === 'set' && b === 'viewport') { out({ success: true, data: {} }); process.exit(0); }
@@ -405,6 +408,58 @@ else await (async () => {
       const z6 = await ev('const l = L(); const s = l.state(); const r = l.el().querySelector(".browser-live-tabrow"); const q = l.el().querySelector(".browser-live-tabrow-quit"); const act = s.tabRow.rows.find((x) => x.active); const actEl = act ? l.el().querySelector(\'.browser-live-tabchip[data-target="\' + act.targetId + \'"]\') : null; return { rows: s.tabRow.rows.map((x) => x.mark), folded: s.tabRow.folded, activeFolded: act ? s.tabRow.folded.includes(act.targetId) : null, row: rect(r), sw: r.scrollWidth, cw: r.clientWidth, quit: q && q.offsetParent ? { text: s.tabRow.quitText, sw: q.scrollWidth, cw: q.clientWidth, right: rect(q).left + rect(q).width } : null, actRect: actEl && actEl.offsetParent ? rect(actEl) : null };');
       ok(z6.rows.every((x) => x === mark) && z6.quit && z6.quit.text === quitWord && z6.quit.sw <= z6.quit.cw + 1 && z6.quit.right <= z6.row.left + z6.row.width + 1 && z6.activeFolded === false && z6.actRect && z6.actRect.left + z6.actRect.width <= z6.row.left + z6.row.width + 1 && z6.sw <= z6.cw + 1,
         `${lang}: the row in the device's words ("${mark}", "${quitWord}"), whole in a 360 px window — nothing overflows, the tab on show never folds (${z6.folded.length} folded into ▾+N)`, S(z6));
+    }
+    // ⑦ lane live-watch-polish (B-93d7, design 006 G1–G4): WATCH A FOLDED TAB in zh at 360 px — the "▾+N" menu's entry says
+    //    "查看 — …" (never a greyed row), the line names BOTH tabs, the watched chip is kept on the row, the agent's tab is
+    //    untouched; the view's socket dropped ⇒ the reconnected view re-sends its watch (one truth). A fake CDP page endpoint
+    //    (the fake agent-browser's cdp-url names it) answers the capture: no screencast frame ⇒ polled, as a background tab is.
+    console.log('— ⑦ zh: a folded tab watched from the ▾+N menu; the line names both tabs; a reconnect keeps one truth');
+    {
+      const CDPF = await freePort(); const pages = [];
+      const cdpSrv = new WebSocketServer({ port: CDPF, host: '127.0.0.1' }); await new Promise((r) => cdpSrv.on('listening', r));
+      cdpSrv.on('connection', (ws, req) => {
+        const m = /^\/devtools\/page\/([0-9A-Fa-f]{16,64})$/.exec(req.url || ''); if (!m) { ws.terminate(); return; }
+        pages.push({ id: m[1].toUpperCase(), ws });
+        ws.on('message', (d) => { let q = null; try { q = JSON.parse(d); } catch { return; } const result = q.method === 'Page.captureScreenshot' ? { data: FRAME.data } : q.method === 'Page.getLayoutMetrics' ? { cssLayoutViewport: { clientWidth: 800, clientHeight: 600, pageX: 0, pageY: 0 } } : {}; try { ws.send(JSON.stringify({ id: q.id, result })); } catch { } });
+        ws.on('error', () => { });
+      });
+      const opened = (id) => pages.filter((p) => p.id === id).length;
+      try {
+        fs.writeFileSync(path.join(AB, 'cdp.json'), JSON.stringify({ [ns]: CDPF }));
+        await cli(['tab', 'new', 'https://f.test/']); await cli(['tab', 'new', 'https://g.test/']);
+        await send('Runtime.evaluate', { expression: `localStorage.setItem('vibespace.lang', 'zh'); true` });
+        if (ok(await boot(), 'zh: the app booted again for the watch leg')) {
+          await sleep(600);
+          await ev(`await app.refreshBrowserProfiles(); if (!chatWin()) app.attachSession(${S(SID)}, 'Resume chat', ${S(ROOT)}, { mode: 'chat', backend: 'claude' }); if (!live()) app.openBrowserLive({ sessionId: ${S(SID)} }); return true;`);
+          await until(async () => !!(await ev('const l = L(); return !!(l && l.state().connected && l.state().tabRow.shown && l.state().tabRow.rows.length === 5);')), 12000, 150);
+          await ev('const w = live(); const el = w.element; wm.setMinSize && wm.setMinSize(w.id, null); el.style.width = "360px"; el.style.height = "560px"; window.dispatchEvent(new Event("resize")); return true;');
+          await sleep(900);
+          const agentTab0 = (tabsOf().find((x) => x.active) || {}).targetId || null;
+          const s0 = await ev('const s = L().state(); return { rows: s.tabRow.rows, folded: s.tabRow.folded, mode: s.mode };');
+          const pick = s0.rows.find((x) => s0.folded.includes(x.targetId) && !x.active && x.owner === 'agent') || null;
+          const more = await ev('const b = L().el().querySelector(".browser-live-tabrow-more"); return b && b.offsetParent ? rect(b) : null;');
+          if (more) await click(centre(more));
+          await sleep(300);
+          const menu = await ev('return [...document.querySelectorAll(".context-menu .context-menu-item")].map((el) => ({ text: el.textContent, disabled: el.classList.contains("disabled"), r: rect(el) }));');
+          const entry = pick ? menu.find((x) => x.text.startsWith('查看 — ') && x.text.includes(pick.title)) : null;
+          ok(!!pick && menu.length > 0 && !menu.some((x) => x.disabled) && !!entry, `G1 zh: the "▾+N" menu (${s0.folded.length} folded) lists a folded agent tab as "查看 — ${pick ? pick.title : '?'}" — no greyed row`, S({ s0, menu }));
+          if (entry) await click(centre(entry.r));
+          const watched = !!pick && await until(async () => { const t = await ev('return L().state().tabRow;'); return !!(t.watch && t.watch.targetId === pick.targetId && !t.watch.pending && /^正在查看“/.test(t.watchLine)); }, 8000, 150);
+          const t1 = await ev('return L().state().tabRow;');
+          const cur = t1.rows.find((x) => x.active) || {};
+          ok(watched && t1.watchLine.includes('“' + pick.title + '”') && t1.watchLine.includes('agent 在“' + cur.title + '”上') && !t1.folded.includes(pick.targetId) && opened(pick.targetId) > 0 && (tabsOf().find((x) => x.active) || {}).targetId === agentTab0,
+            'G2/G3 zh: the view watches the folded tab — the line names BOTH tabs ("正在查看“…” — …agent 在“…”上"), the watched chip is kept on the row, the capture opened on it, the agent\'s tab untouched', S({ t1, pages: pages.map((p) => p.id), agentTab0 }));
+          // G4: the view's socket drops — the reconnected view re-sends its watch; the line and the picture tell ONE truth
+          const p0 = pick ? opened(pick.targetId) : 0;
+          await ev('const ws = L().ws(); if (ws) ws.close(); return true;');
+          const again = !!pick && await until(async () => { const t = await ev('const s = L().state(); return { c: s.connected, w: s.tabRow.watch, line: s.tabRow.watchLine };'); return !!(t.c && opened(pick.targetId) > p0 && t.w && t.w.targetId === pick.targetId && !t.w.pending && t.line.includes('“' + pick.title + '”')); }, 15000, 200);
+          ok(again, 'G4 zh: the socket dropped and reopened — the view re-sent its watch (a new capture on the watched tab) and its line still names it: one truth', S(await ev('const s = L().state(); return { c: s.connected, tr: s.tabRow };')));
+        }
+      } finally {
+        try { fs.unlinkSync(path.join(AB, 'cdp.json')); } catch { }
+        for (const p of pages) { try { p.ws.terminate(); } catch { } }
+        await new Promise((r) => cdpSrv.close(() => r()));
+      }
     }
     await send('Runtime.evaluate', { expression: `localStorage.removeItem('vibespace.lang'); true` });
   } finally {

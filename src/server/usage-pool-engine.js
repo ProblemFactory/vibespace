@@ -91,6 +91,10 @@ const { harnessSetting, harnessDeclares } = (injectedHarnessSetting && injectedH
   : require('./harness-config-sync').accessorsFor({ serverSetting, harnesses });
 const _poolAutoLast = new Map(); // poolId → ts of last DECISION (eval gate)
 const _poolSwitchAt = new Map(); // poolId → ts of last actual SWITCH (dwell belt)
+// A 'spare-lane' move (B-8a65 S5) is pure convenience — the member it leaves can serve — so it waits
+// an HOUR after the conversation's last move, not the belt's 3 min (design desk 2026-10-02, verify r1
+// L3: the only spent member's 5h wobbling on its settle line bounced an idle conversation 15× in 2 h).
+const SPARE_DWELL_MS = 60 * 60 * 1000;
 // ── member auth-health (2.335.0, owner report: a banned/expired/out-of-credit
 // account never triggered a switch — quota was the engine's ONLY signal, and a
 // dead-auth account often still SHOWS rich quota). memberId → {at, reason}.
@@ -586,7 +590,7 @@ function creditsMemberIds(members) {
 function noteCreditsParking(poolId, memberId, sentence, now) {
   serverNotice(`pool-credits-${poolId}-${memberId}-${Math.floor(now / (6 * 3600e3))}`, sentence, { level: 'warn' });
 }
-function poolChooserForModel(poolId, { model, pin = null } = {}) {
+function poolChooserForModel(poolId, { model, pin = null, hinted = false } = {}) {
   try {
     const a = accounts.get(poolId);
     if (!a || a.type !== 'pooled') return null;
@@ -612,10 +616,14 @@ function poolChooserForModel(poolId, { model, pin = null } = {}) {
     if (!fam && !staleDefault) return cur; // no identity → the pool's default target
     // decidePoolSwitch FROM the default target under the projected view: if
     // the default serves this family, stay (fewest distinct billing dirs);
-    // if it doesn't, the switch verdict IS the placement.
+    // if it doesn't, the switch verdict IS the placement. `placing` (B-8a65):
+    // a member that can settle with LESS spare lane (a cap this model does not
+    // draw) takes a new conversation off the default — a spawn is free. Never on a GUESSED family (`hinted`, verify
+    // r1): a claude resume commands no model, the instance default stands in, and the CLI resumes on its own record —
+    // a Fable conversation hinted as Opus would be placed on the member whose Fable is spent.
     const { decidePoolSwitch } = require('../account-pool-auto.js');
     const mem = healthyPoolMembers(poolId);
-    const d = decidePoolSwitch({ currentId: cur, members: mem, readCache, nowSec: Date.now() / 1000, hot: true, readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsMemberIds(mem) });
+    const d = decidePoolSwitch({ currentId: cur, members: mem, readCache, nowSec: Date.now() / 1000, hot: true, placing: !hinted, readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsMemberIds(mem) });
     // (nobody can serve a conversation started here AND the default names a removed member — a boot before the
     // first sweep: the engine's fallback, a member the pool lists, verify r2)
     // …and 全B: the verdict's own parking member when nobody can serve (`holdTo`) — a new conversation meets that
@@ -1406,7 +1414,7 @@ function validateBillingSlot(poolId, linkedId) {
     // gap and it is the one that lets dead-account readings look authorised —
     // hence the explicit state leg below, ONE implementation shared with the
     // panels and the migration (src/login-state.js).
-    if (!(accounts.poolMembers(poolId) || []).some((m) => m.id === linkedId)) return { ok: false, reason: 'slot-not-a-member' };
+    if (!accounts.isPoolMember(poolId, linkedId)) return { ok: false, reason: 'slot-not-a-member' }; // ONE login read, not every member's (prod-stall-202) — the same predicate as poolMembers(poolId).some(id)
     const st = memberLoginState(linkedId);
     if (st && !st.usable) return { ok: false, reason: 'slot-' + st.state }; // slot-wiped / slot-expired / slot-missing / slot-unreadable
   } catch { return { ok: false, reason: 'slot-unreadable' }; }
@@ -5587,7 +5595,8 @@ function armWorkflowUsageWatcher(session, sessionId, runId) {
         const acctKey = resolveUsageKey(session);
         const acct = acctKey === '__global__' ? null : acctKey;
         const model = r.message?.model;
-        const cost = (o) => usageHistory._cost({ acct, model, i: 0, o: 0, cw5: 0, cw1: 0, cr: 0, ...o });
+        const whole = (u.input_tokens || 0) + (cc.ephemeral_5m_input_tokens || 0) + (cc.ephemeral_1h_input_tokens || 0) + (u.cache_read_input_tokens || 0); // parts of ONE request: the long-context rule is the request's
+        const cost = (o) => usageHistory._cost({ acct, model, i: 0, o: 0, cw5: 0, cw1: 0, cr: 0, ...o }, whole);
         const usd = cost({ i: u.input_tokens || 0, o: u.output_tokens || 0, cw5: cc.ephemeral_5m_input_tokens || 0, cw1: cc.ephemeral_1h_input_tokens || 0, cr: u.cache_read_input_tokens || 0 });
         const cwUsd = cost({ cw5: cc.ephemeral_5m_input_tokens || 0, cw1: cc.ephemeral_1h_input_tokens || 0 });
         const crUsd = cost({ cr: u.cache_read_input_tokens || 0 });
@@ -5817,6 +5826,14 @@ function priorityReturnNotice(poolId, sid, s, d, cold) {
   const params = { pool: accounts.get(poolId)?.name || poolId, title: convName(s, sid), target: d.toName || nameOf(d.to), rank: d.priorityRank ?? '?' };
   const text = `Pool "${params.pool}": conversation "${params.title}" is back on ${params.target} (priority #${params.rank}).${cold ? ' Restarting the conversation to apply it.' : ''}`;
   serverNotice(`pool-prio-${poolId}-${sid}-${Date.now()}`, text, { level: 1, i18n: { key: cold ? PRIORITY_RETURN_KEY_COLD : PRIORITY_RETURN_KEY, params } });
+}
+// THE SPARE LANE (B-8a65 S5, owner 2026-10-03): a HOT pool moved an idle conversation off a member
+// rich in a model cap it does not use (decidePoolSwitch 'spare-lane') — one sentence, naming the cap kept.
+const SPARE_LANE_KEY = i18nKey('Pool "{pool}": conversation "{title}" moved to {target} — it does not use {lane}, so the {lane} quota on {source} is kept for the conversations that do.');
+function spareLaneNotice(poolId, sid, s, d, fromId) {
+  const params = { pool: accounts.get(poolId)?.name || poolId, title: convName(s, sid), target: d.toName || nameOf(d.to), lane: (d.spareLane && d.spareLane.label) || 'model', source: nameOf(fromId) };
+  const text = `Pool "${params.pool}": conversation "${params.title}" moved to ${params.target} — it does not use ${params.lane}, so the ${params.lane} quota on ${params.source} is kept for the conversations that do.`;
+  serverNotice(`pool-spare-${poolId}-${sid}-${Date.now()}`, text, { level: 1, i18n: { key: SPARE_LANE_KEY, params } });
 }
 // ── THE CONVERSATION'S PIN (2026-09-28, owner: "你可以加一个手动overwrite这个会话的池对象选择功能，
 // 变成池的子菜单，直接选池本身就是自动切换，如果在子菜单里选"自动"也是自动切换，但如果选择某个具体账号，那在这个
@@ -6288,19 +6305,38 @@ function projectionBurnMemo(now) {
  *  rung (`refreshViaCliPanel`, the owner-approved exception) for a reading
  *  before the crossing — never a new vendor path, never a cadence; the pool then
  *  re-decides on that reading through the new-member wake. */
-function projectionRereadFor(memberId, nowMs = Date.now()) {
+/** WHO BILLS WHERE, in ONE pass over the live conversations (prod-stall-202,
+ *  2026-10-03): memberId → the local claude sessions billed on it RIGHT NOW, in
+ *  activeSessions order. `projectionRereadFor` used to resolve every session's
+ *  billing member inside its own loop, and the auto-cli tick asks it once per
+ *  account — accounts × sessions slot resolutions a tick, each reading login
+ *  files synchronously (6–15 s stalls on production). The tick builds this ONCE
+ *  and hands it to every projectionRereadFor call of that tick; it is never kept
+ *  past the tick, so no decision reads a stale slot. null = the pass threw (the
+ *  per-member loop threw on every member then too ⇒ every projection is null). */
+function projectionBillingIndex() {
   try {
-    if (!memberId) return null;
-    const fams = new Set();
+    const out = new Map();
     for (const [, s] of activeSessions) {
       if ((s.backend || 'claude') !== 'claude' || s.host || !s._accountId) continue;
       const a = accounts.get(s._accountId);
       const on = a && a.type === 'pooled' ? sessionBillingMember(s, a.id).id : s._accountId;
-      if (on !== memberId) continue;
-      fams.add(projectionFamilyFor(s, sessionModelFor(s)) || null);
+      if (!on) continue; // no member answers it — never equal to a member id
+      if (!out.has(on)) out.set(on, []);
+      out.get(on).push(s);
     }
+    return out;
+  } catch { return null; }
+}
+function projectionRereadFor(memberId, nowMs = Date.now(), billing = null) {
+  try {
+    if (!memberId) return null;
+    const index = billing || projectionBillingIndex();
+    if (!index) return null;
+    const fams = new Set();
+    for (const s of index.get(memberId) || []) fams.add(projectionFamilyFor(s, sessionModelFor(s)) || null);
     if (!fams.size) return null;
-    const hot = memberPoolsOf(memberId).some((p) => p.auto && p.hot && capsOf(p.backend).hotSwitch === 'verified');
+    const hot = accounts.poolsWithMember(memberId).some((p) => p.auto && p.hot && capsOf(p.backend).hotSwitch === 'verified'); // memberPoolsOf's answer read live with ONE login per pool — memberPoolsOf re-listed every login per account (prod-stall-202)
     const view = poolReadCache()(memberId);
     const burn = usageEstimator.burnFor(memberId, nowMs) || {};
     let best = null;
@@ -6489,6 +6525,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
       // …and a RETURN to the conversation's pin is a voluntary move like any other (verify r1): it was
       // exempt, and so was the move off a hard-dead pin — a pin whose reading wobbled across its bars
       // re-pointed the conversation on EVERY evaluation (12 of 12; automatic and priority: 1 of 12)
+      if (ds.reason === 'spare-lane' && now - lastS < SPARE_DWELL_MS) continue; // a move of convenience: an hour after the last move (SPARE_DWELL_MS)
       if (now - lastS < 180000 && !ds.escape && ds.reason !== 'not-a-member' && ds.reason !== 'login-expired' && !(ds.fromRemaining != null && ds.fromRemaining < POOL_HARD_PCT)) continue; // a removed member is hard death too (2026-09-28); `escape` = a pinned conversation leaving a wall
       _poolSwitchAt.set(dwellKey, now);
       try {
@@ -6518,6 +6555,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
         else if (ds.pinExhausted && ds.to === ds.pinned) pinNotice(poolId, sid, s2, 'back', { member: ds.to }, !a.hot); // the automatic rules landed it ON its pin (the most headroom when nobody settles): it is back on it — never "X is out of quota — running on X" (verify r2)
         else if (ds.pinExhausted) pinNotice(poolId, sid, s2, ds.pinWhy, { member: ds.pinned, target: ds.to }, !a.hot); // the pin cannot serve: running on the automatic pick, the pin kept
         else if (ds.reason === 'priority-return') priorityReturnNotice(poolId, sid, s2, ds, !a.hot); // manual priority: back on the higher-ranked member at its stop
+        else if (ds.reason === 'spare-lane' && ds.to !== linkCur) spareLaneNotice(poolId, sid, s2, ds, curFor); // B-8a65 S5: an idle conversation moved off a member rich in a cap it does not use
         else if (ds.to !== linkCur) serverNotice(`pool-sess-${sid}-${now}`, `Pool "${a.name}": conversation "${convName(s2, sid)}" moved to ${toName}${ds.priorityRank ? ` (priority #${ds.priorityRank})` : ''}${fam ? ` (its ${fam} quota${ds.fromRemaining != null ? ` ${early ? 'will be' : 'was'} at ${Math.round(ds.fromRemaining)}%${early ? ` within ${Math.round(lead / 60)} min` : ''}` : ''})` : ''}${early ? ` — moved early, ${early}` : ''}${a.hot ? '' : ' — restarting it'}${sScraps}`);
         console.log(`[pool] per-session switch ${poolId}/${sid}: ${curFor} → ${ds.to}${ds.to === linkCur ? ' (re-point, same target)' : ''} (fam=${fam || '?'}, from ${ds.fromRemaining}%${early ? `; ${early}` : ''})${ds.placedBy === 'priority' ? ` — ${ds.reason === 'priority-return' ? 'priority return' : 'priority'} #${ds.priorityRank ?? '-'}` : ''}${ds.reason === 'pin-return' ? ' — pin return (pinned)' : ds.pinExhausted && ds.to === ds.pinned ? ' — onto its pin (pinned)' : ds.pinExhausted ? ` — pin kept (${nameOf(ds.pinned)}: ${ds.pinWhy})` : ''}`);
         // a hot re-point does not move an idle limit-blocked session by itself
@@ -6726,7 +6764,7 @@ function maybeStopOnFallback(session, id, from, to) {
     setConversationPin, poolPinOf, // THE CONVERSATION'S PIN (2026-09-28): the ONE writer (behind POST /api/accounts/:poolId/pin) and the reader
     gatherPlan, // "Move every conversation here now", judged per conversation before anything moves (verify r1)
     memberRemoved, decideDefaultTarget, fallbackDefaultTarget, removalTargetFor, sweepNonMemberLinks, holdRemoved, _removedHoldOwed, // THE REMOVED-MEMBER WALL (2026-09-28): the one entry point, the default's decision (updatePool's chooser), the stale-link sweep every pool tick runs first
-    onMemberReadingFresh, onMemberLoginSuccess, readingForeignForWake, memberPoolsOf, autoCliReady, lastMemberReadAt, projectionRereadFor, // THE NEW-MEMBER WAKE (2026-09-08): the one edge every producer of a fresh reading takes, its login half, and the two facts the auto-cli loop asks before it spends a spawn
+    onMemberReadingFresh, onMemberLoginSuccess, readingForeignForWake, memberPoolsOf, autoCliReady, lastMemberReadAt, projectionRereadFor, projectionBillingIndex, // THE NEW-MEMBER WAKE (2026-09-08): the one edge every producer of a fresh reading takes, its login half, and the two facts the auto-cli loop asks before it spends a spawn
     _memberWakeAt, _loginReadAt, MEMBER_WAKE_FLOOR_MS, MEMBER_READING_FRESH_MS, LOGIN_READ_FLOOR_MS, // the wake's floors are WALL-CLOCK: a suite winds them back instead of sleeping through them (same seam as _poolAutoLast)
     maybeRepinLockedModel, maybeStopOnFallback, modelsMatch, noteServedModel, noteModelFallback, servedDefinesModel, projectionFamilyFor, rerouteAnnouncedBy, // the two stdout-fed model facts + the fallback predicate + the PROJECTION family + THE REROUTE THIS RECORD ANNOUNCES (2026-09-13: one implementation for the parse AND the device feed; r2: one rule for "which cap can refuse this turn"; r4: the fact is placed BEFORE its readers, at both feeds)
     poolChooserForModel, poolReadCache, probeUsageForAccountKey,

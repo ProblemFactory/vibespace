@@ -148,7 +148,7 @@ const bootServer = () => spawn(process.execPath, ['server.js'], {
   cwd: wt, stdio: 'ignore',
   // lane channel-rich: the fake PUSH account also carries the mail room (30 HTML mails + a pictures mail + a hostile
   // mail + a plain one + a bot's line) — on the push fake, so the poll fake's five rooms stay every other leg's fixture
-  env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANNELS_FAKE: '1', VIBESPACE_CHANNELS_FAKE_CONVS: '3', VIBESPACE_CHANNELS_FAKE_MAIL: String(MAIL_N), VIBESPACE_CHANNELS_FAKE_BEACON: BEACON, VIBESPACE_CHANNELS_FAKE_MAIL_DIR: corpusDir },
+  env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANNELS_FAKE: '1', VIBESPACE_CHANNELS_FAKE_CONVS: '3', VIBESPACE_CHANNELS_FAKE_SEARCH: '1', VIBESPACE_CHANNELS_FAKE_MAIL: String(MAIL_N), VIBESPACE_CHANNELS_FAKE_BEACON: BEACON, VIBESPACE_CHANNELS_FAKE_MAIL_DIR: corpusDir },
 });
 srv = bootServer();
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
@@ -352,6 +352,58 @@ const older = await p1.evaljs(`(async () => {
   return { before, after: w.content.querySelectorAll('.chanmsg').length, start: w.content.querySelector('.chanwin-start') ? w.content.querySelector('.chanwin-start').textContent : null };
 })()`);
 ok(older.start && /会话的开头|最早/.test(older.start), 'scrolling past the local log asks the vendor for older history and says where the conversation begins', JSON.stringify(older));
+
+// ── ⑪ design 010 (B-c9be): THE SEARCH DIALOG IN ZH — the saved copy at once, the vendor's whole history on the SAME
+//    press (the fake vendor's archive: messages its history never served), the chip, scroll-to-load, the around sheet;
+//    typing in the panel's filter box asks no search at all (V4) and nothing in section one moves (rows never re-sort) ──
+const fsr = await p1.evaljs(`(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const asked = []; const f0 = window.fetch; window.fetch = (u, o) => { asked.push(String(u)); return f0.call(window, u, o); };
+  try {
+    const box = document.querySelector('.rail-panel-channels input[data-channel-filter]');
+    if (!box) return { fail: 'no filter box' };
+    box.value = 'budget'; box.dispatchEvent(new Event('input', { bubbles: true }));
+    await sleep(700);
+    const typed = asked.filter((u) => u.includes('/api/channels/search')).length;
+    let sm = null;
+    for (let i = 0; i < 40 && !sm; i++) { sm = [...document.querySelectorAll('.rail-panel-channels .chan-more-btn')].find((b) => /budget/.test(b.textContent)); if (!sm) await sleep(150); }
+    if (!sm) return { fail: 'no "search messages for" toggle', typed };
+    sm.click();
+    const dlg = () => document.getElementById('chan-search-dialog');
+    for (let i = 0; i < 100; i++) { if (dlg() && dlg().querySelector('.chan-search-vendor .chan-search-vhit') && /找到|可能相关/.test(dlg().textContent)) break; await sleep(150); }
+    const d = dlg();
+    if (!d) return { fail: 'no dialog', typed };
+    const list = d.querySelector('.chan-search-results');
+    const s1 = d.querySelector('.chan-search-saved');
+    const vh = () => d.querySelectorAll('.chan-search-vendor .chan-search-vhit').length;
+    const out = { typed, heads: [...d.querySelectorAll('.chan-search-sec-head')].map((x) => x.textContent), cov: (d.querySelector('.chan-search-saved .chan-search-cov') || {}).textContent || '', vstat: [...d.querySelectorAll('.chan-search-vstatus')].map((x) => x.textContent), n1: vh(), chips: d.querySelectorAll('.chan-search-vendor .chan-search-chip').length, chip: (d.querySelector('.chan-search-chip') || {}).textContent || '', unknown: [...d.querySelectorAll('.chan-search-vhit b')].map((b) => b.textContent).filter((x) => /尚未同步/.test(x)).length, snippetMarkup: [...d.querySelectorAll('.chan-search-vhit .chan-search-text')].some((x) => /<em>/.test(x.textContent)) };
+    const s1Before = s1.getBoundingClientRect().top + list.scrollTop, s1Rows = s1.querySelectorAll('.chan-search-hit').length;
+    const fullBefore = asked.filter((u) => u.includes('/api/channels/search/full')).length;
+    list.scrollTop = list.scrollHeight;
+    for (let i = 0; i < 80 && vh() === out.n1; i++) await sleep(150);
+    out.n2 = vh(); out.pageAsks = asked.filter((u) => u.includes('/api/channels/search/full') && u.includes('page=')).length; out.fullBefore = fullBefore;
+    out.s1Moved = Math.abs(s1.getBoundingClientRect().top + list.scrollTop - s1Before); out.s1Same = s1.querySelectorAll('.chan-search-hit').length === s1Rows;
+    const hit = d.querySelector('.chan-search-vendor .chan-search-vhit');
+    const vid = hit.dataset.vid;
+    hit.click();
+    let sheet = null;
+    for (let i = 0; i < 80; i++) { sheet = document.getElementById('chan-around-sheet'); if (sheet && sheet.querySelector('.chanmsg')) break; await sleep(150); }
+    out.sheet = !!sheet; out.sheetTitle = !!(sheet && sheet.textContent.includes('这条消息前后')); out.sheetNote = !!(sheet && /没有保存/.test(sheet.textContent));
+    out.found = !!(sheet && [...sheet.querySelectorAll('.chanmsg.chanmsg-found')].some((r) => r.dataset.vid === vid)); out.vid = vid;
+    out.openBtn = !!(sheet && sheet.querySelector('.chan-around-open'));
+    const st = await f0.call(window, '/api/channels/fake-poll/fake-poll-ops/messages?limit=200').then((r) => r.json()).catch(() => null);
+    out.storedArchive = st && Array.isArray(st.records) ? st.records.filter((r) => /-old-|-older-|-arch-/.test(String(r.vendorId))).length : -1;
+    document.querySelectorAll('#chan-around-sheet, #chan-search-dialog').forEach((x) => { const c = x.closest('.modal-overlay') || x; c.remove(); });
+    box.value = ''; box.dispatchEvent(new Event('input', { bubbles: true }));   // the panel as the later legs expect it (no filter)
+    await sleep(400);
+    return out;
+  } finally { window.fetch = f0; }
+})()`);
+ok(fsr && !fsr.fail && fsr.typed === 0, '⑪ typing "budget" in the panel\'s filter box asks NO search (V4 — only the press does)', JSON.stringify(fsr));
+ok(fsr && fsr.heads && fsr.heads[0] === '已保存的消息' && /^更早的消息 — 来自.+的搜索$/.test(fsr.heads[1] || '') && /^搜了本机保存的 \d+ 个对话$/.test(fsr.cov), '⑪ the press: section one "已保存的消息" with what it covered, section two "更早的消息 — 来自…的搜索" below it (zh)', JSON.stringify(fsr && { heads: fsr.heads, cov: fsr.cov }));
+ok(fsr && fsr.n1 === 20 && fsr.chips === fsr.n1 && fsr.chip === '未保存在本机' && fsr.unknown >= 1 && !fsr.snippetMarkup && fsr.vstat.some((x) => /又向.+查了全部历史：找到 20 条更早的/.test(x)), '⑪ two pages of the vendor\'s older hits, each chipped 未保存在本机, a conversation never synced named 一个尚未同步的对话, the snippet\'s markup stripped, the status line counts them', JSON.stringify(fsr && { n1: fsr.n1, chips: fsr.chips, chip: fsr.chip, unknown: fsr.unknown, vstat: fsr.vstat }));
+ok(fsr && fsr.n2 > fsr.n1 && fsr.pageAsks >= 1 && fsr.s1Moved === 0 && fsr.s1Same, '⑪ scrolling to the end loads the next page by itself (no "Show more"), section one never moves', JSON.stringify(fsr && { n1: fsr.n1, n2: fsr.n2, pageAsks: fsr.pageAsks, moved: fsr.s1Moved }));
+ok(fsr && fsr.sheet && fsr.sheetTitle && fsr.sheetNote && fsr.found && fsr.openBtn === false && fsr.storedArchive === 0, '⑪ a click opens 这条消息前后 — the found message marked among the vendor\'s records, said not saved, no "open" for a conversation never synced; nothing was stored', JSON.stringify(fsr && { sheet: fsr.sheet, title: fsr.sheetTitle, note: fsr.sheetNote, found: fsr.found, open: fsr.openBtn, stored: fsr.storedArchive }));
 
 // ── ④ the override from the row menu, persisted, on a second client, after a reload ──
 const pick = await p1.evaljs(`(async () => {

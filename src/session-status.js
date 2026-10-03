@@ -19,6 +19,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const { applyClear, CLEARED_TEXT } = require('./record-clear'); // PURE: "Clear content…" (2026-09-28) — this store holds the door (clearHistory)
 
 // A Task (= a session) has one of these states; `done` = this piece of work is
@@ -36,7 +37,7 @@ class SessionStatusManager {
     this._state = { statuses: {} };
     this._writeTimer = null; this._dirty = false; this._lastWritten = null;
     try {
-      this._state = JSON.parse(fs.readFileSync(this._file, 'utf-8'));
+      this._state = timedSync('session-status.read', () => JSON.parse(fs.readFileSync(this._file, 'utf-8')));
       if (!this._state || typeof this._state.statuses !== 'object') this._state = { statuses: {} };
       this._lastWritten = JSON.stringify(this._state, null, 2); // avoid a redundant first write
     } catch { /* fresh */ }
@@ -90,8 +91,7 @@ class SessionStatusManager {
     const json = JSON.stringify(this._state, null, 2);
     if (json === this._lastWritten) { this._dirty = false; return; } // no real change → skip write
     const tmp = this._file + '.tmp';
-    fs.writeFileSync(tmp, json);
-    fs.renameSync(tmp, this._file);
+    timedSync('session-status.write', () => { fs.writeFileSync(tmp, json); fs.renameSync(tmp, this._file); });
     this._lastWritten = json;
     this._dirty = false;
   }

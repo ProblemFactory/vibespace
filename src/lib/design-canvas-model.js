@@ -16,12 +16,19 @@
 //     the CLOSED set `PICK_KINDS`, and every field is bounded (`pickFence`); anything else is dropped. An artboard is
 //     agent-written HTML — its own scripts can post too, so the fence bounds what a forged pick can carry, and the
 //     quote line the user approves is the hub's own `pickQuote` drawn as text (the hub belts the whole comment line
-//     through peer-text).
+//     through peer-text). Lane design-changes widened the set by ONE kind, `design-edit` (a text edited in place or a
+//     style nudge applied as a preview — `{edit: text|style, ref, path, tag, prop?, from, to}`), and the canvas's own
+//     words by two (`design-style` / `design-undo`, through `frameSay` — the outgoing fence); a pick carries the
+//     frame's `ref` for its element and a `css` snapshot of the four nudgeable values.
 //   · THE FRAME DOCUMENT: `frameSrcdoc` puts the picker FIRST in the artboard's head (before any of its scripts);
 //     `printSrcdoc` adds the print stylesheet (@page from the row's `print`: fixed = one page the artboard's size,
 //     flow = paginated) and the print call. Both find their insertion point by `indexOf` in a bounded head window —
 //     never a regex over the raw artboard (bound before parse).
-import { LIMITS as DM_LIMITS, ENTRY_FILE as DM_ENTRY_FILE, NOTE_COLORS as DM_NOTE_COLORS, isArtboardName as dmIsArtboardName, stemOf as dmStemOf, validateManifest, layoutOf, pickQuote } from '../design-model.js';
+//   · PRESENT + PRINT ALL (lane design-present, design 003 §2.6): `presentOrder` = one page's artboards in READING
+//     order (rows top to bottom, each row left to right), `presentView` = one artboard whole and fitted to the screen,
+//     `presentKey` / `presentGesture` / `presentStep` = what a key, a click or a swipe does; `printAllSrcdoc` = ONE print
+//     document holding every artboard of the page in its own frame, one PDF page each at its own size.
+import { LIMITS as DM_LIMITS, ENTRY_FILE as DM_ENTRY_FILE, NOTE_COLORS as DM_NOTE_COLORS, isArtboardName as dmIsArtboardName, stemOf as dmStemOf, validateManifest, layoutOf, pickQuote, CHANGE_PROPS as DM_CHANGE_PROPS, styleValueOk as dmStyleValueOk, tweakSay } from '../design-model.js';
 
 export const ZOOM_MIN = 0.05;
 export const ZOOM_MAX = 4;
@@ -41,10 +48,18 @@ export const NOTE_COLOR_VARS = Object.freeze({
   pink: 'color-mix(in srgb, var(--magenta) 55%, var(--red, #e55))',
 });
 /** THE CLOSED SET of what an artboard frame may say to its canvas. */
-export const PICK_KINDS = Object.freeze(['design-pick', 'design-key']);
+export const PICK_KINDS = Object.freeze(['design-pick', 'design-key', 'design-edit']);
 /** …and of what the canvas says to a frame. */
-export const FRAME_KINDS = Object.freeze(['design-mode']);
-export const PICK_LIMITS = Object.freeze({ path: 200, text: 120, tag: 32, raw: 4000 });
+export const FRAME_KINDS = Object.freeze(['design-mode', 'design-style', 'design-undo', 'design-tweak']);
+export const PICK_LIMITS = Object.freeze({ path: 200, text: 120, tag: 32, raw: 4000, edit: DM_LIMITS.changeText, css: DM_LIMITS.changeValue });
+/** The style nudges (the hub's closed set and value grammar — one rule, imported). */
+export const CHANGE_PROPS = DM_CHANGE_PROPS;
+export const styleValueOk = dmStyleValueOk;
+/** A frame's handle for one element (`<frame seed>-<n>`, minted inside the frame) — names it back to that frame only. */
+const REF_RE = /^[a-z0-9]{1,12}-[0-9]{1,6}$/;
+const CSS_KEYS = Object.freeze(['color', 'background', 'size', 'pad']);
+/** A computed CSS value a frame reported: its characters only, bounded. */
+const cssLine = (v) => cleanLine(String(v == null ? '' : v).slice(0, 400).replace(/[^A-Za-z0-9#.,()% -]+/g, ''), PICK_LIMITS.css);
 const TAG_RE = /^[a-z][a-z0-9-]{0,31}$/;
 /** Characters that reorder a line or are not drawn (controls, bidi, zero-width, BOM) — a quote line the user reads
  *  before sending must read as it is (the hub's src/peer-text.js belt is the authority on the agent's side). */
@@ -269,12 +284,40 @@ export function pickFence(data, frame) {
   if (data.kind === 'design-key') return data.key === 'Escape' ? { kind: 'design-key', file: frame.file, key: 'Escape' } : null;
   const tag = typeof data.tag === 'string' ? data.tag.slice(0, 64).toLowerCase() : '';
   if (!TAG_RE.test(tag)) return null;
+  if (data.kind === 'design-edit') return editFence(data, frame, tag);
+  const ref = typeof data.ref === 'string' && REF_RE.test(data.ref) ? data.ref : '';
+  const css = isObj(data.css) ? Object.fromEntries(CSS_KEYS.map((k) => [k, cssLine(data.css[k])])) : null;
   const fw = isNum(frame.w) && frame.w > 0 ? frame.w : LAYOUT.maxSize, fh = isNum(frame.h) && frame.h > 0 ? frame.h : LAYOUT.maxSize;
   const r = isObj(data.rect) ? data.rect : {};
   const rx = isNum(r.x) ? clamp(r.x, 0, fw) : 0, ry = isNum(r.y) ? clamp(r.y, 0, fh) : 0;
   const rect = { x: rx, y: ry, w: isNum(r.w) ? clamp(r.w, 0, fw - rx) : 0, h: isNum(r.h) ? clamp(r.h, 0, fh - ry) : 0 };
-  return { kind: 'design-pick', file: frame.file, path: cleanLine(data.path, PICK_LIMITS.path), tag, text: cleanLine(data.text, PICK_LIMITS.text), rect };
+  return { kind: 'design-pick', file: frame.file, path: cleanLine(data.path, PICK_LIMITS.path), tag, text: cleanLine(data.text, PICK_LIMITS.text), rect, ref, css };
 }
+/** A `design-edit` (the frame's report of a preview it drew): a text edit's before / after (bounded lines), or a nudge
+ *  of one of CHANGE_PROPS to a value of its grammar (`from` = the frame's computed value, characters only). */
+function editFence(data, frame, tag) {
+  if (data.edit !== 'text' && data.edit !== 'style') return null;
+  if (typeof data.ref !== 'string' || !REF_RE.test(data.ref)) return null;
+  const base = { kind: 'design-edit', file: frame.file, edit: data.edit, ref: data.ref, path: cleanLine(data.path, PICK_LIMITS.path), tag };
+  if (data.edit === 'text') return { ...base, from: cleanLine(data.from, PICK_LIMITS.edit), to: cleanLine(data.to, PICK_LIMITS.edit) };
+  if (!CHANGE_PROPS.includes(data.prop) || !styleValueOk(data.prop, data.to)) return null;
+  return { ...base, prop: data.prop, from: cssLine(data.from), to: data.to };
+}
+/** THE OUTGOING FENCE: what the canvas says to a frame → the bounded message, or null. `design-mode` (pick on / off +
+ *  the outline colour), `design-style` (preview one nudge on the element `ref` names), `design-undo` (drop a preview),
+ *  `design-tweak` (lane design-tweaks: a Tweaks knob moved — design-model.js tweakSay). */
+export function frameSay(msg) {
+  if (!isObj(msg) || !FRAME_KINDS.includes(msg.kind)) return null;
+  if (msg.kind === 'design-mode') return { kind: 'design-mode', pick: msg.pick === true, color: String(msg.color == null ? '' : msg.color).slice(0, 40) };
+  if (msg.kind === 'design-tweak') return tweakSay(msg);   // lane design-tweaks: ONE custom property / root data attribute, a value of the tweak grammar
+  if (typeof msg.ref !== 'string' || !REF_RE.test(msg.ref)) return null;
+  if (msg.kind === 'design-style') return CHANGE_PROPS.includes(msg.prop) && styleValueOk(msg.prop, msg.value) ? { kind: 'design-style', ref: msg.ref, prop: msg.prop, value: msg.value } : null;
+  if (msg.edit === 'text') return { kind: 'design-undo', ref: msg.ref, edit: 'text' };
+  return msg.edit === 'style' && CHANGE_PROPS.includes(msg.prop) ? { kind: 'design-undo', ref: msg.ref, edit: 'style', prop: msg.prop } : null;
+}
+/** A text edit is the user's only from the frame they were TYPING in: it has the keyboard, or lost it (a click outside
+ *  commits the edit) at most EDIT_GRACE_MS ago — a script in any other frame cannot add a change. */
+export const EDIT_GRACE_MS = 1500;
 
 /** THE FRAME-KEY GATE: an artboard frame may say `design-key` at most KEY_RATE.max times in KEY_RATE.windowMs; past that
  *  it is MUTED for KEY_RATE.muteMs. An artboard's own script can post the closed set too, and a flood of Escapes would
@@ -368,4 +411,90 @@ export function printSrcdoc(html, frame) {
   const s = String(html == null ? '' : html);
   const at = headEndAt(s);
   return s.slice(0, at) + `<style media="print">${printCss(frame).replace(/</g, '')}</style><script>addEventListener('load',function(){setTimeout(function(){print()},60)})</script>` + s.slice(at);
+}
+
+// ── present + print all (lane design-present, design 003 §2.6) ───────────────────────────────────────────────────────
+
+/** Swipe threshold (px) and the dominance a swipe's horizontal travel needs over its vertical one. */
+export const PRESENT_SWIPE = Object.freeze({ min: 40, ratio: 1.5 });
+/**
+ * THE READING ORDER of one page's artboards — what Present steps through and Print all prints: rows top to bottom,
+ * each row left to right. A frame joins the row above while its top sits above that row's vertical middle (hand-placed
+ * rows a few px apart stay one row); equal places keep the given (manifest) order. Frames of other pages are left out.
+ *   → [file]
+ */
+export function presentOrder(frames, pageId) {
+  const page = typeof pageId === 'string' ? pageId : '';
+  const list = (Array.isArray(frames) ? frames : [])
+    .map((f, i) => ({ f, i }))
+    .filter(({ f }) => isObj(f) && isArtboardName(f.file) && isNum(f.x) && isNum(f.y) && (typeof f.page === 'string' ? f.page : '') === page);
+  list.sort((a, b) => a.f.y - b.f.y || a.f.x - b.f.x || a.i - b.i);
+  const rows = [];
+  for (const it of list) {
+    const row = rows[rows.length - 1];
+    if (row && it.f.y < row.mid) row.items.push(it);
+    else rows.push({ mid: it.f.y + sizeOf(it.f.h, LAYOUT.defaultH) / 2, items: [it] });
+  }
+  const seen = new Set();
+  return rows.flatMap((r) => r.items.sort((a, b) => a.f.x - b.f.x || a.i - b.i).map(({ f }) => f.file)).filter((f) => !seen.has(f) && seen.add(f));
+}
+/** THE PRESENTED VIEW: one artboard whole and centred in the pane — scaled UP to fill it (a slide on a big screen, up
+ *  to ZOOM_MAX) or down to fit; no margin unless asked. */
+export function presentView(rect, pane, { pad = 0 } = {}) {
+  return fitView(rect, pane, { pad, maxZ: ZOOM_MAX });
+}
+/** A key while presenting → 'next' | 'prev' | 'first' | 'last' | 'exit' | null (not ours — the browser keeps it). */
+export function presentKey(key) {
+  switch (key) {
+    case 'ArrowRight': case 'ArrowDown': case 'PageDown': case ' ': case 'Spacebar': case 'Enter': return 'next';
+    case 'ArrowLeft': case 'ArrowUp': case 'PageUp': case 'Backspace': return 'prev';
+    case 'Home': return 'first';
+    case 'End': return 'last';
+    case 'Escape': case 'Esc': return 'exit';
+    default: return null;
+  }
+}
+/** A pointer's travel while presenting (dx, dy from press to release) → 'next' (a click or a tap — it barely moved; or
+ *  a swipe to the left), 'prev' (a swipe to the right), or null (a vertical drag / an unclear one: nothing). */
+export function presentGesture(dx, dy, slop = 4) {
+  const x = isNum(dx) ? dx : 0, y = isNum(dy) ? dy : 0;
+  if (Math.hypot(x, y) < slop) return 'next';
+  if (Math.abs(x) >= PRESENT_SWIPE.min && Math.abs(x) > PRESENT_SWIPE.ratio * Math.abs(y)) return x < 0 ? 'next' : 'prev';
+  return null;
+}
+/** The index a step lands on among `n` artboards — clamped at both ends (the last one stays; never wraps). -1 = none. */
+export function presentStep(i, n, step) {
+  const cnt = Number.isInteger(n) && n > 0 ? n : 0;
+  if (!cnt) return -1;
+  const cur = Number.isInteger(i) ? clamp(i, 0, cnt - 1) : 0;
+  if (step === 'next') return Math.min(cnt - 1, cur + 1);
+  if (step === 'prev') return Math.max(0, cur - 1);
+  if (step === 'first') return 0;
+  if (step === 'last') return cnt - 1;
+  return cur;
+}
+
+/** An attribute value (double-quoted): `&` and `"` are the only characters that can end or bend it. */
+const attrText = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+/** How long Print all waits for its frames before it prints anyway. */
+export const PRINT_ALL_WAIT_MS = 8000;
+/**
+ * PRINT ALL — ONE print document for a page: every artboard (`frames` = [{file, w, h, html}] in reading order; a
+ * refused one — html not a string — is left out) in its own `sandbox="allow-scripts"` frame (its styles never meet
+ * another's), each on a NAMED page its own size (`@page a<i>{size:<w>px <h>px;margin:0}`) — the browser's Save as PDF
+ * then writes one page per artboard with the text kept as text. The print call runs once every frame has loaded (or
+ * after PRINT_ALL_WAIT_MS). Rendered in a frame sandboxed `allow-scripts allow-modals`, like Print.
+ */
+export function printAllSrcdoc(frames) {
+  const list = (Array.isArray(frames) ? frames : []).filter((f) => isObj(f) && typeof f.html === 'string').slice(0, LAYOUT.artboards);
+  const css = ['html,body{margin:0;padding:0}', 'iframe{display:block;border:0}', '*{-webkit-print-color-adjust:exact;print-color-adjust:exact}'];
+  const sheets = list.map((f, i) => {
+    const w = sizeOf(f.w, LAYOUT.defaultW), h = sizeOf(f.h, LAYOUT.defaultH);
+    css.push(`@page a${i}{size:${w}px ${h}px;margin:0}.s${i}{page:a${i};width:${w}px;height:${h}px;overflow:hidden${i ? ';break-before:page' : ''}}`);
+    return `<div class="s${i}"><iframe sandbox="allow-scripts" width="${w}" height="${h}" onload="l()" srcdoc="${attrText(f.html)}"></iframe></div>`;
+  });
+  // in the head, before the frames: each frame's load counts down; the last one (or the bound) prints
+  const go = `<script>var left=${sheets.length},done=false;function go(){if(done)return;done=true;setTimeout(function(){print()},300)}`
+    + `function l(){if(--left<=0)go()}setTimeout(go,${PRINT_ALL_WAIT_MS})${sheets.length ? '' : ';go()'}</script>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><style>${css.join('\n')}</style>${go}</head><body>${sheets.join('')}</body></html>`;
 }

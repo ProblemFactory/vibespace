@@ -331,15 +331,17 @@ console.log('⑦ Gmail: the REAL toRecord over an invented MIME message');
 // ═══ ⑧ the registry ═════════════════════════════════════════════════════
 console.log('⑧ the registry: render / titleForm / blocksOf / sendGrant');
 {
+  // the copies of Lark's caps keep the kind 'lark' (B-df40 part 3: Lark's budget / pace keys are declared for that vendor
+  // only — under another kind the undeclared-key refusal would answer first, before the rule each leg is about)
   const base = { ...lark.caps };
-  const bad = (caps) => { try { CH.validateCaps('x', caps); return null; } catch (e) { return String(e.message); } };
+  const bad = (caps) => { try { CH.validateCaps('lark', caps); return null; } catch (e) { return String(e.message); } };
   ok(/caps.render must be one of text\|blocks/.test(bad({ ...base, render: 'html' }) || ''), 'caps.render outside text|blocks is refused (an adapter never declares HTML)');
   ok(/caps.titleForm must be one of name\|subject/.test(bad({ ...base, titleForm: 'banner' }) || ''), 'caps.titleForm outside name|subject is refused');
   const reg = () => CH.createChannelRegistry();
   const regErr = (mod) => { try { reg().register(mod); return null; } catch (e) { return String(e.message); } };
-  ok(/needs blocksOf/.test(regErr({ kind: 'x', caps: { ...base, render: 'blocks' }, create() {} }) || ''), 'render:\'blocks\' WITHOUT blocksOf is refused at registration (the stored-record rung must exist)');
-  ok(/blocksOf is exported but caps.render is not 'blocks'/.test(regErr({ kind: 'x', caps: { ...base, render: undefined }, create() {}, blocksOf() { return []; } }) || ''), 'blocksOf WITHOUT the declaration is refused (an undeclared capability half-works)');
-  ok(/sendGrant must be/.test(regErr({ kind: 'x', caps: { ...base }, create() {}, blocksOf() { return []; }, sendGrant: { scopes: [] } }) || ''), 'a malformed sendGrant is refused');
+  ok(/needs blocksOf/.test(regErr({ kind: 'lark', caps: { ...base, render: 'blocks' }, create() {} }) || ''), 'render:\'blocks\' WITHOUT blocksOf is refused at registration (the stored-record rung must exist)');
+  ok(/blocksOf is exported but caps.render is not 'blocks'/.test(regErr({ kind: 'lark', caps: { ...base, render: undefined }, create() {}, blocksOf() { return []; } }) || ''), 'blocksOf WITHOUT the declaration is refused (an undeclared capability half-works)');
+  ok(/sendGrant must be/.test(regErr({ kind: 'lark', caps: { ...base }, create() {}, blocksOf() { return []; }, sendGrant: { scopes: [] } }) || ''), 'a malformed sendGrant is refused');
   ok(regErr(lark.adapter) === null && regErr(gmail.adapter) === null, 'the Lark and Gmail adapters register with their declarations');
   ok(lark.caps.render === 'blocks' && gmail.caps.render === 'blocks' && gmail.caps.titleForm === 'subject' && lark.caps.titleForm === undefined, 'Lark + Gmail declare `render: \'blocks\'`; only Gmail declares its titles SUBJECTS');
   ok(eq(lark.adapter.sendGrant, { scopes: ['im:message', 'im:message.send_as_user'], console: true }) && gmail.adapter.sendGrant === undefined, 'Lark declares the console step for its two send scopes; Gmail none (a re-consent alone unlocks it)');

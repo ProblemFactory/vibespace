@@ -96,7 +96,7 @@ export class MobileNav {
     // the /api/desktop/apps probe; the ONE command, its own icon) and the AGENT
     // browser (gated like its ⚙ row on the profile digest)
     const APPS_ICON = getCommand('desktopApps.open')?.icon || UI_ICONS.monitor;
-    if (app._desktopAppsAvailable) items.push(row(APPS_ICON, t('Desktop app…'), () => runCommand('desktopApps.open', { app })));
+    if (app._desktopAppsAvailable) items.push(row(APPS_ICON, t('Apps…'), () => runCommand('desktopApps.open', { app }))); // design 009 §B6: one word — Apps
     if (app._browserProfiles) items.push(row(UI_ICONS.browserLive, t('Agent browser'), () => this._openAgentBrowser()));
     return this._sheet(items);
   }

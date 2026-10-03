@@ -65,7 +65,8 @@ function clean(s, max = MESSAGE_MAX) {
 // ships alone to every host (vibespace-browser-stuck.js), so it spells the frame rule itself — the SAME tags and the
 // SAME patterns as channel-record's (FRAME_TAGS / FRAME_TAG_RE / FRAME_OPEN_RE), pinned equal by test-browser-stuck.
 const FRAME_TAGS = Object.freeze(['system-reminder', 'persisted-output', 'task-notification',
-  'local-command-stdout', 'command-name', 'command-message', 'command-args']);
+  'local-command-stdout', 'command-name', 'command-message', 'command-args',
+  'cross-session-message' /* apps-joint r1 F7: the CLI's own peer-message envelope — a vendor's .desktop Name spelled it to an agent */]);
 // THE FOLDER (lane lark-search-poll verify r3, copied at the .197 integration — the parity pins below): a tag split by a
 // character nobody sees (every Default_Ignorable_Code_Point, a control, a line / paragraph separator) is a LIVE tag to a
 // reader that drops it, so the match LOOKS THROUGH a run of them and the neutered name carries none (channel-record's text).

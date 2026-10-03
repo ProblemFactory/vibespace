@@ -40,8 +40,10 @@
 //       within 2 s — no row rebuilt (probe stamps), no `/messages` fetch (the broadcast carried the result)
 //   (g) THE PHONE (360 × 740, touch): a long press on a chip opens the who-list; a tap toggles; no `+`, no empty strip,
 //       and the hover bar is not drawn (hover: none)
-//   (p) THE PHONE AT 390 px: a LONG PRESS on a message opens its SAME actions as a menu (添加表情回应 · 在话题中回复 ·
-//       引用), the row's geometry identical with the menu open; Add reaction from the menu → the picker → a tap reacts
+//   (p) THE PHONE AT 390 px (lane channel-touch-menu, 2.369.203): a LONG PRESS on a message's words is the platform's
+//       SELECTION (Chrome's own gesture path) and opens no menu; the message's … button (≥ 44 px wide, over no word, the
+//       element under its centre) opens its SAME actions as a menu (添加表情回应 · 在话题中回复 · 引用 · 复制文本), the
+//       row's geometry identical with the menu open; the desktop draws no …; Add reaction from the menu → the picker → a tap reacts
 //       (the row grows by its strip) → a tap takes it back (the row closes up exactly)
 //   (h) zh + ja at 360 px, DejaVu Sans: the thread chip, the `in thread` tag, the pane bar's words and the pane composer's
 //       line (naive-user ⑥ — it was cut to "…あなたとしてす…"; control: the pre-fix nowrap rule injected cuts it) drawn WHOLE
@@ -137,7 +139,9 @@ const api = async (method, p, body) => { const r = await fetch(`http://127.0.0.1
 for (let i = 0; i < 80; i++) { const r = await api('GET', '/api/channels/fake-poll/fake-poll-big/messages?limit=5'); if (r.status === 200 && (r.json.records || []).length) break; await sleep(250); }
 
 const WebSocket = require('ws');
-async function newPage({ lang = 'zh', phone = false, font = false, width = 360 } = {}) {
+/** test-mobile-select's phone (the chat's proven Android shape) */
+const ANDROID_UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Mobile Safari/537.36';
+async function newPage({ lang = 'zh', phone = false, font = false, width = 360, android = false } = {}) {
   const r = await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' });
   const t = await r.json();
   const ws = new WebSocket(t.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
@@ -155,8 +159,14 @@ async function newPage({ lang = 'zh', phone = false, font = false, width = 360 }
     return r2.result.result.value;
   };
   if (phone) {
-    await cdp('Emulation.setDeviceMetricsOverride', { width, height: 740, deviceScaleFactor: 2, mobile: true });
+    // `android` (channel-touch-menu verify r1): THE CHAT'S PHONE, scripts/test-mobile-select.mjs — 390 × 844, DPR 3, an
+    // Android UA, hover:none / pointer:coarse — the shape its Android-shaped long press was proven in
+    await cdp('Emulation.setDeviceMetricsOverride', android ? { width: 390, height: 844, deviceScaleFactor: 3, mobile: true } : { width, height: 740, deviceScaleFactor: 2, mobile: true });
     await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+    if (android) {
+      await cdp('Emulation.setUserAgentOverride', { userAgent: ANDROID_UA, platform: 'Linux armv8l' });
+      await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: 'none' }, { name: 'pointer', value: 'coarse' }] });
+    }
   } else await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', ${J(lang)}); } catch {}` });
@@ -187,6 +197,28 @@ const OPEN = (a, c, tag, { min = 1, maximize = false } = {}) => `(async () => {
   for (let i = 0; i < 200; i++) { if (w.content.querySelectorAll('.chanmsg[data-vid]').length >= ${min}) break; await new Promise((r) => setTimeout(r, 100)); }
   window.__w = window.__w || {}; window.__w[${J(tag)}] = w;
   return { rows: w.content.querySelectorAll('.chanmsg[data-vid]').length };
+})()`;
+/** A ROW TO PRESS, ONCE THE LIST STANDS STILL (channel-touch-menu verify r1, measured): the reaction trickle asks the
+ *  rows in the viewport 800 ms after a scroll and draws their strips — rows above a row read 400 ms after its
+ *  scrollIntoView grew and pushed it 34 px down within the next second. Scroll, wait until the row's top and the
+ *  list's height have held for 1.2 s (≤ 10 s), then take the VISIBLE row with no reaction nearest the list's centre
+ *  (every visible row has been asked by then). → { vid, settled, waited } */
+const PICK_ROW = (tag, geo) => `(async () => {
+  const l = window.__w[${J(tag)}].content.querySelector('.chanwin-main .chanwin-list');
+  const plain = (r) => r.querySelector(':scope > .chanmsg-bar')?.dataset.acts === 'react thread quote' && !r.querySelector('.chanmsg-rx') && !r.querySelector('a[href], img') && r.nextElementSibling;
+  const rows = [...l.querySelectorAll('.chanmsg[data-vid]')].filter(plain);
+  const first = rows[Math.max(0, rows.length - 3)];
+  if (!first) return null;
+  first.scrollIntoView({ block: 'center' });
+  const at = () => Math.round(first.getBoundingClientRect().top) + '/' + l.scrollHeight + '/' + Math.round(l.scrollTop);
+  let last = at(), still = 0, waited = 0;
+  while (still < 1200 && waited < 10000) { await new Promise((r) => setTimeout(r, 150)); waited += 150; const now = at(); if (now === last) still += 150; else { still = 0; last = now; } }
+  const lr = l.getBoundingClientRect(), mid = (lr.top + lr.bottom) / 2;
+  const off = (r) => { const q = r.getBoundingClientRect(); return Math.abs((q.top + q.bottom) / 2 - mid); };
+  const row = [...l.querySelectorAll('.chanmsg[data-vid]')].filter((r) => { const q = r.getBoundingClientRect(); return plain(r) && q.top >= lr.top && q.bottom <= lr.bottom; }).sort((a, b) => off(a) - off(b))[0];
+  if (!row) return null;
+  row.dataset.geo = ${J(geo)};
+  return { vid: row.dataset.vid, settled: still >= 1200, waited };
 })()`;
 const LIST = (tag) => `window.__w[${J(tag)}].content.querySelector('.chanwin-main .chanwin-list')`;
 const adapterRx = async (id) => { const r = await api('GET', '/api/channels'); const a = (r.json.adapters || []).find((x) => x.id === id); return (a && a.reactions) || null; };
@@ -925,25 +957,70 @@ console.log('(p) the phone at 390 px: the long-press menu and the geometry');
   ok(p6.ready, 'the phone page loaded (390 × 740, touch emulation, zh)');
   await p6.evaljs(OPEN('fake-poll', 'fake-poll-big', 'big', { min: 10 }));
   await sleep(1500);
-  const vid = await p6.evaljs(`(async () => {
-    const l = window.__w.big.content.querySelector('.chanwin-main .chanwin-list');
-    const rows = [...l.querySelectorAll('.chanmsg[data-vid]')].filter((r) => r.querySelector(':scope > .chanmsg-bar')?.dataset.acts === 'react thread quote' && !r.querySelector('.chanmsg-rx') && !r.querySelector('a[href], img') && r.nextElementSibling);
-    const row = rows[Math.max(0, rows.length - 3)];
-    if (!row) return null;
-    row.scrollIntoView({ block: 'center' });
-    await new Promise((r) => setTimeout(r, 400));
-    row.dataset.geo = 'phone';
-    return row.dataset.vid;
-  })()`);
-  ok(!!vid, `a message with no reaction to press (${vid})`);
+  const pick = await p6.evaljs(PICK_ROW('big', 'phone'));
+  const vid = pick && pick.vid;
+  ok(!!vid && pick.settled, `a message with no reaction to press (${vid}), the list still for 1.2 s (${pick && pick.waited} ms)`, J(pick));
   const PG = `(() => { const row = document.querySelector('[data-geo="phone"]'); const l = row.closest('.chanwin-list'); const b = row.querySelector(':scope > .chanmsg-body').getBoundingClientRect(); const bar = row.querySelector(':scope > .chanmsg-bar'); return { h: row.offsetHeight, next: row.nextElementSibling.offsetTop, sh: l.scrollHeight, top: Math.round(row.getBoundingClientRect().top), x: Math.round(b.left + Math.min(40, b.width / 2)), y: Math.round(b.top + Math.min(10, b.height / 2)), bar: bar ? getComputedStyle(bar).display : null, strip: !!row.querySelector(':scope > .chanmsg-rx') }; })()`;
   const same = (a, b) => a.h === b.h && a.next === b.next && a.sh === b.sh && a.top === b.top;
   const before = await p6.evaljs(PG);
+  // ANDROID-SHAPED long press on the words — THE CHAT'S OWN METHOD (scripts/test-mobile-select.mjs ②, verify r1): its
+  // phone (390 × 844, DPR 3, an Android UA, hover:none / pointer:coarse), Chrome's own touch emulator (a held mouse ⇒ a
+  // touch + its native long press: selectstart → the word selected → a TRUSTED touch contextmenu, ~680 ms; dispatched
+  // touch events never produce one in headless), the page in front (the gesture provider runs for the focused page
+  // only), the page's event log at window CAPTURE (before the door can stop anything) + every menu build. The point is
+  // read on a SETTLED row (PICK_ROW) and the leg reads where the touch LANDED. MEASURED (the old leg's red, lane and
+  // control alike): the touchstart's clientX/Y on the word, its TARGET the author's name 11 px above (Chrome's touch
+  // adjustment — a real finger's too), the platform's long press on the word; the door judged the target ⇒ its timer,
+  // our menu at 500 ms, the selection held off. The door now judges the point (utils.js pressFacts).
+  {
+    const pa = await newPage({ lang: 'zh', phone: true, android: true });
+    await pa.evaljs(OPEN('fake-poll', 'fake-poll-big', 'big', { min: 10 }));
+    await sleep(1500);
+    const pk = await pa.evaljs(PICK_ROW('big', 'android'));
+    const wp = pk && await pa.evaljs(`(() => { const b = document.querySelector('[data-geo="android"] > .chanmsg-body'); const w = document.createTreeWalker(b, NodeFilter.SHOW_TEXT); let n; while ((n = w.nextNode())) { const m = /[A-Za-z\\u4e00-\\u9fff]{3,}/.exec(n.data); if (m && !n.parentElement.closest('a, button, [role], .chanblk-at, .chan-at, .chanblk-code')) { const r = document.createRange(); r.setStart(n, m.index); r.setEnd(n, m.index + m[0].length); const q = r.getBoundingClientRect(); const x = q.left + q.width / 2, y = q.top + q.height / 2; const at = document.elementFromPoint(x, y); return { x, y, word: m[0], at: at && at.tagName + '.' + at.className, ua: navigator.userAgent.includes('Android'), dpr: devicePixelRatio, touch: window.app.isTouch }; } } return null; })()`);
+    await pa.evaljs(`(() => { window.__log = []; window.__menus = 0; window.__tt = null;
+      const desc = (n) => { const el = n && (n.nodeType === 1 ? n : n.parentElement); return el ? el.tagName.toLowerCase() + (typeof el.className === 'string' && el.className ? '.' + el.className.trim().split(/\\s+/).join('.') : '') : null; };
+      for (const type of ['touchstart', 'touchend', 'contextmenu', 'selectstart']) addEventListener(type, (e) => { if (type === 'touchstart' && !window.__tt) window.__tt = { x: e.touches[0].clientX, y: e.touches[0].clientY, target: desc(e.target) }; const row = { type, trusted: e.isTrusted, ptype: e.pointerType ?? null, target: desc(e.target) }; window.__log.push(row); setTimeout(() => { row.prevented = e.defaultPrevented; }, 0); }, true);
+      new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1 && n.classList.contains('context-menu')) window.__menus++; }).observe(document.body, { childList: true, subtree: true });
+      return 1; })()`);
+    if (wp) {
+      await pa.cdp('Page.bringToFront');
+      await pa.cdp('Emulation.setEmitTouchEventsForMouse', { enabled: true, configuration: 'mobile' });
+      // (fired, never awaited: under the touch emulator the press's reply never comes — awaiting it hangs the leg)
+      pa.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: wp.x, y: wp.y, button: 'left', clickCount: 1 });
+      await sleep(900);
+      pa.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: wp.x, y: wp.y, button: 'left', clickCount: 1 });
+      await sleep(350);
+      await pa.cdp('Emulation.setEmitTouchEventsForMouse', { enabled: false });
+    }
+    const a = await pa.evaljs(`(() => { const s = getSelection(); const inBody = (n) => !!n && !!(n.nodeType === 1 ? n : n.parentElement)?.closest('[data-geo="android"] > .chanmsg-body'); const body = document.querySelector('[data-geo="android"] > .chanmsg-body');
+      return { sel: s.toString(), inBody: inBody(s.anchorNode), tt: window.__tt, landed: !!window.__tt && inBody(document.elementFromPoint(window.__tt.x, window.__tt.y)), menus: document.querySelectorAll('.context-menu').length, built: window.__menus, log: window.__log, us: body ? getComputedStyle(body).userSelect : null }; })()`);
+    const trustedCm = a.log.filter((r) => r.type === 'contextmenu' && r.trusted);
+    const synthCm = a.log.filter((r) => r.type === 'contextmenu' && !r.trusted);
+    console.log('    measured order: ' + a.log.map((r) => `${r.type}${r.type === 'contextmenu' ? (r.trusted ? '(trusted ' + r.ptype + ')' : '(synthetic)') : ''}${r.prevented ? '[prevented]' : ''}@${r.target}`).join(' → '));
+    const near = !!wp && !!a.tt && Math.abs(a.tt.x - wp.x) <= 1 && Math.abs(a.tt.y - wp.y) <= 1;
+    ok(!!wp && wp.ua && wp.dpr === 3 && wp.touch && pk.settled && near && a.landed, `ANDROID (the chat's phone: Android UA, DPR ${wp && wp.dpr}): the finger is ON the word it measured ("${wp && wp.word}" in the message body, the list still for 1.2 s; the touchstart's target as Chrome adjusted it: ${a.tt && a.tt.target})`, J({ pk, wp, tt: a.tt }));
+    ok(a.sel.trim().length > 0 && a.inBody, `a LONG PRESS on the words is the platform's SELECTION ("${a.sel.trim()}", user-select ${a.us})`, J({ sel: a.sel, inBody: a.inBody, us: a.us }));
+    ok(a.log.some((r) => r.type === 'selectstart') && trustedCm.length === 1 && trustedCm[0].ptype === 'touch' && trustedCm[0].prevented === false, 'the native long press happened (selectstart, then a TRUSTED touch contextmenu) and the page did NOT cancel it', J(a.log));
+    ok(synthCm.length === 0 && a.menus === 0 && a.built === 0, `no synthetic contextmenu (the door armed no timer on the words), no menu built or open (${a.built} / ${a.menus})`, J({ synth: synthCm, menus: a.menus, built: a.built }));
+    pa.close();
+    await p6.cdp('Page.bringToFront');   // p6's own touch legs need the page in front again (else they never return)
+  }
+  // iOS-SHAPED (raw touch events, no native gesture): our door arms no timer on text ⇒ no menu either
   await p6.touch(before.x, before.y, 700);
+  await sleep(300);
+  const ios = await p6.evaljs(`document.querySelectorAll('.context-menu').length`);
+  ok(ios === 0, `an iOS-shaped long press on the words opens no menu (${ios})`);
+  // THE … BUTTON: a finger's target in the row's corner, over no word, the element under its own centre
+  const mb = await p6.evaljs(`(() => { const row = document.querySelector('[data-geo="phone"]'); const b = row.querySelector(':scope > .chanmsg-tmore'); if (!b) return null; const r = b.getBoundingClientRect(); const x = r.left + r.width / 2, y = r.top + r.height / 2; const at = document.elementFromPoint(x, y);
+    const rg = document.createRange(); rg.selectNodeContents(row.querySelector(':scope > .chanmsg-body')); const words = [...rg.getClientRects()].filter((q) => q.width > 0 && q.bottom > r.top && q.top < r.bottom);
+    return { x: Math.round(x), y: Math.round(y), w: Math.round(r.width), h: Math.round(r.height), rowH: row.offsetHeight, self: !!at && b.contains(at), over: words.filter((q) => q.right > r.left + 0.5).length, label: b.getAttribute('aria-label'), svg: !!b.querySelector('svg') }; })()`);
+  ok(!!mb && mb.w >= 44 && mb.h >= Math.min(44, mb.rowH) && mb.self && mb.over === 0 && mb.svg && mb.label === '消息操作', `the message's … button: ${mb && mb.w}×${mb && mb.h} px (row ${mb && mb.rowH} px), the element under its centre, over no word, an SVG named "${mb && mb.label}"`, J(mb));
+  if (mb) await p6.touch(mb.x, mb.y, 60);
   await sleep(300);
   const menu = await p6.evaljs(`(() => { const m = document.querySelector('.context-menu'); return m ? [...m.querySelectorAll('.context-menu-item')].map((x) => { const r = x.getBoundingClientRect(); return { text: x.textContent, x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), h: Math.round(r.height) }; }) : null; })()`);
   const during = await p6.evaljs(PG);
-  ok(before.bar === 'none' && menu && JSON.stringify(menu.map((m) => m.text)) === JSON.stringify(['添加表情回应', '在话题中回复', '引用']), `no hover bar on the phone (display ${before.bar}); a LONG PRESS on the message opens its actions as a menu: ${menu && menu.map((m) => m.text).join(' · ')}`, J({ bar: before.bar, menu }));
+  ok(before.bar === 'none' && menu && JSON.stringify(menu.map((m) => m.text)) === JSON.stringify(['添加表情回应', '在话题中回复', '引用', '复制文本']), `no hover bar on the phone (display ${before.bar}); a tap on the … opens its actions as a menu: ${menu && menu.map((m) => m.text).join(' · ')}`, J({ bar: before.bar, menu }));
   ok(same(before, during), `GEOMETRY at 390 px: the row's offsetHeight ${before.h} px, the next row's offsetTop ${before.next} px and the list's scrollHeight ${before.sh} px are the same with the menu open`, J({ before, during }));
   // Add reaction from the menu: the picker, a tap on its first quick emoji, the chip
   const add = menu && menu.find((m) => m.text === '添加表情回应');
@@ -959,6 +1036,9 @@ console.log('(p) the phone at 390 px: the long-press menu and the geometry');
   ok(!after.strip && after.h === before.h && after.next === before.next, `taken back with a tap, the row closes up EXACTLY (${grown.h} → ${after.h} px = ${before.h} px; next row ${after.next} = ${before.next})`, J({ before, after }));
   await p6.shot('p-phone-390.png');
   p6.close();
+  // DESKTOP unchanged: no … anywhere (created only on a touch-first device); the hover bar is the door there
+  const desk = await p1.evaljs(`({ more: document.querySelectorAll('.chanmsg-tmore').length, bars: document.querySelectorAll('.chanmsg > .chanmsg-bar').length })`);
+  ok(desk.more === 0 && desk.bars > 0, `the desktop page draws no … (${desk.more}) beside its ${desk.bars} hover bars`, J(desk));
 }
 
 // ── (f) THE TRICKLE: a 120-row room scrolled end to end in 3 s spends ≤ 20 list calls in the minute ──

@@ -26,6 +26,13 @@
 //   ⑧ THE ENGINE'S OWN WRITERS ARE INCREMENTAL: real passes (discovery complete → the unlisting scan, ingest), a refresh,
 //      a mark-read and a refresh override each leave an incremental write. CONTROL: the pre-fix unlisting scan shape (an
 //      update reaching `ix.conversations`) makes the write a whole one.
+//   ⑨ THE FIRST READ (design 008, B-3cf8 — userW's GET /api/channels: 77.5 MB, 1.49 s to first byte at ≈ 50 000 rows),
+//      at 50 274 and 100 548 rows: its bytes (< 1 MB at both, printed), its rowViews (≤ 300 + 30 per account), its work
+//      against the old whole list (< 2 %); every tag kind buried at position ≈ 49 000 by lastAt is on it after a first
+//      read, a reconnect and a non-partial broadcast; a page of 60 and a search (bytes; work linear per row scanned);
+//      the client half in node (JSON.parse + applyFirst + groupListRows + firstScreen < 20 ms, printed; its work bounded).
+//      CONTROL: the old whole list on the route reads ×N and > 50 MB — red. CONTROL: a non-partial broadcast that still
+//      carries every row — red.
 // The store's 2 s tick is captured, never scheduled (a tick inside a measured window would be counted); the
 // clock is injected and frozen; per-pid scratch dirs (scripts/scratch.mjs).
 import fs from 'node:fs';
@@ -39,6 +46,9 @@ startWorkMeter();   // BEFORE the modules load (a function compiled before cover
 const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
 const S = require(path.join(REPO, 'src/channel-store.js'));
 const { makeRecord } = require(path.join(REPO, 'src/channel-record.js'));
+const FO = require(path.join(REPO, 'src/channel-focus.js'));
+const RS = await import(new URL(`file://${path.join(REPO, 'src/lib/channel-rows.js')}`).href);
+const V = await import(new URL(`file://${path.join(REPO, 'src/lib/channel-groups-view.js')}`).href);
 
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
@@ -123,6 +133,75 @@ function oneRowWrite(full) {
     .then(() => measure(() => ix.flush(full ? { full: true } : {}), FILES));
 }
 
+
+// ── ⑨ design 008: the first read, measured where it is built ─────────────────
+// every tag kind, one row each, buried at ≈ 49 000 by lastAt (the fill's rows are T − 1 d − i s)
+const BURIED = { awaiting: 'b-awaiting', assigned: 'b-assigned', read: 'b-read', held: 'b-held', replied: 'b-replied', unknown: 'b-unknown' };
+let planted = false;
+async function plant() {
+  if (planted) return;
+  planted = true;
+  const deep = T - 86400e3 - 49000 * 1000;
+  await ix.update(() => {
+    for (const id of Object.values(BURIED)) Object.assign(ix.entry(A, id), { title: `Buried ${id}`, kind: 'group', lastAt: deep, unread: 0, lastText: 'quiet for weeks' });
+    Object.assign(ix.entry(A, BURIED.assigned), { access: [{ principal: { kind: 'agent', id: 'cid-b', name: 'Bee' }, authority: 'draft' }], watchers: [{ principal: { kind: 'agent', id: 'cid-b', name: 'Bee' }, notify: 'each', mode: 'all' }] });
+    ix.entry(A, BURIED.read).agentReads = [{ id: 'cid-r', name: 'Reader', at: T - 3600e3, upTo: deep }];
+    ix.entry(A, BURIED.held).stats = { wakes: [{ at: T - 7200e3, ok: false, lane: 'none', n: 1 }] };
+    ix.entry(A, BURIED.replied).selfAt = T - 600e3;
+  });
+  await eng.store.outbox.update((ob) => {
+    ob.proposals = ob.proposals || {};
+    ob.proposals['p-b1'] = { id: 'p-b1', key: `${A}/${BURIED.awaiting}`, adapterId: A, convId: BURIED.awaiting, state: 'awaiting-approval', text: 'draft', draftedBy: { kind: 'agent', id: 'cid-a' }, at: T - 60e3, updatedAt: T - 60e3 };
+    ob.proposals['p-b2'] = { id: 'p-b2', key: `${A}/${BURIED.unknown}`, adapterId: A, convId: BURIED.unknown, state: 'unknown', text: 'draft', draftedBy: { kind: 'agent', id: 'cid-a' }, at: T - 60e3, updatedAt: T - 60e3 };
+  });
+  ix.flush();
+}
+const allKeys = () => Object.keys(ix.live());
+const deepAt = (d, id) => { const c = (d.conversations || []).find((x) => x.key === `${A}/${id}`); return !!(c && FO.statusTag(c, now())); };
+const clientHalf = (body) => { const d = JSON.parse(body); const st = RS.createRowStore(); RS.applyFirst(st, d, now()); const { rows } = V.groupListRows({ groups: [], conversations: RS.loadedRows(st), adapters: st.meta.adapters }); return V.firstScreen(rows, { now: now() }); };
+async function firstReadAt(rowsN) {
+  await plant();
+  const route = () => JSON.stringify(eng.digest({ scope: 'first' }));   // what GET /api/channels sends
+  const old = () => JSON.stringify(eng.digest({ keys: allKeys() }));     // the base's whole list (every rowView)
+  route();                                                               // the meter's first take is discarded
+  const v0 = eng.digestStats().rowViews;
+  let body = '';
+  const m = measure(() => { body = route(); }, FILES);
+  const views = eng.digestStats().rowViews - v0;
+  let oldBody = '';
+  old();
+  const mo = measure(() => { oldBody = old(); }, FILES);
+  const d = JSON.parse(body);
+  // a reconnect re-reads the same first read; an account-level change broadcasts its shape
+  const reconnect = JSON.parse(route());
+  events.length = 0;
+  eng.notify([]);
+  const bc = events.find((e) => e && e.type === 'channels-updated');
+  const bcBytes = bc ? Buffer.byteLength(JSON.stringify(bc)) : -1;
+  const oldBcBytes = Buffer.byteLength(JSON.stringify({ type: 'channels-updated', changed: [], changedKeys: [], partial: false, digest: JSON.parse(oldBody) }));
+  // a page of 60 (the All view's "Show more" from the middle) and a search over every row
+  const mid = FO.selectPage(Object.values(ix.live()), { limit: 1, before: { lastAt: T - 86400e3 - 25000 * 1000, key: '' } }).items[0];
+  eng.rows({ limit: 60 });
+  let page = null;
+  const mp = measure(() => { page = eng.rows({ limit: 60, before: FO.pageCursor(mid) }); }, FILES);
+  let hits = null;
+  eng.rows({ q: 'invoice #1049' });
+  const ms = measure(() => { hits = eng.rows({ q: 'invoice #1049', limit: 60 }); }, FILES);
+  let searchMs = Infinity;
+  for (let i = 0; i < 3; i++) { const a = performance.now(); eng.rows({ q: 'invoice #1049', limit: 60 }); searchMs = Math.min(searchMs, performance.now() - a); }
+  // the client half: parse + applyFirst + groupListRows + firstScreen (wall: the best of 5; work: the meter)
+  clientHalf(body);
+  const mc = measure(() => clientHalf(body), FILES);
+  let wall = Infinity;
+  for (let i = 0; i < 5; i++) { const a = performance.now(); clientHalf(body); wall = Math.min(wall, performance.now() - a); }
+  const accounts = eng.adapterRecords().adapters.length;
+  return {
+    rows: rowsN, bytes: Buffer.byteLength(body), views, accounts, work: m.total, oldWork: mo.total, oldBytes: Buffer.byteLength(oldBody),
+    attention: d.attention, n: d.conversations.length, buried: Object.fromEntries(Object.entries(BURIED).map(([k, id]) => [k, [deepAt(d, id), deepAt(reconnect, id), !!(bc && bc.digest && deepAt(bc.digest, id))]])),
+    bcBytes, bcScope: bc && bc.digest && bc.digest.scope, oldBcBytes, pageBytes: Buffer.byteLength(JSON.stringify(page)), pageOk: !!(page && page.ok && page.rows.length === 60), pageWork: mp.total,
+    searchWork: ms.total, searchMs, searchHits: hits && hits.total, clientWall: wall, clientWork: mc.total,
+  };
+}
 console.log(`① one window open over ${N} rows, then ${2 * N} (work, never the clock)`);
 for (const c of ['t-warm', 't-h1', 't-cwarm', 't-c1', 't-rwarm', 't-r1', 't-warm2', 't-h2', 't-cwarm2', 't-c2', 't-rwarm2', 't-r2']) await target(c);
 await fill(0, N);
@@ -133,6 +212,7 @@ baseKnown(true); await measureOpen('t-cwarm'); const c1 = await measureOpen('t-c
 await ix.update((x) => { void x.conversations; }); ix.flush(); await measureOpen('t-rwarm');
 await ix.update((x) => { void x.conversations; }); ix.flush(); const r1 = await measureOpen('t-r1');
 const nb1 = notifyWork('t-h1'), nk1 = notifyWork(`${A}/t-h1`);
+const fr1 = await firstReadAt(rows1);
 console.log('② the index write after one row changed');
 const f1 = await oneRowWrite(false), ff1 = await oneRowWrite(true);
 await fill(N, 2 * N);
@@ -144,6 +224,7 @@ await ix.update((x) => { void x.conversations; }); ix.flush(); await measureOpen
 await ix.update((x) => { void x.conversations; }); ix.flush(); const r2 = await measureOpen('t-r2');
 const f2 = await oneRowWrite(false), ff2 = await oneRowWrite(true);
 const nb2 = notifyWork('t-h1'), nk2 = notifyWork(`${A}/t-h1`);
+const fr2 = await firstReadAt(rows2);
 const row = (m) => `${m.total} (blocks ${m.blocks} + natives ${m.native})`;
 ok(h1.good && h2.good && bounded(h1.total, h2.total), `① a window open: ${row(h1)} at ${rows1} rows, ${row(h2)} at ${rows2}: ×${(h2.total / h1.total).toFixed(3)} ≤ ${BOUNDED_RATIO} — the index's size is not in it`);
 ok(h1.walks === 0 && h2.walks === 0, `① its two broadcasts read the account census inside its 5 s window: ${h1.walks + h2.walks} walks of the rows (the paced walk itself: test-channels-census-pace)`);
@@ -259,6 +340,25 @@ console.log('⑧ the engine\'s own writers are incremental');
   try { e8.stop && e8.stop(); } catch {}
 }
 
+
+console.log('⑨ the first read (design 008): bytes, rowViews, work — at both sizes');
+{
+  const MB = 1e6, pct = (a, b) => (100 * a / b).toFixed(2) + ' %';
+  for (const f of [fr1, fr2]) {
+    ok(f.bytes < MB, `⑨ the first read at ${f.rows} rows: ${(f.bytes / 1024).toFixed(1)} KB (< 1 MB; the old list ${(f.oldBytes / MB).toFixed(1)} MB), ${f.n} rows (attention ${JSON.stringify(f.attention)})`);
+    ok(f.views <= FO.ATTENTION_MAX + FO.HEAD_ROWS * f.accounts, `⑨ …${f.views} rowViews (≤ ${FO.ATTENTION_MAX} + ${FO.HEAD_ROWS}·${f.accounts} accounts)`);
+    ok(f.work < 0.02 * f.oldWork, `⑨ …its work ${f.work} = ${pct(f.work, f.oldWork)} of the old whole list's ${f.oldWork} (< 2 %)`);
+    ok(Object.values(f.buried).every((x) => x.every(Boolean)), `⑨ V1: every tag kind buried at ≈ 49 000 by lastAt is on the first screen after a first read, a reconnect and a non-partial broadcast (${Object.keys(f.buried).join(', ')})`, f.buried);
+    ok(f.bcScope === 'first' && f.bcBytes < MB, `⑨ an account-level change broadcasts the first read's shape: ${(f.bcBytes / 1024).toFixed(1)} KB (< 1 MB)`);
+    ok(!(f.oldBcBytes < MB), `⑨ CONTROL: a non-partial broadcast that still carries every row is ${(f.oldBcBytes / MB).toFixed(1)} MB — red against the same 1 MB bound`);
+    ok(f.pageOk && f.pageBytes < 100 * 1024 && f.searchHits >= 1, `⑨ a page of 60 from the middle: ${(f.pageBytes / 1024).toFixed(1)} KB; a search over every row finds ${f.searchHits}`);
+    ok(f.clientWall < 20, `⑨ the client half (JSON.parse + applyFirst + groupListRows + firstScreen) at ${f.rows} rows: ${f.clientWall.toFixed(2)} ms (< 20 ms; work ${f.clientWork})`);
+  }
+  ok(bounded(fr1.clientWork, fr2.clientWork), `⑨ the client half's work does not grow with the index: ${fr1.clientWork} → ${fr2.clientWork} (×${(fr2.clientWork / fr1.clientWork).toFixed(3)})`);
+  ok(fr2.pageWork <= 2.2 * fr1.pageWork + SLACK && fr2.searchWork <= 2.2 * fr1.searchWork + SLACK, `⑨ a page and a search are linear in the rows scanned: page ${fr1.pageWork} → ${fr2.pageWork} (×${(fr2.pageWork / fr1.pageWork).toFixed(2)}), search ${fr1.searchWork} → ${fr2.searchWork} (×${(fr2.searchWork / fr1.searchWork).toFixed(2)}) (≤ 2.2)`);
+  ok(fr1.searchWork / fr1.rows < fr1.oldWork / fr1.rows / 3, `⑨ …a search reads ${(fr1.searchWork / fr1.rows).toFixed(1)} per row scanned — the shown strings' bytes, under a third of the old list's ${(fr1.oldWork / fr1.rows).toFixed(1)} per row (one search: ${fr1.searchMs.toFixed(1)} ms at ${fr1.rows} rows, ${fr2.searchMs.toFixed(1)} ms at ${fr2.rows}, printed)`);
+  ok(!bounded(fr1.oldWork, fr2.oldWork) && fr2.oldBytes > 50 * MB, `⑨ CONTROL: the old whole list on the route reads ${fr1.oldWork} → ${fr2.oldWork} (×${(fr2.oldWork / fr1.oldWork).toFixed(2)}) — ${(fr1.oldBytes / MB).toFixed(1)} MB at ${fr1.rows} rows (these rows are lighter than userW's 1 542 bytes), ${(fr2.oldBytes / MB).toFixed(1)} MB at ${fr2.rows} — red`);
+}
 try { eng.stop && eng.stop(); } catch {}
 console.log(`\ntest-channels-index-scale: ${pass} passed, ${fail} failed`);
 if (!fail) console.log(`ALL PASS (${pass})`);

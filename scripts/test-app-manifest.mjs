@@ -36,6 +36,9 @@ const fx = (f) => fs.readFileSync(path.join(FX, f), 'utf8');
 const A = require('../src/app-manifest.js');
 const M = require('../src/desktop-apps.js');
 const MUT = mutantCopies('app-manifest', repo);
+const MANIFEST_SRC = fs.readFileSync(path.join(repo, 'src/app-manifest.js'), 'utf8');
+/** One shell function of the root script by name (one-line `f() { … }` or a block ending at a `}` line). */
+const fnOf2 = (script, name) => (new RegExp(`^${name}\\(\\) \\{ .*\\}$`, 'm').exec(script) || new RegExp(`^${name}\\(\\) \\{[^\\n]*\\n[\\s\\S]*?\\n\\}$`, 'm').exec(script) || [null])[0];
 const DIRS = [];
 const myDir = (n) => { const d = scratchDir(n); DIRS.push(d); return d; };
 process.on('exit', () => { for (const d of DIRS) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } } });
@@ -308,6 +311,125 @@ const qSet = (script) => {
   ok(ctl && !ctl.includes('b:amd64 1.0') && !same(ctl, pure), 'CONTROL (q-ii-only): the pre-fix filter drops the held package — the two sets differ', ctl);
 }
 
+console.log('§8c verify-r1 H1 — THE PIN of an approved source (a PURE table = the bytes root writes), the origin of a fetched .deb');
+{
+  const PIN = (host, names) => `Package: *\nPin: origin "${host}"\nPin-Priority: 1\n` + (names ? `\nPackage: ${names}\nPin: origin "${host}"\nPin-Priority: 500\n` : '');
+  const table = [
+    [{ host: 'vs-fixture.test', packages: [] }, PIN('vs-fixture.test', null)],
+    [{ host: 'packages.example.com', packages: ['code', 'code-insiders', 'code'] }, PIN('packages.example.com', 'code code-insiders')],
+    [{ host: 'h.example', packages: ['zz-tool', 'Bad;name', 'aa-lib', 'x'] }, PIN('h.example', 'aa-lib zz-tool')],
+  ];
+  for (const [i, want] of table) ok(A.sourcePin(i) === want, `sourcePin ${JSON.stringify(i)} → everything from the host at ${A.PIN_LOW}, the approved packages (sorted, unique, Debian names only) at ${A.PIN_APPROVED}`, A.sourcePin(i));
+  ok(A.PIN_LOW > 0 && A.PIN_LOW < 100 && A.PIN_APPROVED === 500, 'the low priority is in apt_preferences\' "only when no version is installed" band (0 < P < 100); approved = apt\'s default 500');
+  for (const [u, want] of [['https://packages.example.com/repos/code', 'packages.example.com'], ['https://vs-fixture.test:8443/repo', 'vs-fixture.test'], ['https://h.example', 'h.example'], ['http://h.example/x', null], ['https://h.example:99999999/x', null], ['https://a b/x', null]]) ok(A.pinHost(u) === want, `pinHost ${u} → ${want}`, A.pinHost(u));
+  const srcs = [{ id: 'fx', uris: ['https://vs-fixture.test:8443/repo'] }, { id: 'code', uris: ['https://packages.example.com/repos/code/'] }];
+  const URIS = "'https://vs-fixture.test:8443/repo/pool/capp-third_1.1_all.deb' capp-third_1.1_all.deb 1234 SHA256:ab\n'http://deb.debian.org/debian/pool/main/h/hello/hello_2.10-3_amd64.deb' hello_2.10-3_amd64.deb 53000 SHA256:cd\n'https://vs-fixture.test:8443/repository/pool/evil-x_1_all.deb' evil-x_1_all.deb 1 SHA256:ef\n'https://packages.example.com/repos/code/pool/code_1.9_amd64.deb' code_1.9_amd64.deb 9 \n'file:/home/u/.vibespace/apps/debs/./sl_5.02-1_amd64.deb' sl_5.02-1_amd64.deb 9 SHA256:00\n";
+  const origins = A.parseUris(URIS).debs.map((d) => A.originOf(d.url, srcs));
+  ok(same(origins, [{ source: 'fx', host: 'vs-fixture.test' }, { source: null, host: 'deb.debian.org' }, { source: null, host: 'vs-fixture.test' }, { source: 'code', host: 'packages.example.com' }, { source: null, host: null }]), 'originOf: a source\'s URI must be the URL\'s PREFIX up to a "/" (…/repository is not …/repo), else the host; a file: repository has none', origins);
+  const SIM = 'Inst capp-third [1.0] (1.1 VS Fixture:stable [all])\nInst hello [2.10-2] (2.10-3 Debian:12.7/stable [amd64])\nInst code [1.8] (1.9 code stable:stable [amd64])\n';
+  const ups = A.updatesOf(SIM, ['capp-third', 'hello', 'code'], { debs: A.parseUris(URIS).debs, sources: srcs });
+  ok(same(ups.map((u) => [u.package, u.origin, u.source]), [['capp-third', 'fx', 'fx'], ['hello', 'deb.debian.org', null], ['code', 'code', 'code']]), 'the Refresh card names each update\'s origin: the approved source by name, else the host apt fetches it from (never the publisher\'s own Label words)', ups);
+  ok(same(A.updatesOf(SIM, ['hello']), [{ package: 'hello', from: '2.10-2', to: '2.10-3' }]), '…without the fetched files the rows are as before');
+  const m0 = A.withSource(A.emptyManifest(), { id: 'fx', uris: ['https://vs-fixture.test:8443/repo'], suites: ['stable'], components: ['main'], key: 'https://vs-fixture.test:8443/repo/key.asc' });
+  const m1 = A.withPins(m0, A.parseRunLog('= run x nonce1234 install\n= pin fx capp-third Bad;x\n= pin ghost a-b\n= ok\n', { id: 'x', nonce: 'nonce1234' }).pins);
+  ok(same(m1.sources[0].pin, { packages: ['capp-third'] }) && m1.sources.length === 1 && same(A.validateManifest(m1).manifest.sources[0].pin, { packages: ['capp-third'] }), 'the run log\'s `= pin` lines are recorded on their sources (an unknown source is not invented; a bad name dropped) and the schema keeps them', m1.sources);
+  // the root script's own functions, run here (no root: install → cp, /etc → a scratch dir) — THE SAME BYTES as sourcePin
+  const fnOf = (script, name) => (new RegExp(`^${name}\\(\\) \\{ .*\\}$`, 'm').exec(script) || new RegExp(`^${name}\\(\\) \\{[^\\n]*\\n[\\s\\S]*?\\n\\}$`, 'm').exec(script) || [null])[0];
+  const pinRun = (script, tag) => {
+    const d = myDir(`cah-pin-${tag}`);
+    for (const x of ['sys/sources', 'sys/entries', 't', 'etc/apt']) fs.mkdirSync(path.join(d, x), { recursive: true });
+    fs.writeFileSync(path.join(d, 'sys/sources/fx.sources'), 'Types: deb\nURIs: https://vs-fixture.test:8443/repo\nSuites: stable\nComponents: main\nSigned-By: /etc/apt/keyrings/vibespace-fx.asc\n');
+    fs.writeFileSync(path.join(d, 'sys/sources/other.sources'), 'Types: deb\nURIs: https://pkg.other.example/apt/\nSuites: stable\nSigned-By: /etc/apt/keyrings/vibespace-other.asc\n');
+    fs.writeFileSync(path.join(d, 'sys/entries/third.pin'), 'fx capp-third\nfx capp-lib\nother zz-tool\nfx Bad;name\n');
+    fs.writeFileSync(path.join(d, 'sys/entries/hello.pin'), '');
+    const fns = ['say', 'refuse', 'pkgok', 'field', 'srcs', 'from', 'pins'].map((n) => fnOf(script, n));
+    if (fns.some((f) => !f)) return { missing: true };
+    const body = fns.join('\n').replace(/install -d -m 0755 /g, 'mkdir -p ').replace(/install -m 0644 -o root -g root /g, 'cp ').replace(/"\/etc\/apt\//g, '"$E/etc/apt/').replace(/ \/etc\/apt\//g, ' $E/etc/apt/');
+    const sh = `set -eu\nexport LC_ALL=C\nR=${d}/sys; T=${d}/t; E=${d}\n${body}\nprintf '%s' "$URIS" | from > "$T/from"; pins\n`;
+    const r = spawnSync('sh', ['-c', sh], { encoding: 'utf8', env: { PATH: process.env.PATH, URIS }, timeout: 20000 });
+    const rd = (f) => { try { return fs.readFileSync(path.join(d, f), 'utf8'); } catch { return null; } };
+    return { code: r.status, out: r.stdout, err: r.stderr, from: rd('t/from'), fx: rd('etc/apt/preferences.d/vibespace-fx.pref'), fxSys: rd('sys/sources/fx.pref'), other: rd('etc/apt/preferences.d/vibespace-other.pref') };
+  };
+  const pr = pinRun(A.APP_SCRIPT, 'now');
+  const wantFx = A.sourcePin({ host: 'vs-fixture.test', packages: ['capp-third', 'capp-lib'] });
+  ok(pr.code === 0 && pr.fx === wantFx && pr.fxSys === wantFx && pr.other === A.sourcePin({ host: 'pkg.other.example', packages: ['zz-tool'] }), 'pins() (the root script\'s own text, run here) writes /etc/apt/preferences.d/vibespace-<id>.pref AND root\'s copy sys/sources/<id>.pref — byte-identical to the PURE sourcePin (the port dropped, a bad name skipped)', pr);
+  const runPins = A.parseRunLog('= run x nonce1234 install\n' + (pr.out || ''), { id: 'x', nonce: 'nonce1234' }).pins;
+  ok(same(runPins, { fx: ['capp-lib', 'capp-third'], other: ['zz-tool'] }), 'its `= pin` lines parse to each source\'s allow-list (what the index records)', runPins);
+  ok(pr.from === 'fx capp-third\n', 'from() (the root script\'s attribution) names exactly the .deb under the source\'s URI — the same rule as originOf (…/repository is not …/repo; another host is not the source)', pr.from);
+  ok(/`finish\(\) \{ pins; q > /.test(MANIFEST_SRC) && (A.APP_SCRIPT.match(/hook; rebase; restore/g) || []).length === 2 && /restore\(\) \{[\s\S]*?\n {2}pins\n\}/.test(A.APP_SCRIPT), 'every run ends with pins() (finish), both replay rungs start with restore() (sources, keys AND pins back before apt runs)');
+  ok(/if srcs; then mkdir -p "\$T\/arch\/partial"; apt-get \$LOCK -o Dir::Cache::archives="\$T\/arch\/" --print-uris -y install "\$@"/.test(A.APP_SCRIPT) && /cp "\$T\/req"[^\n]*sort -u "\$T\/from" > "\$R\/entries\/\$ID\.pin\.tmp"/.test(A.APP_SCRIPT) && /rm -f "\$R\/entries\/\$ID\.list" "\$R\/entries\/\$ID\.desktop" "\$R\/entries\/\$ID\.pin"/.test(A.APP_SCRIPT), 'an install attributes what it fetches BEFORE apt runs (an empty archives dir: every .deb printed), the entry keeps it (.pin), a removal drops it');
+  // CONTROL: a patched copy whose pins() writes nothing (the pre-fix script: no pin at all) — the parity above is red
+  const noPin = MUT.load('src/app-manifest.js', MANIFEST_SRC.replace("'pins() {',", "'pins() { return 0',"), 'no-pin');
+  const pc = pinRun(noPin.APP_SCRIPT, 'ctl');
+  ok(pc.code === 0 && pc.fx === null && pc.fxSys === null && pc.fx !== wantFx, 'CONTROL (no-pin): the same run writes no pin — an approved source\'s every package would compete at apt\'s default 500', pc);
+  // verify r1 — the pin's order and reach: every run re-pins BEFORE any apt (a source approved before .203 had no pin, so
+  // its first Refresh took the source's newer hello), the source mode writes the pin BEFORE its source is live (a SIGKILL
+  // during apt-get update left it live unpinned), a source on a host the machine's own apt sources use is refused
+  const orderOf = (script) => {
+    const at = script.indexOf('\ncase $MODE in\ninstall)');
+    const br = (/\nsource\)\n([\s\S]*?)\nsource-remove\)\n/.exec(script) || [, ''])[1];
+    const iRec = br.indexOf('"$R/sources/$ID.sources"; pins; install'), iLive = br.indexOf('"/etc/apt/sources.list.d/vibespace-$ID.sources"');
+    return { repin: at > 0 && script.slice(0, at).endsWith('\npins'), pinFirst: iRec > 0 && iRec < iLive && br.indexOf('apt-get') > iLive, refuseFirst: br.indexOf('refuse shared-host') >= 0 && br.indexOf('refuse shared-host') < br.indexOf('grab ') };
+  };
+  ok(same(orderOf(A.APP_SCRIPT), { repin: true, pinFirst: true, refuseFirst: true }), 'every run calls pins() before the mode dispatch (before any apt-get of any mode); source mode: shared-host refused before anything is written, root\'s record, THEN the pin, THEN the live source, THEN apt-get update', orderOf(A.APP_SCRIPT));
+  const mineRun = (script, U, tag) => {
+    const d = myDir(`cah-mine-${tag}`);
+    fs.mkdirSync(path.join(d, 'etc/apt/sources.list.d'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'etc/apt/sources.list'), '# deb http://commented.example/debian bookworm main\ndeb http://deb.debian.org/debian bookworm main\ndeb [signed-by=/usr/share/keyrings/x.gpg arch=amd64] https://Mirror.Example:8080/ubuntu noble main\n');
+    fs.writeFileSync(path.join(d, 'etc/apt/sources.list.d/extra.list'), 'deb-src http://src.example/debian bookworm main\n');
+    fs.writeFileSync(path.join(d, 'etc/apt/sources.list.d/own.sources'), 'Types: deb\nURIs: https://own.example/apt http://own2.example/apt\nSuites: stable\n');
+    fs.writeFileSync(path.join(d, 'etc/apt/sources.list.d/vibespace-fx.sources'), 'Types: deb\nURIs: https://vs-fixture.test:8443/repo\nSuites: stable\n');
+    const line = (/\n {2}h=\$\(printf[^\n]*shared-host[^\n]*/.exec(script) || [''])[0];
+    const body = ['say', 'refuse', 'mine'].map((n) => fnOf(script, n) || '').join('\n').replace(/ \/etc\/apt\//g, ' $E/etc/apt/');
+    const r = spawnSync('sh', ['-c', `set -eu\nE=${d}\n${body}\nmine | tr '\\n' ' '; echo\n${line}\necho passed\n`], { encoding: 'utf8', env: { PATH: process.env.PATH, U }, timeout: 20000 });
+    return { code: r.status, out: r.stdout + r.stderr };
+  };
+  const mn = mineRun(A.APP_SCRIPT, 'https://Deb.Debian.org/debian', 'now');
+  ok(mn.out.split('\n')[0] === 'deb.debian.org mirror.example own.example own2.example src.example ', 'mine() (the root script\'s own text): the hosts of the machine\'s own sources — sources.list, *.list, *.sources; commented lines and vibespace-* aside; lower case, no port', mn.out);
+  ok(mn.code === 125 && /= refused shared-host deb\.debian\.org/.test(mn.out), 'a source on deb.debian.org (bookworm-backports, say) is refused shared-host: its pin would hold the machine\'s own Debian archive — security updates too — at priority 1', mn.out);
+  const mo = mineRun(A.APP_SCRIPT, 'https://vs-fixture.test:8443/repo', 'own');
+  ok(mo.code === 0 && /passed/.test(mo.out), '…a source on a host of its own is not (another VibeSpace source\'s host is not the machine\'s)', mo.out);
+  // CONTROL: the pre-fix order (no re-pin before the dispatch, the source live before its pin, no shared-host check)
+  const preOrder = MUT.load('src/app-manifest.js', MANIFEST_SRC.replace("  'pins',\n  'case $MODE in',", "  'case $MODE in',").replace('"$R/sources/$ID.sources"; pins; install', '"$R/sources/$ID.sources"; install').replace(/\n {2}'  h=\$\(printf[^\n]*shared-host[^\n]*/, ''), 'pre-order');
+  const pmn = mineRun(preOrder.APP_SCRIPT, 'https://Deb.Debian.org/debian', 'ctl');
+  ok(same(orderOf(preOrder.APP_SCRIPT), { repin: false, pinFirst: false, refuseFirst: false }) && pmn.code === 0, 'CONTROL (the pre-fix order): no re-pin before the dispatch, the source live before its pin, a deb.debian.org source passes', { order: orderOf(preOrder.APP_SCRIPT), mine: pmn });
+}
+
+console.log('§8d verify-r1 H2 — ONE read of a user-owned file: root\'s grab() and the machine half\'s readHashed never block on a FIFO');
+{
+  const d = myDir('cah-grab');
+  const fifo = path.join(d, 'swap.deb'); spawnSync('mkfifo', [fifo]);
+  const real = path.join(d, 'real.deb'); fs.writeFileSync(real, crypto.randomBytes(300000));
+  fs.symlinkSync(real, path.join(d, 'link.deb'));
+  const H = crypto.createHash('sha256').update(fs.readFileSync(real)).digest('hex');
+  const grabSh = (src, extra = '') => `set -eu\nT=${d}\n${['say', 'refuse', 'grab'].map((n) => fnOf2(A.APP_SCRIPT, n)).join('\n')}\n${extra}grab "${src}" "$T/in.deb" no-deb\n[ "$(sha256sum "$T/in.deb" | cut -d" " -f1)" = "${H}" ] || refuse deb-changed\nsay ok`;
+  const t0 = Date.now();
+  const g1 = spawnSync('sh', ['-c', grabSh(fifo)], { encoding: 'utf8', timeout: 10000 });
+  ok(g1.status === 125 && /= refused deb-changed/.test(g1.stdout) && Date.now() - t0 < 8000, `root's grab of a FIFO (the staged .deb swapped for one) returns at once (${Date.now() - t0} ms) and the hash refuses it — the slot is never hung`, { code: g1.status, out: g1.stdout, signal: g1.signal });
+  const g2 = spawnSync('sh', ['-c', grabSh(path.join(d, 'link.deb'))], { encoding: 'utf8', timeout: 10000 });
+  ok(g2.status === 125 && /= refused no-deb/.test(g2.stdout), 'a symbolic link is never followed (refused no-deb)', g2.stdout);
+  const g3 = spawnSync('sh', ['-c', grabSh(real)], { encoding: 'utf8', timeout: 10000 });
+  ok(g3.status === 0 && /= ok/.test(g3.stdout), 'a regular file is copied whole (its hash holds)', g3.stdout + g3.stderr);
+  ok(!/\[ -f "\$S" \] && \[ ! -L "\$S" \] \|\| refuse no-deb/.test(A.APP_SCRIPT) && !/cp "\$S"|cp "\$K"/.test(A.APP_SCRIPT) && /grab "\$S" "\$T\/in\.deb" no-deb/.test(A.APP_SCRIPT) && /grab "\$K" "\$T\/key" no-key/.test(A.APP_SCRIPT), 'deb and source modes read the user\'s file through grab() — no `[ -f ] && cp` gap left');
+  // CONTROL: the pre-fix read (cp) of the same FIFO does not return (killed by the timeout)
+  const c1 = spawnSync('cp', [fifo, path.join(d, 'cp.deb')], { encoding: 'utf8', timeout: 2000 });
+  ok(c1.signal === 'SIGTERM' || c1.error, 'CONTROL: the pre-fix `cp` of a FIFO blocks until killed — what hung the slot', { signal: c1.signal, status: c1.status });
+  const AS0 = require('../src/app-serve.js');
+  const t1 = Date.now();
+  let rh = null;
+  try { await AS0.readHashed(fifo, path.join(d, 'o1.deb'), 1e9); rh = 'resolved'; } catch (e) { rh = e.code; }
+  ok(rh === 'bad_name' && Date.now() - t1 < 3000, `the machine half's readHashed of a FIFO answers bad_name at once (${Date.now() - t1} ms) — its type judged on the open fd, no libuv thread parked`, rh);
+  const okh = await AS0.readHashed(real, path.join(d, 'o2.deb'), 1e9);
+  ok(okh.sha256 === H && okh.size === 300000 && crypto.createHash('sha256').update(fs.readFileSync(path.join(d, 'o2.deb'))).digest('hex') === H, 'a regular file: the hash is of exactly the bytes staged (one read)');
+  // CONTROL: the pre-fix copy (fsp.copyFile) of the same FIFO has not settled after 1 s — a libuv thread sits in open()
+  let settled = false;
+  const pcf = fs.promises.copyFile(fifo, path.join(d, 'o3.deb')).then(() => { settled = true; }, () => { settled = true; });
+  await new Promise((r) => setTimeout(r, 1000));
+  ok(!settled, 'CONTROL: the pre-fix fsp.copyFile of a FIFO is still parked after 1 s');
+  try { const w = fs.openSync(fifo, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK); fs.closeSync(w); } catch { /* no reader yet */ }
+  await Promise.race([pcf, new Promise((r) => setTimeout(r, 3000))]);
+}
+
 console.log('§9 controls — a patched copy per rule');
 {
   const rel = 'src/app-manifest.js';
@@ -405,6 +527,52 @@ console.log('§10 the machine half in-process (src/app-serve.js)');
   ok(fs.readdirSync(ap.appsDir).some((n) => n.startsWith('manifest.json.corrupt-')) && JSON.parse(fs.readFileSync(ap.manifestFile, 'utf8')).v === 1, '…and set aside (manifest.json.corrupt-<ms>, its bytes kept) before the next write');
 }
 
+console.log('§D9 design 009 — an installer by address / file: the verdicts, the kind by the bytes, the app out of the archive, removal by kind');
+{
+  const RC = require('../src/app-recipes.js');
+  const SQ = require('../src/app-squashfs.js');
+  const v = (u, o) => A.fetchVerdict(u, o).ok;
+  const allowed = ['https://dldir1v6.qq.com/weixin/Universal/Linux/WeChatLinux_x86_64.deb', 'https://dl.google.com/x.deb?a=1', 'https://xn--fiq228c.com/a', 'https://cdn.example.com:8443/a.AppImage'];
+  const refused = ['http://dl.google.com/x.deb', 'ftp://x.com/a', 'file:///etc/passwd', 'https://127.0.0.1/a', 'https://0x7f.1/a', 'https://2130706433/a', 'https://[::1]/a', 'https://[fe80::1]/a', 'https://localhost/a', 'https://LOCALHOST./a', 'https://printer.local/a', 'https://svc.internal/a', 'https://router.lan/a', 'https://box.home.arpa/a', 'https://intranet/a', 'https://u:p@dl.google.com/a', 'https://vendor.test/a', 'https://a b.com/x', '', 'https://' + 'a'.repeat(2100) + '.com/'];
+  ok(allowed.every((u) => v(u)) && refused.every((u) => !v(u)) && v('https://vendor.test/a', { testHosts: ['vendor.test'] }) && !v('https://box.local/a', { testHosts: ['box.local'] }), 'fetchVerdict: https + a public NAME only — every IP spelling, loopback / mDNS / private suffixes, credentials refused; `.test` only through a suite\'s seam (a real name never)', refused.filter((u) => v(u)));
+  const pub = ['8.8.8.8', '1.1.1.1', '2606:4700:4700::1111', '2a00:1450::1'], priv = ['0.0.0.0', '10.9.8.7', '100.64.1.1', '127.0.0.53', '169.254.169.254', '172.31.0.1', '192.168.1.1', '198.18.0.1', '224.0.0.1', '255.255.255.255', '::', '::1', 'fd00::1', 'fe80::1%eth0', 'ff02::1', '::ffff:127.0.0.1', '::ffff:7f00:1', '64:ff9b::a9fe:a9fe', '2001:db8::1', 'not-an-ip'];
+  ok(pub.every((a) => A.addressVerdict(a) === null) && priv.every((a) => typeof A.addressVerdict(a) === 'string'), 'addressVerdict: every private / loopback / link-local (the metadata 169.254.169.254) / CGNAT / multicast range, IPv4-mapped and NAT64 judged as their IPv4', priv.filter((a) => A.addressVerdict(a) === null));
+  const elf = (t) => { const h = Buffer.alloc(64); h.set([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1], 0); if (t) h.set([0x41, 0x49, t], 8); h.writeBigUInt64LE(1000n, 0x28); h.writeUInt16LE(64, 0x3a); h.writeUInt16LE(3, 0x3c); return h; };
+  const sn = (b) => A.sniffInstaller(b);
+  ok(sn(Buffer.from('!<arch>\ndebian-binary   1342177 ')).kind === 'deb' && sn(elf(2)).kind === 'appimage' && sn(elf(1)).kind === null && /type 1/.test(sn(elf(1)).why) && /program/.test(sn(elf(0)).why) && /web page/.test(sn(Buffer.from('\n  <!DOCTYPE html><html>')).why) && sn(Buffer.from('!<arch>\nother.o')).kind === null && sn(Buffer.from('PK\x03\x04zip')).kind === null && A.appImageOffset(elf(2)) === 1000 + 192, 'sniffInstaller: the KIND by the bytes — a Debian ar archive, a type-2 AppImage (ELF + AI\\x02); a type-1 AppImage, a program, a web page, a zip named .deb are not installers; the image starts where the ELF ends');
+  const names = A.desktopNames({ zh_TW: '繁', zh_CN: '简', ja_JP: 'J', zh: 'zz' });
+  const r1 = A.parseDesktopFile('[Desktop Entry]\nType=Application\nName=WeChat\nName[zh_TW]=微信TW\nName[zh]=微信\nName[ja]=ウィーチャット\nExec=wechat %U\n', { entry: 'wechat' });
+  const r2 = A.parseDesktopFile('[Desktop Entry]\nType=Application\nName=Tool\nName[zh_TW]=工具\nExec=tool\n', { entry: 'tool' });
+  ok(names.zh === '简' && names.ja === 'J' && r1.row.label === 'WeChat' && r1.row.labels.zh === '微信' && r1.row.labels.ja === 'ウィーチャット' && !r2.row.labels && A.validateManifest({ v: 1, entries: [{ id: 'wechat', kind: 'apt', packages: ['wechat'], by: { kind: 'user' }, rows: [{ ...r1.row, labels: { zh: '微信\nX', ja: 'J', fr: 'no' } }] }] }).manifest.entries[0].rows[0].labels.zh === '微信 X', 'localized names: zh from Name[zh_CN] › Name[zh] (never zh_TW alone), ja from Name[ja] › Name[ja_JP]; the row keeps `label` + `labels` (bounded, one line, zh/ja only)');
+  const ls = ['-rw-r--r-- root/root 4113 2025-01-01 00:00 ./usr/share/applications/wechat.desktop', 'lrwxrwxrwx root/root 0 2025-01-01 00:00 ./usr/share/applications/aaa.desktop -> /etc/shadow', '-rw-r--r-- root/root 999999999 2025-01-01 00:00 ./usr/share/applications/big.desktop', '-rw-r--r-- root/root 10 2025-01-01 00:00 ./usr/share/applications/../../../etc/x.desktop', '-rw-r--r-- root/root 10 2025-01-01 00:00 ./opt/wechat/wechat.desktop', '-rw-r--r-- root/root 1000 2025-01-01 00:00 ./usr/share/icons/hicolor/48x48/apps/wechat.png', '-rw-r--r-- root/root 1000 2025-01-01 00:00 ./usr/share/icons/hicolor/256x256/apps/wechat.png', '-rw-r--r-- root/root 1000 2025-01-01 00:00 ./opt/wechat/icons/wechat.png', 'drwxr-xr-x root/root 0 2025-01-01 00:00 ./usr/'].join('\n');
+  const mem = A.debMembers(ls);
+  ok(JSON.stringify(A.debDesktopOf(mem, { pkg: 'wechat' })) === '["/usr/share/applications/wechat.desktop"]' && A.debIconOf(mem, 'wechat') === '/usr/share/icons/hicolor/256x256/apps/wechat.png' && A.debIconOf(mem, '/opt/wechat/icons/wechat.png') === '/opt/wechat/icons/wechat.png' && A.debIconOf(mem, '/etc/passwd') === null && mem.find((m) => m.type === 'symlink').link === '/etc/shadow', 'a .deb\'s own desktop file: a regular file where a launcher looks — a symlink, a `..` path, a 1 GB "desktop file" are never read; its icon the largest hicolor PNG (or the absolute path it names, if the archive holds it)');
+  const rp = (e) => A.removePlanFor(e);
+  const ai = rp({ id: 'capp', kind: 'appimage', label: 'Capp' }), uv = rp({ id: 'ruff', kind: 'uv-tool', label: 'ruff' }), np = rp({ id: 'x', kind: 'npm', label: '@scope/pkg' });
+  ok(ai.ok && ai.mode === 'home-remove' && /appimage\/capp$/.test(ai.dir) && !ai.argv && !ai.homeArgv && JSON.stringify(uv.homeArgv) === '["uv","tool","uninstall","ruff"]' && JSON.stringify(np.homeArgv) === '["npm","uninstall","-g","--prefix","~/.local","@scope/pkg"]' && !uv.argv && !rp({ id: 'gimp', kind: 'apt', packages: ['gimp'] }).ok && !rp({ id: 'y', kind: 'npm', label: '$(rm -rf ~)' }).ok, 'removePlanFor by kind: an AppImage = its own directory; uv / npm = their own uninstaller as the user (`homeArgv` — the root slot\'s `argv` never set); apt / .deb stay root\'s; a name that is no tool name is refused');
+  ok(RC.RECIPES.length <= 12 && RC.searchRecipes('微信')[0].id === 'wechat' && RC.searchRecipes('装微信')[0].id === 'wechat' && RC.searchRecipes('WeChat')[0].id === 'wechat' && RC.searchRecipes('vs code')[0].id === 'vscode' && !RC.searchRecipes('knowledge').length && !RC.searchRecipes('barcode').length && RC.recipeFor(['update.code.visualstudio.com', 'vscode.download.prss.microsoft.com']).id === 'vscode' && RC.recipeFor(['dldir1v6.qq.com', 'evil.example.com']) === null && RC.recipeFor([]) === null && RC.RECIPES.every((r) => A.fetchVerdict(r.url).ok && r.hosts.includes(A.fetchVerdict(r.url).host)), 'recipes: ≤ 12 rows; "微信" / "装微信" / "WeChat" find WeChat, "knowledge" never finds Edge; a row vouches only when EVERY hop stayed on its hosts; every row\'s address passes the verdict and starts on its own host');
+  const FXI = path.join(repo, 'scripts/fixtures/apps-installers');
+  const open = async (f) => { const b = fs.readFileSync(path.join(FXI, f)); return SQ.open(path.join(FXI, f), A.appImageOffset(b.subarray(0, 64))); };
+  for (const f of ['capp-chat.AppImage', 'capp-chat-zstd.AppImage']) {
+    const img = await open(f);
+    const top = await img.root();
+    const desk = await img.readFile(top.find((e) => e.name === 'capp-chat.desktop'));
+    const icon = await img.readFile(top.find((e) => e.name === '.DirIcon'));
+    const dest = path.join(myDir(`apps-sq-${f.length}`), 'x');
+    const cwd0 = process.cwd(); process.chdir(path.dirname(dest)); fs.mkdirSync('elsewhere'); process.chdir('elsewhere');
+    const w = await img.extract(dest); process.chdir(cwd0);
+    ok(/Name\[zh_CN\]=卡普聊天/.test(desk.toString()) && icon.subarray(1, 4).toString() === 'PNG' && w.count === 7 && fs.readFileSync(path.join(dest, 'usr/bin/capp-chat'), 'utf8') === 'payload\n' && (fs.statSync(path.join(dest, 'AppRun')).mode & 0o777) === 0o755 && fs.readlinkSync(path.join(dest, '.DirIcon')) === 'capp-chat.png' && fs.readdirSync(path.join(path.dirname(dest), 'elsewhere')).length === 0, `the SquashFS reader (${f.includes('zstd') ? 'zstd' : 'gzip'}): the root .desktop + the icon (.DirIcon followed once, by name) read WITHOUT running the AppImage; unpacked whole under its directory (modes, links kept), the cwd elsewhere untouched`, w);
+    await img.close();
+  }
+  const xz = await open('capp-chat-xz.AppImage').then(() => null, (e) => e);
+  const hz = await open('hostile.AppImage');
+  const hRoot = await hz.root();
+  const viaLink = await hz.readFile(hRoot.find((e) => e.name === 'zz.desktop'));
+  const hd = path.join(myDir('apps-sqh'), 'x');
+  const hw = await hz.extract(hd).then(() => null, (e) => e);
+  await hz.close();
+  ok(xz && xz.code === 'unsupported' && /xz/.test(xz.message) && viaLink === null && hw && hw.code === 'hostile' && /`\.\.`/.test(hw.message) && !fs.existsSync(path.join(path.dirname(hd), 'f')), 'refused BY NAME: an xz-packed AppImage (`unsupported`); a desktop file that is a symlink to /etc/passwd is never read; a tree holding a `..` name is refused before anything lands outside');
+}
 for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 8 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}) in ${Date.now() - T0} ms`);
 process.exit(fail ? 1 : 0);

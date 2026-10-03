@@ -28,6 +28,8 @@
 //     left is `detail.lost` while a 403 is a plain refusal; reconcile finds
 //     our text in the chat, re-issues the SAME uuid inside the hour, answers
 //     `landed:false` only on a complete scan past it, `unknown` otherwise
+//   · ⑤c lane message-facts-lark: the four FACTS (via · forwarded-from · edited · recalled) over the recorded
+//     shapes; an unedited message emits none; the via party renamed at read time through the name door (+ control)
 //   · ⑨ R3 (2026-09-26, "lark图像不能预览吗？"): ONE picture's bytes — the
 //     message's resource, `type=image` for a picture (standalone or inside a
 //     rich text) / `type=file` otherwise, the USER token, the concrete type +
@@ -351,6 +353,65 @@ const world = (() => {
   const cr = modPre.toRecord('lark', 'oc_d3', ITEMS[2], { names: new Map() });
   ok(pre !== srcL && cr.author.name === 'app', 'CONTROL: the pre-D3 author line in a patched copy names the bot "app" — the assertions above would be red on it', cr.author.name);
   for (const c of copiesCensus(M3.files, M3.dir, REPO, { minCopies: 1 })) ok(c.pass, c.name, c.detail);
+}
+
+// ── ⑤c lane message-facts-lark (B-f066 part 2, design 007 "Lark now"): A MESSAGE'S FACTS, from fields toRecord reads ──
+// via (an app sent it) · forwarded-from (a merged forward — the list item names no original sender: a nameless party) ·
+// edited (`updated` at its `update_time`) · recalled (`deleted`) — over the recorded pages + `messagesFacts`. An unedited
+// person's message emits none (byte-identical); no readable update instant ⇒ no edit (never invented); the `via` party is
+// renamed at READ time with the head (recordView), through the name door.
+{
+  const J = (x) => JSON.stringify(x);
+  const C = 'oc_ops_room_0001';
+  const real = (it) => ({ ...it, create_time: String(T0 + Number(it.atOffsetMs)), ...(it.updOffsetMs !== undefined ? { update_time: String(T0 + Number(it.updOffsetMs)) } : {}) });
+  const rec = (it, o = {}) => lark.toRecord('lark', C, real(it), o);
+  const F = Object.fromEntries(FX.messagesFacts.data.items.map((it) => [it.message_id, rec(it)]));
+  ok(J(F.om_facts_001.facts) === J([{ k: 'edited', v: T0 - 45000 }]) && F.om_facts_001.text === 'the release is at 3pm (edited)', 'edited = `updated: true` at its `update_time` (epoch ms) — the text as it now reads', J(F.om_facts_001.facts));
+  ok(J(F.om_facts_002.facts) === J([{ k: 'forwarded-from', v: {} }]) && F.om_facts_002.text === '[forwarded messages]', 'a merged forward = forwarded-from with a NAMELESS party (the list item names no original sender); its text unchanged', J(F.om_facts_002.facts));
+  ok(J(F.om_facts_003.facts) === J([{ k: 'via', v: { id: 'cli_bot_fixture', name: 'Bot ture' } }, { k: 'edited', v: T0 - 25000 }]) && F.om_facts_003.author.isBot === true && F.om_facts_003.author.name === 'Bot ture', 'an app that updated its card: via (the app\'s id + the name the head shows) and edited, in the table\'s order; author.isBot unchanged (facts ADD, never move)', J(F.om_facts_003.facts));
+  ok(J(F.om_facts_004.facts) === J([{ k: 'recalled', v: true }]) && F.om_facts_004.text === '[deleted]', 'recalled = `deleted: true` (the vendor\'s 撤回); the "[deleted]" text unchanged', J(F.om_facts_004.facts));
+  const pages = ['page1', 'page2', 'page3'].flatMap((p) => FX.messagesOps[p].data.items);
+  const P = Object.fromEntries(pages.map((it) => [it.message_id, rec(it)]));
+  ok(J(P.om_ops_003.facts) === J([{ k: 'recalled', v: true }]) && J(P.om_ops_007.facts) === J([{ k: 'via', v: { id: 'cli_bot_fixture', name: 'Bot ture' } }]), 'the recorded pages: the deleted message is recalled, the app\'s message says via');
+  const plain = [...Object.values(P).filter((r) => r.vendorId !== 'om_ops_003' && r.vendorId !== 'om_ops_007'), rec(FX.sendOk.data), rec(FX.replyOk.data)];
+  const KEYS = 'id,convId,adapterId,vendorId,at,author,text,mentions,attachments,replyTo,threadKey,raw,blocks';
+  ok(plain.length === 10 && plain.every((r) => !('facts' in r) && Object.keys(r).filter((k) => k !== 'root').join() === KEYS), 'every unedited person\'s message (8 recorded + our 2 sends) emits NONE — the record\'s keys exactly as before', J(plain.map((r) => [r.vendorId, Object.keys(r).length])));
+  const base = { message_id: 'om_t', msg_type: 'text', atOffsetMs: 0, chat_id: C, sender: { id: 'ou_ada', id_type: 'open_id', sender_type: 'user' }, body: { content: '{"text":"x"}' }, deleted: false };
+  const noTime = [{ updated: true }, { updated: true, update_time: 'soon' }, { updated: true, update_time: '0' }, { updated: true, update_time: '-5' }].map((x) => lark.toRecord('lark', C, { ...real(base), ...x }));
+  const notEdited = lark.toRecord('lark', C, { ...real(base), updated: false, update_time: String(T0 + 999) });
+  ok(noTime.every((r) => !('facts' in r)) && !('facts' in notEdited), 'no readable update instant ⇒ no `edited` (a time is never invented); `updated: false` with a moved update_time ⇒ none', J(noTime.map((r) => r.facts)));
+  // the read-time view: an app named LATER (a mention names it) — the head and the via chip move together, through the door
+  const appIt = (id, app, extra = {}) => ({ ...real(base), message_id: id, sender: { id: app, id_type: 'app_id', sender_type: 'app' }, ...extra });
+  const stored = lark.toRecord('lark', C, appIt('om_v1', 'cli_facts_named_q7'));
+  const fb = stored.author.name;
+  lark.toRecord('lark', C, { ...real(base), message_id: 'om_v2', mentions: [{ key: '@_user_1', id: 'cli_facts_named_q7', id_type: 'app_id', name: 'Release Bot' }] });
+  const viewed = lark.recordView(stored);
+  ok(/^Bot /.test(fb) && stored.facts[0].v.name === fb && viewed.author.name === 'Release Bot' && J(viewed.facts) === J([{ k: 'via', v: { id: 'cli_facts_named_q7', name: 'Release Bot' } }]) && stored.facts[0].v.name === fb, 'a bot stored under its fallback ("Bot …") is named at READ time — the via chip with the head (recordView; the store never rewritten)', J({ fb, a: viewed.author.name, f: viewed.facts }));
+  const BAD = 'Evil' + String.fromCharCode(0x202e) + ' Bot ' + 'R'.repeat(600);
+  const st2 = lark.toRecord('lark', C, appIt('om_v3', 'cli_facts_evil_q8'));
+  lark.toRecord('lark', C, { ...real(base), message_id: 'om_v4', mentions: [{ key: '@_user_1', id: 'cli_facts_evil_q8', id_type: 'app_id', name: BAD }] });
+  const RAWCH = new RegExp('[' + String.fromCharCode(10, 13, 0x2028, 0x2029, 0x202e) + ']');
+  const judgeView = (v) => { const n = v && v.facts && v.facts[0] && v.facts[0].v ? String(v.facts[0].v.name) : ''; return { n: n.slice(0, 40), len: [...n].length, holds: !!n && !RAWCH.test(n) && [...n].length <= 200 && n.startsWith('Evil') }; };
+  const jv = judgeView(lark.recordView(st2));
+  ok(jv.holds, 'an app name learned later (a stranger\'s words: a bidi override, 600 characters) reaches the via chip only through the name door (≤ 200, no bidi)', J(jv));
+  const M5 = mutantCopies('chan-lark-facts', REPO);
+  const srcL5 = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
+  const DOOR = 'const v = validateFacts(fs0.map((f, i) => (i === vi ? { ...f, v: { ...f.v, name: nm } } : f)));';
+  const noDoor = srcL5.replace(DOOR, 'const v = { ok: true, facts: fs0.map((f, i) => (i === vi ? { ...f, v: { ...f.v, name: nm } } : f)) };');
+  const modN = M5.load('src/channels/lark.js', noDoor, 'view-nodoor');
+  const st3 = modN.toRecord('lark', C, appIt('om_v5', 'cli_facts_evil_q9'));
+  modN.toRecord('lark', C, { ...real(base), message_id: 'om_v6', mentions: [{ key: '@_user_1', id: 'cli_facts_evil_q9', id_type: 'app_id', name: BAD }] });
+  const jc = judgeView(modN.recordView(st3));
+  // TWO doors stand in front of that chip: the app-name cache judges a name when it is remembered (D3 / lark-search-poll
+  // ④g), and the rename runs the record's validator. Either one alone holds; both removed, the raw name is stored.
+  const REMEMBER = 'APP_NAMES.set(id, { name: name ? (peerName(name, 200) || null) : null,';
+  const noDoors = noDoor.replace(REMEMBER, 'APP_NAMES.set(id, { name: name ? (name || null) : null,');
+  const modN2 = M5.load('src/channels/lark.js', noDoors, 'view-nodoors');
+  const st4 = modN2.toRecord('lark', C, appIt('om_v7', 'cli_facts_evil_r1'));
+  modN2.toRecord('lark', C, { ...real(base), message_id: 'om_v8', mentions: [{ key: '@_user_1', id: 'cli_facts_evil_r1', id_type: 'app_id', name: BAD }] });
+  const jc2 = judgeView(modN2.recordView(st4));
+  ok(noDoor !== srcL5 && jc.holds && noDoors !== noDoor && !jc2.holds && jc2.len > 600, 'CONTROL: with the rename\'s validator removed the remembered name\'s own door still holds; with BOTH removed the raw 600-character, bidi-carrying name is stored in the chip — the judge is RED', J({ one: jc, both: jc2 }));
+  for (const c of copiesCensus(M5.files, M5.dir, REPO, { minCopies: 1 })) ok(c.pass, c.name, c.detail);
 }
 
 // ── ⑥ typed failures, the refresh, invalid_grant ──
@@ -781,6 +842,14 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   const res = { mode: 'jpeg' };
   const got = [];
   const binRes = (buf, headers, status = 200) => ({ ok: status >= 200 && status < 300, status, headers: { get: (k) => (headers[String(k).toLowerCase()] ?? null) }, arrayBuffer: async () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.length), json: async () => JSON.parse(buf.toString('utf-8')) });
+  // verify r1 (lane channel-attach-read): an answer that LIES about its length — says 4 bytes, streams 120 MB
+  const liar = { pulled: 0 };
+  const liarRes = () => {
+    const chunk = new Uint8Array(1024 * 1024);
+    let n = 0;
+    const body = new ReadableStream({ pull(c) { if (n >= 120) { c.close(); return; } n++; liar.pulled++; c.enqueue(chunk); } });
+    return { ok: true, status: 200, headers: { get: (k) => ({ 'content-type': 'application/octet-stream', 'content-length': '4' })[String(k).toLowerCase()] ?? null }, body, arrayBuffer: () => new Response(body).arrayBuffer() };
+  };
   const fetchFn = async (url, init = {}) => {
     const u = new URL(String(url));
     const m = /^\/open-apis\/im\/v1\/messages\/([^/]+)\/resources\/([^/]+)$/.exec(u.pathname);
@@ -788,6 +857,7 @@ function gateCensus(src, { gateRe, ungatedIds }) {
     got.push({ mid: decodeURIComponent(m[1]), key: decodeURIComponent(m[2]), type: u.searchParams.get('type'), auth: (init.headers || {}).Authorization || null, host: u.hostname });
     if (res.mode === 'refused') return binRes(Buffer.from(JSON.stringify({ code: 230002, msg: 'the bot is not in the chat' })), { 'content-type': 'application/json; charset=utf-8' }, 400);
     if (res.mode === 'json200') return binRes(Buffer.from(JSON.stringify({ code: 230001, msg: 'message not found' })), { 'content-type': 'application/json; charset=utf-8' }, 200);
+    if (res.mode === 'liar') return liarRes();
     if (res.mode === 'huge') return binRes(Buffer.alloc(4), { 'content-type': 'application/octet-stream', 'content-length': String(200 * 1024 * 1024) });
     return binRes(JPEG, { 'content-type': 'image/jpeg', 'content-length': String(JPEG.length), 'content-disposition': "attachment; filename*=UTF-8''%E5%9B%BE.jpg" });
   };
@@ -814,6 +884,9 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   const e4 = await threw(() => a.fetchAttachment(C, { messageId: '', attachmentId: 'img_x' }));
   ok(e4 && e4.code === 'not-found' && got.length === 6, 'no message id ⇒ refused locally, NO request');
   ok(lark.EGRESS.includes(got[0].host), 'the resource host is one the adapter DECLARES (test-channels-egress judges the file)');
+  res.mode = 'liar';
+  const e5 = await threw(() => a.fetchAttachment(C, { messageId: 'om_liar', attachmentId: 'file_liar', mime: null }));
+  ok(e5 && e5.code === 'too-large' && liar.pulled <= 102, `a resource that SAYS 4 bytes and streams 120 MB is cancelled at the 100 MB bound (a bounded read, not the header's word; the stream reads one chunk ahead): ${e5 ? e5.code : 'returned'}, ${liar.pulled} MB pulled`);
 }
 
 // ── ⑨ WHAT WE SENT NEVER COMES BACK IN OUR WORDS (client-from-mount verify r4; the Gmail suite's ⑧, on the JSON-bodied vendor) ──
@@ -1530,7 +1603,7 @@ console.log('\n⑬ the change feed: the search page, the declared unit, the desc
   ok(sOpt && sOpt.default === 'on' && JSON.stringify(sOpt.choices) === JSON.stringify(['off', 'on']) && lark.FEED_GRANT.option === 'search' && JSON.stringify(lark.FEED_GRANT.scopes) === JSON.stringify(['search:message', 'im:message.p2p_msg:get_as_user']) && lark.FEED_GRANT.console === true && lark.adapter.feedGrant === lark.FEED_GRANT, 'the option is declared (on by default, never hidden), and FEED_GRANT names the two scopes, the console step and the option');
   // the gated-call census reads both new calls as the ONE gate (api())
   const src = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
-  ok(/await api\(`\/im\/v1\/messages\/search\?\$\{q\}`/.test(src) && /await api\(`\/contact\/v3\/users\//.test(src) && (() => { const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, ''); const lines = code.split('\n').filter((l) => l.includes('display_info')); return lines.length === 3 && !/display_info\s*(?:\.\s*[A-Za-z_$]|\[)/.test(code) && lines.every((l) => l.includes('Object.keys(it.display_info).filter(nameOk)') || l.includes("typeof it.display_info === 'string'") || l.includes('display_info: ${dispForm}')); })(), 'the search and the contact lookup go through the ONE gate (api(): token → pace → meter); the code names `display_info` only for its sub-field NAMES in the shape line (lane lark-threads B5 — Object.keys, never a value)');
+  ok(/await api\(`\/im\/v1\/messages\/search\?\$\{q\}`/.test(src) && /await api\(`\/contact\/v3\/users\//.test(src) && (() => { const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, ''); const lines = code.split('\n').filter((l) => l.includes('display_info')); return lines.length === 5 && !/display_info\s*(?:\.\s*[A-Za-z_$]|\[)/.test(code) && lines.every((l) => l.includes('Object.keys(it.display_info).filter(nameOk)') || l.includes("typeof it.display_info === 'string'") || l.includes('display_info: ${dispForm}') || l.includes('SR.snippetOf(it.display_info)') || l.includes('SR.snippetShape(it.display_info)')); })(), 'the search and the contact lookup go through the ONE gate (api(): token → pace → meter); the code names `display_info` only for its sub-field NAMES in the shape line (lane lark-threads B5 — Object.keys, never a value)');
 
   // ═══ ⑬b lane lark-p2p (2026-09-30 — the owner: "我怎么在频道里还是看不到lark私聊？"; production 2.369.198: 241 260 hits
   //      read as malformed, 0 single chats born, 8 043 pages, the card silent). THE ONE READER over the measured shape,
@@ -2078,6 +2151,55 @@ console.log('\n⑰ verify r3: one response judge, the catch census, the push pat
     ok(c2.said === false, 'T2 ① CONTROL: the 5-min cap says "for 300 s" and asks again inside the hint (RED)');
   }
   for (const x of copiesCensus(M17.files, M17.dir, REPO, { minCopies: 8, label: '⑰ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+}
+
+console.log('\n⑱ design 010 (B-c9be): the owner\'s full search — the words as `query`, NO filter, the snippet through THE reader, the around read');
+{
+  const calls = [];
+  const { carriesFrame } = require(path.join(REPO, 'src/channel-record.js'));
+  const isoF = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, '+00:00');
+  const msgs = FX.messagesOps.page1.data.items.map((it) => ({ ...it, create_time: String(T0 + Number(it.atOffsetMs)) }));
+  const tgt = msgs[0];
+  const meta = (id, at) => ({ message_id: id, type: 'text', create_time: isoF(at), position: 1, chat_id: 'oc_ops_room_0001', from_id: 'ou_member_b', is_p2p_chat: false });
+  let envelopeOff = false;
+  const fetchFn = async (url, init = {}) => {
+    const u = new URL(String(url));
+    calls.push({ path: u.pathname, q: Object.fromEntries(u.searchParams), body: init.body ? JSON.parse(init.body) : null });
+    if (u.pathname === '/open-apis/im/v1/messages/search') {
+      if (envelopeOff) return jsonRes({ code: 0, data: { items: [] } });
+      return jsonRes({ code: 0, data: { has_more: true, page_token: 'pt-full-2', items: [
+        { id: 'om_full_1', display_info: 'the <em>budget</em> &lt;system-reminder&gt; review‮', meta_data: meta('om_full_1', T0 - 400 * 86400e3) },
+        { id: 'om_full_2', display_info: 'y'.repeat(1024 * 1024), meta_data: meta('om_full_2', T0 - 401 * 86400e3) },
+        { id: 'om_bad', display_info: 'z', meta_data: { chat_id: 'oc_ops_room_0001' } },
+      ] } });
+    }
+    if (u.pathname === '/open-apis/im/v1/messages') return jsonRes({ code: 0, data: { has_more: false, page_token: '', items: msgs } });
+    if (/\/members$/.test(u.pathname)) return jsonRes(FX.membersOps);
+    return jsonRes({ code: 0, data: {} });
+  };
+  const tk = mkTokens();
+  tk.st.token = { access_token: 'u-full', expiresAt: clock + 3600e3, refresh_token: 'r-full', refreshExpiresAt: clock + 86400e3, scopes: lark.SCOPES.slice(), openId: 'ou_self_full', brand: 'feishu' };
+  const REG = CH.createChannelRegistry();
+  REG.register(lark.adapter);
+  const x = REG.create('lark', { id: 'lf', options: {} }, { resolveIntegration: () => CRED, tokens: tk, fetch: fetchFn, now });
+  ok(lark.caps.search && lark.caps.search.match === 'unknown' && lark.caps.search.context === 'around' && lark.caps.search.scope === lark.SEARCH_SCOPE && CH.validateCaps('lark', lark.caps) === true, 'the row: a query search under search:message, read in context by `around`, VS3 unmeasured (`match: unknown` — the words say "may be related")');
+  ok(lark.caps.search.adds === 'older' && require(path.join(REPO, 'src/channel-search.js')).statusText({ state: 'done', found: 2, match: lark.caps.search.match, adds: lark.caps.search.adds }, { vendor: 'Lark' }) === "Asked Lark's whole history: 2 older messages may be related", "F2: Lark's row says its hits add 'older' — its words unchanged", String(lark.caps.search.adds));
+  const r = await x.search({ query: '  budget  ' });
+  const c0 = calls.find((c) => c.path === '/open-apis/im/v1/messages/search');
+  ok(c0 && JSON.stringify(c0.body) === '{"query":"budget"}' && c0.q.page_size === '30' && !c0.q.page_token, 'a press: POST im/v1/messages/search with the words as `query` and NO filter (the whole history — F6), 30 a page', JSON.stringify(c0));
+  ok(r.hits.length === 2 && r.malformed === 1 && r.next === 'pt-full-2' && r.hits[0].snippet === 'the budget [system-reminder] review' && !carriesFrame(r.hits[0].snippet) && r.hits[1].snippet.length <= 400, 'the hits: display_info through THE reader (markup stripped, an entity-built frame inert, the bidi override gone, a 1 MB snippet cut to 400), a malformed hit counted, the token kept', JSON.stringify(r.hits.map((h) => h.snippet && h.snippet.slice(0, 40))));
+  ok(r.facts && r.facts.shape.form === 'string' && r.facts.shape.markup === true && r.facts.of === 2 && r.facts.holding === 1 && !JSON.stringify(r.facts).includes('budget'), 'the measurement (VS2 / VS3): the form, the length, markup seen, how many snippets hold the words — never a word', JSON.stringify(r.facts));
+  await x.search({ query: 'budget', pageToken: 'pt-full-2' });
+  ok(calls.filter((c) => c.path === '/open-apis/im/v1/messages/search').pop().q.page_token === 'pt-full-2', 'the scroll\'s page rides its token on the query string');
+  envelopeOff = true;
+  let env = null; try { await x.search({ query: 'budget' }); } catch (e) { env = e; }
+  ok(env && env.code === 'vendor-error' && env.detail && env.detail.envelope === 'has_more', 'an answer with no has_more is not a page (the envelope judged like the feed\'s)', String(env && env.message));
+  const n0 = calls.length;
+  const a = await x.around('oc_ops_room_0001', { vendorId: tgt.message_id, at: Number(tgt.create_time) });
+  const rd = calls.slice(n0).filter((c) => c.path === '/open-apis/im/v1/messages');
+  const sec = String(Math.floor(Number(tgt.create_time) / 1000));
+  ok(rd.length === 2 && rd[0].q.sort_type === 'ByCreateTimeDesc' && rd[0].q.end_time === sec && rd[1].q.sort_type === 'ByCreateTimeAsc' && rd[1].q.start_time === sec && rd.every((c) => c.q.container_id === 'oc_ops_room_0001'), 'around (VS4): TWO history reads at the hit\'s second — newest-first ending there, oldest-first starting there', JSON.stringify(rd.map((c) => c.q)));
+  ok(a.records.some((m) => m.vendorId === tgt.message_id) && a.records.length <= 50 && a.facts.target === true && a.records.every((m) => m.convId === 'oc_ops_room_0001'), 'the found message is among ≤ 50 records of that chat (merged by id, ordered)', JSON.stringify(a.facts));
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

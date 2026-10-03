@@ -178,6 +178,13 @@ for (const id of Object.keys(ACP_COMMANDS)) {
 function harnessAvailability() {
   return listHarnesses().map((h) => {
     const row = { id: h.id, label: h.label, kind: h.kind, installed: h.acp ? !!ACP_COMMANDS[h.id] : true, ...(h.acp ? { caps: { fork: !!capsOf(h.id).fork } } : {}) };
+    // `cli` (B-df40 part 2): did this harness's CLI RESOLVE on this machine? `installed` keeps claude/codex/shell
+    // listed in the New Session picker whatever the PATH says; the Settings window hides a harness's section
+    // (`when: { harness }`) only on this fact. cliCmds holds the boot-resolved path (an absolute one) or, when
+    // nothing resolved, the bare name — and a later spawn that re-resolves it updates it. A harness with no
+    // registered command (shell) counts as present.
+    const cur = cliCmds.current(h.id);
+    row.cli = h.acp ? !!ACP_COMMANDS[h.id] : cur == null || String(cur).startsWith('/');
     // A harness whose STORE is BROKEN must say so where the user looks (the
     // 2.369.42 runaway burned for two hours in silence) — the ONE predicate,
     // shared with the live push below (see storeFailureReason).

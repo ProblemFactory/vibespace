@@ -133,7 +133,7 @@ class WindowManager {
     };
     controls.querySelector('.win-minimize').onclick = (e) => { e.stopPropagation(); this.witnessGeometry(winInfo.id); this.minimize(winInfo.id); }; // the user's act: witnessed (verify r4 ③)
     controls.querySelector('.win-maximize').onclick = (e) => { e.stopPropagation(); this.witnessGeometry(winInfo.id); this.toggleMaximize(winInfo.id); };
-    controls.querySelector('.win-close').onclick = (e) => { e.stopPropagation(); this.requestClose(winInfo.id); };
+    controls.querySelector('.win-close').onclick = (e) => { e.stopPropagation(); this.requestCloseGroup(winInfo.id); }; // the FRAME's ✕: a group's ends every tab, asked first (B-a67c, tab-group.js); a lone window = requestClose
     el.addEventListener('mousedown', (e) => this._focusFromPointer(winInfo, e));
     titleBar.addEventListener('dblclick', (e) => { if (!e.target.closest('.window-controls')) { this.witnessGeometry(winInfo.id); this.toggleMaximize(winInfo.id); } });
     // Right-click on title bar (2.212.0): full window menu — the old direct
@@ -143,7 +143,8 @@ class WindowManager {
     titleBar.addEventListener('contextmenu', (e) => {
       if (e.target.closest('.window-controls')) return;
       e.preventDefault();
-      if (this._app) showWindowContextMenu(this._app, winInfo.id, e.clientX, e.clientY, { switchSubmenu: true });
+      const grouped = !!(winInfo._tabChain && winInfo._tabChain.tabs.length >= 2); // the FRAME's menu (a tab's own menu is the tab's — tab-group.js): its Close ends the group (B-a67c)
+      if (this._app) showWindowContextMenu(this._app, winInfo.id, e.clientX, e.clientY, grouped ? { switchSubmenu: true, group: true, closeLabel: '\u2715 ' + t('Close group') } : { switchSubmenu: true });
       else this._showOverlapSwitcher(winInfo, e.clientX, e.clientY);
     });
     if (openSpec) winInfo._openSpec = openSpec;
@@ -1341,7 +1342,7 @@ class WindowManager {
   }
 
   // ── Layout Presets ──
-  focusWindow(id, { bounce = false, _stageBypass = false } = {}) {
+  focusWindow(id, { _stageBypass = false } = {}) {
     const win = this.windows.get(id); if (!win) return;
     // Dynamic desktop (Stage): while the stage view is active, focusing a
     // session window MATERIALIZES it into the slot instead (the one choke
@@ -1376,11 +1377,6 @@ class WindowManager {
     if (intensity === 'subtle') win.element.classList.add('highlight-subtle');
     else if (intensity === 'strong') win.element.classList.add('highlight-strong');
     this.activeWindowId = id; this.syncHiddenViews(); this._notify();
-    if (bounce && (this._settings?.get('window.enableBounceOnFocus') ?? false)) {
-      win.element.classList.remove('window-bounce');
-      requestAnimationFrame(() => win.element.classList.add('window-bounce'));
-      setTimeout(() => win.element.classList.remove('window-bounce'), 300);
-    }
   }
   /** TELL EVERY CHAT VIEW WHICH HIDERS HOLD ITS WINDOW OFF-SCREEN (inc-mu6bfv1t-4drq,
    *  owner: "每次手机上切对话都会滚到对话历史里"). The desktop model suspends a hidden
@@ -1652,7 +1648,8 @@ class WindowManager {
     return true;
   }
 
-  /** A USER'S close (the title-bar ✕, a tab ✕, the taskbar menu, Ctrl+\\ x, the phone nav ✕): the window may answer
+  /** A USER'S close of ONE window (a lone window's ✕, a tab ✕, the window menu, Ctrl+\\ x, the phone nav ✕; a WHOLE group's
+   *  doors go through tab-group.js requestCloseGroup, which asks, then closes each member here — B-a67c): the window may answer
    *  first — `winInfo.onCloseRequest()` returning false keeps it (round 3 A2: a desktop-app window asks its APP to
    *  close, docs/design-desktop-apps-seamless §3.2). Programmatic closes (layout sync, a window closing itself) call
    *  closeWindow directly and are never vetoed. Returns true when the window closed. */

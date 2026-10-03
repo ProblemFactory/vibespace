@@ -36,6 +36,11 @@ const p = arg ? JSON.parse(arg) : {};
   try {
     if (cmd === 'status') { const s = await engine.status('local'); out({ ok: true, ms: Date.now() - t0, status: { entries: s.entries, rows: s.rows, manifest: s.manifest, replay: s.replay, drift: s.drift, updates: s.updates, refreshedAt: s.refreshedAt, facts: s.facts } }); return; }
     if (cmd === 'run') { const log = []; const r = await engine.run({ host: 'local', request: p.request, onData: (d) => log.push(String(d)) }); out({ ok: true, ms: Date.now() - t0, result: r, log: log.join('').slice(-20000) }); return; }
+    // design 009: an agent's proposal of an installer by file, its click (the shown digest), a directory listing, a program run
+    if (cmd === 'propose') { const r = await engine.propose({ host: 'local', request: p.request, why: 'heavy gate', by: { kind: 'agent', conversation: 'conv-heavy', name: 'Heavy' } }); out({ ok: true, ms: Date.now() - t0, proposal: r }); return; }
+    if (cmd === 'runp') { const q = engine.proposalsOf('conv-heavy').filter((x) => x.state === 'proposed').pop(); const log = []; const r = await engine.run({ proposalId: q.id, expectDigest: q.digest, onData: (d) => log.push(String(d)) }); out({ ok: true, ms: Date.now() - t0, result: r, log: log.join('').slice(-6000), cwd: process.cwd() }); return; }
+    if (cmd === 'ls') { const o = {}; for (const d of p.dirs || []) { try { o[d] = fs.readdirSync(d); } catch { o[d] = null; } } out({ ok: true, ls: o }); return; }
+    if (cmd === 'exec') { let o = null; try { o = execFileSync(p.argv[0], p.argv.slice(1), { encoding: 'utf8', timeout: 20000 }); } catch (e) { o = `ERR ${e.message}`; } out({ ok: true, out: o }); return; }
     if (cmd === 'plan') { const r = await engine.plan('local', p.request); out({ ok: true, ms: Date.now() - t0, plan: r.plan, digest: r.digest }); return; }
     if (cmd === 'afterListen') { const r = await engine.afterListen(); out({ ok: true, ms: Date.now() - t0, result: r }); return; }
     if (cmd === 'steer') {
@@ -48,6 +53,20 @@ const p = arg ? JSON.parse(arg) : {};
       fs.writeFileSync(mf, JSON.stringify(m));
       try { const r = await engine.plan('local', { kind: 'apt', packages: p.packages }); out({ ok: true, ms: Date.now() - t0, entryId: r.plan.entryId, argvId: r.plan.argv ? r.plan.argv[r.plan.argv.indexOf('vs-app') + 3] : null, digest: r.digest }); }
       finally { fs.writeFileSync(mf, keep); }
+      return;
+    }
+    if (cmd === 'pin') {
+      // verify-r1 H1: an approved source's pin as apt reads it, root's copy, the PURE text for the expected allow-list,
+      // the index's record, the versions dpkg has, and apt's own policy (its `origin` line is what `Pin: origin` matches)
+      const rd = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
+      const uri = (/^URIs: (\S+)/m.exec(rd(path.join(STATE, 'apps', 'sys', 'sources', `${p.id}.sources`)) || '') || [])[1] || null;
+      const m = JSON.parse(rd(path.join(STATE, 'apps', 'manifest.json')) || '{}');
+      const src = (m.sources || []).find((s) => s.id === p.id) || null;
+      const versions = {};
+      for (const k of p.packages || []) { try { versions[k] = execFileSync('dpkg-query', ['-W', '-f=${Version}', k], { encoding: 'utf8' }); } catch { versions[k] = null; } }
+      let policy = '';
+      try { policy = execFileSync('apt-cache', ['policy', ...(p.packages || [])], { encoding: 'utf8' }); } catch (e) { policy = String(e.message); }
+      out({ ok: true, host: A.pinHost(uri), etc: rd(`/etc/apt/preferences.d/vibespace-${p.id}.pref`), sys: rd(path.join(STATE, 'apps', 'sys', 'sources', `${p.id}.pref`)), want: A.sourcePin({ host: A.pinHost(uri), packages: p.expect || [] }), pin: src ? src.pin || null : null, versions, policy: policy.slice(0, 3000) });
       return;
     }
     if (cmd === 'parity') {

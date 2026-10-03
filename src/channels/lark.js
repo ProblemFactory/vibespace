@@ -55,7 +55,7 @@
  * No `process.platform`, no `scanSources` — this is not a scan adapter.
  */
 const crypto = require('crypto');
-const { makeRecord, makeConversation, peerName } = require('../channel-record.js');   // peerName: THE name door (the .197 integration — the D3 app names pass it, lark-search-poll ④g)
+const { makeRecord, makeConversation, peerName, validateFacts } = require('../channel-record.js');   // peerName: THE name door (the .197 integration — the D3 app names pass it, lark-search-poll ④g)
 const { ChannelError, retryAfterSeconds, sentSecrets, withoutSent } = require('./index.js');
 const { namelessSentence } = require('../channel-identity.js');   // verify r6: a consent must name its account
 const { createLarkLive, NAMES_WAIT_MS } = require('./live/lark.js');
@@ -65,6 +65,8 @@ const { createLarkLive, NAMES_WAIT_MS } = require('./live/lark.js');
 const Blocks = require('../channel-blocks.js');
 // lane lark-search-poll (B-5aab): the change feed's PURE arithmetic — the hit shape, the declared unit, the ISO window
 const Feed = require('../channel-feed.js');
+const { CHANNEL_SETTINGS, budgetOf, paceOf } = require('../channel-settings.js');   // B-df40 part 3: the budget + pace rows are DECLARED there (the schema row, the engine bound and this caps all read it)
+const SR = require('../channel-search.js');   // design 010: THE snippet reader + the shape-only measurement (PURE)
 
 const KIND = 'lark';
 const LABEL = 'Lark / 飞书';
@@ -253,6 +255,11 @@ const caps = Object.freeze({
   historyBySource: null,
   listConversations: true,
   sendAs: ['user'],                // P4: as the USER (decision 2); convCaps narrows until the send scopes are held
+  // design 005 §2.B (B-fd1f): an agent's attachments are NOT offered here yet — Lark documents its picture and file
+  // uploads (im/v1/images, im/v1/files) for the app's tenant token only (LA1), and whether a message sent AS THE USER may
+  // carry a key the app uploaded (LA3) cannot be proven without a live call; the reason rides every refusal
+  sendAttachments: null,
+  sendAttachmentsWhy: "Lark documents its picture and file uploads for the app's own token only, and a message sent as you carrying them is not yet measured",
   identityMarking: 'unknown',      // UNVERIFIED until one real send's `sender.sender_type` is read (§21 item 3) — treated as `marked`
   identityMarkingWhere: null,
   identityMarkingText: null,
@@ -268,17 +275,18 @@ const caps = Object.freeze({
   // through `messages/:message_id/resources/:key`, history pages back with
   // `end_time`, and every request is metered against the account's budget —
   // 1000/min per API per app per TENANT is the vendor's pool (a cluster app
-  // shares it), so the default is 60 (6 %), the setting names it
+  // shares it), so the default is 60 (6 %) — the default and the setting come
+  // from the lark table of src/channel-settings.js BY IDENTITY (B-df40 part 3)
   attachments: 'fetch',
   olderHistory: 'page',
-  budget: { unit: 'request', default: 60, settingKey: 'channels.budgetLarkPerMin', metered: true },
+  budget: { unit: 'request', metered: true, ...budgetOf(CHANNEL_SETTINGS.lark) },
   // lane R5 (2026-09-26): PACED PER SECOND as well (drain rule 18). The
   // vendor's frequency tiers are per API, per app, per TENANT — the chat /
   // message / member / resource reads are tier 4, "1000/min, 50/s" — and a
   // cluster app shares that pool with every instance and user, so the
   // default is 5 requests/s (10 % of the per-second tier); the engine also
   // spreads the minute's budget (60 ⇒ about one a second).
-  pace: { unitsPerSec: 5, settingKey: 'channels.larkRequestsPerSec', cost: { fetch: 1, discover: 1, scanHost: 1, feed: 1 } },
+  pace: { ...paceOf(CHANNEL_SETTINGS.lark), cost: { fetch: 1, discover: 1, scanHost: 1, feed: 1 } },
   vendorName: i18nKey('Lark'),
   // lane channel-threads (2026-09-28; vendor facts L3, L6–L12): a VENDOR thread object (`omt_…`) whose replies are
   // NOT in the chat listing (`threadHistory` walks `container_id_type=thread`), a reply INTO it (`reply_in_thread`);
@@ -287,6 +295,10 @@ const caps = Object.freeze({
   // 2026-09-28 (reply PLACEMENTS): a plain message, a QUOTE (the reply endpoint — shown in the chat), a reply IN the
   // thread (`reply_in_thread`); no broadcast into the chat. The norm for a message outside a thread is a quote
   // (threads are opt-in on Lark); a message already in one is answered in it (PL3 — Lark files it there anyway, L6)
+  // lane message-facts-lark (B-f066 part 2, design 007 "Lark now"): the per-message FACTS `toRecord` emits from fields it
+  // already reads — the app a message came through (`sender_type: app`), a merged forward, an edit (`updated` + its
+  // `update_time`), a recall (`deleted`); the contract suite holds every emit to this list. No `factsOf`: nothing to backfill
+  facts: Object.freeze(['via', 'forwarded-from', 'edited', 'recalled']),
   threads: Object.freeze({ read: 'vendor', replyInto: true, listing: 'separate', placements: Object.freeze(['chat', 'quote', 'thread']), rootReply: 'quote' }),
   reactions: Object.freeze({ read: 'list', add: true, remove: 'own', vocabulary: 'names', custom: 'none', perMessageMax: null }),
   // lane lark-search-poll (B-5aab, design §1.3): THE CHANGE FEED — `im/v1/messages/search` with an EMPTY query and a
@@ -298,6 +310,13 @@ const caps = Object.freeze({
   // .197 declaration `ms` read every one of 241 260 hits malformed. `reader: 2` = the hit reader's revision (a feed row
   // the old reader wrote starts over — the engine's `feedReaderHeal`)
   changeFeed: Object.freeze({ via: 'search', scope: SEARCH_SCOPE, option: 'search', pageSize: 30, pagesPerPass: 5, perMin: 10, maxWindowSec: 3600, catchUp: Object.freeze({ chatType: 'p2p', pagesMax: 20 }), describes: true, timeUnit: 'iso', reader: 2 }),
+  // design 010 (B-c9be, lane channels-full-search): THE OWNER'S FULL SEARCH — the same endpoint with the owner's WORDS and
+  // no time filter (F6: no filter = the whole searchable history), on a person's press only. 3 pages a press, 12 pages a
+  // sliding minute beside the feed's 10 (22 of the vendor's 100/min tenant tier together); a hit read in context = the
+  // chat's history at its instant (`around`, two `im/v1/messages` pages). VS3 — how CJK words match — is MEASURED on the
+  // owner's first press (the engine's record `rec.feed.counters.fullSearch`): until it says substring, `match` stays
+  // 'unknown' and the words say "may be related" (可能相关). THE LINE THAT FLIPS THEM: `match: 'unknown'` → 'substring'.
+  search: Object.freeze({ via: 'query', scope: SEARCH_SCOPE, pageSize: 30, pagesPerPress: 3, perMin: 12, cost: 1, snippet: true, context: 'around', match: 'unknown', adds: 'older' }),
 });
 /**
  * THE REACTION VOCABULARY (lane channel-threads, 2026-09-28; vendor fact L9):
@@ -606,7 +625,14 @@ function recordView(record) {
   const a = r.author || {};
   if (a.isBot && (!a.name || a.name === 'app' || /^Bot( [A-Za-z0-9]{1,4})?$/.test(a.name))) {
     const nm = appNameOf(a.id);
-    if (nm !== a.name) out = { ...out, author: { ...a, name: nm } };
+    if (nm !== a.name) {
+      out = { ...out, author: { ...a, name: nm } };
+      // lane message-facts-lark: the `via` chip names the app as the head does — its party renamed the same way, through
+      // the record's validator (the name door), only when it still carries the old name
+      const fs0 = Array.isArray(r.facts) ? r.facts : null;
+      const vi = fs0 ? fs0.findIndex((f) => f && f.k === 'via' && f.v && String(f.v.id || '') === String(a.id || '') && String(f.v.name || '') === String(a.name || '')) : -1;
+      if (vi >= 0) { const v = validateFacts(fs0.map((f, i) => (i === vi ? { ...f, v: { ...f.v, name: nm } } : f))); if (v.ok) out.facts = v.facts; }
+    }
   }
   // lane lark-threads (B1/B5): a PERSON the profile cache knows — an unnamed author gets the profile's name, and every
   // author its alternatives (the nickname, the department…) for the view's head; the store is never rewritten
@@ -656,6 +682,25 @@ function readByIdAnswer(data, { messageId, convId } = {}) {
 }
 const BYID_KINDS = Object.freeze(['absent', 'foreign', 'deleted', 'reply', 'root', 'plain']);
 
+/**
+ * A MESSAGE'S FACTS from the vendor item (lane message-facts-lark, B-f066 part 2 — design 007 "Lark now"; PURE): `via` = the
+ * application a message came through (`sender_type: 'app'` — its id and the name the head shows), `forwarded-from` = a
+ * merged forward (`msg_type: 'merge_forward'`; the list item names no original sender, so the party is nameless `{}`),
+ * `edited` = `updated: true` at its `update_time` (epoch ms — no readable instant, no fact: a time is never invented),
+ * `recalled` = `deleted: true` (the vendor's 撤回). An unedited, unforwarded person's message emits none. The record's
+ * validator judges every string (the name door) and the contract suite holds the kinds to `caps.facts`.
+ */
+function factsOfItem(item, { appName = '' } = {}) {
+  const out = [];
+  const sender = (item && item.sender) || {};
+  if (sender.sender_type === 'app' && (sender.id || appName)) out.push({ k: 'via', v: { id: String(sender.id || ''), name: String(appName || '') } });
+  if (item && item.msg_type === 'merge_forward') out.push({ k: 'forwarded-from', v: {} });
+  const upd = Number(item && item.update_time);
+  if (item && item.updated === true && Number.isFinite(upd) && upd > 0) out.push({ k: 'edited', v: upd });
+  if (item && item.deleted === true) out.push({ k: 'recalled', v: true });
+  return out;
+}
+
 /** ONE vendor item → ONE ChannelRecord. `names` maps open_id → display name
  *  (chat members, cached) and app_id → application name (D3); `selfId` is
  *  the authorizing user's open_id. */
@@ -666,6 +711,7 @@ function toRecord(adapterId, convId, item, { names = new Map(), selfId = null, s
   const mentions = mentionsOf(item);
   seedAppNamesFrom(item);
   const isApp = sender.sender_type === 'app';
+  const facts = factsOfItem(item, { appName: isApp ? appNameOf(sid, names) : '' });   // lane message-facts-lark: the app named as the head names it
   return makeRecord({
     adapterId, convId,
     vendorId: String(item.message_id || ''),
@@ -689,6 +735,7 @@ function toRecord(adapterId, convId, item, { names = new Map(), selfId = null, s
     threadKey: item.thread_id ? String(item.thread_id) : (item.root_id ? String(item.root_id) : null),
     root: item.root_id ? String(item.root_id) : null,
     raw: { msg_type: item.msg_type || null, chat_id: item.chat_id || null, sender_type: sender.sender_type || null, updated: item.updated || null, ...(typeof sender.tenant_key === 'string' && sender.tenant_key.length <= 64 ? { tenant_key: sender.tenant_key } : {}) },
+    ...(facts.length ? { facts } : {}),   // a message with none stays byte-identical
   });
 }
 
@@ -1780,6 +1827,72 @@ function create(record = {}, deps = {}) {
     },
 
     /**
+     * THE OWNER'S FULL SEARCH, ONE PAGE (design 010): `POST /im/v1/messages/search` with the words as `query` and NO
+     * `filter` (the whole searchable history — F6), paging on the query string like the feed (≤ 30, `page_token`). The
+     * envelope is judged like the feed's (a page without `has_more`, or `has_more` with no token, is not a page); each
+     * item through THE ONE hit reader (`readSearchHit`); `display_info` — the snippet, a stranger's text — through THE
+     * ONE snippet reader (`SR.snippetOf`: cut to 4 000 characters before any regex, markup stripped, the name door, ≤ 400).
+     * `facts` = what VS2 / VS3 need, shape only: the snippet's form / key names / length / markup seen, and how many
+     * snippets hold the words as written (never a character of any of them).
+     */
+    async search({ query, pageToken = null } = {}) {
+      const q = String(query || '').trim().slice(0, SR.QUERY_MAX);
+      const size = caps.search.pageSize;
+      const p = new URLSearchParams({ user_id_type: 'open_id', page_size: String(size) });
+      if (pageToken) p.set('page_token', String(pageToken));
+      const d = await api(`/im/v1/messages/search?${p}`, { method: 'POST', what: 'lark message search', body: { query: q } });
+      const data = (d && d.data) || {};
+      const envelope = (field, why) => new ChannelError('vendor-error', `lark message search: ${why} — not a search page`, { retryable: true, detail: { envelope: field } });
+      if (!data || typeof data !== 'object' || Array.isArray(data)) throw envelope('data', 'the answer carries no data');
+      if (typeof data.has_more !== 'boolean') throw envelope('has_more', 'the answer carries no has_more (the page contract)');
+      const next = nextToken(data);
+      if (data.has_more === true && !next) throw envelope('page_token', 'has_more with no page_token');
+      if (data.items !== undefined && data.items !== null && !Array.isArray(data.items)) throw envelope('items', 'items is not a list');
+      const items = Array.isArray(data.items) ? data.items : [];
+      if (items.length > size) throw new ChannelError('vendor-error', `lark full search: ${items.length} items for a page of ${size} — page_size ignored`, { retryable: false, detail: { contract: 'page-size' } });
+      const t = now();
+      const hits = [];
+      let malformed = 0, holding = 0, withSnippet = 0, shape = null;
+      for (const it of items) {
+        const v = readSearchHit(it, { now: t, unit: caps.changeFeed.timeUnit });
+        if (!v.ok) { malformed++; continue; }
+        const snippet = SR.snippetOf(it.display_info);
+        if (!shape && it.display_info !== undefined) shape = SR.snippetShape(it.display_info);
+        if (snippet) { withSnippet++; if (SR.holdsQuery(snippet, q)) holding++; }
+        hits.push({ convId: v.hit.convId, vendorId: v.hit.vendorId, at: v.hit.at, fromId: v.hit.fromId || null, threadKey: v.hit.threadKey || null, snippet });
+      }
+      return { hits, next: data.has_more === true ? next : null, malformed, facts: { shape: shape || SR.snippetShape(undefined), holding, of: withSnippet } };
+    },
+
+    /**
+     * A HIT IN CONTEXT (design 010, VS4): the chat's history AT the hit's instant — two `im/v1/messages` pages, the
+     * newest-first page ending at its second (`end_time`, inclusive) and the oldest-first page starting there
+     * (`start_time`) — merged by message id, ordered by (at, id), ≤ SR.AROUND_MAX around the hit. Read-only: the
+     * caller shows them for the dialog's life and stores nothing (F8 — a log is contiguous from its oldest record).
+     */
+    async around(convId, { vendorId = null, at = null } = {}) {
+      const sec = Math.floor(Number(at) / 1000);
+      if (!(sec > 0)) throw new ChannelError('not-found', 'lark around: a hit needs its instant', { retryable: false });
+      const half = Math.floor(SR.AROUND_MAX / 2);
+      const pb = new URLSearchParams({ container_id_type: 'chat', container_id: convId, sort_type: 'ByCreateTimeDesc', page_size: String(half), end_time: String(sec) });
+      const pa = new URLSearchParams({ container_id_type: 'chat', container_id: convId, sort_type: 'ByCreateTimeAsc', page_size: String(half), start_time: String(sec) });
+      const before = await api(`/im/v1/messages?${pb}`, { what: 'lark messages around' });
+      const after = await api(`/im/v1/messages?${pa}`, { what: 'lark messages around' });
+      const seen = new Set();
+      const items = [];
+      for (const m of [...(((before.data && before.data.items) || [])), ...(((after.data && after.data.items) || []))]) {
+        if (!m || !m.message_id || seen.has(String(m.message_id))) continue;
+        seen.add(String(m.message_id));
+        items.push(m);
+      }
+      items.sort((x, y) => (Number(x.create_time) || 0) - (Number(y.create_time) || 0) || (String(x.message_id) < String(y.message_id) ? -1 : 1));
+      const names = items.length ? await allNamesFor(convId, items) : new Map();
+      const selfId = (readToken().token || {}).openId || null;
+      const records = items.slice(0, SR.AROUND_MAX).map((m) => toRecord(adapterId, convId, m, { names, selfId, selfTenant: selfTenant() }));
+      return { records, requests: 2, facts: { before: ((before.data && before.data.items) || []).length, after: ((after.data && after.data.items) || []).length, target: !!vendorId && seen.has(String(vendorId)) } };
+    },
+
+    /**
      * ONE ATTACHMENT's bytes (2026-09-26): `GET messages/:message_id/
      * resources/:key?type=image|file` with the user token — an image
      * (including one inside a rich text) is `type=image`, every file / audio
@@ -1804,7 +1917,21 @@ function create(record = {}, deps = {}) {
       }
       const len = Number((r.headers && r.headers.get && r.headers.get('content-length')) || 0);
       if (len > 100 * 1024 * 1024) throw new ChannelError('too-large', `lark resource: ${len} bytes is over the 100 MB bound`, { retryable: false });
-      const data = Buffer.from(await r.arrayBuffer());
+      // verify r1 (lane channel-attach-read): the declared length is the vendor's word — the READ is bounded too (a chunked
+      // answer says no length; a wrong one says less): past 100 MB the transfer is cancelled, nothing is kept
+      let data;
+      if (r.body && typeof r.body.getReader === 'function') {
+        const rd = r.body.getReader(), parts = [];
+        let n = 0;
+        for (;;) {
+          const { done, value } = await rd.read();
+          if (done) break;
+          n += value.length;
+          if (n > 100 * 1024 * 1024) { try { await rd.cancel(); } catch { } throw new ChannelError('too-large', 'lark resource: the answer ran past the 100 MB bound — cancelled, nothing kept', { retryable: false }); }
+          parts.push(Buffer.from(value));
+        }
+        data = Buffer.concat(parts);
+      } else data = Buffer.from(await r.arrayBuffer());
       const cd = String((r.headers && r.headers.get && r.headers.get('content-disposition')) || '');
       const nm = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd);
       return { data, mime: ct.split(';')[0].trim() || null, name: nm ? decodeURIComponent(nm[1]) : null };

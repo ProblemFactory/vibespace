@@ -16,7 +16,8 @@
  *     replyTo, threadKey,          // the record's PLACE: what it answers, which thread it is in
  *     raw:         { bounded, adapter-specific, NEVER rendered },
  *     blocks?:     [ the TYPED render tree — OPTIONAL, see below ],
- *     root?:       the thread's ROOT message id when the vendor names one (2026-09-28) }
+ *     root?:       the thread's ROOT message id when the vendor names one (2026-09-28),
+ *     facts?:      [{k, v, more?, cut?}] — the message's own per-message facts (B-f066, see below) }
  *
  * Reactions and a vendor's thread stats are NOT on this line: they are facts
  * about a message that change after it was written, so they live in the
@@ -37,6 +38,15 @@
  * http(s):/mailto: to plain text. An invalid tree is REFUSED BY NAME (a
  * `code`), and the record simply carries no `blocks` — `text` stays the
  * agent-facing string on every path; blocks are for the eye only.
+ *
+ * A MESSAGE'S FACTS (lane message-facts, B-f066 — design 007: "gmail thread 展示的时候缺乏细节（收件人，cc，reply-to）…
+ * 不同 provider 可能针对消息都有类似的独特机制，怎么制定统一方案处理"): `facts` is a CLOSED, typed list beside `blocks` —
+ * the envelope (To / Cc / Reply-To …) and each provider's own per-message facts, from ONE declared vocabulary. Its SCHEMA
+ * lives here: `FACT_TYPES` (seven value types — the only thing the renderer and the agent's printer know), `FACT_SCHEMA`
+ * (each kind's type and, for a `level`, its own closed words) and `validateFacts()` (the bounds, every string through the
+ * name door). The words, the fold and the summary are src/channel-facts.js. An invalid fact is dropped BY NAME and the
+ * record survives; a record without facts is byte-identical to one stored before them. A fact learned LATER is a side
+ * record (`fx`, below). Unlike `blocks`, facts reach the agent — through the engine's belt door `agentFacts`.
  *
  * THREE RULES THIS FILE EXISTS TO ENFORCE, each one somebody's incident:
  *
@@ -98,7 +108,7 @@ const RECORD_FIELDS = ['id', 'convId', 'adapterId', 'vendorId', 'at', 'author', 
  *  record's thread / reply chain when the vendor names one and it is not this
  *  record). A record stored before either field existed carries neither, and
  *  every reader treats absence as "not said". */
-const OPTIONAL_FIELDS = ['blocks', 'root'];
+const OPTIONAL_FIELDS = ['blocks', 'root', 'facts'];   // + `facts` (lane message-facts, B-f066)
 
 /** Bounds. A vendor body is peer-controlled and is synced to every client. */
 const MAX_TEXT = 64 * 1024;
@@ -116,7 +126,8 @@ const MAX_RAW_BYTES = 8 * 1024;
  * to stop a stranger from spelling one of these.
  */
 const FRAME_TAGS = ['system-reminder', 'persisted-output', 'task-notification',
-  'local-command-stdout', 'command-name', 'command-message', 'command-args'];
+  'local-command-stdout', 'command-name', 'command-message', 'command-args',
+  'cross-session-message' /* apps-joint r1 F7: the CLI's own peer-message envelope — a vendor's .desktop Name spelled it to an agent */];
 // LINEAR (verify round 3, 2026-09-27): the tail used to be `(\s[^<>]*)?\s*>` — `[^<>]*` and `\s*` both eat a
 // whitespace run, so `<system-reminder` + 64 KiB of spaces cost 1.7 s (quadratic: every split of the run tried
 // before the `>` failed) — at INGEST and again at every READ of the page that holds it (the judge runs per page,
@@ -300,6 +311,120 @@ function safeHref(href) {
   if (u.protocol === 'mailto:') return MAILTO_RE.test(s) ? s : null;
   if (!u.hostname || u.username || u.password) return null;
   return u.href;
+}
+
+// ── THE FACTS SCHEMA (lane message-facts, B-f066 — design 007 §2) ─────────
+/** The VALUE TYPES — CLOSED. `parties` [{id, name, self?}] (≤ FACT_LIMITS.parties kept, then `more: n`; `cut: true` =
+ *  the source was over its bound and nothing was parsed) · `party` {id, name, self?} · `time` (epoch ms) · `line` (one
+ *  peer line) · `level` (one word of the kind's own declared set) · `count` (an integer) · `flag` (true). A new kind is
+ *  a row of `FACT_SCHEMA` with one of these — never a new type, never renderer code. */
+const FACT_TYPES = Object.freeze(['parties', 'party', 'time', 'line', 'level', 'count', 'flag']);
+/** THE KINDS — CLOSED: each kind's value type (and a `level`'s words). Only kinds an adapter EMITS are declared (the
+ *  dead-row rule); src/channel-facts.js words each one (`FACT_KINDS`) and the suite holds the two tables equal. */
+const FACT_SCHEMA = Object.freeze({
+  to: Object.freeze({ type: 'parties' }),
+  cc: Object.freeze({ type: 'parties' }),
+  bcc: Object.freeze({ type: 'parties' }),
+  'reply-to': Object.freeze({ type: 'parties' }),
+  sender: Object.freeze({ type: 'party' }),
+  list: Object.freeze({ type: 'line' }),
+  'delivered-to': Object.freeze({ type: 'party' }),
+  subject: Object.freeze({ type: 'line' }),
+  importance: Object.freeze({ type: 'level', levels: Object.freeze(['low', 'high', 'urgent']) }),
+  automated: Object.freeze({ type: 'level', levels: Object.freeze(['auto-reply', 'bulk', 'notification']) }),
+  // lane message-facts-lark (B-f066 part 2): Lark's own — the app a message came through, a merged forward, an edit, a
+  // recall. `nameless: true` = the vendor may say THAT a party is there without naming it (Lark's merged forward names no
+  // original sender): `v: {}` is that fact; a named party is judged as any other
+  via: Object.freeze({ type: 'party' }),
+  'forwarded-from': Object.freeze({ type: 'party', nameless: true }),
+  edited: Object.freeze({ type: 'time' }),
+  recalled: Object.freeze({ type: 'flag' }),
+});
+const FACT_KIND_NAMES = Object.freeze(Object.keys(FACT_SCHEMA));
+/** The bounds: facts are peer-derived and sync to every client. `bytes` = a record's whole list after JSON.stringify —
+ *  past it the longest party list gives up its tail (`more` grows), never the record. */
+const FACT_LIMITS = Object.freeze({ facts: 32, parties: 50, idChars: 320, nameChars: 200, lineChars: 200, count: 1e9, bytes: 16 * 1024 });
+/** ONE party through the name door — its address (`id`) too: a stranger spells both (a bidi override, a split frame tag,
+ *  a line break that would start a second line of the agent's read are all judged here, at ingest). */
+function factParty(p) {
+  if (!p || typeof p !== 'object') return null;
+  const id = peerName(typeof p.id === 'string' ? p.id : '', FACT_LIMITS.idChars) || '';
+  const name = peerName(typeof p.name === 'string' ? p.name : '', FACT_LIMITS.nameChars) || '';
+  if (!id && !name) return null;
+  return { id, name, ...(p.self === true ? { self: true } : {}) };
+}
+/** The longest party list gives up its last party (`more` + 1) until the list fits `max` bytes; false when none can. */
+function fitFacts(facts, max) {
+  let json = JSON.stringify(facts);
+  while (json.length > max) {
+    let big = null;
+    for (const f of facts) if (Array.isArray(f.v) && f.v.length && (!big || f.v.length > big.v.length)) big = f;
+    if (!big) return false;
+    big.v.pop();
+    big.more = (Number(big.more) || 0) + 1;
+    json = JSON.stringify(facts);
+  }
+  return true;
+}
+/**
+ * VALIDATE (and clean) a fact list. Answers `{ok:true, facts, refused:[{index, k, code}]}` — a NEW list holding only the
+ * declared fields, in `FACT_KIND_NAMES` order, every string through the name door — or `{ok:false, code:'not-an-array'}`.
+ * A fact that breaks a rule is REFUSED BY NAME and left out (the rest survive): `unknown-kind`, `bad-value` (the value is
+ * not its kind's type, an empty party list that says neither `more` nor `cut`, a level outside the kind's words),
+ * `duplicate-kind` (the first one wins), `too-many` (past FACT_LIMITS.facts). Every bound is judged BEFORE a string is
+ * read (a 1 MB "name" is cut to its bound first).
+ */
+function validateFacts(list) {
+  if (!Array.isArray(list)) return { ok: false, code: 'not-an-array', error: 'facts must be an array', facts: [], refused: [] };
+  const byKind = new Map();
+  const refused = [];
+  for (let i = 0; i < list.length; i++) {
+    const f = list[i];
+    const k = f && typeof f === 'object' && typeof f.k === 'string' ? f.k : null;
+    const no = (code) => refused.push({ index: i, k: k && k.length <= 40 ? k : null, code });
+    if (i >= FACT_LIMITS.facts) { no('too-many'); continue; }
+    if (!k || !Object.prototype.hasOwnProperty.call(FACT_SCHEMA, k)) { no('unknown-kind'); continue; }
+    if (byKind.has(k)) { no('duplicate-kind'); continue; }
+    const sch = FACT_SCHEMA[k];
+    let out = null;
+    if (sch.type === 'parties') {
+      const raw = Array.isArray(f.v) ? f.v : null;
+      if (!raw) { no('bad-value'); continue; }
+      const v = raw.slice(0, FACT_LIMITS.parties).map(factParty).filter(Boolean);
+      const dropped = raw.length - Math.min(raw.length, FACT_LIMITS.parties);
+      const more = Math.min(FACT_LIMITS.count, (Number.isInteger(f.more) && f.more > 0 ? f.more : 0) + dropped);
+      const cut = f.cut === true;
+      if (!v.length && !more && !cut) { no('bad-value'); continue; }
+      out = { k, v };
+      if (more) out.more = more;
+      if (cut) out.cut = true;
+    } else if (sch.type === 'party') {
+      const v = factParty(f.v) || (sch.nameless === true && f.v && typeof f.v === 'object' && !Array.isArray(f.v) && !f.v.id && !f.v.name ? {} : null);   // lane message-facts-lark: a party the vendor does not name
+      if (!v) { no('bad-value'); continue; }
+      out = { k, v };
+    } else if (sch.type === 'time') {
+      const n = Number(f.v);
+      if (typeof f.v !== 'number' || !Number.isFinite(n) || n <= 0) { no('bad-value'); continue; }
+      out = { k, v: n };
+    } else if (sch.type === 'line') {
+      const v = typeof f.v === 'string' ? peerName(f.v, FACT_LIMITS.lineChars) : null;
+      if (!v) { no('bad-value'); continue; }
+      out = { k, v };
+    } else if (sch.type === 'level') {
+      if (typeof f.v !== 'string' || !sch.levels.includes(f.v)) { no('bad-value'); continue; }
+      out = { k, v: f.v };
+    } else if (sch.type === 'count') {
+      if (!Number.isInteger(f.v) || f.v < 0) { no('bad-value'); continue; }
+      out = { k, v: Math.min(FACT_LIMITS.count, f.v) };
+    } else if (sch.type === 'flag') {
+      if (f.v !== true) { no('bad-value'); continue; }
+      out = { k, v: true };
+    }
+    byKind.set(k, out);
+  }
+  const facts = FACT_KIND_NAMES.filter((k) => byKind.has(k)).map((k) => byKind.get(k));
+  fitFacts(facts, FACT_LIMITS.bytes);
+  return { ok: true, facts, refused };
 }
 
 /**
@@ -519,6 +644,11 @@ function makeRecord(input, opts = {}) {
     if (v.ok && v.blocks.length) out.blocks = v.blocks;
   }
   if (root) out.root = root;
+  // A MESSAGE'S FACTS (B-f066) — optional, validated here; an invalid fact is dropped by name, an empty list is no field
+  if (r.facts !== undefined && r.facts !== null) {
+    const v = validateFacts(r.facts);
+    if (v.ok && v.facts.length) out.facts = v.facts;
+  }
   return out;
 }
 
@@ -558,7 +688,10 @@ const CUSTOM_IMAGE_RE = /^emoji:[A-Za-z0-9_+\-:.]{1,64}$/;
  *  the same log later) — nobody invents a second mechanism. */
 // lane lark-threads (A1, 2026-10-01): `pl` = a PLACE PATCH — a later vendor copy of a stored message named the thread
 // (or root) the first copy did not carry; widen-only (src/channel-thread.js `widenPlace`), folded at read
-const SIDE_KINDS = Object.freeze(['rx', 'th', 'pl']);
+// lane message-facts (B-f066): `fx` = a message's FACTS learned after it was stored (design 007 — the "edit" occupant named
+// above: a backfilled envelope, a vendor-flagged edit) — `facts` judged by `validateFacts`, folded at read by
+// src/channel-facts.js `foldFacts` (per kind the later one wins; a flag never un-happens); an empty list = "asked, none"
+const SIDE_KINDS = Object.freeze(['rx', 'th', 'pl', 'fx']);
 const SIDE_FORMS = Object.freeze(['delta', 'snapshot']);
 const SIDE_OPS = Object.freeze(['add', 'remove']);
 // lane lark-threads: + `walk` (a thread walk's repeated root), `byid` (a message read by its id), `recheck` (the
@@ -632,6 +765,8 @@ function validateReactions(list) {
  *   {k:'th', msg, at, src, count, lastAt, replyUsers:[ids]}
  *   {k:'pl', msg, at, src, threadKey|null, root|null}   (lane lark-threads: a place patch — at least one id, ≤ 512 each,
  *                                                        no control character; a root equal to `msg` is no root)
+ *   {k:'fx', msg, at, src, facts:[…]}                    (lane message-facts: `validateFacts`; a list past the line bound
+ *                                                        gives up party tails (`more`), never the record; `bad-facts`)
  * A snapshot past the bounds (> REACTIONS_MAX keys, > REACTION_BY_MAX ids per
  * key, a line past SIDE_LINE_MAX_BYTES) is TRUNCATED with `truncated: true`;
  * anything else broken is REFUSED by name (`bad-kind`, `bad-msg`, `bad-at`, `bad-place`,
@@ -647,7 +782,12 @@ function validateSide(input) {
   if (!Number.isFinite(at) || at <= 0) return no('bad-at', 'at must be an epoch ms');
   if (!SIDE_SOURCES.includes(s.src)) return no('bad-source', `src must be one of ${SIDE_SOURCES.join('|')}`);
   let out;
-  if (s.k === 'pl') {
+  if (s.k === 'fx') {
+    const v = validateFacts(s.facts);
+    if (!v.ok) return no('bad-facts', 'an fx side record carries a facts list');
+    out = { k: 'fx', msg: s.msg, at, src: s.src, facts: v.facts };
+    if (!fitFacts(out.facts, SIDE_LINE_MAX_BYTES - 1100)) return no('too-large', `a side line is at most ${SIDE_LINE_MAX_BYTES} bytes`);
+  } else if (s.k === 'pl') {
     const pid = (v) => (typeof v === 'string' && v.length > 0 && v.length <= 512 && !/[\u0000-\u001f\u007f]/.test(v) ? v : null);
     const threadKey = pid(s.threadKey);
     const root = pid(s.root) === s.msg ? null : pid(s.root);
@@ -706,6 +846,7 @@ function sideKey(s) {
   const x = s || {};
   if (x.k === 'th') return ['th', x.msg, x.at].join(':');
   if (x.k === 'pl') return ['pl', x.msg, x.threadKey || '', x.root || ''].join(':');   // a replayed widening is a no-op, whenever it came
+  if (x.k === 'fx') return ['fx', x.msg, x.at, x.src].join(':');   // lane message-facts: one learning per instant and source
   if (x.form === 'snapshot') return ['rx', 'snapshot', x.msg, x.at].join(':');
   if (x.rid) return ['rx', 'delta', x.rid].join(':');
   return ['rx', 'delta', x.msg, x.key, (x.actor && x.actor.id) || '', x.op, x.at].join(':');
@@ -736,4 +877,6 @@ module.exports = {
   REACTIONS_MAX, REACTION_BY_MAX, REACTION_KEY_MAX, REACTION_KEY_RE, REACTION_GLYPH_MAX, REACTION_LABEL_MAX, REACTION_COUNT_MAX,
   CUSTOM_IMAGE_MAX, SIDE_KINDS, SIDE_FORMS, SIDE_OPS, SIDE_SOURCES, SIDE_LINE_MAX_BYTES, THREAD_USERS_MAX,
   isReactionKey, isReactionGlyph, validateReactions, validateSide, sideKey,
+  // lane message-facts (B-f066): a message's facts — the closed types, the kinds' schema, the bounds, the validator
+  FACT_TYPES, FACT_SCHEMA, FACT_KIND_NAMES, FACT_LIMITS, validateFacts,
 };

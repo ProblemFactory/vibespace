@@ -88,6 +88,7 @@
 .chat-status-design-empty:hover { opacity: 1; filter: none; }
 .chat-design-brief { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; font-size: 12px; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--text); }
 .chat-design-public { font-size: 11px; color: var(--text-secondary); display: flex; align-items: center; gap: 4px; margin-right: auto; }
+.chat-design-public.chat-design-ask { margin-right: 0; } /* lane design-ask: the ask-first box sits before the public box */
 .chat-design-pages { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--border); padding-top: 6px; max-height: 180px; overflow: auto; }
 .chat-design-page { display: flex; align-items: center; gap: 6px; font-size: 12px; }
 .chat-design-page-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

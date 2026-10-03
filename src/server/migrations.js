@@ -10,6 +10,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { runMigrations } = require('../migration-runner.js');
+const { RETIRED_SETTING_KEYS, stripRetiredSettings } = require('../retired-settings.js'); // PURE: the one retired-key list (the schema re-exports it)
 
 /** 2026-09-runaway-parks-void: the old guard's sentence and what replaces it. */
 const OLD_RUNAWAY_PREFIX = 'stopped as a runaway: RSS ';
@@ -616,7 +617,65 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         return rep;
       },
     },
+    {
+      id: '2026-10-settings-rows-retired',
+      note: "settings cleanup part 1 (B-df40, lane settings-prune): the experimental VibeSpace channel (the Claude Code channels research preview of 2.344.0 — not the Channels feature) is removed with its per-session socket path, and three rows nothing applied went with it (window.enableBounceOnFocus, terminal.preserveCustomTitle, sessionCard.detailTruncation); agentd.dataPlane / remoteSessions / sessions were stored without a row since they graduated in 2.175.0. Each listed key (RETIRED_SETTING_KEYS, src/retired-settings.js) present in data/settings.json is ARCHIVED in this migration's ledger report ({stripped: {key: value}}) and stripped; every other key keeps its value and order; a file holding none of them is not rewritten (byte-identical), an absent or unparseable one is left alone. data/channel-socks/ loses its sockets (only entries that ARE sockets) and the directory goes when nothing else is in it; a link at that path is never followed.",
+      run() {
+        const rep = { ...stripRetiredSettingsFile(path.join(dataDir, 'settings.json')), socks: removeChannelSocks(path.join(dataDir, 'channel-socks')) };
+        console.log('[migrate] settings-rows-retired:', JSON.stringify({ ...rep, stripped: Object.keys(rep.stripped) }));
+        return rep;
+      },
+    },
+    {
+      id: '2026-10-archive-codex-fork-replays',
+      note: "a forked codex rollout opens by REPLAYING its ancestors' token_count records, all stamped at the fork instant, and the walk keyed each one by the FORK's thread id — so the same API request was counted twice (price check wf_d2b3907b-2c5, 2026-10-02: 1,661 rows on the author's instance, 1,557 gpt-5.6-sol + 104 with a null model, ≈ $177, all 2026-08-24..25). Both walkers skip the replay from this release; this archives the rows written before that — only a LOCAL codex row whose thread's rollout is a fork, stamped within 2 s of the fork instant, whose original (an earlier row of another thread, same cumulative total, identical tokens) is still in the ledger (src/codex-fork-ledger-purge.js). Archive first (data/archive/codex-fork-replays-<day>.ndjson, a reason per row), atomic shard rewrite, idempotent. The estimator re-derives on its own: its interval costs are keyed by the ledger's event count.",
+      run() {
+        const { purgeCodexForkReplays } = require('../codex-fork-ledger-purge.js');
+        const rep = purgeCodexForkReplays({ dataDir, codexSessionsDir: path.join(process.env.CODEX_HOME || path.join(homeDir, '.codex'), 'sessions'), id: '2026-10-archive-codex-fork-replays' });
+        console.log('[migrate] codex-fork-replays:', JSON.stringify(rep));
+        if (rep.archived) {
+          try {
+            serverNotice?.('codex-fork-replays-archived', `Usage bookkeeping repaired: ${rep.archived} Codex ledger row(s) counted a request twice (a forked conversation replays its parent's usage records) and were archived to data/archive/ with a reason each. The Usage window and the quota estimator re-derive from the cleaned ledger.`, { level: 'info' });
+          } catch { }
+        }
+        return rep;
+      },
+    },
   ];
+
+  /** 2026-10-settings-rows-retired, the settings half: strip RETIRED_SETTING_KEYS from data/settings.json, the values
+   *  returned as the archive (the ledger report). Written the way the settings route writes it (2-space JSON, atomic,
+   *  the file's mode kept) and ONLY when something was stripped — a file without them stays byte-identical. */
+  function stripRetiredSettingsFile(file) {
+    let text;
+    try { text = fs.readFileSync(file, 'utf-8'); } catch (e) { if (e && e.code === 'ENOENT') return { settings: 'absent', stripped: {} }; throw e; }
+    let doc;
+    try { doc = JSON.parse(text); } catch { return { settings: 'unparseable', stripped: {} }; }   // never rewrite what we cannot read
+    const { doc: kept, stripped } = stripRetiredSettings(doc, RETIRED_SETTING_KEYS);
+    if (!Object.keys(stripped).length) return { settings: 'untouched', stripped };
+    let mode = 0o644; try { mode = fs.statSync(file).mode & 0o777; } catch { }
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(kept, null, 2), { mode });
+    fs.renameSync(tmp, file);
+    return { settings: 'rewritten', stripped };
+  }
+
+  /** 2026-10-settings-rows-retired, the socket half: data/channel-socks/<windowId>.sock were the removed channel's
+   *  per-session sockets. Removes the entries that ARE sockets (lstat), then the directory if it is left empty; any
+   *  other entry is kept and named. A link at the path is left as it is (never followed). */
+  function removeChannelSocks(dir) {
+    let st;
+    try { st = fs.lstatSync(dir); } catch (e) { if (e && e.code === 'ENOENT') return { dir: 'absent', sockets: 0 }; throw e; }
+    if (!st.isDirectory()) return { dir: 'kept', why: st.isSymbolicLink() ? 'symlink' : 'not-a-directory', sockets: 0 };
+    let sockets = 0;
+    const kept = [];
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (e.isSocket()) { fs.unlinkSync(path.join(dir, e.name)); sockets++; } else kept.push(e.name);
+    }
+    if (kept.length) return { dir: 'kept', why: 'not-only-sockets', sockets, kept: kept.slice(0, 20) };
+    fs.rmdirSync(dir);
+    return { dir: 'removed', sockets };
+  }
 
   /** 2026-10-design-kit-removed: delete the extracted vendor kit. lstat first — a link at the root is unlinked, never
    *  followed (rmSync removes links inside as links); the report counts what went (it rides the ledger). */

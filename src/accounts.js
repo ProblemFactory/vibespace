@@ -992,6 +992,38 @@ class AccountManager {
     const loggedIn = (x) => !!this._readAuthFor(be, x.id).loggedIn;
     return wanted.filter(loggedIn).map((x) => ({ id: x.id, name: x.name }));
   }
+  /** Is `memberId` one of poolMembers(id)? THE SAME ANSWER as
+   *  `poolMembers(id).some((m) => m.id === memberId)` — same roster filter,
+   *  same login reader — but it reads ONE login, not every member's
+   *  (prod-stall-202, 2026-10-03: the billing-slot check ran per pooled
+   *  session per auto-cli account, 13 members × 2 files each, ~9K synchronous
+   *  reads a tick over the NFS-backed data dir = 6–15 s with the event loop
+   *  stopped). A miss still resolves the harness's account dir as poolMembers'
+   *  first read would, so an unregistered harness throws here exactly as it
+   *  throws there (both readers are total over the files themselves). */
+  isPoolMember(id, memberId) {
+    const a = this.get(id);
+    const be = this._acctBackend(a) || 'claude';
+    const all = this._state.accounts.filter((x) => this._acctBackend(x) === be && this._acctType(x) === 'subscription');
+    const wanted = Array.isArray(a?.members) && a.members.length ? all.filter((x) => a.members.includes(x.id)) : all;
+    if (!wanted.some((x) => x.id === memberId)) { if (wanted.length) this._acctDir(be, wanted[0].id); return false; }
+    return !!this._readAuthFor(be, memberId).loggedIn;
+  }
+  /** The pools whose CANDIDATES hold `memberId`, with the pool fields list()'s
+   *  pooled row carries (`auto` is always true there, `hot` = !!record.hot) —
+   *  the engine's memberPoolsOf answer for the projection, read with ONE login
+   *  per pool instead of list()'s every login (prod-stall-202). A pool whose
+   *  candidates cannot be read holds nobody, as memberPoolsOf has it. */
+  poolsWithMember(memberId) {
+    const out = [];
+    for (const a of this._state.accounts) {
+      if (this._acctType(a) !== 'pooled') continue;
+      let member = false;
+      try { member = this.isPoolMember(a.id, memberId); } catch { }
+      if (member) out.push({ id: a.id, name: a.name, backend: this._acctBackend(a), auto: true, hot: !!a.hot });
+    }
+    return out;
+  }
   /** The pool's CONFIGURED membership (2026-09-28, the removed-member wall):
    *  ids of every same-backend subscription the pool LISTS — the explicit list,
    *  or (members:null) every one of them — WHATEVER their login state. This is

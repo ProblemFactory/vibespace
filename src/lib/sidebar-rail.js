@@ -285,7 +285,8 @@ export function installSidebarRail(Sidebar) {
       // broadcast (app.js toasts it and calls _railSysBadge)
       fetchJson('/api/sysinfo').then((r) => this._railSysBadge(r?.mem?.pct)).catch(() => {});
       // channels: one probe at load; live updates ride 'channels-updated'
-      fetchJson('/api/channels').then((r) => this._railChanBadge('ch', (r?.unreadTotal || 0) + (r?.awaitingTotal || 0))).catch(() => {});
+      // design 008: the badge reads two numbers — `?scope=totals`, never the first screen's rows
+      fetchJson('/api/channels?scope=totals').then((r) => this._railChanBadge('ch', (r?.unreadTotal || 0) + (r?.awaitingTotal || 0))).catch(() => {});
       fetchJson('/api/channel-groups').then((r) => { if (r && Array.isArray(r.groups)) this._railChanBadge('grp', r.groups.reduce((a, g) => a + (g && !g.archivedAt ? Number(g.unread) || 0 : 0), 0)); }).catch(() => {});
     },
 
@@ -297,7 +298,7 @@ export function installSidebarRail(Sidebar) {
         this._railSetBadge('ports', nf || '');
         const off = (ho?.hosts || []).filter((h) => h.transport === 'dial' && !h.online).length;
         this._railSetBadge('mounts', off ? off + '⏻' : '');
-        const ch = await fetchJson('/api/channels').catch(() => null);
+        const ch = await fetchJson('/api/channels?scope=totals').catch(() => null);
         if (ch && !ch.error) this._railChanBadge('ch', (ch.unreadTotal || 0) + (ch.awaitingTotal || 0));
         const jb = await fetchJson('/api/jobs').catch(() => null);
         if (jb?.jobs) {
@@ -545,6 +546,12 @@ export function installSidebarRail(Sidebar) {
         if (d.load) {
           parts.push(`<div class="usage-section-title">${escHtml(tr('Load'))}</div>`);
           parts.push(`<div class="sys-load">${d.load.join(' · ')}${d.cpus ? ` <span class="sys-load-cpus">/ ${d.cpus} CPU</span>` : ''}</div>`);
+        }
+        // design 011 lane 1 (store-timing): this instance's slowest named store writes of the last hour
+        if (!hostId && Array.isArray(d.storeWrites)) {
+          const dur = (v) => (v >= 1000 ? (v / 1000).toFixed(1) + ' s' : Math.round(v) + ' ms');
+          const list = d.storeWrites.map((w) => `${w.store} ${dur(w.ms)}`).join(' · ') || '—';
+          parts.push(`<div class="sys-load sys-store-writes">${escHtml(tr('Slowest store writes (last hour): {list}', { list }))}</div>`);
         }
         live.innerHTML = parts.join('');
       };

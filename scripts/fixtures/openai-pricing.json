@@ -1,0 +1,26 @@
+{
+  "about": "The official OpenAI text-token price table that every gpt-* row of DEFAULT_PRICING (src/usage-history.js) is judged against by scripts/test-pricing-openai.mjs. USD per 1M tokens, Standard tier. Read from the RAW HTML of the pages below (the pricing page's embedded table data + each model page's 'Text tokens' block), not a summary. When OpenAI changes a price: re-fetch, update this file AND the row together, and move the old rate into the row's `earlier` list (and `dated` here) if ledger rows were billed at it. cacheWrite null = the page lists no cache-write rate (5.5 and older). long = the >272K-input-token rate for the WHOLE request; longSource says whether the page prints it or it is the page's stated multiplier applied ('2x input and 1.5x output'; the doubled cached rate is printed only for gpt-6-astra and gpt-5.6-sol).",
+  "fetchedAt": "2026-10-03T04:38Z",
+  "pricingPage": "https://developers.openai.com/api/docs/pricing",
+  "models": {
+    "gpt-6-astra":   { "page": "https://developers.openai.com/api/docs/models/gpt-6-astra", "input": 10, "cached": 1, "cacheWrite": 12.5, "output": 50, "long": { "above": 272000, "input": 20, "cached": 2, "cacheWrite": 25, "output": 75 }, "longSource": "pricing page, Long context columns" },
+    "gpt-6.1-sol":   { "page": "https://developers.openai.com/api/docs/pricing", "input": 2, "cached": 0.1, "cacheWrite": 2.5, "output": 10, "long": { "above": 272000, "input": 4, "cached": 0.2, "cacheWrite": 5, "output": 15 }, "longSource": "pricing page, Long context columns" },
+    "gpt-6-luna":    { "page": "https://developers.openai.com/api/docs/pricing", "input": 0.1, "cached": 0.01, "cacheWrite": 0.125, "output": 0.5, "long": { "above": 272000, "input": 0.2, "cached": 0.02, "cacheWrite": 0.25, "output": 0.75 }, "longSource": "pricing page, Long context columns" },
+    "gpt-5.6-sol":   { "page": "https://developers.openai.com/api/docs/models/gpt-5.6-sol", "input": 4, "cached": 0.4, "cacheWrite": 5, "output": 20, "long": { "above": 272000, "input": 8, "cached": 0.8, "cacheWrite": 10, "output": 30 }, "longSource": "pricing page, Long context columns", "note": "promotional, 'at least through November 21, 2026' (model page)" },
+    "gpt-5.6-terra": { "page": "https://developers.openai.com/api/docs/models/gpt-5.6-terra", "input": 2, "cached": 0.2, "cacheWrite": 2.5, "output": 12, "long": { "above": 272000, "input": 4, "cached": 0.4, "cacheWrite": 5, "output": 18 }, "longSource": "model page multiplier (2x input, 1.5x output, full request)" },
+    "gpt-5.6-luna":  { "page": "https://developers.openai.com/api/docs/models/gpt-5.6-luna", "input": 0.2, "cached": 0.02, "cacheWrite": 0.25, "output": 1.2, "long": { "above": 272000, "input": 0.4, "cached": 0.04, "cacheWrite": 0.5, "output": 1.8 }, "longSource": "model page multiplier (2x input, 1.5x output, full request)" },
+    "gpt-5.5":       { "page": "https://developers.openai.com/api/docs/models/gpt-5.5", "input": 5, "cached": 0.5, "cacheWrite": null, "output": 30, "long": { "above": 272000, "input": 10, "cached": 1, "output": 45 }, "longSource": "model page multiplier ('For GPT-5.5, prompts with >272K input tokens are priced at 2x input and 1.5x output for the full session')" },
+    "gpt-5.4-mini":  { "page": "https://developers.openai.com/api/docs/pricing", "input": 0.75, "cached": 0.075, "cacheWrite": null, "output": 4.5 },
+    "gpt-5.4":       { "page": "https://developers.openai.com/api/docs/models/gpt-5.4", "input": 2.5, "cached": 0.25, "cacheWrite": null, "output": 15, "long": { "above": 272000, "input": 5, "cached": 0.5, "output": 22.5 }, "longSource": "model page multiplier ('For models with a 1.05M context window (GPT-5.4 and GPT-5.4 Pro) … 2x input and 1.5x output')" },
+    "gpt-5.3-codex": { "page": "https://developers.openai.com/api/docs/pricing", "input": 1.75, "cached": 0.175, "cacheWrite": null, "output": 14 },
+    "gpt-5.2-codex": { "page": "https://developers.openai.com/api/docs/models/gpt-5.2-codex", "input": 1.75, "cached": 0.175, "cacheWrite": null, "output": 14 },
+    "gpt-5.1-codex": { "page": "https://developers.openai.com/api/docs/models/gpt-5.1-codex", "input": 1.25, "cached": 0.125, "cacheWrite": null, "output": 10 },
+    "gpt-5.1-codex-max": { "page": "https://developers.openai.com/api/docs/models/gpt-5.1-codex-max", "input": 1.25, "cached": 0.125, "cacheWrite": null, "output": 10 },
+    "gpt-5-codex":   { "page": "https://developers.openai.com/api/docs/models/gpt-5-codex", "input": 1.25, "cached": 0.125, "cacheWrite": null, "output": 10 }
+  },
+  "dated": {
+    "gpt-5.6-sol": [
+      { "until": "2026-08-21", "source": "https://community.openai.com/t/20-price-reduction-for-gpt-5-6-sol-api-codex-credits-and-chatgpt-work/1391726 (posted 2026-08-21T19:41Z: 'Starting today … Sol now costs $4 … and $20 …, 20% lower input pricing and 33% lower output pricing. The price reductions also apply to … long-context requests'; the cached rate is the 2026-07-09 row)", "input": 5, "cached": 0.5, "cacheWrite": 6.25, "output": 30, "long": { "above": 272000, "input": 10, "cached": 1, "cacheWrite": 12.5, "output": 45 } }
+    ]
+  }
+}

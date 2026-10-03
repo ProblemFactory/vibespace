@@ -15,6 +15,7 @@ const { capsOf } = require('../backend-caps.js'); // streamProtocol picks the pa
 const { createStdoutRegistry } = require('./stdout/index.js'); // protocol → consumer (S5)
 const { exitFacts, tombExpired, awaitsWrapper, WRAPPER_SETTLE_MS, WRAPPER_SETTLE_STEP_MS } = require('../exit-facts.js'); // PURE: the exit record's facts (B-3052)
 const fs = require('fs');
+const { timedSync } = require('../timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const path = require('path');
 const pty = require('node-pty');
 const { spawn } = require('child_process');
@@ -376,7 +377,7 @@ function settleWrapperMeta(metaPath, maxMs, done) {
 
 // Read/write session metadata
 function readSessionMeta(sockName) {
-  try { return JSON.parse(fs.readFileSync(path.join(META_DIR, sockName + '.json'), 'utf-8')); } catch { return {}; }
+  try { return timedSync('session-meta.read', () => JSON.parse(fs.readFileSync(path.join(META_DIR, sockName + '.json'), 'utf-8'))); } catch { return {}; }
 }
 // Tombstones (2.89.1): teardown deletes the meta, but debounced/straggler
 // writers (status flush, todo coalesce, attribution) can fire AFTER the delete
@@ -431,8 +432,7 @@ function writeSessionMeta(sockName, meta) {
   // the next restore.
   const fp = path.join(META_DIR, sockName + '.json');
   const tmp = fp + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(meta));
-  fs.renameSync(tmp, fp);
+  timedSync('session-meta.write', () => { fs.writeFileSync(tmp, JSON.stringify(meta)); fs.renameSync(tmp, fp); });
   try { recordUsageAttribution(meta); } catch {} // usage-ledger account-by-time
   // r6: the id a record may BIND is not always the id it NAMES — a claude/codex
   // fork carries the PARENT's conversation id until the harness announces its

@@ -22,6 +22,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -281,6 +282,63 @@ ok('NEGATIVE CONTROL: the pin rejects the exact line that shipped and accepts th
 })());
 const wf = read('src/server/wrapper-files.js');
 ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)', /peerMessage: !!\(caps && caps\.peerMessage\)/.test(wf));
+
+// B-df40 part 1 (lane settings-prune): THE LADDER HAS NO RUNG 0. The experimental VibeSpace channel socket
+// (agents.vibespaceChannel, data/channel-socks/<wid>.sock, peerMsg.postChannelEvent) is removed: with EVERY setting
+// on — the retired key included — and a socket file left on disk for the live session, a peer message reaches the
+// local CLI inbox (rung 1) exactly as before and the channel post is never called. The control is a PATCHED COPY of
+// conversation-deliver.js with the old rung put back: the same assertion must read it as a channel delivery.
+{
+  const CHCID = 'cid-df40-0000-0000-0000-000000000001', CHWID = 'w-df40';
+  fs.mkdirSync(path.join(dataDir, 'channel-socks'), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, 'channel-socks', CHWID + '.sock'), '');   // the leftover a session of the old build had
+  const run = async (CDmod) => {
+    const calls = { channel: 0, inbox: [] };
+    const sessions = new Map([[CHWID, { backend: 'claude', mode: 'chat', claudeSessionId: CHCID, name: 'Ch', host: null }]]);
+    const L = CDmod.create({
+      dataDir,
+      peerMsg: { findPeer: (c) => (c === CHCID ? { socketPath: '/nowhere.sock', name: 'Ch' } : null), postToPeer: async (peer, text) => { calls.inbox.push(text); return { ok: true }; }, postChannelEvent: async () => { calls.channel++; return { ok: true }; } },
+      getHosts: () => null, getConvIndex: () => null, serverSetting: () => true, activeSessions: sessions, emitPeerCard: () => true,
+      authorizeSpend: () => ({ ok: true, identity: { key: 'slot-a', name: 'A' }, hold: { id: 'h-df40' } }), noteSpend: () => { }, releaseSpend: () => { },
+      log: () => { },
+    });
+    const r = await L.deliverToConversation(CHCID, 'hello from B', { fromName: 'session B' });
+    return { r, calls };
+  };
+  const firstRungIsInbox = ({ r, calls }) => r.ok === true && r.lane === 'message' && calls.inbox.length === 1 && calls.inbox[0].includes('hello from B') && calls.channel === 0;
+  const real = await run(require(path.join(REPO, 'src/server/conversation-deliver.js')));
+  ok('B-df40: every setting on + a channel socket on disk ⇒ the peer message lands on rung 1 (the local CLI inbox), the channel post is never called', firstRungIsInbox(real), JSON.stringify({ r: real.r, channel: real.calls.channel, inbox: real.calls.inbox.length }));
+  const cdSrc = read('src/server/conversation-deliver.js');
+  ok('B-df40: the ladder names no channel socket, no postChannelEvent and journals no lane \'channel\' any more', !/postChannelEvent|channel-socks|vibespaceChannel|lane: 'channel'/.test(cdSrc));
+  ok('B-df40: peer-messaging exports no postChannelEvent (the channel ingress is gone with its script)', !('postChannelEvent' in require(path.join(REPO, 'src/peer-messaging.js'))) && !fs.existsSync(path.join(REPO, 'data/bin/vibespace-channel.js')));
+  const RUNG1 = "      // rung 1: this machine's CLI inbox registry\n";
+  const RUNG0 = `      try {
+        if (!noWake && serverSetting?.('agents.vibespaceChannel') === true && activeSessions) {
+          for (const [wid, s] of activeSessions) {
+            if (addressableId(s) !== cid) continue;
+            const sock = path.join(dataDir, 'channel-socks', wid + '.sock');
+            if (!fs.existsSync(sock)) continue;
+            const rc = await peerMsg.postChannelEvent(sock, text, { kind: 'peer_message' });
+            if (rc.ok) { spent(); cardOk(); return { ok: true, lane: 'channel', kind, peerName: s.name || null }; }
+          }
+        }
+      } catch (e) { log('[deliver] channel lane failed (falling through):', e.message); }
+`;
+  ok('CONTROL scope: the anchor the patched copy re-adds the rung at is present once', cdSrc.split(RUNG1).length === 2);
+  const M = mutantCopies('peer-delivery', REPO);
+  const mutant = await run(M.load('src/server/conversation-deliver.js', cdSrc.replace(RUNG1, RUNG0 + RUNG1), 'rung0'));
+  ok('NEGATIVE CONTROL: a patched copy with rung 0 put back delivers on the channel lane — the assertion above reads it as NOT the inbox (it can go red)', !firstRungIsInbox(mutant) && mutant.r.lane === 'channel' && mutant.calls.channel === 1 && mutant.calls.inbox.length === 0, JSON.stringify(mutant.r));
+  // V1's shape at the spawn: a session option left over from the old build is ignored — no development-channels flag, no channel MCP server
+  const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
+  const argv = new ClaudeCodeAdapter({ claudeCmd: 'claude' }).buildSessionArgs({ cwd: '/tmp', mode: 'chat', vibespaceChannel: { script: '/x/vibespace-channel.js', sock: '/x/w.sock' } }).args;
+  ok('B-df40: a spawn handed the old vibespaceChannel option builds argv without --dangerously-load-development-channels or a vibespace channel MCP config', Array.isArray(argv) && argv.includes('--settings') && !argv.includes('--mcp-config') && !argv.includes('--dangerously-load-development-channels') && !argv.some((a) => /VIBESPACE_CHANNEL_SOCK|vibespace-channel\.js/.test(String(a))), JSON.stringify(argv));
+  const ccSrc = read('src/adapters/claude-code.js');
+  const TUI = '    // TUI renderer for terminal-mode sessions';
+  const OLD_PUSH = "    if (options.vibespaceChannel && options.vibespaceChannel.script) { args.push('--mcp-config', JSON.stringify({ mcpServers: { vibespace: { command: process.execPath, args: [options.vibespaceChannel.script], env: { VIBESPACE_CHANNEL_SOCK: options.vibespaceChannel.sock } } } })); args.push('--dangerously-load-development-channels', 'server:vibespace'); }\n";
+  const { ClaudeCodeAdapter: MutAdapter } = M.load('src/adapters/claude-code.js', ccSrc.replace(TUI, OLD_PUSH + TUI), 'channel-flags');
+  const mutArgv = new MutAdapter({ claudeCmd: 'claude' }).buildSessionArgs({ cwd: '/tmp', mode: 'chat', vibespaceChannel: { script: '/x/vibespace-channel.js', sock: '/x/w.sock' } }).args;
+  ok('NEGATIVE CONTROL: a patched adapter with the old flag push put back emits --dangerously-load-development-channels for the same options (the argv leg can go red)', ccSrc.split(TUI).length === 2 && mutArgv.includes('--dangerously-load-development-channels') && mutArgv.includes('--mcp-config'));
+}
 
 fs.rmSync(dataDir, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

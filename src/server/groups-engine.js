@@ -391,6 +391,16 @@ function create({
     always: 'Your notify mode in this group is "always"',
     invite: 'You were just added to this group',
   };
+  /** WHAT A WAKE'S CARD SAYS (lane peer-card-sender, B-9fd6): the message that woke it — and when the report carried
+   *  SEVERAL messages, every one the agent was shown, each sender named in the head (≤ 3 + "and N more", PURE
+   *  GC.reportCardOf). The delivery's own lines, never its framed text read back. One message ⇒ exactly as before. */
+  function wakeCardOf(rep, rec) {
+    const msgs = (Array.isArray(rep.lines) ? rep.lines : []).filter((x) => x && x.rec && ((x.rec.raw && x.rec.raw.kind) || 'message') === 'message')
+      .map((x) => { const a = x.rec.author || {}; return { from: a.name || a.id || null, self: a.id === G.OWNER, text: String(x.body == null ? '' : x.body) }; });
+    if (msgs.length < 2) return { text: rec.text, authors: {} };
+    const rc = GC.reportCardOf(msgs);
+    return { text: rc.text, authors: { authors: rc.authors, authorsMore: rc.authorsMore } };
+  }
   /** ONE wake = the member's pending report delivered NOW, down THE ladder.
    *  The authorizer inside decides; a refusal is journaled and the message
    *  stays for the next report (never stashed — it would arrive twice). */
@@ -407,7 +417,8 @@ function create({
         // `group` (lane group-report-card): the ladder's own card after a successful post is the GROUP card — the
         // sender → the group, the message that woke it — keyed like a report's (a later re-report renders no second)
         const self = !!(rec.author && rec.author.id === G.OWNER);
-        r = await deliver.deliverToConversation(member, rep.text, { kind: 'peer', spendReason: 'peer-message', fromName: `${displayName(g, rec.author.id)} · ${g.name}`, cardText: rec.text, group: { id: g.id, name: g.name, at: rec.at, from: self ? null : displayName(g, rec.author.id), self, via: 'wake' } });
+        const wc = wakeCardOf(rep, rec);
+        r = await deliver.deliverToConversation(member, rep.text, { kind: 'peer', spendReason: 'peer-message', fromName: `${displayName(g, rec.author.id)} · ${g.name}`, cardText: wc.text, group: { id: g.id, name: g.name, at: rec.at, from: self ? null : displayName(g, rec.author.id), self, via: 'wake', ...wc.authors } });
       } catch (e) { r = { ok: false, reason: 'delivery threw: ' + (e && e.message) }; }
     }
     try { store.audit({ kind: 'group-wake', groupId: gid, member, why, ok: !!(r && r.ok), lane: (r && r.lane) || null, reason: r && !r.ok ? r.reason || null : null, refused: (r && r.refused) || null, spendWhy: (r && r.why) || null }); } catch { }

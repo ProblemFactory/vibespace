@@ -431,7 +431,7 @@ function terminalAt(job) {
   return Number((job && (job.terminalAt || job.createdAt)) || 0);
 }
 // lanes on which a notification REACHED somebody: a conversation's inbox
-// ('message'), a channel event, the codex wrapper's app-server lane
+// ('message'), a channel event (RETIRED — below), the codex wrapper's app-server lane
 // ('rpc-queue' — a billed turn/start when idle, a steer / queue/add when busy;
 // verifier 2026-09-16: it was missing, so every codex-owned failure stayed
 // red for ever and was never archived), the user's own inbox, a remote
@@ -439,6 +439,12 @@ function terminalAt(job) {
 // delivered nothing. test-job-model CENSUSES the producers of ok:true journal
 // entries (the delivery ladder's returns + jobs.js's _notifyLogPush literals)
 // against this set — a lane the ladder grows cannot silently strand a backend.
+// RETIRED lanes no producer journals any more but a journal written before still
+// holds — and those entries DID reach the session, so they keep acknowledging:
+// 'channel' = the experimental VibeSpace channel rung (removed 2.369.202, B-df40).
+// The census exempts exactly these from "nobody produces it", and refuses one a
+// producer emits again (it would leave this set).
+const RETIRED_ACK_LANES = new Set(['channel']);
 const ACK_LANES = new Set(['message', 'channel', 'rpc-queue', 'user-inbox', 'remote-message']);
 const ACK_BY = new Set(['notified', 'agent-read', 'user-opened']);
 /** PURE. Has somebody SEEN this terminal one-shot? Acknowledged when (a) the
@@ -568,7 +574,7 @@ module.exports = {
   ownedJobsView, STATE_WORDS,
   isTerminal, isOwner, canView, canControl, canEdit, visibleJobs,
   validateFilter, filterMatches,
-  ONE_SHOT_TERMINAL, ATTENTION_FAILED, ACK_LANES, isOneShot, isTerminalOneShot, terminalAt, ackState, attentionOf, agentReadAcks, archiveVerdict, lastLineOf,
+  ONE_SHOT_TERMINAL, ATTENTION_FAILED, ACK_LANES, RETIRED_ACK_LANES, isOneShot, isTerminalOneShot, terminalAt, ackState, attentionOf, agentReadAcks, archiveVerdict, lastLineOf,
   HELD_KINDS, heldKind, heldDigest, NOTIF_TAIL, notifTailSentence,
   vetSpec, jobCommandParts, VENDOR_PATTERNS,
   parseCron, nextFire, validateSchedule, AGENT_MIN_EVERY_MS,

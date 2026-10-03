@@ -122,19 +122,42 @@ async function newPage() {
   return { cdp, evaljs, load, close: () => { try { ws.close(); } catch {} } };
 }
 
-const digest = (await api('GET', '/api/channels')).json;
-ok(Array.isArray(digest.conversations) && digest.conversations.length === N, `FIXTURE: the digest holds ${N} conversations`);
+// design 008 (B-3cf8): GET /api/channels is the FIRST READ (the attention rows + each account's newest 30) and every
+// other row is paged from /api/channels/rows. The vehicle here is a PARTIAL digest naming EVERY row (a superset of
+// the largest real broadcast, PARTIAL_MAX = 200): the panel patches it in place, by key.
+const first = (await api('GET', '/api/channels')).json;
+const every = [];
+for (let before = null, k = 0; k < 20; k++) {
+  const page = (await api('GET', `/api/channels/rows?limit=200${before ? `&beforeAt=${before.lastAt}&beforeKey=${encodeURIComponent(before.key)}` : ''}`)).json;
+  every.push(...(page.rows || []));
+  if (!page.next) break;
+  before = page.next;
+}
+const digest = { ...first, partial: true, conversations: every };
+ok(first.scope === 'first' && first.counts.all === N && first.conversations.length < 100 && every.length === N, `FIXTURE: the first read holds ${first.conversations && first.conversations.length} rows of ${first.counts && first.counts.all}; the pages hold all ${every.length}`);
 const OPEN = `(async () => {
   const btn = document.querySelector('[data-rail="channels"], [data-tab="channels"]');
   if (btn) btn.click();
   for (let i = 0; i < 100 && !document.querySelector('.chan-row, .chan-grow'); i++) await new Promise((r) => setTimeout(r, 100));
-  // the ALL view (the attention list is short by construction) + every "Show all"
+  // the ALL view (the attention list is short by construction) + every list read to its END by scrolling the end into
+  // view (design 008: 60 a page in All, 200 in an account; owner 2026-10-03: seamless — no button), and THE ROWS
+  // ALREADY DRAWN ARE KEPT across a page append (the same elements)
   const seg = [...document.querySelectorAll('.chan-view-btn')].find((x) => x.getAttribute('aria-pressed') === 'false');
-  if (seg) { seg.click(); await new Promise((r) => setTimeout(r, 200)); }
-  for (let k = 0; k < 4; k++) { const b = [...document.querySelectorAll('button')].find((x) => /显示全部|Show all/.test(x.textContent)); if (!b) break; b.click(); await new Promise((r) => setTimeout(r, 300)); }
-  return { grows: document.querySelectorAll('.chan-grow').length, rows: document.querySelectorAll('.chan-row').length };
+  if (seg) seg.click();
+  for (let i = 0; i < 50 && document.querySelectorAll('.chan-grow').length < 30; i++) await new Promise((r) => setTimeout(r, 100));
+  const ends = () => [...document.querySelectorAll('.chan-list-end')];
+  const buttons = () => [...document.querySelectorAll('button')].filter((x) => /显示更多|Show more/.test(x.textContent));
+  let kept = null, clicks = 0;
+  for (let k = 0; k < 80; k++) {
+    const e = ends()[0]; if (!e) break;
+    const before = [...document.querySelectorAll('.chan-grow')], n0 = before.length + document.querySelectorAll('.chan-row').length;
+    e.scrollIntoView({ block: 'end' }); clicks++;
+    for (let i = 0; i < 60 && document.querySelectorAll('.chan-grow').length + document.querySelectorAll('.chan-row').length === n0; i++) await new Promise((r) => setTimeout(r, 50));
+    if (kept === null && before.length) { const after = [...document.querySelectorAll('.chan-grow')]; if (after.length > before.length) kept = before.every((x, i) => after[i] === x); }
+  }
+  return { grows: document.querySelectorAll('.chan-grow').length, rows: document.querySelectorAll('.chan-row').length, kept, clicks, more: ends().length + buttons().length };
 })()`;
-/** The measurement, run in the page: identity across a whole and a partial digest, the times, a 250 ms storm. */
+/** The measurement, run in the page: identity across a digest naming every row and one naming one, the times, a 250 ms storm. */
 const MEASURE = (d) => `(async () => {
   const d = ${J(d)};
   const one = { ...d, partial: true, conversations: d.conversations.slice(0, 1) };
@@ -171,14 +194,15 @@ async function clickAcrossBroadcast(p, d) {
 }
 
 // ═══ ① ② ③ the fixed panel ═══
-console.log('① ② ③ the panel over 879 conversations: a whole and a partial redraw in place, the storm');
+console.log('① ② ③ the panel over 879 conversations: a digest naming every row and one naming one, redrawn in place, the storm');
 const p1 = await newPage();
 ok(await p1.load(), 'the page loaded');
 const O = await p1.evaljs(OPEN);
-ok(O.grows >= N && O.rows >= N, `FIXTURE: "Show all" open on the first screen (${O.grows} rows) and the account card (${O.rows} rows)`, J(O));
+ok(O.grows >= N && O.rows >= N && O.more === 0, `FIXTURE: every list read to its end by scrolling its end into view — the first screen (${O.grows} rows) and the account card (${O.rows} rows), ${O.clicks} scrolls, no button`, J(O));
+ok(O.kept === true, '① design 008: a page append KEEPS every row already drawn (the same elements, the new rows after them)', J(O));
 const M = await p1.evaljs(MEASURE(digest));
 console.log(`    (measured: whole ${M.whole.join(' / ')} ms · partial ${M.partial.join(' / ')} ms · storm ${M.storm.busyMs} ms busy of ${M.storm.wallMs} = ${M.storm.share} %, long frames ${M.storm.longGaps}, p95 ${M.storm.p95} ms)`);
-ok(M.whole.every((x) => x < BOUND_MS) && M.partial.every((x) => x < BOUND_MS), `② a whole digest and a partial digest naming ONE row each redraw the 1 758-row panel in < ${BOUND_MS} ms (whole ${M.whole.join(' / ')}, partial ${M.partial.join(' / ')} — 90–115 ms before the fix)`, J(M));
+ok(M.whole.every((x) => x < BOUND_MS) && M.partial.every((x) => x < BOUND_MS), `② a partial digest naming EVERY row (design 008: the first read is bounded; a broadcast names changed rows) and one naming ONE row each redraw the 1 758-row panel in < ${BOUND_MS} ms (whole ${M.whole.join(' / ')}, partial ${M.partial.join(' / ')} — 90–115 ms before the fix)`, J(M));
 ok(M.sameGrows && M.sameRows && M.sameBox && M.sameList && M.samePart && M.sameSec, '② every row, the rows box, the group list, the Accounts part and the account section are the SAME elements after the redraws (kept and reconciled, never rebuilt)', J(M));
 ok(M.storm.n === 20 && M.storm.share < 15, `③ twenty broadcasts 250 ms apart keep the handler's share of the main thread under 15 % (${M.storm.share} % — 37 % before the fix)`, J(M.storm));
 // ═══ ④ the trusted click across a broadcast ═══
@@ -197,7 +221,8 @@ const F = await p1.evaljs(`(async () => {
   const sec1 = document.querySelector('.chan-sec.chan-account');
   const folded1 = sec1.classList.contains('chan-collapsed');
   sec1.querySelector('.chan-sec-head').click();
-  const gone = { ...d, conversations: d.conversations.filter((c) => c.id !== 'oc_3') };
+  // design 008: a broadcast names CHANGED rows — a conversation leaves the list when the vendor stops listing it
+  const gone = { ...d, conversations: d.conversations.filter((c) => c.id === 'oc_3').map((c) => ({ ...c, unlisted: true })) };
   fire(gone); await new Promise((r) => setTimeout(r, 50));
   const left = !document.querySelector('.chan-row[data-conv="lark/oc_3"]') && !document.querySelector('.chan-grow[data-grow$="/oc_3"], .chan-grow[data-grow="oc_3"]');
   const back = document.querySelectorAll('.chan-row').length;
@@ -205,7 +230,7 @@ const F = await p1.evaljs(`(async () => {
   return { folded0, folded1, same: sec === sec1, left, back, rows: document.querySelectorAll('.chan-row').length };
 })()`);
 ok(F.folded0 && F.folded1 && F.same, '⑤ a collapsed account section stays collapsed across a redraw (the same element, its class kept)', J(F));
-ok(F.left && F.back === N - 1 && F.rows === N, '⑤ a conversation that left the digest leaves both lists; back in the digest, it is back', J(F));
+ok(F.left && F.back === N - 1 && F.rows === N, '⑤ a conversation the vendor stopped listing leaves both lists; listed again, it is back (the lists were read whole: it sorts inside them)', J(F));
 // ═══ ⑤b THE SIGNATURE NAMES WHAT THE ROW PRINTS (verify round 5, 2026-09-27) ═══
 // round 4 signed `assignment` (the first watcher / access row) but line 3 prints the WHOLE access + watchers lists:
 // a second principal granted access never reached the memoised row (reproduced against the live route)
@@ -239,9 +264,10 @@ async function clickHeadAcross(p, d, sel, bc) {
   if (!pt) return { found: false };
   await p.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: pt.x, y: pt.y });
   await p.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: pt.x, y: pt.y, button: 'left', clickCount: 1 });
+  // design 008: the card's unread is the ACCOUNT's kept count (adapters[].scheduler.unread) — an 'unread' broadcast moves it as a message does
   // `bc`: false = no broadcast; true = a partial digest naming ONE row unchanged (round 5); 'unread' = the same row with
   // its unread +1 — the head's COUNT title changes ("{n} conversations · {k} unread"), what every message brings (round 6)
-  if (bc) { await p.evaljs(`(() => { const d = ${J(d)}; const rows = d.conversations.slice(0, 1).map((c) => (${J(bc === 'unread')} ? { ...c, unread: (Number(c.unread) || 0) + 1 + Math.floor(Math.random() * 1000) } : c)); const one = { ...d, partial: true, conversations: rows }; for (const fn of window.app.ws.globalHandlers) { try { fn({ type: 'channels-updated', digest: one, partial: true }); } catch (e) {} } return 1; })()`); await sleep(40); }
+  if (bc) { await p.evaljs(`(() => { const d = ${J(d)}; const rows = d.conversations.slice(0, 1).map((c) => (${J(bc === 'unread')} ? { ...c, unread: (Number(c.unread) || 0) + 1 + Math.floor(Math.random() * 1000) } : c)); const bump = rows[0] && ${J(bc === 'unread')} ? rows[0].unread - (Number(d.conversations[0].unread) || 0) : 0; const adapters = (d.adapters || []).map((a) => (bump && rows[0] && a.id === rows[0].adapterId && a.scheduler ? { ...a, scheduler: { ...a.scheduler, unread: (Number(a.scheduler.unread) || 0) + bump } } : a)); const one = { ...d, adapters, partial: true, conversations: rows }; for (const fn of window.app.ws.globalHandlers) { try { fn({ type: 'channels-updated', digest: one, partial: true }); } catch (e) {} } return 1; })()`); await sleep(40); }
   await p.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: pt.x, y: pt.y, button: 'left', clickCount: 1 });
   await sleep(300);
   return p.evaljs(`(() => { const menus = document.querySelectorAll('.context-menu').length - window.__m0; const mm = document.querySelector('.context-menu'); const at = mm ? [Math.round(mm.getBoundingClientRect().left), Math.round(mm.getBoundingClientRect().top)] : null; const sec = document.querySelector('.chan-sec.chan-account'); const toggled = sec.classList.contains('chan-collapsed') !== window.__c0; const sameHead = sec.querySelector('.chan-sec-head') === window.__h0; for (const m of document.querySelectorAll('.context-menu')) m.remove(); if (sec.classList.contains('chan-collapsed')) sec.querySelector('.chan-sec-head').click(); return { found: true, menus, at, toggled, sameHead }; })()`);
@@ -263,6 +289,80 @@ ok(H4.found && H4.menus === 1 && H4.sameHead && J(H4.at) === J(H0.at) && /未读
 const H5 = await clickHeadAcross(p1, digest, '.chan-sec.chan-account .chan-sec-name', 'unread');
 ok(H5.found && H5.toggled && H5.sameHead, '⑤d the head click across an unread-changing broadcast toggles the fold', J(H5));
 p1.close();
+
+// ═══ ⑤d SEAMLESS LISTS (owner 2026-10-03: no "Show more" — the list's end loads itself) ═══
+console.log('⑤d the lists load as their end comes near: a skeleton row while a page is read, nothing at the end, focus reads on, the range kept across a whole broadcast, a tall screen filled within a bound');
+const SEAMLESS = `(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const of = window.fetch; window.__rowsReads = 0;
+  window.fetch = async (u, o) => { if (String(u).includes('/api/channels/rows')) { window.__rowsReads++; if (!/[?&]adapter=/.test(String(u))) window.__allReads = (window.__allReads || 0) + 1; await sleep(Number(window.__hold || 0)); } return of(u, o); };
+  const btn = document.querySelector('[data-rail="channels"], [data-tab="channels"]'); if (btn) btn.click();
+  for (let i = 0; i < 100 && !document.querySelector('.chan-row, .chan-grow'); i++) await sleep(100);
+  const seg = [...document.querySelectorAll('.chan-view-btn')].find((x) => x.getAttribute('aria-pressed') === 'false'); if (seg) seg.click();
+  for (let i = 0; i < 80 && document.querySelectorAll('.chan-groups .chan-grow').length < 60; i++) await sleep(100);
+  await sleep(window.__settle || 300);
+  return { grows: document.querySelectorAll('.chan-groups .chan-grow').length, reads: window.__rowsReads, allReads: window.__allReads || 0 };
+})()`;
+const grows = `document.querySelectorAll('.chan-groups .chan-grow').length`;
+const endOf = `document.querySelector('.chan-groups .chan-list-end')`;
+const scrollerOf = `(() => { for (let n = document.querySelector('.chan-groups').parentElement; n; n = n.parentElement) { const oy = getComputedStyle(n).overflowY; if ((oy === 'auto' || oy === 'scroll') && n.scrollHeight > n.clientHeight) return n; } return document.scrollingElement; })()`;
+{
+  const p5 = await newPage();
+  await p5.cdp('Emulation.setFocusEmulationEnabled', { enabled: true });   // a background headless page defers focus events
+  ok(await p5.load(), 'the page loaded');
+  await p5.evaljs(`window.__hold = 600; 1`);
+  const s0 = await p5.evaljs(SEAMLESS);
+  const S = await p5.evaljs(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const G = () => ${grows}, E = () => ${endOf};
+    const out = { g0: G(), buttons: [...document.querySelectorAll('button')].filter((x) => /显示更多|Show more|显示全部/.test(x.textContent)).length };
+    E().scrollIntoView({ block: 'end' });
+    await sleep(200);
+    const sk = document.querySelector('.chan-groups .chan-list-end.chan-row-skeleton');
+    out.skel = sk ? { role: sk.getAttribute('role'), busy: sk.getAttribute('aria-busy'), label: sk.getAttribute('aria-label'), h: Math.round(sk.getBoundingClientRect().height), button: sk.tagName === 'BUTTON' || !!sk.querySelector('button') } : null;
+    for (let i = 0; i < 80 && G() <= out.g0; i++) await sleep(50);
+    out.g1 = G();
+    window.__hold = 0;
+    const sc = ${scrollerOf};
+    sc.scrollTop = 0; await sleep(400);
+    out.g2a = G();
+    E().focus({ preventScroll: true });
+    for (let i = 0; i < 60 && G() <= out.g2a; i++) await sleep(50);
+    out.g2 = G(); out.focusTop = sc.scrollTop;
+    for (let k = 0; k < 12 && G() < 270 && E(); k++) { const n = G(); E().scrollIntoView({ block: 'end' }); for (let i = 0; i < 60 && G() === n; i++) await sleep(50); }
+    await sleep(300);
+    sc.scrollTop = Math.max(0, sc.scrollTop - 600); await sleep(300);
+    out.g3 = G(); out.top3 = sc.scrollTop;
+    const first = await (await fetch('/api/channels')).json();
+    for (const fn of window.app.ws.globalHandlers) { try { fn({ type: 'channels-updated', digest: { ...first, partial: false } }); } catch (e) {} }
+    await sleep(150); out.g4mid = G();
+    await sleep(2500);
+    out.g4 = G(); out.top4 = sc.scrollTop;
+    for (let k = 0; k < 40 && E(); k++) { const n = G(); E().scrollIntoView({ block: 'end' }); for (let i = 0; i < 60 && G() === n; i++) await sleep(50); }
+    await sleep(300);
+    out.gEnd = G(); out.endAtEnd = !!E(); out.skelAtEnd = !!document.querySelector('.chan-groups .chan-row-skeleton');
+    return out;
+  })()`);
+  ok(S.buttons === 0, '⑤d no "Show more" / "Show all" button anywhere in the panel', J(S));
+  ok(!!S.skel && S.skel.role === 'status' && S.skel.busy === 'true' && /加载更多会话/.test(S.skel.label || '') && S.skel.h >= 20 && !S.skel.button, `⑤d while the next page is read a SKELETON ROW stands at the end (role=status, "${S.skel && S.skel.label}", ${S.skel && S.skel.h} px) — not a button`, J(S.skel));
+  ok(S.g0 >= 60 && S.g1 > S.g0, `⑤d the end coming into view reads the next page — row 61 appears (${S.g0} → ${S.g1} rows)`, J(S));
+  ok(S.g2 > S.g2a && S.focusTop < 50, `⑤d keyboard / a screen reader: focus reaching the end reads on with no scroll at all (${S.g2a} → ${S.g2} rows, scrollTop ${S.focusTop})`, J(S));
+  ok(S.g3 > 200 && S.g4mid >= S.g3 && S.g4 >= S.g3 && Math.abs(S.top4 - S.top3) <= 2, `⑤d a WHOLE broadcast keeps the range read (${S.g3} rows → ${S.g4mid} at once → ${S.g4} after the re-read, past one 200-row page) and the scroll (${S.top3} → ${S.top4} px) — never back to the top`, J(S));
+  ok(S.gEnd >= N && !S.endAtEnd && !S.skelAtEnd, `⑤d at the end nothing is drawn after the last row (${S.gEnd} rows)`, J(S));
+  p5.close();
+  // a TALL screen the first page does not fill reads on by itself — within a bound; a resize storm does not chain reads
+  const p6 = await newPage();
+  await p6.cdp('Emulation.setDeviceMetricsOverride', { width: 1400, height: 3200, deviceScaleFactor: 1, mobile: false });
+  ok(await p6.load(), 'the tall page loaded');
+  await p6.evaljs(`window.__settle = 3000; 1`);
+  const T6 = await p6.evaljs(SEAMLESS);
+  for (let k = 0; k < 12; k++) { await p6.cdp('Emulation.setDeviceMetricsOverride', { width: 1400, height: k % 2 ? 3200 : 500, deviceScaleFactor: 1, mobile: false }); await sleep(120); }
+  await sleep(2500);
+  const T7 = await p6.evaljs(`(() => ({ grows: ${grows}, reads: window.__rowsReads, allReads: window.__allReads || 0 }))()`);
+  ok(T6.grows > 60 && T6.allReads >= 2 && T6.allReads <= 6 && T6.grows < N, `⑤d a 3200 px screen the first page does not fill reads on by itself, within the bound (All: ${T6.allReads} reads ≤ 1 + 5, ${T6.grows} rows of ${N}; every list: ${T6.reads})`, J(T6));
+  ok(T7.reads - T6.reads <= 3 && T7.grows < N, `⑤d twelve resizes (maximize / restore) do not chain reads: ${T7.reads - T6.reads} more, ${T7.grows} rows of ${N}`, J([T6, T7]));
+  p6.close();
+}
 
 // ═══ ⑥ CONTROL: the round-3 draw (replaceChildren) — the same measurements ═══
 console.log('⑥ CONTROL: the scratch bundle rebuilt with reconcile = replaceChildren (the round-3 draw)');
@@ -331,6 +431,28 @@ console.log('⑧ CONTROL: the scratch bundle rebuilt as round 5 left it (the hea
   ok(H6.found && H6.menus === 1 && H6.sameHead, 'CONTROL (round 6) setup: round 5\'s own leg still holds on its copy — a same-row broadcast keeps the equal head', J(H6));
   ok(H7.found && H7.menus === 0 && !H7.sameHead, 'CONTROL (round 6): with the head built fresh per draw an unread-changing broadcast REPLACES it and the ⋯ click across it opens NO menu — ⑤d would redden', J(H7));
   p4.close();
+}
+
+// ═══ ⑨ CONTROL (verify r1): the panel WITHOUT the list's end (no sentinel) — row 61 never appears ═══
+console.log('⑨ CONTROL: the scratch bundle rebuilt with endOfList answering null');
+{
+  const rel = 'src/lib/channels-panel.js';
+  const src = fs.readFileSync(path.join(repo, rel), 'utf-8');
+  const from = '  function endOfList(name) {\n';
+  ok(src.split(from).length === 2, 'CONTROL setup: endOfList is spelled once');
+  fs.writeFileSync(path.join(wt, rel), src.replace(from, from + '    return null;   // CONTROL: no sentinel\n'));   // the SCRATCH copy only
+  bundle();
+  const p9 = await newPage();
+  ok(await p9.load(), 'the control page loaded');
+  const c0 = await p9.evaljs(SEAMLESS);
+  const C9 = await p9.evaljs(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const sc = ${scrollerOf};
+    for (let k = 0; k < 8; k++) { sc.scrollTop = sc.scrollHeight; await sleep(400); }
+    return { grows: ${grows}, reads: window.__rowsReads };
+  })()`);
+  ok(c0.grows >= 60 && C9.grows === c0.grows, `CONTROL: without the sentinel the list never reads on — row 61 never appears (${c0.grows} → ${C9.grows} rows after 8 scrolls to the bottom) — ⑤d would redden`, J([c0, C9]));
+  p9.close();
 }
 
 console.log(`\n(${Math.round((Date.now() - T0) / 1000)} s)`);

@@ -20,6 +20,15 @@
 // them to `mythos` / `mythos-5-1`, pins that the fable ids are undisturbed, and a
 // NEGATIVE CONTROL removes the two rows from a copy of the table — the ids fall back
 // to `_default`, so the rows are what routes them. §3's oracle names both ids.
+//
+// Retired generations (2.369.203, price check wf_d2b3907b-2c5): an id that only an
+// OLD model carries must never borrow a newer generation's price through the
+// longest-key rule — Opus 4 / 4.1 / 3 landed on `opus` ($5/$25, a third of their
+// $15/$75), Haiku 3.5 / 3 on `haiku` (Haiku 4.5's $1/$5), Mythos Preview on
+// `mythos` ($10/$50 vs $25/$125). §2c routes every spelling to its exact key, pins
+// that the current ids did not move, and a CONTROL drops the rows from a copy of
+// the table (they fall back to the newer key). §3's oracle names
+// claude-opus-4-0 / -4-1 and claude-3-5-haiku (the catalog's tier_15_75 / haiku_35).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -98,6 +107,27 @@ try {
   ok(Math.abs(myCost - (1000 * 10 + 2000 * 50 + 3000 * 20 + 40000 * 0.25) / 1e6) < 1e-12, `a mythos-5-1 event costs the hand arithmetic ($${myCost.toFixed(6)})`);
   ok(negCost < myCost / 2, `control: \`_default\` priced the same event at $${negCost.toFixed(6)} (${((negCost / myCost) * 100).toFixed(1)} % of list) — the underbilling the rows end`);
   ok(uh2._pricing.tiers.mythos?.cacheRead === 1 && uh2._pricing.tiers['mythos-5-1']?.cacheRead === 0.25 && uh2._tier('claude-mythos-5-1') === 'mythos-5-1', 'an old on-disk pricing.json gains both mythos rows on load, and Mythos 5.1 routes to its row');
+  // ── §2c retired generations get their own rows ──────────────────────────────
+  console.log('§2c retired ids never borrow a newer generation\'s price');
+  const RETIRED = {
+    'claude-opus-4-20250514': 'opus-4-2025', 'claude-opus-4-0': 'opus-4-0', 'claude-opus-4-1': 'opus-4-1', 'claude-opus-4-1-20250805': 'opus-4-1',
+    'us.anthropic.claude-opus-4-20250514-v1:0': 'opus-4-2025', 'claude-opus-4@20250514': 'opus-4@', 'claude-opus-4-1@20250805': 'opus-4-1', 'claude-3-opus-20240229': '3-opus',
+    'claude-3-5-haiku-20241022': '3-5-haiku', 'claude-3-5-haiku@20241022': '3-5-haiku', 'claude-3-haiku-20240307': '3-haiku', 'claude-mythos-preview': 'mythos-preview',
+  };
+  for (const [id, key] of Object.entries(RETIRED)) ok(uh._tier(id) === key, `${id} → \`${key}\``, uh._tier(id));
+  const CURRENT = { 'claude-opus-4-5-20251101': 'opus', 'claude-opus-4-6': 'opus', 'claude-opus-4-8': 'opus', 'claude-opus-5': 'opus', 'claude-opus-4-5@20251101': 'opus', 'claude-haiku-4-5-20251001': 'haiku', 'claude-mythos-5': 'mythos', 'claude-mythos-5-1': 'mythos-5-1' };
+  for (const [id, key] of Object.entries(CURRENT)) ok(uh._tier(id) === key, `${id} stays on \`${key}\``, uh._tier(id));
+  ok(t['opus-4-1'].input === 15 && t['opus-4-1'].output === 75 && t['3-5-haiku'].input === 0.8 && t['3-haiku'].output === 1.25 && t['mythos-preview'].input === 25, 'the rows carry the retired list prices ($15/$75, $0.80/$4, $0.25/$1.25, $25/$125)');
+  {
+    const cdir = scratch('pricing-retired'); fs.mkdirSync(path.join(cdir, 'usage-history'), { recursive: true });
+    const tiers = { ...t }; for (const k of new Set(Object.values(RETIRED))) delete tiers[k];
+    fs.writeFileSync(path.join(cdir, 'usage-history', 'pricing.json'), JSON.stringify({ version: 2, tiers, accounts: {} }));
+    const neg = new UsageHistory({ dataDir: cdir, homeDir: cdir });
+    neg._pricing.tiers = tiers; // the load fills missing DEFAULT keys — the control is the table WITHOUT them
+    ok(neg._tier('claude-opus-4-1') === 'opus' && neg._tier('claude-3-5-haiku-20241022') === 'haiku' && neg._tier('claude-mythos-preview') === 'mythos', 'control: without the rows the retired ids land on the NEWER generation\'s key — the rows are what routes them', [neg._tier('claude-opus-4-1'), neg._tier('claude-3-5-haiku-20241022'), neg._tier('claude-mythos-preview')].join(','));
+    try { fs.rmSync(cdir, { recursive: true, force: true }); } catch { }
+  }
+
   // ── §3 the BINARY ORACLE ───────────────────────────────────────────────────
   console.log('§3 the binary oracle — the installed claude\'s catalog tier per version the table names');
   const findBinary = () => {
@@ -129,7 +159,7 @@ try {
     };
     console.log(`  installed binary ${path.basename(bin)} (${lenient ? 'mirror: informational' : 'STRICT'})`);
     let seen = 0;
-    for (const id of ['claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-8', 'claude-opus-4-5', 'claude-fable-5-1', 'claude-fable-5', 'claude-mythos-5-1', 'claude-mythos-5', 'claude-sonnet-5']) {
+    for (const id of ['claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-8', 'claude-opus-4-5', 'claude-fable-5-1', 'claude-fable-5', 'claude-mythos-5-1', 'claude-mythos-5', 'claude-sonnet-5', 'claude-opus-4-1', 'claude-opus-4-0', 'claude-3-5-haiku']) {
       const cat = tierOf(id);
       if (!cat) { console.log(`  - ${id}: not in this build's catalog (skipped)`); continue; }
       seen++;

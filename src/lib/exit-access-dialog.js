@@ -41,8 +41,17 @@ export function lastRunText(lr) {
   const head = cmd.length > 40 ? cmd.slice(0, 39) + '…' : cmd;
   // lane-exit-run-output E2: a child that never started says why on the row too (it read "exit 1")
   if (lr.outcome === 'spawn_failed') return t('Last run: {cmd} — {who}, {when}, could not start — {why}', { cmd: head, who: (lr.by && lr.by.name) || '?', when: lr.at ? agoText(lr.at, t) : '', why: spawnFailureText(lr.spawnError, { interpreter: lr.interpreter || 'sh' }) });
+  // lane device-upgrade-stuck: refused before it was sent (a Windows agent without run-shell) — never "exit ?"
+  if (lr.outcome === 'agent_outdated') return t('Last run: {cmd} — {who}, {when}, not run — agent {v} cannot run commands on Windows; rerun the install command (Pairing command)', { cmd: head, who: (lr.by && lr.by.name) || '?', when: lr.at ? agoText(lr.at, t) : '', v: lr.agentVersion || '?' });
   const code = lr.timedOut ? t('timed out') : (lr.code == null ? (lr.outcome === 'offline' ? t('offline') : '?') : lr.code);
   return t('Last run: {cmd} — {who}, {when}, exit {code}', { cmd: head, who: (lr.by && lr.by.name) || '?', when: lr.at ? agoText(lr.at, t) : '', code });
+}
+/** lane device-upgrade-stuck — the machine row's line while its agent's update has failed (`agentUpgrade` on the /api/hosts
+ *  row, src/server/device-upgrade-watch.js), until the device reports the version; '' otherwise. */
+export function agentUpgradeText(h) {
+  const u = h && h.agentUpgrade;
+  if (!u || !u.from || !u.to) return '';
+  return u.lost === 'commands' ? t('Agent {from} — its update to {to} failed, so commands cannot run here; rerun the install command (Pairing command)', { from: u.from, to: u.to }) : t('Agent {from} — its update to {to} failed; rerun the install command (Pairing command)', { from: u.from, to: u.to });
 }
 /** The cookie routes' codes in the device's words (§11.5). */
 function codeWords(code, extra = {}) {

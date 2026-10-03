@@ -8,6 +8,10 @@ const http = require('http');
 const { WebSocketServer } = require('ws');
 const pty = require('node-pty');
 const path = require('path');
+// STORE TIMING (design 011 lane 1): every named store's sync write / big read is timed from here on (src/timed-sync.js);
+// VIBESPACE_STORE_TIMING=0 turns the clock off. On before any store is constructed, so the boot reads are counted.
+const storeTiming = require('./src/timed-sync.js');
+storeTiming.enable(process.env.VIBESPACE_STORE_TIMING !== '0');
 const fs = require('fs');
 const os = require('os');
 const { execFileSync, spawn } = require('child_process');
@@ -406,7 +410,7 @@ const {
   _vsuPending, usageAnchors, usageEstimator,
   armWorkflowUsageWatcher, darkSources, darkTaintedAccounts, kickPoolEval,
   markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool, notePoolAuthFailure, noteTurnStopped, memberRemoved, decideDefaultTarget, fallbackDefaultTarget, removalTargetFor, setConversationPin, gatherPlan,
-  maybeRepinLockedModel, maybeStopOnFallback, modelsMatch, onMemberReadingFresh, onMemberLoginSuccess, autoCliReady, lastMemberReadAt, projectionRereadFor, // …+ the new-member wake (2026-09-08) + its LOGIN half, handed to the account routes (2026-09-29: read there since 2026-09-08, never passed — dead until now)
+  maybeRepinLockedModel, maybeStopOnFallback, modelsMatch, onMemberReadingFresh, onMemberLoginSuccess, autoCliReady, lastMemberReadAt, projectionRereadFor, projectionBillingIndex, // …+ the new-member wake (2026-09-08) + its LOGIN half, handed to the account routes (2026-09-29: read there since 2026-09-08, never passed — dead until now)
   apiDerivedWindow, establishedWindows, repairIdentityAnchors, // B-855a: the two identity witnesses handed to setupUsage — the panel probe may only write the account it proves — + c2's STANDING identity repair (boot + POST /api/usage/repair-identity)
   poolChooserForModel, poolReadCache, probeUsageForAccountKey, readRawUsageCache, spendGuard, // the ONE raw usage-cache read (overage lives there — design §1.4) + THE SPEND CEILING (§4.4c): ONE authorizer in front of every turn nobody typed, per credential slot, persisted ⇒ src/server/spend-guard.js
   noteSessionProduced, noteTurnEnd: noteTurnEndEngine, noteWallSignal, noteStreamRecord, recordIsLate, beforeAutoResumeFire, fireIdentityFor, memberLoginState, probeUsageViaSession, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane, // …+ the SERVED-MODEL pair + its FALLBACK PREDICATE (r3-r2: the parse's target-less lock latch asks it, so a classifier substitute never becomes the lock target that defines placement) + the REROUTE THIS RECORD ANNOUNCES (r4: placed BEFORE the served capture at both feeds — the incident's first announcement rides the very record the substitute answered) + the per-turn LANE settle (2026-09-13 r3): both stdout feeds destructure them from the `engine:` literals below, and neither was exported here — the whole round-1 fix was a TypeError in production
@@ -830,7 +834,7 @@ app.get('/api/sysinfo', async (req, res) => {
   try {
     const hostId = String(req.query.host || '');
     if (hostId) return res.json(await remoteSysinfo(hostId));
-    res.json(await sysinfo.read(path.join(__dirname, 'data')));
+    res.json({ ...(await sysinfo.read(path.join(__dirname, 'data'))), storeWrites: storeTiming.enabled() ? storeTiming.slowest() : undefined }); // the System window's "slowest store writes (last hour)" (design 011 lane 1)
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Process manager (2.354.0, btop-like): full table + user-initiated signal.
@@ -1047,6 +1051,8 @@ process.on('unhandledRejection', (e) => { try { telemetry.record({ kind: 'server
       telemetry.record({ kind: 'metric', name: 'srv-evloop-max-lag-ms', value: Math.max(0, maxLagMs) });
       telemetry.record({ kind: 'metric', name: 'srv-live-sessions', value: activeSessions.size });
       telemetry.record({ kind: 'metric', name: 'srv-ws-clients', value: wss.clients.size });
+      // store-timing (design 011 lane 1): each named store's slowest sync write / read of these 5 min + its bucket counts
+      for (const [name, w] of Object.entries(storeTiming.takeWindow())) telemetry.record({ kind: 'metric', name: 'srv-store-ms:' + name, value: w.max, detail: 'n=' + w.n + ' b=' + w.buckets.join(',') });
       // Leak canaries — the exact classes the 2.81-2.91 audits kept finding:
       // subagent watchers that outlive their agent, normalizer message piles.
       let watchers = 0, normMsgs = 0;
@@ -1077,51 +1083,29 @@ global.__vsMetric = (name, value, detail) => { try { telemetry.record({ kind: 'm
 // enum-ish details only, never content (telemetry charter).
 global.__vsEvent = (name, detail) => { try { telemetry.record({ kind: 'event', name, detail }); } catch {} };
 
-// ── Threadpool canary (2.108.6) ──
-// The wedge class that took the instance down twice today (hung fuse IO) fills
-// the libuv threadpool while the EVENT LOOP stays healthy — evloop-lag metrics
-// see nothing. Canary: a stat() of our own package.json (always-fast local
-// disk) must round-trip through the pool; when it exceeds the deadline three
-// times in a row, the pool is wedged by SOMETHING — log loudly, record
-// telemetry, and kick the mount health sweep (the known culprit class) without
-// waiting for its 60s timer. Self-healing for known causes, loud for unknown.
+// ── Threadpool canary (2.108.6; off the main thread since design 011 lane 1) ── src/server/fs-canary.js says why: the
+// stat is timed in its own SafeFs worker and the main loop's delay is a second fact, so a blocked loop never reads as
+// a slow mount. Three stats past 5 s in a row still kick the mount health sweep.
 {
-  const CANARY_FILE = path.join(__dirname, 'package.json');
-  let canaryStrikes = 0;
-  let canaryBusy = false;
-  setInterval(() => {
-    if (canaryBusy) return; // previous canary still in flight = already wedged; strikes accrue on its resolution
-    canaryBusy = true;
-    const t0 = Date.now();
-    const deadline = setTimeout(() => {
-      canaryBusy = false;
-      canaryStrikes++;
-      console.error(`[canary] threadpool stat() exceeded 5s (strike ${canaryStrikes}) — pool likely wedged`);
-      telemetry.record({ kind: 'metric', name: 'srv-fs-canary-ms', value: 5000 });
-      if (canaryStrikes >= 3) {
-        canaryStrikes = 0;
-        telemetry.record({ kind: 'event', name: 'srv-threadpool-wedged' });
-        try { mounts._healthSweep().catch(() => {}); } catch {}
-      }
-    }, 5000);
-    fs.promises.stat(CANARY_FILE).then(() => {
-      clearTimeout(deadline);
-      if (!canaryBusy) return; // deadline already fired for this run
-      canaryBusy = false;
-      canaryStrikes = 0;
-      const ms = Date.now() - t0;
-      // record anomalies only — a healthy sub-ms canary every 10s is noise
-      if (ms > 1000) telemetry.record({ kind: 'metric', name: 'srv-fs-canary-ms', value: ms });
-    }).catch(() => { clearTimeout(deadline); canaryBusy = false; });
-  }, 10000).unref();
+  const fsCanary = require('./src/server/fs-canary.js').createFsCanary({
+    file: path.join(__dirname, 'package.json'),
+    record: (ev) => telemetry.record(ev),
+    onWedged: () => { try { mounts._healthSweep().catch(() => {}); } catch {} },
+  });
+  setInterval(() => { fsCanary.tick().catch(() => {}); }, 10000).unref();
 }
 
 const usageHistory = new UsageHistory({
   dataDir: path.join(__dirname, 'data'),
+  // THE RECORD, not list() (prod-stall-202): list() reads every account's login files and the
+  // walker asks this once per ledger line — seconds of synchronous NFS reads per walk step on
+  // production. The same three fields list()'s row carries: its type/backend defaults, and a
+  // tail only on the key rows (a pool or subscription row has none).
   resolveAccount: (id) => {
-    const a = (accounts.list().accounts || []).find((x) => x.id === id);
+    const a = accounts.get(id);
     if (!a) return null;
-    return { type: a.backend === 'codex' ? 'codex-subscription' : a.type, name: a.name, tail: a.tail };
+    const type = a.type || 'api', backend = a.backend || 'claude';
+    return { type: backend === 'codex' ? 'codex-subscription' : type, name: a.name, tail: type === 'pooled' || type === 'subscription' ? undefined : a.tail };
   },
 });
 // OTel receiver (2.361.0, B-345b; DEMOTED TO CORROBORATION 2026-09-07 — the
@@ -1583,6 +1567,9 @@ app.post('/api/ports/kill-orphan', (req, res) => {
 // On-demand EXIT (task #164): let an agent borrow a machine's network / run a command on it for ONE command.
 // Who may, per machine: two lists (lane-pairing ⑥, PURE src/exit-reach.js) — the routes are src/server/exit-routes.js.
 const { ExitProxyManager } = require('./src/exit-proxy');
+// lane device-upgrade-stuck: an agent upgrade the hub gave up on reaches the user — ONE For-you item per (machine, version) + the row's line, gone at that version (every transport's door)
+const deviceUpgradeWatch = require('./src/server/device-upgrade-watch.js').create({ userTodos, dataDir: path.join(__dirname, 'data'), log: (...a) => console.log(...a), bcast: () => { try { bcastAll({ type: 'hosts-updated' }); } catch { } } });
+hosts.onAgentUpgrade = (event, facts) => deviceUpgradeWatch.onAgentUpgrade(event, facts); hosts.agentUpgradeOf = (id) => deviceUpgradeWatch.rowOf(id);
 const exitProxy = new ExitProxyManager({ hosts, log: (m) => console.log('[exit]', m), dataDir: path.join(__dirname, 'data'), userTodos, sessionsMap: () => activeSessions, bcastAll: (...a) => bcastAll(...a),
   emitCard: (s, card) => feedPeerCard(s, card), groupsOf: (s, id) => tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId }).map((g) => g.id) });
 hosts.onReachChange = (why) => exitProxy.rejudgeAll(`hosts-${why}`); // verify-r3 A-r3a: an import / a removal / a reshape of hosts.json re-judges every lent machine (the PATCH was the only writer that did)
@@ -1649,7 +1636,7 @@ const usage = setupUsage({ app, accounts, hosts, usageHistory, activeSessions, s
 // ── auto-cli quota refresh loop (2.329.0; src/server/auto-cli-loop.js since
 // quota r2 — its pacing state persists in data/auto-cli-state.json). One
 // `claude -p /usage` spawn per 60 s tick at most, burn-aware, never a cadence.
-require('./src/server/auto-cli-loop.js').createAutoCliLoop({ serverSetting, accounts, autoCliReady, USAGE_CACHE_DIR, usageIdentityGroupsCached, usageEstimator, projectionRereadFor, lastMemberReadAt, usage, onMemberReadingFresh, dataDir: path.join(__dirname, 'data') }).start();
+require('./src/server/auto-cli-loop.js').createAutoCliLoop({ serverSetting, accounts, autoCliReady, USAGE_CACHE_DIR, usageIdentityGroupsCached, usageEstimator, projectionRereadFor, projectionBillingIndex, lastMemberReadAt, usage, onMemberReadingFresh, dataDir: path.join(__dirname, 'data') }).start();
 // Normalizer-level settings reads (chat.hideEmptyHooks) go through the REAL store
 MessageManager.getSetting = (k) => { try { return serverSetting(k); } catch { return undefined; } };
 const { getOAuthToken, usagePollingEnabled, summarizeCodexRateLimit, summarizeCodexRateLimits } = usage;
@@ -1663,7 +1650,7 @@ app.get('/api/session-options', (req, res) => {
 
 // ── WebSocket Terminal Handler (extracted to src/ws-handler.js) ──
 const sendUserInput = require('./src/server/user-input.js').createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, broadcastToSession, feedLive, autoResume, reattachLocalPty, ptyQuietSince, writeSessionInput, log: (...a) => console.log(...a) }).send; require('./src/routes/user-todos-reply.js').registerUserTodoReplyRoutes(app, { userTodos, activeSessions, sendUserInput, sessionStatusKey }); // THE typing path, ONE implementation: the ws chat-input case AND the For-you reply route (POST /api/user-todos/:id/reply, owner-only — design-user-inbox-reply D1)
-const designEngine = require('./src/server/design-engine.js').create({ dataDir: path.join(__dirname, 'data'), rootDir: __dirname, activeSessions, getRemoteFs: () => remoteFs, getPublishedPages: () => publishedPages, getDeliver: () => deliver, sendUserInput, broadcastAll: (m) => bcastAll(m), broadcastToSession, log: (...a) => console.log(...a) }); require('./src/routes/design.js').registerDesignRoutes(app, { design: designEngine, activeSessions, getJobs: jobsWiring.getJobs }); // THE DESIGN WINDOW (lane design-core, docs/design-design-window.md §3.3): the registry, one-op reads, the 2 s watch while a window looks, a comment → THE typing sender (else the stash), publish → published pages
+const designEngine = require('./src/server/design-engine.js').create({ dataDir: path.join(__dirname, 'data'), rootDir: __dirname, activeSessions, getRemoteFs: () => remoteFs, getPublishedPages: () => publishedPages, getDeliver: () => deliver, sendUserInput, broadcastAll: (m) => bcastAll(m), broadcastToSession, log: (...a) => console.log(...a), serverSetting }); require('./src/routes/design.js').registerDesignRoutes(app, { design: designEngine, activeSessions, getJobs: jobsWiring.getJobs }); // THE DESIGN WINDOW (lane design-core, docs/design-design-window.md §3.3): the registry, one-op reads, the 2 s watch while a window looks, a comment → THE typing sender (else the stash), publish → published pages
 { const { turnDigest } = require('./src/server/turn-facts.js'); let lastTurns = ''; setInterval(() => { const d = turnDigest(activeSessions); if (d !== lastTurns) { lastTurns = d; broadcastActiveSessions(); } }, 1000).unref(); } // the payload's `turn` column ('running'|'idle'|'waiting' — the inbox's running dot; carried, never gating) is DERIVED: one 1 s digest over _isStreaming/_turnState, a list broadcast only when it moved — never a hook at the nine flip sites (design-user-inbox-reply D1.7)
 const { registerWsHandler, noConvoRef, pickCodexThreadCandidate } = require('./src/ws-handler');
 registerWsHandler(wss, {
@@ -1682,7 +1669,7 @@ registerWsHandler(wss, {
   adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
   accounts, scheduleCtxSync, activeSessionsPayload, serverNotice,
   getExitProxy: () => { try { return exitProxy; } catch { return null; } }, // verify-r2 A3-r2 / ask-a: the kill path ends a dead conversation's pairs + asks
-  USAGE_STATUSLINE_CMD, userStatuslineCmd, telemetry, sendUserInput, getDesign: () => designEngine, // getDesign = the Design window's watch (design-watch / design-unwatch); telemetry: the ws switch's `default:` counts unknown message types (Plugin Ph1); sendUserInput = THE typing path (src/server/user-input.js), shared with the For-you reply route
+  USAGE_STATUSLINE_CMD, userStatuslineCmd, telemetry, sendUserInput, getDesign: () => designEngine, setCustomName: (k, n) => persistenceRouter.setCustomName(k, n), /* lane peer-card-sender: rename-session → customNames */ // getDesign = the Design window's watch (design-watch / design-unwatch); telemetry: the ws switch's `default:` counts unknown message types (Plugin Ph1); sendUserInput = THE typing path (src/server/user-input.js), shared with the For-you reply route
 });
 
 // Billing identity for the card badge. Precedence: env-key spawn (definite) →
@@ -1753,7 +1740,7 @@ function activeSessionsPayload() {
     if (s.isTmuxView) continue;
     activeList.push({
       id,
-      name: s.name,
+      name: s.name, nameExplicit: !!s._nameExplicit, // nameExplicit (lane peer-card-sender): a name given at creation / by a rename — it outranks the first message on the card
       cwd: s.cwd,
       host: s.host || null,
       hostName: s.hostName || null,
@@ -1966,6 +1953,7 @@ server.listen(PORT, HOST, () => {
         version: require('./package.json').version,
         nodeModules: path.join(__dirname, 'node_modules'),
         log: console.log,
+        onUpgradeStuck: (from, to, info) => hosts.onAgentUpgrade?.('stuck', { ...(info || {}), hostKey: 'local', machine: os.hostname(), from, to }), onVersionMatch: (v) => hosts.onAgentUpgrade?.('matched', { hostKey: 'local', version: v }), // lane device-upgrade-stuck: this machine's own daemon, the same door (no row)
       });
       // device #0 becomes reachable through hosts.device(null) — that is what
       // lets a consumer be written ONCE and run on ANY machine including this
@@ -1984,7 +1972,7 @@ server.listen(PORT, HOST, () => {
   // One-shot data migrations (src/server/migrations.js, plan B step 1): the
   // ledger-driven registry runs BEFORE any session restore touches the data
   // it may reshape. Failures notice + retry next boot, never block startup.
-  try { require('./src/server/migrations.js').create({ rootDir: __dirname, serverNotice, hosts /* lane-pairing ⑥: exit-access-lists reshapes THROUGH the live HostManager (it holds hosts.json and saves it whole) */, desktopKeeper, browserKeeper: () => browserKeeper /* 2026-09-25: the runaway-parks-void reshape goes THROUGH the live keepers */, channels: channelsWiring.channels /* 2026-09-22: adapters.json's ONE writer stamps the legacy credential keys */, userTodos /* 2.369.152: the LIVE inbox store — the spend-notices migration reshapes through it, never beside it */, accounts: () => accounts /* 2026-09-28: the pool manual-priority reshape goes THROUGH the live account store */ }).runLocalMigrations(); usage.reloadRateLimitCache?.(); usageHistory.reloadCursors?.(); usageHistory.reloadEvents?.(); /* a repair may have unlinked data/usage-cache.json AFTER setupUsage loaded it (r6), or REWRITTEN the ledger shards in place (origin backfill) — the event cache reads only appended tails */ }
+  try { require('./src/server/migrations.js').create({ rootDir: __dirname, serverNotice, hosts /* lane-pairing ⑥: exit-access-lists reshapes THROUGH the live HostManager (it holds hosts.json and saves it whole) */, desktopKeeper, browserKeeper: () => browserKeeper /* 2026-09-25: the runaway-parks-void reshape goes THROUGH the live keepers */, channels: channelsWiring.channels /* 2026-09-22: adapters.json's ONE writer stamps the legacy credential keys */, userTodos /* 2.369.152: the LIVE inbox store — the spend-notices migration reshapes through it, never beside it */, accounts: () => accounts /* 2026-09-28: the pool manual-priority reshape goes THROUGH the live account store */ }).runLocalMigrations(); persistenceRouter.reloadSettings?.() /* settings-prune verify r1: settings-rows-retired rewrote settings.json after boot cached it */; usage.reloadRateLimitCache?.(); usageHistory.reloadCursors?.(); usageHistory.reloadEvents?.(); /* a repair may have unlinked data/usage-cache.json AFTER setupUsage loaded it (r6), or REWRITTEN the ledger shards in place (origin backfill) — the event cache reads only appended tails */ }
   catch (e) { console.warn('[migrate] local registry failed to run:', e.message); }
   // B-855a c2: the STANDING identity repair — every boot, AFTER the one-shot registry (it may have reshaped the stores this reads), idempotent; then the panel memory re-reads the repaired disk
   try { repairIdentityAnchors('boot'); usage.reloadRateLimitCache?.(); } catch (e) { console.warn('[usage] boot identity repair failed:', e.message); }

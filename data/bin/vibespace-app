@@ -9,10 +9,13 @@
 // (a `sudo apt install` you run yourself is LOST at the rebuild — never do that for an app the user wants to keep).
 // The outcome comes back FREE on your next turn (a VibeSpace notice); `wait` reads it now. Once installed, an app with
 // a desktop file is a catalog row you can open: `vibespace-window open app.<entry>`.
-// `add --kind uv|npm|appimage` installs a USER-LEVEL tool as you (in your home — no root, nothing to replay) and
-// records it; it is HELD by your CLI's own permission card (it runs an installer), like `vibespace-job run`.
+// Not in the package sources? `install --from <the vendor's https address>` (or `--file <an installer already on the
+// machine>`): VibeSpace downloads it, reads what it is from its bytes and the app's own name from inside it, and files
+// ONE card — the agent downloads, unpacks and starts nothing itself (design 009).
+// `add --kind uv|npm` installs a USER-LEVEL tool as you (in your home — no root, nothing to replay) and records it; it
+// is HELD by your CLI's own permission card (it runs an installer), like `vibespace-job run`. `add --kind appimage
+// <file>` is now `install --file <file>` (a proposal — nothing runs).
 'use strict';
-const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { spawnSync } = require('child_process');
@@ -22,7 +25,7 @@ if (!API || !TOKEN) { console.error('vibespace-app: not inside a VibeSpace sessi
 
 const args = process.argv.slice(2);
 const verb = args[0];
-const flagNames = new Set(['--why', '--host', '--uri', '--suite', '--component', '--key', '--kind', '--name']);
+const flagNames = new Set(['--why', '--host', '--uri', '--suite', '--component', '--key', '--kind', '--name', '--from', '--file']);
 const flag = (name) => { const i = args.indexOf(name); return i >= 0 ? (args[i + 1] ?? '') : undefined; };
 const has = (name) => args.includes(name);
 const json = has('--json');
@@ -34,18 +37,23 @@ const USAGE = `vibespace-app — apps that survive a rebuilt machine. You PROPOS
   vibespace-app list                               apps installed through VibeSpace (+ their catalog ids) and YOUR proposals
   vibespace-app plan <package…>                    what an install would do (packages, sizes, refusals) — nothing proposed
   vibespace-app install <package…> --why "<why>"   PROPOSE an install: one For-you item with the plan; nothing runs
+  vibespace-app install --from https://… --why "<why>"
+                                                   not in the sources? PROPOSE the vendor's OFFICIAL download (.deb preferred to
+                                                   an AppImage): VibeSpace downloads and checks it — you download nothing
+  vibespace-app install --file /abs/path --why "<why>"   PROPOSE an installer already on that machine (.deb / AppImage)
   vibespace-app install --source <name> --uri https://… --suite <s> [--component main] --key https://…/key.asc --why "<why>"
                                                    PROPOSE a third-party package source (its OWN item: address + key fingerprint) —
                                                    approved before any package can come from it
   vibespace-app remove <app-id> --why "<why>"      PROPOSE removing an app (its id from 'list')
   vibespace-app status                             after a rebuild: restoring / done; installed outside VibeSpace; updates
   vibespace-app wait <proposal>                    wait ≤ 100 s for the user's decision; repeat to keep waiting
-  vibespace-app add --kind uv|npm|appimage <name|file> --why "<why>"
+  vibespace-app add --kind uv|npm <name> --why "<why>"
                                                    a USER-LEVEL tool, installed as you in your home (no root, nothing to replay) —
-                                                   asks your permission like any installer you run
+                                                   asks your permission like any installer you run (--kind appimage = install --file)
   vibespace-app docs                               the full manual (= vibespace-docs apps)
 Options: --host <machine> (default: the machine this conversation runs on) · --json
 Rules: never \`sudo apt install\` an app the user wants to keep — it is lost when the machine is rebuilt; propose it here.
+       Never download, unpack, write a launcher for or start an app yourself — propose its address; the user clicks once.
        A declined proposal ("Not now") is final: do not propose it again unless the user asks.`;
 
 async function call(method, p, body) {
@@ -78,7 +86,9 @@ function planLine(p) {
     const q = words().join(' ');
     if (!q) { console.error('vibespace-app search <words…>'); process.exit(2); }
     const j = await call('GET', `/api/agent/apps/search?q=${encodeURIComponent(q)}${hostQ() ? '&' + hostQ() : ''}`);
-    out(j, j.results && j.results.length ? j.results.map((r) => `${r.package} — ${r.summary}`).join('\n') : `nothing found for "${q}"${j.code ? ` [${j.code}]` : ''}`);
+    const rec = (j.recipes || []).map((r) => `${r.names.join(' / ')} — ${r.publisher}'s official download: vibespace-app install --from '${r.url}' --why "…"`);
+    const pk = (j.results || []).map((r) => `${r.package} — ${r.summary}`);
+    out(j, rec.length || pk.length ? [...rec, ...pk].join('\n') : `nothing found for "${q}"${j.code ? ` [${j.code}]` : ''} — not in the package sources: find the vendor's official download address and propose it (vibespace-app install --from <url> --why "…")`);
     return;
   }
   if (verb === 'list') {
@@ -86,7 +96,7 @@ function planLine(p) {
     const lines = [];
     lines.push(`Apps installed through VibeSpace on ${j.host}:`);
     if (!(j.entries || []).length) lines.push('  (none)');
-    for (const e of j.entries || []) lines.push(`  ${e.id}  ${e.packages.join(' ')}${e.rows.length ? `  → ${e.rows.map((r) => `${r.id} (${r.label})`).join(', ')}` : '  (no desktop app — on PATH)'}${e.by === 'agent' ? '  [proposed by an agent]' : ''}`);
+    for (const e of j.entries || []) lines.push(`  ${e.id}  ${e.packages.join(' ') || `${e.label || e.id} (${e.kind === 'appimage' ? 'AppImage' : e.kind}, in your home)`}${e.rows.length ? `  → ${e.rows.map((r) => `${r.id} (${r.label})`).join(', ')}` : '  (no desktop app — on PATH)'}${e.by === 'agent' ? '  [proposed by an agent]' : ''}`);
     if ((j.proposals || []).length) { lines.push('Your proposals:'); for (const p of j.proposals) lines.push(`  ${p.id}  ${p.state}  ${p.kind} ${p.label}`); }
     if (j.drift && j.drift.added.length) lines.push(`Installed OUTSIDE VibeSpace (lost at the next rebuild unless the user adopts them): ${j.drift.added.join(' ')}`);
     if (j.updates) lines.push(`${j.updates} update(s) available — the user's Refresh in Desktop apps`);
@@ -106,6 +116,8 @@ function planLine(p) {
     if (!why || !why.trim()) { console.error(`vibespace-app ${verb}: say why (--why "…") — the user reads it before deciding`); process.exit(2); }
     let request;
     if (verb === 'remove') { const id = words()[0]; if (!id) { console.error('vibespace-app remove <app-id> --why "…"'); process.exit(2); } request = { kind: 'remove', entryId: id }; }
+    else if (flag('--from') !== undefined) { const u = flag('--from'); if (!/^https:\/\//.test(u || '')) { console.error('vibespace-app install --from https://<the vendor\'s download address> --why "…"'); process.exit(2); } request = { kind: 'installer', url: u }; }
+    else if (flag('--file') !== undefined) { const f = flag('--file'); if (!f) { console.error('vibespace-app install --file /absolute/path/to/the/installer --why "…"'); process.exit(2); } request = { kind: 'installer', file: path.resolve(f) }; }
     else if (flag('--source') !== undefined || has('--source')) {
       const name = flag('--source') || flag('--name');
       request = { kind: 'source', source: { id: name, uris: [flag('--uri') || ''], suites: String(flag('--suite') || '').split(/[\s,]+/).filter(Boolean), components: String(flag('--component') || '').split(/[\s,]+/).filter(Boolean), key: flag('--key') || '' } };
@@ -117,8 +129,11 @@ function planLine(p) {
     const j = await call('POST', '/api/agent/apps/proposals', { ...hostB(), request, why });
     const p = j.proposal;
     const s = p.summary || {};
-    const what = p.kind === 'remove' ? `remove ${p.label}` : p.kind === 'source' ? `the package source ${p.label} (key ${(s.fingerprints || []).join(' ')})` : `${p.label} + ${Math.max(0, (s.newCount || 0) + (s.upgradeCount || 0) - 1)} packages, ${size(s.downloadBytes)} download, ${size(Math.max(0, s.installedBytes || 0))} on disk`;
-    out(j, p.again ? `Already proposed ${p.id} (${p.state}): ${what}. It is the same ask — still one item in the user's For you tray. Wait for it: vibespace-app wait ${p.id}` : `Proposed ${p.id}: ${what}.\nNothing is installed until the user approves it in VibeSpace (For you → Install). Wait for it: vibespace-app wait ${p.id}`);
+    const fetched = p.kind === 'deb' || p.kind === 'appimage';
+    const names = fetched && p.app ? [...new Set([p.app.labels && p.app.labels.zh, p.app.name, p.app.labels && p.app.labels.ja].filter(Boolean))] : [];
+    const what = fetched ? `${names.join(' / ') || p.label} (${p.from && p.from.host ? p.from.host : 'your file'}, ${size(p.bytes && p.bytes.download)})` : p.kind === 'remove' ? `remove ${p.label}` : p.kind === 'source' ? `the package source ${p.label} (key ${(s.fingerprints || []).join(' ')})` : `${p.label} + ${Math.max(0, (s.newCount || 0) + (s.upgradeCount || 0) - 1)} packages, ${size(s.downloadBytes)} download, ${size(Math.max(0, s.installedBytes || 0))} on disk`;
+    const yours = request.file ? `\nThe file you had (${request.file}) is no longer needed — VibeSpace keeps its own copy.` : '';
+    out(j, p.again ? `Already proposed ${p.id} (${p.state}): ${what}. It is the same ask — still one item in the user's For you tray. Wait for it: vibespace-app wait ${p.id}` : fetched ? `Proposed ${p.id}: ${what}. The user sees one card; nothing is installed until they press Install. The outcome reaches you on your next turn (or: vibespace-app wait ${p.id}).${yours}` : `Proposed ${p.id}: ${what}.\nNothing is installed until the user approves it in VibeSpace (For you → Install). Wait for it: vibespace-app wait ${p.id}`);
     return;
   }
   if (verb === 'status') {
@@ -151,23 +166,20 @@ function planLine(p) {
     const kind = flag('--kind');
     const target = words()[0];
     const why = flag('--why') || '';
-    if (!['uv', 'npm', 'appimage'].includes(kind) || !target) { console.error('vibespace-app add --kind uv|npm|appimage <name|file> --why "…"'); process.exit(2); }
+    if (!['uv', 'npm', 'appimage'].includes(kind) || !target) { console.error('vibespace-app add --kind uv|npm <name> --why "…"  (an AppImage: vibespace-app install --file <file> --why "…")'); process.exit(2); }
+    if (kind === 'appimage') { // design 009: an AppImage is PROPOSED like any installer — VibeSpace unpacks it in its own directory at the user's click
+      if (!why.trim()) { console.error('vibespace-app add --kind appimage: say why (--why "…") — the user reads it before deciding'); process.exit(2); }
+      const file = path.resolve(target);
+      const j = await call('POST', '/api/agent/apps/proposals', { ...hostB(), request: { kind: 'installer', file }, why });
+      const p = j.proposal;
+      out(j, `Proposed ${p.id}: ${(p.app && p.app.name) || p.label} (your file, ${size(p.bytes && p.bytes.download)}). The user sees one card; nothing is installed until they press Install.\nThe file you had (${file}) is no longer needed — VibeSpace keeps its own copy.`);
+      return;
+    }
     if (kind !== 'appimage' && !/^[@a-z0-9][a-z0-9@/._+-]{0,120}$/i.test(target)) { console.error('vibespace-app add: not a package name'); process.exit(2); }
     const run = (cmd, a) => { const r = spawnSync(cmd, a, { stdio: 'inherit' }); if (r.error) { console.error(`vibespace-app add: ${cmd} could not run (${r.error.message})`); process.exit(5); } if (r.status !== 0) { console.error(`vibespace-app add: ${cmd} exited ${r.status}`); process.exit(r.status || 1); } };
-    let name = target;
+    const name = target;
     if (kind === 'uv') run('uv', ['tool', 'install', target]);
-    else if (kind === 'npm') run('npm', ['install', '-g', '--prefix', path.join(os.homedir(), '.local'), target]);
-    else {
-      const file = path.resolve(target);
-      if (!fs.existsSync(file)) { console.error(`vibespace-app add: ${file} does not exist`); process.exit(2); }
-      name = path.basename(file).replace(/\.AppImage$/i, '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'appimage';
-      const dir = path.join(os.homedir(), '.local', 'opt', name);
-      fs.mkdirSync(dir, { recursive: true });
-      const copy = path.join(dir, path.basename(file));
-      fs.copyFileSync(file, copy); fs.chmodSync(copy, 0o755);
-      run(copy, ['--appimage-extract']);
-      console.log(`extracted into ${dir}/squashfs-root — run ${dir}/squashfs-root/AppRun (no FUSE needed)`);
-    }
+    else run('npm', ['install', '-g', '--prefix', path.join(os.homedir(), '.local'), target]);
     const j = await call('POST', '/api/agent/apps/user-kind', { ...hostB(), kind: kind === 'uv' ? 'uv-tool' : kind, name, why });
     out(j, `Installed ${name} (${kind}) in your home and recorded it (${j.entry ? j.entry.id : 'recorded'}) — it needs no replay after a rebuild.`);
     return;

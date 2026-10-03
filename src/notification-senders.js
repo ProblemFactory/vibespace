@@ -184,4 +184,22 @@ function noticeCardView(from, text, { facts = null } = {}) {
   return { title: { text: first }, body: rest, folded: false };
 }
 
-module.exports = { NOTIFICATION_SENDERS, isNotificationQueueItem, VIBESPACE_NOTICE_HEAD, VIBESPACE_CARD_SENDER, vibespaceNoticeText, isNotificationSender, noticeBody, isVibespaceNotice, noticeCardView, senderKey, impersonatesVibespace, withoutNoticeHead, stashKindOf };
+// ── A TRANSCRIPT RECORD NOBODY TYPED (lane peer-card-sender; the coordinator 2026-10-03, an owner screenshot: every
+// worker of the lanes' Task Group was called "Another Claude session sent a message:" in the sidebar). A conversation
+// is named after its first REAL user message (discovery-facts nameFromUserRecord); a worker's first user record is a
+// DELIVERY — a wake / report VibeSpace posted, another session's message, a job's notification — which the CLI
+// records as a user record with `origin.kind` set. That stamp is the judgement (the normalizers' provenance law:
+// origin wins — message-manager renders such a record as a peer / notification card, never "You"), not its words.
+const DELIVERED_ORIGINS = Object.freeze(['peer', 'task-notification']);
+/** 'peer' | 'task-notification' | null — the delivery a transcript user record IS, by its own origin stamp. */
+function deliveredRecordKind(rec) {
+  const o = rec && typeof rec === 'object' ? rec.origin : null;
+  const k = o && typeof o === 'object' ? o.kind : null;
+  return DELIVERED_ORIGINS.includes(k) ? k : null;
+}
+/** The CLI's own frame at the START of a delivered text (CLI_WRAP_HEAD — what the card strips). Only for a record whose
+ *  origin stamp is GONE: a raw line cut short before it (the ssh discovery script caps a line; `origin` is written after
+ *  `message`) — a whole record is judged by `deliveredRecordKind`. */
+function opensWithCliFrame(text) { return CLI_WRAP_HEAD.test(String(text == null ? '' : text).trimStart()); }
+
+module.exports = { DELIVERED_ORIGINS, deliveredRecordKind, opensWithCliFrame, NOTIFICATION_SENDERS, isNotificationQueueItem, VIBESPACE_NOTICE_HEAD, VIBESPACE_CARD_SENDER, vibespaceNoticeText, isNotificationSender, noticeBody, isVibespaceNotice, noticeCardView, senderKey, impersonatesVibespace, withoutNoticeHead, stashKindOf };

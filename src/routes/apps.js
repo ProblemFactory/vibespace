@@ -11,7 +11,12 @@
  *   POST /api/apps/plan {host, request | proposalId}   THE PLAN the install dialog shows (+ `digest`)
  *   POST /api/apps/install {host, request | proposalId, planDigest}   the run, NDJSON like /api/desktop/install:
  *                                             `{reattached}` · `{log}` lines · ONE `{done, …}` or `{error, code, plan?}`
+ *   POST /api/apps/proposals/:id/approve {shown}   THE ONE CLICK (design 009): the card's Install — `shown` = the digest of
+ *                                             the card pressed (src/app-card.js); a stale card ⇒ 409 plan_changed + `card`
+ *                                             (nothing ran); else the stored plan runs in the background, the card follows
  *   POST /api/apps/proposals/:id/reject       Not now (the agent is told on its next turn)
+ *   GET  /api/apps/proposals/:id/icon         design 009: the icon read out of a proposal's downloaded installer (staged —
+ *                                             the card's picture before anything is installed; same headers as the row icon)
  *   GET  /api/apps/icon?host=&row=            THE icon of a catalog row: image/png | image/svg+xml, nosniff, an SVG
  *                                             sandboxed by CSP (an <img> never runs it; a navigation cannot either)
  *   GET  /api/apps/helper-prompt?host=&q=     "Let an agent help…": the first prompt of the temporary helper session
@@ -21,7 +26,9 @@
  *   GET  /api/agent/apps?host=                its machine's apps (entries + rows) + its own proposals
  *   GET  /api/agent/apps/search?host=&q=
  *   POST /api/agent/apps/plan {host, request}       a plan, nothing proposed
- *   POST /api/agent/apps/proposals {host, request, why}   PROPOSE (install / remove / a package source) → one For-you item
+ *   POST /api/agent/apps/proposals {host, request, why}   PROPOSE (install / remove / a package source / an installer by
+ *                                             address or file — `{kind:'installer', url|file}`, fetched first: the answer
+ *                                             is a 200 whose body starts with keep-alive spaces, then the JSON) → one item
  *   GET  /api/agent/apps/proposals/:id?wait=<s>&since=<state>   its own proposal; `wait` ≤ 100 s, repeatable
  *   GET  /api/agent/apps/status?host=          replay / drift / updates in one line each
  *   POST /api/agent/apps/user-kind {kind, name, why}   record a USER-LEVEL tool the agent installed as the user (`add`)
@@ -58,15 +65,16 @@ function setup(deps) { ctx = deps; }
 const LOCAL = new Set(['', 'local']);
 const HOST_RE = /^[A-Za-z0-9._-]{1,80}$/;
 const STATUS = {
-  'bad-request': 400, bad_name: 400, bad_source: 400, 'unsupported-host': 400,
+  'bad-request': 400, bad_name: 400, bad_source: 400, 'unsupported-host': 400, bad_address: 400, not_an_installer: 400, too_large: 400,
   agent_forbidden: 403, 'not-yours': 403,
   'not-found': 404, not_found: 404,
   busy: 409, plan_changed: 409, proposal_state: 409, no_sudo: 409, no_apt: 409, conflict: 409, removes: 409, needs_snap: 409, disk: 409, shared: 409, nothing: 409, not_run: 409, refused: 409, not_recorded: 409, host_needs_daemon: 409, no_conversation: 409, not_filed: 409,
-  host_unavailable: 503, install_link_lost: 503, install_timeout: 504,
+  changed: 409, gone: 409, unsupported: 409, unreadable: 409, hostile: 409, remove_failed: 409,
+  fetch_failed: 502, host_unavailable: 503, install_link_lost: 503, install_timeout: 504,
 };
 function fail(res, e) {
   const code = (e && e.code) || null;
-  res.status(STATUS[code] || 500).json({ error: String((e && e.message) || e), code, ...(e && e.plan ? { plan: e.plan } : {}) });
+  res.status(STATUS[code] || 500).json({ error: String((e && e.message) || e), code, ...(e && e.plan ? { plan: e.plan } : {}), ...(e && e.card ? { card: e.card } : {}) });
 }
 function hostParam(req, res, src = req.method === 'GET' ? req.query : req.body) {
   const h = src && src.host != null ? String(src.host) : '';
@@ -123,6 +131,11 @@ router.post('/api/apps/install', async (req, res) => {
     line({ error: String((e && e.message) || e), code: (e && e.code) || 'install_failed', ...(e && e.plan ? { plan: e.plan } : {}), ...(e && e.digest ? { digest: e.digest } : {}) });
   } finally { try { res.end(); } catch { /* gone */ } }
 });
+router.post('/api/apps/proposals/:id/approve', (req, res) => {
+  const engine = userGate(req, res); if (!engine) return;
+  const b = req.body || {};
+  try { res.json({ ok: true, proposal: engine.approve(String(req.params.id), { shown: typeof b.shown === 'string' ? b.shown.slice(0, 120) : null }).proposal }); } catch (e) { fail(res, e); }
+});
 router.post('/api/apps/proposals/:id/reject', (req, res) => {
   const engine = userGate(req, res); if (!engine) return;
   try { res.json({ ok: true, proposal: engine.reject(String(req.params.id), { by: 'user' }) }); } catch (e) { fail(res, e); }
@@ -139,7 +152,7 @@ router.get('/api/apps/icon', async (req, res) => {
     const row = (st.rows || []).find((r) => r.id === rowId);
     if (!row || !row.icon) return res.status(404).json({ error: 'no icon', code: 'not-found' });
     let bytes = null, type = null;
-    for (const c of A.iconCandidates(row.icon)) {
+    for (const c of A.iconCandidates(row.icon, { appsDir: st.appsDir })) {
       try {
         if (host === 'local') { const s = await fs.promises.stat(c); if (s.isFile() && s.size <= 1024 * 1024) bytes = await fs.promises.readFile(c); }
         else if (ctx.access && typeof ctx.access.readFile === 'function') bytes = await ctx.access.readFile(host, c, 1024 * 1024);
@@ -151,10 +164,27 @@ router.get('/api/apps/icon', async (req, res) => {
     res.end(bytes);
   } catch (e) { fail(res, e); }
 });
+/** design 009: a proposal's icon, read out of its downloaded installer (staged) — an IMAGE like the row icon route. */
+router.get('/api/apps/proposals/:id/icon', async (req, res) => {
+  const engine = userGate(req, res); if (!engine) return;
+  const ic = engine.proposalIcon(String(req.params.id));
+  if (!ic || !/^[0-9a-f]{16}\.icon\.(?:png|svg)$/.test(ic.name)) return res.status(404).json({ error: 'no icon', code: 'not-found' });
+  try {
+    const st = await engine.status(ic.host);
+    const file = path.join(st.appsDir, 'staging', ic.name);
+    let bytes = null;
+    if (ic.host === 'local') { const s = await fs.promises.lstat(file).catch(() => null); if (s && s.isFile() && s.size <= 1024 * 1024) bytes = await fs.promises.readFile(file); }
+    else if (ctx.access && typeof ctx.access.readFile === 'function') bytes = await ctx.access.readFile(ic.host, file, 1024 * 1024).catch(() => null);
+    if (!bytes) return res.status(404).json({ error: 'no icon file', code: 'not-found' });
+    res.set({ 'Content-Type': ic.name.endsWith('.svg') ? 'image/svg+xml' : 'image/png', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, max-age=3600', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox" });
+    res.end(bytes);
+  } catch (e) { fail(res, e); }
+});
 router.get('/api/apps/helper-prompt', async (req, res) => {
   const engine = userGate(req, res); if (!engine) return;
   const host = hostParam(req, res); if (!host) return;
-  try { res.json({ prompt: await helperPrompt(engine, host, String(req.query.q || '').slice(0, 1000)) }); } catch (e) { fail(res, e); }
+  const request = String(req.query.q || '').slice(0, 1000);
+  try { res.json({ prompt: await helperPrompt(engine, host, request), request }); } catch (e) { fail(res, e); }
 });
 router.post('/api/apps/helpers', (req, res) => {
   const engine = userGate(req, res); if (!engine) return;
@@ -166,28 +196,12 @@ router.delete('/api/apps/helpers/:sessionId', (req, res) => {
   engine.dropHelper(String(req.params.sessionId)); res.json({ ok: true });
 });
 
-/** The helper's FIRST PROMPT: the user's request + the whole apps manual + this machine's facts (distro, installed apps,
- *  free space) — everything the one job needs, so no standing conversation carries a line of it (D3). */
+/** The helper's FIRST MESSAGE (design 009 S6): the user's own words + ONE line pointing at the tool and its manual — the
+ *  user's bubble is what the user typed (the manual is one command away, the machine's facts one `vibespace-app list`). */
 async function helperPrompt(engine, host, request) {
-  let manual = '';
-  try { manual = fs.readFileSync(path.join(__dirname, '..', '..', 'docs', 'agent', 'apps-manual.md'), 'utf8'); } catch { manual = '(the apps manual could not be read — run: vibespace-docs apps)'; }
-  let st = null;
-  try { st = await engine.status(host); } catch { st = null; }
-  const facts = st && st.facts ? st.facts : null;
-  const apps = st ? (st.manifest && st.manifest.entries || []).map((e) => `${e.id} (${e.packages.join(' ')})`).join(', ') || 'none yet' : 'unknown';
-  return [
-    'You are a temporary helper: the user opened you from Desktop apps → "Let an agent help…" to install an app on a machine. This is your only job; say "done" when it is installed (or when you have explained why it cannot be).',
-    '',
-    `The user's request: ${request || '(none typed — ask them what they want to install)'}`,
-    '',
-    `The machine${host === 'local' ? ' (this machine)' : ` (${host})`}: ${facts ? `${facts.prettyName || facts.distro || 'Linux'}${facts.codename ? ` (${facts.codename})` : ''}, ${facts.arch || '?'}; free space: system ${A.fmtBytes(facts.rootFree)}, home ${A.fmtBytes(facts.homeFree)}; passwordless sudo: ${facts.sudo || facts.root ? 'yes' : 'no'}` : 'its facts could not be read'}.`,
-    `Apps already installed through VibeSpace there: ${apps}.`,
-    '',
-    'You can only PROPOSE — the user approves in the For you tray (or in the Desktop apps dialog). Use vibespace-app (its manual follows). Never run `sudo apt` yourself: an install outside VibeSpace is lost when the machine is rebuilt.',
-    '',
-    '--- the apps manual (vibespace-docs apps) ---',
-    manual,
-  ].join('\n');
+  void engine;
+  const words = String(request || '').trim() || 'Help me install an app.';
+  return `${words}\n\n(VibeSpace: propose installs with \`vibespace-app\`${host === 'local' ? '' : ` --host ${host}`} — manual: \`vibespace-docs apps\`.)`;
 }
 
 // ── THE AGENT'S FACE ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -216,7 +230,7 @@ router.get('/api/agent/apps', async (req, res) => {
   const host = agentHost(req, g.who); if (!LOCAL.has(host) && !HOST_RE.test(host)) return fail(res, { code: 'bad-request', message: 'bad host' });
   try {
     const st = await g.engine.status(host);
-    const entries = (st.manifest && st.manifest.entries || []).map((e) => ({ id: e.id, kind: e.kind, packages: e.packages, rows: (st.rows || []).filter((r) => r.app === e.id).map((r) => ({ id: r.id, label: pkgWords(r.label, 120) })), by: e.by && e.by.kind, addedAt: e.addedAt }));
+    const entries = (st.manifest && st.manifest.entries || []).map((e) => ({ id: e.id, kind: e.kind, packages: e.packages, ...(e.label ? { label: pkgWords(e.label, 80) } : {}), rows: (st.rows || []).filter((r) => r.app === e.id).map((r) => ({ id: r.id, label: pkgWords(r.label, 120) })), by: e.by && e.by.kind, addedAt: e.addedAt }));
     res.json({ host, entries, proposals: g.who.conversation ? inertDeep(g.engine.proposalsOf(g.who.conversation)) : [], replay: st.replay && st.replay.decision, drift: st.drift && st.drift.drift ? { added: st.drift.added.map((x) => x.package) } : null, updates: st.updates ? st.updates.count : null, refreshedAt: st.refreshedAt || null });
   } catch (e) { fail(res, e); }
 });
@@ -232,10 +246,20 @@ router.post('/api/agent/apps/proposals', async (req, res) => {
   const g = agentGate(req, res); if (!g) return;
   if (g.who.borrowed) return fail(res, { code: 'no_conversation', message: g.who.borrowed });
   const b = req.body || {};
+  // design 009: an installer by address / file is DOWNLOADED first (minutes for a big one) — the answer starts at once and
+  // carries a keep-alive space every 10 s (JSON ignores leading whitespace), then the JSON; a refusal is `{error, code}`
+  const rk = b.request && typeof b.request === 'object' ? String(b.request.kind || '') : '';
+  const slow = rk === 'installer' || ((rk === 'deb' || rk === 'appimage') && (b.request.url != null || b.request.file != null));
+  let tick = null;
+  if (slow) { res.status(200).set({ 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.write(' '); tick = setInterval(() => { try { res.write(' '); } catch { /* gone */ } }, 10000); }
+  const send = (status, obj) => { if (tick) { clearInterval(tick); res.end(JSON.stringify(obj)); } else res.status(status).json(obj); };
   try {
     const p = await g.engine.propose({ host: agentHost(req, g.who), request: b.request, why: String(b.why || '').slice(0, 500), by: { kind: 'agent', sessionId: g.who.sessionId, conversation: g.who.conversation, name: g.who.name, sessionKey: g.who.sessionKey } });
-    res.json({ ok: true, proposal: inertDeep(p), text: g.engine.outcomeText(p.id) });
-  } catch (e) { fail(res, e); }
+    send(200, { ok: true, proposal: inertDeep(p), text: g.engine.outcomeText(p.id) });
+  } catch (e) {
+    if (!tick) return fail(res, e);
+    send(0, { error: pkgWords(String((e && e.message) || e), 600), code: (e && e.code) || null });
+  }
 });
 router.get('/api/agent/apps/proposals/:id', async (req, res) => {
   const g = agentGate(req, res); if (!g) return;
@@ -252,7 +276,8 @@ router.post('/api/agent/apps/user-kind', async (req, res) => {
   const g = agentGate(req, res); if (!g) return;
   const b = req.body || {};
   const kind = String(b.kind || '');
-  if (!['uv-tool', 'npm', 'appimage'].includes(kind)) return fail(res, { code: 'bad-request', message: 'kind must be uv-tool / npm / appimage' });
+  if (kind === 'appimage') return fail(res, { code: 'bad-request', message: 'an AppImage is proposed, not recorded: vibespace-app install --file <the .AppImage> --why "…"' });
+  if (!['uv-tool', 'npm'].includes(kind)) return fail(res, { code: 'bad-request', message: 'kind must be uv-tool / npm' });
   try { res.json({ ok: true, ...(await g.engine.recordUserKind(agentHost(req, g.who), { kind, name: String(b.name || ''), why: String(b.why || '').slice(0, 500), by: { kind: 'agent', conversation: g.who.conversation, name: g.who.name } })) }); } catch (e) { fail(res, e); }
 });
 router.get('/api/agent/apps/status', async (req, res) => {

@@ -324,7 +324,11 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
 {
   const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
   const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/([^:'"\\])\/\/[^'"\n]*$/gm, '$1');
-  /** THE CENSUS: rows [name, pass, detail] over the engine's + the routes' + every server file's text. */
+  /** THE CENSUS: rows [name, pass, detail] over the engine's + the routes' + every server file's text.
+   *  lane channel-attach-read (B-d6b9, design 005 §4): the AGENT's route is the second caller, admitted ONLY behind its
+   *  two conditions — the read route's REACH asked first inside attachment() (before the cache: a cached picture of a
+   *  conversation the agent may not read is no picture), and the AGENTS' SHARE asked between the verdict's `fetch` and
+   *  the one vendor call; the agent route calls it `by: 'agent'` with the caller's principal, never as the owner. */
   const attachmentCensus = (engineSrc, routesSrc, serverTexts) => {
     const rows = [];
     const E = strip(engineSrc);
@@ -353,7 +357,15 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
     // `attachment(` occurs ONCE — its definition: an ingest that queued `attachment(rec.id, convId, id)` per
     // fresh picture on the next tick was GREEN on the receiver list and on a synchronous runtime count
     const engineCallers = Object.entries(serverTexts).flatMap(([rel, text]) => ((strip(text).match(/\.attachment\(/g) || []).map(() => rel)));
-    rows.push(['ON-DEMAND: the engine\'s attachment() is called ONLY by the GET attachment route (every `.attachment(` in the server tree)', /engine\(\)\.attachment\(/.test(routeBody) && engineCallers.length === 1 && engineCallers[0] === 'src/routes/channels.js', engineCallers.join(', ')]);
+    rows.push(['ON-DEMAND: the engine\'s attachment() is called ONLY by the owner\'s GET attachment route and the agent\'s (every `.attachment(` in the server tree)', /engine\(\)\.attachment\(/.test(routeBody) && engineCallers.slice().sort().join() === 'src/agent-routes.js,src/routes/channels.js', engineCallers.join(', ')]);
+    const AR = strip(serverTexts['src/agent-routes.js'] || '');
+    const arAt = AR.indexOf("app.get('/api/agent/channels/attachment'");
+    const arBody = arAt < 0 ? '' : AR.slice(arAt, AR.indexOf('\n});', arAt));
+    rows.push(['AGENT DOOR: the agent\'s route asks it `by: \'agent\'` with the calling session\'s principal (a session token — agentSession — never as the owner)', /const hit = agentSession\(req, res\);/.test(arBody) && /eng\.attachment\(key\.adapterId, key\.convId, att, \{ msg, by: 'agent', principal: channelPrincipal\(s, id\) \}\)/.test(arBody) && (arBody.match(/\.attachment\(/g) || []).length === 1, arBody.slice(0, 200)]);
+    const reach = pos("if (agent && !(ctx && ctx.kind === 'agent' && stillSees(ctx, adapterId, convId))) return ACL.notFound();");
+    rows.push(['AGENT REACH FIRST: an agent\'s call asks the read route\'s reach (stillSees — the uniform not-found) BEFORE the cache is asked', /const agent = by === 'agent';/.test(body) && reach > 0 && cache > reach, JSON.stringify({ reach, cache })]);
+    const share = pos('if (agent) { const sh = agentShareRefusal(rec, e); if (sh) return sh; }');
+    rows.push(['AGENT SHARE: an agent\'s fetch asks the agents\' share (agentShareRefusal) after the verdict\'s `fetch` and before the one vendor call, and its charge is the agents\'', share > gate && gate > 0 && call > share && /spendAs\(agent \? 'agent' : 'owner', /.test(body.slice(share, call)), JSON.stringify({ gate, share, call })]);
     const bare = E.match(/(?<![.\w$])attachment\(/g) || [];
     rows.push(['ON-DEMAND: inside the engine `attachment(` is never INVOKED — its definition is the only bare occurrence (no ingest / timer / view prefetches a picture through it)', bare.length === 1 && /async function attachment\(/.test(E), `bare occurrences: ${bare.length}`]);
     return rows;
@@ -420,7 +432,19 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   };
   const noBudget = mutEngine('no-budget', 'affordable: affordable(rec, e),', '');
   ok(noBudget.length >= 1 && noBudget.some((n) => /BUDGET-CHARGED/.test(n)), `§7 CONTROL: a copy that drops the budget fact is RED (${noBudget.join(' | ')})`);
-  const noCache = mutEngine('no-cache', 'const hit = store.attachmentGet(adapterId, convId, attId);', 'const hit = null;');
+  // lane channel-attach-read: the agent caller's two conditions, each removed in a copy — and a route that asks as the owner
+  const noReach = mutEngine('agent-no-reach', "if (agent && !(ctx && ctx.kind === 'agent' && stillSees(ctx, adapterId, convId))) return ACL.notFound();", '');
+  ok(noReach.some((n) => /AGENT REACH FIRST/.test(n)), `§7 CONTROL: a copy whose agent call skips the reach check is RED (${noReach.join(' | ')})`);
+  const noShare = mutEngine('agent-no-share', 'if (agent) { const sh = agentShareRefusal(rec, e); if (sh) return sh; }', '');
+  ok(noShare.some((n) => /AGENT SHARE/.test(n)), `§7 CONTROL: a copy whose agent fetch skips the agents' share is RED (${noShare.join(' | ')})`);
+  {
+    const arRel = 'src/agent-routes.js', from = "{ msg, by: 'agent', principal: channelPrincipal(s, id) }";
+    ok(serverTexts[arRel].split(from).length === 2, '§7 CONTROL agent-as-owner: the anchor is spelled once in the agent route');
+    const af = MUT.write(arRel, serverTexts[arRel].replace(from, '{ msg }'), 'agent-as-owner');
+    const asOwner = reds(attachmentCensus(engineSrc, routesSrc, { ...serverTexts, [arRel]: fs.readFileSync(af, 'utf-8') }));
+    ok(asOwner.some((n) => /AGENT DOOR/.test(n)), `§7 CONTROL: an agent route that asks as the OWNER (no by / principal) is RED (${asOwner.join(' | ')})`);
+  }
+  const noCache = mutEngine('no-cache', 'const legacy = () => {\n      const o = store.attachmentGet(adapterId, convId, attId);\n      if (!o || (o.meta && o.meta.msg)) return null;\n      const carriers = store.readTail(adapterId, convId, { limit: 5000 }).filter((r) => r && Array.isArray(r.attachments) && r.attachments.some((a) => a && String(a.id) === String(attId)));\n      return carriers.length === 1 && String(carriers[0].vendorId) === scope ? o : null;\n    };\n    const hit = store.attachmentGet(adapterId, convId, attId, scope) || (scope && !agent ? legacy() : null);', 'const hit = null;');   // verify r2: the bare-id `legacy` asks the cache too — the copy drops both
   ok(noCache.some((n) => /CACHE-FIRST/.test(n)), `§7 CONTROL: a copy that never asks the cache is RED (${noCache.join(' | ')})`);
   const second = mutEngine('ingest-fetch', 'const r = await vendor(rec, e, () => e.adapter.history(convId, opts));', 'const r = await vendor(rec, e, () => e.adapter.history(convId, opts)); for (const x of r.records || []) for (const a of x.attachments || []) await e.adapter.fetchAttachment(convId, { messageId: x.vendorId, attachmentId: a.id });');
   ok(second.some((n) => /ON-DEMAND/.test(n)), `§7 CONTROL: a copy whose INGEST fetches every picture is RED (${second.join(' | ')})`);
@@ -434,7 +458,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   ok(wiring.some((n) => /every `\.attachment\(` in the server tree/.test(n)), `§7 CONTROL: a wiring-file copy calling \`engine.attachment(\` (a receiver the old list did not name) is RED (${wiring.join(' | ')})`);
   const Amut = MUT.load('src/channel-attachments.js', AttSrc.replace("if (f.affordable === false) return { act: 'refuse', code: 'vendor-budget' };", ''), 'no-budget-verdict');
   ok(AttSrc.includes("if (f.affordable === false) return { act: 'refuse', code: 'vendor-budget' };") && reds(verdictTable(Amut)).length >= 1, `§7 CONTROL: a PURE verdict without its budget gate is RED (${reds(verdictTable(Amut)).join(' | ')})`);
-  for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 6, label: '§7 ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+  for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 9, label: '§7 ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
 }
 
 // ── 8: THE BROWSER-TOOLS INSTALL SLOT (lane browser-admin 2b, 2026-10-01) ──
@@ -499,6 +523,42 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   ok(reds(slotCensus(keeperSrc, open, { ...serverTexts, [routesRel]: open })).some((n) => /USER-ONLY/.test(n)), '§8 CONTROL: a CLI install route an agent token reaches is RED');
   const twoSlots = mut('two-slots', keeperRel, keeperSrc, "VERBS.cliInstallVerdict({ version: String(version || ''), running: installState.running,", "VERBS.cliInstallVerdict({ version: String(version || ''), running: false,");
   ok(reds(slotCensus(twoSlots, routesSrc, { ...serverTexts, [keeperRel]: twoSlots })).some((n) => /ONE SLOT/.test(n)), '§8 CONTROL: a CLI install that ignores the slot is RED');
+  // lane chrome-builds-download (design 004, B-80c1): THE SLOT'S THIRD KIND — a Chrome for Testing build into the CLI's own
+  // builds folder. OUR fetch (no child downloads), so the census reads the fetch itself:
+  //   ONE FETCH   the keeper has exactly ONE `fetch(` — inside `buildFetch`, AFTER egressVerdict over the hosts of
+  //               CHROME_BUILDS_RECORD (https only, redirects by hand); no http(s).request / http(s).get anywhere in the keeper;
+  //   USER-ONLY   installChromeBuild / removeChromeBuild / chromeBuildsAvailable are called only from routes/browser.js, each
+  //               route refusing an agent's token BEFORE the keeper is asked — no timer, no boot path, no agent route;
+  //   ONE SLOT    the download asks `installState.running` and takes the slot as kind `chrome-build`.
+  const buildCensus = (K, R, texts) => {
+    const rows = [], k = strip(K), r = strip(R);
+    const fnBody = (src, name) => { const at = src.indexOf(`function ${name}(`); if (at < 0) return ''; const end = src.indexOf('\n  }\n', at); return end < 0 ? '' : src.slice(at, end); };
+    const bf = fnBody(k, 'buildFetch'), inst = fnBody(k, 'installChromeBuild');
+    rows.push(['installChromeBuild + buildFetch exist', !!bf && !!inst, '']);
+    const fetches = (k.match(/\bfetch\(/g) || []).length;
+    rows.push(['ONE FETCH: the keeper\'s only `fetch(` is buildFetch\'s, after egressVerdict over CHROME_BUILDS_RECORD\'s hosts (https only, redirect: manual)', fetches === 1 && /const ev = B\.egressVerdict\(x\.hostname, buildHosts\(\)\);\s*if \(!ev\.allow \|\| x\.protocol !== 'https:'\) throw namedError\('build_url_offhost',/.test(bf) && bf.indexOf('B.egressVerdict(') < bf.indexOf('fetch(') && /redirect: 'manual'/.test(bf)
+      && /const CBR = VERBS\.CHROME_BUILDS_RECORD;/.test(k) && /const buildHosts = \(\) => B\.parseEgressAllowlist\(\[CBR\.listHost, CBR\.fileHost\]\);/.test(k), `${fetches} fetch(`]);
+    const reqs = k.match(/\bhttps?\.(request|get)\(/g) || [];
+    rows.push(['ONE FETCH: no other request leaves the keeper (its one http.get is the CDP probe of a browser\'s own /json/version)', reqs.length === 1 && /http\.get\(\{ host: target\.hostname, port: target\.port \|\| \(target\.protocol === 'https:' \? 443 : 80\), path: '\/json\/version',/.test(k), reqs.join(' ')]);
+    const callers = [];
+    for (const [rel, text] of Object.entries(texts)) for (const m of strip(text).matchAll(/\.(installChromeBuild|removeChromeBuild|chromeBuildsAvailable)\(/g)) callers.push(rel + ':' + m[1]);
+    rows.push(['USER-ONLY: the download, the removal and the list reads are called only from src/routes/browser.js (no timer, no boot path, no other module)', callers.length === 3 && callers.every((c) => c.startsWith(routesRel + ':')), callers.join(', ')]);
+    const route = (verb, p) => { const at = r.indexOf(`router.${verb}('${p}'`); if (at < 0) return ''; const end = r.indexOf('\n});', at); return end < 0 ? '' : r.slice(at, end); };
+    const rs = [route('get', '/api/browser/builds/available'), route('post', '/api/browser/builds/download'), route('delete', '/api/browser/builds/:version')];
+    rows.push(['USER-ONLY: each of the three routes refuses an agent\'s token (refuseAgentBearer) BEFORE the keeper is asked', rs.every((x) => /refuseAgentBearer\(req, res, BUILDS_DOWNLOAD_IS_USERS\)/.test(x) && x.indexOf('refuseAgentBearer') < x.search(/k\.(chromeBuildsAvailable|installChromeBuild|removeChromeBuild)\(/)), '']);
+    rows.push(['no AGENT route downloads a build', !/router\.(get|post|delete)\('\/api\/agent\/[^']*'[\s\S]{0,800}?(installChromeBuild|removeChromeBuild|chromeBuildsAvailable)\(/.test(r.replace(/router\.(get|post|patch|delete)\('\/api\/(?!agent)/g, '§')), '']);
+    rows.push(['ONE SLOT: the download asks the slot\'s running state and takes it as `chrome-build`', /if \(installState\.running\) throw namedError\('install_running',/.test(inst) && /Object\.assign\(installState, \{ running: true, kind: 'chrome-build',/.test(inst), '']);
+    return rows;
+  };
+  for (const [n, p, d] of buildCensus(keeperSrc, routesSrc, serverTexts)) ok(p, '§8 ' + n + (p || !d ? '' : ' — ' + d));
+  const noVerdict = mut('build-no-verdict', keeperRel, keeperSrc, '      const ev = B.egressVerdict(x.hostname, buildHosts());', '      const ev = { allow: true };');
+  ok(reds(buildCensus(noVerdict, routesSrc, { ...serverTexts, [keeperRel]: noVerdict })).some((n) => /ONE FETCH/.test(n)), '§8 CONTROL: a build fetch without the egress verdict is RED');
+  const secondFetch = mut('build-second-fetch', keeperRel, keeperSrc, '  async function jsonBody(res, max) {', '  async function headOf(u) { return fetch(u, { method: \'HEAD\' }); }\n  async function jsonBody(res, max) {');
+  ok(reds(buildCensus(secondFetch, routesSrc, { ...serverTexts, [keeperRel]: secondFetch })).some((n) => /ONE FETCH/.test(n)), '§8 CONTROL: a second fetch site beside buildFetch is RED');
+  const openDl = mut('build-agent-token', routesRel, routesSrc, "router.post('/api/browser/builds/download', async (req, res) => {\n  if (refuseHost(req, res)) return;\n  if (refuseAgentBearer(req, res, BUILDS_DOWNLOAD_IS_USERS)) return;", "router.post('/api/browser/builds/download', async (req, res) => {\n  if (refuseHost(req, res)) return;");
+  ok(reds(buildCensus(keeperSrc, openDl, { ...serverTexts, [routesRel]: openDl })).some((n) => /USER-ONLY/.test(n)), '§8 CONTROL: a download route an agent token reaches is RED');
+  const atBoot = mut('build-at-boot', keeperRel, keeperSrc, '  const reattached = reattachInstall();', "  const reattached = reattachInstall(); setTimeout(() => { api.installChromeBuild({ version: VERBS.CHROME_BUILDS_RECORD.measured.stable }).catch(() => {}); }, 0);");
+  ok(reds(buildCensus(atBoot, routesSrc, { ...serverTexts, [keeperRel]: atBoot })).some((n) => /USER-ONLY/.test(n)), '§8 CONTROL: a keeper that downloads a build at boot is RED');
   for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 4, label: '§8 ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
 }
 
@@ -754,6 +814,96 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
       ok(ctl8.inet >= 1, '§10 LIVE CONTROL: the same run with one deliberate loopback connect is SEEN (the zero above is a measurement)', JSON.stringify(ctl8));
     } finally { try { fs.rmSync(tmp8, { recursive: true, force: true }); } catch { } }
   }
+}
+
+// lane message-facts (B-f066, design 007 S5): THE BACKFILL IS ON DEMAND — the ONE caller of an adapter's `factsOf` is the engine's
+// `messageFacts`, reached only from the owner's facts route; no timer, no ingest / pass path, no agent route asks it
+{
+  const engSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const calls = [...engSrc.matchAll(/adapter\.factsOf\(/g)].map((m) => m.index);
+  const at = engSrc.indexOf('async function messageFacts(');
+  const end = engSrc.indexOf('\n  }\n', at);
+  const body = engSrc.slice(at, end);
+  ok(calls.length === 1 && calls[0] > at && calls[0] < end, 'message-facts: the engine calls an adapter\'s factsOf exactly once, inside messageFacts', JSON.stringify({ calls: calls.length }));
+  ok(!/setTimeout|setInterval|\.pass\(|requestRefresh/.test(body), 'message-facts: messageFacts arms no timer and starts no pass');
+  const callers = [...engSrc.matchAll(/messageFacts\(/g)].length;
+  const routes = ['src/routes/channels.js', 'src/agent-routes.js', 'src/routes/agent-channels.js'].filter((f) => fs.existsSync(path.join(REPO, f))).map((f) => [f, (fs.readFileSync(path.join(REPO, f), 'utf-8').match(/messageFacts\(/g) || []).length]);
+  ok(callers === 1 && routes.filter(([, n]) => n).length === 1 && routes.find(([f]) => f === 'src/routes/channels.js')[1] === 1, 'message-facts: messageFacts is reached only from the owner\'s route (src/routes/channels.js), never an agent route', JSON.stringify({ callers, routes }));
+  const gm = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
+  ok(!/\.factsOf\(/.test(gm) && /async factsOf\(convId\) \{\n[^\n]*\n\s*const t = await api\(/.test(gm), 'message-facts: gmail\'s factsOf reads through the gate (api: token → pace → meter)');
+}
+
+// §FS design 010 (B-c9be, lane channels-full-search): THE VENDOR'S OWN SEARCH IS ASKED ONLY ON A PERSON'S ACT. Its one
+// adapter call sits in the engine's `vendorSearch`, reached ONLY from the owner's press route (`searchVendor`) and the
+// agent's explicit `--full` (`searchFullFor` ← `searchFor`); `around` only from the owner's sheet and the agent's
+// `--around`. No timer, no ingest pass, no keystroke: the client asks the full route only from the dialog's press / its
+// scroll sentinel, never from an `input` listener. A derived census over the function bodies + two planted controls.
+console.log('§FS the full search: the call sites (a press, an explicit --full — never a timer, an ingest, a keystroke)');
+{
+  const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf-8');
+  const bodies = (src) => { const out = new Map(); let cur = null, buf = []; for (const l of src.split('\n')) { const m = /^  (?:async\s+)?function\s+(\w+)\s*\(/.exec(l); if (m) { if (cur) out.set(cur, buf.join('\n')); cur = m[1]; buf = [l]; } else if (cur) buf.push(l); } if (cur) out.set(cur, buf.join('\n')); return out; };
+  const callers = (b, re, self) => [...b].filter(([n, x]) => n !== self && re.test(x.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n'))).map(([n]) => n).sort().join();
+  const judge = (eng, panel) => {
+    const b = bodies(eng);
+    const sh = panel.slice(panel.indexOf('function showSearchDialog('), panel.indexOf('/** THE OPTIONS EDITOR:'));
+    return {
+      adapterSearch: callers(b, /e\.adapter\.search\(/), vendorSearch: callers(b, /\bvendorSearch\(/, 'vendorSearch'), searchFullFor: callers(b, /\bsearchFullFor\(/, 'searchFullFor'),
+      adapterAround: callers(b, /e\.adapter\.around\(/), aroundFor: callers(b, /\baroundFor\(/, 'aroundFor'),
+      clientRoutes: (panel.match(/\/api\/channels\/search\/full/g) || []).length, keystroke: /addEventListener\('input'/.test(sh), askCalls: (sh.match(/\bask\(st/g) || []).length,
+    };
+  };
+  const want = { adapterSearch: 'vendorSearch', vendorSearch: 'searchFullFor,searchVendor', searchFullFor: 'searchFor', adapterAround: 'aroundFor', aroundFor: 'aroundOwner,readAroundFor', clientRoutes: 1, keystroke: false, askCalls: 3 };
+  const ENGS = read('src/server/channels-engine.js'), PANEL = read('src/lib/channels-panel.js');
+  const j = judge(ENGS, PANEL);
+  ok(JSON.stringify(j) === JSON.stringify(want), 'the full search\'s ONE adapter call is reached only from the press route and the agent\'s --full; around only from the sheet and --around; the client asks only on a press / the scroll sentinel / the once-retry', JSON.stringify(j));
+  const rc = read('src/routes/channels.js'), ar = read('src/agent-routes.js');
+  ok((rc.match(/engine\(\)\.searchVendor\(/g) || []).length === 1 && /router\.get\('\/api\/channels\/search\/full'[\s\S]{0,400}engine\(\)\.searchVendor\(/.test(rc) && (rc.match(/engine\(\)\.aroundOwner\(/g) || []).length === 1 && (ar.match(/full: req\.query\.full === '1'/g) || []).length === 1, 'the owner\'s two routes and the agent\'s one flag are the only doors');
+  const tickSpot = ENGS.indexOf('  function feedDue(rec, e, t = now()) {');
+  const planted = ENGS.slice(0, tickSpot) + "  function feedDue(rec, e, t = now()) {\n    vendorSearch(rec, 'x', {});" + ENGS.slice(tickSpot + '  function feedDue(rec, e, t = now()) {'.length);
+  const keyed = PANEL.replace("  go.onclick = run;\n", "  go.onclick = run;\n  input.addEventListener('input', () => { for (const st of []) ask(st); });\n");
+  const jp = judge(planted, PANEL), jk = judge(ENGS, keyed);
+  ok(tickSpot > 0 && jp.vendorSearch.includes('feedDue') && keyed !== PANEL && jk.keystroke === true && jk.askCalls === 4, 'CONTROL: a vendor search planted in the feed\'s tick, and a keystroke listener in the dialog, are each caught by name', JSON.stringify({ tick: jp.vendorSearch, keystroke: jk.keystroke }));
+}
+
+// §FS-G design 010 S6 (lane channels-followups): GMAIL'S FULL SEARCH IS ASKED ONLY THROUGH ITS `search` / `around`. The
+// engine half is §FS above (the adapter's `search` reached only from the owner's press route and the agent's --full,
+// `around` only from the sheet and --around). Here the adapter half, over src/channels/gmail.js's own units (the
+// adapter's methods and create()'s helpers): the request that carries the person's WORDS (`messages.list` with a `q`
+// that is not one of the reconcile's own `in:sent` queries) and the per-hit metadata read live in `search` alone; the
+// thread read for context in `around` alone; no other unit calls either method (no listing, ingest, push or reconcile
+// path searches). Two planted copies prove the census reads what it claims.
+console.log('§FS-G design 010 S6: Gmail\'s search requests live in its search / around only');
+{
+  const units = (src) => {
+    const out = new Map(); let cur = null, buf = [];
+    const head = (l) => { const m = /^  (?:async\s+)?function\s+(\w+)\s*\(/.exec(l) || /^  const (\w+) = /.exec(l) || /^    (?:async\s+)?([A-Za-z_]\w*)\s*\([^)]*\)\s*\{\s*$/.exec(l) || /^    (?:async\s+)?([A-Za-z_]\w*)\s*\(\{[^)]*\}\s*=\s*\{\}\)\s*\{\s*$/.exec(l); return m ? m[1] : null; };
+    for (const l of src.split('\n')) { const n = head(l); if (n) { if (cur) out.set(cur, (out.get(cur) || '') + buf.join('\n')); cur = n; buf = [l]; } else if (cur) buf.push(l); }
+    if (cur) out.set(cur, (out.get(cur) || '') + buf.join('\n'));
+    return out;
+  };
+  const code = (x) => x.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*\*)/.test(l)).join('\n');
+  const judge = (src) => {
+    const u = units(src);
+    const where = (pred) => [...u].filter(([, b]) => pred(code(b))).map(([n]) => n).sort().join();
+    return {
+      words: where((b) => b.split('\n').some((l) => /api\(`\/messages\?/.test(l) && !/in:sent/.test(l))),
+      hitRead: where((b) => /'gmail search hit'/.test(b)),
+      aroundRead: where((b) => /'gmail thread around'/.test(b)),
+      searchCallers: [...u].filter(([n, b]) => n !== 'search' && /(?:this|adapter|impl|a)\.search\(|\bsearch\(\{\s*query/.test(code(b))).map(([n]) => n).sort().join(),
+      aroundCallers: [...u].filter(([n, b]) => n !== 'around' && /(?:this|adapter|impl|a)\.around\(/.test(code(b))).map(([n]) => n).sort().join(),
+      methods: ['listConversations', 'history', 'search', 'around'].filter((n) => u.has(n)).join(),
+    };
+  };
+  const GS = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
+  const want = { words: 'search', hitRead: 'search', aroundRead: 'around', searchCallers: '', aroundCallers: '', methods: 'listConversations,history,search,around' };
+  const j = judge(GS);
+  ok(JSON.stringify(j) === JSON.stringify(want), 'gmail.js: the request with the person\'s words and the per-hit metadata read are in `search` only, the context read in `around` only, and no other unit calls either (the units are real: the listing, the history, search, around)', JSON.stringify(j));
+  const L0 = '    async listConversations({ cursor = null, limit = 100 } = {}) {\n';
+  const H0 = '    async history(convId, { anchor = null, limit = 50 } = {}) {\n';
+  const planted = GS.split(L0).length === 2 ? GS.replace(L0, L0 + "      await this.search({ query: 'x' });\n") : null;
+  const wordsInHistory = GS.split(H0).length === 2 ? GS.replace(H0, H0 + "      await api(`/messages?${new URLSearchParams({ q: String(convId) })}`, { what: 'x' });\n") : null;
+  const jp = planted && judge(planted), jw = wordsInHistory && judge(wordsInHistory);
+  ok(jp && jp.searchCallers === 'listConversations' && jw && jw.words === 'history,search', 'CONTROL: a search planted in the listing, and a words query planted in the history read, are each caught by name', JSON.stringify({ planted: jp && jp.searchCallers, words: jw && jw.words }));
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);

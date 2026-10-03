@@ -86,6 +86,9 @@ const LIVE_SESSION_FACTS = Object.freeze({
   // 2.72.0/2.106.1 churn); the panel patches its dots from the payload itself.
   turn: { digest: null },
   outputStyle: { digest: (v) => v || '' },            // 2.369.58 response-style row
+  // lane peer-card-sender: the live name was GIVEN (at creation / by a rename) — the card shows it before the first
+  // message; a scalar that flips at most once per session (a rename), so it gates the re-render
+  nameExplicit: { digest: (v) => (v ? '1' : '') },
   // The B-6b6d spawn knobs and the origin each one came from. CARRIED-ONLY:
   // nothing on the CARD draws them (Session Properties does, and it re-reads
   // the merged row when it opens), so gating on them would buy a re-render
@@ -216,7 +219,7 @@ class Sidebar {
     // kick, changing them only took effect on the next digest change (users
     // read that as "needs a page refresh"). _render() preserves scroll.
     for (const k of ['sessionCard.clickBehavior', 'sessionCard.findMode', 'sessionCard.clickToCopy',
-      'sessionCard.visibleFields', 'sessionCard.detailTruncation']) {
+      'sessionCard.visibleFields']) {
       app.settings?.on(k, () => this._render());
     }
 

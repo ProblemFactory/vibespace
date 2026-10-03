@@ -19,6 +19,7 @@ export function runVerdictText(r) {
   if (!r) return '';
   if (r.outcome === 'spawn_failed') return t('could not start — {why}', { why: spawnFailureText(r.spawnError, { interpreter: r.interpreter || 'sh' }) });
   if (r.outcome === 'timed_out') return t('timed out after {s} s', { s: EXIT_RUN_TIMEOUT_MS / 1000 });
+  if (r.outcome === 'refused' && r.refusal === 'device_agent_outdated') return t('not run — the agent is too old to run commands on Windows; rerun the install command'); // lane device-upgrade-stuck
   if (r.outcome === 'refused') return t('refused ({code})', { code: r.refusal || '?' });
   return t('exit {code}', { code: r.code == null ? '?' : r.code });
 }

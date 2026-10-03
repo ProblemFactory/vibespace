@@ -49,6 +49,7 @@ const { loginUsable, loginSwitchTarget, loginRank, loginWallPhrase, loginBlocked
 // predicate about the remaining made a fully FREE member read back as "no usage
 // data" — see the essay in quota-model.js.
 const { bucketCounts, bucketStatesSpend, RESET_GRACE_SEC } = require('./quota-model.js');
+const { familyOfScopedBucket } = require('./model-family.js');
 
 const SWITCH_THRESHOLD_PCT = 5;
 // PER-BUCKET-KIND thresholds (2.268.2, user-designed: what matters is
@@ -85,6 +86,11 @@ const PROACTIVE_MARGIN_SEC = 3600;
 // remaining by this much (two members leapfrogging inside the exhaustion band
 // otherwise ping-pong every evaluation tick).
 const MIN_GAIN_PCT = 3;
+// THE SPARE LANE ON A RUNNING CONVERSATION (B-8a65 S5): a proactive 'spare-lane' move must free at
+// least this many points of spare lane. Every such move cold-starts the conversation, and readings
+// wobble: with the deadline tier refusing to move a conversation onto MORE spare lane, a two-member
+// bounce would need a reading error over margin/4 on each side (±3.75 pt here) — never measured.
+const SPARE_MOVE_MARGIN_PCT = 15;
 
 // THE WARM CACHE (2026-09-22, owner: "如果一个对话最近在活跃（缓存还热）那就尽量不要切，
 // 因为无缓启动要消耗大量额度"). Moving a conversation to another member COLD-STARTS
@@ -211,6 +217,33 @@ function weeklyRemaining(brs) {
   return w.length ? Math.min(...w) : null;
 }
 
+// THE SPARE LANE (B-8a65, owner 2026-10-02: 「如果一个claude session在用opus，自动选择账号的时候
+// 优先选择fable用尽了的，避免占据fable额度（因为fable也要用全局额度）」). A member's SPARE lane is a
+// model-scoped cap THIS request does not draw — the buckets the family projection set aside
+// (model-family `projectCacheForFamily` → `spareScoped`). It is not a constraint, but it is
+// fed by the same 7d window this request spends (Fable turns draw the plan lanes too), so a
+// non-Fable conversation on a Fable-rich member burns the 7d that Fable headroom needs.
+// MIN over the lanes that state a spend. Why MIN (design desk 2026-10-02, verify r1 L2): an
+// UNUSED known-family cap — every member's Sonnet at 100 % because nobody here runs Sonnet —
+// would read every member spare-rich under MAX and mute the rule; under MIN it is ignored.
+// (A codename cap never gets here: an unknown family stays a CONSTRAINT, model-family.js.)
+// Its known defect, kept on purpose: with TWO known lanes both in real use, a member with one
+// spent lane reads "spent" though its other lane is rich. Measured 2026-10-02: 15/15 members
+// carry only the Fable known lane, so MIN = MAX and the defect is unreachable. When a second
+// known lane first appears in real readings, switch to "only lanes some pool member has spent
+// on, then MAX" (~10 lines) — test-pool-auto spare (10) pins today's two-lane answer.
+// null = no spare lane known (no projection, an unknown family, no number) — and null sorts
+// as RICH: ignorance never jumps the queue.
+function spareLaneOf(cache, nowSec) {
+  let out = null;
+  for (const b of cache && Array.isArray(cache.spareScoped) ? cache.spareScoped : []) {
+    const r = bucketRemaining(b, nowSec);
+    if (r != null && (!out || r < out.remaining)) out = { remaining: r, name: String(b.name || 'model cap') };
+  }
+  return out;
+}
+function spareLaneRemaining(cache, nowSec) { const l = spareLaneOf(cache, nowSec); return l ? l.remaining : null; }
+
 // Decide a switch for a pool. members = [{id, name}] (already login-filtered),
 // readCache(id) → parsed cache entry or null. proactive/hot = hot pools:
 // re-points are free, so they soft-exhaust at the RAISED per-kind thresholds
@@ -235,6 +268,12 @@ function weeklyRemaining(brs) {
 // EDF comparator — ONE implementation for the live decision AND the
 // sealed-orders ranked snapshot the daemon holds (design §Pool management).
 function edfCompare(a, b) {
+  // THE SPARE LANE leads (B-8a65; owner Q1 = yes: it outranks the deadline): the member whose
+  // spare lane has the LEAST left is spent first, so the members still rich in a cap this
+  // request does not draw keep their 7d for the conversations that do. A row without the
+  // field (the sealed orders, an unprojected view) ties here ⇒ the order below, unchanged.
+  const spare = (a.spare ?? 100) - (b.spare ?? 100);
+  if (spare) return spare;
   // LAST tiebreak only (2026-09-07): between two members the quota ranking
   // calls EQUAL, prefer the healthier LOGIN — an 'expiring' member ranks below
   // an equal 'ok' one. It can never reorder members the quota rules separate,
@@ -363,7 +402,11 @@ function rankPoolMembers({ members, readCache, nowSec, readLogin = null, credits
 // hot bar + MIN_GAIN): a member that just fell under the hard bar cannot flap
 // back on an estimate's wobble. The proactive EDF tier runs only between members
 // of EQUAL priority rank (both unlisted) — a listed member is never left for EDF.
-function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false, hot = proactive, pessimism = {}, exclude = null, readLogin = null, reserveFloorPct = 0, overageIds = null, creditsIds = null, warm = null, membership = null, priority = null, explain = false }) {
+// placing = this decision PLACES a new conversation (the spawn chooser, nobody else, B-8a65):
+// a usable default is left for a settleable member with less SPARE lane (`reason:
+// 'spare-lane'`, see THE SPARE LANE). Omit it ⇒ byte-identical. A HOT pool's proactive pass
+// moves an idle running conversation the same way, past SPARE_MOVE_MARGIN_PCT (S5).
+function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false, hot = proactive, pessimism = {}, exclude = null, readLogin = null, reserveFloorPct = 0, overageIds = null, creditsIds = null, warm = null, membership = null, priority = null, placing = false, pinned = false, explain = false }) {
   const prioRank = priorityRankOf(priority);
   const order = priorityOrder(priority);
   const excluded = exclude && exclude.length ? new Set(exclude) : null;
@@ -414,6 +457,12 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   const curCache = readCache(currentId);
   const cur = dockRem(currentId, accountRemaining(curCache, nowSec)); // min% — display/scraps comparison
   const curDeadline = weeklyDeadline(curCache, nowSec);
+  const curLane = spareLaneOf(curCache, nowSec); // undocked: pessimism docks CONSTRAINTS, a spare lane is none
+  const curSpare = curLane ? curLane.remaining : null;
+  // the view KEPT a lane of a known family = this conversation's OWN model-scoped cap (Fable today): it is the kind of
+  // conversation the spare lanes are kept FOR, so a proactive spare move never cold-starts it (verify r1: owner Q2 moves
+  // a NON-Fable conversation; a vendor's second lane — Sonnet, Opus — must not start moving Fable conversations)
+  const curOwnLane = !!(curCache && Array.isArray(curCache.scopedWeekly) && curCache.scopedWeekly.some((b) => familyOfScopedBucket(b && b.name)));
   const curBr = dock(currentId, bucketRems(curCache, nowSec));
   const soft = (b) => b.remaining < (hot ? THRESH[b.kind].hot : THRESH[b.kind].hard);
   const dead = (b) => b.remaining < THRESH[b.kind].hard;
@@ -437,7 +486,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   // (a manual priority keeps asking: a return to a higher-priority member is not
   // a judgement about the CURRENT member, so its missing data is no reason to stay)
   if (!cur.known && !proactive && !curLoginDead && !notMember && !prioRank) return none('no-data');
-  if (!exhausted && !proactive && !prioRank) return none('healthy', { fromRemaining: cur.known ? cur.remaining : null });
+  if (!exhausted && !proactive && !prioRank && !placing) return none('healthy', { fromRemaining: cur.known ? cur.remaining : null });
 
   // Rank candidates by EDF: known weekly deadline ascending; same deadline
   // (±60s) → MORE remaining first (equal-deadline order can't change total
@@ -482,7 +531,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     // that still has quota is not billing yet).
     if (credits && credits.has(m.id)) {
       creditsHeld.push({ id: m.id, name: m.name });
-      creditsRanked.push({ id: m.id, name: m.name, eff, known: r.known, settleOk: false, remaining: r.known ? r.remaining : null, weeklyRemaining: weeklyRemaining(br), deadline: weeklyDeadline(c, nowSec), loginPenalty: loginRank(li), barredWhy: 'credits', dead: r.known && br.some(dead) });
+      creditsRanked.push({ id: m.id, name: m.name, eff, known: r.known, settleOk: false, remaining: r.known ? r.remaining : null, weeklyRemaining: weeklyRemaining(br), deadline: weeklyDeadline(c, nowSec), loginPenalty: loginRank(li), spare: spareLaneRemaining(c, nowSec), barredWhy: 'credits', dead: r.known && br.some(dead) });
       continue;
     }
     if (r.known && br.some(dead)) { quotaBlockedN++; continue; } // gated: some bucket below its hard floor — can't serve
@@ -491,7 +540,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     // (the 2.266.1 oscillation guard, now per-kind)
     const settleOk = r.known && br.length > 0 && br.every((b) => b.remaining >= THRESH[b.kind].hot + MIN_GAIN_PCT);
     const wk = weeklyRemaining(br);
-    const row = { id: m.id, name: m.name, eff, known: r.known, settleOk, remaining: r.known ? r.remaining : null, weeklyRemaining: wk, deadline: weeklyDeadline(c, nowSec), loginPenalty: loginRank(li) };
+    const row = { id: m.id, name: m.name, eff, known: r.known, settleOk, remaining: r.known ? r.remaining : null, weeklyRemaining: wk, deadline: weeklyDeadline(c, nowSec), loginPenalty: loginRank(li), spare: spareLaneRemaining(c, nowSec) };
     if (readLogin && !loginSwitchTarget(li)) { loginBlocked.push({ id: m.id, name: m.name, state: li.state, msLeft: li.msLeft ?? null }); nearRanked.push({ ...row, barredWhy: 'login-near' }); continue; }
     // PAID OVERAGE (D3c). Real dollars, not a spent window — it does not heal
     // on a timer, so it is named separately from every quota bucket.
@@ -657,14 +706,38 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     if (warm && warm.inTurn) return none('priority-hold', { wouldTo: bestSettle.id, wouldToName: bestSettle.name, priorityRank: rank, fromRemaining: cur.known ? cur.remaining : null });
     return { to: bestSettle.id, toName: bestSettle.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: bestSettle.remaining, reason: 'priority-return', placedBy: 'priority', priorityRank: rank };
   }
+  // THE SPARE LANE (B-8a65). `spareGain` = how much more spare lane the current member holds than
+  // the first member that can SETTLE (the order above already put the least-spare first) — between
+  // members of EQUAL priority rank only; exhaustion and the priority return were answered first.
+  //  · A SPAWN (`placing`, the chooser only) is a FREE placement — nothing warm, nothing to restart —
+  //    so any gain takes it there (an unknown default reads rich). No margin: a spawn decides once.
+  //  · A RUNNING conversation on a HOT pool (owner 2026-10-03, Q2 = yes — 「Opus 便宜」) moves too,
+  //    but each move cold-starts it: only off a MEASURED spare lane (a cold start is never bought
+  //    on ignorance), only for a gain over SPARE_MOVE_MARGIN_PCT, and only once it is idle — a warm
+  //    cache holds it ('warm-cache'), a turn in flight holds it ('spare-hold'); asked again next cycle.
+  //    A conversation whose view sets nothing aside (Fable, an unknown model, a standing reroute)
+  //    has no spare lane anywhere, so this tier never moves it.
+  const spareGain = bestSettle && (!prioRank || prioRank(currentId) === prioRank(bestSettle.id)) ? (curSpare ?? 100) - (bestSettle.spare ?? 100) : 0;
+  const spareMove = () => ({ to: bestSettle.id, toName: bestSettle.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: bestSettle.remaining, reason: 'spare-lane', spareLane: { label: curLane ? curLane.name : null, from: curSpare, to: bestSettle.spare ?? null } });
+  //    An UNKNOWN default (no spare reading) is no claim either way (verify r1): a spawn leaves it only for a member whose
+  //    spare lane is MEASURED spent — under its hot bar, where that lane's own conversations would leave it anyway.
+  const spareClaim = curSpare != null || (bestSettle != null && bestSettle.spare != null && bestSettle.spare < THRESH.weekly.hot);
+  if (placing && spareGain > 0 && spareClaim) return spareMove();
+  //    Never a PINNED conversation waiting off its pin (`pinned`, verify r1): the owner chose its member.
+  if (proactive && !pinned && !curOwnLane && curSpare != null && spareGain > SPARE_MOVE_MARGIN_PCT) {
+    if (warm && (warm.warm || warm.inTurn)) return none(warm.warm ? 'warm-cache' : 'spare-hold', { agoSec: warm.agoSec, ttlSec: warm.ttlSec, wouldTo: bestSettle.id, wouldToName: bestSettle.name, why: 'spare-lane' });
+    return spareMove();
+  }
   // Proactive tier (hot pools): jump to a strictly-sooner KNOWN deadline —
   // drain the soonest-expiring quota while the current target's keeps. Never
   // jump onto unknown data, never without a real deadline margin, and never
   // onto a member below the settle bar (the oscillation guard above).
   // …under a manual priority only between members of EQUAL rank (both unlisted):
   // a member the owner listed is never left for a sooner deadline
+  // …and never onto MORE spare lane (B-8a65: the spare lane outranks the deadline — a conversation the
+  // spare tier moved off a rich member is not dragged back by perishability; rows without one tie)
   if (proactive && bestSettle && bestSettle.deadline != null && curDeadline != null && bestSettle.known
-      && curDeadline - bestSettle.deadline > PROACTIVE_MARGIN_SEC && (!prioRank || prioRank(bestSettle.id) === prioRank(currentId))) {
+      && curDeadline - bestSettle.deadline > PROACTIVE_MARGIN_SEC && (bestSettle.spare ?? 100) <= (curSpare ?? 100) && (!prioRank || prioRank(bestSettle.id) === prioRank(currentId))) {
     // …and never while the conversation's prompt cache is still warm: the jump
     // is VOLUNTARY, and a re-point cold-starts it (THE WARM CACHE, above). The
     // pool asks again next cycle; the cache goes cold on its own.
@@ -757,7 +830,8 @@ function decidePinnedPlacement(opts = {}) {
     }
     why = 'pin-recovering'; // can serve, but has not recovered enough to be RETURNED to — the automatic rules keep it for now (named apart from 'pin-exhausted': it is NOT out of quota, verify r2)
   }
-  const auto = decidePoolSwitch({ ...opts, readCache: autoReadCache || readCache, explain: true });
+  // (`pinned`: the automatic rules may carry it over a wall or a deadline, never for a spare lane — verify r1, B-8a65)
+  const auto = decidePoolSwitch({ ...opts, readCache: autoReadCache || readCache, pinned: true, explain: true });
   return { ...(auto || { to: null, reason: 'hold' }), reason: 'pin-exhausted', autoReason: auto ? auto.reason : 'hold', pinWhy: why, ...base };
 }
 
@@ -1223,4 +1297,4 @@ function conversationDisplayName(session, customNames, fallbackId = '') {
 
 module.exports = {
   quotaVerdict, conversationDisplayName, priorityOrder, priorityRankOf, decidePinnedPlacement, soonestUsableMember,
-  classifyAuthFailure, decideCliRefresh, cliRefreshWhy, nextScheduledReadMs, projectionBucketBought, projectionReadsAfter, PROJECTION_LEAD_SEC, PROJECTION_MOVE_MS, PROJECTION_WINDOW_MS, PROJECTION_MEMORY_MS, PROJECTION_RECORD_MAX_MS, projectCacheAhead, projectionCrossing, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, CACHE_TTL_SEC, CACHE_TTL_1M_SEC, cacheTtlSecFor, warmCache, conversationInTurn, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, decidePoolSwitch, poolBlockedNotice, poolCreditsNotice };
+  classifyAuthFailure, decideCliRefresh, cliRefreshWhy, nextScheduledReadMs, projectionBucketBought, projectionReadsAfter, PROJECTION_LEAD_SEC, PROJECTION_MOVE_MS, PROJECTION_WINDOW_MS, PROJECTION_MEMORY_MS, PROJECTION_RECORD_MAX_MS, projectCacheAhead, projectionCrossing, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, SPARE_MOVE_MARGIN_PCT, CACHE_TTL_SEC, CACHE_TTL_1M_SEC, cacheTtlSecFor, warmCache, conversationInTurn, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, spareLaneRemaining, decidePoolSwitch, poolBlockedNotice, poolCreditsNotice };

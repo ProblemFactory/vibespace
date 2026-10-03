@@ -236,6 +236,7 @@ const WS_CTX_CONTRACT = [
   'USAGE_STATUSLINE_CMD', 'userStatuslineCmd', 'serverNotice', 'otelEnv', 'telemetry',
   'sendUserInput', // THE typing path (src/server/user-input.js) — the chat-input case and the For-you reply route share it
   'getDesign', // the Design window's hub (src/server/design-engine.js): design-watch / design-unwatch, a socket's close unwatches
+  'setCustomName', // lane peer-card-sender: rename-session writes user-state customNames (src/routes/persistence.js — the sidebar rename's store)
 ];
 
 function registerWsHandler(wss, ctx) {
@@ -251,7 +252,7 @@ function registerWsHandler(wss, ctx) {
     adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
     accounts, scheduleCtxSync, activeSessionsPayload,
     USAGE_STATUSLINE_CMD, userStatuslineCmd, otelEnv, telemetry,
-    sendUserInput, getExitProxy = () => null, getDesign = () => null,
+    sendUserInput, getExitProxy = () => null, getDesign = () => null, setCustomName = null,
   } = ctx;
 
   // Monotonic sequence for layout-sync rebroadcasts (shared across all
@@ -783,6 +784,9 @@ function registerWsHandler(wss, ctx) {
           if (!session) break;
 
           if (trimmedName) session.name = trimmedName;
+          // lane peer-card-sender (③): an outside rename (an agent, a script) lands where the sidebar's own rename does —
+          // user-state `customNames[<backend>:<id>]`, broadcast to every client — and the name is explicit (②)
+          if (trimmedName) { session._nameExplicit = true; const key = getSessionKey(session); if (key && typeof setCustomName === 'function') { try { setCustomName(key, trimmedName); } catch (e) { console.warn('[rename] custom name not stored:', e && e.message); } } }
           // Write the new name back into the AGENT's own store when the
           // harness has somewhere to write it (caps.renameWriteback — codex's
           // thread name; claude's JSONL has no title field). Never a backend id.
@@ -793,6 +797,7 @@ function registerWsHandler(wss, ctx) {
             writeSessionMeta(session.sockName, {
               ...(readSessionMeta(session.sockName) || {}), // preserve keys not re-listed (agentToken/taskId/accountId)
               name: session.name,
+              nameExplicit: session._nameExplicit || undefined,
               cwd: session.cwd,
               backend: session.backend,
               backendSessionId: session.backendSessionId,

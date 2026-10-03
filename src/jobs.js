@@ -15,6 +15,7 @@ const { withoutNoticeHead } = require('./notification-senders.js'); // lane noti
 const textDigest = (t) => crypto.createHash('sha256').update(String(t)).digest('hex'); // a flood floor's memory of a text (verify r9)
 const { spawn, execFile } = require('child_process');
 const M = require('./job-model.js');
+const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const { applyClear, CLEARED_TEXT } = require('./record-clear.js'); // PURE: "Clear content…" (2026-09-28) — this engine holds the door (clearJobs)
 
 function writeJsonAtomic(file, obj) {
@@ -164,7 +165,7 @@ class JobManager {
   }
   _load() {
     try {
-      const arr = JSON.parse(fs.readFileSync(this.file, 'utf-8'));
+      const arr = timedSync('jobs.read', () => JSON.parse(fs.readFileSync(this.file, 'utf-8')));
       for (const j of arr) this.jobs.set(j.id, j);
     } catch (e) {
       if (fs.existsSync(this.file)) { // corrupt store: preserve bytes, reconcile skeletons from log dirs (§5)
@@ -188,8 +189,8 @@ class JobManager {
     // dirty even in read-only mode)
     if (this.readOnly) { this._dirty = false; return; }
     try {
-      writeJsonAtomic(this.file, [...this.jobs.values()]);
-      writeJsonAtomic(this.notifsFile, Object.fromEntries(this.pendingNotifs));
+      timedSync('jobs.write', () => writeJsonAtomic(this.file, [...this.jobs.values()]));
+      timedSync('jobs-notifs.write', () => writeJsonAtomic(this.notifsFile, Object.fromEntries(this.pendingNotifs)));
       this._dirty = false;
     } catch (e) { this.d.log('[jobs] save failed:', e.message); }
   }
@@ -845,7 +846,7 @@ class JobManager {
   /** the notifs file alone, NOW (a claim, a drain — a delivery's bookkeeping never waits for the 2 s save tick). */
   _saveNotifs() {
     if (this.readOnly) return;
-    try { writeJsonAtomic(this.notifsFile, Object.fromEntries(this.pendingNotifs)); } catch (e) { this.d.log('[jobs] notifs save failed:', e.message); }
+    try { timedSync('jobs-notifs.write', () => writeJsonAtomic(this.notifsFile, Object.fromEntries(this.pendingNotifs))); } catch (e) { this.d.log('[jobs] notifs save failed:', e.message); }
   }
   /** Put drained notifications BACK as themselves (a hand-over's frame came back undelivered — verify r2). */
   restoreNotifs(cid, items) {

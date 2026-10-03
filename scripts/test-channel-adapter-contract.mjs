@@ -16,11 +16,15 @@
 //   · a `receive:'scan'` adapter declares scanSources + per-source scanLatency
 //     + historyBySource covering every named source, and none of them 'none'
 //   · THE GREP CENSUS: no call site outside src/channels/ branches on `kind`
+//   · ⑦ THE DECLARED VENDOR SETTINGS (B-df40 part 3): an adapter's budget / pace setting is a row of its
+//     vendor's table in src/channel-settings.js, spread BY IDENTITY; an undeclared key is refused at
+//     registration by name; the tables are checked — each rule with a patched copy that turns it red
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { gitEnvFrom } from './git-env.mjs';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -49,13 +53,21 @@ ok(REGISTERED.length === 3, `the P0 registry holds the three fakes (${REGISTERED
   bad({ ...good, receive: 'push' }, /pushTransport/, 'a push adapter must name its transport');
   bad({ ...good, receive: 'push', pushTransport: 'ws-long-conn' }, /pushAckBudgetMs/, 'a push adapter must state the vendor\'s ack deadline (fence 11 acks AFTER durability)');
   // lane R5: the PER-SECOND pace (drain rule 18) and the vendor's declared name
-  const budgeted = { ...good, budget: { unit: 'quota-unit', default: 3000, settingKey: 'channels.budgetXPerMin', metered: true } };
-  ok(CH.validateCaps('paced', { ...budgeted, pace: { unitsPerSec: 40, settingKey: 'channels.xUnitsPerSec', cost: { fetch: 40, discover: 410, scanHost: 1 } }, vendorName: 'Google' }) === true, 'a declared pace (per second, a channels.* setting, a cost per drain action) and a vendor name validate');
+  // (B-df40 part 3: a settingKey must be a row of the vendor's table — the synthetic budget reads none; the declared
+  // pace below is the gmail table's own pair, see ⑦)
+  const CS = require(path.join(REPO, 'src/channel-settings.js'));
+  const budgeted = { ...good, budget: { unit: 'quota-unit', default: 3000, settingKey: null, metered: true } };
+  ok(CH.validateCaps('gmail', { ...good, budget: { unit: 'quota-unit', metered: true, ...CS.budgetOf(CS.CHANNEL_SETTINGS.gmail) }, pace: { ...CS.paceOf(CS.CHANNEL_SETTINGS.gmail), cost: { fetch: 40, discover: 410, scanHost: 1 } }, vendorName: 'Google' }) === true, 'a declared pace (per second, a channels.* setting, a cost per drain action) and a vendor name validate');
   bad({ ...good, pace: { unitsPerSec: 40 } }, /needs caps\.budget/, 'a pace with no budget is refused (the pace is counted in the budget\'s unit)');
   bad({ ...budgeted, pace: { unitsPerSec: 0 } }, /unitsPerSec must be a positive number/, 'a pace of 0 a second is refused (it would never send)');
   bad({ ...budgeted, pace: { unitsPerSec: 5, settingKey: 'gmail.rate' } }, /pace\.settingKey must be a channels\.\* setting key/, 'a pace setting outside channels.* is refused');
   bad({ ...budgeted, pace: { unitsPerSec: 5, cost: { send: 100 } } }, /not an action the drain paces/, 'a cost for an action the drain does not pace is refused (the drain prices fetch / discover / scanHost only)');
   bad({ ...budgeted, pace: { unitsPerSec: 5, cost: { fetch: -1 } } }, /cost\.fetch must be a number/, 'a negative cost is refused');
+  // verify r1 F2: caps.search.adds — what a hit ADDS to the saved copy; the words read it, so it is required and named
+  const sRow = { via: 'query', scope: null, pageSize: 10, pagesPerPress: 2, perMin: 6, cost: 1, snippet: true, context: 'thread', match: 'tokens' };
+  ok(['older', 'unsaved'].every((adds) => CH.validateCaps('srch', { ...good, search: { ...sRow, adds } }) === true), "a search row that says what its hits add ('older' | 'unsaved') validates");
+  bad({ ...good, search: { ...sRow, adds: 'newer' } }, /caps\.search\.adds must be one of older\|unsaved/, "a search row's unknown `adds` ('newer') is refused by name");
+  bad({ ...good, search: sRow }, /caps\.search\.adds must be one of/, 'a search row that does not say what its hits add is refused (the words would guess "older")');
   bad({ ...good, vendorName: '' }, /caps\.vendorName must be a non-empty string/, 'an empty vendor name is refused (the card would say " is limiting the rate")');
   ok(JSON.stringify(CH.PACE_COSTS) === JSON.stringify(['fetch', 'discover', 'scanHost', 'feed']), 'the priced actions are exactly the drain\'s four vendor actions (lane lark-search-poll: a change-feed page is one)');
 
@@ -456,6 +468,111 @@ for (const { kind, caps } of REGISTERED) {
   ok(dd.kind === 'dm' && dd.title && dd.peers.length === 1, 'the fake names a single chat it found (a title, kind dm, its peer)', JSON.stringify(dd));
   const hist = await ff.history(hidden[0], { limit: 50 });
   ok(hist.records.length === 4 && hist.reachedAnchor, 'a found single chat reads through the SAME history() (the words come from the reader, never from the hit)');
+}
+
+// ── ⑦ THE DECLARED VENDOR SETTINGS (B-df40 part 3 — design desk settings-cleanup §2 P3, the harness precedent applied
+// to channel adapters): an adapter's budget / pace setting is a row of its vendor's table in src/channel-settings.js,
+// referenced BY IDENTITY (spread from budgetOf / paceOf — never a literal); a key that table does not declare for that
+// vendor is refused AT REGISTRATION, by name (V3); the tables are checked (closed roles, number rows, min ≤ default ≤
+// max, the registry's key shape). Each rule has a patched copy outside the tree that turns its own judge red ──
+{
+  const CS = require(path.join(REPO, 'src/channel-settings.js'));
+  const lark = require(path.join(REPO, 'src/channels/lark.js'));
+  const gmail = require(path.join(REPO, 'src/channels/gmail.js'));
+  const MC = mutantCopies('adapter-contract-settings', REPO);
+  const srcOf = (f) => fs.readFileSync(path.join(REPO, 'src/channels', f), 'utf8');
+  const J = {};
+  J.values = (pairs) => pairs.every(([m, tbl]) => {
+    const b = CS.rowOfRole(tbl, 'budget'), p = CS.rowOfRole(tbl, 'pace');
+    return m.caps.budget.settingKey === CS.settingPath(b.key) && m.caps.budget.default === b.default && m.caps.pace.settingKey === CS.settingPath(p.key) && m.caps.pace.unitsPerSec === p.default;
+  });
+  const QUOTED_KEY = /['"`]channels\.[A-Za-z0-9]+['"`]/;
+  J.spread = (src, vendor) => src.includes(`...budgetOf(CHANNEL_SETTINGS.${vendor})`) && src.includes(`...paceOf(CHANNEL_SETTINGS.${vendor})`) && !QUOTED_KEY.test(src);
+  ok(J.values([[lark, CS.CHANNEL_SETTINGS.lark], [gmail, CS.CHANNEL_SETTINGS.gmail]]) && lark.caps.budget.default === 60 && lark.caps.pace.unitsPerSec === 5 && gmail.caps.budget.default === 3000 && gmail.caps.pace.unitsPerSec === 40,
+    'lark / gmail caps.budget + caps.pace carry their table rows\' settings key and default (60 · 5 · 3000 · 40, today\'s numbers)');
+  ok(J.spread(srcOf('lark.js'), 'lark') && J.spread(srcOf('gmail.js'), 'gmail'), 'both adapters SPREAD budgetOf / paceOf(CHANNEL_SETTINGS.<vendor>) into their caps — the table by identity');
+  const literal = fs.readdirSync(path.join(REPO, 'src/channels')).filter((f) => f.endsWith('.js') && QUOTED_KEY.test(srcOf(f)));
+  ok(!literal.length, `no module under src/channels/ spells a quoted channels.* key (${literal.join(', ') || 'clean'}) — a vendor's settings live in its table`);
+  const FROM = "budget: { unit: 'request', metered: true, ...budgetOf(CHANNEL_SETTINGS.lark) },";
+  const lsrc = srcOf('lark.js');
+  ok(lsrc.includes(FROM), 'the patch site of the planted-literal control is in lark.js (a moved line would make the control vacuous)');
+  const litFile = MC.write('src/channels/lark.js', lsrc.replace(FROM, "budget: { unit: 'request', default: 60, settingKey: 'channels.budgetLarkPerMin', metered: true },"), 'literal');
+  const Lit = require(litFile);
+  ok(J.values([[Lit, CS.CHANNEL_SETTINGS.lark]]) && !J.spread(fs.readFileSync(litFile, 'utf8'), 'lark'),
+    'NEGATIVE CONTROL — a lark.js copy with the key planted as a literal of the SAME value: the value check stays green, the identity census goes RED (it is what catches the copy that would drift on the next edit)');
+
+  // V3: registration refuses, by name, a key the table does not declare for that vendor
+  const good = { receive: 'poll', pollInterval: { hot: 30, cold: 300, floor: 10 }, history: 'page', sendAs: [], identityMarking: 'none' };
+  const planted = [
+    ['slack', { ...good, budget: { unit: 'request', default: 60, settingKey: 'channels.budgetSlackPerMin', metered: true } }, /"channels\.budgetSlackPerMin" is not declared — the "slack" adapter has no budget row in src\/channel-settings\.js/],
+    ['lark', { ...good, budget: { unit: 'request', metered: true, default: 60, settingKey: 'channels.budgetLarkPerMinute' } }, /"channels\.budgetLarkPerMinute" is not the budget row src\/channel-settings\.js declares for "lark" \(channels\.budgetLarkPerMin\)/],
+    ['lark', { ...good, budget: { unit: 'request', metered: true, ...CS.budgetOf(CS.CHANNEL_SETTINGS.lark) }, pace: { unitsPerSec: 5, settingKey: 'channels.gmailUnitsPerSec' } }, /caps\.pace\.settingKey "channels\.gmailUnitsPerSec" is not the pace row src\/channel-settings\.js declares for "lark" \(channels\.larkRequestsPerSec\)/],
+  ];
+  J.refused = (CHm) => planted.map(([kind, caps, re]) => {
+    const r = CHm.createChannelRegistry();
+    try { r.register({ kind, caps, create: () => ({}) }); return false; } catch (e) { return re.test(String(e.message)); }
+  });
+  const got = J.refused(CH);
+  ok(got.every(Boolean), 'V3: a planted adapter whose caps name a key its vendor\'s table does not declare is REFUSED at registration, by name — a new vendor with no table, a misspelt Lark key, Lark naming Gmail\'s pace key', JSON.stringify(got));
+  const declared = CH.createChannelRegistry();
+  let declaredOk = true;
+  try { declared.register({ kind: 'gmail', caps: { ...good, budget: { unit: 'quota-unit', metered: true, ...CS.budgetOf(CS.CHANNEL_SETTINGS.gmail) }, pace: { ...CS.paceOf(CS.CHANNEL_SETTINGS.gmail) } }, create: () => ({}) }); } catch (e) { declaredOk = String(e.message); }
+  ok(declaredOk === true, '…while the same shape spreading its own table registers (a NULL settingKey — the fakes, a suite\'s module — stays allowed: it reads no setting)', declaredOk);
+  const isrc = fs.readFileSync(path.join(REPO, 'src/channels/index.js'), 'utf8');
+  const GATE = '  if (key === undefined || key === null) return;\n';
+  ok(isrc.includes(GATE), 'the patch site of the registration control is in index.js');
+  const CHmut = require(MC.write('src/channels/index.js', isrc.replace(GATE, '  return;\n'), 'undeclared'));
+  ok(J.refused(CHmut).every((x) => !x), 'NEGATIVE CONTROL — an index.js copy without the declaration check registers all three planted adapters (the judge goes red without the rule)');
+
+  // the tables themselves
+  const errs = CS.checkChannelTables(CS.CHANNEL_SETTINGS);
+  ok(!errs.length && JSON.stringify(Object.keys(CS.CHANNEL_SETTINGS)) === '["lark","gmail"]' && Object.isFrozen(CS.CHANNEL_SETTINGS.lark.rows[0]), 'the shipped tables (lark, gmail) are valid and frozen', errs.join('; '));
+  const row = { key: 'budgetXPerMin', role: 'budget', type: 'number', default: 60, min: 5, max: 1000, label: 'x', description: 'y' };
+  const tbl = (rows, o = {}) => ({ vendor: 'x', vendorName: 'X', rows, ...o });
+  const BAD = [
+    [tbl([{ ...row, role: 'burst' }]), /role must be one of budget\|pace/],
+    [tbl([{ ...row, default: 2000 }]), /needs min ≤ default ≤ max/],
+    [tbl([{ ...row, min: 100, default: 60 }]), /needs min ≤ default ≤ max/],
+    [tbl([{ ...row, type: 'string' }]), /type must be number/],
+    [tbl([{ ...row, key: 'x.y' }]), /key must match/],
+    [tbl([row, { ...row, key: 'budgetX2' }]), /a second budget row/],
+    [tbl([{ ...row, label: '' }]), /label must be a non-empty string/],
+    [tbl([row], { vendor: 'X Corp' }), /vendor must be a lowercase slug/],
+    [tbl([row], { fn: () => 1 }), /pure data/],
+  ];
+  J.table = (CSm) => BAD.map(([t, re]) => CSm.checkChannelTable(t).some((e) => re.test(e)));
+  ok(J.table(CS).every(Boolean) && !CS.checkChannelTable(tbl([row])).length, 'checkChannelTable refuses each defect by name — an unknown role, a default outside min..max (both sides), a non-number row, a bad key, two rows of one role, an empty label, a non-slug vendor, a function', JSON.stringify(J.table(CS)));
+  const cross = CS.checkChannelTables({ x: tbl([row]), y: { ...tbl([row]), vendor: 'y' }, z: tbl([{ ...row, key: 'budgetZ' }]) });
+  ok(cross.some((e) => /key budgetXPerMin is also x's/.test(e)) && cross.some((e) => /z: vendor "x" is not its entry name/.test(e)), 'checkChannelTables: a key two vendors claim, and an entry whose vendor is not its name, are refused', cross.join('; '));
+  const csrc = fs.readFileSync(path.join(REPO, 'src/channel-settings.js'), 'utf8');
+  const RANGE = '    else if (!(r.min <= r.default && r.default <= r.max)) errs.push';
+  ok(csrc.includes(RANGE), 'the patch site of the range control is in channel-settings.js');
+  const CSmut = require(MC.write('src/channel-settings.js', csrc.replace(RANGE, '    else if (false) errs.push'), 'range'));
+  const mutTable = J.table(CSmut);
+  ok(!mutTable[1] && !mutTable[2] && mutTable[0], 'NEGATIVE CONTROL — a channel-settings.js copy without the range rule accepts both out-of-range defaults (the other defects still refused)', JSON.stringify(mutTable));
+
+  // the registry's `channelSettings` seam is a SUITE's (a scripted module declaring its own key — the coordinator's
+  // ruling 04:45Z, option A): NO production file passes it, or the strict rule above would have a back door
+  const prodFiles = [];
+  const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = path.join(d, e.name); if (e.isDirectory()) walk(rel); else if (/\.(c|m)?js$/.test(e.name)) prodFiles.push(rel); } };
+  walk('src'); prodFiles.push('server.js');
+  J.seam = (files) => files.flatMap(({ rel, src }) => {
+    const out = [];
+    for (const m of src.matchAll(/createChannelRegistry\(([^)]*)\)/g)) if (m[1].trim() && !/^function /.test(src.slice(Math.max(0, m.index - 9), m.index + 1).trimStart())) out.push(`${rel}: createChannelRegistry(${m[1].trim()})`);
+    if (/\bchannelSettings\b/.test(src) && rel !== path.join('src', 'channels', 'index.js')) out.push(`${rel}: names channelSettings`);
+    return out;
+  });
+  const prod = prodFiles.map((rel) => ({ rel, src: fs.readFileSync(path.join(REPO, rel), 'utf8') }));
+  const seamHits = J.seam(prod);
+  ok(prod.length > 200 && !seamHits.length && /function createChannelRegistry\(\{ channelSettings \} = \{\}\)/.test(isrc), `no production file (${prod.length} under src/ + server.js) passes the registry's channelSettings seam — every createChannelRegistry() call is bare`, seamHits.join('; '));
+  const esrcRel = path.join('src', 'server', 'channels-engine.js');
+  const esrc = prod.find((f) => f.rel === esrcRel).src;
+  const CALL = '    registry = createChannelRegistry(),\n';
+  ok(esrc.includes(CALL), 'the patch site of the seam control is in channels-engine.js');
+  const plantedCall = MC.write(esrcRel, esrc.replace(CALL, '    registry = createChannelRegistry({ channelSettings: {} }),\n'), 'seam');
+  const withPlant = prod.map((f) => (f.rel === esrcRel ? { rel: f.rel, src: fs.readFileSync(plantedCall, 'utf8') } : f));
+  ok(J.seam(withPlant).some((h) => h.startsWith(esrcRel)), 'NEGATIVE CONTROL — an engine copy that passes channelSettings to its registry is reported by name (the census can go red)', J.seam(withPlant).join('; '));
+  for (const r of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 4 })) ok(r.pass, r.name, r.detail);
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

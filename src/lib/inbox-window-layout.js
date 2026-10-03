@@ -183,7 +183,11 @@ export function itemView(item, ctx = {}) {
   // item that is not from an agent session at all (`no_session`: a login /
   // spend notice), where "nothing to reply to" would be noise on every pane.
   const rs = ctx.reply && typeof ctx.reply === 'object' ? ctx.reply : { show: false, enabled: false, why: '' };
-  const reply = resolved ? { show: false, enabled: false, why: '' }
+  // design 009: an app install's ONE card — TWO buttons by its state (Install / Not now · Try again · Open once installed);
+  // Reply, Mark done, Ignore, Copy and Clear content… behind its ⋯ (Reply opens the box only when asked for there)
+  const card = i.action && i.action.type === 'app-install' && i.card && typeof i.card === 'object' ? i.card : null;
+  const cardOpen = !!(card && card.state === 'done' && card.result && Array.isArray(card.result.rows) && card.result.rows.some((r) => r && r.id));
+  const reply = card && !ctx.replyOpen ? { show: false, enabled: false, why: '' } : resolved ? { show: false, enabled: false, why: '' }
     : rs.show ? { show: true, enabled: !!rs.enabled, why: rs.enabled ? '' : String(rs.why || '') }
     : { show: false, enabled: false, why: rs.code && rs.code !== 'no_session' ? String(rs.why || '') : '' };
   const options = !resolved && reply.show && Array.isArray(i.options) ? i.options.map((label, idx) => ({ idx, label: String(label) })) : [];
@@ -195,6 +199,8 @@ export function itemView(item, ctx = {}) {
   const proposal = !resolved && i.action && (i.action.type === 'browser-proposal' || i.action.type === 'channel-watch-request') && i.action.id ? { id: i.action.id, shown: String(i.action.shown || '') } : null;   // lane channel-agent-watch: an agent's wake request too
   // Layer 0 apps: an agent's install proposal — Install… (THE install dialog, the plan first) / Not now, answered here too
   const appAsk = !resolved && i.action && i.action.type === 'app-install' && i.action.id ? { id: i.action.id, host: i.action.host || 'local' } : null;
+  const cardActs = !card ? null : resolved ? [...(cardOpen ? ['app-open'] : []), 'reopen', 'copy']
+    : card.state === 'installing' ? ['more'] : card.state === 'failed' ? ['app-retry', 'more'] : card.state === 'done' ? [...(cardOpen ? ['app-open'] : []), 'more'] : ['app-install', 'app-reject', 'more'];
   const actions = resolved ? ['reopen', 'copy'] : [...(exitAsk ? ['exit-allow', 'exit-deny'] : []), ...(proposal ? ['proposal-approve', 'proposal-reject'] : []), ...(appAsk ? ['app-install', 'app-reject'] : []), ...(reply.show ? ['reply'] : []), 'done', 'dismiss', 'copy', ...(producer ? ['producer'] : [])];
   const title = String(ctx.words != null ? ctx.words : (i.text || ''));
   const detail = String(ctx.detail != null ? ctx.detail : (i.detail || ''));
@@ -209,6 +215,6 @@ export function itemView(item, ctx = {}) {
   return {
     id: i.id || null, sessionKey: i.sessionKey || null, title, detail, name: String(ctx.name || ''),
     urgency: resolved || notice ? '' : urgency, notice, resolved, status: resolved ? (i.status === 'dismissed' ? 'dismissed' : 'done') : 'open',
-    meta, replied, options, reply, actions, producer, exitAsk, proposal, appAsk, copy, cut,
+    meta, replied, options, reply, actions: cardActs || actions, producer, exitAsk, proposal, appAsk, copy, cut,
   };
 }

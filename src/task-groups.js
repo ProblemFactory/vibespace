@@ -33,6 +33,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const crypto = require('crypto');
 const { pickColorSeq } = require('./task-color-seq');
 // Backlog PRIORITY + the ownership-aware selection every READ uses (TASK.md,
@@ -234,7 +235,7 @@ class TaskGroupManager {
     // (harmless) so an older server build could still read it if rolled back.
     for (const [f, legacy] of [[this._file, false], [this._legacyFile, true]]) {
       let parsed;
-      try { parsed = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { continue; }
+      try { parsed = timedSync('task-groups.read', () => JSON.parse(fs.readFileSync(f, 'utf-8'))); } catch { continue; }
       if (!parsed || typeof parsed.tasks !== 'object') continue;
       this._state = parsed;
       if (legacy) this._save(); // migrate tasks.json → task-groups.json
@@ -246,8 +247,7 @@ class TaskGroupManager {
 
   _save() {
     const tmp = this._file + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(this._state, null, 2));
-    fs.renameSync(tmp, this._file);
+    timedSync('task-groups.write', () => { fs.writeFileSync(tmp, JSON.stringify(this._state, null, 2)); fs.renameSync(tmp, this._file); });
     // Keep every context folder's generated TASK.md in lockstep with the
     // store (content-compare guard makes this a no-op for unchanged tasks)
     for (const t of Object.values(this._state.tasks)) this._syncTaskMd(t);

@@ -129,6 +129,7 @@ const SESSION_FIELDS = {
   _accountId:          { owner: 'ws',     persisted: 'session-meta accountId', config: { key: 'account', example: 'sub-0a1b2c3d4e5f' }, note: "the billing identity this session spawned under (an account or a pool id; set at spawn from the create's `accountId`, re-pointed by the billing switcher's restart). Written in ws-create's session literal (the write detector sees only `x._f =`), so this row exists for the RESUME CARRIER: the client's per-session config `account` is what a resume sends back as `accountId`" },
   _pickedModel:        { owner: 'pool',   persisted: 'meta',    note: 'set-model pick (plan C identity ladder)' },
   _pickedModelAt:      { owner: 'pool',   persisted: 'meta',    note: 'timestamp of the pick' },
+  _nameExplicit:       { owner: 'ws',     persisted: 'meta',    note: 'lane peer-card-sender: the live name was GIVEN (ws create `sessionName`, a ws rename-session) — the sidebar card shows it before the first message; meta `nameExplicit`, restored by boot-restore' },
   _spawnModel:         { owner: 'ws',     persisted: 'meta',    config: { key: 'model', example: 'claude-fable-5-1' }, note: 'model at spawn (identity ladder fallback)' },
   _modelLocked:        { owner: 'pool',   persisted: 'meta',    config: { key: 'modelLock', example: true }, note: 'per-conversation model lock flag' },
   _lockedModel:        { owner: 'pool',   persisted: 'meta',    config: { key: 'lockModel', example: 'claude-fable-5-1' }, note: 'lock target (full id upgraded from the CLI echo)' },

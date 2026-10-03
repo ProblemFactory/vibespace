@@ -9,14 +9,15 @@
 //     one stop per message the old `+` was. Focus inside the bar shows it (CSS :focus-within).
 //   · A press on a button never reaches the row (stopPropagation) — the body's links, the quote fold, the thread chip
 //     keep their own clicks (the bar covers only its own box, and only while shown).
-//   · The phone has no hover: the bar is not drawn there (CSS), and a long press on the message opens a menu of the
-//     SAME actions (`msgActionMenu`) — the explorer's touch rows.
+//   · The phone has no hover: the bar is not drawn there (CSS). A long press on the WORDS is the platform's selection
+//     (press-select.js), so a … button (`renderMsgMore`, touch-first devices only) opens the SAME actions + Copy text as
+//     a menu (`msgActionMenu`); a long press on the row's chrome (the avatar, the head) still opens it too.
 //   · `syncMsgBar` patches a drawn bar IN PLACE when the conversation's offers change (keyed by `data-act`), never a
 //     rebuilt row.
 import { t } from './i18n.js';
 import { icon } from './channel-chrome.js';
 import { showContextMenu } from './utils.js';
-import { barKeyStep } from './msg-bar-model.js';
+import { barKeyStep, TOUCH_QUERY } from './msg-bar-model.js';
 
 const GLYPH = Object.freeze({ react: 'emojiAdd', thread: 'thread', quote: 'quote', more: 'more' });
 
@@ -96,6 +97,23 @@ export function holdBarOpen(button, pop) {
   };
   const mo = new MutationObserver(() => { if (!pop.isConnected) done(); });
   mo.observe(pop.parentNode || document.body, { childList: true });
+}
+
+/** A touch-first device NOW (the … button is created only there; CSS draws it only there). */
+export const isTouchFirst = () => !!(typeof matchMedia === 'function' && matchMedia(TOUCH_QUERY).matches);
+
+/** THE TOUCH DOOR (lane channel-touch-menu, 2.369.203 — the chat's … of lane mobile-select): a button in the bar's
+ *  corner (CSS: the row keeps a 44 px right gutter, so it covers no words), the library's SVG, named. `onOpen(button)`
+ *  opens the menu at it; none = a delegated click (the group window's `.chanmsg-more`). */
+export function renderMsgMore(onOpen, cls = '') {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'chanmsg-tmore' + (cls ? ' ' + cls : '');
+  b.title = t('Message actions');
+  b.setAttribute('aria-label', t('Message actions'));
+  b.appendChild(icon('more', 16));
+  if (onOpen) b.addEventListener('click', (ev) => { ev.stopPropagation(); ev.preventDefault(); onOpen(b); });
+  return b;
 }
 
 /** THE PHONE'S DOOR (and a right click on a desktop): the row's SAME actions as a menu at the press. `anchor` = what a

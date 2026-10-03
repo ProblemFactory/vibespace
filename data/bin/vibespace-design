@@ -13,21 +13,30 @@ const TOKEN = process.env.VIBESPACE_SESSION_TOKEN || process.env.VIBESPACE_JOB_T
 
 const args = process.argv.slice(2);
 const verb = args[0];
-const VALUE_FLAGS = new Set(['--title', '--dir', '--w', '--h', '--x', '--y', '--page']);
+const VALUE_FLAGS = new Set(['--title', '--dir', '--w', '--h', '--x', '--y', '--page', '--system', '--kind']);
 const flag = (name) => { const i = args.indexOf(name); return i >= 0 ? (args[i + 1] ?? '') : undefined; };
 const has = (name) => args.includes(name);
 /** The positional arguments after the verb (a value flag's value is not one). */
 const positional = () => { const out = []; for (let i = 1; i < args.length; i++) { if (VALUE_FLAGS.has(args[i])) { i++; continue; } if (!args[i].startsWith('--')) out.push(args[i]); } return out; };
 
 const USAGE = `vibespace-design — plain-HTML design artboards, shown live in the VibeSpace Design window
-  vibespace-design new <slug> [--title "<what the user would call it>"] [--dir designs]
-        ← creates <dir>/<slug>/ with design.json + a Main.html to replace, opens the window, prints the folder
+  vibespace-design new <slug> [--title "<what the user would call it>"] [--dir designs] [--system <name>|none]
+        ← creates <dir>/<slug>/ with design.json + a Main.html to replace, opens the window, prints the folder;
+          follows a design system (its tokens.css is copied in) — the named one, else this VibeSpace's default
+  vibespace-design new <slug> --kind system [--title "<brand name>"]
+        ← a DESIGN SYSTEM: system.md (the guide) + tokens.css (custom properties) + component artboards
+  vibespace-design systems          ← the design systems on this VibeSpace (and the default one)
   vibespace-design add <file.html> [--title "…"] [--w 1280 --h 800] [--x 0 --y 0] [--page <id>]
         ← checks the artboard on the hub, then adds / updates its row in design.json and repaints it
   vibespace-design check [dir]      ← every artboard's verdict and design.json's, by name (exit 1 on a refusal)
   vibespace-design sync [dir]       ← "these files changed" — run it after every edit (on any machine)
   vibespace-design open [dir]       ← opens (or brings forward) the Design window on the folder
-  vibespace-design show [dir]       ← design.json in words: artboards, pages, the notes
+  vibespace-design show [dir]       ← design.json in words: artboards, pages, the notes, the tweaks + what the user set
+  vibespace-design ask [dir] < questions.json
+        ← BEFORE drawing a new design: 3–6 questions as a form in the Design window; then stop until the
+          [Design answers] message arrives (JSON: [{"id", "q", "kind": "one"|"many", "options": [...]}, …])
+  vibespace-design preview <file.html>
+        ← an address your browser opens (15 min): look at the artboard at its own size before you hand over
   vibespace-design publish [dir] [--public] [--page <id>]
         ← publishes the design as one page on this VibeSpace (asks the user first) and prints its path
   vibespace-design list             ← this conversation's designs and their pages
@@ -104,6 +113,74 @@ const skeleton = (title) => `<!doctype html>
 </body>
 </html>
 `;
+// ── design systems (lane design-systems-home, design 003 §2 S5) ──
+/** A folder holding system.md AND tokens.css (regular files) is a design system. */
+function kindOf(dir) {
+  const isFile = (n) => { try { return fs.lstatSync(path.join(dir, n)).isFile(); } catch { return false; } };
+  return isFile('system.md') && isFile('tokens.css') ? 'system' : 'design';
+}
+const SYSTEM_MD = (title) => `# ${title} — design system
+
+What this system is for, in one paragraph: the product, its voice, who reads it.
+
+## Tokens (tokens.css)
+Every colour, font size, radius and spacing is a custom property in tokens.css. A design made with
+\`vibespace-design new <slug> --system "${title.replace(/"/g, '')}"\` copies tokens.css and pastes it into each artboard's <style>;
+\`vibespace-design check\` then warns on any colour or font size that is not one of these tokens.
+
+## Type
+## Colour
+## Components
+One artboard per group (buttons, forms, cards, navigation …), each built only from the tokens.
+
+## Do / don't
+`;
+const TOKENS_CSS = `:root {
+  --color-bg: #ffffff;
+  --color-surface: #f5f5f7;
+  --color-ink: #1d1d1f;
+  --color-muted: #6e6e73;
+  --color-accent: #0a84ff;
+  --font-sans: system-ui, sans-serif;
+  --font-size-small: 13px;
+  --font-size-body: 16px;
+  --font-size-h2: 24px;
+  --font-size-h1: 40px;
+  --radius: 8px;
+  --space: 8px;
+}
+`;
+/** A first artboard built on a system's tokens: the tokens pasted into its <style>, no literal colour or font size. */
+const systemSkeleton = (title, tokens, { components = false } = {}) => `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escHtml(title)}</title>
+<style>
+/* the design system's tokens — a copy of tokens.css: keep it identical (vibespace-design check says when it drifts) */
+${tokens.trim()}
+</style>
+<style>
+  body { margin: 0; font-family: var(--font-sans, system-ui, sans-serif); color: var(--color-ink); background: var(--color-bg); font-size: var(--font-size-body); }
+  main { max-width: 960px; margin: 0 auto; padding: 64px 32px; }
+  h1 { font-size: var(--font-size-h1); margin: 0 0 16px; }${components ? `
+  .swatch { display: inline-block; width: 96px; height: 64px; border-radius: var(--radius); margin: 0 var(--space) var(--space) 0; }
+  button { font: inherit; padding: 10px 20px; border: 0; border-radius: var(--radius); background: var(--color-accent); color: var(--color-bg); }` : ''}
+</style>
+</head>
+<body>
+<main>
+  <section>
+    <h1>${escHtml(title)}</h1>
+${components ? `    <p>The components of this system — one artboard per group, built only from tokens.css.</p>
+    <div><span class="swatch" style="background: var(--color-accent)"></span><span class="swatch" style="background: var(--color-ink)"></span><span class="swatch" style="background: var(--color-surface)"></span></div>
+    <button type="button">Primary</button>` : `    <p>Replace this with the first screen — every colour and font size as var(--…) from the tokens.</p>`}
+  </section>
+</main>
+</body>
+</html>
+`;
 const intFlag = (name, lo, hi) => {
   const v = flag(name);
   if (v === undefined) return undefined;
@@ -120,6 +197,18 @@ function printCheck(r, { only = null } = {}) {
   if (sizeWords(r.size)) console.log(sizeWords(r.size));
 }
 const refused = (r) => r.refusals.length > 0 || r.frames.some((f) => !f.ok);
+// lane design-tweaks: the knobs design.json declares + THE USER'S LAYER (user.json — VibeSpace writes it; read it, never write it)
+const tweakWord = (v) => (typeof v === 'string' ? v : JSON.stringify(v));
+function printTweaks(b, { full = false } = {}) {
+  const tw = Array.isArray(b.tweaks) ? b.tweaks : [];
+  const set = (b.user && b.user.tweaks) || {};
+  const ids = Object.keys(set);
+  if (full && tw.length) {
+    console.log(`tweaks (the user's values live in user.json — VibeSpace writes it; never write it yourself):`);
+    for (const x of tw) console.log(`  ${x.id}  "${x.label}"  ${x.kind} ${x.var || x.attr}${x.kind === 'range' ? ` ${x.min}–${x.max} step ${x.step}${x.unit ? ' ' + x.unit : ''}` : ''}${x.kind === 'select' ? ` [${x.options.join(' | ')}]` : ''}  default ${tweakWord(x.default)}${ids.includes(x.id) ? `  → the user set ${tweakWord(set[x.id])}` : ''}`);
+  } else if (tw.length) console.log(`  tweaks: ${tw.length} declared${ids.length ? ` — the user set ${ids.map((k) => `${k} ${tweakWord(set[k])}`).join(', ')}` : ' — the user set none'}`);
+  for (const w of (b.user && b.user.warnings) || []) console.log(`  ! user.json: ${w.why}`);
+}
 
 (async () => {
   if (!verb || verb === 'help' || verb === '--help' || verb === '-h') { console.log(USAGE); return; }
@@ -129,6 +218,19 @@ const refused = (r) => r.refusals.length > 0 || r.frames.some((f) => !f.ok);
     const slug = positional()[0];
     if (!slug || !/^[a-z0-9][a-z0-9-]{0,62}$/.test(slug)) die('usage: vibespace-design new <slug> [--title "…"] [--dir designs] — the slug is lower-case letters, digits and -', 2);
     const title = (flag('--title') || slug.replace(/-/g, ' ')).replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 120);
+    // lane design-systems-home: a design system (--kind system), or a design that follows one (--system <name>; none
+    // named = this VibeSpace's default, if it has one; --system none = without). Asked BEFORE anything is made.
+    const kind = flag('--kind'), sysFlag = flag('--system');
+    if (kind !== undefined && kind !== 'system' && kind !== 'design') die('--kind takes system (a design system) or design', 2);
+    if (sysFlag === '') die('--system takes the name of a design system (vibespace-design systems lists them) or none', 2);
+    if (kind === 'system' && sysFlag !== undefined && sysFlag !== 'none') die('a design system does not follow another one — drop --system', 2);
+    let sys = null, sysNote = '';
+    if (kind !== 'system' && sysFlag !== 'none') {
+      const q = await call('GET', '/api/agent/design/system' + (sysFlag ? '?name=' + encodeURIComponent(sysFlag) : ''));
+      if (q.ok) sys = q.body;
+      else if (sysFlag !== undefined) refuse(q);   // a named system that is not there: nothing is made
+      else if (q.body && q.body.code !== 'no_default') sysNote = `(this VibeSpace's default design system is not used: ${q.body.error || q.status})`;
+    }
     const baseRaw = path.resolve(flag('--dir') || 'designs');
     fs.mkdirSync(baseRaw, { recursive: true });
     const base = fs.realpathSync(baseRaw);
@@ -140,12 +242,21 @@ const refused = (r) => r.refusals.length > 0 || r.frames.some((f) => !f.ok);
     const dir = fs.realpathSync(target);
     if (path.dirname(dir) !== base) die(`refusing ${target}: it resolves outside ${base}`);
     const made = [];
-    if (!fs.existsSync(path.join(dir, 'design.json'))) { writeInside(dir, 'design.json', JSON.stringify({ title, artboards: [{ file: 'Main.html', x: 0, y: 0, w: 1280, h: 800, title: 'Main' }] }, null, 2) + '\n'); made.push('design.json'); }
-    if (!fs.existsSync(path.join(dir, 'Main.html'))) { writeInside(dir, 'Main.html', skeleton(title)); made.push('Main.html'); }
-    const r = await call('POST', '/api/agent/design/register', { dir, title });
+    const absent = (n) => !fs.existsSync(path.join(dir, n));
+    if (kind === 'system') {
+      if (absent('system.md')) { writeInside(dir, 'system.md', SYSTEM_MD(title)); made.push('system.md'); }
+      if (absent('tokens.css')) { writeInside(dir, 'tokens.css', TOKENS_CSS); made.push('tokens.css'); }
+    } else if (sys && absent('tokens.css')) { writeInside(dir, 'tokens.css', sys.tokens); made.push('tokens.css'); }
+    const tokensNow = () => { try { return fs.readFileSync(path.join(dir, 'tokens.css'), 'utf8'); } catch { return null; } };
+    if (absent('design.json')) { writeInside(dir, 'design.json', JSON.stringify({ title, ...(sys ? { system: { name: sys.system.name } } : {}), artboards: [{ file: 'Main.html', x: 0, y: 0, w: 1280, h: 800, title: kind === 'system' ? 'Components' : 'Main' }] }, null, 2) + '\n'); made.push('design.json'); }
+    if (absent('Main.html')) { const tk = (kind === 'system' || sys) ? tokensNow() : null; writeInside(dir, 'Main.html', tk && !/<\/style/i.test(tk) ? systemSkeleton(title, tk, { components: kind === 'system' }) : skeleton(title)); made.push('Main.html'); }
+    const r = await call('POST', '/api/agent/design/register', { dir, title, kind: kindOf(dir) });
     if (!r.ok) refuse(r);
     console.log(dir);
     console.log(made.length ? `created ${made.join(' + ')} — replace Main.html with the first screen, then: vibespace-design add <file.html> · check · sync` : 'the folder already held a design — nothing overwritten');
+    if (kind === 'system') console.log('a DESIGN SYSTEM: write system.md (what it is for, type, colour, components, do / don\'t), put every colour and font size in tokens.css as a custom property, one artboard per component group built only from the tokens — check holds them to tokens.css');
+    if (sys) console.log(`follows the design system "${sys.system.name}"${sys.viaDefault ? ' (this VibeSpace\'s default — --system none starts without one)' : ''}: ${made.includes('tokens.css') ? `tokens.css copied from ${sys.system.dir}${sys.system.host ? ` on ${sys.system.host}` : ''}` : 'the folder already had a tokens.css (kept)'}; paste tokens.css into each artboard's <style> and write every colour and font size as var(--…) — check warns on any other`);
+    if (sysNote) console.log(sysNote);
     console.log(r.body.opened ? 'the Design window is open on the user\'s screen' : '(no live window to open — the design is listed in the chat\'s design chip)');
     return;
   }
@@ -201,6 +312,7 @@ const refused = (r) => r.refusals.length > 0 || r.frames.some((f) => !f.ok);
     const r = await call('POST', '/api/agent/design/check', { dir });
     if (!r.ok) refuse(r);
     printCheck(r.body);
+    printTweaks(r.body);
     if (refused(r.body)) process.exit(1);
     console.log(`all ${r.body.frames.length} artboard(s) pass`);
     return;
@@ -217,9 +329,14 @@ const refused = (r) => r.refusals.length > 0 || r.frames.some((f) => !f.ok);
 
   if (verb === 'open') {
     const dir = designDir(positional()[0]);
-    const r = await call('POST', '/api/agent/design/register', { dir, ...(flag('--title') !== undefined ? { title: flag('--title') } : {}) });
+    // no --title: design.json's own title (a folder removed from the list and opened again keeps its name — a design
+    // system is followed BY that name; lane design-systems-home)
+    let title = flag('--title');
+    if (title === undefined) { try { const j = JSON.parse(fs.readFileSync(path.join(dir, 'design.json'), 'utf8')); if (j && typeof j.title === 'string' && j.title.trim()) title = j.title; } catch { } }
+    const r = await call('POST', '/api/agent/design/register', { dir, kind: kindOf(dir), ...(title !== undefined ? { title } : {}) });
     if (!r.ok) refuse(r);
     console.log(r.body.opened ? `opened the Design window on ${dir}` : `${dir} is registered (no live window to open — the chat's design chip lists it)`);
+    if (r.body.design && r.body.design.kind === 'system') console.log('(a design system: it holds system.md + tokens.css — vibespace-design systems lists it)');
     return;
   }
 
@@ -229,6 +346,8 @@ const refused = (r) => r.refusals.length > 0 || r.frames.some((f) => !f.ok);
     if (!r.ok) refuse(r);
     const b = r.body;
     console.log(`${b.title} — ${b.dir}`);
+    if (b.kind === 'system') console.log('a design system (system.md + tokens.css) — its artboards are checked against its own tokens');
+    if (b.system) console.log(`follows the design system "${b.system.name}" (its tokens.css copied here) — colours and font sizes outside the tokens are warned below`);
     if (b.pages.length) console.log('pages: ' + b.pages.map((p) => `${p.id} "${p.name}"`).join(', '));
     console.log(`launch: ${b.launch.view}${b.launch.page ? ` page ${b.launch.page}` : ''}${b.launch.file ? ` ${b.launch.file}` : ''}`);
     console.log('artboards:');
@@ -236,6 +355,45 @@ const refused = (r) => r.refusals.length > 0 || r.frames.some((f) => !f.ok);
     if (b.notes.length) { console.log('notes:'); for (const n of b.notes) console.log(`  [${n.id}, ${n.color}${n.page ? `, page ${n.page}` : ''}]\n${n.text.split('\n').map((l) => '    ' + l).join('\n')}`); }
     for (const x of b.refusals) console.log(`  ✗ design.json ${x.where}: ${x.why}`);
     for (const w of b.warnings) console.log(`  ! ${w.why}`);
+    printTweaks(b, { full: true });
+    return;
+  }
+
+  if (verb === 'ask') {
+    const dir = designDir(positional()[0]);
+    if (process.stdin.isTTY) die('usage: vibespace-design ask [dir] < questions.json — the questions come on stdin as JSON: [{"id": "platform", "q": "Which platform?", "kind": "one", "options": ["iOS phone", "Desktop web"]}, …]', 2);
+    const chunks = [];
+    let size = 0;
+    for await (const c of process.stdin) { size += c.length; if (size > 64 * 1024) die('the questions are over 64 KB — ask at most 8 short questions', 2); chunks.push(c); }
+    const text = Buffer.concat(chunks).toString('utf8');
+    if (!text.trim()) die('no questions on stdin — vibespace-design ask [dir] < questions.json', 2);
+    const r = await call('POST', '/api/agent/design/ask', { dir, questions: text });
+    if (!r.ok) refuse(r);
+    const qs = (r.body.ask && r.body.ask.questions) || [];
+    console.log(`asked ${qs.length} question(s) on ${dir} — ${r.body.opened ? 'the Design window shows them as a form' : 'the Design window shows them as a form when the user opens it (no live window now)'}`);
+    for (const q of qs) console.log(`  ${q.id} (${q.kind === 'many' ? 'pick any' : 'pick one'}): ${q.q}\n    ${[...q.options, 'decide for me', ...(q.other ? ['other…'] : [])].join(' | ')}`);
+    console.log('Now list these questions in your reply too (a user who stays in the chat answers there), then STOP —');
+    console.log('draw nothing until the answers arrive as a "[Design answers] …" message (or the user answers in the chat).');
+    return;
+  }
+
+  if (verb === 'preview') {
+    const file = positional()[0];
+    if (!file || !/\.html$/i.test(file)) die('usage: vibespace-design preview <file.html> — the artboard to look at (in the design folder)', 2);
+    let real;
+    try { real = fs.realpathSync(path.resolve(file)); } catch { die(`no such file: ${path.resolve(file)}`, 2); }
+    const name = path.basename(real);
+    if (name !== path.basename(path.resolve(file))) die(`refusing ${file}: it is a link to ${real} — name the artboard itself in the design folder`);
+    const r = await call('POST', '/api/agent/design/preview', { dir: path.dirname(real), file: name });
+    if (!r.ok) refuse(r);
+    const b = r.body;
+    const url = API.replace(/\/+$/, '') + b.path;
+    console.log(url);
+    console.log(`${b.file} at its own size ${b.w}×${b.h}; this address works for 15 minutes and re-reads the file on every load. Look at it:`);
+    console.log(`  vibespace-browser open "${url}"`);
+    console.log(`  vibespace-browser set viewport ${b.w} ${b.h}`);
+    console.log(`  vibespace-browser screenshot /tmp/${name.replace(/\.html$/i, '').replace(/[^A-Za-z0-9_.-]+/g, '-')}-check.png`);
+    console.log('Look for text that overlaps or is cut off, content that overflows the frame, contrast too low to read — fix, sync, reload.');
     return;
   }
 
@@ -262,7 +420,17 @@ const refused = (r) => r.refusals.length > 0 || r.frames.some((f) => !f.ok);
     const r = await call('GET', '/api/agent/designs');
     if (!r.ok) refuse(r);
     if (!r.body.designs.length) { console.log('no designs in this conversation yet — vibespace-design new <slug> starts one'); return; }
-    for (const d of r.body.designs) console.log(`${d.dir}${d.host ? ` (on ${d.host})` : ''}  "${d.title}"${d.page ? `  ${d.page.path} (${d.page.public ? 'public' : 'private'})` : ''}`);
+    for (const d of r.body.designs) console.log(`${d.dir}${d.host ? ` (on ${d.host})` : ''}  "${d.title}"${d.kind === 'system' ? '  [design system]' : ''}${d.page ? `  ${d.page.path} (${d.page.public ? 'public' : 'private'})` : ''}`);
+    return;
+  }
+
+  if (verb === 'systems') {
+    const r = await call('GET', '/api/agent/design/systems');
+    if (!r.ok) refuse(r);
+    const { systems = [], defaultSystem = '' } = r.body;
+    if (!systems.length) { console.log('no design system on this VibeSpace yet — vibespace-design new <slug> --kind system makes one (from the brand, the codebase or the files the user points at)'); return; }
+    for (const x of systems) console.log(`"${x.name}"  ${x.dir}${x.host ? ` (on ${x.host})` : ''}${defaultSystem && x.name.toLowerCase() === defaultSystem.toLowerCase() ? '  (the default)' : ''}`);
+    console.log(defaultSystem ? `the default: "${defaultSystem}" — vibespace-design new follows it unless --system names another (or none)` : 'no default is set — vibespace-design new follows a system only with --system <name>');
     return;
   }
 

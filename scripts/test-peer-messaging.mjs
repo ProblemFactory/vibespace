@@ -4,15 +4,16 @@
 // standing in for the CLI's cross-session messaging server: registry scan
 // (live-pid + key-file discovery, dead-pid and wrong-id rejection), the exact
 // two-frame wire shape ({"type":"auth"} then {"type":"user"} — from the
-// 2.1.229 binary's own injection recipe), dead-socket honesty, and the
-// channel-lane event post with its ok-ack. All in a tmp dir; no real CLI.
+// 2.1.229 binary's own injection recipe) and dead-socket honesty (the
+// channel-lane event post went with the VibeSpace channel, B-df40). All in a
+// tmp dir; no real CLI.
 import fs from 'node:fs';
 import os from 'node:os';
 import net from 'node:net';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const { findPeer, postToPeer, postChannelEvent } = require('../src/peer-messaging.js');
+const { findPeer, postToPeer } = require('../src/peer-messaging.js');
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 
@@ -53,23 +54,6 @@ server.close();
 // 3. dead socket honesty
 const r2 = await postToPeer({ socketPath: path.join(dir, 'gone.sock'), key: null }, 'x');
 ok(r2.ok === false && /socket error|timeout/.test(r2.reason || ''), 'dead socket → {ok:false, reason}, never throws');
-
-// 4. channel-lane event post (ok-ack protocol)
-const chSock = path.join(dir, 'chan.sock');
-const got = [];
-const chServer = net.createServer((conn) => {
-  let buf = '';
-  conn.on('data', (d) => {
-    buf += d.toString();
-    let i; while ((i = buf.indexOf('\n')) >= 0) { got.push(JSON.parse(buf.slice(0, i))); buf = buf.slice(i + 1); conn.write('ok\n'); }
-  });
-});
-await new Promise((r) => chServer.listen(chSock, r));
-const r3 = await postChannelEvent(chSock, 'event body', { kind: 'background_job' });
-ok(r3.ok === true && got.length === 1 && got[0].content === 'event body' && got[0].meta.kind === 'background_job', 'postChannelEvent delivers {content, meta} and honors the ok-ack');
-chServer.close();
-const r4 = await postChannelEvent(path.join(dir, 'gone2.sock'), 'x');
-ok(r4.ok === false, 'channel post to a dead socket fails honestly');
 
 fs.rmSync(dir, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

@@ -315,16 +315,6 @@ class ClaudeCodeAdapter extends BackendAdapter {
     // --settings (docs/en/cross-session-messaging §Non-interactive sessions);
     // repo/managed settings can still tighten it — we never override a hold.
     if (options.acceptPeerMessages) mergeSettings({ crossSessionInbound: 'accept' });
-    // EXPERIMENTAL VibeSpace channel (2.344.0, CLI research preview): register
-    // our channel MCP server for THIS spawn only (--mcp-config — never the
-    // user's config files) and opt it in per-session. Custom channels aren't
-    // on the preview's Anthropic-curated allowlist, so the development flag is
-    // the only opt-in; org channelsEnabled policy still applies. Default OFF.
-    if (options.vibespaceChannel && options.vibespaceChannel.script) {
-      const vc = options.vibespaceChannel;
-      args.push('--mcp-config', JSON.stringify({ mcpServers: { vibespace: { command: process.execPath, args: [vc.script], env: { VIBESPACE_CHANNEL_SOCK: vc.sock } } } }));
-      args.push('--dangerously-load-development-channels', 'server:vibespace');
-    }
 
     // TUI renderer for terminal-mode sessions (CLI ≥2.1.x): "fullscreen" is the
     // flicker-free alternate-screen renderer with virtualized scrollback (same

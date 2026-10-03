@@ -22,12 +22,18 @@ function familyOfScopedBucket(name) { return familyOfModel(name); }
 // (every request consumes them — the nested model), and a bucket whose name
 // maps to NO family is KEPT (fail closed: unknown data must never relax a
 // constraint). fam=null ⇒ no projection (the whole cache, today's semantics).
+// THE SPARE LANE (B-8a65): the caps set aside are handed back as `spareScoped`
+// — the same door answers "which caps does this request NOT draw", so there is
+// no second projection. A spare lane is not a constraint (nothing here counts
+// it); the pool only ORDERS on it (account-pool-auto `spareLaneRemaining`).
+// View-only: never written to data/usage-cache.
 function projectCacheForFamily(cache, fam) {
   if (!cache || !fam || !Array.isArray(cache.scopedWeekly)) return cache;
-  const scopedWeekly = cache.scopedWeekly.filter((b) => {
+  const scopedWeekly = [], spareScoped = [];
+  for (const b of cache.scopedWeekly) {
     const bf = familyOfScopedBucket(b?.name);
-    return !bf || bf === fam;
-  });
-  return { ...cache, scopedWeekly };
+    (!bf || bf === fam ? scopedWeekly : spareScoped).push(b);
+  }
+  return { ...cache, scopedWeekly, spareScoped };
 }
 module.exports = { familyOfModel, familyOfScopedBucket, projectCacheForFamily };

@@ -66,7 +66,17 @@
 // container, and the UA's focus scroll-into-view on the Command input was
 // what scrolled the title off-left. test-desktop-app-window pins the three
 // viewports with computed geometry.
-import { t } from './i18n.js';
+//
+// APPS FIRST (design 009 §B3–B7, lane apps-interface, 2026-10-03 — the owner: 「APP 界面需要优化一下了」): ONE name, "Apps"
+// (the toolbar button, the dialog title, the catalog's heading, a TOP-LEVEL ⚙ row); "Desktop" keeps meaning the whole
+// desktop. The dialog reads top-down: a head row (the machine picker + "Install an app…", one tap on a phone), Running,
+// Apps, Browsers, Your installed apps, Advanced — and a FOOTER with what used to stand before the apps: the intro, the
+// sharing default, the display backend's line (moved to the head only when it says something is wrong) and the
+// real-desktop line, said ONCE. A card's name wraps to two lines (never "Li…"); the per-app default scale left the card
+// for its ⋯ (and a right-click on the card) — the ⋯ reads "1.5×" only while a default is set. A refusal from a plan is
+// ONE sentence in the device's language plus its way out ("Let an agent find another way"). Layer 1's banner (an
+// interrupted install → Repair) is a slot at the top, fed by the apps section's state (PURE appsBannerModel).
+import { t, resolveLang } from './i18n.js';
 import { copyText, createModalShell, escHtml, fetchJson, showConfirmDialog, showContextMenu, showToast, uiScale } from './utils.js';
 import { registerCommand, registerMenuItem, runCommand } from './contributions.js';
 import { setupDirAutocomplete } from './autocomplete.js';
@@ -76,7 +86,7 @@ import { SCALE_PREF_KEY, scaleKeyOf, scaleChoiceOf, setScaleChoice, launchScaleC
 import { wireAppPrefs, appPrefs, appPrefsReady, onAppPrefs, saveAppPrefs } from './desktop-app-prefs.js';
 import { mountLaunchShareRow, launchKeyOf } from './window-share.js';
 import { OFFICE_MODULES, installSpecFor, FONTS_ID } from '../office-open.js'; // §7.9: the LibreOffice table (PURE)
-import { appPlanBlock, appRefusalText, appDialogTitle, appGoLabel, appPlanNote, appDoneText, renderAppsSection, openDebInstall } from './app-install-dialog.js'; // Layer 0 apps: THE install dialog shows an app's plan too
+import { appPlanBlock, appSummaryBlock, appRefusalText, appDialogTitle, appGoLabel, appPlanNote, appDoneText, renderAppsSection, openDebInstall, openAppSearch, openAgentHelp, appsBannerModel } from './app-install-dialog.js'; // Layer 0 apps: THE install dialog shows an app's plan too
 
 export const COMMAND_ID = 'desktopApps.open';
 const RECENTS_KEY = 'desktopAppRecents';
@@ -110,7 +120,7 @@ export function explicitScaleLabel(choice) {
   return `${choice}×`;
 }
 /** Lane D: a catalog card's default-scale control — its words ("Auto" / "1.5×"), its tooltip and its menu rows. */
-export function cardScaleText(choice) { return choice === 'auto' ? t('Auto') : `${choice}×`; }
+export function cardScaleText(choice) { return choice === 'auto' ? '' : `${choice}×`; } // design 009 §B4: '' = the ⋯ glyph (no permanent "Auto")
 export function cardScaleTitle(app, choice) {
   return choice === 'auto'
     ? t('Default scale for {app}: Auto (Settings → Desktop app scale). Click to choose the scale it starts at.', { app })
@@ -120,6 +130,26 @@ export function cardScaleRowLabel(row) {
   const mark = row.current ? '✓ ' : '\u2003';
   return mark + (row.choice === 'auto' ? t('Auto (Settings → Desktop app scale)') : explicitScaleLabel(row.choice));
 }
+
+/** Design 009 §B6/§B7: a catalog card's name in the device's language — an installed app's own localized name
+ *  (`labels: {zh, ja}` from its .desktop file, lane apps-install-core), a built-in row's translated label, else the label
+ *  as served. PURE (the language is a parameter). */
+export function catalogLabel(row, lang = resolveLang()) {
+  if (!row) return '';
+  const own = row.labels && typeof row.labels === 'object' && typeof row.labels[lang] === 'string' ? row.labels[lang].trim() : '';
+  if (own) return own;
+  if (!row.app && row.label === 'Calculator (GNOME)') return t('Calculator (GNOME)'); // the built-in registry's one worded label
+  return String(row.label || row.exec || '');
+}
+/** Design 009 §B7: a built-in row whose program is absent says so in a few translated words ("gedit not on PATH" stays
+ *  its tooltip). null ⇒ not a plain registry row. */
+export function registryReasonShort(row) {
+  if (!row || row.available || row.browser || row.office || row.app || row.reasonCode) return null;
+  return t('not installed');
+}
+/** Design 009 §B5: the plan refusals that end in a hand-off to an agent (the thing is not in this machine's package
+ *  sources, or only as a format that does not run here). */
+export const HAND_OFF_CODES = Object.freeze(['needs_snap', 'not_found', 'conflict', 'removes']);
 
 /** B-bfe6: the ONE sentence that tells a desktop-app browser apart from the Agent browser — the Browsers section
  *  prints it and every browser card carries it in its tooltip (a function: `t` must run after the language loads). */
@@ -306,10 +336,12 @@ export function splitArgs(line) {
   return out;
 }
 
+let launcherApp = null; // design 009 §B5: the install dialog's hand-off opens a helper conversation, which needs the app
 export function installDesktopAppLauncher(app) {
   app._desktopAppsAvailable = false;
-  registerCommand({ id: COMMAND_ID, title: 'Desktop apps…', icon: APPS_ICON, run: (ctx) => showLaunchDialog((ctx && ctx.app) || app) });
-  registerMenuItem({ menu: 'gear', parent: 'tools', order: 30, icon: APPS_ICON, /* under Tools ▸ (gear-menu.js head 'tools'; Usage 10 · Background Work 20 · this 30 · Plugins 40) */ when: (c) => !!c.app._desktopAppsAvailable, label: () => t('Desktop apps…'), run: (c) => runCommand(COMMAND_ID, { app: c.app }) });
+  launcherApp = app;
+  registerCommand({ id: COMMAND_ID, title: 'Apps…', icon: APPS_ICON, run: (ctx) => showLaunchDialog((ctx && ctx.app) || app) });
+  registerMenuItem({ menu: 'gear', group: '1_admin', order: 18, icon: APPS_ICON, /* design 009 §B6: a TOP-LEVEL row (Manage agents 10 · All Settings 15 · this 18 · Tools ▸ 20) */ when: (c) => !!c.app._desktopAppsAvailable, label: () => t('Apps…'), run: (c) => runCommand(COMMAND_ID, { app: c.app }) });
   const btn = document.getElementById('btn-desktop-apps');
   if (btn) btn.addEventListener('click', () => runCommand(COMMAND_ID, { app }));
   // Layer 0 apps (owner D4): the file explorer's "Install this package…" on a .deb — THE plan, on the machine that holds it
@@ -325,6 +357,7 @@ export function installDesktopAppLauncher(app) {
       // entry stays reachable (the dialog greys what cannot run and offers "Install xpra on <machine>…")
       if (!ok) { const m = await fetchJson('/api/desktop/machines'); ok = !!(m && Array.isArray(m.machines) && m.machines.some((x) => x.hostId !== 'local' && x.code !== 'no_x11')); }
       app._desktopAppsAvailable = ok;
+      app._desktopAppsKnown = true; // the probe ANSWERED (Settings: an unanswered probe hides nothing — settings-view.js)
       app._applyChromeSettings?.();
     }).catch(() => { if (attempt < 5) setTimeout(() => probe(attempt + 1), [3000, 8000, 20000, 45000, 90000][attempt]); });
   };
@@ -358,6 +391,18 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
   actions.append(copyBtn, goBtn);
   const facts = document.createElement('div'); facts.className = 'desktop-install-facts'; facts.style.display = 'none'; // an app's plan: its facts above the commands
   ib.append(note, facts, pre, actions, log);
+  // design 009 B: an app's dialog LEADS with the card's summary (what, from where, how big, what it gives); the plan's
+  // facts, the root sentence and the commands fold under Details (a plan the engine sent no card for keeps the old order)
+  const summary = document.createElement('div'); summary.className = 'app-card-summary'; summary.style.display = 'none';
+  const more = document.createElement('details'); more.className = 'app-install-details';
+  if (isApp) { const s = document.createElement('summary'); s.textContent = t('Details'); more.append(s); ib.insertBefore(summary, note); }
+  // design 009 §B5: a refusal that is a dead end offers its way out — an agent looks for another way (the request carried)
+  const handOff = (code, pkgs) => {
+    if (!HAND_OFF_CODES.includes(code) || !launcherApp) return;
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'btn-create desktop-install-handoff'; b.textContent = t('Let an agent find another way');
+    b.onclick = () => { iclose(); openAgentHelp(launcherApp, m, { request: (pkgs || []).join(' ') }); };
+    actions.replaceChildren(b);
+  };
   const q = m.hostId === 'local' ? '' : `?host=${encodeURIComponent(m.hostId)}`;
   const r = isApp
     ? await fetchJson('/api/apps/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(proposalId ? { proposalId } : { host: m.hostId || 'local', request }) })
@@ -367,10 +412,20 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
   let shownDigest = r.digest || null; // verify-r6 I1: the press names the plan these commands are
   if (isApp && r.request) { const h = ib.closest('.dialog')?.querySelector('.dialog-title, h3, .modal-title'); if (h) h.textContent = appDialogTitle(r.request, name); }
   if (!plan.ok) {
-    note.textContent = isApp ? [appRefusalText(plan.code), plan.error].filter(Boolean).join(' — ') : (installRefusalText(plan.code, what) || plan.error || '');
-    note.classList.add('is-bad'); return;
+    note.textContent = isApp ? (appRefusalText(plan.code) || plan.error || '') : (installRefusalText(plan.code, what) || plan.error || ''); // design 009 §B5: ONE sentence, ours
+    note.classList.add('is-bad');
+    if (isApp) handOff(plan.code, (r.request || request || {}).packages);
+    return;
   }
-  if (isApp) { facts.replaceChildren(appPlanBlock(plan, { proposal: r.proposal || null })); facts.style.display = ''; }
+  if (isApp) {
+    facts.replaceChildren(appPlanBlock(plan, { proposal: r.proposal || null })); facts.style.display = '';
+    if (r.card) {
+      const p = r.proposal || null;
+      summary.replaceChildren(appSummaryBlock(p ? { ...r.card, by: p.by && p.by.name ? { name: p.by.name } : null, why: p.why || '' } : r.card)); summary.style.display = '';
+      const rootLine = document.createElement('div'); rootLine.className = 'app-install-root'; rootLine.textContent = appPlanNote(plan, name);
+      more.append(rootLine, facts, pre); ib.insertBefore(more, actions);
+    }
+  }
   pre.textContent = plan.commands.join('\n'); pre.style.display = '';
   copyBtn.style.display = '';
   copyBtn.onclick = async () => { const ok = await copyText(plan.commands.join('\n')); showToast(ok === false ? t('Could not copy — select the commands and copy them') : t('Commands copied'), ok === false ? { type: 'error' } : undefined); };
@@ -378,7 +433,7 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
   // an install already running there (a restarted hub, another tab) is FOLLOWED, never started twice (verify r2 F3/F4)
   const running = !!((isApp ? r.install : r.facts) && (isApp ? r.install : r.facts).installing);
   if (!plan.canRun && !running) { note.textContent = isApp ? appRefusalText('no_sudo') : installRefusalText('no_sudo', what); note.classList.add('is-bad'); return; }
-  note.textContent = running ? t('An install is already running on {machine} — follow its log here.', { machine: name }) : isApp ? appPlanNote(plan, name) : t('These commands run on {machine} as root, {source}:', { machine: name, source: src });
+  note.textContent = running ? t('An install is already running on {machine} — follow its log here.', { machine: name }) : isApp ? (r.card ? '' : appPlanNote(plan, name)) : t('These commands run on {machine} as root, {source}:', { machine: name, source: src });
   if (isApp) goBtn.textContent = appGoLabel(plan);
   if (running) goBtn.textContent = t('Follow the install');
   goBtn.style.display = '';
@@ -403,7 +458,7 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
         if (!p.trim()) continue;
         let o; try { o = JSON.parse(p); } catch { continue; }
         if (o.reattached && !o.done) { note.textContent = t('Still installing on {machine} — re-attached. Its log so far follows.', { machine: name }); note.classList.remove('is-bad'); }
-        if (o.log != null) { log.textContent += o.log + '\n'; log.scrollTop = log.scrollHeight; }
+        if (o.log != null && !(isApp && /^= (run|ok)\b/.test(o.log))) { log.textContent += o.log + '\n'; log.scrollTop = log.scrollHeight; } // design 009 B (review I13): the slot's own `= run …` / `= ok` markers are not the user's words
         if (o.done || o.error) end = o;
       }
     }
@@ -420,7 +475,7 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
       showToast(installRefusalText('plan_changed', what), { type: 'error' });
       goBtn.disabled = false; copyBtn.disabled = false;
     }
-    else { note.textContent = (end && ((isApp ? [appRefusalText(end.code), end.error].filter(Boolean).join(' — ') : installRefusalText(end.code, what)) || end.error)) || t('The install ended without an answer — the log above says what ran'); note.classList.add('is-bad'); showToast(isApp ? t('It did not finish on {machine} — the dialog says why', { machine: name }) : xp ? t('The xpra install on {machine} failed', { machine: name }) : t('The LibreOffice install on {machine} failed', { machine: name }), { type: 'error' }); goBtn.disabled = false; copyBtn.disabled = false; }
+    else { note.textContent = (end && ((isApp ? appRefusalText(end.code) : installRefusalText(end.code, what)) || end.error)) || t('The install ended without an answer — the log above says what ran'); note.classList.add('is-bad'); showToast(isApp ? t('It did not finish on {machine} — the dialog says why', { machine: name }) : xp ? t('The xpra install on {machine} failed', { machine: name }) : t('The LibreOffice install on {machine} failed', { machine: name }), { type: 'error' }); goBtn.disabled = false; copyBtn.disabled = false; }
   };
   void iclose;
 }
@@ -432,29 +487,24 @@ const patchUserState = (patch) => fetch('/api/user-state', { method: 'PATCH', he
 export async function showLaunchDialog(app, opts = {}) {
   const doc = opts && opts.file && typeof opts.file === 'object' && opts.file.path ? opts.file : null;
   const refusal = doc && opts.refusal && opts.refusal.code ? opts.refusal : null;
-  const { overlay, body, close } = createModalShell({ id: 'desktop-launch-dialog', title: doc ? t('Open with LibreOffice') : t('Desktop apps'), dialogClass: 'desktop-launch', escapeToClose: true });
+  const { overlay, body, close } = createModalShell({ id: 'desktop-launch-dialog', title: doc ? t('Open with LibreOffice') : t('Apps'), dialogClass: 'desktop-launch', escapeToClose: true });
+  // design 009 §B3: apps first — the head row (machines + "Install an app…"), Running, Apps, Browsers, Your installed
+  // apps, Advanced; the intro, the sharing default, the backend's line and the real-desktop line live in the FOOTER
   body.innerHTML = `
-    <p class="desktop-launch-intro">${escHtml(t('Opens a graphical program from this machine in a VibeSpace window you drive with your mouse and keyboard — agents cannot see it unless you share it. Click an application below to open it, or use “Advanced” to run any command.'))}</p>
-    <div class="desktop-launch-machines" role="group" aria-label="${escHtml(t('Machine'))}"><span class="desktop-launch-machines-label">${escHtml(t('Run on'))}</span></div>
-    <div class="desktop-launch-share-row"></div>
-    <div class="desktop-launch-avail"></div>
+    <div class="desktop-launch-banner is-empty"></div>
+    <div class="desktop-launch-head">
+      <div class="desktop-launch-machines" role="group" aria-label="${escHtml(t('Machine'))}"><span class="desktop-launch-machines-label">${escHtml(t('Run on'))}</span></div>
+      <button type="button" class="btn-create desktop-launch-install-app">${escHtml(t('Install an app…'))}</button>
+    </div>
+    <div class="desktop-launch-avail-head"></div>
     <div class="desktop-launch-install is-empty"></div>
     <section class="desktop-launch-sec desktop-launch-running-sec is-empty">
       <h4>${escHtml(t('Running'))}<span class="desktop-launch-count"></span></h4>
       <div class="desktop-launch-running"></div>
     </section>
-    <section class="desktop-launch-sec desktop-launch-desk-sec">
-      <h4>${escHtml(t('Agents on your real desktop'))}<span class="desktop-launch-desk-state"></span></h4>
-      <div class="desktop-launch-desk"></div>
-    </section>
-    <section class="desktop-launch-sec">
-      <h4>${escHtml(t('Applications'))}</h4>
+    <section class="desktop-launch-sec desktop-launch-catalog-sec">
+      <h4>${escHtml(t('Apps'))}</h4>
       <div class="desktop-launch-registry desktop-launch-grid"></div>
-    </section>
-    <section class="desktop-launch-sec desktop-launch-apps-sec">
-      <h4>${escHtml(t('Your installed apps'))}</h4>
-      <p class="desktop-launch-apps-note">${escHtml(t('Apps you install here are kept by VibeSpace: they come back by themselves after this machine is rebuilt. An agent can only propose one — you approve it.'))}</p>
-      <div class="desktop-launch-apps"></div>
     </section>
     <section class="desktop-launch-sec desktop-launch-browsers-sec is-empty">
       <h4>${escHtml(t('Browsers'))}</h4>
@@ -464,6 +514,11 @@ export async function showLaunchDialog(app, opts = {}) {
         <label class="desktop-launch-check"><input type="checkbox" class="desktop-launch-keep-profile"><span>${escHtml(t('Keep the profile after it closes'))}</span></label>
       </div>
       <div class="desktop-launch-browsers desktop-launch-grid"></div>
+    </section>
+    <section class="desktop-launch-sec desktop-launch-apps-sec">
+      <h4>${escHtml(t('Your installed apps'))}</h4>
+      <p class="desktop-launch-apps-note">${escHtml(t('Apps you install here are kept by VibeSpace: they come back by themselves after this machine is rebuilt. An agent can only propose one — you approve it.'))}</p>
+      <div class="desktop-launch-apps"></div>
     </section>
     <div class="desktop-launch-adv">
       <button type="button" class="desktop-launch-adv-toggle" aria-expanded="false" aria-controls="desktop-launch-adv-body">${UI_ICONS.chevronDown}<span>${escHtml(t('Advanced: run any command'))}</span></button>
@@ -482,12 +537,22 @@ export async function showLaunchDialog(app, opts = {}) {
           </div>
         </div>
       </div>
+    </div>
+    <div class="desktop-launch-foot">
+      <p class="desktop-launch-intro">${escHtml(t('Opens a graphical program from this machine in a VibeSpace window you drive with your mouse and keyboard — agents cannot see it unless you share it. Click an application below to open it, or use “Advanced” to run any command.'))}</p>
+      <div class="desktop-launch-share-row"></div>
+      <div class="desktop-launch-avail"></div>
+      <section class="desktop-launch-sec desktop-launch-desk-sec">
+        <h4>${escHtml(t('Agents on your real desktop'))}<span class="desktop-launch-desk-state"></span></h4>
+        <div class="desktop-launch-desk"></div>
+      </section>
     </div>`;
   const $ = (sel) => body.querySelector(sel);
   const availEl = $('.desktop-launch-avail'), regEl = $('.desktop-launch-registry'), runEl = $('.desktop-launch-running'), recEl = $('.desktop-launch-recents');
   const browsersSec = $('.desktop-launch-browsers-sec'), browsersEl = $('.desktop-launch-browsers'), urlIn = $('.desktop-launch-url'), keepIn = $('.desktop-launch-keep-profile');
   const runSec = $('.desktop-launch-running-sec'), countEl = $('.desktop-launch-count');
   const machinesEl = $('.desktop-launch-machines'), installEl = $('.desktop-launch-install');
+  const availHead = $('.desktop-launch-avail-head'), availFoot = $('.desktop-launch-foot'), bannerEl = $('.desktop-launch-banner'), installAppBtn = $('.desktop-launch-install-app');
   let host = doc && doc.host ? String(doc.host) : 'local'; // lane C2: the machine the catalog + a launch are for (§7.9: a document's own machine)
   let machines = [];        // GET /api/desktop/machines (the PURE picker verdicts)
   let listError = null;     // { code, error } when the chosen machine's list failed
@@ -499,6 +564,8 @@ export async function showLaunchDialog(app, opts = {}) {
   // §7.9 FILE MODE: the intro names the document; browsers + "Advanced" are not for a document (a document is not a command)
   if (doc) {
     const intro = $('.desktop-launch-intro');
+    if (intro) body.prepend(intro); // a document's own sentence leads (the footer's intro is the catalog's)
+    installAppBtn.style.display = 'none'; // installing apps: not this dialog's question
     if (intro) intro.textContent = t('Opens {file} in LibreOffice in a VibeSpace window, on the machine that holds it — you edit it there, and Save writes it back in place.', { file: doc.label || doc.path });
     const note = document.createElement('p'); note.className = 'desktop-launch-file-note';
     const said = refusal && refusal.code !== 'app-absent' ? (openWithRefusalText(refusal.code, { file: doc.label, machine: doc.hostLabel || null }) || refusal.error || '') : '';
@@ -515,8 +582,20 @@ export async function showLaunchDialog(app, opts = {}) {
     if (doc) return;
     try { appsSec?.dispose(); } catch { }
     const elx = body.querySelector('.desktop-launch-apps');
-    if (elx) appsSec = renderAppsSection(app, elx, { host, machine: machineOf(host), onChange: () => { if (overlay.isConnected) refresh(); } });
+    if (elx) appsSec = renderAppsSection(app, elx, { host, machine: machineOf(host), onChange: () => { if (overlay.isConnected) refresh(); }, onState: renderBanner });
   };
+  // design 009 §C: Layer 1's ONE banner — an interrupted install, at the top of the dialog (PURE appsBannerModel)
+  function renderBanner(st) {
+    const b = appsBannerModel(st);
+    bannerEl.replaceChildren();
+    bannerEl.classList.toggle('is-empty', !b);
+    if (!b) return;
+    const said = document.createElement('span'); said.className = 'desktop-launch-banner-text'; said.textContent = b.text;
+    const go = document.createElement('button'); go.type = 'button'; go.className = 'btn-create desktop-launch-banner-go'; go.textContent = b.label;
+    go.onclick = () => showInstallDialog(machineOf(host), { what: 'app', request: b.request, onDone: () => { if (overlay.isConnected) { refresh(); appsSec?.refresh(); } } });
+    bannerEl.append(said, go);
+  }
+  installAppBtn.onclick = () => openAppSearch(app, machineOf(host), { onDone: () => { if (overlay.isConnected) { refresh(); appsSec?.refresh(); } } });
   const docMachineName = () => (doc ? (doc.hostLabel || machineInSentence(machineOf(doc.host || 'local'))) : '');
   let data = null;
   let recents = [];
@@ -533,18 +612,18 @@ export async function showLaunchDialog(app, opts = {}) {
     const c = document.createElement('button'); c.type = 'button';
     c.className = 'desktop-launch-card-scale' + (cur !== 'auto' ? ' has-default' : '');
     c.dataset.scaleFor = row.id;
-    c.textContent = cardScaleText(cur);
-    c.title = cardScaleTitle(row.label, cur);
+    if (cur === 'auto') c.innerHTML = UI_ICONS.more; else c.textContent = cardScaleText(cur); // design 009 §B4: ⋯ — or the default it starts at
+    c.title = cardScaleTitle(catalogLabel(row), cur);
     c.setAttribute('aria-label', c.title);
     c.setAttribute('aria-haspopup', 'menu');
-    c.onclick = (e) => {
+    c.onclick = (e, at = null) => {
       e.stopPropagation();
-      const r = c.getBoundingClientRect();
+      const r = at || c.getBoundingClientRect();
       const rows = scaleDefaultMenuModel(appPrefs(SCALE_PREF_KEY), key).map((m) => ({ label: cardScaleRowLabel(m), disabled: m.disabled, action: () => {
         refocusScale = row.id;
         saveAppPrefs(SCALE_PREF_KEY, (map) => setScaleChoice(map, key, m.choice), t('Could not save the app’s default scale'));
       } }));
-      const pop = showContextMenu(r.left, r.bottom + 2, [{ label: t('Default scale for {app}', { app: row.label }), disabled: true }, ...rows]);
+      const pop = showContextMenu(r.left, r.bottom + 2, [{ label: t('Default scale for {app}', { app: catalogLabel(row) }), disabled: true }, ...rows]);
       // Esc closes THIS menu only: the dialog's own Esc (createModalShell's overlay listener) would close the whole dialog
       const onEsc = (ev) => {
         if (!pop.isConnected) { document.removeEventListener('keydown', onEsc, true); return; }
@@ -665,7 +744,11 @@ export async function showLaunchDialog(app, opts = {}) {
   const render = () => {
     const mName = host === 'local' ? null : machineName(machineOf(host));
     availEl.textContent = listError ? machineErrorText(listError.code, mName || machineName(null), listError.error) : availabilityText(data && data.availability, mName);
-    availEl.classList.toggle('desktop-launch-avail-bad', !!listError || !!(data && data.availability && !data.availability.backend));
+    const availBad = !!listError || !!(data && data.availability && !data.availability.backend);
+    availEl.classList.toggle('desktop-launch-avail-bad', availBad);
+    // design 009 §B3: a backend that works is footer small print; one that is missing or fell back is said at the top
+    if (availBad || !!(data && data.availability && data.availability.fallbackWhy)) { if (availEl.parentElement !== availHead) availHead.appendChild(availEl); }
+    else { const shareEl = availFoot.querySelector('.desktop-launch-share-row'); if (availEl.previousElementSibling !== shareEl) shareEl.after(availEl); }
     renderInstall();
     const dead = !!listError || !data?.availability?.backend;
     const scales = !dead && data?.availability?.stream === 'xpra'; // lane D: only a rung that scales apps offers a default scale
@@ -695,10 +778,10 @@ export async function showLaunchDialog(app, opts = {}) {
       const unavailable = !row.available || !!row.parkedUntil;
       b.className = 'desktop-launch-card' + (unavailable ? ' is-unavailable' : '') + (isLaunching ? ' is-launching' : '');
       // a dimmed BROWSER row says its verdict SHORT and translated (by the server's code); the sentence is its tooltip
-      const sub = isLaunching ? t('Launching…') : row.available ? (row.reason || row.exec) : ((row.browser && browserReasonShort(row.reasonCode)) || (row.office && officeReasonShort(row.reasonCode)) || (row.app && appReasonShort(row.reasonCode)) || row.reason || t('not on PATH'));
+      const sub = isLaunching ? t('Launching…') : row.available ? (row.reason || row.exec) : ((row.browser && browserReasonShort(row.reasonCode)) || (row.office && officeReasonShort(row.reasonCode)) || (row.app && appReasonShort(row.reasonCode)) || registryReasonShort(row) || row.reason || t('not on PATH'));
       // faces B: a startable browser card names its face ("Browser app · chromium"); a dimmed one says only its short reason
       const docSub = doc && !isLaunching && !unavailable ? t('opens {file}', { file: doc.label || doc.path }) : null; // §7.9 FILE MODE: the card names the document it opens
-      b.innerHTML = `<span class="desktop-launch-card-icon">${isLaunching ? UI_ICONS.refresh : cardIconFor(row.category, row.office)}</span><span class="desktop-launch-card-label">${escHtml(row.label)}</span><span class="desktop-launch-card-sub">${docSub !== null ? escHtml(docSub) : escHtml(row.browser && !isLaunching && !unavailable ? `${t('Browser app')} · ${sub}` : sub)}</span>`;
+      b.innerHTML = `<span class="desktop-launch-card-icon">${isLaunching ? UI_ICONS.refresh : cardIconFor(row.category, row.office)}</span><span class="desktop-launch-card-label">${escHtml(catalogLabel(row))}</span><span class="desktop-launch-card-sub">${docSub !== null ? escHtml(docSub) : escHtml(row.browser && !isLaunching && !unavailable ? `${t('Browser app')} · ${sub}` : sub)}</span>`;
       if (row.app && row.icon && !isLaunching) { // an installed app's own icon — through ONE cookie-only route, set as img.src (never markup)
         const img = document.createElement('img'); img.className = 'desktop-launch-card-img'; img.alt = ''; img.width = 20; img.height = 20; img.decoding = 'async';
         img.onerror = () => img.remove();
@@ -728,7 +811,12 @@ export async function showLaunchDialog(app, opts = {}) {
       // the card's button, so the grid item is a wrapper holding both
       const wrap = document.createElement('div'); wrap.className = 'desktop-launch-card-wrap';
       wrap.appendChild(b);
-      if (scales) wrap.appendChild(cardScaleControl(row));
+      if (scales && !unavailable) { // design 009 §B4: an app that cannot start has no default scale to choose (its name keeps the room)
+        const sc = cardScaleControl(row);
+        wrap.appendChild(sc);
+        // design 009 §B4: a right-click (a long press on a phone) on the card opens the same menu, at the pointer
+        b.addEventListener('contextmenu', (e) => { e.preventDefault(); sc.onclick(e, { left: e.clientX, bottom: e.clientY }); });
+      }
       // §7.9: a LibreOffice row that is not installed carries its install beside it (the plan first, never a silent apt)
       if (row.office && !row.available && !dead) {
         const ib = document.createElement('button'); ib.type = 'button'; ib.className = 'desktop-launch-card-install';
@@ -795,10 +883,10 @@ export async function showLaunchDialog(app, opts = {}) {
     const d = await fetchJson('/api/window/desktop');
     if (!deskEl || !deskEl.isConnected) return;
     deskEl.innerHTML = '';
-    if (!d || d.error) { deskState.textContent = ''; deskEl.innerHTML = `<div class="desktop-launch-empty">${escHtml((d && d.error) || t('Off — turn it on in Settings → Agent browser'))}</div>`; return; }
-    deskState.textContent = d.enabled ? '' : t('Off — turn it on in Settings → Agent browser');
+    if (!d || d.error) { deskState.textContent = ''; deskEl.innerHTML = `<div class="desktop-launch-empty">${escHtml((d && d.error) || t('Off — turn it on in Settings → Desktop apps'))}</div>`; return; }
+    deskState.textContent = d.enabled ? '' : t('Off — turn it on in Settings → Desktop apps'); // design 009 §B3: said ONCE (the heading's line), never again below it
     const leases = d.enabled ? (d.leases || []) : [];
-    if (!leases.length) { deskEl.innerHTML = `<div class="desktop-launch-empty">${escHtml(d.enabled ? t('No agent holds a window on your desktop') : t('Off — turn it on in Settings → Agent browser'))}</div>`; return; }
+    if (!leases.length) { if (d.enabled) deskEl.innerHTML = `<div class="desktop-launch-empty">${escHtml(t('No agent holds a window on your desktop'))}</div>`; return; }
     for (const l of leases) {
       const row = document.createElement('div'); row.className = 'desktop-launch-run-row desktop-launch-desk-row';
       const paused = l.input === 'user';

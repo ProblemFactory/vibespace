@@ -59,6 +59,13 @@ const path = require('path');
 // spellings over the same table, so a one-sided edit fails there.
 const { isFixtureProjectDir, isFixtureSid } = require('./fixture-guard.js');
 
+// A UUIDv7's millisecond stamp (its first 48 bits); null for any other id
+// shape. Codex mints thread AND turn ids as v7, so "minted after the fork" is
+// readable off a turn id itself (FORK REPLAY's identity end).
+function uuid7Ms(id) {
+  const s = String(id || '');
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-/i.test(s) ? parseInt(s.slice(0, 8) + s.slice(9, 13), 16) : null;
+}
 function defaultCursorFile() {
   return process.env.VIBESPACE_USAGE_CURSOR || path.join(os.homedir(), '.vibespace', 'usage-cursor.json');
 }
@@ -340,6 +347,40 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
       cur.zsize = st.size;
     };
     yield* scanRollout((line) => {
+      // FORK REPLAY (2.369.203): a forked rollout (session_meta
+      // .forked_from_id) opens by REPLAYING its ancestors' token_count records,
+      // every one stamped at the fork instant — requests already counted from
+      // the ancestor's own rollout under ITS thread id, so the per-thread rid
+      // never dedups them (1,661 double-counted ledger rows on the author's
+      // instance, 104 with a null model: the replay precedes the fork's first
+      // turn_context). A token_count in a forked rollout stamped within 2 s of
+      // the fork instant is a replay (local corpus 2026-10-03: 1,714 of 1,714
+      // replays, 0 genuine requests). The fork instant is read from the FIRST
+      // line a cursor sees and PERSISTS IN THE CURSOR (a scan may start
+      // mid-file; a pre-upgrade cursor is past the replay already ⇒ 0).
+      // The window is only the OUTER bound: the replay ENDS at the fork's own
+      // first turn — its task_started / turn_context carries a turn id minted
+      // AFTER the fork's thread id (both UUIDv7), every replayed turn an
+      // ancestor's id minted before it (48 of 48 local forks: the replay ends
+      // exactly there). From that line on nothing is skipped, so a fast first
+      // turn inside the 2 s still counts (verify r1). `forkOwn` (the fork id's
+      // ms) persists with forkTs; ids of another shape leave the window alone.
+      if (cur.forkTs === undefined) {
+        cur.forkTs = 0;
+        if (line.indexOf('"session_meta"') >= 0) {
+          let r; try { r = JSON.parse(line); } catch { r = null; }
+          if (r && r.type === 'session_meta' && r.payload && r.payload.forked_from_id) {
+            cur.forkTs = Date.parse(r.payload.timestamp || r.timestamp) || 0;
+            cur.forkOwn = uuid7Ms(r.payload.id);
+          }
+          return;
+        }
+      }
+      if (cur.forkTs && cur.forkOwn != null && (line.indexOf('"task_started"') >= 0 || line.indexOf('"turn_context"') >= 0)) {
+        let r; try { r = JSON.parse(line); } catch { r = null; }
+        const p = r && r.payload, tid = p ? uuid7Ms(p.turn_id) : null;
+        if (tid != null && tid >= cur.forkOwn && (r.type === 'turn_context' || p.type === 'task_started')) cur.forkTs = 0; // the fork's own first turn: the replay is over
+      }
       if (line.indexOf('"turn_context"') >= 0) {
         let r; try { r = JSON.parse(line); } catch { return; }
         if (r.type === 'turn_context' && r.payload) {
@@ -375,6 +416,7 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
       const rid = `cx:${sid}:${cum != null ? cum : cur.offset + '-' + ts}`;
       const pendMid = cur.pendMid || null, pendTotal = cur.pendTotal;
       delete cur.pendMid; delete cur.pendTotal; // consumed by this token_count whether or not it emits
+      if (cur.forkTs && ts <= cur.forkTs + 2000) return; // a fork's replay of its ancestors' requests (FORK REPLAY above)
       if (rid === cur.lastRid) return;
       cur.lastRid = rid;
       const cached = last.cached_input_tokens || 0;

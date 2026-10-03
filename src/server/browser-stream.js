@@ -1126,7 +1126,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     const say = (o) => send(viewer.ws, { type: 'watching', ...o });
     const id = targetId ? String(targetId).toUpperCase() : null;
     if (viewer.watch) stopViewerWatch(relay, viewer, null);
-    if (!id || (relay.activeTarget && id === String(relay.activeTarget).toUpperCase())) { log.log?.(`[browser-live] ${relay.key}: viewer ${viewer.id} follows the agent's tab again`); return; }
+    if (!id || (relay.activeTarget && id === String(relay.activeTarget).toUpperCase())) { log.log?.(`[browser-live] ${relay.key}: viewer ${viewer.id} follows the agent's tab again`); if (id) say({ targetId: null }); return; } // live-watch-polish G4: a re-sent watch of the tab the agent is on now is ANSWERED (the view's line clears)
     if (relay.holder === viewer.id) { say({ targetId: null, refused: 'driving', error: 'you drive this window — its chip switches the agent\'s tab' }); return; }
     let owners = {}; try { owners = (JSON.parse(relay.lastOwners || '{}') || {}).owners || {}; } catch { owners = {}; }
     const mine = isHuman(relay) ? 'you' : 'agent';
@@ -1152,7 +1152,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       onMode: (m) => { if (live()) { w.mode = m; say({ targetId: id, mode: m }); } },
       onEnd: (why) => { if (live() && why !== 'closed') stopViewerWatch(relay, viewer, why); },
     })).catch((e) => ({ ok: false, error: String(e && e.message) })).then((r) => {
-      if (!r || !r.ok) { if (live()) { viewer.watch = null; say({ targetId: null, refused: 'unreadable', error: String((r && r.error) || 'the tab could not be shown') }); } return; }
+      if (!r || !r.ok) { if (live()) { viewer.watch = null; say({ targetId: null, refused: 'unreadable', ...(r && r.code ? { why: String(r.code) } : {}), error: String((r && r.error) || 'the tab could not be shown') }); } return; } // live-watch-polish G5: `why` = the capture's code
       if (live() && seq === viewer.watchSeq) w.stop = r.close; else { try { r.close(); } catch { /* ended */ } }
     });
   }

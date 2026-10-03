@@ -161,6 +161,10 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   ck('projection drops OTHER known families, keeps own + unknown + 5h/7d',
     proj.scopedWeekly.length === 2 && proj.scopedWeekly.some((b) => b.name === 'Opus') && proj.scopedWeekly.some((b) => b.name === 'Mystery') && !!proj.fiveHour && !!proj.sevenDay);
   ck('null family = no projection (conservative)', projectCacheForFamily(cache, null).scopedWeekly.length === 3);
+  ck('projection hands back the caps it set aside as `spareScoped` (B-8a65: view-only, the pool orders on it) — the cache itself is untouched',
+    proj.spareScoped.length === 1 && proj.spareScoped[0].name === 'Fable' && !('spareScoped' in cache));
+  ck('…a view with nothing to set aside carries an EMPTY spare list; a null family is the cache object itself',
+    projectCacheForFamily({ ...cache, scopedWeekly: [cache.scopedWeekly[0], cache.scopedWeekly[2]] }, 'fable').spareScoped.length === 0 && projectCacheForFamily(cache, null) === cache);
 }
 fs.rmSync(DATA, { recursive: true, force: true });
 

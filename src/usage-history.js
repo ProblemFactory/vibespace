@@ -19,14 +19,16 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { runUsageWalk } = require('./usage-walker.js');
+const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 
 // API-equivalent prices, USD per MILLION tokens. Subscription sessions don't
 // actually cost this — it's shown as a reference ("what this would cost on the
 // API"). Official Anthropic pricing per platform.claude.com/docs/.../pricing,
 // as of 2026-07-09 (researched + cross-verified). Tier matched by substring of
-// the model id (current flagship rates; deprecated Opus 4.1/4 were $15/$75 —
-// override per-account in pricing.json if you still run those). Editable at
-// data/usage-history/pricing.json.
+// the model id, LONGEST key first — so every retired generation that a newer
+// family key would also match carries its own exact key (Opus 4/4.1/3, Haiku
+// 3/3.5, Mythos Preview below): without one it silently borrowed the newer
+// generation's price. Editable at data/usage-history/pricing.json.
 const DEFAULT_PRICING = {
   // Fable 5 — $10/$50 (2× Opus; Mythos-class). NOTE: Fable uses a newer tokenizer
   // (~30% more tokens per unit of English text), so effective $/word is higher.
@@ -45,6 +47,10 @@ const DEFAULT_PRICING = {
   // list cost). Longest key wins: 'claude-mythos-5-1' lands on `mythos-5-1`,
   // 'claude-mythos-5' on `mythos`; the fable ids never contain either key.
   mythos: { input: 10, output: 50, cacheWrite5m: 12.5, cacheWrite1h: 20, cacheRead: 1.0 },
+  // Mythos Preview (Glasswing, deprecated 2026-06-09): $25/$125 per
+  // anthropic.com/glasswing (2026-10-02); no cache row is published — the cache
+  // rates are the general 1.25× / 2× / 0.1× multipliers. 'mythos' alone priced it at $10/$50.
+  'mythos-preview': { input: 25, output: 125, cacheWrite5m: 31.25, cacheWrite1h: 50, cacheRead: 2.5 },
   'mythos-5-1': { input: 10, output: 50, cacheWrite5m: 12.5, cacheWrite1h: 20, cacheRead: 0.25 },
   // Opus 5.5 (2026-09-22): the installed CLI 2.1.280's model catalog prices
   // `claude-opus-5-5` at its tier `tier_4_20_cache_read_0_20` = $4/$20, cache
@@ -56,24 +62,99 @@ const DEFAULT_PRICING = {
   // 'claude-opus-4-8' stay on `opus`.
   'opus-5-5': { input: 4, output: 20, cacheWrite5m: 5, cacheWrite1h: 8, cacheRead: 0.2 },
   opus:   { input: 5,  output: 25, cacheWrite5m: 6.25, cacheWrite1h: 10, cacheRead: 0.5 },  // Opus 4.5–4.8 and Opus 5 (the catalog's tier_5_25)
+  // Opus 4 / 4.1 / 3 (retired except on Bedrock / Google Cloud): $15/$75, the
+  // CLI catalog's tier_15_75 for claude-opus-4-0 / -4-1; platform.claude.com
+  // pricing 2026-10-02 (Opus 3's 1h write = the 2× rule). 'opus-4-2025' is the
+  // dated Opus 4 id (claude-opus-4-20250514 — not claude-opus-4-5-2025…),
+  // 'opus-4@' its Vertex spelling. Without them `opus` charged a third.
+  'opus-4-1':    { input: 15, output: 75, cacheWrite5m: 18.75, cacheWrite1h: 30, cacheRead: 1.5 },
+  'opus-4-0':    { input: 15, output: 75, cacheWrite5m: 18.75, cacheWrite1h: 30, cacheRead: 1.5 },
+  'opus-4-2025': { input: 15, output: 75, cacheWrite5m: 18.75, cacheWrite1h: 30, cacheRead: 1.5 },
+  'opus-4@':     { input: 15, output: 75, cacheWrite5m: 18.75, cacheWrite1h: 30, cacheRead: 1.5 },
+  '3-opus':      { input: 15, output: 75, cacheWrite5m: 18.75, cacheWrite1h: 30, cacheRead: 1.5 },
   sonnet: { input: 3,  output: 15, cacheWrite5m: 3.75, cacheWrite1h: 6,  cacheRead: 0.3 },  // Sonnet 4.x
   'sonnet-5': { input: 2, output: 10, cacheWrite5m: 2.5, cacheWrite1h: 4, cacheRead: 0.2 },  // Sonnet 5: the $2/$10 launch price became the standard price (the 2026-09-01 increase was cancelled)
   haiku:  { input: 1,  output: 5,  cacheWrite5m: 1.25, cacheWrite1h: 2,  cacheRead: 0.1 },
-  // OpenAI (codex) — per developers.openai.com pricing as of 2026-07-09 (GPT-5.6
-  // GA'd today: Sol $5/$30, Terra $2.50/$15, Luna $1/$6; 5.5 $5/$30; 5.4
-  // $2.50/$15; 5.4-mini $0.75/$4.50; 5.3-codex $1.75/$14). cacheRead = the 90%-
-  // off cached-input rate. cacheWrite 0: codex rollouts don't report cache-write
-  // token counts, so those events always carry cw=0 — a price would never apply.
-  // Tier match is LONGEST-substring over these keys, so 'gpt-5.6-sol' wins over
-  // any shorter overlap; a new model = one new key here or in pricing.json.
-  'gpt-5.6-sol':   { input: 5,    output: 30,   cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0.5 },
-  'gpt-5.6-terra': { input: 2.5,  output: 15,   cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0.25 },
-  'gpt-5.6-luna':  { input: 1,    output: 6,    cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0.1 },
-  'gpt-5.5':       { input: 5,    output: 30,   cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0.5 },
-  'gpt-5.4-mini':  { input: 0.75, output: 4.5,  cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0.075 },
-  'gpt-5.4':       { input: 2.5,  output: 15,   cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0.25 },
-  'gpt-5.3':       { input: 1.75, output: 14,   cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0.175 },
+  // Haiku 3.5 = the catalog's haiku_35; Haiku 3 per anthropic.com/news/claude-3-family
+  // + the prompt-caching post (its 1h write = the 2× rule). 'haiku' is Haiku 4.5.
+  '3-5-haiku': { input: 0.8,  output: 4,    cacheWrite5m: 1,   cacheWrite1h: 1.6, cacheRead: 0.08 },
+  '3-haiku':   { input: 0.25, output: 1.25, cacheWrite5m: 0.3, cacheWrite1h: 0.5, cacheRead: 0.03 },
+  // OpenAI (codex). Every gpt-* row is judged against the DATED official table
+  // in scripts/fixtures/openai-pricing.json (developers.openai.com/api/docs/pricing
+  // + each model page, raw HTML fetched 2026-10-03T04:38Z; test-pricing-openai) —
+  // the rows below were stale for weeks with nothing red (gpt-6-astra had no row
+  // and fell to `_default` = Sonnet's price: ≈$13K under on this instance).
+  // cacheRead = the cached-input rate. cacheWrite5m = the "cache writes" column
+  // (GPT-5.6 and later bill writes at 1.25× input; 5.5 and older list none);
+  // the walker still stores cw 0 for codex — no rollout here has reported one.
+  // `long`: a request whose WHOLE prompt (uncached + cached + cache-write input)
+  // exceeds `above` tokens is priced at these rates for ALL its tokens (OpenAI:
+  // ">272K input tokens … 2x input and 1.5x output for the full request"); the
+  // doubled cached rate is printed only for 6-astra / 5.6-sol, elsewhere it is
+  // the "2x input" reading. `earlier`: the rates in force BEFORE a dated price
+  // change, oldest first — an event older than an entry's `until` takes it.
+  // Both are resolved in ONE place (priceAt) and the shape is closed
+  // (PRICE_ROW_FIELDS, enforced by test-pricing-openai).
+  'gpt-6-astra':   { input: 10,   output: 50,   cacheWrite5m: 12.5,  cacheWrite1h: 0, cacheRead: 1,     long: { above: 272000, input: 20, output: 75, cacheWrite5m: 25, cacheRead: 2 } },
+  'gpt-6.1-sol':   { input: 2,    output: 10,   cacheWrite5m: 2.5,   cacheWrite1h: 0, cacheRead: 0.1,   long: { above: 272000, input: 4, output: 15, cacheWrite5m: 5, cacheRead: 0.2 } },
+  'gpt-6-luna':    { input: 0.1,  output: 0.5,  cacheWrite5m: 0.125, cacheWrite1h: 0, cacheRead: 0.01,  long: { above: 272000, input: 0.2, output: 0.75, cacheWrite5m: 0.25, cacheRead: 0.02 } },
+  // gpt-5.6-sol: the 2026-08-21 cut ($5/$30 → $4/$20, long requests too;
+  // community.openai.com/t/…/1391726, posted 2026-08-21T19:41Z "starting
+  // today"; promotional "at least through November 21, 2026" per its model
+  // page — no end date is modelled, the next change is a new `earlier` entry).
+  'gpt-5.6-sol':   { input: 4,    output: 20,   cacheWrite5m: 5,     cacheWrite1h: 0, cacheRead: 0.4,   long: { above: 272000, input: 8, output: 30, cacheWrite5m: 10, cacheRead: 0.8 },
+    earlier: [{ until: '2026-08-21', input: 5, output: 30, cacheWrite5m: 6.25, cacheWrite1h: 0, cacheRead: 0.5, long: { above: 272000, input: 10, output: 45, cacheWrite5m: 12.5, cacheRead: 1 } }] },
+  'gpt-5.6-terra': { input: 2,    output: 12,   cacheWrite5m: 2.5,   cacheWrite1h: 0, cacheRead: 0.2,   long: { above: 272000, input: 4, output: 18, cacheWrite5m: 5, cacheRead: 0.4 } },
+  'gpt-5.6-luna':  { input: 0.2,  output: 1.2,  cacheWrite5m: 0.25,  cacheWrite1h: 0, cacheRead: 0.02,  long: { above: 272000, input: 0.4, output: 1.8, cacheWrite5m: 0.5, cacheRead: 0.04 } },
+  'gpt-5.5':       { input: 5,    output: 30,   cacheWrite5m: 0,     cacheWrite1h: 0, cacheRead: 0.5,   long: { above: 272000, input: 10, output: 45, cacheRead: 1 } },
+  'gpt-5.4-mini':  { input: 0.75, output: 4.5,  cacheWrite5m: 0,     cacheWrite1h: 0, cacheRead: 0.075 },
+  'gpt-5.4':       { input: 2.5,  output: 15,   cacheWrite5m: 0,     cacheWrite1h: 0, cacheRead: 0.25,  long: { above: 272000, input: 5, output: 22.5, cacheRead: 0.5 } },
+  'gpt-5.3':       { input: 1.75, output: 14,   cacheWrite5m: 0,     cacheWrite1h: 0, cacheRead: 0.175 },
+  // the 2025-10 … 2026-02 codex models (they fell to `_default` = Sonnet's
+  // $3/$15). 'gpt-5.1-codex' also covers gpt-5.1-codex-max (same price);
+  // 'gpt-5-codex' is not inside 'gpt-5.1-codex' / 'gpt-5.2-codex'.
+  'gpt-5.2-codex': { input: 1.75, output: 14,   cacheWrite5m: 0,     cacheWrite1h: 0, cacheRead: 0.175 },
+  'gpt-5.1-codex': { input: 1.25, output: 10,   cacheWrite5m: 0,     cacheWrite1h: 0, cacheRead: 0.125 },
+  'gpt-5-codex':   { input: 1.25, output: 10,   cacheWrite5m: 0,     cacheWrite1h: 0, cacheRead: 0.125 },
   _default: { input: 3, output: 15, cacheWrite5m: 3.75, cacheWrite1h: 6, cacheRead: 0.3 },
+};
+
+// codex ids already named by _warnUnpriced in this process
+const UNPRICED_WARNED = new Set();
+
+// THE CLOSED SHAPE of a price row: the five rates, plus the optional `long`
+// block (`above` + any of the rates) and the dated `earlier` list (`until` +
+// the rates + its own `long`). Nothing else is read; test-pricing-openai holds
+// every shipped row to it.
+const RATE_FIELDS = ['input', 'output', 'cacheWrite5m', 'cacheWrite1h', 'cacheRead'];
+const PRICE_ROW_FIELDS = { row: [...RATE_FIELDS, 'long', 'earlier'], long: ['above', ...RATE_FIELDS], earlier: ['until', ...RATE_FIELDS, 'long'] };
+
+// The ONE resolver of that shape: the `earlier` entry the instant falls in
+// (else the row itself), then its `long` rates when the request's WHOLE prompt
+// is over `long.above` — a long block names what changes, the rest carry over.
+// `ts` missing (live stdout paths) = now.
+function priceAt(row, ts, prompt) {
+  let r = row;
+  if (Array.isArray(row.earlier) && row.earlier.length) {
+    const t = Number.isFinite(ts) ? ts : Date.now();
+    for (const e of row.earlier) if (t < Date.parse(e.until)) { r = e; break; }
+  }
+  const L = r.long;
+  if (!L || !(prompt > L.above)) return r;
+  return { input: L.input ?? r.input, output: L.output ?? r.output, cacheWrite5m: L.cacheWrite5m ?? r.cacheWrite5m, cacheWrite1h: L.cacheWrite1h ?? r.cacheWrite1h, cacheRead: L.cacheRead ?? r.cacheRead };
+}
+
+// Shipped rows a later release corrected. setPricing writes EVERY merged row
+// to pricing.json, so on an instance whose owner ever saved the editor these
+// rows sit on disk and the fill-missing-keys rule never replaces them. A stored
+// row still EQUAL to an old shipped value was never edited — it takes the new
+// default; an edited row is left alone.
+const SUPERSEDED_DEFAULTS = {
+  'gpt-5.6-sol':   [[5, 30, 0, 0, 0.5]],
+  'gpt-5.6-terra': [[2.5, 15, 0, 0, 0.25]],
+  'gpt-5.6-luna':  [[1, 6, 0, 0, 0.1]],
+  'gpt-5.5':       [[5, 30, 0, 0, 0.5]],
+  'gpt-5.4':       [[2.5, 15, 0, 0, 0.25]],
 };
 
 // THE PER-TICK BYTE BUDGET of the in-process ledger walk (2.369.167, perf
@@ -106,7 +187,7 @@ class UsageHistory {
     this.attribFile = path.join(this.dir, 'attribution.ndjson');
     this._resolveAccount = resolveAccount;
     try { fs.mkdirSync(this.dir, { recursive: true }); } catch {}
-    this._cursors = this._loadJson(this.cursorsFile, {});
+    this._cursors = timedSync('usage-cursors.read', () => this._loadJson(this.cursorsFile, {}));
     // Re-read the cursor map from disk (2.369.85): a one-shot migration that
     // PURGES fixture rows also drops their cursors, but this object was built
     // (and loaded _cursors.json) BEFORE runLocalMigrations() ran, so the first
@@ -115,7 +196,7 @@ class UsageHistory {
     // verifier). Same shape as usage-routes' reloadRateLimitCache(): the
     // boot-time consumer re-reads after the repair instead of the repair
     // reaching into a live object.
-    this.reloadCursors = () => { this._cursors = this._loadJson(this.cursorsFile, {}); };
+    this.reloadCursors = () => { this._cursors = timedSync('usage-cursors.read', () => this._loadJson(this.cursorsFile, {})); };
     // …and the same for the EVENTS (2026-09-10). `_loadEvents` keeps a byte
     // watermark per shard and only reads the appended tail, so a migration
     // that REWRITES a shard in place (the origin backfill) is invisible to an
@@ -270,6 +351,10 @@ class UsageHistory {
     // Newly-shipped default tiers (e.g. the gpt-* family) fill into an existing
     // on-disk pricing.json without clobbering the user's edited values.
     for (const [k, v] of Object.entries(DEFAULT_PRICING)) if (!p.tiers[k]) p.tiers[k] = v;
+    for (const [k, olds] of Object.entries(SUPERSEDED_DEFAULTS)) {
+      const row = p.tiers[k];
+      if (row && !row.long && !row.earlier && olds.some((o) => RATE_FIELDS.every((f, j) => row[f] === o[j]))) p.tiers[k] = DEFAULT_PRICING[k];
+    }
     return p;
   }
   _writeAtomic(f, data) { const t = f + '.tmp'; fs.writeFileSync(t, data); fs.renameSync(t, f); }
@@ -475,9 +560,9 @@ class UsageHistory {
       // THE ONE COMMIT POINT — synchronous, so no reader interleaves between
       // the shard appends and the cursor write
       for (const [shard, lines] of Object.entries(shardBuffers)) {
-        if (lines.length) { fs.appendFileSync(shard, lines.join('\n') + '\n'); if (this._evCache) this._evCache.checkedAt = 0; } // our own append ⇒ next _loadEvents re-checks (2.369.36 throttle)
+        if (lines.length) { timedSync('usage-shards.write', () => fs.appendFileSync(shard, lines.join('\n') + '\n')); if (this._evCache) this._evCache.checkedAt = 0; } // our own append ⇒ next _loadEvents re-checks (2.369.36 throttle)
       }
-      this._writeAtomic(this.cursorsFile, JSON.stringify(this._cursors));
+      timedSync('usage-cursors.write', () => this._writeAtomic(this.cursorsFile, JSON.stringify(this._cursors)));
       this._lastScan = Date.now();
     } catch (e) {
       console.error('[usage-history] scan failed:', e && e.message);
@@ -551,7 +636,7 @@ class UsageHistory {
       added++;
     }
     for (const [shard, lines] of Object.entries(shardBuffers)) {
-      if (lines.length) { fs.appendFileSync(shard, lines.join('\n') + '\n'); if (this._evCache) this._evCache.checkedAt = 0; } // our own append ⇒ next _loadEvents re-checks (2.369.36 throttle)
+      if (lines.length) { timedSync('usage-shards.write', () => fs.appendFileSync(shard, lines.join('\n') + '\n')); if (this._evCache) this._evCache.checkedAt = 0; } // our own append ⇒ next _loadEvents re-checks (2.369.36 throttle)
     }
     return { added };
   }
@@ -583,20 +668,40 @@ class UsageHistory {
     this._tierMemo.set(m, out);
     return out;
   }
-  // The rate for a given account + tier: an account may override specific tiers
-  // and/or carry a flat discount (0..1). Subscriptions/global have no override →
-  // default tiers (the API-equivalent reference).
-  _rateFor(acct, tier) {
+  // The rate for a given account + tier, at instant `ts`, for a request whose
+  // whole prompt is `prompt` tokens (priceAt): an account may override specific
+  // tiers and/or carry a flat discount (0..1) — the discount scales whichever
+  // dated / long rate applies; an override row without `long` is flat.
+  // Subscriptions/global have no override → default tiers (the API-equivalent reference).
+  _rateFor(acct, tier, ts, prompt) {
     const ov = acct ? this._pricing.accounts?.[acct] : null;
-    const base = (ov?.tiers && ov.tiers[tier]) || this._pricing.tiers[tier] || this._pricing.tiers._default;
+    const base = priceAt((ov?.tiers && ov.tiers[tier]) || this._pricing.tiers[tier] || this._pricing.tiers._default, ts, prompt);
     const disc = ov && typeof ov.discount === 'number' ? Math.max(0, Math.min(0.99, ov.discount)) : 0;
     if (!disc) return base;
     const f = 1 - disc;
     return { input: base.input * f, output: base.output * f, cacheWrite5m: base.cacheWrite5m * f, cacheWrite1h: base.cacheWrite1h * f, cacheRead: base.cacheRead * f };
   }
-  _cost(ev) {
-    const p = this._rateFor(ev.acct, this._tier(ev.model));
+  // `prompt`: the WHOLE request's input (i + cr + cw5 + cw1) when a caller
+  // prices ONE request in parts (the token-class splits) — the long-context
+  // rule is decided on the request, never on the part, or the parts stop
+  // adding up to the whole. Default: this event's own sum.
+  _cost(ev, prompt) {
+    const tier = this._tier(ev.model);
+    if (tier === '_default' && ev.be === 'codex') this._warnUnpriced(ev.model);
+    const p = this._rateFor(ev.acct, tier, ev.ts, prompt != null ? prompt : (ev.i || 0) + (ev.cr || 0) + (ev.cw5 || 0) + (ev.cw1 || 0));
     return (ev.i * p.input + ev.o * p.output + ev.cw5 * p.cacheWrite5m + ev.cw1 * p.cacheWrite1h + ev.cr * p.cacheRead) / 1e6;
+  }
+  // A codex model id with no key is priced at `_default` — Anthropic Sonnet's
+  // rates. That is how gpt-6-astra went unpriced for a month: say it ONCE per
+  // id per process (journal + a Diagnostics event), never silently. The set is
+  // the MODULE's, not the instance's: a migration builds its own UsageHistory
+  // (ledger-slot-backfill) beside the server's (verify r1).
+  _warnUnpriced(model) {
+    const id = String(model || '(no model id)').toLowerCase().slice(0, 80); // the matcher's own spelling
+    if (UNPRICED_WARNED.has(id)) return;
+    UNPRICED_WARNED.add(id);
+    try { global.__vsEvent?.('usage-unpriced-model', 'codex:' + id); } catch { }
+    console.warn(`[usage] codex model "${id}" has no price row — priced at the _default (Anthropic Sonnet) rates until a key is added to DEFAULT_PRICING or pricing.json (see Diagnostics)`);
   }
   /** Stable token for the EFFECTIVE price table (tiers + per-account overrides
    *  and discounts) — the VERSION half of any memo key over computed costs.
@@ -941,4 +1046,4 @@ class UsageHistory {
   }
 }
 
-module.exports = { UsageHistory, DEFAULT_PRICING };
+module.exports = { UsageHistory, DEFAULT_PRICING, PRICE_ROW_FIELDS, SUPERSEDED_DEFAULTS, priceAt };

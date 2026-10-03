@@ -384,6 +384,56 @@ function maxRunningOf(v, dflt = 6) {
   return Math.max(MAX_RUNNING_MIN, Math.min(MAX_RUNNING_MAX, Math.round(n)));
 }
 
+// ── lane live-watch-polish (B-93d7, design 006 G1/G2/G5): THE WATCH'S WORDS AND THE "▾+N" MENU — PURE, `t` passed in ──
+const wordsOf = (t) => (typeof t === 'function' ? (s, p) => t(s, p) : (s, p) => String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m)));
+/** A title the watch line / menu names. A PAGE chose it (peer text): bounded BEFORE the code-point walk, whitespace folded,
+ *  cut to `max` characters with "…" — the client sets it as textContent, never markup. '' for none. */
+const WATCH_TITLE_MAX = 40;
+function watchTitle(title, max = WATCH_TITLE_MAX) {
+  const s = String(title == null ? '' : title).slice(0, max * 4).replace(/\s+/g, ' ').trim();
+  const g = Array.from(s);
+  return g.length > max ? g.slice(0, max - 1).join('') + '…' : s;
+}
+/** G2: the watch line names BOTH tabs — "Watching “X” — the agent is on “Y”" (the polling one keeps its half-second
+ *  clause). A title not known (yet) keeps the unnamed sentence — never an empty pair of quotes. */
+function watchLineWords({ watched = '', current = '', mode = 'screencast' } = {}, tIn) {
+  const t = wordsOf(tIn);
+  const w = watchTitle(watched), c = watchTitle(current), polling = mode === 'polling';
+  if (w && c) return polling ? t('Watching “{watched}” — a new picture every half second; the agent is on “{current}”', { watched: w, current: c }) : t('Watching “{watched}” — the agent is on “{current}”', { watched: w, current: c });
+  return polling ? t('Watching a background tab of the agent’s — a new picture every half second; the agent’s current tab is unchanged') : t('Watching another tab of the agent’s — the agent’s current tab is unchanged');
+}
+/** G1: the "▾+N" menu — each folded row asks the SAME click verdict as its chip (`clickOf(row)` → {act}, tabClickVerdict)
+ *  and its entry says the act; his own window's rows keep the row's own switch (`canSwitch`); a row with nothing to do is
+ *  NOT listed (no greyed control). → [{targetId, act, label}] in row order. */
+function foldMenuRows(rows, clickOf, tIn) {
+  const t = wordsOf(tIn);
+  const out = [];
+  for (const r of rows || []) {
+    if (!r || !r.targetId) continue;
+    const cv = (typeof clickOf === 'function' && clickOf(r)) || { act: 'none' };
+    const act = cv.act && cv.act !== 'none' ? cv.act : r.canSwitch ? 'switch' : null;
+    if (!act) continue;
+    const title = watchTitle(r.title) || '—';
+    const label = act === 'watch' ? t('Watch — {title}', { title }) : act === 'follow' ? t('Back to the agent’s tab — {title}', { title }) : act === 'front' ? t('Bring to the front — {title}', { title }) : t('Switch to — {title}', { title });
+    out.push({ targetId: r.targetId, act, label });
+  }
+  return out;
+}
+/** G5: a refused or failed watch said BY CODE in the device's words — the bridge's `refused` (driving / not_your_tab /
+ *  unavailable / unreadable) and, for unreadable, the capture's `why` (unreachable / no_screencast / no_tab). The server's
+ *  English sentence never reaches the toast for a code named here; an unknown code keeps the server's words. */
+const WATCH_REFUSALS = Object.freeze(['driving', 'not_your_tab', 'unavailable', 'unreadable']);
+function watchRefusalWords({ refused = '', why = '', error = '' } = {}, tIn) {
+  const t = wordsOf(tIn);
+  switch (refused) {
+    case 'driving': return t('you drive this window — its chip switches the agent’s tab');
+    case 'not_your_tab': return t('Another conversation’s — open its live view to use it');
+    case 'unavailable': return t('this server cannot show another tab');
+    case 'unreadable': return why === 'unreachable' ? t('the tab could not be reached') : why === 'no_screencast' ? t('the tab refused a screencast') : why === 'no_tab' ? t('the tab is gone') : t('the tab could not be shown');
+    default: return String(error || refused || '');
+  }
+}
+
 module.exports = {
   WINDOWS_PROOF, ownWindowParams, windowCreateParams, instanceOf, hasOwnWindow, windowMates,
   TAB_LABELS_MAX, withTabLabel, labelTargetOf, withLabelsOnRows,
@@ -393,4 +443,5 @@ module.exports = {
   DRIVE_ENDED_NOTICE_KIND, driveEndedNotice, driveEndedText, renderDriveEndedNotice, // verify r5 ②: the refused holders told, free, when the user's drive ends
   BACKGROUND_PAINT_FRAMES, BACKGROUND_PAINT_WINDOW_MS, paintsAgain, // verify r1 ④: the frame facts clear a lying page's verdict
   MAX_RUNNING_MIN, MAX_RUNNING_MAX, maxRunningOf,
+  WATCH_TITLE_MAX, watchTitle, watchLineWords, foldMenuRows, WATCH_REFUSALS, watchRefusalWords, // lane live-watch-polish G1/G2/G5
 };

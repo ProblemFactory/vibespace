@@ -2,6 +2,44 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.203 — 2026-10-03
+
+### Added
+- An agent can install an app for you from a package source, its maker's website or a file: For you shows one plain card, and one click on Install installs it.
+- Before drawing a new design, the agent can ask you a few questions in the Design window; answer with a tap, or let it decide.
+- In the Design window you can collect several changes (retype a text, adjust a colour, size or spacing, add comments) and send them in one message.
+- Designs can have Tweaks: knobs the agent adds for colours, sizes and density; move them in the Design window and see the change at once.
+- Design systems: have the agent make one from your brand and new designs follow it; ⚙ Tools ▸ Designs… lists every design and design system.
+- The Design window can present its artboards full screen, print one PDF page per artboard, and download the design as an HTML file or a .zip.
+- An agent can open a picture or a file someone sent in a chat it may read.
+- An agent can attach pictures and files to what it sends in Channels; the approval card shows each file, and exactly those files are sent.
+- Channel search shows your saved matches at once, then Lark's or Gmail's own search over the whole history, each marked "not saved here".
+- Gmail mail shows who it went to (To, Cc, Bcc, Reply-To, mailing list); Lark messages say when they were edited, recalled, forwarded or sent by an app.
+- In Change build… you can download another Chrome version, see whether it suits your profiles first, and remove the ones you downloaded.
+- The System window shows the slowest store writes of the last hour, and a stalled server is no longer mistaken for slow storage.
+
+### Changed
+- Settings opens on everyday settings; timers, budgets and operator switches wait behind "Show advanced settings", and settings that cannot apply stay hidden.
+- Lark and Gmail request budgets sit under "Per vendor" in Settings → Channels and show only once an account of that service is linked.
+- Closing a whole tab group (tabbed or side by side) now asks first and lists every tab; a tab's own ✕ still closes just that tab.
+- Apps is easier to read: apps come first, names show in full, the window bar drops technical labels, and a search that finds nothing can go to an agent.
+- Opening Channels no longer stalls on accounts with tens of thousands of conversations; All and each account keep loading as you scroll.
+- On a phone or tablet, press and hold a channel message's words to select them; its actions open from a … button.
+- Automatic pool placement saves Fable quota for Fable chats: other conversations start on, and when idle move to, members with less Fable left.
+- A package source you added only updates the apps you installed from it; Refresh shows where each update comes from.
+- In the live view you can watch a tab folded into "▾+N", and the line above the picture names the tab you watch and the agent's tab.
+
+### Fixed
+- The server no longer freezes for a few seconds every minute or two; account checks stop re-reading the login files.
+- Commands on a Windows machine whose agent is too old say how to update it instead of "exit 1"; an agent that could not update itself shows in For you.
+- A message VibeSpace delivers into a conversation (a group report, a wake) names who wrote it and the group.
+- Agent conversations in the sidebar show the name they were given, and a rename made elsewhere shows on every device.
+- Codex usage costs match OpenAI's current prices, and a forked Codex conversation no longer counts its parent's usage twice.
+- Admins: a Google client or integration preset dropped from a user's release values is really removed on upgrade, so later key rotations reach that user.
+
+### Removed
+- Settings no longer shows the obsolete "VibeSpace channel (experimental)" switch or three switches that did nothing; the settings manual lists every setting.
+
 ## 2.369.202 — 2026-10-02
 
 ### Added

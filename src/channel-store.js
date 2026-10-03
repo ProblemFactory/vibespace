@@ -155,11 +155,14 @@
  */
 const fs = require('fs');
 const path = require('path');
+const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const crypto = require('crypto');
 const { sideKey, validateSide } = require('./channel-record.js');
 // lane lark-threads (A1): THE PLACE PATCH's PURE rules (widen-only, the fold, the compaction) — imports only channel-record
 const Thr = require('./channel-thread.js');
 const { compactSide } = require('./channel-reactions.js');
+// lane message-facts (B-f066): a message's `fx` lines (facts learned after it was stored) compact into ONE folded line
+const { compactFactLines } = require('./channel-facts.js');
 
 /** Side-log dedup set bound per conversation (rebuilt from the whole side log on demand). */
 const SIDE_DEDUP_MAX = 20000;
@@ -336,7 +339,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    *  message names the file. */
   const blockedError = (msg) => { const e = new Error(msg); e.code = 'store-blocked'; e.status = 503; return e; };
 
-  const ixLoad = loadJsonFamily(indexFile, (v) => v && typeof v === 'object' && v.conversations && typeof v.conversations === 'object', EMPTY_INDEX);
+  const ixLoad = timedSync('channels-index.read', () => loadJsonFamily(indexFile, (v) => v && typeof v === 'object' && v.conversations && typeof v.conversations === 'object', EMPTY_INDEX));
   let ix = ixLoad.value;
   const ixBlocked = ixLoad.blocked;
 
@@ -476,7 +479,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   }
   function writeIndex(full) {
     const conv = ix.conversations;
-    if (!plainRows(conv)) { flushStats.fallback++; layout = null; allDirty = true; writeJsonAtomic(indexFile, ix); allDirty = false; dirtyKeys.clear(); return; }
+    if (!plainRows(conv)) { flushStats.fallback++; layout = null; allDirty = true; timedSync('channels-index.write', () => writeJsonAtomic(indexFile, ix)); allDirty = false; dirtyKeys.clear(); return; }
     if (full || allDirty || !layout) { buildLayout(conv); flushStats.full++; } else { applyTouched(conv); flushStats.incremental++; }
     const wasFull = full || allDirty;
     allDirty = false; dirtyKeys.clear();   // the cache now holds memory; a failed disk write below stays owed via `dirty`
@@ -492,7 +495,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
         buildLayout(conv); parts = [Buffer.from(want, 'utf8')];
       }
     }
-    writeBuffersAtomic(indexFile, parts);
+    timedSync('channels-index.write', () => writeBuffersAtomic(indexFile, parts));
   }
   /** THE SWEEP (every interval tick): re-serialize the next SWEEP_CHUNKS cached chunks and compare. A difference is a
    *  row changed OUTSIDE `update()`/`entry()` (the one-door rule broken somewhere): it is written, and said once per
@@ -1181,7 +1184,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   }
   /** The `"msg":"<id>"` of a side line, read off its head without parsing the body (the line begins
    *  `{"k":"rx","msg":` — `validateSide` builds it in that order). Linear: one bounded string match. */
-  const SIDE_HEAD_RE = /^\{"k":"(?:rx|th|pl)","msg":("(?:[^"\\]|\\.){1,1100}")/;
+  const SIDE_HEAD_RE = /^\{"k":"(?:rx|th|pl|fx)","msg":("(?:[^"\\]|\\.){1,1100}")/;   // + fx (lane message-facts)
   /**
    * The side records naming `msgs` (a Set of vendorIds), in FILE order (append order), at most `limit` — the
    * newest are kept when there are more. A line naming another message is skipped WITHOUT parsing its body.
@@ -1227,7 +1230,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       last.set(k, i);
     });
     const order = [...byMsg.keys()].sort((a, b) => last.get(a) - last.get(b));
-    const groups = order.map((k) => compactSide(byMsg.get(k)).map((x) => JSON.stringify(x)));
+    const groups = order.map((k) => compactSide(byMsg.get(k)).concat(compactFactLines(byMsg.get(k))).map((x) => JSON.stringify(x)));   // + a message's facts, folded (lane message-facts)
     // the newest groups first, until the bound (one group is always kept — a single message's lines are ≤ 8 KiB each)
     let from = groups.length, bytes = 0;
     for (let i = groups.length - 1; i >= 0; i--) {
@@ -1296,24 +1299,35 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    * worth of NDJSON on the event loop. A line is parsed only when its raw
    * bytes already contain the query (lower-cased), then the record's text /
    * author is checked for real. Newest first; `truncated` when a cap was hit.
+   *
+   * design 010 (B-c9be, lane channels-full-search): the logs are visited NEWEST CONVERSATION FIRST (the index's
+   * `lastAt`; a log the index does not name goes last) — the byte cap used to cut in `readdir` order, so on a big
+   * account WHICH conversations were searched was chance; now the cap cuts the oldest. The answer says what it
+   * covered: `coverage = {scanned, total, capped, oldestAt}` (conversations read / eligible, whether the BYTE cap
+   * cut, the oldest instant the read logs reach — each log's first line is its oldest record).
    */
   async function search(adapterId, q, { limit = 100, maxBytes = 64 * 1024 * 1024, convIds = null } = {}) {
     const needle = String(q || '').trim().toLowerCase();
-    if (!needle) return { results: [], scannedBytes: 0, truncated: false, files: 0 };
+    const none = { results: [], scannedBytes: 0, truncated: false, files: 0, coverage: { scanned: 0, total: 0, capped: false, oldestAt: null } };
+    if (!needle) return none;
     const dir = path.join(msgsDir, safeSeg(adapterId));
     let names = [];
-    try { names = await fs.promises.readdir(dir); } catch { return { results: [], scannedBytes: 0, truncated: false, files: 0 }; }
-    names = names.filter((n) => n.endsWith('.ndjson'));
+    try { names = await fs.promises.readdir(dir); } catch { return none; }
     const wanted = convIds ? new Set([...convIds].map((c) => `${safeSeg(c)}.ndjson`)) : null;
-    let scanned = 0, truncated = false, files = 0;
+    names = names.filter((n) => n.endsWith('.ndjson') && (!wanted || wanted.has(n)));
+    // NEWEST CONVERSATION FIRST (design 010): the index's lastAt per log file, read-only (no copy, no touch)
+    const lastAtOf = new Map();
+    for (const en of Object.values(ix.conversations)) if (en && en.adapterId === adapterId && en.id != null) lastAtOf.set(`${safeSeg(en.id)}.ndjson`, Number(en.lastAt) || 0);
+    names.sort((a, b) => (lastAtOf.has(b) - lastAtOf.has(a)) || ((lastAtOf.get(b) || 0) - (lastAtOf.get(a) || 0)) || (a < b ? -1 : a > b ? 1 : 0));
+    let scanned = 0, truncated = false, files = 0, capped = false, oldestAt = null;
     const hits = [];
     for (const n of names) {
-      if (wanted && !wanted.has(n)) continue;
       const fp = path.join(dir, n);
       let st; try { st = await fs.promises.stat(fp); } catch { continue; }
-      if (scanned + st.size > maxBytes) { truncated = true; break; }
+      if (scanned + st.size > maxBytes) { truncated = true; capped = true; break; }
       let text; try { text = await fs.promises.readFile(fp, 'utf-8'); } catch { continue; }
       scanned += st.size; files++;
+      { const nl = text.indexOf('\n'); try { const r0 = JSON.parse(nl < 0 ? text : text.slice(0, nl)); const a0 = Number(r0 && r0.at); if (a0 > 0 && (oldestAt === null || a0 < oldestAt)) oldestAt = a0; } catch { } }
       for (const line of text.split('\n')) {
         if (!line || !line.toLowerCase().includes(needle)) continue;
         let r; try { r = JSON.parse(line); } catch { continue; }
@@ -1324,7 +1338,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     }
     hits.sort((a, b) => cmpRecord(b, a));
     if (hits.length > limit) truncated = true;
-    return { results: hits.slice(0, limit), scannedBytes: scanned, truncated, files };
+    return { results: hits.slice(0, limit), scannedBytes: scanned, truncated, files, coverage: { scanned: files, total: names.length, capped, oldestAt } };
   }
 
   // ── ATTACHMENTS, fetched on demand, LRU per ACCOUNT (2026-09-26) ─────────
@@ -1364,9 +1378,11 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (!lruTimer) { lruTimer = setTimeout(lruFlush, LRU_TOUCH_MS); if (lruTimer.unref) lruTimer.unref(); }
   }
   /** A cached attachment: `{file, meta}` or null. A hit refreshes its LRU stamp. */
-  function attachmentGet(adapterId, convId, attId) {
+  // verify r1 (lane channel-attach-read): `msg` names the message whose part it is (a Gmail `part:N` repeats per mail)
+  const attSlot = (attId, msg) => attHash(msg ? `${msg}\n${attId}` : attId);
+  function attachmentGet(adapterId, convId, attId, msg = null) {
     const d = attDir(adapterId, convId);
-    const h = attHash(attId);
+    const h = attSlot(attId, msg);
     const file = path.join(d, h);
     let meta;
     try { meta = JSON.parse(fs.readFileSync(file + '.json', 'utf-8')); } catch { return null; }
@@ -1385,17 +1401,17 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    *  atomic writes. The temp name is unique per call, so two concurrent
    *  fetches of the same attachment never write into one temp file. */
   let attSeq = 0;
-  async function attachmentPut(adapterId, convId, attId, { data, name = null, mime = null } = {}, { budgetBytes = 5120 * 1024 * 1024 } = {}) {
+  async function attachmentPut(adapterId, convId, attId, { data, name = null, mime = null, msg = null } = {}, { budgetBytes = 5120 * 1024 * 1024 } = {}) {
     const buf = Buffer.isBuffer(data) ? data : Buffer.from(data || '');
     const d = attDir(adapterId, convId);
     await fs.promises.mkdir(d, { recursive: true, mode: 0o700 });
-    const h = attHash(attId);
+    const h = attSlot(attId, msg);
     const file = path.join(d, h);
     const tmp = `${file}.tmp-${process.pid}-${++attSeq}`;
     await fs.promises.writeFile(tmp, buf, { mode: 0o600 });
     try { await fs.promises.chmod(tmp, 0o600); } catch {}
     await fs.promises.rename(tmp, file);
-    const meta = { id: String(attId), name: name ? String(name).slice(0, 256) : null, mime: mime ? String(mime).slice(0, 128) : null, bytes: buf.length, at: now() };
+    const meta = { id: String(attId), ...(msg ? { msg: String(msg).slice(0, 512) } : {}), name: name ? String(name).slice(0, 256) : null, mime: mime ? String(mime).slice(0, 128) : null, bytes: buf.length, at: now() };
     writeJsonAtomic(file + '.json', meta, { mode: 0o600 });
     const l = lruOf(adapterId);
     const key = `${safeSeg(convId)}/${h}`;
@@ -1495,7 +1511,12 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (all.length <= OUTBOX_KEEP) return;
     const rank = (p) => (Number.isFinite(OUTBOX_PRUNE_RANK[p.state]) ? OUTBOX_PRUNE_RANK[p.state] : 2);
     const done = all.filter((p) => p && OUTBOX_PRUNABLE.includes(p.state)).sort((a, b) => (rank(a) - rank(b)) || ((a.updatedAt || a.at || 0) - (b.updatedAt || b.at || 0)));
-    for (const p of done.slice(0, all.length - OUTBOX_KEEP)) delete ob.proposals[p.id];
+    for (const p of done.slice(0, all.length - OUTBOX_KEEP)) { delete ob.proposals[p.id]; dropOutboxFiles(p.id); }
+  }
+  // design 005 §2.B (B-fd1f): a pruned proposal takes its attachments' folder with it (src/channel-outbox-files.js layout)
+  function dropOutboxFiles(id) {
+    if (!/^p-[a-z0-9]+-[a-z0-9]+$/.test(String(id))) return;
+    try { fs.rmSync(path.join(dir, 'outbox-files', String(id)), { recursive: true, force: true }); } catch { /* the sweep tries again */ }
   }
   function outboxUpdate(fn) {
     if (obLoad.blocked) return Promise.reject(blockedError(obLoad.blocked));

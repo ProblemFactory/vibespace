@@ -30,6 +30,7 @@
 //          replyState(item) → {show, enabled, why}, mini?}
 import { escHtml } from './utils.js';
 import { UI_ICONS } from './icons.js';
+import { cardWords, progressWords } from './app-card-model.js'; // design 009: THE words of an app install's one card (PURE)
 
 /** "3min ago" / "2h ago" / a date — words by the caller's t(). */
 export function agoText(ts, t) {
@@ -101,6 +102,32 @@ const proposalAskHtml = (i, t, detail) => (i && i.action && PROPOSAL_ACTIONS.inc
 const appAskHtml = (i, t) => (i && i.action && i.action.type === 'app-install' && i.action.id
   ? `<div class="ut-exit-answer ut-app-answer"><button type="button" class="ut-act ut-action-app ut-app-install" data-answer="install" title="${escHtml(t('Shows the plan first — nothing runs until you confirm'))}">${escHtml(t('Install…'))}</button><button type="button" class="ut-act ut-action-app ut-app-reject" data-answer="reject">${escHtml(t('Not now'))}</button></div>` : '');
 
+/** design 009 §2 A: an app install's ONE CARD — the engine's view (`item.card`, src/app-card.js) worded by
+ *  app-card-model: who asks and why, where it comes from and how big, what the click gives; TWO buttons (Install / Not
+ *  now — the click installs, nothing in between); the progress, Installed · Open and a failure's Try again in the same
+ *  card; everything else in its Details fold. Every string escHtml'd (an app's name and an agent's why are peer text).
+ *  `buttons: false` = the For-you window's pane (its buttons live in the pane's action row). */
+const isAppCard = (i) => !!(i && i.action && i.action.type === 'app-install' && i.card && typeof i.card === 'object');
+/** apps-joint r1 (F1): a download's icon is served from its proposal (lane apps-install-core) — the only other address a
+ *  card's picture may have. */
+const PROPOSAL_ICON_RE = /^\/api\/apps\/proposals\/ap-[0-9a-f]{6}\/icon$/;
+export function appCardHtml(i, t, { lang = 'en', resolved = false, buttons = true } = {}) {
+  const v = i.card;
+  const w = cardWords(v, t, lang);
+  const pg = progressWords(v, t);
+  const line = (cls, s) => (s ? `<div class="ut-app-line ${cls}">${escHtml(s)}</div>` : '');
+  const icon = v.app && typeof v.app.icon === 'string' && (v.app.icon.startsWith('/api/apps/icon?') || PROPOSAL_ICON_RE.test(v.app.icon)) ? `<img class="ut-app-icon" alt="" src="${escHtml(v.app.icon)}">` : '';
+  let html = icon + line('ut-app-by', w.by) + line('ut-app-from', w.from) + line('ut-app-note', w.fromNote) + line('ut-app-gives', w.gives) + line('ut-app-first', w.firstUse) + line('ut-app-changed', w.changed);
+  if (pg) {
+    const acts = buttons ? pg.actions.map((a) => `<button type="button" class="ut-act ut-action-app ut-app-${a}" data-answer="${a}">${escHtml(a === 'open' ? t('Open') : t('Try again'))}</button>`).join('') : '';
+    html += `<div class="ut-app-progress" data-kind="${pg.kind}">${pg.kind === 'busy' ? '<span class="ut-app-spin" aria-hidden="true"></span>' : ''}<span class="ut-app-progress-text">${escHtml(pg.text)}</span>${acts}</div>`;
+  } else if (buttons && !resolved && v.state === 'proposed' && i.action.id) {
+    html += `<div class="ut-exit-answer ut-app-answer"><button type="button" class="ut-act ut-action-app ut-app-install" data-answer="install">${escHtml(w.go)}</button><button type="button" class="ut-act ut-action-app ut-app-reject" data-answer="reject">${escHtml(w.later)}</button></div>`;
+  }
+  if (w.details.length) html += `<details class="ut-detail-exp ut-app-details"><summary>${escHtml(t('Details'))}</summary><div class="ut-app-detail">${w.details.map((d) => `<div class="ut-app-dline${d.mono ? ' ut-app-mono' : ''}">${escHtml(d.text)}</div>`).join('')}</div></details>`;
+  return `<div class="ut-app-card" data-state="${escHtml(String(v.state || ''))}">${html}</div>`;
+}
+
 /** The static parts of a row for `entry` + the signature patchRow compares.
  *  The LIVE half (enabled / tooltip of the reply controls) is NOT in here —
  *  applyLive owns it, so a turn flip never rebuilds a row. */
@@ -112,7 +139,9 @@ function partsOf(entry, ctx) {
   const tail = !!entry.tail;
   // a CLEARED item ("Clear content…", 2026-09-28): its words are the cleared sentence (ctx.wordsOf) — dimmed, in its place
   const cls = 'ut-item' + (notice ? ' ut-item-notice' : '') + (resolved ? ' ut-item-resolved' : '') + (resolved && !tail ? ' ut-item-inplace' : '') + (i && i.clearedAt ? ' ut-item-cleared' : '');
-  const words = ctx.wordsOf(i);
+  const card = isAppCard(i) ? i.card : null; // design 009: an app install's ONE card (a cleared item has none left)
+  const lang = typeof ctx.lang === 'function' ? ctx.lang() : (ctx.lang || 'en');
+  const words = card ? cardWords(card, t, lang).title : ctx.wordsOf(i);
   const detail = ctx.detailOf(i);
   const rs = !resolved && ctx.replyState ? ctx.replyState(i) : { show: false };
   const dot = resolved
@@ -141,11 +170,14 @@ function partsOf(entry, ctx) {
     meta = (notice ? `<span class="ut-sess">${escHtml(ctx.nameFor(i.sessionKey, [i]))}</span> · ` : '')
       + escHtml(agoText(i.createdAt, t)) + (exp ? ' · ' + escHtml(exp) : '');
   }
-  const body = `<div class="ut-text">${escHtml(words)}</div>${!resolved ? exitAskHtml(i, t) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) : ''}${detailFold}${opts}<div class="ut-meta">${meta}</div>`;
+  const body = `<div class="ut-text">${escHtml(words)}</div>${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) : ''}${card ? '' : detailFold}${opts}<div class="ut-meta">${meta}</div>`;
   // ⤢ = THE For-you window ON this item (design-user-inbox-reply §9: long text at full width, reply / done there)
   const view = `<button class="ut-act ut-view" title="${escHtml(t('Open in the For-you window'))}" aria-label="${escHtml(t('Open in the For-you window'))}">⤢</button>`;
+  // design 009: a card's Reply / Mark done / Ignore / Copy / Clear content… live behind its ⋯ (two buttons on its face)
+  const more = `<button type="button" class="ut-act ut-more" title="${escHtml(t('More'))}" aria-label="${escHtml(t('More'))}">⋯</button>`;
   const actions = resolved
     ? `<span class="ut-actions">${view}<button class="ut-act ut-reopen" title="${escHtml(t('Reopen'))}">↺</button></span>`
+    : card ? `<span class="ut-actions">${view}${more}</span>`
     : `<span class="ut-actions">${actionBtnHtml(i, t)}${rs.show ? `<button type="button" class="ut-act ut-reply-btn" title="${escHtml(t('Reply'))}">${UI_ICONS.reply}</button>` : ''}${view}`
       + `<button class="ut-act ut-done" title="${escHtml(t('Handled — mark done'))}">✓</button>`
       + `<button class="ut-act ut-dismiss" title="${escHtml(t('Dismiss (not going to act on this)'))}">✕</button></span>`;

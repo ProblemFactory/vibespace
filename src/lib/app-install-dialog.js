@@ -10,8 +10,15 @@
 //     package source… / Let an agent help…. Every string an agent or a package wrote is drawn as textContent.
 //   · openAppSearch / openDebInstall / openSourceDialog / openAgentHelp — the four doors.
 // Every failure reaches the user (a toast or the dialog's own line); fetchJson never throws, so every answer is checked.
-import { t } from './i18n.js';
-import { createModalShell, fetchJson, showToast } from './utils.js';
+// Design 009 (lane apps-interface): the section's status line sits at its FOOT ("5 apps · 3 updates · [Update]" — PURE
+// appsStatusModel; after a base change Layer 1's "your apps still run in their original environment — [Migrate…]"), Layer 1's
+// interrupted-install banner is PURE appsBannerModel (the launch dialog draws it), "Add a package source…" sits under
+// More…, a search that finds nothing hands the words to an agent ("Let an agent find it"), and a refusal is one sentence.
+// Layer 1's slot contract (the queued lanes app-system-core / app-system-keeper fill it): GET /api/apps answers
+// `appSystem: { interrupted?: true, rebase?: true }` — the requests these rows send are `{kind: 'repair'}` / `{kind: 'rebase'}`.
+import { t, tc, resolveLang } from './i18n.js';
+import { cardWords } from './app-card-model.js'; // design 009: THE words of an install's one card — the dialog leads with them
+import { createModalShell, fetchJson, showContextMenu, showToast } from './utils.js';
 import { showInstallDialog, machineName, machineInSentence } from './desktop-app-launcher.js';
 import { fmtBytes } from '../app-manifest.js';
 
@@ -22,8 +29,8 @@ const q = (o) => Object.entries(o).filter(([, v]) => v != null && v !== '').map(
 /** A refusal code → the user's words (a plan the machine refused, a run that could not start). '' = none of ours. */
 export function appRefusalText(code) {
   switch (code) {
-    case 'needs_snap': return t('This package is only a placeholder for a snap — snaps do not run here. Install the program another way (a .deb file, or another package).');
-    case 'conflict': return t('apt cannot install it together with what is already installed.');
+    case 'needs_snap': return t('This package only points to a kind of app that does not run here.'); // design 009 §B5: one sentence; the way out is a button
+    case 'conflict': return t('It cannot be installed together with what is already on this machine.');
     case 'removes': return t('Installing it would remove other packages — VibeSpace never removes a package to install another.');
     case 'not_found': return t('There is no such package in this machine’s package sources.');
     case 'bad_name': return t('That is not a package name.');
@@ -82,7 +89,7 @@ export function appDoneText(end, name) {
   if (end.kind === 'source') return t('The package source {app} is added to {machine}', { app: end.label || '', machine: name });
   if (end.kind === 'source-remove') return t('The package source {app} is removed', { app: end.label || '' });
   if (end.kind === 'replay') return t('Your apps are back on {machine}', { machine: name });
-  return (end.rows || []).length ? t('{app} is installed on {machine} — it is in the Applications list', { app: end.rows.map((r) => r.label).join(', '), machine: name }) : t('{app} is installed on {machine}', { app: end.label || '', machine: name });
+  return (end.rows || []).length ? t('{app} is installed on {machine} — it is in Apps', { app: end.rows.map((r) => r.label).join(', '), machine: name }) : t('{app} is installed on {machine}', { app: end.label || '', machine: name });
 }
 
 /** THE PLAN'S FACTS (the block above the commands): who proposed it and why, the packages, the sizes, a source's key
@@ -97,7 +104,7 @@ export function appPlanBlock(plan, { proposal = null } = {}) {
   const k = plan.kind;
   if (k === 'apt' || k === 'deb' || k === 'adopt') {
     const n = (plan.closure || []).length;
-    if (k !== 'adopt') line(n ? t('{n} packages · {download} to download · {disk} on disk', { n, download: fmtBytes(plan.downloadBytes || 0), disk: fmtBytes(Math.max(0, plan.installedBytes || 0)) }) : t('Already installed — VibeSpace keeps it so it comes back after a rebuild.'));
+    if (k !== 'adopt') line(n ? t(n === 1 ? '1 package · {download} to download · {disk} on disk' : '{n} packages · {download} to download · {disk} on disk', { n, download: fmtBytes(plan.downloadBytes || 0), disk: fmtBytes(Math.max(0, plan.installedBytes || 0)) }) : t('Already installed — VibeSpace keeps it so it comes back after a rebuild.'));
     if ((plan.origins || []).length) line(t('From: {origins}', { origins: plan.origins.join(', ') }));
     if (k === 'deb' && plan.deb) {
       line(t('File: {name} · sha256 {sha}', { name: plan.deb.name, sha: plan.deb.sha256 }), 'app-plan-mono');
@@ -120,9 +127,43 @@ export function appPlanBlock(plan, { proposal = null } = {}) {
     line((plan.removes || []).length ? t('Removes: {pkgs}', { pkgs: plan.removes.join(' ') }) : t('Its packages stay (another of your apps uses them); only the record goes.'));
   } else if (k === 'refresh') {
     const u = plan.updates || [];
-    line(u.length ? t('{n} updates: {list}', { n: u.length, list: u.slice(0, 30).map((x) => `${x.package} ${x.from} → ${x.to}`).join(', ') }) : t('Everything is up to date — Refresh still checks again and saves the packages.'));
+    line(u.length ? t('{n} updates: {list}', { n: u.length, list: u.slice(0, 30).map((x) => `${x.package} ${x.from} → ${x.to}${x.origin ? ` (${x.origin})` : ''}`).join(', ') }) : t('Everything is up to date — Refresh still checks again and saves the packages.'));
   }
   return box;
+}
+
+/** design 009 B: THE card's summary at the head of the install dialog — the same words as the For-you card
+ *  (app-card-model): what, who asks and why, from where and how big, what it gives. textContent only; the plan's facts,
+ *  the root sentence and the commands fold under Details below it. */
+export function appSummaryBlock(view) {
+  const w = cardWords(view, t, resolveLang());
+  const box = el('div', 'app-card-sum');
+  box.appendChild(el('div', 'app-card-sum-title', w.title));
+  for (const [cls, s] of [['by', w.by], ['from', w.from], ['note', w.fromNote], ['gives', w.gives], ['first', w.firstUse]]) if (s) box.appendChild(el('div', `app-card-sum-line app-card-sum-${cls}`, s));
+  return box;
+}
+
+/** Design 009 §C: the section's ONE status line — "5 apps · 3 updates" + [Update] (Refresh: the plan first, never an
+ *  automatic upgrade), "· up to date" + [Check for updates]; Layer 1's base change adds its own line + [Migrate…].
+ *  null ⇒ nothing installed (the list says so). PURE. */
+export function appsStatusModel(st) {
+  const entries = (st && st.manifest && st.manifest.entries) || [];
+  if (!entries.length) return null;
+  const n = entries.length;
+  const u = st.updates && Number.isFinite(st.updates.count) ? st.updates.count : null;
+  const parts = [n === 1 ? t('1 app') : t('{n} apps', { n })];
+  if (u === 0) parts.push(t('up to date'));
+  else if (u === 1) parts.push(t('1 update'));
+  else if (u > 1) parts.push(tc('apps', '{n} updates', { n: u })); // "{n} updates" alone already means progress updates (zh 条进展)
+  const out = { text: parts.join(' · '), label: u > 0 ? t('Update…') : t('Check for updates…'), request: { kind: 'refresh' }, title: updatesChipText(st) };
+  if (st.appSystem && st.appSystem.rebase) out.rebase = { text: t('The system was upgraded; your apps still run in their original environment'), label: t('Migrate…'), request: { kind: 'rebase' } };
+  return out;
+}
+/** Design 009 §C: Layer 1's ONE banner at the top of the Apps dialog — an install that was interrupted, and its Repair.
+ *  null ⇒ no banner. PURE. */
+export function appsBannerModel(st) {
+  if (!st || !st.appSystem || !st.appSystem.interrupted) return null;
+  return { text: t('The last install was interrupted'), label: t('Repair'), request: { kind: 'repair' } };
 }
 
 /** "N updates · last refreshed N days ago" (D5) — never an automatic upgrade. */
@@ -138,23 +179,26 @@ export function updatesChipText(st, now = Date.now()) {
  * THE "YOUR APPS" SECTION of the Desktop apps dialog, for ONE machine. Keyed by the machine; re-renders from
  * GET /api/apps on open and on every `apps-updated` broadcast for that machine. Returns {refresh, dispose}.
  */
-export function renderAppsSection(app, root, { host = 'local', machine = null, onChange = () => { } } = {}) {
+export function renderAppsSection(app, root, { host = 'local', machine = null, onChange = () => { }, onState = null } = {}) {
   const m = machine || { hostId: host };
   const name = () => machineInSentence(m);
   let alive = true, last = null;
   const done = () => { refresh(); onChange(); };
-  const head = el('div', 'app-sec-head');
+  // design 009 §C: the status line at the section's FOOT (+ Layer 1's base-change line above it)
+  const foot = el('div', 'app-sec-foot');
   const chip = el('span', 'app-sec-updates');
-  const refreshBtn = btn(t('Refresh…'), 'file-tool-btn app-sec-refresh', t('Shows the plan first — nothing runs until you confirm'));
+  const refreshBtn = btn(t('Check for updates…'), 'file-tool-btn app-sec-refresh', t('Shows the plan first — nothing runs until you confirm'));
   refreshBtn.onclick = () => showInstallDialog(m, { what: 'app', request: { kind: 'refresh' }, onDone: done });
-  head.append(chip, refreshBtn);
+  const rebaseRow = el('div', 'app-sec-row app-sec-rebase');
+  foot.append(chip, refreshBtn);
   const actions = el('div', 'app-sec-actions');
   const bInstall = btn(t('Install an app…'), 'btn-create app-sec-install');
   bInstall.onclick = () => openAppSearch(app, m, { onDone: done });
   const bDeb = btn(t('Install from a .deb file…'), 'file-tool-btn app-sec-deb');
   bDeb.onclick = () => openDebInstall(app, m, { onDone: done });
-  const bSrc = btn(t('Add a package source…'), 'file-tool-btn app-sec-source');
-  bSrc.onclick = () => openSourceDialog(app, m, { onDone: done });
+  // design 009 §B ("Not changed"): a package source stays for people who know what it is — under More…
+  const bSrc = btn(t('More…'), 'file-tool-btn app-sec-more');
+  bSrc.onclick = (e) => { e.stopPropagation(); const r = bSrc.getBoundingClientRect(); showContextMenu(r.left, r.bottom + 2, [{ label: t('Add a package source…'), action: () => openSourceDialog(app, m, { onDone: done }) }]); };
   const bHelp = btn(t('Let an agent help…'), 'file-tool-btn app-sec-help', t('Starts a temporary helper conversation that knows how to install apps — it can only propose; you approve'));
   bHelp.onclick = () => openAgentHelp(app, m);
   actions.append(bInstall, bDeb, bSrc, bHelp);
@@ -163,19 +207,29 @@ export function renderAppsSection(app, root, { host = 'local', machine = null, o
   const props = el('div', 'app-sec-proposals');
   const drift = el('div', 'app-sec-drift');
   const list = el('div', 'app-sec-list');
-  root.replaceChildren(head, actions, status, back, props, drift, list);
+  root.replaceChildren(actions, status, back, props, drift, list, rebaseRow, foot);
   const render = (st) => {
     if (!alive || !root.isConnected) return;
+    try { onState?.(st && !st.error ? st : null); } catch { } // design 009 §C: the dialog's banner reads the same state
     if (!st || st.error) {
-      chip.textContent = '';
+      chip.textContent = ''; foot.style.display = 'none'; rebaseRow.replaceChildren();
       status.textContent = st && st.code === 'host_needs_daemon' ? appRefusalText('host_needs_daemon') : t('Could not read the apps on {machine}: {why}', { machine: name(), why: (st && st.error) || t('server unreachable') });
       status.classList.add('is-bad');
       back.replaceChildren(); props.replaceChildren(); drift.replaceChildren(); list.replaceChildren();
       return;
     }
     status.classList.remove('is-bad');
-    chip.textContent = updatesChipText(st);
-    refreshBtn.disabled = !(st.manifest && st.manifest.entries || []).length;
+    const sm = appsStatusModel(st);
+    foot.style.display = sm ? '' : 'none';
+    chip.textContent = sm ? sm.text : ''; chip.title = sm ? sm.title : '';
+    refreshBtn.textContent = sm ? sm.label : t('Check for updates…');
+    refreshBtn.disabled = !sm;
+    rebaseRow.replaceChildren();
+    if (sm && sm.rebase) {
+      const go = btn(sm.rebase.label, 'file-tool-btn app-sec-rebase-go', t('Shows the plan first — nothing runs until you confirm'));
+      go.onclick = () => showInstallDialog(m, { what: 'app', request: sm.rebase.request, onDone: done });
+      rebaseRow.append(el('span', 'app-sec-label', sm.rebase.text), go);
+    }
     status.textContent = st.replaying ? t('Putting your apps back after this machine was rebuilt…') : st.manifestError ? t('The apps list on this machine could not be read: {why}', { why: st.manifestError }) : '';
     // verify-r1 F4: entries root keeps that are not installed here (a replay that could not put them back, a paired machine
     // rebuilt, an install that ran before the boot replay) — "Put back" runs the replay through THE install dialog
@@ -277,7 +331,12 @@ export function openAppSearch(app, m, { onDone = null } = {}) {
     go.disabled = false;
     if (!r || r.error) { note.textContent = appRefusalText(r && r.code) || (r && r.error) || t('server unreachable'); note.classList.add('is-bad'); return; }
     const exact = /^[a-z0-9][a-z0-9+.-]{1,63}$/.test(words);
-    note.textContent = r.results.length ? t('{n} found — pick one to see its plan', { n: r.results.length }) : exact ? '' : t('Nothing found for “{q}”', { q: words });
+    note.textContent = r.results.length ? t('{n} found — pick one to see its plan', { n: r.results.length }) : t('The package sources of {machine} have no “{q}”', { machine: machineInSentence(m), q: words });
+    if (!r.results.length) { // design 009 §B5: a dead end hands the words to an agent (it finds the vendor's own installer and proposes it)
+      const ho = el('button', 'btn-create app-search-handoff', t('Let an agent find it')); ho.type = 'button';
+      ho.onclick = () => { close(); openAgentHelp(app, m, { request: words }); };
+      results.appendChild(ho);
+    }
     if (exact && !r.results.some((x) => x.package === words)) { const b = el('button', 'app-search-result app-search-exact'); b.type = 'button'; b.append(el('span', 'app-search-pkg', words), el('span', 'app-search-sum', t('Plan this exact package name'))); b.onclick = () => pick(words); results.appendChild(b); }
     for (const x of r.results) { const b = el('button', 'app-search-result'); b.type = 'button'; b.dataset.pkg = x.package; b.append(el('span', 'app-search-pkg', x.package), el('span', 'app-search-sum', x.summary)); b.onclick = () => pick(x.package); results.appendChild(b); }
   };
@@ -334,14 +393,16 @@ export function openSourceDialog(app, m, { onDone = null } = {}) {
 }
 
 /** "Let an agent help…" (owner D3) — a TEMPORARY helper conversation, through the existing new-session + first-message
- *  path: its first prompt is the user's request + the whole apps manual + this machine's facts (the server composes it).
+ *  path: its first message is the user's own words + one line pointing at vibespace-app (design 009 S6; the server
+ *  composes it) and it is named by those words.
  *  It can only PROPOSE; the user approves in For you or here. It is marked as a helper (not a standing conversation). */
-export function openAgentHelp(app, m) {
+export function openAgentHelp(app, m, { request: carried = '' } = {}) {
   const { body, close } = createModalShell({ id: 'app-help-dialog', title: t('Let an agent help install an app'), dialogClass: 'desktop-install app-help', escapeToClose: true });
   body.appendChild(el('p', 'app-search-intro', t('Starts a temporary helper conversation that knows how to install apps on {machine}. It can only propose an install — you approve it in For you. Close it when it says done.', { machine: machineInSentence(m) })));
   const form = el('form', 'app-search-form');
   const input = el('input', 'app-search-input app-help-request'); input.type = 'text'; input.placeholder = t('What do you want to install? (e.g. an image editor that opens PSD files)'); input.autocomplete = 'off';
   input.setAttribute('aria-label', t('What do you want to install?'));
+  if (carried) input.value = String(carried); // design 009 §B5: a search's or a refusal's words, carried
   const go = btn(t('Start the helper'), 'btn-create'); go.type = 'submit';
   form.append(input, go);
   body.appendChild(form);
@@ -353,7 +414,7 @@ export function openAgentHelp(app, m) {
     if (!r || r.error || !r.prompt) { go.disabled = false; showToast(t('Could not start the helper: {why}', { why: (r && r.error) || t('server unreachable') }), { type: 'error' }); return; }
     close();
     if (typeof app.createSession !== 'function') { showToast(t('Could not start the helper: {why}', { why: 'no session' }), { type: 'error' }); return; }
-    app.createSession({ cwd: '', name: t('App install helper'), mode: 'chat', backend: 'claude', hostId: m.hostId && m.hostId !== 'local' ? m.hostId : undefined, initialMessage: r.prompt,
+    app.createSession({ cwd: '', name: request ? t('Install app · {request}', { request: request.slice(0, 40) }) : t('App install helper'), /* design 009 S6: named by the user's own words */ mode: 'chat', backend: 'claude', hostId: m.hostId && m.hostId !== 'local' ? m.hostId : undefined, initialMessage: r.prompt,
       onCreateResult: async (okd, msg) => {
         if (!okd || !msg || !msg.sessionId) return;
         const h = await fetchJson('/api/apps/helpers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: m.hostId, sessionId: msg.sessionId, request }) });

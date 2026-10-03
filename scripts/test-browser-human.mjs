@@ -1316,6 +1316,10 @@ ok(hs && hs.browserKey === HL && hs.open && hs.recorded === true && hs.count >= 
       // lane browser-admin 2b: a download is the user's act — both installs of the ONE slot (CloakBrowser, the browser CLI)
       ['POST', '/api/browser/install', '/api/browser/install', {}],
       ['POST', '/api/browser/cli/install', '/api/browser/cli/install', { version: '0.38.1' }],
+      // lane chrome-builds-download (design 004): the list Google offers, a download and a removal are the user's (BUILDS_DOWNLOAD_IS_USERS)
+      ['GET', '/api/browser/builds/available', '/api/browser/builds/available'],
+      ['POST', '/api/browser/builds/download', '/api/browser/builds/download', { version: '151.0.7922.34' }],
+      ['DELETE', '/api/browser/builds/:version', '/api/browser/builds/151.0.7922.34'],
     ];
     const table = WALK_H.map(([m, p]) => m + ' ' + p).sort();
     ok(J(derived) === J(table), `the human-route census: the routes that serve HIS browsing, derived from the routers (${derived.length}), are exactly the walk's table — a new one is RED until it is walked`, { derived, table });

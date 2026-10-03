@@ -137,11 +137,14 @@ class HostManager {
     // dial hosts carry a live `online` field (server wires dialOnline to the
     // dialed-in stream registry) — the ONE machine list is the whole roster,
     // there is no separate device API anymore (B-f3e8).
+    // lane device-upgrade-stuck: `agentUpgrade` = the agent's failed update (src/server/device-upgrade-watch.js rowOf) —
+    // the row's line until the device reports the version
+    const up = (h) => { const u = this.agentUpgradeOf?.(h.id); return u ? { agentUpgrade: u } : {}; };
     return this._state.hosts.map(h => (h.transport === 'dial'
-      ? { ...h, dialTokenHash: undefined, online: !!this.dialOnline?.(h.deviceId) }
+      ? { ...h, dialTokenHash: undefined, online: !!this.dialOnline?.(h.deviceId), ...up(h) }
       // graduated ssh machine (B-6640): expose the upgrade + live-dial state
       // (hash stays redacted like pure-dial records)
-      : { ...h, dialTokenHash: undefined, ...(h.deviceId ? { graduated: true, dialLive: !!this.dialOnline?.(h.deviceId) } : {}) }));
+      : { ...h, dialTokenHash: undefined, ...(h.deviceId ? { graduated: true, dialLive: !!this.dialOnline?.(h.deviceId) } : {}), ...up(h) }));
   }
 
   get(id) {
@@ -1124,6 +1127,9 @@ class HostManager {
       version: this.agentdDeps.version,
       transport: { kind: 'ssh', hostToken: this.agentdDeps.agentdHostToken(id), sshBin: 'ssh', sshArgs: this.sshArgs(h, { multiplex: true }), remoteCmd },
       log: () => {},
+      // lane device-upgrade-stuck: the same door as a dial device (src/server/device-upgrade-watch.js)
+      onUpgradeStuck: (from, to, info) => this.onAgentUpgrade?.('stuck', { ...(info || {}), hostKey: id, machine: h.name || id, from, to }),
+      onVersionMatch: (v) => this.onAgentUpgrade?.('matched', { hostKey: id, version: v }),
     });
     await dm.connect();
     this._devices.set(id, dm);

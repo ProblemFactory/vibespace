@@ -16,12 +16,12 @@
 // second surface over them); ⤢ on a row, on the popup's tab strip and on the
 // mini inbox's head opens THE window (src/lib/inbox-window.js, app.openInbox) —
 // the read-only viewer modal is retired.
-import { t } from './i18n.js';
+import { t, tc } from './i18n.js';
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, badgeCounts, inboxBadgeFor, miniInboxEntries, foldGroup, FOLD_MAX, noticeGroups, noticeChips, noticeFilterFor, tabCounts, NOTICE_FILTER_KEY, HISTORY_SEEN_KEY } from './user-todos-layout.js'; // PURE: the group order + append-only row order while the popup is open (inc-mtw02kbq-kj96); notices split (2.369.118); the flood fold (chunk 4); notices by origin + the tab counts (B-328d)
 import { inboxModel, tierCounts, actionWords } from './user-todos-actions.js'; // THE client model (§9): the store, the live facts (the running dot + the reply verdict, D1.5/D1.7), the words, every verb — shared with the For-you window
 import { trayWhere } from './user-todos-layout.js'; // lane S3: the new-item toast names the corner the tray sits in on this device
 import { renderRow, patchRow, applyLive, replyBoxEl, reconcileKeyed, agoText as agoTextOf } from './user-todos-row.js'; // THE row renderer (one spelling of a row; keyed patching keeps a reply box alive)
-import { anchorFixedPopup, createPopover, escHtml, fetchJson, getToastHistory, onOutsidePress, showContextMenu, showToast, stripLegacyRecordToasts } from './utils.js';
+import { anchorFixedPopup, copyText, createPopover, escHtml, fetchJson, getToastHistory, onOutsidePress, showContextMenu, showToast, stripLegacyRecordToasts } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { pressVerdict, armAfterLayout } from './press-arm.js'; // verify-r6 V1: an Allow counts only once it sat still where it was read
 
@@ -263,7 +263,7 @@ export function installUserTodos(app) {
   // appeared or MOVED (a resolved row above it shrank, an expiry) starts its ARM_MS again (PURE src/lib/press-arm.js)
   const armExitButtons = () => {
     const now = performance.now();
-    for (const b of document.querySelectorAll('.ut-action-exit.ut-exit-allow, .ut-action-proposal.ut-proposal-approve')) { // lane browser-propose: an Approve is armed the same way
+    for (const b of document.querySelectorAll('.ut-action-exit.ut-exit-allow, .ut-action-proposal.ut-proposal-approve, .ut-action-app.ut-app-install')) { // lane browser-propose: an Approve is armed the same way; design 009: so is a card's one-click Install
       const top = b.getBoundingClientRect().top;
       b._armSince = armAfterLayout({ prevTop: b._armTop ?? null, top, prevSince: b._armSince ?? null, now });
       b._armTop = top;
@@ -799,10 +799,35 @@ export function installUserTodos(app) {
     }
     const appBtn = e.target.closest('.ut-action-app');
     if (appBtn) {
-      // Layer 0 apps: Install… opens THE install dialog on the proposal (nothing runs before its own button); Not now declines
-      if (appBtn.dataset.answer === 'install') hidePopup();
+      // design 009: the card's Install INSTALLS (the card shows the progress in place) — an Install that appeared or moved
+      // under the pointer a moment ago is not the one the user read (the exit ask's V1 rule); Try again is the same click;
+      // Open starts the app; Not now declines. An item filed before the card (no view) opens THE install dialog, as before.
+      const rec = byId(id);
+      const ans = appBtn.dataset.answer;
+      if (ans === 'install' && rec && rec.card) {
+        armExitButtons();
+        const pv = pressVerdict({ since: appBtn._armSince ?? null, now: performance.now() });
+        if (!pv.ok) { showToast(t('That Install moved under the pointer just now — read it, then press it again')); return; }
+      }
+      if ((ans === 'install' && !(rec && rec.card)) || ans === 'open') hidePopup();
       appBtn.disabled = true;
-      Promise.resolve(model.runAction(todos.open.find((i) => i.id === id), appBtn.dataset.answer)).finally(() => { appBtn.disabled = false; });
+      Promise.resolve(model.runAction(rec, ans)).finally(() => { appBtn.disabled = false; });
+      return;
+    }
+    const moreBtn = e.target.closest('.ut-more');
+    if (moreBtn) {
+      // design 009: the card's ⋯ — what used to be five buttons beside its two (Mark done and Ignore still decline it)
+      const rec = byId(id);
+      if (!rec) return;
+      const rs = model.replyState(rec);
+      const r = moreBtn.getBoundingClientRect();
+      showContextMenu(r.left, r.bottom, [
+        ...(rs.show && rs.enabled ? [{ label: t('Reply'), action: () => openBox(item) }] : []),
+        { label: t('Mark done'), action: () => setStatus(id, 'done') },
+        { label: tc('inbox', 'Dismiss'), action: () => setStatus(id, 'dismissed') },
+        { label: t('Copy'), action: () => { copyText([model.wordsOf(rec), model.detailOf(rec)].filter(Boolean).join('\n\n')); showToast(t('Copied')); } },
+        ...model.menuFor(id),
+      ]);
       return;
     }
     const propBtn = e.target.closest('.ut-action-proposal');

@@ -594,7 +594,10 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
   also lists the Chrome builds installed on the machine and the browser driver
   version in use. Which build a profile runs is the user's choice (the Agent
   browser panel's Change build…); nothing you send chooses one
-  (`--executable-path` and `install` are not offered). When the user
+  (`--executable-path` and `install` are not offered). The user can also
+  download another Chrome for Testing build there (Change build… → Download
+  another build…); one that lands simply appears in `providers`. You cannot
+  start a download — when a site needs another Chrome, tell the user so. When the user
   changes a build, the browser restarts: you are told what was interrupted —
   read the page, then run it again.
 * **Being blocked — you PROPOSE, the user approves.** When a sign-in page

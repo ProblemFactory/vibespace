@@ -1,5 +1,19 @@
 # vibespace-app — apps that survive a rebuilt machine
 
+## The user asked for an app → what you do
+
+1. `vibespace-app search <name>` — the machine's package sources, plus VibeSpace's short list of well-known apps (WeChat /
+   微信, Chrome, VS Code, Edge, Zoom, Discord, TeamViewer, Steam): a hit prints the exact command to propose it.
+2. In the sources → `vibespace-app install <package> --why "<their words>"`.
+3. **Not in the package sources?** Find the vendor's OFFICIAL download address (prefer the `.deb` to an AppImage) and
+   propose it: `vibespace-app install --from <https address> --why "…"`. VibeSpace downloads it, reads what it is from its
+   bytes and the app's own name and icon from inside it, and files ONE card. Already have the installer on that machine?
+   `vibespace-app install --file <absolute path> --why "…"` (VibeSpace copies it; yours is no longer needed).
+4. **Never download, unpack, write a launcher for or start the app yourself**, and never `sudo apt install` / `dpkg -i`
+   it — that is lost when the machine is rebuilt, and the user cannot see or undo it.
+5. Tell the user in one plain sentence that a card is waiting in their For you tray. Do not mention package formats.
+   The outcome reaches you on your next turn: "Installed: 微信 — open it with `vibespace-window open app.wechat`."
+
 **The first thing to know:** a machine's system files are not kept when it is rebuilt (a container pod is recreated
 on every update; only the user's home survives). An app installed with `sudo apt install` is GONE after that. An app
 installed through VibeSpace is kept: VibeSpace saves every `.deb` it needed and puts the app back by itself, offline,
@@ -16,6 +30,8 @@ The outcome reaches you for free on your next turn (a VibeSpace notice), or now 
 vibespace-app search <words…>                     search the machine's package sources (apt-cache search)
 vibespace-app plan <package…>                     what an install would do — nothing is proposed
 vibespace-app install <package…> --why "<why>"    PROPOSE an install (the user reads your why)
+vibespace-app install --from https://… --why "…"  PROPOSE a vendor's download (.deb / AppImage) — VibeSpace downloads it
+vibespace-app install --file /abs/path --why "…"  PROPOSE an installer already on that machine
 vibespace-app remove <app-id> --why "<why>"       PROPOSE removing an app (the id from `list`)
 vibespace-app list                                apps installed through VibeSpace, their catalog ids, your proposals
 vibespace-app status                              after a rebuild: restoring / done; installed outside VibeSpace; updates
@@ -57,7 +73,13 @@ one (a command-line tool) is simply on PATH.
 | `no_apt` | the machine has no apt-get (not a Debian / Ubuntu machine) |
 | `no_sudo` | the plan is shown, but the machine has no passwordless sudo — the user runs the commands by hand |
 | `shared` | removing it would also remove a package another installed app needs |
-| `agent_forbidden` | that request is the user's (a `.deb` file, Refresh, putting apps back) — ask the user |
+| `agent_forbidden` | that request is the user's (Refresh, putting apps back, a file VibeSpace staged) — ask the user |
+| `bad_address` | the download address is refused: not https, an IP address, a private name (localhost, .local, .internal…), more than 5 redirects, or a redirect to one of those — name the vendor's public address |
+| `not_an_installer` | what the address sent (or the file) is neither a Debian package nor an AppImage — often a web PAGE: find the file's own address |
+| `too_large` | more than 2 GiB |
+| `fetch_failed` | the address did not answer, answered an error, or stopped sending — say so; never fall back to another site silently |
+| `unsupported` / `hostile` / `unreadable` | an AppImage VibeSpace cannot open (packed with xz, an old type-1, a damaged or hostile file tree) — look for the vendor's `.deb` |
+| `changed` | the downloaded file changed after the card was shown — nothing ran; propose it again |
 | `host_needs_daemon` | the VibeSpace agent on that machine is too old — the user reconnects the machine to upgrade it |
 
 ## Decisions
@@ -91,8 +113,9 @@ are the user's: "N updates · last refreshed …" + Refresh in Desktop apps. Nev
 ```
 vibespace-app add --kind uv <tool> --why "…"          uv tool install <tool>          (needs uv)
 vibespace-app add --kind npm <package> --why "…"      npm install -g --prefix ~/.local <package>
-vibespace-app add --kind appimage <file> --why "…"    copies + extracts it under ~/.local/opt/<name>
 ```
+(`add --kind appimage <file>` is now `install --file <file>` — a proposal: VibeSpace unpacks it into
+`~/.vibespace/apps/appimage/<id>/` at the user's click, never by running it, and gives it a row in Apps.)
 
 These run AS YOU in the user's home (it survives a rebuild, so nothing needs putting back) and are recorded. `add` runs
 an installer, so your CLI asks the user's permission for it like any other command.

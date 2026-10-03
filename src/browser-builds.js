@@ -39,7 +39,9 @@ const VERSION_RE = /^\d{2,4}(?:\.\d{1,6}){2,3}$/;
 const BUILDS_MAX = 64;
 const CHOICE_KINDS = Object.freeze(['default', 'build', 'path']);
 /** Every refusal this module answers — a closed set the routes' STATUS table mirrors. */
-const BUILD_CODES = Object.freeze(['browser_choice_invalid', 'browser_choice_user_only', 'browser_choice_provider', 'builds_unsupported', 'builds_unreadable', 'browser_build_missing', 'browser_build_not_executable', 'browser_path_missing', 'browser_path_not_executable', 'downgrade_refused', 'downgrade_unknown']);
+const BUILD_CODES = Object.freeze(['browser_choice_invalid', 'browser_choice_user_only', 'browser_choice_provider', 'builds_unsupported', 'builds_unreadable', 'browser_build_missing', 'browser_build_not_executable', 'browser_path_missing', 'browser_path_not_executable', 'downgrade_refused', 'downgrade_unknown',
+  // lane chrome-builds-download (design 004): the download's refusals, each said by name
+  'build_platform_unsupported', 'disk', 'build_present', 'build_version_invalid', 'build_version_unknown', 'build_list_invalid', 'build_list_unreachable', 'build_url_offhost', 'build_fetch_failed', 'build_check_failed', 'build_zip_shape', 'build_unpack_failed', 'build_verify_failed', 'build_in_use', 'build_not_downloaded', 'build_removing', 'unzip_unavailable', 'install_running', 'build_stalled']);
 
 /** `chrome-151.0.7922.34` → `{version:'151.0.7922.34', major:151}`; null for anything else. */
 function parseBuildDir(name) {
@@ -188,4 +190,155 @@ function buildsView(l) {
   return { ok: true, root: l.root, missing: !!l.missing, cut: !!l.cut, builds: (l.builds || []).map((b) => ({ version: b.version, major: b.major, usable: !!b.usable, why: b.why || null })) };
 }
 
-module.exports = { buildWords, missingNotice, BUILDS_REL, BUILD_DIR_RE, BUILDS_MAX, CHOICE_KINDS, BUILD_CODES, parseBuildDir, compareVersions, buildExecutable, fileFact, listBuilds, normalizeBrowserChoice, sameChoice, browserChoiceVerdict, runningBuildOf, choiceView, agentChoiceView, agentMissingView, buildsView };
+// ── lane chrome-builds-download (design 004, B-80c1 — the owner: 「能不能自动从网上下载对应的版本？…下载前让用户检查是否互相兼容」) ──
+// THE PURE HALF of "Download another build…": Google's two Chrome for Testing version documents parsed (an off-host download
+// URL refused by name, never offered), THE compatibility verdict a version's row says before any byte moves (two HARD rows
+// refuse; every other row is a chip the person reads), the download's paths (never outside the builds folder), and the zip's
+// shape judged from `unzip`'s own listing BEFORE anything is extracted. The keeper (src/server/browser-keeper.js
+// installChromeBuild) does the fetching, in THE install slot; the record of the hosts is browser-verbs CHROME_BUILDS_RECORD.
+const CFT_CHANNELS = Object.freeze(['Stable', 'Beta', 'Dev', 'Canary']);
+/** The one platform whose layout is measured (`chrome-<v>/chrome` after the rename) — Linux x64 = CfT's `linux64`. */
+const DOWNLOAD_PLATFORM = 'linux-x64';
+/** zip + unpacked + slack: a 196 MB zip unpacks to ≈ 390 MB (measured, F1/F8). */
+const DISK_FACTOR = 3;
+const LIST_MAX = 6000;
+const ZIP_ENTRIES_MAX = 5000;
+const WITNESS_FILE = 'vibespace-download.json';
+const bareHost = (h) => String(h || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/[/:].*$/, '').replace(/\.$/, '');
+/** A list document's download URL, judged against the record: https, on the record's file host — else refused BY NAME. */
+function downloadUrlVerdict(url, { fileHost } = {}) {
+  let x = null;
+  try { x = new URL(String(url || '')); } catch { x = null; }
+  if (!x) return { ok: false, code: 'build_list_invalid', error: `the list names a download that is not a URL (${String(url).slice(0, 120)})` };
+  const want = bareHost(fileHost);
+  if (x.protocol !== 'https:' || bareHost(x.hostname) !== want || x.username || x.password) return { ok: false, code: 'build_url_offhost', error: `the list names a download on ${x.protocol === 'https:' ? x.hostname : x.protocol + '//' + x.hostname}, not on ${want} — it is not offered` };
+  return { ok: true, url: x.href, host: want };
+}
+function chromeDownloads(downloads, platform) { const a = downloads && Array.isArray(downloads.chrome) ? downloads.chrome : []; return a.find((d) => d && d.platform === platform) || null; }
+/** The 10 KB last-known-good document → the four channel rows (`{channel, version, major, revision, url}`) + the rows refused
+ *  by name (`refused`: an off-host URL, a malformed version). A document of another shape is refused whole (`build_list_invalid`). */
+function parseLastKnownGood(doc, { fileHost, platform = 'linux64' } = {}) {
+  if (!doc || typeof doc !== 'object' || !doc.channels || typeof doc.channels !== 'object') return { ok: false, code: 'build_list_invalid', error: 'the Chrome for Testing channel list has an unknown shape (no "channels")' };
+  const rows = [], refused = [];
+  for (const channel of CFT_CHANNELS) {
+    const c = doc.channels[channel];
+    if (!c || typeof c !== 'object') continue;
+    const version = String(c.version || '');
+    if (!VERSION_RE.test(version)) { refused.push({ channel, version: version.slice(0, 40), code: 'build_list_invalid', error: `the ${channel} row names no version` }); continue; }
+    const d = chromeDownloads(c.downloads, platform);
+    if (!d) { refused.push({ channel, version, code: 'build_list_invalid', error: `the ${channel} row has no ${platform} download` }); continue; }
+    const u = downloadUrlVerdict(d.url, { fileHost });
+    if (!u.ok) { refused.push({ channel, version, code: u.code, error: u.error }); continue; }
+    rows.push({ channel, version, major: Number(version.split('.')[0]), revision: String(c.revision || ''), url: u.url });
+  }
+  if (!rows.length && !refused.length) return { ok: false, code: 'build_list_invalid', error: 'the Chrome for Testing channel list names no channel' };
+  return { ok: true, timestamp: String(doc.timestamp || ''), rows, refused };
+}
+/** The 5.2 MB known-good document → every version with a `platform` chrome zip (`{version, major, revision, url}`, newest
+ *  first) + the refused ones. Bounded (LIST_MAX). */
+function parseKnownGood(doc, { fileHost, platform = 'linux64' } = {}) {
+  if (!doc || typeof doc !== 'object' || !Array.isArray(doc.versions)) return { ok: false, code: 'build_list_invalid', error: 'the Chrome for Testing version list has an unknown shape (no "versions")' };
+  const versions = [], refused = [];
+  for (const v of doc.versions.slice(0, LIST_MAX)) {
+    const version = String((v && v.version) || '');
+    if (!VERSION_RE.test(version)) continue;
+    const d = chromeDownloads(v.downloads, platform);
+    if (!d) continue;
+    const u = downloadUrlVerdict(d.url, { fileHost });
+    if (!u.ok) { refused.push({ version, code: u.code, error: u.error }); continue; }
+    versions.push({ version, major: Number(version.split('.')[0]), revision: String(v.revision || ''), url: u.url });
+  }
+  versions.sort((a, b) => compareVersions(b.version, a.version));
+  return { ok: true, timestamp: String(doc.timestamp || ''), versions, refused, cut: doc.versions.length > LIST_MAX };
+}
+/** One row per major, newest first: `{major, newest, count}` (the "Older versions…" list; a major expands to its versions). */
+function majorsOf(versions) {
+  const m = new Map();
+  for (const v of versions || []) { const e = m.get(v.major); if (!e) m.set(v.major, { major: v.major, newest: v.version, count: 1 }); else { e.count++; if (compareVersions(v.version, e.newest) > 0) e.newest = v.version; } }
+  return [...m.values()].sort((a, b) => b.major - a.major);
+}
+/**
+ * THE COMPATIBILITY VERDICT of one version, said BEFORE the download (design 004 §2's table). Two HARD rows refuse the
+ * download (`hard`, the first is `code`/`error`): the machine (only Linux x64 has the measured layout) and the disk (free bytes
+ * on the builds folder's filesystem against the zip's length × 3, when the length is known). Every other row is a CHIP
+ * (structure; the client words it): `present` (already on this computer — the row offers nothing), `cli` (driven by the
+ * measured agent-browser), `census` (the CDP census relation), `profile` (older than the Chrome that last opened THIS profile —
+ * it can't be picked for it), `cloak` (whether a profile opened with it can still switch to CloakBrowser Free / Pro later).
+ * Inputs are facts read by the caller (`census` = cdp-census chromeRelation(version), `censusChrome` = its newest censused
+ * Chrome; `cloak` = browser-switch CLOAK_TIERS). → `{ok, offer, code, error, hard, chips, major, needBytes}`.
+ */
+function buildCompatVerdict({ version, channel = null, platform = process.platform, arch = process.arch, present = false, freeBytes = null, zipBytes = null, freePath = '', census = null, censusChrome = null, profile = null, cloak = SW.CLOAK_TIERS, cli = null, command = '', defaultBuild, defaultUsers = [] } = {}) {
+  const v = String(version || '');
+  if (!VERSION_RE.test(v)) return { ok: false, offer: false, code: 'build_version_invalid', error: `"${v.slice(0, 40)}" is not a Chrome version`, hard: [{ code: 'build_version_invalid' }], chips: [], major: null, needBytes: null };
+  const major = Number(v.split('.')[0]);
+  const hard = [], chips = [];
+  const machine = SW.platformTag(platform, arch);
+  if (machine !== DOWNLOAD_PLATFORM) hard.push({ code: 'build_platform_unsupported', machine, command: String(command || ''), error: `Downloads are offered on Linux x64 computers; on ${machine} install by hand${command ? ': ' + command : ''}` });
+  const zb = Number(zipBytes), fb = Number(freeBytes);
+  const needBytes = Number.isFinite(zb) && zb > 0 ? zb * DISK_FACTOR : null;
+  if (needBytes != null && freeBytes != null && Number.isFinite(fb) && fb < needBytes) hard.push({ code: 'disk', need: needBytes, free: fb, path: String(freePath || ''), error: `needs about ${Math.ceil(needBytes / 1e6)} MB free, ${Math.floor(fb / 1e6)} MB left on ${freePath || 'the builds folder'}` });
+  if (present) chips.push({ kind: 'present' });
+  if (cli) chips.push({ kind: 'cli', version: String(cli) });
+  if (census) chips.push({ kind: 'census', relation: census === 'between' ? 'older' : String(census), census: censusChrome ? String(censusChrome) : null });
+  const wrote = profile && Number.isInteger(profile.lastChromiumMajor) ? profile.lastChromiumMajor : null;
+  if (wrote != null && major < wrote) chips.push({ kind: 'profile', label: String((profile && profile.label) || ''), wrote });
+  const free = cloak && cloak.free ? cloak.free.chromiumMajor : null, pro = cloak && cloak.pro ? cloak.pro.chromiumMajor : null;
+  if (Number.isInteger(free) && Number.isInteger(pro)) chips.push({ kind: 'cloak', reach: major <= free ? 'both' : major <= pro ? 'pro' : 'none', free, pro });
+  // verify r1 (H1): with no executable path the CLI launches its NEWEST build (measured: agent-browser 0.38.1 ran chrome-157 over
+  // chrome-150) — a download newer than every build here becomes the default of every default-choice profile and every
+  // conversation's browser, and a profile it opens can't go back. Said on the row (`defaultBuild`: the newest build here, null = none).
+  if (defaultBuild !== undefined && !present && (defaultBuild == null || compareVersions(v, String(defaultBuild)) > 0)) chips.push({ kind: 'default', from: defaultBuild == null ? null : String(defaultBuild), users: (Array.isArray(defaultUsers) ? defaultUsers : []).slice(0, 20).map(String) });
+  return { ok: hard.length === 0, offer: hard.length === 0 && !present, code: hard[0] ? hard[0].code : null, error: hard[0] ? hard[0].error : null, hard, chips, major, needBytes, channel: channel || null };
+}
+/** THE PATHS of one download — all inside the builds folder (a version is VERSION_RE-checked: no `/`, no `..`): the zip's
+ *  `.part`, the unpack folder, the target `chrome-<version>`, the removal's rename. */
+function downloadPlan({ version, url = null, bytes = null, buildsRoot } = {}) {
+  const v = String(version || '');
+  if (!VERSION_RE.test(v)) return { ok: false, code: 'build_version_invalid', error: `"${v.slice(0, 40)}" is not a Chrome version` };
+  const root = path.resolve(String(buildsRoot || ''));
+  const b = Number(bytes);
+  return { ok: true, version: v, url, root, part: path.join(root, `chrome-${v}.part`), unpackDir: path.join(root, `.unpack-${v}`), targetDir: path.join(root, `chrome-${v}`), removingDir: path.join(root, `.removing-${v}`), witness: path.join(root, `chrome-${v}`, WITNESS_FILE), needBytes: Number.isFinite(b) && b > 0 ? b * DISK_FACTOR : null };
+}
+/** `unzip -Z1` (the names unzip itself will use) + `unzip -Zs` (each entry's type, first character of its mode) → entries
+ *  `[{name, kind: 'file'|'dir'|'link'|'other'}]`. Two listings that do not pair up one to one are refused. */
+function parseZipListing(namesText, longText) {
+  const names = String(namesText || '').split('\n').filter((x) => x !== '');
+  const longs = String(longText || '').split('\n').filter((x) => /^\S{7,10}\s+\d+\.\d+\s/.test(x));
+  if (!names.length) return { ok: false, code: 'build_zip_shape', error: 'the zip lists no entry' };
+  if (names.length !== longs.length) return { ok: false, code: 'build_zip_shape', error: `the zip's two listings disagree (${names.length} names, ${longs.length} entries) — a name with a line break?` };
+  return { ok: true, entries: names.map((name, i) => { const c = longs[i][0]; return { name, size: Number(longs[i].trim().split(/\s+/)[3]) || 0, kind: c === 'l' ? 'link' : c === 'd' || (c === '-' && name.endsWith('/')) ? 'dir' : c === '-' ? 'file' : 'other' }; }) };
+}
+/** THE ZIP'S SHAPE, judged before `unzip` extracts anything: every entry under the measured layout's ONE top folder, no `..`,
+ *  no `.`, no absolute name, no backslash or control character, no link or special entry, no duplicate, and the layout's
+ *  `chrome` a regular file. Entries = names (a trailing `/` = a folder) or `{name, kind}`. */
+function zipShapeVerdict(entries, { layout = 'chrome-linux64/', max = ZIP_ENTRIES_MAX } = {}) {
+  const list = Array.isArray(entries) ? entries.map((e) => (typeof e === 'string' ? { name: e, kind: e.endsWith('/') ? 'dir' : 'file' } : e)) : [];
+  const bad = (entry, why) => ({ ok: false, code: 'build_zip_shape', entry: String(entry).slice(0, 200), error: `the zip is not a Chrome for Testing build: ${why} (${JSON.stringify(String(entry).slice(0, 120))}) — nothing was extracted` });
+  if (!list.length) return bad('', 'it lists no entry');
+  if (list.length > max) return bad(list.length, `more than ${max} entries`);
+  const seen = new Set();
+  let files = 0, chrome = false, unpacked = 0; // verify r1 (L1): what the zip SAYS it unpacks to (`unzip -Zs`'s sizes)
+  for (const e of list) {
+    const n = String((e && e.name) || '');
+    if (!n || /[\0-\x1f\x7f\\]/.test(n)) return bad(n, 'a name with a control character or a backslash');
+    if (n.startsWith('/')) return bad(n, 'an absolute name');
+    if (!n.startsWith(layout)) return bad(n, `an entry outside ${layout}`);
+    const segs = n.replace(/\/$/, '').split('/');
+    if (segs.some((s) => s === '..' || s === '.' || s === '')) return bad(n, 'a name with "..", "." or an empty part');
+    if (e.kind !== 'file' && e.kind !== 'dir') return bad(n, e.kind === 'link' ? 'a link entry' : 'a special entry');
+    if (seen.has(n)) return bad(n, 'the same name twice');
+    seen.add(n);
+    if (e.kind === 'file') { files++; unpacked += Number(e.size) || 0; if (n === layout + 'chrome') chrome = true; }
+  }
+  if (!chrome) return bad(layout + 'chrome', 'no chrome program in it');
+  return { ok: true, files, entries: list.length, unpacked };
+}
+/** Does `chrome --version`'s output name exactly this version ("Google Chrome for Testing 154.0.8037.92")? */
+function versionSays(out, version) {
+  const m = /(?:Chrome|Chromium)[^\d\n]{0,40}(\d{2,4}(?:\.\d{1,6}){3})/.exec(String(out || ''));
+  return { ok: !!m && m[1] === String(version), says: m ? m[1] : null };
+}
+
+module.exports = { buildWords, missingNotice, BUILDS_REL, BUILD_DIR_RE, BUILDS_MAX, CHOICE_KINDS, BUILD_CODES, parseBuildDir, compareVersions, buildExecutable, fileFact, listBuilds, normalizeBrowserChoice, sameChoice, browserChoiceVerdict, runningBuildOf, choiceView, agentChoiceView, agentMissingView, buildsView,
+  // lane chrome-builds-download (design 004)
+  CFT_CHANNELS, DOWNLOAD_PLATFORM, DISK_FACTOR, WITNESS_FILE, VERSION_RE, downloadUrlVerdict, parseLastKnownGood, parseKnownGood, majorsOf, buildCompatVerdict, downloadPlan, parseZipListing, zipShapeVerdict, versionSays };

@@ -13,6 +13,14 @@
  *                    has none), a .deb copied into ~/.vibespace/apps/staging with its sha256, a source's key fetched
  *                    over https with its OpenPGP fingerprints — → the PURE plan + the argv to run + the commands a
  *                    person reads; `kind: 'search'` answers `apt-cache search`
+ *   app-fetch        design 009 — an installer the agent names by ADDRESS (downloaded as the user: https, a public name,
+ *                    the address every hop connects to judged first, ≤ 5 redirects, ≤ 2 GiB) or by FILE (copied), into
+ *                    staging/ 0600 with its sha256; its KIND read from the bytes (a .deb or an AppImage — anything else
+ *                    is deleted and named). `app-plan` then plans the staged file in place: a .deb as today, an AppImage
+ *                    with no root at all (its own .desktop + icon read out of its SquashFS — src/app-squashfs.js — never
+ *                    by running it); `app-install {kind:'appimage'}` unpacks it into appimage/<id>/ and deletes it;
+ *                    `app-remove {home:true}` removes an entry that lives in the home (AppImage / uv / npm), no root;
+ *                    `app-unstage` deletes a proposal's staged files (declined, withdrawn, expired, done)
  *   app-install / app-remove / app-refresh / app-adopt-drift
  *                    the RECORD after the slot ran: the script's `= …` lines read from the slot's own log (keyed by the
  *                    run's nonce), the rows and package lists read from the ROOT-OWNED ~/.vibespace/apps/sys (an agent
@@ -31,9 +39,14 @@ const crypto = require('crypto');
 const { execFile } = require('child_process');
 const A = require('./app-manifest.js');
 const M = require('./desktop-apps.js');
+const SQ = require('./app-squashfs.js');
 
-const APP_OPS = Object.freeze(['app-status', 'app-plan', 'app-install', 'app-remove', 'app-refresh', 'app-adopt-drift']);
-const PLAN_KINDS = Object.freeze(['search', 'apt', 'deb', 'source', 'source-remove', 'remove', 'refresh', 'adopt', 'replay']);
+const APP_OPS = Object.freeze(['app-status', 'app-plan', 'app-install', 'app-remove', 'app-refresh', 'app-adopt-drift', 'app-fetch', 'app-unstage']);
+const PLAN_KINDS = Object.freeze(['search', 'apt', 'deb', 'appimage', 'source', 'source-remove', 'remove', 'refresh', 'adopt', 'replay']);
+/** A file VibeSpace staged for a proposal: `<16 hex>.deb` / `.AppImage` / `.icon.png|svg` (a download in flight: `.part`). */
+const STAGED_RE = /^[0-9a-f]{16}\.(?:deb|AppImage|icon\.(?:png|svg))$/;
+const STAGED_ANY_RE = /^[0-9a-f]{16}\.(?:deb|AppImage|part|key|icon\.(?:png|svg))$/;
+const ICON_MAX = 1024 * 1024;
 const MANIFEST_FILE = 'manifest.json';
 const STATE_FILE = 'state.json';
 /** How long the user's own apt lists count as fresh (a machine whose system has no lists — a container image). */
@@ -54,16 +67,41 @@ async function writeJsonAtomic(file, obj) {
   await fsp.rename(tmp, file);
 }
 /** A bounded child: never throws; `{code, stdout, stderr, timedOut}`. */
-function run(cmd, args, { env, timeout = SIM_MS, maxBuffer = 32 * 1024 * 1024, cwd } = {}) {
+function run(cmd, args, { env, timeout = SIM_MS, maxBuffer = 32 * 1024 * 1024, cwd, encoding = 'utf8' } = {}) {
   return new Promise((resolve) => {
     let child;
     try {
-      child = execFile(cmd, args, { env: { ...(env || process.env), LC_ALL: 'C' }, timeout, maxBuffer, encoding: 'utf8', cwd }, (err, stdout, stderr) => {
-        resolve({ code: err ? (typeof err.code === 'number' ? err.code : (err.killed ? 124 : 127)) : 0, stdout: String(stdout || ''), stderr: String(stderr || ''), timedOut: !!(err && err.killed), error: err && typeof err.code !== 'number' ? String(err.message || err) : null });
+      child = execFile(cmd, args, { env: { ...(env || process.env), LC_ALL: 'C' }, timeout, maxBuffer, encoding, cwd }, (err, stdout, stderr) => {
+        resolve({ code: err ? (typeof err.code === 'number' ? err.code : (err.killed ? 124 : 127)) : 0, stdout: encoding === 'buffer' ? (stdout || Buffer.alloc(0)) : String(stdout || ''), stderr: String(stderr || ''), timedOut: !!(err && err.killed), error: err && typeof err.code !== 'number' ? String(err.message || err) : null });
       });
     } catch (e) { resolve({ code: 127, stdout: '', stderr: String(e.message || e), timedOut: false, error: String(e.message || e) }); }
     void child;
   });
+}
+/** verify-r1 H2 — ONE read of a file the user named: opened O_NONBLOCK (a FIFO swapped in after a stat never blocks a
+ *  libuv thread — an open of a writer-less FIFO returns at once), its type and size judged on the OPEN fd, copied to
+ *  `dest` (0600) while hashed: the sha256 is of exactly the bytes staged (root installs only bytes that still hash to
+ *  it, from its own copy). → {sha256, size}; throws `bad_name` for anything but a regular file ≤ max. */
+async function readHashed(src, dest, max) {
+  const fh = await fsp.open(src, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+  try {
+    const st = await fh.stat();
+    if (!st.isFile() || st.size > max) throw named('bad_name', `${src} is not a regular file under ${A.fmtBytes(max)}`);
+    const h = crypto.createHash('sha256');
+    const out = await fsp.open(dest, 'w', 0o600);
+    let size = 0;
+    try {
+      const buf = Buffer.alloc(1 << 20);
+      for (;;) {
+        const { bytesRead } = await fh.read(buf, 0, buf.length, null);
+        if (!bytesRead) break;
+        size += bytesRead;
+        if (size > max) throw named('bad_name', `${src} grew past ${A.fmtBytes(max)} while it was read`);
+        h.update(buf.subarray(0, bytesRead)); await out.write(buf, 0, bytesRead);
+      }
+    } finally { await out.close(); }
+    return { sha256: h.digest('hex'), size };
+  } finally { await fh.close(); }
 }
 const sha256File = (file) => new Promise((resolve, reject) => {
   const h = crypto.createHash('sha256');
@@ -147,9 +185,11 @@ function fetchHttps(url, { max = KEY_MAX, timeout = 20000, redirects = 3 } = {})
  * @param installState (stateDir) => {installing, lastInstall} (desktop-display — the slot's own pidfile reading)
  * @param dpkgStatus  path of the dpkg status file (the suite points it at a fixture)
  * @param markerDir   where the ephemeral-rootfs markers live (the suite points it at a scratch dir)
+ * @param fetchSeam   SUITES ONLY: `{hosts: {'<name>.test': '127.0.0.1'}, ca: <PEM>, limits: {idleMs, totalMs, max}}` — a
+ *                    loopback "vendor" by a RESERVED `.test` name (never a real site); production passes nothing
  */
 function create({ home = os.homedir(), stateDir, env = () => process.env, log = console, now = Date.now, binOnPath = null, installState = null,
-  dpkgStatus = '/var/lib/dpkg/status', markerDir = A.MARKER_DIR, systemLists = '/var/lib/apt/lists', osRelease = '/etc/os-release', isRoot = null, runner = run } = {}) {
+  dpkgStatus = '/var/lib/dpkg/status', markerDir = A.MARKER_DIR, systemLists = '/var/lib/apt/lists', osRelease = '/etc/os-release', isRoot = null, runner = run, fetchSeam = null } = {}) {
   if (!stateDir) throw new Error('app-serve: stateDir is required');
   if (typeof env !== 'function') { const e0 = env; env = () => e0; }
   const appsDir = path.join(home, A.APPS_REL);
@@ -330,6 +370,14 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
     if (!(await rootDirOk(sysDir)) || !(await rootDirOk(dir))) return [];
     try { return (await fsp.readdir(dir)).filter((n) => /^[a-z0-9][a-z0-9-]{0,39}\.sources$/.test(n)).map((n) => n.slice(0, -8)); } catch { return []; }
   }
+  /** verify-r1 H1 — the approved sources as ROOT holds them (sys/sources/<id>.sources: its URIs line), never the index's word. */
+  async function rootSources() {
+    const out = [];
+    for (const id of await rootSourceIds()) {
+      try { const m = /^URIs: (\S+)/m.exec(await fsp.readFile(path.join(sysDir, 'sources', `${id}.sources`), 'utf8')); if (m) out.push({ id, uris: [m[1]] }); } catch { /* gone */ }
+    }
+    return out;
+  }
   /** The rows of ONE entry: each .desktop file (root-owned, under apt's applications dirs) parsed and validated; the
    *  primary row (`app.<entry>`) is the file named after the package (`<pkg>.desktop`, `…-<pkg>.desktop`), else the first. */
   async function rowsFor(entry) {
@@ -350,11 +398,27 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
     const dir = path.join(sysDir, 'entries');
     let sig = '';
     try { const names = (await fsp.readdir(dir)).sort(); for (const n of names) sig += `${n}:${await mtimeOf(path.join(dir, n))};`; } catch { sig = 'none'; }
+    sig += `|m:${await mtimeOf(manifestFile)}`;
     if (sig === catalog.sig) return catalog.rows;
     const rows = [];
     for (const e of await rootEntries()) rows.push(...await rowsFor(e));
+    rows.push(...await homeRows());
     catalog = { rows, sig, at: now() };
     return rows;
+  }
+  /** design 009 S2 — an AppImage's row lives in the user-writable index; it is a row only while it runs exactly
+   *  `<appsDir>/appimage/<id>/root/AppRun` and that file exists (an index edited to run anything else is no row). */
+  async function homeRows() {
+    const { manifest } = await readManifest();
+    const out = [];
+    for (const e of manifest.entries.filter((x) => x.kind === 'appimage')) {
+      const apprun = path.join(appsDir, 'appimage', e.id, 'root', 'AppRun');
+      const r = e.rows[0];
+      if (!r || !(r.exec === apprun || (r.exec === 'xterm' && r.args[0] === '-e' && r.args[1] === apprun)) || !(await exists(apprun))) continue;
+      const row = { ...r, args: [...r.args], env: { APPDIR: path.dirname(apprun) }, app: e.id };
+      if (M.validateAppRow(row).ok) out.push(row);
+    }
+    return out;
   }
   /** The rows as desktop-serve's registry() last saw them (refreshCatalog keeps them current). */
   function catalogRows() { return catalog.rows.map((r) => ({ ...r, args: [...r.args] })); }
@@ -362,7 +426,7 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
   async function iconFile(rowId) {
     const row = catalog.rows.find((r) => r.id === rowId);
     if (!row || !row.icon) return null;
-    for (const c of A.iconCandidates(row.icon)) {
+    for (const c of A.iconCandidates(row.icon, { appsDir })) {
       try { const st = await fsp.stat(c); if (st.isFile() && st.size <= 1024 * 1024) return { file: c, type: c.endsWith('.svg') ? 'image/svg+xml' : 'image/png' }; } catch { /* next */ }
     }
     return null;
@@ -476,27 +540,50 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
       return ret({ ...pl, mode: 'install', entryId, recorded, source: 'apt', commands: A.appCommands({ mode: 'install', packages }), argv: A.appArgv({ mode: 'install', appsDir, id: entryId, nonce, args: packages, root: f.root }), label: label0(packages) });
     }
     if (kind === 'deb') {
-      const file = String(p.debPath || '');
-      if (!path.isAbsolute(file) || !/\.deb$/.test(file)) return ret({ ok: false, code: 'bad_name', error: 'name a .deb file by its absolute path on this machine', kind });
-      let st;
-      try { st = await fsp.stat(file); } catch (e) { return ret({ ok: false, code: 'not_found', error: `${file} cannot be read on this machine (${e.code === 'ENOENT' ? 'no such file' : e.message})`, kind }); }
-      if (!st.isFile() || st.size > DEB_MAX) return ret({ ok: false, code: 'bad_name', error: `${file} is not a regular file under ${A.fmtBytes(DEB_MAX)}`, kind });
-      const staged = await stage(file, 'deb');
-      const sha256 = await sha256File(staged);
+      const own = p.staged != null; // design 009: an installer VibeSpace fetched / copied at propose time — planned IN PLACE, bound by its sha256
+      let file, st, staged, sha256;
+      if (own) {
+        const sf = await stagedFile(p, '.deb');
+        if (sf.error) return ret({ ...sf.error, kind });
+        staged = sf.file; sha256 = p.sha256; st = { size: sf.size }; file = `/${String(p.name || 'package.deb').replace(/[^A-Za-z0-9@._+-]+/g, '-').slice(0, 120)}`;
+      } else {
+        file = String(p.debPath || '');
+        if (!path.isAbsolute(file) || !/\.deb$/.test(file)) return ret({ ok: false, code: 'bad_name', error: 'name a .deb file by its absolute path on this machine', kind });
+        try { st = await fsp.stat(file); } catch (e) { return ret({ ok: false, code: 'not_found', error: `${file} cannot be read on this machine (${e.code === 'ENOENT' ? 'no such file' : e.message})`, kind }); }
+        if (!st.isFile() || st.size > DEB_MAX) return ret({ ok: false, code: 'bad_name', error: `${file} is not a regular file under ${A.fmtBytes(DEB_MAX)}`, kind });
+        staged = await stage(Buffer.alloc(0), 'deb');
+        try { ({ sha256 } = await readHashed(file, staged, DEB_MAX)); } catch (e) { await fsp.rm(staged, { force: true }); return ret({ ok: false, code: 'bad_name', error: e.code === 'bad_name' ? e.message : `${file} cannot be read on this machine (${e.message})`, kind }); }
+      }
+      const drop = async () => { if (!own) await fsp.rm(staged, { force: true }); }; // a staged proposal's file is the engine's to delete
       const info = await runner('dpkg-deb', ['-I', staged], { env: env(), timeout: 30000 });
       const ctl = await runner('dpkg-deb', ['-f', staged, 'Package', 'Version', 'Architecture', 'Maintainer'], { env: env(), timeout: 30000 });
       const fields = {};
       for (const l of ctl.stdout.split('\n')) { const m = /^([A-Za-z-]+): (.*)$/.exec(l); if (m) fields[m[1]] = m[2]; }
-      if (info.code !== 0 || !A.PKG_RE.test(fields.Package || '')) { await fsp.rm(staged, { force: true }); return ret({ ok: false, code: 'bad_name', error: `${path.basename(file)} is not a Debian package (dpkg-deb cannot read it)`, kind }); }
+      if (info.code !== 0 || !A.PKG_RE.test(fields.Package || '')) { await drop(); return ret({ ok: false, code: 'bad_name', error: `${path.basename(file)} is not a Debian package (dpkg-deb cannot read it)`, kind }); }
       const scripts = ['preinst', 'postinst', 'prerm', 'postrm', 'config'].filter((x) => new RegExp(`\\blines\\s+\\*?\\s*${x}\\b`).test(info.stdout)); // dpkg-deb -I's control-archive listing: "<n> bytes, <n> lines  *  postinst  #!/bin/sh"
       const opts = await aptOpts();
       const sim = await runner('apt-get', [...opts, '-s', 'install', staged], { env: env() });
       const uris = await runner('apt-get', [...opts, '--print-uris', '-y', 'install', staged], { env: env() });
       const pl = A.parsePlan(both(sim), both(uris), { requested: [fields.Package], facts: f, kind: 'deb' });
       const deb = { package: fields.Package, version: fields.Version || null, arch: fields.Architecture || null, sha256, size: st.size, name: path.basename(file), maintainer: (fields.Maintainer || '').slice(0, 120), scripts };
-      if (!pl.ok) { await fsp.rm(staged, { force: true }); return ret({ ...pl, deb }); }
+      if (!pl.ok) { await drop(); return ret({ ...pl, deb }); }
       const entryId = await entryIdFor([deb.package], manifest, { kind: 'deb' });
-      return ret({ ...pl, mode: 'deb', entryId, source: 'local-file', deb, staged, packages: [deb.package], commands: A.appCommands({ mode: 'deb', deb }), argv: A.appArgv({ mode: 'deb', appsDir, id: entryId, nonce, args: [staged, sha256], root: f.root }), label: deb.package });
+      const app = own ? await debApp(staged, deb.package) : null;
+      return ret({ ...pl, mode: 'deb', entryId, source: 'local-file', deb, staged, ...(own ? { stagedName: p.staged, app, downloadBytes: (pl.downloadBytes || 0) + (/^'file:/m.test(both(uris)) ? 0 : st.size) /* apps-joint r1 F5: apt lists the local file itself */ } : {}), packages: [deb.package], commands: A.appCommands({ mode: 'deb', deb }), argv: A.appArgv({ mode: 'deb', appsDir, id: entryId, nonce, args: [staged, sha256], root: f.root }), label: (app && app.name) || deb.package });
+    }
+    if (kind === 'appimage') { // design 009 S2: no root at all — unpacked into the user's own appimage/<id>/ at the click
+      const sf = await stagedFile(p, '.AppImage');
+      if (sf.error) return ret({ ...sf.error, kind });
+      let info;
+      try { info = await appImageInfo(sf.file); } catch (e) { return ret({ ok: false, code: ['unsupported', 'hostile', 'too_large'].includes(e.code) ? e.code : 'unreadable', error: String(e.message || e), kind }); }
+      const disk = A.diskVerdict({ homeFree: f.homeFree, downloadBytes: info.bytes });
+      if (disk) return ret({ ok: false, ...disk, kind });
+      const label = info.app ? info.app.name : String(p.name || 'app').replace(/\.AppImage$/i, '').slice(0, 80);
+      const prev = manifest.entries.find((e) => e.kind === 'appimage' && e.label === label);
+      const entryId = prev ? prev.id : A.entryIdFor((info.app && info.app.stem) || label, [...(await rootEntries()).map((e) => e.id), ...manifest.entries.map((e) => e.id)]);
+      const icon = info.icon ? await stageIcon(info.icon.bytes, p.staged) : null;
+      return ret({ ok: true, code: null, error: null, canRun: true, kind, mode: 'appimage', entryId, source: 'download', packages: [], closure: [], closureKey: `appimage ${p.sha256} ${entryId}`, newCount: 0, upgradeCount: 0, downloadBytes: sf.size, installedBytes: info.bytes, origins: [], stagedName: p.staged, sha256: p.sha256, app: info.app ? { ...info.app, icon } : null, label, files: info.files,
+        commands: [`# VibeSpace unpacks the AppImage (sha256 ${p.sha256}) into ~/.vibespace/apps/appimage/${entryId}/ as you — nothing runs as root, the AppImage itself is not run`, '# its own desktop file becomes its row in Apps; the downloaded file is deleted once it is unpacked'] });
     }
     if (kind === 'source') {
       const v = A.validateSourceSpec(p.source);
@@ -524,6 +611,8 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
     if (kind === 'remove') {
       const entries = await rootEntries();
       const e = entries.find((x) => x.id === p.entryId);
+      const homeE = !e && manifest.entries.find((x) => x.id === p.entryId && A.HOME_KINDS.includes(x.kind));
+      if (homeE) return ret(A.removePlanFor(homeE)); // design 009 S3: AppImage / uv / npm — no root, no slot
       if (!e) return ret({ ok: false, code: 'not_found', error: `no app ${JSON.stringify(String(p.entryId || '').slice(0, 40))} was installed through VibeSpace on this machine`, kind });
       const others = entries.filter((x) => x.id !== e.id).flatMap((x) => x.packages);
       const own = e.packages.filter((x) => !others.includes(x));
@@ -550,13 +639,239 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
       }
       let updates = [];
       if (pk.length) {
-        const sim = await runner('apt-get', [...(await aptOpts()), '-s', 'install', '--only-upgrade', ...pk], { env: env() });
-        updates = A.updatesOf(both(sim), pk);
+        const opts = await aptOpts();
+        const sim = await runner('apt-get', [...opts, '-s', 'install', '--only-upgrade', ...pk], { env: env() });
+        // verify-r1 H1: each update names its origin — the files apt would fetch, an approved source by ROOT's record
+        const uris = await runner('apt-get', [...opts, '--print-uris', '-y', 'install', '--only-upgrade', ...pk], { env: env() });
+        updates = A.updatesOf(both(sim), pk, { debs: A.parseUris(both(uris)).debs, sources: await rootSources() });
       }
       await writeState({ updates: { count: updates.length, list: updates.slice(0, 100), at: now() } });
       return ret({ ok: true, code: canRun ? null : 'no_sudo', canRun, kind, mode: 'refresh', entryId: 'refresh', source: 'apt', packages: pk, updates, closure: [], closureKey: updates.map((u) => `${u.package}=${u.to}`).sort().join(' '), commands: A.appCommands({ mode: 'refresh', packages: pk }), argv: A.appArgv({ mode: 'refresh', appsDir, id: 'refresh', nonce, args: [], root: f.root }), label: 'refresh' });
     }
     throw named('bad-request', `plan kind ${kind} is not implemented`);
+  }
+
+  // ── design 009 §2 A: an installer by ADDRESS or FILE — staged as the user, judged by its bytes, read without running it ──
+  const stagedPath = (name) => (STAGED_RE.test(String(name || '')) ? path.join(stagingDir, String(name)) : null);
+  /** A staged installer, re-hashed: `{file, size}` | `{error: <a plan refusal>}` (gone, or not the bytes approved). */
+  async function stagedFile(p, ext) {
+    const f = stagedPath(p.staged);
+    if (!f || !f.endsWith(ext) || !A.SHA256_RE.test(String(p.sha256 || ''))) return { error: { ok: false, code: 'bad-request', error: 'a staged installer is named by its file and its sha256' } };
+    let st;
+    try { st = await fsp.lstat(f); } catch { return { error: { ok: false, code: 'gone', error: 'the downloaded installer is gone (declined, expired or cleaned up) — propose it again' } }; }
+    if (!st.isFile()) return { error: { ok: false, code: 'changed', error: 'the staged installer is not a plain file any more — nothing ran' } };
+    const sha = await sha256File(f).catch(() => null);
+    if (sha !== p.sha256) return { error: { ok: false, code: 'changed', error: 'the installer changed after it was shown — nothing ran; propose it again' } };
+    return { file: f, size: st.size };
+  }
+  const testHosts = () => Object.keys((fetchSeam && fetchSeam.hosts) || {});
+  /** The ONE address a hop connects to: every address the name resolves to must be public (or the suite's `.test` seam). */
+  async function resolveHost(host) {
+    const seam = fetchSeam && fetchSeam.hosts && Object.prototype.hasOwnProperty.call(fetchSeam.hosts, host) ? fetchSeam.hosts[host] : null;
+    if (seam && /\.test$/.test(host)) return { address: seam, family: seam.includes(':') ? 6 : 4 };
+    let all;
+    try { all = await require('dns').promises.lookup(host, { all: true, verbatim: true }); } catch (e) { throw named('fetch_failed', `${host} does not resolve (${e.code || e.message})`); }
+    if (!all.length) throw named('fetch_failed', `${host} does not resolve`);
+    for (const a of all) { const why = A.addressVerdict(a.address); if (why) throw named('bad_address', `${host} points at a private address (${why}) — refused`); }
+    return all[0];
+  }
+  /** ONE GET of a judged address, connected to exactly `ip` → `{redirect}` | `{sha256, size}` (the body into `dest`). */
+  function getOnce(url, ip, dest, lim) {
+    const https = require('https');
+    return new Promise((resolve, reject) => {
+      let settled = false, ws = null;
+      const fin = (fn, x) => { if (settled) return; settled = true; clearTimeout(total); fn(x); };
+      const fail = (code, msg) => { try { req.destroy(); } catch { /* gone */ } if (ws) ws.destroy(); fin(reject, named(code, msg)); };
+      const total = setTimeout(() => fail('fetch_failed', `the download did not finish within ${Math.round(lim.totalMs / 60000)} min`), lim.totalMs);
+      const lookup = (h, o, cb) => (o && o.all ? cb(null, [{ address: ip.address, family: ip.family }]) : cb(null, ip.address, ip.family));
+      const req = https.get(url, { lookup, headers: { 'User-Agent': 'VibeSpace-apps', Accept: '*/*' }, ...(fetchSeam && fetchSeam.ca ? { ca: fetchSeam.ca } : {}) }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) { res.resume(); return fin(resolve, { redirect: String(res.headers.location) }); }
+        if (res.statusCode !== 200) { res.resume(); return fail('fetch_failed', `the address answered HTTP ${res.statusCode}`); }
+        const len = Number(res.headers['content-length']);
+        if (Number.isFinite(len) && len > lim.max) return fail('too_large', `the file is ${A.fmtBytes(len)} — VibeSpace downloads at most ${A.fmtBytes(lim.max)}`);
+        const h = crypto.createHash('sha256'); let size = 0;
+        ws = fs.createWriteStream(dest, { flags: 'wx', mode: 0o600 });
+        ws.on('error', (e) => fail('fetch_failed', `the download could not be written (${e.message})`));
+        res.on('data', (d) => { size += d.length; if (size > lim.max) return fail('too_large', `the file is larger than ${A.fmtBytes(lim.max)} — VibeSpace downloads at most that`); h.update(d); });
+        res.on('error', (e) => fail('fetch_failed', `the download broke off (${e.message})`));
+        res.on('aborted', () => fail('fetch_failed', 'the download broke off'));
+        ws.on('finish', () => fin(resolve, { sha256: h.digest('hex'), size }));
+        res.pipe(ws);
+      });
+      req.setTimeout(lim.idleMs, () => fail('fetch_failed', `the address stopped sending for ${Math.round(lim.idleMs / 1000)} s`));
+      req.on('error', (e) => fail('fetch_failed', `the address could not be fetched (${e.code || e.message})`));
+    });
+  }
+  /** Download `url0` into `dest`: every hop judged (fetchVerdict + the resolved address), ≤ FETCH_REDIRECTS redirects. */
+  async function download(url0, dest) {
+    const lim = { idleMs: 60000, totalMs: 60 * 60000, max: A.FETCH_MAX, ...((fetchSeam && fetchSeam.limits) || {}) };
+    let url = String(url0);
+    const hosts = [];
+    for (let hop = 0; ; hop++) {
+      const v = A.fetchVerdict(url, { testHosts: testHosts() });
+      if (!v.ok) throw named(v.code, hop ? `the address redirected to ${url.slice(0, 160)} — ${v.error}` : v.error);
+      if (hop > A.FETCH_REDIRECTS) throw named('bad_address', `the address redirected more than ${A.FETCH_REDIRECTS} times`);
+      hosts.push(v.host);
+      const r = await getOnce(v.url, await resolveHost(v.host), dest, lim);
+      if (r.redirect) { try { url = new URL(r.redirect, v.url).href; } catch { throw named('bad_address', 'a bad redirect'); } continue; }
+      return { ...r, hosts, url: String(url0) };
+    }
+  }
+  /** `app-fetch {url} | {file}` → `{staged, sha256, size, kind, hosts, url?, file?}` — or a named refusal, nothing kept. */
+  async function fetchInstaller(p = {}) {
+    await ensureDirs();
+    const part = path.join(stagingDir, `${nonceOf()}.part`);
+    try {
+      let got;
+      if (p.url != null) got = await download(String(p.url), part);
+      else if (p.file != null) {
+        const file = String(p.file);
+        if (!path.isAbsolute(file) || /[\0\n]/.test(file) || file.length > 4096) throw named('bad_name', 'name the installer by its absolute path on that machine');
+        if (path.resolve(file).startsWith(appsDir + path.sep)) throw named('bad_name', 'that file is VibeSpace\'s own');
+        try { got = { ...(await readHashed(file, part, A.FETCH_MAX)), hosts: [], file }; }
+        catch (e) { throw named(e.code === 'bad_name' ? 'bad_name' : 'not_found', e.code === 'bad_name' ? e.message : `${file} cannot be read on that machine (${e.code === 'ENOENT' ? 'no such file' : e.code === 'EACCES' ? 'you may not read it' : e.message})`); }
+      } else throw named('bad-request', 'name an address or a file');
+      const head = Buffer.alloc(64);
+      const fh = await fsp.open(part, 'r'); try { await fh.read(head, 0, 64, 0); } finally { await fh.close(); }
+      const s = A.sniffInstaller(head);
+      if (!s.kind) throw named('not_an_installer', `${p.url != null ? `what ${got.hosts[got.hosts.length - 1]} sent` : path.basename(String(p.file))} is ${s.why}`);
+      const name = `${path.basename(part, '.part')}.${s.kind === 'deb' ? 'deb' : 'AppImage'}`;
+      await fsp.rename(part, path.join(stagingDir, name));
+      return { staged: name, sha256: got.sha256, size: got.size, kind: s.kind, hosts: got.hosts, url: p.url != null ? String(p.url) : null, file: got.file || null };
+    } catch (e) { await fsp.rm(part, { force: true }); throw e; }
+  }
+  /** `app-unstage {names}` deletes a proposal's staged files; `{keep}` sweeps every staged file over an hour old that no
+   *  open proposal keeps (a crash mid-install, a hub restarted). */
+  async function unstage(p = {}) {
+    let removed = 0;
+    for (const n of (Array.isArray(p.names) ? p.names : []).slice(0, 20)) { const f = stagedPath(n); if (f && await exists(f)) { await fsp.rm(f, { force: true }); removed++; } }
+    if (Array.isArray(p.keep)) {
+      const keep = new Set(p.keep.map(String));
+      let names = [];
+      try { names = await fsp.readdir(stagingDir); } catch { names = []; }
+      for (const n of names) { if (keep.has(n) || !STAGED_ANY_RE.test(n)) continue; const t = await mtimeOf(path.join(stagingDir, n)); if (t != null && now() - t > 3600 * 1000) { await fsp.rm(path.join(stagingDir, n), { force: true }); removed++; } }
+    }
+    return { removed };
+  }
+  /** An icon read out of an archive → `<hash>.icon.png|svg` in staging (PNG by its magic, SVG by its text), or null. The
+   *  name is the hash of the bytes AND the installer's staged name: a re-plan of the same proposal (the dialog, the click)
+   *  writes nothing new, another proposal never shares (and never deletes) it. */
+  async function stageIcon(buf, salt) {
+    if (!buf || !buf.length || buf.length > ICON_MAX) return null;
+    const ext = buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) ? 'png' : /<svg[\s>]/.test(buf.subarray(0, 4096).toString('utf8')) ? 'svg' : null;
+    if (!ext) return null;
+    const name = `${crypto.createHash('sha256').update(String(salt || '')).update(buf).digest('hex').slice(0, 16)}.icon.${ext}`;
+    try { await fsp.writeFile(path.join(stagingDir, name), buf, { mode: 0o600, flag: 'wx' }); } catch (e) { if (e.code !== 'EEXIST') throw e; }
+    return name;
+  }
+  /** ONE member of a .deb's data archive (dpkg-deb --fsys-tarfile | tar -xO, bounded) → Buffer | null. */
+  async function debMember(staged, member, max) {
+    const r = await runner('sh', ['-c', 'dpkg-deb --fsys-tarfile "$1" | tar -xOf - -- "$2"', 'vs-deb-member', staged, `.${member}`], { env: env(), timeout: 60000, maxBuffer: max, encoding: 'buffer' });
+    return r.code === 0 && r.stdout && r.stdout.length ? Buffer.from(r.stdout) : null;
+  }
+  /** A staged .deb's own app: its .desktop (Name + the localized names) and icon, read out WITHOUT installing it. */
+  async function debApp(staged, pkg) {
+    const ls = await runner('dpkg-deb', ['-c', staged], { env: env(), timeout: 60000, maxBuffer: 64 * 1024 * 1024 });
+    if (ls.code !== 0) return null;
+    const members = A.debMembers(ls.stdout);
+    for (const d of A.debDesktopOf(members, { pkg, max: DESKTOP_MAX }).slice(0, 4)) {
+      const txt = await debMember(staged, d, DESKTOP_MAX);
+      const r = txt ? A.parseDesktopFile(txt.toString('utf8'), { entry: 'x', primary: true }) : null;
+      if (!r || !r.ok) continue;
+      const iconPath = A.debIconOf(members, r.row.icon);
+      const icon = iconPath ? await stageIcon(await debMember(staged, iconPath, ICON_MAX), path.basename(staged)) : null;
+      return { name: r.row.label, labels: r.row.labels || null, icon, desktop: d };
+    }
+    return null;
+  }
+  /** An AppImage's facts, read out of its SquashFS (never run): the app (its root .desktop), its icon bytes, the
+   *  unpacked size; every name in the tree judged NOW (a hostile tree is refused before any card exists). */
+  async function appImageInfo(file) {
+    const head = Buffer.alloc(64);
+    const fh = await fsp.open(file, 'r'); try { await fh.read(head, 0, 64, 0); } finally { await fh.close(); }
+    const off = A.appImageOffset(head);
+    if (off == null) throw named('unreadable', 'not an AppImage (no ELF header)');
+    const img = await SQ.open(file, off);
+    try {
+      const sum = await img.walk(async () => { });
+      const top = await img.root();
+      const d = top.filter((e) => e.type !== 'dir' && /^[A-Za-z0-9@._+-]+\.desktop$/.test(e.name)).sort((a, b) => (a.name < b.name ? -1 : 1))[0];
+      const out = { app: null, desktopText: null, icon: null, bytes: sum.bytes, files: sum.count, offset: off };
+      if (!d) return out;
+      const txt = await img.readFile(d, DESKTOP_MAX).catch(() => null);
+      const r = txt ? A.parseDesktopFile(txt.toString('utf8'), { entry: 'x', primary: true }) : null;
+      if (!r || !r.ok) return out;
+      out.desktopText = txt.toString('utf8');
+      out.app = { name: r.row.label, labels: r.row.labels || null, stem: d.name.replace(/\.desktop$/, '').toLowerCase() };
+      const names = r.row.icon && /^[A-Za-z0-9@._+-]{1,120}$/.test(r.row.icon) ? [`${r.row.icon}.png`, `${r.row.icon}.svg`, '.DirIcon'] : ['.DirIcon'];
+      for (const n of names) {
+        const e = top.find((x) => x.name === n);
+        const b = e ? await img.readFile(e, ICON_MAX).catch(() => null) : null;
+        if (b && (b.subarray(0, 4).toString('latin1') === '\x89PNG' || /<svg[\s>]/.test(b.subarray(0, 4096).toString('utf8')))) { out.icon = { bytes: b, ext: b[0] === 0x89 ? 'png' : 'svg' }; break; }
+      }
+      return out;
+    } finally { await img.close(); }
+  }
+  /** design 009 S2 — THE CLICK for an AppImage: the staged bytes copied (hashed) into a private directory, checked
+   *  against the approved sha256, unpacked by VibeSpace's own reader into appimage/<id>/root (never run, never outside
+   *  that directory), the AppImage file deleted, the row recorded from its own desktop file. */
+  async function installAppImage({ staged, sha256, entryId, by, why = null, label = null, from = null, icon = null }) {
+    if (!A.ENTRY_ID_RE.test(String(entryId || ''))) throw named('bad-request', 'bad entry id');
+    const sf = await stagedFile({ staged, sha256 }, '.AppImage');
+    if (sf.error) throw named(sf.error.code, sf.error.error);
+    const base = path.join(appsDir, 'appimage');
+    await fsp.mkdir(base, { recursive: true, mode: 0o700 });
+    const dir = path.join(base, entryId), tmp = path.join(base, `.${entryId}.${nonceOf()}`);
+    await fsp.mkdir(tmp, { mode: 0o700 });
+    let row, info;
+    try {
+      const copy = path.join(tmp, 'app.AppImage');
+      const h = await readHashed(sf.file, copy, A.FETCH_MAX);
+      if (h.sha256 !== sha256) throw named('changed', 'the installer changed after it was shown — nothing was installed');
+      info = await appImageInfo(copy);
+      if (!info.desktopText) throw named('unreadable', 'the AppImage carries no desktop file VibeSpace can read — it would have no row in Apps');
+      const img = await SQ.open(copy, info.offset);
+      try { await img.extract(path.join(tmp, 'root')); } finally { await img.close(); }
+      await fsp.rm(copy, { force: true });
+      if (info.icon) await fsp.writeFile(path.join(tmp, `icon.${info.icon.ext}`), info.icon.bytes, { mode: 0o600 });
+      const rr = A.appImageRow({ entry: entryId, desktopText: info.desktopText, dir, icon: info.icon ? path.join(dir, `icon.${info.icon.ext}`) : null, validate: M.validateAppRow });
+      if (!rr.ok) throw named('unreadable', rr.error || `the AppImage's desktop file is not an app (${rr.skip})`);
+      row = rr.row;
+      let old = null;
+      if (await exists(dir)) { old = path.join(base, `.${entryId}.old-${nonceOf()}`); await fsp.rename(dir, old); }
+      await fsp.rename(tmp, dir);
+      if (old) await fsp.rm(old, { recursive: true, force: true });
+    } catch (e) { await fsp.rm(tmp, { recursive: true, force: true }); throw e; }
+    const { manifest, corrupt } = await readManifest();
+    const prev = manifest.entries.find((e) => e.id === entryId);
+    const m = A.withEntry(manifest, { id: entryId, kind: 'appimage', packages: [], label: String(label || row.label).slice(0, 80), addedAt: (prev && prev.addedAt) || now(), by: byOf(by), approvedAt: now(), rows: [row], services: [], ...(why ? { why } : {}), appimage: { sha256, size: sf.size, name: info.app ? `${info.app.stem}.AppImage` : 'app.AppImage', from: from ? String(from).slice(0, 300) : null } });
+    await writeManifest(m, { corrupt });
+    await unstage({ names: [staged, icon] });
+    catalog.sig = null;
+    const rows = (await refreshCatalog()).filter((r) => r.app === entryId);
+    return { entry: m.entries.find((e) => e.id === entryId), rows, run: { files: info.files, bytes: info.bytes } };
+  }
+  /** design 009 S3 — removing an entry that lives in the home: an AppImage's own directory (lstat'ed, never a link) and
+   *  row; a uv / npm tool through its own uninstaller, as the user. */
+  async function removeHome({ entryId }) {
+    const { manifest, corrupt } = await readManifest();
+    const e = manifest.entries.find((x) => x.id === entryId && A.HOME_KINDS.includes(x.kind));
+    if (!e) throw named('not_found', `no app ${JSON.stringify(String(entryId || '').slice(0, 40))} in your home`);
+    const pl = A.removePlanFor(e);
+    if (!pl.ok) throw named(pl.code, pl.error);
+    if (e.kind === 'appimage') {
+      const dir = path.join(appsDir, 'appimage', e.id);
+      let st = null;
+      try { st = await fsp.lstat(dir); } catch { st = null; }
+      if (st && st.isDirectory()) await fsp.rm(dir, { recursive: true, force: true });
+    } else {
+      const argv = pl.homeArgv.map((a) => (a === '~/.local' ? path.join(home, '.local') : a));
+      const r = await runner(argv[0], argv.slice(1), { env: env(), timeout: 300000 });
+      if (r.code !== 0 && !/not installed|No such|is not a|nothing to/i.test(both(r))) throw named('remove_failed', `${argv.join(' ')} failed (exit ${r.code}): ${both(r).trim().split('\n').slice(-2).join(' ').slice(0, 300)}`);
+    }
+    await writeManifest(A.withoutEntry(manifest, e.id), { corrupt });
+    catalog.sig = null; await refreshCatalog();
+    return { removed: e.id, kind: e.kind };
   }
 
   // ── records (after the slot ran) ──
@@ -575,7 +890,7 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
     return r;
   }
   const byOf = (b) => (b && typeof b === 'object' && (b.kind === 'user' || b.kind === 'agent') ? b : { kind: 'user' });
-  async function recordEntry({ entryId, nonce, kind = 'apt', by, why = null, label = null, deb = null, source = null }) {
+  async function recordEntry({ entryId, nonce, kind = 'apt', by, why = null, label = null, deb = null, source = null, staged = null, icon = null }) {
     if (!A.ENTRY_ID_RE.test(String(entryId || ''))) throw named('bad-request', 'bad entry id');
     const run0 = await runOf(entryId, nonce);
     const entry = (await rootEntries()).find((e) => e.id === entryId);
@@ -585,8 +900,9 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
     const { manifest, corrupt } = await readManifest();
     const prev = manifest.entries.find((e) => e.id === entryId);
     let m = A.withEntry(manifest, { id: entryId, kind: kind === 'deb' ? 'deb' : 'apt', packages: entry.packages, source: kind === 'deb' ? 'local-file' : (source || null), addedAt: (prev && prev.addedAt) || now(), by: byOf(by), approvedAt: now(), rows, services: run0.services.map((s) => s.unit), ...(why ? { why } : {}), ...(label ? { label } : {}), ...(kind === 'deb' && deb ? { deb } : {}) });
-    m = { ...m, resolved: { ...m.resolved, ...(run0.debs.length ? { debs: run0.debs } : {}), baseSha: run0.base || m.resolved.baseSha, at: now() } };
+    m = A.withPins({ ...m, resolved: { ...m.resolved, ...(run0.debs.length ? { debs: run0.debs } : {}), baseSha: run0.base || m.resolved.baseSha, at: now() } }, run0.pins);
     await writeManifest(m, { corrupt });
+    if (staged || icon) await unstage({ names: [staged, icon] }); // design 009: root keeps its own copy in debs/ — the staged one goes at once
     return { entry: m.entries.find((e) => e.id === entryId), rows, run: { added: run0.delta.added.length, desktops: run0.desktops.length, services: run0.services, missing: run0.missing } };
   }
   async function recordRemove({ entryId, nonce }) {
@@ -594,23 +910,23 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
     catalog.sig = null; await refreshCatalog();
     const { manifest, corrupt } = await readManifest();
     let m = A.withoutEntry(manifest, entryId);
-    m = { ...m, resolved: { ...m.resolved, debs: run0.debs, at: now() } };
+    m = A.withPins({ ...m, resolved: { ...m.resolved, debs: run0.debs, at: now() } }, run0.pins);
     await writeManifest(m, { corrupt });
     return { removed: entryId, run: { removed: run0.delta.removed.length, kept: run0.kept } };
   }
   async function recordRefresh({ nonce, id = 'refresh', mode = 'refresh' }) {
     const run0 = await runOf(id, nonce);
     const { manifest, corrupt } = await readManifest();
-    if (run0.debs.length || run0.base) await writeManifest({ ...manifest, generation: manifest.generation + 1, resolved: { ...manifest.resolved, ...(run0.debs.length ? { debs: run0.debs } : {}), baseSha: run0.base || manifest.resolved.baseSha, at: now() } }, { corrupt });
+    if (run0.debs.length || run0.base || Object.keys(run0.pins).length) await writeManifest(A.withPins({ ...manifest, generation: manifest.generation + 1, resolved: { ...manifest.resolved, ...(run0.debs.length ? { debs: run0.debs } : {}), baseSha: run0.base || manifest.resolved.baseSha, at: now() } }, run0.pins), { corrupt });
     const patch = id === 'replay' ? { replay: { at: now(), mode, ok: run0.ok, partial: run0.partial, entries: run0.entries, missing: run0.missing.slice(0, 50) } } : { refreshedAt: now(), updates: { count: 0, list: [], at: now() } };
     const st = await writeState(patch);
     catalog.sig = null; await refreshCatalog();
     return { state: st, run: { ok: run0.ok, partial: run0.partial, entries: run0.entries, upgraded: run0.delta.added.length, missing: run0.missing } };
   }
-  /** A USER-LEVEL tool (`vibespace-app add --kind uv|npm|appimage`, design §3.4) installed by the agent as the user —
-   *  in HOME, nothing to replay: recorded for the record (who, why), never through root. */
+  /** A USER-LEVEL tool (`vibespace-app add --kind uv|npm`, design §3.4) installed by the agent as the user — in HOME,
+   *  nothing to replay: recorded for the record (who, why), never through root. (An AppImage is proposed: design 009.) */
   async function recordUserKind({ kind, name, why = null, by }) {
-    if (!['uv-tool', 'npm', 'appimage'].includes(kind)) throw named('bad-request', 'kind must be uv-tool / npm / appimage');
+    if (!['uv-tool', 'npm'].includes(kind)) throw named('bad-request', 'kind must be uv-tool / npm (an AppImage is proposed: vibespace-app install --file)');
     if (typeof name !== 'string' || !/^[@a-z0-9][a-z0-9@/._+-]{0,120}$/i.test(name)) throw named('bad_name', 'not a tool name');
     const { manifest, corrupt } = await readManifest();
     const prev = manifest.entries.find((e) => e.kind === kind && e.label === name);
@@ -620,14 +936,14 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
     return { entry: m.entries.find((e) => e.id === id) };
   }
   async function recordSource({ sourceId, nonce, source, by, remove = false }) {
-    await runOf(sourceId, nonce);
+    const run0 = await runOf(sourceId, nonce);
     const { manifest, corrupt } = await readManifest();
-    const m = remove ? A.withoutSource(manifest, sourceId) : A.withSource(manifest, { ...source, id: sourceId, addedAt: now(), approvedAt: now(), by: byOf(by) });
+    const m = A.withPins(remove ? A.withoutSource(manifest, sourceId) : A.withSource(manifest, { ...source, id: sourceId, addedAt: now(), approvedAt: now(), by: byOf(by) }), run0.pins);
     await writeManifest(m, { corrupt });
     return { source: remove ? null : m.sources.find((s) => s.id === sourceId), removed: remove ? sourceId : null };
   }
 
-  return { appsDir, sysDir, stagingDir, manifestFile, stateFile, listsRoot, facts, plan, status, readManifest, writeManifest, readState, writeState, recordEntry, recordRemove, recordRefresh, recordSource, recordUserKind, refreshCatalog, catalogRows, iconFile, rootEntries, dpkgNow, aptOpts, slotState };
+  return { appsDir, sysDir, stagingDir, manifestFile, stateFile, listsRoot, facts, plan, status, fetchInstaller, unstage, installAppImage, removeHome, appImageInfo, readManifest, writeManifest, readState, writeState, recordEntry, recordRemove, recordRefresh, recordSource, recordUserKind, refreshCatalog, catalogRows, iconFile, rootEntries, dpkgNow, aptOpts, slotState };
 }
 
 const bad = (error) => ({ ok: false, code: 'bad-request', error });
@@ -636,10 +952,13 @@ const bad = (error) => ({ ok: false, code: 'bad-request', error });
  * a throw across the wire. Shapes:
  *   app-status      {}                                              → {ok, status}
  *   app-plan        {kind, packages?, debPath?, source?, entryId?, sourceId?, query?, rung?}  → {ok, plan, facts, install} | {ok, results} (search)
- *   app-install     {entryId, nonce, kind?, by, why?, label?, deb?, source?}  → {ok, entry, rows, run}   (after the slot ran)
- *                   {kind: uv-tool|npm|appimage, name, why, by}     → {ok, entry}   (a user-level tool — no slot, no root)
+ *   app-install     {entryId, nonce, kind?, by, why?, label?, deb?, source?, staged?, icon?}  → {ok, entry, rows, run}   (after the slot ran)
+ *                   {kind: uv-tool|npm, name, why, by}              → {ok, entry}   (a user-level tool — no slot, no root)
+ *                   {kind: 'appimage', staged, sha256, entryId, by, why?, label?, from?, icon?}  → {ok, entry, rows, run}  (unpacked as the user)
+ *   app-fetch       {url} | {file}                                  → {ok, staged, sha256, size, kind, hosts, url?, file?}
+ *   app-unstage     {names?: [staged…], keep?: [staged…]}           → {ok, removed}
  *                   {sourceId, nonce, source, by} (kind 'source')  → {ok, source}
- *   app-remove      {entryId, nonce} | {sourceId, nonce, kind:'source'}      → {ok, removed, run}
+ *   app-remove      {entryId, nonce} | {sourceId, nonce, kind:'source'} | {entryId, home: true}  → {ok, removed, run?}
  *   app-refresh     {nonce, id: 'refresh'|'replay', mode}           → {ok, state, run}
  *   app-adopt-drift {entryId, nonce, by}                            → {ok, entry, rows, run}
  */
@@ -652,11 +971,15 @@ async function runAppOp(apps, action, params = {}) {
   try {
     if (op === 'app-status') return { ok: true, status: await apps.status() };
     if (op === 'app-plan') return { ok: true, ...(await apps.plan(p)) };
-    if (op === 'app-install' && ['uv-tool', 'npm', 'appimage'].includes(p.kind)) return { ok: true, ...(await apps.recordUserKind({ kind: p.kind, name: p.name, why: p.why, by: p.by })) }; // a user-level tool: no slot ran, nothing to key
+    if (op === 'app-fetch') return { ok: true, ...(await apps.fetchInstaller(p)) };
+    if (op === 'app-unstage') return { ok: true, ...(await apps.unstage(p)) };
+    if (op === 'app-install' && p.kind === 'appimage') return { ok: true, ...(await apps.installAppImage(p)) }; // no slot, no root: unpacked as the user
+    if (op === 'app-remove' && p.home === true) return { ok: true, ...(await apps.removeHome({ entryId: p.entryId })) };
+    if (op === 'app-install' && ['uv-tool', 'npm'].includes(p.kind)) return { ok: true, ...(await apps.recordUserKind({ kind: p.kind, name: p.name, why: p.why, by: p.by })) }; // a user-level tool: no slot ran, nothing to key
     if (!nonceOk()) return bad(`${op} needs the run's nonce`);
     if (op === 'app-install') {
       if (p.kind === 'source') return { ok: true, ...(await apps.recordSource({ sourceId: p.sourceId, nonce: p.nonce, source: p.source, by: p.by })) };
-      return { ok: true, ...(await apps.recordEntry({ entryId: p.entryId, nonce: p.nonce, kind: p.kind, by: p.by, why: p.why, label: p.label, deb: p.deb, source: p.source })) };
+      return { ok: true, ...(await apps.recordEntry({ entryId: p.entryId, nonce: p.nonce, kind: p.kind, by: p.by, why: p.why, label: p.label, deb: p.deb, source: p.source, staged: p.staged, icon: p.icon })) };
     }
     if (op === 'app-adopt-drift') return { ok: true, ...(await apps.recordEntry({ entryId: p.entryId, nonce: p.nonce, kind: 'apt', by: p.by, why: p.why || 'installed outside VibeSpace, adopted', label: p.label })) };
     if (op === 'app-remove') {
@@ -670,4 +993,4 @@ async function runAppOp(apps, action, params = {}) {
   }
 }
 
-module.exports = { create, runAppOp, APP_OPS, PLAN_KINDS, keyFingerprints, dearmor, fetchHttps, MANIFEST_FILE, STATE_FILE, LISTS_TTL_MS };
+module.exports = { create, runAppOp, APP_OPS, PLAN_KINDS, STAGED_RE, keyFingerprints, dearmor, fetchHttps, readHashed, MANIFEST_FILE, STATE_FILE, LISTS_TTL_MS };

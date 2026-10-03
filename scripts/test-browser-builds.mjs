@@ -442,6 +442,88 @@ console.log('— ④ the client words (en / zh / ja) + wiring');
   ok(/keeper\.onRelaunch\(\(ev\) => \{ try \{ announceRelaunch\(ev\);/.test(hb) && !/announceRelaunch[\s\S]{0,2500}deliverToConversation/.test(hb.slice(hb.indexOf('function announceRelaunch'), hb.indexOf('function announceRelaunch') + 2500)), 'the announcer tells a relaunch through the CARD path + a zero-spend notice (never a delivery — nobody typed it)');
 }
 
+// ═══ ⑥ lane chrome-builds-download (design 004): the PURE half + the picker's words ═══════════════════════════════
+console.log('— ⑥ Download another build…: the two list parsers, THE compatibility verdict, the paths, the zip\'s shape, the words');
+{
+  const V = require('../src/browser-verbs.js'); const R = V.CHROME_BUILDS_RECORD;
+  const FIX = path.join(REPO, 'scripts/fixtures/chrome-for-testing');
+  const lkg = JSON.parse(fs.readFileSync(path.join(FIX, 'last-known-good-versions-with-downloads.json'), 'utf8'));
+  const kg = JSON.parse(fs.readFileSync(path.join(FIX, 'known-good-versions-with-downloads.trimmed.json'), 'utf8'));
+  ok(R.listHost === 'googlechromelabs.github.io' && R.fileHost === 'storage.googleapis.com' && R.platform === 'linux64' && R.layout === 'chrome-linux64/' && R.measured.stable === '154.0.8037.92' && R.measured.bytes === 196202491 && Object.isFrozen(R),
+    'CHROME_BUILDS_RECORD: the two measured hosts (the ONE place they are spelled), the platform, the layout, the measurement');
+  const p1 = BB.parseLastKnownGood(lkg, { fileHost: R.fileHost });
+  ok(p1.ok && p1.rows.map((r) => r.channel).join() === 'Stable,Beta,Dev,Canary' && p1.rows[0].version === '154.0.8037.92' && p1.rows.every((r) => r.url === `https://${R.fileHost}/chrome-for-testing-public/${r.version}/linux64/chrome-linux64.zip`) && !p1.refused.length, 'the 10 KB channel list (measured): four rows, each the linux64 zip on the file host', p1.rows);
+  const planted = JSON.parse(JSON.stringify(lkg));
+  planted.channels.Beta.downloads.chrome.find((d) => d.platform === 'linux64').url = 'https://evil.example.com/chrome-linux64.zip';
+  planted.channels.Dev.downloads.chrome.find((d) => d.platform === 'linux64').url = `http://${R.fileHost}/x.zip`;
+  planted.channels.Canary.downloads.chrome.find((d) => d.platform === 'linux64').url = `https://u:p@${R.fileHost}/x.zip`;
+  const p2 = BB.parseLastKnownGood(planted, { fileHost: R.fileHost });
+  ok(p2.ok && p2.rows.map((r) => r.channel).join() === 'Stable' && p2.refused.length === 3 && p2.refused.every((x) => x.code === 'build_url_offhost') && /evil\.example\.com/.test(p2.refused[0].error), 'an off-host url, a plain-http one, one with credentials: each row refused BY NAME, never offered', p2.refused);
+  ok(BB.parseLastKnownGood({ nope: 1 }, { fileHost: R.fileHost }).code === 'build_list_invalid' && BB.parseKnownGood({ versions: 'x' }, { fileHost: R.fileHost }).code === 'build_list_invalid', 'a document of another shape: refused whole (`build_list_invalid`), never a crash');
+  const p3 = BB.parseKnownGood(kg, { fileHost: R.fileHost });
+  ok(p3.ok && p3.versions.length === 23 && p3.versions[0].version === '157.0.8083.0' && p3.versions.at(-1).version === '113.0.5672.0' && BB.majorsOf(p3.versions).map((m) => m.major).join() === '157,154,153,151,146,113' && BB.majorsOf(p3.versions).find((m) => m.major === 151).count === 4,
+    'the known-good list (trimmed to 6 majors): every linux64 version newest first; one row per major with its newest and its count');
+  const C = (o) => BB.buildCompatVerdict({ version: '155.0.1.2', platform: 'linux', arch: 'x64', ...o });
+  const chip = (v, k) => v.chips.find((x) => x.kind === k);
+  const mac = C({ platform: 'darwin', arch: 'arm64', command: '/x/agent-browser install' });
+  ok(!mac.ok && mac.code === 'build_platform_unsupported' && /Linux x64.*darwin-arm64 install by hand: \/x\/agent-browser install/.test(mac.error), 'HARD machine: off Linux x64 the download is refused, the hand command said', mac.error);
+  const d1 = C({ zipBytes: 100e6, freeBytes: 299e6, freePath: '/home' }), d2 = C({ zipBytes: 100e6, freeBytes: 300e6 }), d3 = C({ freeBytes: 1 });
+  ok(!d1.ok && d1.code === 'disk' && d1.hard[0].need === 300e6 && /needs about 300 MB free, 299 MB left on \/home/.test(d1.error) && d2.ok && d3.ok && !d3.hard.length, 'HARD disk: free bytes against the zip\'s length × 3, with the numbers; no length yet ⇒ no disk row');
+  ok(C({ present: true }).ok && C({ present: true }).offer === false && chip(C({ present: true }), 'present'), 'present: a chip ("Already on this computer"), the row offers nothing — not a refusal');
+  ok(chip(C({ census: 'newer', censusChrome: '154.0.8037.57' }), 'census').census === '154.0.8037.57' && chip(C({ census: 'between' }), 'census').relation === 'older' && chip(C({ census: 'censused' }), 'census').relation === 'censused', 'the census chip: the relation chromeRelation gave (between reads as older)');
+  ok(chip(C({ profile: { label: 'Work', lastChromiumMajor: 156 } }), 'profile').wrote === 156 && !chip(C({ profile: { label: 'Work', lastChromiumMajor: 155 } }), 'profile') && !chip(C({ profile: { lastChromiumMajor: null } }), 'profile'), 'this profile: a chip only for a build OLDER than the major that last opened it');
+  const reach = (v) => chip(BB.buildCompatVerdict({ version: v, platform: 'linux', arch: 'x64' }), 'cloak').reach;
+  ok(reach('146.0.1.1') === 'both' && reach('147.0.1.1') === 'pro' && reach('151.0.1.1') === 'pro' && reach('152.0.1.1') === 'none', 'CloakBrowser later: ≤ 146 both tiers, 147–151 Pro only, ≥ 152 neither (CLOAK_TIERS, F7)');
+  const pl = BB.downloadPlan({ version: '154.0.8037.92', buildsRoot: '/h/.agent-browser/browsers' });
+  ok(pl.ok && pl.part === '/h/.agent-browser/browsers/chrome-154.0.8037.92.part' && pl.unpackDir === '/h/.agent-browser/browsers/.unpack-154.0.8037.92' && pl.targetDir === '/h/.agent-browser/browsers/chrome-154.0.8037.92' && pl.removingDir === '/h/.agent-browser/browsers/.removing-154.0.8037.92'
+    && ['../x', '154.0.8037.92/../../x', '154.0.8037.92/x', ''].every((v) => BB.downloadPlan({ version: v, buildsRoot: '/h' }).code === 'build_version_invalid') && !BB.parseBuildDir('chrome-154.0.8037.92.part') && !BB.parseBuildDir('.unpack-154.0.8037.92'),
+    'the plan: every path inside the builds folder; a version that is a path is refused; .part / .unpack- / .removing- are never listed as builds');
+  const okZip = ['chrome-linux64/', 'chrome-linux64/chrome', 'chrome-linux64/locales/', 'chrome-linux64/locales/en-US.pak'];
+  const Z = (extra, base = okZip) => BB.zipShapeVerdict([...base, ...extra]);
+  ok(Z([]).ok && Z([]).files === 2, 'the zip: the measured layout passes');
+  const zbad = [[['chrome-linux64/../x'], '..'], [['/etc/passwd'], 'absolute'], [[{ name: 'chrome-linux64/lnk', kind: 'link' }], 'link'], [['other/x'], 'outside'], [['chrome-linux64/chrome'], 'twice'], [['chrome-linux64/a\\b'], 'backslash'], [['chrome-linux64/./x'], '"."'], [[{ name: 'chrome-linux64/fifo', kind: 'other' }], 'special']];
+  ok(zbad.every(([e]) => Z(e).code === 'build_zip_shape') && BB.zipShapeVerdict(['chrome-linux64/', 'chrome-linux64/x']).code === 'build_zip_shape' && BB.zipShapeVerdict([]).code === 'build_zip_shape', 'the zip refused by name: "..", absolute, a link, outside the layout, a duplicate, a backslash, ".", a special entry, no chrome, empty', zbad.map(([e, w]) => [w, Z(e).error]));
+  const zl = BB.parseZipListing('chrome-linux64/\nchrome-linux64/chrome\nchrome-linux64/l\n', 'Archive:  x.zip\nZip file size: 9 bytes, number of entries: 3\ndrwxr-xr-x  3.0 unx        0 bx stor 26-Oct-02 21:49 chrome-linux64/\n-rwxr-xr-x  3.0 unx       51 tx stor 26-Oct-02 21:49 chrome-linux64/chrome\nlrwxrwxrwx  3.0 unx       11 bx stor 26-Oct-02 21:49 chrome-linux64/l\n3 files, 62 bytes uncompressed\n');
+  ok(zl.ok && zl.entries.map((e) => e.kind).join() === 'dir,file,link' && BB.zipShapeVerdict(zl.entries).code === 'build_zip_shape' && BB.parseZipListing('a\nb\n', '-rw-r--r--  3.0 unx 1 tx stor 26-Oct-02 21:49 a\n').code === 'build_zip_shape',
+    'unzip\'s two listings paired: names from -Z1, kinds from -Zs (a link is seen); listings that do not pair are refused');
+  ok(BB.versionSays('Google Chrome for Testing 154.0.8037.92 \n', '154.0.8037.92').ok && BB.versionSays('Google Chrome for Testing 154.0.8037.93', '154.0.8037.92').says === '154.0.8037.93' && !BB.versionSays('', '1.2.3.4').ok, '`chrome --version` must name exactly the version');
+  ok(['build_platform_unsupported', 'disk', 'build_zip_shape', 'build_url_offhost', 'build_in_use', 'build_not_downloaded', 'unzip_unavailable', 'install_running', 'build_stalled'].every((c) => BB.BUILD_CODES.includes(c)) && BB.BUILD_CODES.every((c) => /'?[a-z_]+'?: \d{3}/.test(c) || read('src/routes/browser.js').includes(`${c}: `) || read('src/routes/browser.js').includes(`'${c}': `)),
+    'every refusal code is in BUILD_CODES and the routes\' STATUS table');
+  const W = await import('../src/lib/browser-build-model.js');
+  const zh = (await import('../src/lib/i18n-zh.js')).default, ja = (await import('../src/lib/i18n-ja.js')).default;
+  const mkT = (d) => (k, p) => { let x = (d && d[k]) || k; if (p) x = x.replace(/\{(\w+)\}/g, (m, y) => (p[y] !== undefined ? String(p[y]) : m)); return x; };
+  const t = mkT(null);
+  const rowsDl = W.buildRows({ ok: true, builds: [] }, { local: true, t, download: { offered: true } });
+  ok(rowsDl.at(-1).kind === 'download' && rowsDl.at(-1).label === 'Download another build…' && !W.buildRows({ ok: true, builds: [] }, { local: false, t, download: { offered: false } }).some((r) => r.kind === 'download') && W.choiceOfRow(rowsDl.at(-1)) === null,
+    'Change build… / New profile…: the LAST row "Download another build…" on this computer (Linux x64) — an act, never a choice; none on a paired machine');
+  ok(W.installHint({ command: 'ab install', local: true, download: { offered: true } }, t) === null && /Linux x64.*darwin-arm64.*ab install/.test(W.installHint({ command: 'ab install', local: true, download: { offered: false, machine: 'darwin-arm64' } }, t)) && /paired machine aren't offered yet.*ab install/.test(W.installHint({ command: 'ab install', local: false, download: { offered: false } }, t)),
+    'the hand command: gone where the row is; elsewhere said WITH the reason (another machine kind, a paired machine)');
+  const lines = W.verdictLines(BB.buildCompatVerdict({ version: '155.0.1.2', platform: 'linux', arch: 'x64', census: 'newer', censusChrome: '154.0.8037.57', profile: { label: 'Work', lastChromiumMajor: 156 }, cli: '0.38.1', zipBytes: 100e6, freeBytes: 1e6, freePath: '/h' }), t).map((x) => x.text);
+  ok(/Needs about 300 MB free, 1 MB left on \/h/.test(lines[0]) && lines.includes('Driven by agent-browser 0.38.1') && lines.some((x) => /Newer than the census \(154\.0\.8037\.57\)/.test(x)) && lines.some((x) => /last opened Work \(156\)/.test(x)) && lines.some((x) => /can't switch to CloakBrowser later \(Free 146 \/ Pro 151\)/.test(x)), 'a row\'s lines: the HARD refusal first with its numbers, then every chip in words', lines);
+  const cf = W.downloadConfirmWords({ version: '154.0.8037.92', host: 'storage.googleapis.com', bytes: 196202491, root: '/h/.agent-browser/browsers' }, t);
+  ok(cf.title === 'Download Chrome 154.0.8037.92?' && /About 196 MB comes from storage\.googleapis\.com and unpacks to about 392 MB in \/h\/\.agent-browser\/browsers/.test(cf.message) && /Google publishes no separate one/.test(cf.message) && /Nothing restarts/.test(cf.message) && /never auto-updates/.test(cf.message) && cf.confirmText === 'Download',
+    'THE CONFIRM: the version, the host, the size, where it lands, how it is checked (and that Google publishes no checksum), nothing restarts, no auto-update; one button');
+  ok(W.downloadProgressWords({ running: true, step: 'fetch', version: '1.2.3.4', bytes: 42e6, total: 196e6 }, t).text === 'Downloading Chrome 1.2.3.4… 42 MB of 196 MB' && /^Unpacking/.test(W.downloadProgressWords({ running: true, step: 'unpack', version: 'x' }, t).text) && W.downloadProgressWords({ done: '1.2.3.4' }, t).done && /didn't finish in 15 minutes/.test(W.downloadProgressWords({ failed: true, version: 'x', code: 'build_stalled' }, t).text),
+    'the progress line: "downloading… 42 MB of 196 MB" → unpacking… → ready; a failure says why (the 15-minute clock by name)');
+  ok(W.installedWords({ bytes: 389e6, downloaded: true }, t).remove && !W.installedWords({ bytes: 389e6 }, t).remove && /in use by Work/.test(W.installedWords({ bytes: 1, downloaded: true, profiles: ['Work'] }, t).text) && /in use — Work, Live/.test(W.downloadRefusalWords({ code: 'build_in_use', build: { profiles: ['Work'], running: ['Live'] } }, t)),
+    'installed builds: Remove only on a build VibeSpace downloaded that nobody uses; in use names who');
+  for (const [lang, d] of [['zh', zh], ['ja', ja]]) {
+    const tt = mkT(d); const said = new Set(); const rec = (k, pp) => { said.add(k); return tt(k, pp); };
+    W.verdictLines({ hard: [{ code: 'build_platform_unsupported', machine: 'm', command: 'c' }, { code: 'disk', need: 1, free: 1, path: '/' }], chips: [{ kind: 'present' }, { kind: 'cli', version: '1' }, { kind: 'census', relation: 'censused' }, { kind: 'census', relation: 'newer' }, { kind: 'census', relation: 'older' }, { kind: 'profile', label: 'x', wrote: 1 }, { kind: 'cloak', reach: 'both' }, { kind: 'cloak', reach: 'pro' }, { kind: 'cloak', reach: 'none' }] }, rec);
+    W.pickerIntro(rec); W.downloadConfirmWords({ bytes: 1 }, rec); W.downloadConfirmWords({}, rec); W.majorLabel({ major: 1, newest: '1', count: 1 }, rec);
+    for (const c of ['install_running', 'build_present', 'unzip_unavailable', 'build_url_offhost', 'build_version_unknown', 'build_list_unreachable', 'build_list_invalid', 'disk', 'build_check_failed', 'build_zip_shape', 'build_unpack_failed', 'build_verify_failed', 'build_stalled', 'build_in_use', 'build_not_downloaded', 'build_removing', 'build_platform_unsupported']) W.downloadRefusalWords({ code: c }, rec);
+    for (const st of ['fetch', 'check', 'unpack', 'verify']) W.downloadProgressWords({ running: true, step: st }, rec);
+    W.downloadProgressWords({ other: 'cli' }, rec); W.downloadProgressWords({ done: '1' }, rec); W.downloadProgressWords({ failed: true, code: 'disk' }, rec);
+    W.installedWords({ profiles: ['a'] }, rec); W.installedWords({ downloaded: true }, rec); W.installedWords({}, rec); W.freeWords({ free: 1 }, rec); W.removeConfirmWords({}, rec); W.removedWords('1', rec);
+    W.buildRows({ ok: true, builds: [] }, { t: rec, download: { offered: true } }); W.installHint({ command: 'x', download: { offered: false } }, rec); W.installHint({ command: 'x', local: false, download: { offered: false } }, rec);
+    const miss = [...said].filter((k) => !(k in d));
+    ok(said.size > 45 && !miss.length, `${lang}: every sentence of the picker (${said.size}) has its entry`, miss);
+  }
+  const dg = read('src/lib/browser-build-dialog.js'), np = read('src/lib/browser-new-profile.js');
+  ok(/if \(r\.kind === 'download'\) \{ list\.appendChild\(downloadRow\(r, \(\) => openPicker\(\)\)\); continue; \}/.test(dg) && /openBuildDialog\(app, id, \{ label, onDone, pick: v \}\)/.test(dg) && /if \(r\.kind === 'download'\) \{ order\.push\(row \|\| downloadRow\(r, openBuildPicker\)\); continue; \}/.test(np) && /st\.buildDownload = r && !r\.error \? r\.download \|\| null : null;/.test(np),
+    'wiring: Change build… opens the picker in the dialog and comes back with the new build picked; New profile…\'s build section opens it in place');
+}
+
 // ═══ ⑤ controls ═══════════════════════════════════════════════════════════════
 console.log('— ⑤ controls: patched copies the gates above must turn red');
 {
@@ -545,6 +627,19 @@ console.log('— ⑤ controls: patched copies the gates above must turn red');
   try { await kf.stop(pf.id, { why: 'user' }); } catch { /* none */ }
 }
 try { if (kk) for (const p of kk.list().profiles) { try { await kk.stop(p.id, { why: 'user' }); } catch { /* none */ } } } catch { /* none */ }
+
+// verify r1 (H1, L1): with no executable path the CLI launches its NEWEST build — a download newer than every build here says it
+// becomes that default (naming the default-choice profiles); the zip's declared unpacked size is summed from `unzip -Zs`
+console.log('— verify r1: the default chip · the zip\'s declared unpacked size');
+{
+  const cv = (v, o) => BB.buildCompatVerdict({ version: v, platform: 'linux', arch: 'x64', ...o });
+  const d = (r) => r.chips.find((c) => c.kind === 'default');
+  ok(d(cv('157.0.8083.0', { defaultBuild: '154.0.8037.92', defaultUsers: ['Bank logins'] })).users.join() === 'Bank logins' && d(cv('157.0.8083.0', { defaultBuild: null })).from === null
+    && !d(cv('153.0.8010.47', { defaultBuild: '154.0.8037.92' })) && !d(cv('154.0.8037.92', { defaultBuild: '154.0.8037.92' })) && !d(cv('157.0.8083.0', { defaultBuild: '154.0.8037.92', present: true })) && !d(cv('157.0.8083.0', {})),
+    'the default chip: only a version newer than every build here (or with none) says it, naming the default-choice profiles; never an older / equal / present one, nor when not asked');
+  const zl = BB.parseZipListing('chrome-linux64/\nchrome-linux64/chrome\nchrome-linux64/blob\n', 'drwxr-xr-x  3.0 unx        0 b- stor 80-000-00 00:00 chrome-linux64/\n-rwxr-xr-x  3.0 unx       51 b- stor 80-000-00 00:00 chrome-linux64/chrome\n-rw-r--r--  3.0 unx 67108864 b- defN 80-000-00 00:00 chrome-linux64/blob\n');
+  ok(zl.ok && BB.zipShapeVerdict(zl.entries).unpacked === 67108915, 'the zip\'s declared unpacked size is summed over its files (the keeper weighs it against the free space before `unzip -q`)', zl);
+}
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

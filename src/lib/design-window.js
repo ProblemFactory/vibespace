@@ -32,6 +32,11 @@ import { onFileChanged, foldPath } from './file-changed.js';
 import { createDesignCanvas } from './design-canvas.js';
 import { pickerSource } from './design-pick.js';
 import { normalizeRead, quoteLine, printSrcdoc, zoomPercent } from './design-canvas-model.js';
+import { mountDesignAsk } from './design-ask.js';
+import { mountDesignChanges } from './design-changes.js';
+import { mountDesignPresent } from './design-present.js';
+import { mountDesignTweaks } from './design-tweaks.js';
+import { openDesignHome } from './design-home.js'; // lane design-systems-home: the window with no folder = the home
 
 const RELOAD_COALESCE_MS = 250;
 const CHIP_MS = 10000;
@@ -124,7 +129,7 @@ export function openDesignPublishDialog(app, { host = '', dir = '', title = '' }
 export function openDesign(app, { host = '', dir = '', sessionId = '', syncId } = {}) {
   const h = hostKey(host);
   const d = String(dir || '');
-  if (!d) { showToast(t('No design folder was named'), { type: 'error' }); return null; }
+  if (!d) return openDesignHome(app, { syncId }); // no folder = the home: every design and design system (lane design-systems-home)
   const existing = [...app.wm.windows.values()].find((w) => w._design && w._design.host === h && foldPath(w._design.dir) === foldPath(d));
   if (existing) {
     if (sessionId && !existing._design.sessionId) { existing._design.sessionId = sessionId; if (existing._openSpec) existing._openSpec.sessionId = sessionId; }
@@ -184,6 +189,8 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId } 
   const boardsBtn = btn('boards', 'columns', t('Artboards'), 2);
   const commentBtn = btn('comment', 'chat', t('Comment'), 0, { words: !phone });
   commentBtn.setAttribute('aria-pressed', 'false');
+  const presentBtn = btn('present', 'play', t('Present'), 1, { words: !phone }); // lane design-present (src/lib/design-present.js wires it)
+  const tweaksBtn = btn('tweaks', 'sliders', t('Tweaks'), 1, { words: !phone }); // lane design-tweaks: the free knobs
   const reloadBtn = btn('reload', 'refresh', t('Reload'), 5);
   const printBtn = btn('print', 'print', t('Print'), 6);
   const publishBtn = btn('publish', 'upload', t('Publish…'), 6, { words: true });
@@ -200,12 +207,13 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId } 
   bar.appendChild(more);
   const fold = createBarFold(bar, {
     more,
-    moreAlways: () => phone,
+    moreAlways: () => phone || !!(winInfo._designMoreRows && winInfo._designMoreRows.length),
     items: () => [...bar.children].filter((el) => el !== more && KEYS.has(el)).map((el) => ({ key: KEYS.get(el).key, el, priority: KEYS.get(el).priority })),
     signal,
     onLayout: (v) => { winInfo._designBarLayout = v; },
   });
   const ROW_ACTS = { fit: () => canvas.fit(), out: () => canvas.zoomBy(-1), in: () => canvas.zoomBy(+1), boards: () => openBoards(), reload: () => load(), print: () => doPrint(), comment: () => togglePick(), back: () => canvas.focus(null) };
+  ROW_ACTS.present = () => present.start();
   more.addEventListener('click', (e) => {
     e.stopPropagation();
     const folded = new Set(fold.folded());
@@ -218,6 +226,7 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId } 
       if (ROW_ACTS[k.key]) rows.push({ label: k.label, action: ROW_ACTS[k.key] });
     }
     if (phone || folded.has('publish')) rows.push({ label: t('Publish…'), action: () => publish() });
+    for (const extra of winInfo._designMoreRows || []) { const row = extra(); if (row) rows.push(row); } // the lanes' own ⋯ rows (design-ask: Copy hand-off prompt)
     if (!rows.length) return;
     const r = more.getBoundingClientRect();
     showContextMenu(r.left, r.bottom + 2, rows);
@@ -268,6 +277,11 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId } 
   const hideChip = () => { chip.style.display = 'none'; clearTimeout(chipTimer); };
   chipX.addEventListener('click', hideChip, L);
   const sayChip = (text) => { chipText.textContent = text; chip.style.display = ''; clearTimeout(chipTimer); chipTimer = setTimeout(hideChip, CHIP_MS); };
+  winInfo._designAsk = mountDesignAsk({ app, win: winInfo, stage, host: h, dir: d, signal, phone }); // lane design-ask: the questions sheet + ⋯ Copy hand-off prompt
+  const changes = mountDesignChanges({ winInfo, canvas, stage, signal, phone, host: h, dir: d, sayChip, closeComposer, composer: () => composer }); // the changes strip (lane design-changes)
+  const present = mountDesignPresent({ winInfo, canvas, button: presentBtn, signal, host: h, dir: d, sayChip, stopPick: () => { if (canvas.pick()) togglePick(); } }); // lane design-present: ▶ Present, Print all, Download HTML / .zip
+  winInfo._designTweaks = mountDesignTweaks({ winInfo, canvas, stage, button: tweaksBtn, signal, phone, host: h, dir: d, sayChip }); // the Tweaks panel (lane design-tweaks)
+  ROW_ACTS.tweaks = () => winInfo._designTweaks.toggle();
 
   // ── the read ──
   let loading = null, again = false, loadedOnce = false, lastRead = null, lastAt = null;
@@ -387,6 +401,7 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId } 
     const send = mk('button', 'btn-create'); send.type = 'button'; send.textContent = t('Send');
     foot.append(cancel, send);
     box.append(quote, ta, foot);
+    changes.composer(box, foot, ta); // "Add" beside Send + the Style row (src/lib/design-changes.js)
     cancel.onclick = () => closeComposer();
     send.onclick = () => sendComment();
     ta.addEventListener('keydown', (e) => {
@@ -487,6 +502,7 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId } 
     const frames = canvas.frames().filter((f) => f.page === canvas.page());
     const file = canvas.focused() || (frames.length === 1 ? frames[0].file : null);
     const f = file && canvas.frames().find((x) => x.file === file);
+    if (!f && frames.length > 1) { present.printAll(); return; } // lane design-present: nothing open on a page of several = all of them
     if (!f) { sayChip(phone ? t('Open an artboard first (Artboards), then Print') : t('Open an artboard first (double-click it), then Print')); return; }
     if (f.html == null) { sayChip(t('This artboard was refused — there is nothing to print')); return; }
     dropPrint();

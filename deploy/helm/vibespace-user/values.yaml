@@ -172,9 +172,10 @@ presets:
   mountPath: /etc/vibespace/presets
   # THIS release's override (optional), layered over the cluster Secret per
   # key: an entry whose key the cluster also names replaces it, the rest of
-  # the cluster's stay. Rendered into the release's own Secret (keys
-  # gdriveClients / integrations) — changing it is a helm upgrade that touches
-  # only that Secret, so the pod does not roll and the server picks it up live.
+  # the cluster's stay. Rendered into the Secret `<release>-preset-override`
+  # (keys gdriveClients / integrations, `data:`-rendered so a key dropped here
+  # leaves it on upgrade) — changing it is a helm upgrade that touches only
+  # that Secret, so the pod does not roll and the server picks it up live.
   # Empty = fall back to the legacy blocks below (`gdrive`, `integrations`).
   override:
     gdriveClients: []    # [{key, label, clientId, clientSecret}, …]

@@ -463,6 +463,8 @@ class App {
       this._repoDir = d.repoDir || null; // server install dir (⚙ self-update)
       this._publicUrlDefault = d.publicUrlDefault || null; // cluster-injected agentd.publicUrl default (settings placeholder)
       setInstanceUrl(d.instancePublicUrl || null); // the address every "link to something here" helper uses (utils.absUrl)
+      // the Settings window's `when: { harness }` fact (settings-view.js): the harnesses whose CLI resolved here (`cli`)
+      if (Array.isArray(d.harnesses)) this._harnessesHere = new Set(d.harnesses.filter((h) => h && h.cli !== false).map((h) => String(h.id)));
       for (const h of Array.isArray(d.harnesses) ? d.harnesses : []) { // ACP harnesses (S8): offered only where their CLI is installed
         // A CONTRIBUTED harness ships its settings table (design-harness-settings
         // §7): derive its Settings section here, exactly like a built-in's.

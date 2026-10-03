@@ -24,6 +24,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const crypto = require('crypto');
 const { normalizeOptions, REPLY_MAX } = require('./inbox-reply.js'); // PURE: the option-chip rule the route, the CLI and the panel share (design-user-inbox-reply D3a)
 const { normalizeOrigin } = require('./inbox-origin.js'); // PURE: the closed set of PRODUCERS an item names (B-328d) — the Notices area groups by it; a filing that names none is REFUSED (r2)
@@ -83,6 +84,36 @@ function normalizeAction(x) {
 // never carries an action, never merges into one). exit-proxy's asks: one item per ask (each is a different command;
 // a reopened item answered the NEXT ask under the user's pointer). helper-ask is NOT here on purpose: a helper's
 // parallel asks of one text SHARE one item by design (helper-asks.js re-points it — test-helper-ask ⑩)
+/** A producer's CARD (design 009 §4, Layer 0 apps: an install proposal's view): the plain DATA a client draws the item
+ *  from — structure, never words (the client words it with its own t()) and never markup. Validated like `action`:
+ *  plain keys, strings ≤ 2 000 chars, finite numbers, booleans, null, arrays ≤ 64, depth ≤ 4, ≤ 24 KB as JSON; a value
+ *  inside those bounds is kept EXACTLY (the card's Install sends a digest of what the client drew — src/app-card.js).
+ *  A shape outside them THROWS by name. null = none. */
+function normalizeCard(x) {
+  if (x == null) return null;
+  if (typeof x !== 'object' || Array.isArray(x)) throw new Error('card must be an object');
+  const walk = (v, depth, at) => {
+    if (v === null || typeof v === 'boolean') return v;
+    if (typeof v === 'number') { if (!Number.isFinite(v)) throw new Error(`${at} must be finite`); return v; }
+    if (typeof v === 'string') { if (v.length > 2000) throw new Error(`${at} is longer than 2000 characters`); return v; }
+    if (depth >= 4) throw new Error(`${at} is nested too deep (max 4)`);
+    if (Array.isArray(v)) { if (v.length > 64) throw new Error(`${at} has more than 64 entries`); return v.map((y, k) => walk(y, depth + 1, `${at}[${k}]`)); }
+    if (typeof v !== 'object') throw new Error(`${at} must be plain data`);
+    const out = {};
+    let n = 0;
+    for (const [k, y] of Object.entries(v)) {
+      if (y === undefined) continue;
+      if (++n > 32) throw new Error(`${at} has too many fields (max 32)`);
+      if (!/^[a-zA-Z][a-zA-Z0-9]{0,40}$/.test(k)) throw new Error(`${at}.${k}: not a plain field name`);
+      out[k] = walk(y, depth + 1, `${at}.${k}`);
+    }
+    return out;
+  };
+  const out = walk(x, 0, 'card');
+  if (JSON.stringify(out).length > 24000) throw new Error('card is larger than 24 KB');
+  return out;
+}
+
 const ACTION_IDENTITY = Object.freeze({ 'exit-run-ask': 'askId', 'browser-proposal': 'id', 'app-install': 'id', 'open-channel': 'key' }); // lane browser-propose: one item per proposal (each is a different switch); Layer 0 apps (verify-r1 F2): one item per app proposal — another proposal of the same words never re-points this one's Install; channel-names verify r1 F2: one item per CONVERSATION (two rooms of one name merged — the click opened the last filer's, deciding one retracted both)
 const URGENCIES = ['low', 'normal', 'high', 'urgent'];
 const KINDS = ['action', 'notice']; // 2.369.118: action = needs the user (default); notice = for their information (own section, grey count)
@@ -104,8 +135,10 @@ const DETAIL_PREVIEW = 300;
  *  first DETAIL_PREVIEW chars + `detailTruncated: true`; anything shorter (or no detail)
  *  is the record itself. Never mutates the stored item. */
 function previewOf(item) {
-  if (!item || typeof item.detail !== 'string' || item.detail.length <= DETAIL_PREVIEW) return item;
-  return { ...item, detail: item.detail.slice(0, DETAIL_PREVIEW), detailTruncated: true };
+  // a resolved CARD rides as its face only (its Details are history — GET /api/user-todos/:id has them whole)
+  const card = item && item.card && item.card.details ? { ...item.card, details: null } : null;
+  if (!item || typeof item.detail !== 'string' || item.detail.length <= DETAIL_PREVIEW) return card ? { ...item, card } : item;
+  return { ...item, detail: item.detail.slice(0, DETAIL_PREVIEW), detailTruncated: true, ...(card ? { card } : {}) };
 }
 const MAX_OPEN_PER_SESSION = 20; // an agent looping on add must not flood the inbox
 const MAX_ITEMS = 1000;          // total ledger cap — oldest RESOLVED pruned first
@@ -134,7 +167,7 @@ class UserTodoManager {
     this._state = { items: [] };
     this._writeTimer = null; this._dirty = false; this._lastWritten = null;
     try {
-      const parsed = JSON.parse(fs.readFileSync(this._file, 'utf-8'));
+      const parsed = timedSync('user-todos.read', () => JSON.parse(fs.readFileSync(this._file, 'utf-8')));
       if (parsed && Array.isArray(parsed.items)) this._state = parsed;
       this._lastWritten = JSON.stringify(this._state, null, 2);
     } catch { /* fresh */ }
@@ -236,8 +269,7 @@ class UserTodoManager {
     const json = JSON.stringify(this._state, null, 2);
     if (json === this._lastWritten) { this._dirty = false; return; }
     const tmp = this._file + '.tmp';
-    fs.writeFileSync(tmp, json);
-    fs.renameSync(tmp, this._file);
+    timedSync('user-todos.write', () => { fs.writeFileSync(tmp, json); fs.renameSync(tmp, this._file); });
     this._lastWritten = json;
     this._dirty = false;
   }
@@ -278,7 +310,7 @@ class UserTodoManager {
 
   get(id) { return this._state.items.find((i) => i.id === id) || null; }
 
-  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null } = {}) {
+  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null } = {}) {
     const rawText = typeof text === 'string' ? text.trim() : '';
     text = rawText.slice(0, TEXT_MAX);
     const textCut = rawText.length > TEXT_MAX ? TEXT_MAX : 0; // the cap it hit, named on the return
@@ -293,6 +325,7 @@ class UserTodoManager {
     // approval in …". Validated here; a malformed shape is refused by name.
     i18n = normalizeI18n(i18n);
     action = normalizeAction(action); // a server producer's decision payload (reset credit, §5), or null
+    card = normalizeCard(card); // a server producer's view of the item (design 009: an app install's one card), or null
     options = normalizeOptions(options); // option chips (vibespace-ask --options "A|B|C"): ≤6 distinct labels ≤40 chars, else THROWS by name — or null
     // ORIGIN (B-328d, 2026-09-24): WHO filed it — a closed set (src/inbox-origin.js).
     // REQUIRED (r2, fail closed): a caller naming none THROWS `origin required
@@ -359,6 +392,7 @@ class UserTodoManager {
       if (kind && kind !== existing.kind) { existing.kind = kind; changed = true; }
       if (i18n && JSON.stringify(i18n) !== JSON.stringify(existing.i18n || null)) { existing.i18n = i18n; changed = true; }
       if (action && JSON.stringify(action) !== JSON.stringify(existing.action || null)) { existing.action = action; changed = true; }
+      if (card && JSON.stringify(card) !== JSON.stringify(existing.card || null)) { existing.card = card; changed = true; }
       if (options && JSON.stringify(options) !== JSON.stringify(existing.options || null)) { existing.options = options; changed = true; } // a re-file WITH options replaces them; one without keeps the old set
       // a DECLARED origin is kept (the item's producer does not change on a re-file);
       // an item filed before the field existed takes the re-filer's declaration
@@ -377,6 +411,7 @@ class UserTodoManager {
       jobId: jobId || null, // Background Work origin (2.348.1): lets the inbox jump STRAIGHT to the job's panel
       i18n, // the words as structure, or null (an agent's own item is its own words)
       action, // what the item's button does ({type, …facts}), or null — a server producer's only
+      ...(card ? { card } : {}), // design 009: the producer's VIEW the client draws the item from (an app install's one card)
       expiresAt, // ms epoch the item dies at (resolved 'expired' by expireDue), or null = lasting
       options, // the one-click answers (≤6 labels), or null — a chip's reply IS its label (design-user-inbox-reply D3a)
       reply: null, // {text, at} once the user replied from the inbox (resolveByReply)
@@ -409,6 +444,19 @@ class UserTodoManager {
   }
 
   // status: 'done' (handled) | 'dismissed' (not going to) | 'open' (reopen)
+  /** A producer's card moved (design 009: an install proposal's state — installing, done, failed, a new plan): the
+   *  item's `card` replaced, nothing else (its status stays the producer's setStatus). A CLEARED item keeps nothing
+   *  (Clear content… dropped its card). → true when it changed. */
+  setCard(id, card) {
+    const it = this.get(id);
+    if (!it || it.clearedAt) return false;
+    const c = normalizeCard(card);
+    if (JSON.stringify(c) === JSON.stringify(it.card || null)) return false;
+    if (c) it.card = c; else delete it.card;
+    this._save(); this._notify();
+    return true;
+  }
+
   setStatus(id, status, by = 'user') {
     if (!STATUSES.includes(status)) throw new Error(`status must be one of ${STATUSES.join('/')}`);
     const item = this._state.items.find((i) => i.id === id);

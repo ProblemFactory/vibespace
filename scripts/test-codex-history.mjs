@@ -323,7 +323,16 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   fs.mkdirSync(cxDir, { recursive: true });
   fs.writeFileSync(path.join(cxDir, `rollout-2026-08-24T04-36-10-${CHILD}.jsonl`), subagentHead.map((r) => JSON.stringify(r)).join('\n') + '\n');
   const evs = runUsageWalk({ home, codexSessionsDir: path.join(home, '.codex', 'sessions'), cursorFile: path.join(home, 'cursor.json') }).events.map((l) => JSON.parse(l));
-  ok('walker rid for the sub-agent file === normalizer requestId (cx:<child>:16496, sid = the filename uuid)', evs.length === 1 && evs[0].rid === `cx:${CHILD}:16496` && evs[0].rid === reply?.meta?.requestId, JSON.stringify(evs.map((e) => e.rid)));
+  // 2.369.203 FORK REPLAY: this head's one turn ran 11:34:22–11:34:26 (task_started /
+  // task_complete) — BEFORE the fork at 11:36:10.451; it is the PARENT's request,
+  // replayed into the child's file at the fork instant and already counted as
+  // cx:<parent>:16496 from the parent's rollout. The walker no longer counts it again.
+  ok('walker: the sub-agent file\'s replay of the parent\'s turn (stamped within 2 s of the fork) is NOT a second ledger row', evs.length === 0, JSON.stringify(evs.map((e) => e.rid)));
+  // …the join itself still holds for a request the child really made: the same records stamped after the replay window
+  const late = new Date(Date.parse(TS) + 60000).toISOString();
+  fs.writeFileSync(path.join(cxDir, `rollout-2026-08-24T04-36-10-${CHILD}.jsonl`), subagentHead.map((r, i) => JSON.stringify(i < 2 ? r : { ...r, timestamp: late })).join('\n') + '\n');
+  const evs2 = runUsageWalk({ home, codexSessionsDir: path.join(home, '.codex', 'sessions'), cursorFile: path.join(home, 'cursor2.json') }).events.map((l) => JSON.parse(l));
+  ok('walker rid for the sub-agent file === normalizer requestId (cx:<child>:16496, sid = the filename uuid) for a request the child made', evs2.length === 1 && evs2[0].rid === `cx:${CHILD}:16496` && evs2[0].rid === reply?.meta?.requestId, JSON.stringify(evs2.map((e) => e.rid)));
   fs.rmSync(home, { recursive: true, force: true });
 
   // The READER's thread id is preferred when the manager is constructed with

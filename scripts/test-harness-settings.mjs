@@ -108,7 +108,7 @@ console.log('§2 derived schema rows vs the 2.369.120 snapshot');
     if (!d.harness || !d.apply) diffs.push(`${k}: no harness/apply`);
   }
   ok('every snapshot row exists with identical type/default/options/label/description/category/liveApply/min/max/step/combobox', diffs.length === 0, diffs.slice(0, 8).join(', '));
-  ok('claude.autoResumeOnLimit stays a hand-written Chat row (generic feature, legacy key)', schemaMod.SETTINGS_SCHEMA['claude.autoResumeOnLimit']?.category === 'Chat' && !schemaMod.SETTINGS_SCHEMA['claude.autoResumeOnLimit'].harness);
+  ok('claude.autoResumeOnLimit stays a hand-written row (generic feature, legacy key) — category Spending since 2.369.202 (it starts billed turns)', schemaMod.SETTINGS_SCHEMA['claude.autoResumeOnLimit']?.category === 'Spending' && !schemaMod.SETTINGS_SCHEMA['claude.autoResumeOnLimit'].harness);
   ok('GENERIC_LEGACY_KEYS names that exact key', GENERIC_LEGACY_KEYS.autoResumeOnLimit === 'claude.autoResumeOnLimit');
   const hp = schemaMod.SETTINGS_SCHEMA['codex.historyPersistence'];
   ok('the NEW codex.historyPersistence row is derived (enum, default save-all, cli-config → history.persistence, category Codex)', hp && hp.type === 'enum' && hp.default === 'save-all' && hp.apply.kind === 'cli-config' && hp.apply.path.join('.') === 'history.persistence' && hp.category === 'Codex' && hp.options.some((o) => o.value === 'none') && hp.options.some((o) => o.value === ''));

@@ -25,7 +25,7 @@ class DeviceManager {
    *  version      release version (= daemonVersion expected)
    *  log          logger fn
    */
-  constructor({ dataDir, bundlePath, version, nodeModules, transport, log = console.log, upgradeLedger = null } = {}) {
+  constructor({ dataDir, bundlePath, version, nodeModules, transport, log = console.log, upgradeLedger = null, onUpgradeStuck = null, onVersionMatch = null } = {}) {
     this._tokFile = path.join(dataDir, 'agentd-tokens.json');
     this._bundlePath = bundlePath;
     this._version = version;
@@ -36,6 +36,10 @@ class DeviceManager {
     // on every dial-in. A ledger OUTLIVES the instance (dial-pairing.js keeps one per device); `get(expected)` →
     // `{tries, gaveUp}` for THIS bundle version, `set(expected, {tries, gaveUp})` after every change.
     this._upgradeLedger = upgradeLedger;
+    // lane device-upgrade-stuck: THE door of a stuck / healed upgrade (the construction site binds the machine —
+    // hosts.onAgentUpgrade → src/server/device-upgrade-watch.js). Pre-fix nothing ever assigned `_onUpgradeStuck`.
+    this._onUpgradeStuck = typeof onUpgradeStuck === 'function' ? onUpgradeStuck : null;
+    this._onVersionMatch = typeof onVersionMatch === 'function' ? onVersionMatch : null;
     // The version a freshly-upgraded daemon will REPORT is the one baked into
     // the bundle we ship — not this server's package version. They diverge
     // whenever the repo is rebuilt without restarting the server (or vice
@@ -259,7 +263,7 @@ class DeviceManager {
                 led.gaveUp = true; this._ledgerWrite(expected, led);
                 this._log(`[agentd] daemon stays at ${msg.daemonVersion} after ${this._upgradeTries} upgrade attempts to ${expected} — GIVING UP and using it as-is (capability-gated). Fix the device install manually; no further attempts this connection.`);
                 try { global.__vsEvent?.('agentd-upgrade-stuck', { detail: `${msg.daemonVersion}→${expected}` }); } catch { }
-                try { this._onUpgradeStuck?.(msg.daemonVersion, expected); } catch { }
+                try { this._onUpgradeStuck?.(msg.daemonVersion, expected, { platform: msg.platform, capabilities: msg.capabilities }); } catch { }
               }
             } else if (msg.daemonVersion !== expected && fs.existsSync(this._bundlePath)) {
               led.tries += 1; this._ledgerWrite(expected, led);
@@ -272,7 +276,7 @@ class DeviceManager {
               }).catch(fail);
               return;
             }
-            if (msg.daemonVersion === expected) this._ledgerWrite(expected, { tries: 0, gaveUp: false });
+            if (msg.daemonVersion === expected) { this._ledgerWrite(expected, { tries: 0, gaveUp: false }); try { this._onVersionMatch?.(expected); } catch { } }
             mux.control({ op: 'ok' });
             settled = true;
             const sessions = new Map(); // chan → { onData, onExit }
@@ -384,6 +388,9 @@ class DeviceManager {
       const origOnControl = mux.onControl;
       mux.onControl = (msg) => {
         if (msg.op === 'upgrade-done') { clearTimeout(timer); mux.onControl = origOnControl; resolve(); }
+        // lane device-upgrade-stuck: a daemon that could not LAND the bundle says so (≥ 2.369.203) — the attempt ends
+        // now with the device's own reason, never a silent 30 s timeout
+        else if (msg.op === 'upgrade-failed') { clearTimeout(timer); mux.onControl = origOnControl; reject(new Error('the device could not land the upgrade — ' + String(msg.error || '?').replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 200))); }
         else origOnControl(msg);
       };
       // the version the daemon lands under and REPORTS after its re-exec (VIBESPACE_AGENTD_VERSION) is the

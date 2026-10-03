@@ -18,7 +18,7 @@ const { workflowNameFromAck, shortWorkflowName } = require('./workflow-name.js')
 const { VIBESPACE_NOTICE_HEAD } = require('./notification-senders.js'); // PURE: the head our notifications open with (S3 verify F3: a peer record's PATH, peerOriginOf)
 const { offerOf, offerResolution } = require('./reset-credit.js'); // PURE: the reset-credit offer a peer card may carry (design-reset-credits §5) + its resolution (lane reset-path R3)
 const { refOf: channelRefOf } = require('./channel-ref.js'); // PURE (B-c127): a channel notice's conversation — `peerChannel`
-const { groupOf: groupCardOf } = require('./group-card.js'); // PURE (lane group-report-card): a group message's card facts — `peerGroup`
+const { groupOf: groupCardOf, readReport, cardOfReport } = require('./group-card.js'); // PURE (lane group-report-card): a group message's card facts — `peerGroup`
 const { sliceTextWindow } = require('./text-window.js'); // PURE: the attach slab counted in text cards (perf lane A)
 const { staleFromDenyMessage } = require('./browser-stale.js'); // PURE (lane J r2): a deny naming browser_paused = the takeover's stale answer
 const { unknownFields: shapeUnknownFields, carrierOf: shapeCarrierOf, unknownFieldsSample } = require('./record-shape.js'); // §3 schema drift (2026-09-21)
@@ -180,6 +180,7 @@ function peerDisplayName(origin, text) {
 // (since lane S3) our notice head. Anywhere else it is somebody QUOTING it (a
 // group wake carrying a member's words), which must never name the record.
 const escRe = (x) => String(x).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const NOTICE_AT_START_RE = new RegExp('^\\s*(?:Another Claude session sent a message:\\s*)?' + escRe(VIBESPACE_NOTICE_HEAD));
 const BW_AT_START_RE = new RegExp('^\\s*(?:Another Claude session sent a message:\\s*)?(?:' + escRe(VIBESPACE_NOTICE_HEAD) + '\\s*)?\\[VibeSpace Background Work\\] \\w+ "([^"]+)"');
 /**
  * WHO sent a transcript peer record and WHICH PATH its words took (S3 verify
@@ -208,7 +209,29 @@ function peerOriginOf(origin, text) {
   if (bw) return { name: 'Background Work · ' + bw[1], via: 'notification' };
   const f = origin && origin.from;
   if (f && f !== 'unknown' && !String(f).startsWith('uds:')) return { name: String(f), via: 'peer' };
-  return { name: null, via: null };
+  // A GROUP REPORT the server posted (lane peer-card-sender, B-9fd6): a wake's record is name-less too, and the
+  // framed report it holds names its senders and its group — read back (PURE group-card readReport) only when it
+  // OPENS the delivery (our own notice head never does); the call site draws the card (`applyPeerOrigin`, via 'peer').
+  const report = NOTICE_AT_START_RE.test(s) ? null : readReport(s);
+  return report ? { name: null, via: null, report } : { name: null, via: null };
+}
+/** The words the CLI RECORDED for a peer card whose text was re-drawn from them (a framed group report) — what the
+ *  rebuild's card matching reads (normalizers `recordedTextOf`); a symbol, so it never rides a message to a client. */
+const PEER_RECORDED = Symbol('peerRecorded');
+/** A transcript peer record's provenance onto its card (the three claude sites): the name and the PATH, and — for a
+ *  server-posted group report (B-9fd6) — the group card it was live: "<sender(s)> → <group>", the words without the
+ *  frame (the message that woke it; every message, each sender named, when the report carried several). */
+function applyPeerOrigin(msg, po, recorded) {
+  msg.peerFrom = po.name;
+  if (po.via) msg.peerVia = po.via; // S3 verify F3: the rung that named it, never the words
+  const card = po.report ? cardOfReport(po.report, msg.ts) : null;
+  if (!card) return msg;
+  msg.peerGroup = card.group;
+  msg.peerVia = 'peer';
+  msg.peerFrom = card.group.self ? null : card.fromName;
+  msg.content = [{ type: 'text', text: card.text }];
+  Object.defineProperty(msg, PEER_RECORDED, { value: String(recorded || ''), enumerable: false, configurable: true, writable: true });
+  return msg;
 }
 
 // Result-error classes the UI ACTS on (2.365.0). 'prompt-too-long' = the
@@ -1483,7 +1506,7 @@ class MessageManager {
       }
       for (let i = this.messages.length - 1, seen = 0; i >= 0 && seen < 12; i--, seen++) {
         const m = this.messages[i];
-        if (m.role === 'user' && (m.content || []).map((b) => b.text || '').join('') === text) return;
+        if (m.role === 'user' && (m[PEER_RECORDED] || (m.content || []).map((b) => b.text || '').join('')) === text) return;
       }
       if (a.origin?.kind === 'peer' && a.origin.msg_id && this._peerMsgIds.has(a.origin.msg_id)) return; // already rendered (msg_id is authoritative)
       this.turnIndex++;
@@ -1492,9 +1515,7 @@ class MessageManager {
         // same provenance law as the idle-wake user record — render the
         // peer card, never a "You" bubble of someone else's words
         msg.originKind = 'peer-message';
-        const po = peerOriginOf(a.origin, text);
-        msg.peerFrom = po.name;
-        if (po.via) msg.peerVia = po.via; // S3 verify F3: the rung that named it, never the words
+        applyPeerOrigin(msg, peerOriginOf(a.origin, text), text);
         this._notePeerMsgId(a.origin.msg_id);
       } else {
         msg.typed = true; // the user's own words — never a notification card
@@ -1780,9 +1801,8 @@ class MessageManager {
         // path — the turn appeared to start from nothing. Same provenance law
         // as task-notification: origin.kind wins, render a distinct card.
         msg.originKind = 'peer-message';
-        const po = peerOriginOf(raw.origin, (raw.message && (typeof raw.message.content === 'string' ? raw.message.content : (raw.message.content || []).map((b) => b.text || '').join('\n'))) || '');
-        msg.peerFrom = po.name;
-        if (po.via) msg.peerVia = po.via; // S3 verify F3: the rung that named it, never the words
+        const said = (raw.message && (typeof raw.message.content === 'string' ? raw.message.content : (raw.message.content || []).map((b) => b.text || '').join('\n'))) || '';
+        applyPeerOrigin(msg, peerOriginOf(raw.origin, said), said);
         this._notePeerMsgId(raw.origin.msg_id);
       }
       else if (raw.originKind === 'auto-resume') { msg.originKind = 'auto-resume'; msg.typed = false; if (typeof raw.originNote === 'string' && raw.originNote) msg.originNote = raw.originNote; } // VibeSpace's own continue prompt (auto-resume) — labelled, never a "you typed this" bubble (2.369.32)
@@ -2253,4 +2273,4 @@ const KNOWN_IGNORED_SYSTEM_SUBTYPES = new Set([
   'bridge_status',          // the TUI's "/remote-control is active" banner (transcript 2.1.81, 11 rows; NOT in the SDK union — record-shape CORPUS_ONLY_SUBTYPES); VibeSpace never runs the remote-control bridge
 ]);
 
-module.exports = { splitToolResultContent, toolResultText, MessageManager, classifyResultError, parseBackgroundLaunch, normalizeTaskType, TASK_TYPE_MAP, peerDisplayName, peerOriginOf, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson };
+module.exports = { splitToolResultContent, toolResultText, MessageManager, classifyResultError, parseBackgroundLaunch, normalizeTaskType, TASK_TYPE_MAP, peerDisplayName, peerOriginOf, PEER_RECORDED, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson };

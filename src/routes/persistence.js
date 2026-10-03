@@ -12,6 +12,7 @@ const fs = require('fs');
 const os = require('os');
 const { listCodexThreads } = require('../codex-session-store');
 const { desktopChanges } = require('../lib/desktop-record.js'); // PURE: a rollback point names the change that followed it (userW inc-mun7qjmw-iksh)
+const { RETIRED_SETTING_KEYS } = require('../retired-settings.js'); // PURE: the retired settings keys (B-df40 part 1) — one may LEAVE data/settings.json, never re-enter it
 
 const router = express.Router();
 
@@ -358,6 +359,18 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   router.writeLayouts = writeLayouts;
   router.flushLayouts = flushLayouts;
   router.readUserState = () => readUserState(); // TaskGroupManager one-time Groups migration
+  // lane peer-card-sender (③): ONE custom name set from the server (ws rename-session — an agent or a script renaming a
+  // session) through the same store + broadcast the sidebar's own rename PATCHes; an unchanged name writes nothing
+  router.setCustomName = (key, name) => {
+    const k = String(key || ''), v = String(name == null ? '' : name).trim();
+    if (!k || !k.includes(':')) return false;
+    const cur = readUserState();
+    const names = { ...(cur.customNames || {}) };
+    if ((names[k] || '') === v) return false;
+    if (v) names[k] = v; else delete names[k];
+    writeUserState({ ...cur, customNames: names });
+    return true;
+  };
 
   // ── Bookmarks ──
   const BOOKMARKS_FILE = path.join(dataDir, 'bookmarks.json');
@@ -634,6 +647,11 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   function writeSettings(data) {
     ensureDir(dataDir);
     const prev = readSettings(); // capture BEFORE the cache swap (for the change callback)
+    // settings-prune verify r1: a RETIRED key may leave the file (the boot migration archives it, then strips) but never
+    // re-enter it — a tab loaded before the update POSTs its whole `_values` (refetch never deletes a key), which wrote
+    // the stripped keys back for good (the migration never re-runs). Kept only while the file still holds it.
+    const back = RETIRED_SETTING_KEYS.filter((k) => Object.hasOwn(data, k) && !(prev && Object.hasOwn(prev, k)));
+    if (back.length) { data = { ...data }; for (const k of back) delete data[k]; }
     _settingsCache = data;
     writeJsonAtomic(SETTINGS_FILE, data);
     broadcast({ type: 'settings-updated', settings: data });
@@ -649,6 +667,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // getSyncStore('settings') (that store is empty — a real bug class: 9 server
   // reads silently saw defaults regardless of what the user configured).
   router.readSettings = readSettings;
+  /** settings-prune verify r1: a boot migration may rewrite data/settings.json AFTER something read it into the cache —
+   *  server.js drops the cache once they ran, so GET (and the next save) start from what the file now holds. */
+  router.reloadSettings = () => { _settingsCache = null; };
   /** lane browser-propose: a SERVER act that writes a setting the user approved (the proposal's site on the CloakBrowser
    *  list) — the PATCH route's own merge through the ONE writer (atomic file, `settings-updated` broadcast to every client). */
   router.patchSettings = (patch) => {

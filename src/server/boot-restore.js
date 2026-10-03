@@ -370,6 +370,7 @@ function restoreSessions() {
       _dialReversePort: meta.dialReversePort || null, // VIBESPACE_API back-tunnel, re-owned at the next dial-in (audit #49)
       hostName: meta.hostName || null,
       name: meta.name || sockFile,
+      _nameExplicit: meta.nameExplicit === true, // lane peer-card-sender: a name given at creation / by a rename
       createdAt: meta.createdAt || Date.now(),
       backend: meta.backend || 'claude',
       backendSessionId: meta.backendSessionId || meta.claudeSessionId || null,
@@ -567,7 +568,7 @@ function restoreAgentdPipeSessions() {
     persistNoStart(sockFile, meta, { readSessionMeta, writeSessionMeta }); // r5
     const session = {
       mode: 'chat', backend: meta.backend || 'claude', cwd: meta.cwd || os.homedir(),
-      name: meta.name || 'Session', createdAt: meta.createdAt || Date.now(), sockName: sockFile,
+      name: meta.name || 'Session', _nameExplicit: meta.nameExplicit === true, createdAt: meta.createdAt || Date.now(), sockName: sockFile,
       clients: new Map(), buffer: '', agentToken: meta.agentToken || null, taskId: meta.taskId || null,
       _accountId: meta.accountId || null, claudeSessionId: meta.claudeSessionId || null,
       _heldPoolMember: typeof meta.heldPoolMember === 'string' ? meta.heldPoolMember : null, // design-reset-credits r2: the member the surviving pipe process holds
@@ -680,6 +681,7 @@ async function readoptOrphanKeeperSessions() {
       host: meta.host, hostName: meta.hostName || null,
       keeperSid: meta.keeperSid,
       name: meta.name || 'Session',
+      _nameExplicit: meta.nameExplicit === true,
       createdAt: meta.createdAt || Date.now(),
       backend: 'claude',
       backendSessionId: meta.claudeSessionId || meta.backendSessionId || null,

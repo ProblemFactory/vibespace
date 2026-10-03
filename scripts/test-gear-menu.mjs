@@ -6,7 +6,7 @@
 //   opens its flyout only after the 120 ms intent delay (measured on the
 //   PAGE's clock — node polls until-style, never a fixed sleep against the
 //   timer), to the LEFT of the head and fully on screen; hovering another
-//   head swaps it (one at a time); ArrowDown ×5 from the first row lands on
+//   head swaps it (one at a time); ArrowDown ×5 (×6 with the top-level Apps… row) from the first row lands on
 //   System, ArrowLeft opens it with focus on its first member, ArrowDown, Enter runs a STUBBED
 //   _openDiagnostics and closes the popover; Esc closes ONE layer (the
 //   flyout, focus back on its head) and the next Esc the popover; an outside
@@ -185,8 +185,10 @@ try {
 
   // keyboard
   await evalJs(`document.querySelector('${POP} .gs-menu > .gs-menu-item[data-id="appearance"]').focus(); true`);
-  for (let i = 0; i < 5; i++) await key('ArrowDown'); // Manage agents → All Settings (2.369.131) → Tools → Communication → System
-  check('ArrowDown ×5 from Appearance lands on System (Manage agents → All Settings → Tools → Communication → System)', await evalJs(`document.activeElement?.dataset?.id === 'system'`));
+  // design 009 §B6: "Apps…" is a TOP-LEVEL row between All Settings and Tools whenever the desktop-apps probe found a backend
+  const downs = 5 + (await evalJs(`!!app._desktopAppsAvailable`) ? 1 : 0);
+  for (let i = 0; i < downs; i++) await key('ArrowDown'); // Manage agents → All Settings (2.369.131) → [Apps…] → Tools → Communication → System
+  check(`ArrowDown ×${downs} from Appearance lands on System (Manage agents → All Settings → ${downs === 6 ? 'Apps… → ' : ''}Tools → Communication → System)`, await evalJs(`document.activeElement?.dataset?.id === 'system'`));
   await key('ArrowLeft');
   check('ArrowLeft opens the System flyout, swaps out the hover-opened one, focus on its first member (Report a problem…)', await evalJs(isOpen('system')) && !(await evalJs(isOpen('comm'))) && await evalJs(`/Report a problem/.test(document.activeElement?.textContent || '')`));
   await key('ArrowDown');
@@ -208,7 +210,7 @@ try {
   const escState = () => evalJs(`(() => { const a = document.activeElement; return JSON.stringify({ pop: !!document.querySelector('${POP}'), open: [...document.querySelectorAll('${POP} .gs-flyout.open, ${POP} .gs-sub.open')].map((s) => s.parentElement?.classList?.contains('gs-menu-item') ? s.parentElement.dataset.id : (s.previousElementSibling?.dataset?.id || '?')), active: a ? (a.tagName + (a.dataset?.id ? '#' + a.dataset.id : '') + '.' + (a.className || '').toString().split(' ')[0]) : null, body: a === document.body, floats: document.querySelectorAll('[data-popover]').length }); })()`);
   await openGear();
   await evalJs(`document.querySelector('${POP} .gs-menu > .gs-menu-item[data-id="appearance"]').focus(); true`);
-  for (let i = 0; i < 5; i++) await key('ArrowDown'); // Manage agents → All Settings (2.369.131) → Tools → Communication → System
+  for (let i = 0; i < downs; i++) await key('ArrowDown'); // Manage agents → All Settings (2.369.131) → [Apps…] → Tools → Communication → System
   await key('ArrowLeft');
   check(`(setup) System flyout open by keyboard (${await escState()})`, await evalJs(isOpen('system')));
   await shot('esc-0-before.png');
@@ -306,7 +308,7 @@ await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, devi
 await cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
 await cdp('Page.navigate', { url: URL });
 await sleep(1500);
-await evalJs(`localStorage.removeItem('vibespace.settingsNavFolds'); app._settingsUI.open(); true`);
+await evalJs(`localStorage.removeItem('vibespace.settingsNavFolds'); localStorage.setItem('vibespace.settingsAdvanced', '1'); app._harnessesHere = null; app._settingsUI.open(); true`); // settings-tiers: the whole tree (advanced on, harness facts unknown ⇒ shown)
 await sleep(400);
 const sw = await evalJs(`(() => { const nav = document.querySelector('.settings-window .settings-nav'); if (!nav) return null; const groups = [...nav.querySelectorAll('.settings-nav-group')].map((g) => ({ id: g.dataset.group, head: g.querySelector('.settings-nav-group-head span')?.textContent, items: [...g.querySelectorAll('.settings-nav-item')].map((i) => i.textContent), folded: g.classList.contains('is-folded') })); const blocksOf = (cat) => { const sec = document.querySelector('.settings-window .settings-section[data-category="' + cat + '"]'); return sec ? [...sec.querySelectorAll('.settings-subsection-title')].map((b) => ({ kind: b.dataset.applyKind, text: b.textContent.slice(0, 60), rows: (() => { let n = 0; for (let e = b.nextElementSibling; e && !e.classList.contains('settings-subsection-title'); e = e.nextElementSibling) if (e.classList.contains('settings-row')) n++; return n; })() })) : null; }; const blocks = blocksOf('Claude'); const perHarness = { Claude: blocksOf('Claude'), Codex: blocksOf('Codex'), OpenCode: blocksOf('OpenCode') }; const sections = [...document.querySelectorAll('.settings-window .settings-section')].map((x) => x.dataset.category); return { groups, blocks, perHarness, sections }; })()`);
 check(`the nav is five groups in order (${sw && sw.groups.map((g) => g.id + ':' + g.items.length).join(' ')})`, !!sw && sw.groups.map((g) => g.id).join(',') === 'appearance,sessions,harness,services,spending' && sw.groups.every((g) => g.items.length >= 1 && g.head), sw && sw.groups);
@@ -324,7 +326,7 @@ await evalJs(`(() => { const i = document.querySelector('.settings-window .setti
 await sleep(300);
 const searched = await evalJs(`(() => { const g = document.querySelector('.settings-window .settings-nav-group[data-group="services"]'); return { present: !!g, folded: g ? g.classList.contains('is-folded') : null, items: g ? [...g.querySelectorAll('.settings-nav-item')].map((i) => i.textContent) : [] }; })()`);
 check('a search shows every matching category even inside a folded group (the fold is not a filter)', !!searched && searched.present && searched.folded === false && searched.items.includes('Channels'), searched);
-await evalJs(`localStorage.removeItem('vibespace.settingsNavFolds'); document.querySelector('.settings-window')?.remove(); true`);
+await evalJs(`localStorage.removeItem('vibespace.settingsNavFolds'); localStorage.removeItem('vibespace.settingsAdvanced'); document.querySelector('.settings-window')?.remove(); true`);
 
 // ── 2.369.137 the freeze probe: an automatic capture carries the GPU/canvas inventory ──
 {

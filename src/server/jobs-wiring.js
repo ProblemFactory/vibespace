@@ -268,17 +268,6 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     } catch (e) { log('[jobs] accept catch-up failed:', e.message); }
   };
 
-  const sweepChannelSocks = () => {
-    try {
-      const dir = path.join(dataDir, 'channel-socks');
-      for (const f of fs.readdirSync(dir)) {
-        if (!f.endsWith('.sock')) continue;
-        if (activeSessions && activeSessions.has(f.slice(0, -5))) continue;
-        try { fs.unlinkSync(path.join(dir, f)); } catch { }
-      }
-    } catch { }
-  };
-
   return {
     jm,
     getJobs: () => jm,
@@ -286,7 +275,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       try { jm.init(); } catch (e) { log('[jobs] init threw (isolated):', e.message); }
       // two passes: dtach re-attaches trickle in after boot
       const t1 = setTimeout(pushAcceptToLiveSessions, 5000);
-      const t2 = setTimeout(() => { pushAcceptToLiveSessions(); sweepChannelSocks(); }, 60_000);
+      const t2 = setTimeout(pushAcceptToLiveSessions, 60_000);
       t1.unref?.(); t2.unref?.();
     },
     shutdown: () => { try { jm.shutdown(); } catch { } },

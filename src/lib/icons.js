@@ -156,6 +156,7 @@ export const UI_ICONS = {
   // the Design window (lane design-window): Fit = four corners drawn in; Print = a printer
   fit:       _s('<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/><rect x="5.5" y="5.5" width="5" height="5" rx="0.5"/>'),
   print:     _s('<path d="M4.5 6V2.5h7V6"/><rect x="2.5" y="6" width="11" height="5" rx="1"/><path d="M4.5 9.5h7v4h-7z"/>'),
+  sliders:   _s('<path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6"/><circle cx="10" cy="4.5" r="1.5"/><circle cx="6" cy="11.5" r="1.5"/>'), // the Design window's Tweaks
   // lane everyone-principal (2026-10-02): THE "All agents" principal — every conversation, now and later (three heads;
   // `users` stays a Task Group's / an agent group's glyph)
   everyone:  _s('<circle cx="8" cy="4.8" r="2"/><path d="M4.6 12.6c.4-2.1 1.7-3.3 3.4-3.3s3 1.2 3.4 3.3"/><circle cx="3.2" cy="6.4" r="1.5"/><path d="M.9 12c.2-1.5 1-2.5 2.3-2.7"/><circle cx="12.8" cy="6.4" r="1.5"/><path d="M15.1 12c-.2-1.5-1-2.5-2.3-2.7"/>'),

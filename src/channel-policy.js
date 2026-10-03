@@ -462,6 +462,160 @@ function placementRefusalText(r, { t = defaultT } = {}) {
 }
 
 
+/**
+ * AN AGENT'S ATTACHMENTS (design 005 §2.B, B-fd1f). The CLI the agent runs reads its files and sends their bytes IN the
+ * proposal (`attachments: [{name, data: <base64>}]`) — the server never opens a path an agent names. Here, PURE: the
+ * SHAPE and the BOUNDS (at most ATTACH_MAX_COUNT files, each at least 1 byte, at most ATTACH_MAX_TOTAL together), the
+ * NAME rule (a name is only a name: no separator, no character of src/hidden-chars.js's set, no line break / tab, no edge space, at most
+ * ATTACH_NAME_MAX), the TYPE sniffed from the bytes (`sniffType` — never the name's extension), and `attachVerdict` over
+ * the adapter's `caps.sendAttachments` row (null ⇒ `attachments-not-offered`, in the channel's name, with its reason).
+ * Every refusal names itself in `why` (one of ATTACH_CODES) and creates nothing.
+ */
+const ATTACH_MAX_COUNT = 10;
+const ATTACH_MAX_TOTAL = 25e6;
+const ATTACH_NAME_MAX = 200;
+const ATTACH_CODES = Object.freeze(['attachment-count', 'attachment-too-large', 'attachment-empty', 'attachment-name', 'attachment-data', 'attachments-not-offered', 'attachment-shape', 'attachment-changed', 'attachments-held']);
+/** the four raster types a card may draw inline (the owner's read route serves the same set inline) */
+const INLINE_RASTER = Object.freeze(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+const B64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
+/** The decoded size of a base64 string, nothing decoded (null = not base64). */
+function base64Bytes(v) {
+  if (typeof v !== 'string' || v.length % 4 !== 0 || !B64_RE.test(v)) return null;
+  return (v.length / 4) * 3 - (v.endsWith('==') ? 2 : v.endsWith('=') ? 1 : 0);
+}
+/** A file's NAME as the agent gave it — only a name: refused (never cleaned) when it is a path, hides a character, or is too long. */
+function safeAttachmentName(name) {
+  const no = (error) => ({ ok: false, why: 'attachment-name', error });
+  if (typeof name !== 'string' || !name.trim()) return no('an attachment needs a name');
+  if (name.length > ATTACH_NAME_MAX) return no(`an attachment's name is longer than ${ATTACH_NAME_MAX} characters`);
+  const shown = JSON.stringify(name.slice(0, 80));
+  if (/[/\\]/.test(name) || name === '.' || name === '..') return no(`${shown} is a path — an attachment is named by its file name only`);
+  // verify-r6 Z2: THE hidden-character set is src/hidden-chars.js (joiners refused, as in an address); a line feed or a tab
+  // is what it looks like in a text, never in a name
+  const hid = hiddenCharsOf(name, { joiners: true });
+  if (hid.length) return no(`an attachment's name carries a control or invisible character (${hid.join(', ')})`);
+  if (name.includes('\n') || name.includes('\t')) return no('an attachment\'s name carries a line break or a tab');
+  // verify r1 (C10): a LONE UTF-16 surrogate is no character at all — Gmail's RFC 2231 name and the card's download
+  // header cannot encode it (encodeURIComponent throws: the send failed after the approval, the route answered 500)
+  if (/\p{Cs}/u.test(name)) return no('an attachment\'s name carries a broken character (a lone UTF-16 surrogate)');
+  if (name !== name.trim()) return no(`the name ${shown} starts or ends with a space`);
+  return { ok: true, name };
+}
+/** The proposal's `attachments`, validated: `{ok, list: [{name, data, bytes}]}` or the refusal by name. */
+function attachmentsOf(v) {
+  const no = (why, error) => ({ ok: false, why, error: `${error} — nothing was created` });
+  if (v === undefined || v === null) return { ok: true, list: [] };
+  if (!Array.isArray(v)) return no('attachment-data', 'attachments must be a list of {name, data}');
+  if (v.length > ATTACH_MAX_COUNT) return no('attachment-count', `at most ${ATTACH_MAX_COUNT} attachments in one message (got ${v.length})`);
+  const list = [];
+  let total = 0;
+  for (const a of v) {
+    const nm = safeAttachmentName(a && a.name);
+    if (!nm.ok) return no(nm.why, nm.error);
+    const bytes = base64Bytes(a && a.data);
+    if (bytes === null) return no('attachment-data', `${JSON.stringify(nm.name.slice(0, 80))} carries no bytes (data must be base64 — vibespace-channels --attach reads the file)`);
+    if (bytes < 1) return no('attachment-empty', `${JSON.stringify(nm.name.slice(0, 80))} has no bytes (it is 0 bytes long)`);
+    total += bytes;
+    if (total > ATTACH_MAX_TOTAL) return no('attachment-too-large', `the attachments are larger than ${ATTACH_MAX_TOTAL / 1e6} MB together`);
+    list.push({ name: nm.name, data: a.data, bytes });
+  }
+  return { ok: true, list };
+}
+/** The first bytes as text, or null (a NUL, or not UTF-8 — a cut character at the end is allowed). */
+function textHead(b) {
+  const n = Math.min(b.length, 512);
+  for (let i = 0; i < n; i++) if (b[i] === 0) return null;
+  const u8 = b instanceof Uint8Array ? b : Uint8Array.from(b);
+  for (let cut = 0; cut < 4 && cut < n; cut++) { try { return new TextDecoder('utf-8', { fatal: true }).decode(u8.subarray(0, n - cut)); } catch { /* try a shorter head */ } }
+  return null;
+}
+/** The TYPE of a file from its BYTES: `{mime, kind}` — the four raster pictures are `image`, everything else a `file`
+ *  (an SVG or an HTML page is a file, never a picture to draw). PURE over a Buffer / Uint8Array. */
+function sniffType(buf) {
+  const b = buf || [];
+  const at = (i) => (i < b.length ? b[i] : -1);
+  const starts = (sig, off = 0) => sig.every((x, i) => at(off + i) === x);
+  const ascii = (str, off = 0) => starts([...str].map((c) => c.charCodeAt(0)), off);
+  if (starts([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return { mime: 'image/png', kind: 'image' };
+  if (starts([0xff, 0xd8, 0xff])) return { mime: 'image/jpeg', kind: 'image' };
+  if (ascii('GIF87a') || ascii('GIF89a')) return { mime: 'image/gif', kind: 'image' };
+  if (ascii('RIFF') && ascii('WEBP', 8)) return { mime: 'image/webp', kind: 'image' };
+  if (ascii('%PDF-')) return { mime: 'application/pdf', kind: 'file' };
+  if (starts([0x50, 0x4b, 0x03, 0x04]) || starts([0x50, 0x4b, 0x05, 0x06])) return { mime: 'application/zip', kind: 'file' };
+  if (starts([0x1f, 0x8b])) return { mime: 'application/gzip', kind: 'file' };
+  const head = textHead(b);
+  if (head !== null) {
+    const h = (head.charCodeAt(0) === 0xfeff ? head.slice(1) : head).trimStart().slice(0, 256).toLowerCase();
+    if (/^<svg[\s>]/.test(h) || (/^<\?xml/.test(h) && h.includes('<svg'))) return { mime: 'image/svg+xml', kind: 'file' };
+    if (/^(<!doctype html|<html[\s>]|<head[\s>]|<body[\s>]|<script[\s>])/.test(h)) return { mime: 'text/html', kind: 'file' };
+    return { mime: 'text/plain', kind: 'file' };
+  }
+  return { mime: 'application/octet-stream', kind: 'file' };
+}
+const EXT_TYPES = Object.freeze({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', pdf: 'application/pdf', zip: 'application/zip', docx: 'application/zip', xlsx: 'application/zip', pptx: 'application/zip', odt: 'application/zip', gz: 'application/gzip', svg: 'image/svg+xml', html: 'text/html', htm: 'text/html', txt: 'text/plain' });
+/** The card's chip: the name's extension says one type, the bytes another (`{ext, said}`), else null. */
+function nameTypeMismatch(name, mime) {
+  const m = /\.([A-Za-z0-9]{1,8})$/.exec(String(name || ''));
+  const said = m ? EXT_TYPES[m[1].toLowerCase()] : null;
+  return said && said !== mime ? { ext: m[1].toLowerCase(), said } : null;
+}
+/** May THIS channel carry these files (`[{kind, bytes}]`)? Over the adapter's row: absent / null ⇒ `attachments-not-offered`
+ *  (with the row's reason); one row `{maxCount, maxTotalBytes, withText}`, or `{images, files}` each `{maxCount, maxBytes,
+ *  withText}` — pictures and files never share a message there, and a group without text refuses text (`attachment-shape`). */
+function attachVerdict(row, list, { hasText = true, channel = 'this channel', why = null } = {}) {
+  const files = Array.isArray(list) ? list : [];
+  if (!files.length) return { ok: true };
+  const no = (code, error) => ({ ok: false, why: code, error: `${error} — nothing was created` });
+  const ch = String(channel || 'this channel');
+  const r = row && typeof row === 'object' ? row : null;
+  if (!r) return no('attachments-not-offered', `${ch} does not take attachments from an agent${why ? ` (${why})` : ''}; send the text alone, or ask the user to send the file`);
+  const mb = (n) => `${Math.round(Number(n) / 1e5) / 10} MB`;
+  if (r.images !== undefined || r.files !== undefined) {
+    const pics = files.filter((f) => f && f.kind === 'image');
+    if (pics.length && pics.length < files.length) return no('attachment-shape', `on ${ch} pictures and other files cannot ride one message — send them as separate replies`);
+    const g = pics.length ? r.images : r.files;
+    if (!g) return no('attachments-not-offered', `${ch} does not take ${pics.length ? 'pictures' : 'files'} from an agent${why ? ` (${why})` : ''}`);
+    if (hasText && g.withText === false) return no('attachment-shape', `on ${ch} a file is its own message — send the text as another reply`);
+    if (files.length > g.maxCount) return no('attachment-count', `${ch} takes at most ${g.maxCount} ${pics.length ? 'pictures' : 'files'} in one message`);
+    const big = files.find((f) => Number(f.bytes) > g.maxBytes);
+    if (big) return no('attachment-too-large', `${ch} takes at most ${mb(g.maxBytes)} per ${pics.length ? 'picture' : 'file'} (${JSON.stringify(String(big.name || '').slice(0, 80))} is ${mb(big.bytes)})`);
+    return { ok: true };
+  }
+  if (files.length > r.maxCount) return no('attachment-count', `${ch} takes at most ${r.maxCount} attachments in one message`);
+  const total = files.reduce((n, f) => n + (Number(f && f.bytes) || 0), 0);
+  if (total > r.maxTotalBytes) return no('attachment-too-large', `${ch} takes at most ${mb(r.maxTotalBytes)} of attachments in one message (these are ${mb(total)})`);
+  if (hasText && r.withText === false) return no('attachment-shape', `on ${ch} attachments go without text — send the text as another reply`);
+  return { ok: true };
+}
+/** The attachments a proposal STORED (each with its sha256) — a record from before the bytes (names only) has none. */
+function storedAttachments(p) {
+  return (p && Array.isArray(p.attachments) ? p.attachments : []).filter((a) => a && typeof a === 'object' && typeof a.sha256 === 'string' && a.sha256);
+}
+/** A size in the card's and the receipt's words: 12 B · 340 KB · 1.2 MB. */
+function attachmentSize(n) {
+  const b = Math.max(0, Number(n) || 0);
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${Math.round(b / 1024)} KB`;
+  return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+}
+/** verify r1 (C4): the bytes ONE drafter's UNDECIDED proposals (any state but a terminal one) keep under outbox-files —
+ *  at most ATTACH_HELD_MAX together, so a looping agent cannot fill the owner's disk for the 24 h a proposal waits
+ *  (each new proposal is judged with what is held; `{ok}` or `attachments-held` by name). PURE. */
+const ATTACH_HELD_MAX = 100e6;
+function attachHeldVerdict(proposals, drafter, list) {
+  const adding = (Array.isArray(list) ? list : []).reduce((n, f) => n + (Number(f && f.bytes) || 0), 0);
+  if (!adding) return { ok: true };
+  const who = (d) => `${(d && d.kind) || 'user'}:${(d && d.id) || ''}`;
+  const me = who(drafter);
+  let held = 0;
+  for (const p of Object.values(proposals && typeof proposals === 'object' ? proposals : {})) {
+    if (!p || TERMINAL_STATES.includes(p.state) || p.attachmentsGoneAt || who(p.draftedBy) !== me) continue;
+    held += storedAttachments(p).reduce((n, a) => n + (Number(a.bytes) || 0), 0);
+  }
+  if (held + adding <= ATTACH_HELD_MAX) return { ok: true, held };
+  return { ok: false, why: 'attachments-held', held, error: `your proposals still awaiting the user already hold ${Math.round(held / 1e6)} MB of attachments (at most ${ATTACH_HELD_MAX / 1e6} MB together) — wait for the user's decision, or withdraw one (vibespace-channels withdraw <proposalId>); nothing was created` };
+}
+
 /** A proposal's shape, validated. */
 function validateProposal(input = {}) {
   const p = input && typeof input === 'object' ? input : {};
@@ -478,7 +632,11 @@ function validateProposal(input = {}) {
     const kind = kinds.includes(p.why.kind) ? p.why.kind : 'text';
     why = { kind, id: p.why.id === undefined || p.why.id === null ? null : String(p.why.id).slice(0, 200), label: String(p.why.label || '').slice(0, 300) || null };
   } else if (typeof p.why === 'string' && p.why.trim()) why = { kind: 'text', id: null, label: p.why.trim().slice(0, 300) };
-  const attachments = Array.isArray(p.attachments) ? p.attachments.slice(0, 20).map((a) => ({ name: String((a && a.name) || '').slice(0, 200), bytes: Number(a && a.bytes) || 0 })) : [];
+  // design 005 §2.B (B-fd1f): an attachment carries its BYTES (`{name, data: <base64>}`, read by the agent's CLI) —
+  // the bounds and the name rule refuse by name (`why`), before anything exists
+  const att = attachmentsOf(p.attachments);
+  if (!att.ok) return att;
+  const attachments = att.list;
   // lane channel-threads (spec §5.2): a reply INTO a thread is a PROMISE the composer / the agent makes — it names
   // what it answers (a thread reply without a parent is refused by name, `why: 'inThread'`)
   if (p.inThread !== undefined && p.inThread !== null && p.inThread !== false && p.inThread !== true) return { ok: false, error: 'inThread must be true or false', why: 'inThread' };
@@ -670,6 +828,9 @@ function shownFields(p) {
     // the .197 integration (pairing r6 × channel-threads): WHERE the reply lands (read through the alias) and a
     // REACTION's op / key / message decide what is sent too — the card shows both, so the digest covers both
     s(placementOf(q)), q.reaction && typeof q.reaction === 'object' ? [s(q.reaction.op), s(q.reaction.key), s(q.reaction.msg)] : null,
+    // design 005 §2.B (B-fd1f): WHAT LEAVES WITH IT — each stored attachment's name, size and sha256, so a card approved
+    // for other bytes is `changed-since-shown`; appended only when there are any (every other proposal keeps its digest)
+    ...(storedAttachments(q).length ? [storedAttachments(q).map((a) => [s(a.name), Number(a.bytes) || 0, s(a.sha256)])] : []),
   ];
 }
 /** FNV-1a 32 over the UTF-16 units, seeded (the plugin-manifest precedent). */
@@ -1067,6 +1228,8 @@ function receiptFor(p) {
     // …and a REPLY names where it landed (2026-09-28: its PLACEMENT — a quote, a thread, a thread also shown in the
     // chat; `inThread` + the thread's key kept beside it as the alias older readers know)
     ...replyPlaceOf(p),
+    // design 005 §2.B: the files it carried — name, size, sha256 (what the person approved)
+    ...(storedAttachments(p).length ? { attachments: storedAttachments(p).map((a) => ({ name: a.name, bytes: Number(a.bytes) || 0, sha256: a.sha256 })) } : {}),
   };
 }
 
@@ -1121,6 +1284,7 @@ function renderReceiptBlock(receipt, { adapterLabel = null, title = null, text =
   lines.push(`Channel receipt — ${safeInline(adapterLabel || r.adapterId || 'channel', 60)} · ${safeInline(title || r.convId || '', 120)}`.trim());
   const what = r.status === 'edited' ? 'SENT after the user edited it' : r.status === 'sent' ? 'SENT' : r.status === 'rejected' ? 'REJECTED by the user' : r.status === 'expired' ? 'EXPIRED unapproved (24 h)' : r.status === 'failed' ? 'FAILED' : r.status === 'withdrawn' ? `WITHDRAWN by you (the drafting agent)${r.replacedBy ? ` — replaced by proposal ${safeInline(r.replacedBy, 80)}` : ''}` : String(r.status || '').toUpperCase();
   lines.push(`proposal ${safeInline(r.proposalId, 80)}: ${what}${r.vendorMessageId ? ` (vendor id ${safeInline(r.vendorMessageId, 200)})` : ''}`);
+  if (Array.isArray(r.attachments) && r.attachments.length) lines.push(`with ${r.attachments.length} attachment${r.attachments.length === 1 ? '' : 's'}: ${r.attachments.map((a) => `${safeInline(a.name, 120)} ${attachmentSize(a.bytes)} sha256 ${safeInline(String(a.sha256 || '').slice(0, 12), 12)}`).join(', ')}`);
   // the PLACEMENT (a receipt from before the enum carries `inThread` only — read as `thread`)
   const pl = PLACEMENTS.includes(r.placement) ? r.placement : r.inThread ? 'thread' : null;
   if (pl && pl !== 'chat') lines.push(`placed ${placementWords(pl)}${isThreadPlacement(pl) && r.threadKey ? ` (thread ${safeInline(r.threadKey, 200)})` : ''}`);
@@ -1170,4 +1334,6 @@ module.exports = {
   // the digest of the card (F6), the arming delay (F6), the characters that hide what a line says (O1)
   replyAnchorVerdict, anchorView, envelopeVerdict, ENVELOPE_HEADER_MAX, envelopeAddresses, withAddedCc, addressesOf, shownFields, shownDigest, ARM_MS, armVerdict, rearmVerdict,
   hiddenCharsOf, revealSegments,
+  // design 005 §2.B (B-fd1f): an agent's attachments — bounds, the name rule, the sniffed type, the adapter's row
+  ATTACH_MAX_COUNT, ATTACH_MAX_TOTAL, ATTACH_NAME_MAX, ATTACH_CODES, INLINE_RASTER, base64Bytes, safeAttachmentName, attachmentsOf, sniffType, nameTypeMismatch, attachVerdict, storedAttachments, attachmentSize, ATTACH_HELD_MAX, attachHeldVerdict,
 };

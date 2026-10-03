@@ -36,6 +36,7 @@ const zlib = require('zlib');
 // discovery CO leg run in shell (src/cli-identity.js holds both spellings).
 // Node builtins only, so the daemon bundle still carries this module.
 const { isCliProcess } = require('./cli-identity');
+const { deliveredRecordKind, opensWithCliFrame } = require('./notification-senders'); // PURE: a record nobody typed (its origin stamp) never names a session
 
 const NAME_MAX = 80;
 
@@ -163,10 +164,17 @@ function extractTailIds(text, max = 8) {
 
 /** The ONE naming rule: first non-empty LINE of a real user message, trimmed,
  *  ≤80 chars; injected <…>-tag context/reminders and slash-command echoes are
- *  not names. Takes a PARSED user record. Returns string|null. */
+ *  not names. A record the CLI wrote is not a user message (lane peer-card-sender:
+ *  a wake, another session's message, a job's notification — the origin stamp,
+ *  notification-senders deliveredRecordKind — and every `isMeta` record; a worker
+ *  was otherwise named "Another Claude session sent a message:"). Takes a PARSED user record.
+ *  Returns string|null. */
 function nameFromUserRecord(d) {
   const msg = d?.message;
   if (!msg || !msg.content) return null;
+  // the CLI's own stamps, never the words: a delivery (origin.kind) and any record the CLI wrote itself (isMeta — a
+  // Stop hook's feedback, an image's size note, a delivery too); a typed message carries neither
+  if (d.isMeta === true || deliveredRecordKind(d)) return null;
   const content = Array.isArray(msg.content)
     ? (msg.content.find((c) => c && c.type === 'text')?.text || '')
     : String(msg.content);
@@ -190,6 +198,8 @@ function nameFromUserLine(line) {
   // MID-STRING leaves no closing quote — the old parser's regex required one
   // and silently named nothing. The first line is all we need, so an
   // unterminated tail is fine.
+  // a cut line keeps its origin stamp only when the cut came after it (`origin` is written after `message`)
+  if (/"origin":\{"kind":"(?:peer|task-notification)"|"isMeta":true/.test(s)) return null;
   const m = s.match(/"content":"((?:[^"\\]|\\.)*)"/) || s.match(/"text":"((?:[^"\\]|\\.)*)"/)
     || s.match(/"content":"((?:[^"\\]|\\.)*)/) || s.match(/"text":"((?:[^"\\]|\\.)*)/);
   if (!m) return null;
@@ -197,7 +207,8 @@ function nameFromUserLine(line) {
   let text;
   try { text = JSON.parse('"' + frag + '"'); }
   catch { text = frag.replace(/\\n/g, '\n').replace(/\\t/g, ' ').replace(/\\"/g, '"'); }
-  return nameFromText(text);
+  // the stamp was cut off: the CLI's own frame at the start is the witness left (notification-senders opensWithCliFrame)
+  return opensWithCliFrame(text) ? null : nameFromText(text);
 }
 
 /** THE codex naming rule (moved here verbatim from adapters/codex.js in S3

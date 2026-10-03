@@ -3,10 +3,22 @@
  *
  * Each key is a dotted path (e.g. 'toolbar.showLayoutPresets').
  * Only non-default values are persisted (sparse storage).
+ *
+ * Two OPTIONAL row fields decide what the Settings window draws (B-df40, the
+ * design desk's settings-cleanup §2 P2; the rules + WHEN_KINDS live in
+ * ./settings-view.js, PURE): `tier: 'advanced'` (absent = everyday — drawn
+ * only while "Show advanced settings" is on) and `when: <clause> | [clauses]`
+ * (the row matters only while every clause holds — another row's value, a
+ * machine fact, an installed harness CLI, a linked channel vendor; otherwise
+ * it is hidden, never greyed, and a search still finds it). A derived harness
+ * row takes its table's `when` (the Codex / OpenCode sections). test-architecture
+ * 44e is the build-time gate on both fields.
  */
 
 import { t } from './i18n.js';
 import { HARNESS_SETTINGS, settingPath, checkTable, rowsOfKind } from '../harness-settings.js'; // PURE (CJS): the descriptor-declared per-harness tables — the Claude/Codex/OpenCode sections are DERIVED from them (docs/design-harness-settings.zh.md §4)
+import { whenClauses } from './settings-view.js'; // PURE: the tier / when rules (WHEN_KINDS) — re-exported below
+import { CHANNEL_SETTINGS, settingPath as channelSettingPath } from '../channel-settings.js'; // PURE (CJS): the per-vendor channel rows — the Channels "Per vendor" block is DERIVED from them (B-df40 part 3)
 
 const SETTINGS_SCHEMA = {
   // ── Toolbar & Layout ──
@@ -28,11 +40,13 @@ const SETTINGS_SCHEMA = {
   'toolbar.showDesktopButton': {
     type: 'boolean', default: true, label: t('Show Desktop button'),
     description: t('Show the shared-desktop (VNC) button in the toolbar (hidden anyway when this machine has no VNC server)'),
+    when: { fact: 'vnc' },
     category: t('Toolbar & Layout'), liveApply: true,
   },
   'toolbar.showDesktopAppsButton': {
     type: 'boolean', default: true, label: t('Show Apps button'),
     description: t('Show the desktop-application launcher button in the toolbar (hidden anyway when this machine has no display backend)'),
+    when: { fact: 'desktopApps' },
     category: t('Toolbar & Layout'), liveApply: true,
   },
   'toolbar.showTerminalButton': {
@@ -58,6 +72,7 @@ const SETTINGS_SCHEMA = {
   'sidebar.railPersistent': {
     type: 'boolean', default: true, label: t('Keep the rail when the sidebar is collapsed'),
     description: t('vscode behavior: collapsing the sidebar leaves the 44px icon rail on screen — click any icon to expand back. Off = collapsing hides everything.'),
+    when: { setting: 'sidebar.activityRail', is: true },
     category: t('Sidebar'), liveApply: true,
   },
   'sidebar.position': {
@@ -118,6 +133,7 @@ const SETTINGS_SCHEMA = {
   'layout.enableShiftDragSelection': {
     type: 'boolean', default: true, label: t('Shift-drag cell selection'),
     description: t('Hold Shift while dragging title bar to select a range of grid cells'),
+    when: { setting: 'layout.enableDragSnap', is: true },
     category: t('Toolbar & Layout'), liveApply: true,
   },
   'desktop.dynamicEnabled': {
@@ -128,7 +144,9 @@ const SETTINGS_SCHEMA = {
   'desktop.idleTimeoutMin': {
     type: 'number', default: 0, min: 0, max: 1440, step: 5, label: t('Desktop app idle timeout (minutes)'),
     description: t('0 (the default) never stops an app for sitting still. Set minutes to stop a desktop application window that had no input for that long; "Keep running" in a window exempts that app.'),
-    category: t('Window'), liveApply: true,
+    when: { fact: 'desktopApps' },
+    tier: 'advanced',
+    category: t('Desktop apps'), liveApply: true,
   },
   'desktop.appScale': {
     type: 'enum', default: 'auto', options: [
@@ -138,7 +156,8 @@ const SETTINGS_SCHEMA = {
       { value: '2', label: '2×' },
     ], label: t('Desktop app scale (xpra)'),
     description: t('How large a desktop application draws itself, for sharp text on high-resolution screens. Auto: derived from the screen you launch it from — its pixel ratio × your UI scale (a 2× screen at UI scale 125 % = 2.5×). A fractional scale (1.5×, 2.5×) scales buttons and text alike: the app is drawn at the next whole scale and shown smaller, a little softer than a whole scale. The scale is fixed when the app starts; a window\'s ⋯ → Scale relaunches it at another one, and its status bar shows the scale and where it came from.'),
-    category: t('Window'), liveApply: true,
+    when: { fact: 'desktopApps' },
+    category: t('Desktop apps'), liveApply: true,
   },
   'desktop.seamless': {
     type: 'enum', default: 'auto', options: [
@@ -146,32 +165,41 @@ const SETTINGS_SCHEMA = {
       { value: 'off', label: t('Off (always show the window frame)') },
     ], label: t('Seamless desktop app windows'),
     description: t('An app that draws its own title bar (GTK header bars, e.g. GNOME Calculator) is shown with NO VibeSpace title bar or status strip: drag its own header bar to move the window. Hover the top edge (or hold Alt) to bring the bars back; the taskbar menu of the window has every control. Paused while an agent drives the app, in a tab group and on a phone. A window\'s ⋯ → Show window frame overrides this per app.'),
-    category: t('Window'), liveApply: true,
+    when: { fact: 'desktopApps' },
+    category: t('Desktop apps'), liveApply: true,
   },
   'desktop.backendPrefs': {
     type: 'string', default: '',
     label: t('Desktop app display backend order'),
     description: t('Comma-separated rung ids that reorder the picture-backend ladder for NEW desktop apps on this instance, e.g. "vnc-display, xpra" to keep the whole-display rung first. Empty = installed order (xpra > vnc-display > desktop-singleton). Unknown ids are ignored; a running app keeps the backend it started with.'),
-    category: t('Window'), liveApply: true,
+    when: { fact: 'desktopApps' },
+    tier: 'advanced',
+    category: t('Desktop apps'), liveApply: true,
   },
   'desktop.stageKeepAlive': {
     type: 'number', default: 3, min: 0, max: 10, step: 1, label: t('Stage: workspaces kept alive'),
     description: t('How many recent session workspaces stay loaded (hidden) for instant switching; older ones are saved and closed'),
+    when: { setting: 'desktop.dynamicEnabled', is: true },
+    tier: 'advanced',
     category: t('Window'), liveApply: true,
   },
   'layout.presetOneShot': {
     type: 'boolean', default: false, label: t('Layout buttons apply once'),
     description: t('A layout button arranges the current windows once and returns to free-form. Off (default): it also keeps that grid active, so windows snap to its cells until you pick Freeform'),
+    when: { setting: 'toolbar.showLayoutPresets', is: true },
     category: t('Toolbar & Layout'), liveApply: true,
   },
   'layout.shakeBypassSnap': {
     type: 'boolean', default: true, label: t('Shake to bypass snap'),
     description: t('Shake a window vigorously for ~1 second while dragging to turn off grid/edge snap for the rest of that drag (a mouse-only alternative to holding Alt)'),
+    when: { setting: 'layout.enableDragSnap', is: true },
     category: t('Toolbar & Layout'), liveApply: true,
   },
   'layout.shakeBypassSeconds': {
     type: 'number', default: 1, min: 0.3, max: 3, step: 0.1, label: t('Shake duration (seconds)'),
     description: t('How long you must keep shaking before grid snap turns off. Lower = triggers faster (but easier to trigger by accident).'),
+    when: [{ setting: 'layout.enableDragSnap', is: true }, { setting: 'layout.shakeBypassSnap', is: true }],
+    tier: 'advanced',
     category: t('Toolbar & Layout'), liveApply: true,
   },
 
@@ -179,33 +207,32 @@ const SETTINGS_SCHEMA = {
     type: 'number', default: 70, min: 30, max: 100, step: 5,
     label: t('Desktop preview size (%)'),
     description: t('How much of the taskbar height the desktop preview occupies (rest goes to label text)'),
+    when: { setting: 'taskbar.showDesktopPreviews', is: true },
     category: t('Toolbar & Layout'), liveApply: true,
   },
   'chrome.arrangement': {
     type: 'json', default: null,
     label: t('Chrome element arrangement'),
     description: t('Which bar hosts each movable element, in what order ({zone: [elementId, …]}). Managed by Customize mode (⚙ → Customize UI… → drag elements); edit by hand only if you know what you are doing.'),
+    tier: 'advanced',
     category: t('Toolbar & Layout'), liveApply: true,
   },
   'chrome.zoneAlign': {
     type: 'json', default: null,
     label: t('Chrome alignment'),
     description: t('Alignment per area: taskbar-items left/center (Windows-11-style centered icons), toolbar-center left/center/right, taskbar-tray left/right end. Managed by Customize mode.'),
+    tier: 'advanced',
     category: t('Toolbar & Layout'), liveApply: true,
   },
   'chrome.springs': {
     type: 'json', default: null,
     label: t('Spring configs'),
     description: t('Per-spring config: {mode:"flex", weight:1-9} (strength = flex-grow share) or {mode:"fixed", px:N} (rigid spacer). Managed by Customize mode (click a spring).'),
+    tier: 'advanced',
     category: t('Toolbar & Layout'), liveApply: true,
   },
 
   // ── Window ──
-  'window.enableBounceOnFocus': {
-    type: 'boolean', default: false, label: t('Bounce on remote focus'),
-    description: t('Briefly scale-bounce windows when focused from sidebar or taskbar'),
-    category: t('Window'), liveApply: true,
-  },
   'window.tabWrap': {
     type: 'boolean', default: false,
     label: t('Multi-row tabs'),
@@ -276,11 +303,6 @@ const SETTINGS_SCHEMA = {
     description: t('Auto-adjust text colors to meet this contrast ratio (4.5 = WCAG AA). Set to 1 to disable.'),
     category: t('Terminal'), liveApply: false,
   },
-  'terminal.preserveCustomTitle': {
-    type: 'boolean', default: false, label: t('Preserve custom session title'),
-    description: t('Prevent Claude\'s OSC title updates from overwriting user-set session names'),
-    category: t('Terminal'), liveApply: true,
-  },
   'terminal.webgl': {
     type: 'boolean', default: true, label: t('WebGL renderer'),
     description: t('Draw terminals with WebGL (fast). Turn it off to test whether GPU-side freezes come from the terminals — new terminals then use the DOM renderer (existing ones keep theirs until reopened).'),
@@ -319,6 +341,7 @@ const SETTINGS_SCHEMA = {
     ],
     label: t('Role indicator style'),
     description: t('How to visually distinguish user vs assistant messages in compact mode.'),
+    when: { setting: 'chat.compactMode', is: true },
     category: t('Chat'), liveApply: true,
   },
 
@@ -338,12 +361,14 @@ const SETTINGS_SCHEMA = {
     type: 'number', default: 3, min: 0, max: 60, step: 1,
     label: t('Reconnect a silent conversation after (minutes)'),
     description: t('When a conversation has sent VibeSpace nothing for this long while its agent is still working (its output file or its API requests say so), VibeSpace reconnects to its output by itself and shows what it missed as caught up — nothing is re-run. 0 turns this off.'),
+    tier: 'advanced',
     category: t('Session'), liveApply: true,
   },
   'accounts.shipSubscriptionToRemote': {
     type: 'boolean', default: false,
     label: t('Ship subscription logins to remote hosts'),
     description: t('OFF (recommended): a subscription (Pro/Max) account can only run on THIS machine; for a remote host, log in on the host instead. Turning this ON copies the subscription’s login to the remote host — its token then appears from that host’s IP (often a datacenter), which can look like account abuse to Anthropic and risk a ban. API-key accounts are always allowed on remote hosts and are unaffected by this.'),
+    tier: 'advanced',
     category: t('Session'), liveApply: true,
   },
   'chat.showHookCards': {
@@ -379,12 +404,14 @@ const SETTINGS_SCHEMA = {
     type: 'boolean', default: false,
     label: t("Show the CLI's 'Stop hook error' notice"),
     description: t("The CLI posts a 'Stop hook error occurred' notice whenever a Stop hook blocks — including VibeSpace's own bookkeeping nudge, which is expected, not an error. Off hides that notice (the 'Stop hook feedback' and hook summary cards stay); on shows it as a red immediate notice. Applies to open chats instantly."),
+    when: { setting: 'chat.showHookCards', is: true },
     category: t('Chat'), liveApply: true,
   },
   'chat.hideEmptyHooks': {
     type: 'boolean', default: true,
     label: t('Hide hooks with no output'),
     description: t('Hooks like PostToolUse fire on every tool call with nothing to show — by default those render no card at all. Turn off to see every hook event. Applies to newly loaded history (reopen the window for existing views).'),
+    when: { setting: 'chat.showHookCards', is: true },
     category: t('Chat'), liveApply: true,
   },
   'chat.touchEnterSends': {
@@ -441,6 +468,7 @@ const SETTINGS_SCHEMA = {
     ],
     label: t('Card kinds that collapse'),
     description: t('Which card kinds fold into the summary line, by MEANING — the same setting covers every backend (claude Bash and codex exec are both command runs). Enabled kinds collapse TOGETHER as one interleaved group (think → read → edit → run is the real work pattern; per-kind groups rarely get long enough to fold). Memory = operations on the agent\'s own memory directory — housekeeping, folded by default and listed as memory/<name> in the summary; project-file writes are off by default — diffs are usually worth seeing. A run of only thinking needs two or more; any tool card folds immediately. Cards waiting for your approval never fold.'),
+    when: { setting: 'chat.collapseRuns', is: true },
     category: t('Chat'), liveApply: true,
   },
   'chat.foldPeerMessages': {
@@ -484,6 +512,7 @@ const SETTINGS_SCHEMA = {
     type: 'number', default: 900000, min: 0, max: 86400000,
     label: t('Close an idle agent browser after (ms)'),
     description: t('How long an agent\'s browser may sit idle before its daemon shuts itself down. Set explicitly because the installed CLI has NO default (and newer ones exempt browsers with a visible window), so nothing else would ever reclaim the browsers this feature creates — one per browsing session instead of one per machine. 0 = never shut down, which is the CLI\'s own meaning and a real choice; anything unreadable falls back to 15 minutes.'),
+    tier: 'advanced',
     category: t('Agent browser'), liveApply: true,
   },
   'browser.headed': {
@@ -515,6 +544,7 @@ const SETTINGS_SCHEMA = {
     ],
     label: t('When this machine has no desktop session'),
     description: t('What an agent\'s browser does when it asks for a window but nobody is logged in to this machine\'s desktop. A hidden window (default, when Xvfb is installed) is a normal browser on an invisible screen — sign-in pages see an ordinary browser; headless has no screen at all and some sign-in pages refuse it. Either way the pages work and you can watch and take over in the live view. Applies to the next browser that starts.'),
+    tier: 'advanced',
     category: t('Agent browser'), liveApply: true,
   },
   // lane browser-propose (step 1, 2026-09-30): the ONE launch flag that stops the agent's Chromium announcing automation
@@ -524,6 +554,7 @@ const SETTINGS_SCHEMA = {
     type: 'boolean', default: true,
     label: t('Do not announce the agent browser as automated'),
     description: t('ON (default): the agent\'s browser starts with --disable-blink-features=AutomationControlled, so pages no longer read it as an automated browser (navigator.webdriver is false). It hides that one signal only — a site that still refuses the browser makes the agent propose a switch to CloakBrowser, which you approve. If your own ~/.agent-browser/config.json already names an AutomationControlled value, yours is kept. Applies to the next browser that starts; CloakBrowser is not affected.'),
+    tier: 'advanced',
     category: t('Agent browser'), liveApply: true,
   },
   // ── AGENT BROWSER P3 (design-agent-browser-v2 §4.3 / §4.3.1) ──────────
@@ -531,6 +562,7 @@ const SETTINGS_SCHEMA = {
     type: 'number', default: 600000, min: 0, max: 86400000,
     label: t('Hand the browser back to the agent after this long without input (ms)'),
     description: t('When you take over an agent\'s browser in the live view and then walk away, control goes back to the agent by itself after this many milliseconds without your input, so an abandoned takeover never parks an agent for ever. 0 = never (only an explicit Hand back or closing the live view returns control). Anything under 30 s is raised to 30 s.'),
+    tier: 'advanced',
     category: t('Agent browser'), liveApply: true,
   },
   // ── BROWSE YOURSELF (B-6ae8, the owner 2026-09-28 ruling 8): how long the user's OWN tab is kept after his browsing
@@ -539,6 +571,7 @@ const SETTINGS_SCHEMA = {
     type: 'number', default: 43200000, min: 0, max: 604800000,
     label: t('Keep your own browsing tab after its window closes (ms)'),
     description: t('When you open a profile\'s browser yourself (Browse yourself) and close its window without pressing Close, your tab stays open this long so you can continue where you were, and the browser keeps running for it. 12 hours by default. When you joined a browser an agent had started, your tab is kept as long as the takeover time above instead. 0 = keep it until you press Close or the browser stops; anything under 1 minute is raised to 1 minute.'),
+    tier: 'advanced',
     category: t('Agent browser'), liveApply: true,
   },
   // ── (verify S2 r4's `browser.fenceScriptsWhileDriven` was RETIRED 2026-09-27 by the owner's ruling — "直接打断所有脚本和agent操作":
@@ -579,12 +612,15 @@ const SETTINGS_SCHEMA = {
     type: 'string', default: 'path',
     label: t('Browser CLI version'),
     description: t('Which agent-browser VibeSpace drives: "path" = the one on this computer\'s PATH; "pinned" = the version VibeSpace was tested with, installed by VibeSpace (Agent browser panel → Install the measured version…); or a version number such as 0.39.2, installed the same way.'),
+    tier: 'advanced',
     category: t('Agent browser'), liveApply: true,
   },
   'browser.cloak.executablePath': {
     type: 'string', default: '',
     label: t('CloakBrowser program file'),
     description: t('The CloakBrowser browser program (its chrome file), for when it was installed some other way. Leave it empty to use the one installed from Manage agents.'),
+    when: { setting: 'browser.cloak.enabled', is: true },
+    tier: 'advanced',
     category: t('Agent browser'), liveApply: true,
   },
   // lane-cloak: THE SITES a running cloak browser may reach — the keeper's
@@ -594,6 +630,8 @@ const SETTINGS_SCHEMA = {
     type: 'string', default: '',
     label: t('Sites CloakBrowser may open (hosts, comma-separated)'),
     description: t('The only sites a CloakBrowser browser may reach, through this instance\'s allowlisting proxy: exact hostnames, or ".example.com" for a domain and every sub-domain. Empty (default): it opens no site at all. Measured: CloakBrowser itself needs no site of its own, so this list is all it can reach — its maker\'s download and update hosts are refused. Loopback and link-local addresses are never admitted.'),
+    when: { setting: 'browser.cloak.enabled', is: true },
+    tier: 'advanced',
     category: t('Agent browser'), liveApply: true,
   },
   'browser.actionTrace': {
@@ -613,6 +651,7 @@ const SETTINGS_SCHEMA = {
     type: 'number', default: 1024, min: 64, max: 102400, step: 64,
     label: t('Browser records kept per profile (MB)'),
     description: t('How much each profile\'s browser records may take — the before/after screenshots and the list of actions. Over it, the screenshots of the oldest sessions are removed first; the list of what the agent did is always kept. Records are never removed for being old. Default 1024 MB (1 GB), at least 64 MB.'),
+    tier: 'advanced',
     category: t('Agent browser'), liveApply: true,
   },
   // lane browser-resume (§3.9, the owner's ruling 1, 2026-09-30: "state survives the process"): a conversation's own
@@ -628,12 +667,14 @@ const SETTINGS_SCHEMA = {
     type: 'number', default: 512, min: 64, max: 102400, step: 64,
     label: t('Kept browser size per conversation (MB)'),
     description: t('How much one conversation\'s kept browser may take on disk. Over it, its caches are removed first (the browser rebuilds them); its logins are never removed for this. Default 512 MB, at least 64 MB.'),
+    tier: 'advanced',
     category: t('Agent browser'), liveApply: true,
   },
   'browser.keptBytesTotal': {
     type: 'number', default: 4096, min: 256, max: 1048576, step: 256,
     label: t('Kept browsers, total (MB)'),
     description: t('How much all kept conversation browsers may take together. Over it, whole kept browsers are removed, the one used longest ago first. A browser that is running is never removed. Default 4096 MB (4 GB), at least 256 MB.'),
+    tier: 'advanced',
     category: t('Agent browser'), liveApply: true,
   },
   'browser.autoBindLiveView': {
@@ -665,12 +706,14 @@ const SETTINGS_SCHEMA = {
     type: 'number', default: 6, min: 1, max: 32,
     label: t('Browsers running at once on this machine'),
     description: t('The most agent browsers (desktop apps counted with them) that may run on this machine at the same time: 6 by default, 1 to 32. Several conversations on one profile share its one browser, each in its own window, so they count once. At the ceiling a new browser is refused by name — the agent is told which of its own run and how many others do — and nothing starts until one idles out or you stop one. A change applies to the next browser that starts; nothing running is stopped. The resource guard still only reports a browser that uses too much memory or CPU.'),
+    tier: 'advanced',
     category: t('Agent browser'), liveApply: true,
   },
   'browser.defaultPerConversationCap': {
     type: 'number', default: 3, min: 1, max: 6,
     label: t('Browsers one conversation may run at once'),
     description: t('The default number of browsers one conversation (with its helpers) may have running at the same time. Each conversation can change its own from the count in its Agent browser window or in Session Properties, and a Task Group can give its new conversations a different default (a conversation keeps the group default it started with). The machine keeps its own ceiling (Browsers running at once on this machine, six by default), shared with desktop apps.'),
+    tier: 'advanced',
     category: t('Agent browser'), liveApply: true,
   },
   // B-325a: a conversation's own browser (and its helpers') is let go a few
@@ -681,6 +724,7 @@ const SETTINGS_SCHEMA = {
     type: 'number', default: 180000, min: 0, max: 86400000,
     label: t('Release a conversation\'s browser after its turn ends (ms)'),
     description: t('How long after a turn ends the conversation\'s own browser (and its helpers\' browsers) keep running before they are released. The tab stays in the Agent browser window and the next command starts the browser again. Never while you are driving it or watching it in a live view. Chat sessions only: a terminal session\'s browser keeps running until its idle timeout. 0 = never release; anything under 30 s is raised to 30 s.'),
+    tier: 'advanced',
     category: t('Agent browser'), liveApply: true,
   },
   // ── AGENT BROWSER P10 (design-agent-browser-v2 §7.6 tier 3 / §6.6, D27 (b)) ──
@@ -693,7 +737,9 @@ const SETTINGS_SCHEMA = {
     type: 'boolean', default: false, confirmOn: true,
     label: t('\u26a0 Let agents address windows on your real desktop (tier 3)'),
     description: t('OFF (default): an agent may act only in windows VibeSpace started on its own private displays; your own desktop is never listed. ON: every application on this machine\u2019s accessibility bus becomes a window target an agent can read (its accessibility tree contains the text on your screen) and act in through the actions a node itself declares \u2014 including the window you are typing in. Nothing is ever injected on this class (no chords, no point clicks); every such row is marked \u201cyour desktop\u201d; you can pause an agent per window (Desktop apps \u2192 Agents on your real desktop); turning this OFF drops every such lease at once.'),
-    category: t('Agent browser'), liveApply: true,
+    when: { fact: 'desktopApps' },
+    tier: 'advanced',
+    category: t('Desktop apps'), liveApply: true,
   },
   'browser.defaultProfile': {
     // The INSTANCE rung of the profile pin ladder (design-agent-browser-v2
@@ -708,37 +754,42 @@ const SETTINGS_SCHEMA = {
     type: 'boolean', default: true,
     label: t('Inject Task Group context'),
     description: t('Deliver each session\'s Task Group context (objective, shared-context folder index, activity log, update diffs) into the agent via hooks. OFF: agents get no group payloads at all — the reporting tools below still work if enabled. The per-group "Inject context" checkbox in the group\'s detail window is the finer-grained version of this.'),
+    when: { setting: 'agents.vibespaceIntegration', is: true },
     category: t('Integration'), liveApply: true,
   },
   'agents.toolStatus': {
     type: 'boolean', default: true,
     label: t('Agent tool: vibespace-status (board state)'),
     description: t('Lets agents self-report working/blocked/needs-input/… onto the session board. OFF: the tool is no longer taught in injected context or reminders, its endpoint refuses with skip-and-continue guidance, and the stop-time bookkeeping nudge (which is keyed on status staleness) never fires. Synthesized states (idle detection) keep working.'),
+    when: { setting: 'agents.vibespaceIntegration', is: true },
     category: t('Integration'), liveApply: true,
   },
   'agents.toolAsk': {
     type: 'boolean', default: true,
     label: t('Agent tool: vibespace-ask (the For you tray)'),
     description: t('Lets agents mirror questions/decisions into the For you tray. OFF: not taught, endpoint refuses with skip-and-continue guidance — agents ask only in chat.'),
+    when: { setting: 'agents.vibespaceIntegration', is: true },
     category: t('Integration'), liveApply: true,
   },
   'agents.toolTask': {
     type: 'boolean', default: true,
     label: t('Agent tool: vibespace-task (activity log & backlog)'),
     description: t('Lets agents log finished work into the group activity log and park items in the group backlog. OFF: not taught, the progress/backlog write endpoints refuse with skip-and-continue guidance; reading group state (vibespace-task show) still works while context injection is on.'),
+    when: { setting: 'agents.vibespaceIntegration', is: true },
     category: t('Integration'), liveApply: true,
   },
   'agents.toolJobs': {
     type: 'boolean', default: true,
     label: t('Agent tool: vibespace-job (background work)'),
     description: t('Lets agents register services, long tasks and cron schedules that outlive their conversation (Background Work window). OFF: not taught, endpoints refuse with skip-and-continue guidance; existing jobs keep running and stay visible to you.'),
+    when: { setting: 'agents.vibespaceIntegration', is: true },
     category: t('Integration'), liveApply: true,
   },
   'agents.jobNotify': {
     type: 'boolean', default: true,
     label: t('Background jobs: notify the owner conversation'),
     description: t('When a background job finishes, fails, is parked, or needs input, its owner conversation gets a message through Claude Code’s own cross-session messaging inbox (delivered by the CLI under its inbound rules; an idle session starts a turn, billed like a typed prompt). When the conversation is closed, the notification is stashed and injected the next time it resumes. Per-group override in the Task Group detail window; per-job override at creation (--notify on/off).'),
-    category: t('Integration'), liveApply: true,
+    category: t('Background Work'), liveApply: true,
   },
   // ── Background Work TRIAGE (2026-09-14, docs/design-background-work.md §13):
   // terminal one-shots leave the live list for data/jobs-archive.json. The two
@@ -749,42 +800,44 @@ const SETTINGS_SCHEMA = {
     type: 'number', default: 24, min: 0, max: 720, step: 1,
     label: t('Archive finished tasks after (hours)'),
     description: t('A one-shot task that finished successfully leaves the Background Work list for the archive this many hours after it ended (its runs, delivery log and acknowledgement are kept; poll/show of the id still answer). 0 = never archive finished tasks.'),
+    tier: 'advanced',
     category: t('Background Work'), liveApply: true,
   },
   'jobs.archiveFailedAfterDays': {
     type: 'number', default: 7, min: 0, max: 90, step: 1,
     label: t('Archive acknowledged failures after (days)'),
     description: t('A failed, missed, interrupted or unverified one-shot leaves the list this many days after somebody ACKNOWLEDGED it (its owner conversation was notified, an owner agent polled it, or you expanded its row). An unacknowledged failure is never archived. 0 = never archive failures.'),
+    tier: 'advanced',
     category: t('Background Work'), liveApply: true,
-  },
-  'agents.vibespaceChannel': {
-    type: 'boolean', default: false,
-    label: t('VibeSpace channel (experimental)'),
-    description: t('Registers VibeSpace as a Claude Code channel in NEW local claude sessions (research-preview CLI feature, enabled per spawn via the development-channels flag). Job notifications then arrive as structured <channel source="vibespace"> events instead of plain peer messages, and this becomes the bridge for future external chat integrations. Sessions must be recreated to pick up a change. Leave off unless experimenting.'),
-    category: t('Integration'), liveApply: true,
   },
   'agents.stopNudgeStaleMinutes': {
     type: 'number', default: 10, min: 0, max: 240, step: 1,
     label: t('Stop nudge: staleness threshold (minutes)'),
     description: t('The nudge only fires when the session has not updated its board status for this long. Lower = agents are reminded more eagerly; higher = quieter. 0 = always considered stale (with cooldown 0 too, the nudge fires on EVERY stop — one bookkeeping mini-turn per turn).'),
+    when: [{ setting: 'agents.vibespaceIntegration', is: true }, { setting: 'agents.stopBookkeepingNudge', is: true }],
+    tier: 'advanced',
     category: t('Integration'), liveApply: true,
   },
   'agents.stopNudgeCooldownMinutes': {
     type: 'number', default: 30, min: 0, max: 720, step: 1,
     label: t('Stop nudge: cooldown per session (minutes)'),
     description: t('After nudging a session once, wait at least this long before nudging it again — the ceiling on how often an agent pays the bookkeeping mini-turn. 0 = no cooldown.'),
+    when: [{ setting: 'agents.vibespaceIntegration', is: true }, { setting: 'agents.stopBookkeepingNudge', is: true }],
+    tier: 'advanced',
     category: t('Integration'), liveApply: true,
   },
   'tasks.backlogNudgeAt': {
     type: 'number', default: 20, min: 0, max: 1000, step: 1,
     label: t('Backlog cleanup nudge: items per session'),
     description: t('When one session holds this many open backlog items (claimed or parked by it), its backlog commands and its per-turn backlog note ask it to finish, drop or merge items before parking more. 0 = never.'),
+    tier: 'advanced',
     category: t('Integration'), liveApply: true,
   },
   'agents.stopBookkeepingNudge': {
     type: 'boolean', default: true,
     label: t('Stop-time bookkeeping nudge for agents'),
     description: t('When an agent finishes a turn while its board state is stale (no status update in 10 minutes), it gets one short follow-up asking it to set vibespace-status, mirror open questions with vibespace-ask, and log finished work — then it stops. At most once per 30 minutes per session. Claude enforces this via a blocking Stop hook; Codex via its wrapper at turn end.'),
+    when: { setting: 'agents.vibespaceIntegration', is: true },
     category: t('Integration'), liveApply: true,
   },
   'ports.watchNew': {
@@ -806,26 +859,38 @@ const SETTINGS_SCHEMA = {
     type: 'boolean', default: false,
     label: t('Continue automatically when a usage limit resets'),
     description: t('DEFAULT for new chat sessions on any agent that reports usage limits (Claude, Codex): when the account is out of quota and there is no other account to switch to, wait for the reset — or for the quota to come back early — and then continue the interrupted task by itself. Each session can override this in the chat status bar. Off by default because continuing spends quota without you being there.'),
+    category: t('Spending'), liveApply: true,
+  },
+  // lane design-systems-home (design 003 §2 S5): the design system a new design follows when the agent names none
+  // (vibespace-design new copies its tokens.css); the chat's design chip preselects it. Read by the hub (serverSetting).
+  'design.defaultSystem': {
+    type: 'string', default: '',
+    label: t('Default design system'),
+    description: t('The design system a new design follows when none is named: its tokens.css is copied into the design and the check warns on colours and font sizes outside it. The name of a design system (the Design window\'s home lists them). Empty = none.'),
     category: t('Chat'), liveApply: true,
   },
   'agentd.publicUrl': {
     type: 'string', default: '',
     label: t('This instance\'s public address (for reverse mounts)'),
     description: t('The https/http URL a remote machine uses to reach THIS VibeSpace (reverse mounts, remote agent installs, page share links). Leave blank to let each browser use its own address. The Ports panel\'s "This VibeSpace" row can map the whole instance to an frp URL, which takes precedence while mapped WITHOUT changing this value.'),
+    tier: 'advanced',
     category: t('Session'), liveApply: true,
   },
   'agentd.autoGraduate': {
-    type: 'boolean', default: true, category: t('Integration'),
+    tier: 'advanced',
+    type: 'boolean', default: true, category: t('Session'),
     label: t('Move machines to a ws link automatically'),
     description: t('When an SSH machine\u2019s agent is reachable, install it as a service so it dials back over WebSocket \u2014 fewer per-command SSH spawns and a link that notices breakage. Only runs when a public URL is set above; SSH always stays as the rescue channel.'),
   },
   'agentd.localPipeSessions': {
-    type: 'boolean', default: false, category: t('Integration'),
+    tier: 'advanced',
+    type: 'boolean', default: false, category: t('Session'),
     label: t('Local sessions via device daemon (R6)'),
     description: t('New local chat sessions run as device-daemon pipe sessions instead of dtach — the session-brain final form (survives server restarts via the daemon). Existing sessions are never migrated; any daemon failure falls back to dtach at spawn. Leave off until the device-assisted consumer path has soaked.'),
   },
   'agentd.localDiscovery': {
-    type: 'boolean', default: false, category: t('Integration'),
+    tier: 'advanced',
+    type: 'boolean', default: false, category: t('Session'),
     label: t('Local session discovery via device daemon'),
     description: t('The 5s session-list sweep reads its filesystem facts (lock files, transcript listing, tail ids) from the device daemon\'s snapshot — computed in a daemon child process, so a slow or network-mounted home directory can never stall the server. Local enrichment (window mapping, tmux) is unaffected. Falls back to the local scan on any failure.'),
   },
@@ -833,48 +898,62 @@ const SETTINGS_SCHEMA = {
     type: 'text', default: '',
     label: t('Custom agent instructions (injected)'),
     description: t('Your own standing instructions for every agent session, injected at the TOP of the VibeSpace hook context (task context or the baseline tools intro). Delivered once per session and re-delivered when you change it — never on every turn. Edit comfortably in Manage Agents → Agent instructions. Max 4000 chars.'),
+    when: { setting: 'agents.vibespaceIntegration', is: true },
     category: t('Integration'), liveApply: true,
   },
   'agents.perTurnExtra': {
     type: 'text', default: '',
     label: t('Per-turn reminder extra (injected EVERY prompt)'),
     description: t('Short custom text placed at the top of the per-turn reminder — reaches the agent on EVERY message you send, so keep it tight (≤500 chars; it costs tokens each turn). Delivers even if the standard tool reminder is turned off. Edit in Manage Agents → Agent instructions.'),
+    when: { setting: 'agents.vibespaceIntegration', is: true },
+    tier: 'advanced',
     category: t('Integration'), liveApply: true,
   },
   'agents.stopNudgeExtra': {
     type: 'text', default: '',
     label: t('Stop-nudge extra (injected when the bookkeeping nudge fires)'),
     description: t('Custom text placed at the top of the stop-time bookkeeping nudge (≤500 chars) — e.g. extra end-of-turn duties for your agents. Edit in Manage Agents → Agent instructions.'),
+    when: [{ setting: 'agents.vibespaceIntegration', is: true }, { setting: 'agents.stopBookkeepingNudge', is: true }],
+    tier: 'advanced',
     category: t('Integration'), liveApply: true,
   },
   'agents.perTurnToolReminder': {
     type: 'boolean', default: true,
     label: t('Per-turn tool reminder for agents'),
     description: t('Injects a one-line (~250 byte) reminder of the vibespace tools (status / ask / task) with every prompt you send, so agents keep using them in long sessions — the full rules injected at session start scroll out of the working context over time. Turn off to save the few tokens per turn.'),
+    when: { setting: 'agents.vibespaceIntegration', is: true },
+    tier: 'advanced',
     category: t('Integration'), liveApply: true,
   },
   'agents.contextUpdateDiffs': {
     type: 'boolean', default: true,
     label: t('Task Group updates as diffs'),
     description: t('When a Task Group changes mid-session, agents receive only WHAT changed (new activity entries, objective edits, backlog changes, changed shared files) instead of the whole group context again. The full context is still delivered on first contact and after a server restart. Turn off to always re-send the complete state.'),
+    when: { setting: 'agents.vibespaceIntegration', is: true },
+    tier: 'advanced',
     category: t('Integration'), liveApply: true,
   },
   'agents.allowGroupManagement': {
     type: 'boolean', default: false,
     label: t('Allow agents to manage Task Groups'),
     description: t('Lets sessions YOU designate as "Group manager" (Session Properties) create and configure Task Groups via their CLI — create/update/bind/unbind, the same organize-only operations you perform in the UI. Paths they may use are limited by the roots setting below; every operation is recorded in the group\'s activity log. Off = the API refuses all agents.'),
+    when: { setting: 'agents.vibespaceIntegration', is: true },
     category: t('Integration'), liveApply: true,
   },
   'agents.stopNudgeMaxUnanswered': {
     type: 'number', default: 3, min: 0, max: 100, step: 1,
     label: t('Stop nudge: give up after this many unanswered nudges'),
     description: t('A session that has never reported a board status is being asked for bookkeeping it does not do — and every nudge costs a real mini-turn. After this many nudges with no status report at all, that session is not nudged again (any status report resets the count). 0 = never give up.'),
+    when: [{ setting: 'agents.vibespaceIntegration', is: true }, { setting: 'agents.stopBookkeepingNudge', is: true }],
+    tier: 'advanced',
     category: t('Integration'), liveApply: true,
   },
   'agents.groupManagementRoots': {
     type: 'string', default: '~',
     label: t('Group management path roots'),
     description: t('Comma-separated absolute path prefixes a manager agent may use for a group\'s context folder / auto-include folders (~ = your home). Keeps agents from pointing context injection at arbitrary paths.'),
+    when: [{ setting: 'agents.vibespaceIntegration', is: true }, { setting: 'agents.allowGroupManagement', is: true }],
+    tier: 'advanced',
     category: t('Integration'), liveApply: true,
   },
   // ── SPENDING (docs/design-account-hardening.md §4.4c, owner decisions D2/D3/D6)
@@ -912,6 +991,7 @@ const SETTINGS_SCHEMA = {
     type: 'boolean', default: false, confirmOn: true,
     label: t('\u26a0 Allow unattended turns while an account bills paid overage'),
     description: t('OFF (recommended): while an account reports that it is using PAID OVERAGE, VibeSpace refuses every turn it would have started by itself on that account — a turn nobody asked for is a quota decision when quota is included and a dollar decision when it is not. Turns YOU type always run. Turn this ON only if you want automatic continues to keep going at pay-per-use prices.'),
+    tier: 'advanced',
     category: t('Spending'), liveApply: true,
   },
   // ── Channels (docs/design-communication-panel.zh.md §7.4 / fence 12, P2) ──
@@ -919,6 +999,7 @@ const SETTINGS_SCHEMA = {
     type: 'number', default: 60, min: 0, max: 600, step: 5,
     label: t('Coalesce pushed messages before waking an agent (seconds)'),
     description: t('Polling batches a minute of messages into ONE wake by nature; a push lane delivers them one by one, so a burst of 30 would become 30 billed turns. While a push lane carries messages, matched hits are gathered for this many seconds and delivered as one wake that lists them all. 0 = wake per message. Poll and scan lanes are already batches and never wait.'),
+    tier: 'advanced',
     category: t('Channels'), liveApply: true,
   },
   // ── Channels: THE AGGREGATED IM's time and capacity numbers (owner ruling
@@ -930,101 +1011,87 @@ const SETTINGS_SCHEMA = {
     type: 'number', default: 30, min: 10, max: 300, step: 5,
     label: t('Refresh a busy conversation every (seconds)'),
     description: t('A conversation open in a window, or with a message in the last hour, is "hot" and fetched this often. The vendor\'s own minimum still applies (Gmail: 30 s). Push, when it carries messages, makes polling a slow safety net instead.'),
+    tier: 'advanced',
     category: t('Channels'), liveApply: true,
   },
   'channels.pollWarmSec': {
     type: 'number', default: 300, min: 30, max: 900, step: 30,
     label: t('Refresh a recent conversation every (seconds)'),
     description: t('A conversation with a message in the last day ("warm") is fetched this often.'),
+    tier: 'advanced',
     category: t('Channels'), liveApply: true,
   },
   'channels.pollColdSec': {
     type: 'number', default: 900, min: 60, max: 900, step: 60,
     label: t('Refresh every other conversation every (seconds, at most 900)'),
     description: t('Every other conversation ("cold") is fetched this often — never less often than every 15 minutes. This is also how often the conversation list itself is re-read and the safety-net cadence while push carries messages.'),
+    tier: 'advanced',
     category: t('Channels'), liveApply: true,
   },
   'channels.hotRecentMinutes': {
     type: 'number', default: 60, min: 5, max: 1440, step: 5,
     label: t('A conversation is busy for this long after a message (minutes)'),
     description: t('How recent the last message must be for a conversation to count as busy (hot).'),
+    tier: 'advanced',
     category: t('Channels'), liveApply: true,
   },
   'channels.warmRecentHours': {
     type: 'number', default: 24, min: 1, max: 168, step: 1,
     label: t('A conversation is recent for this long after a message (hours)'),
     description: t('How recent the last message must be for a conversation to count as recent (warm).'),
+    tier: 'advanced',
     category: t('Channels'), liveApply: true,
   },
   'channels.agentRefreshFloorSec': {
     type: 'number', default: 20, min: 5, max: 900, step: 5,
     label: t('An agent may refresh a conversation at most every (seconds)'),
     description: t('"vibespace-channels refresh" is refused, with the wait, when the conversation was fetched less than this long ago — an agent cannot turn itself into a polling loop. Every refresh counts against the account\'s vendor budget.'),
+    tier: 'advanced',
     category: t('Channels'), liveApply: true,
   },
   'channels.agentBudgetSharePct': {
     type: 'number', default: 25, min: 5, max: 100, step: 5,
     label: t('Agent refreshes may use at most (% of an account\'s vendor budget per minute)'),
     description: t('Every "vibespace-channels refresh" counts against the account\'s vendor budget. Agents together may spend at most this share of each minute, so the conversations you watch keep their refresh cadence; past it an agent\'s refresh is refused with the wait. 100 = no separate limit.'),
+    tier: 'advanced',
     category: t('Channels'), liveApply: true,
   },
   'channels.historyPageSize': {
     type: 'number', default: 50, min: 10, max: 200, step: 10,
     label: t('Messages per history page'),
     description: t('A new conversation is fetched one page deep; older pages load when you scroll up in its window. Lark serves at most 50 per request.'),
+    tier: 'advanced',
     category: t('Channels'), liveApply: true,
   },
   'channels.attachmentBudgetMB': {
     type: 'number', default: 5120, min: 64, max: 102400, step: 64,
     label: t('Attachment cache per account (MB)'),
     description: t('Attachments and images are downloaded when you open them and kept per account up to this size; the least recently opened ones are removed first. They are never executed.'),
+    tier: 'advanced',
     category: t('Channels'), liveApply: true,
   },
-  'channels.budgetLarkPerMin': {
-    type: 'number', default: 60, min: 5, max: 1000, step: 5,
-    label: t('Lark: requests per minute per account'),
-    description: t('Lark allows 1000 requests a minute per API for the whole app across every instance and user that shares it. When an account reaches this budget its refreshes wait for the next minute, and the account card says so.'),
-    category: t('Channels'), liveApply: true,
-  },
-  'channels.budgetGmailPerMin': {
-    type: 'number', default: 3000, min: 100, max: 6000, step: 100,
-    label: t('Gmail: quota units per minute per account'),
-    description: t('Gmail allows 6000 quota units a minute per user (a thread read costs 40, a change check 2). When an account reaches this budget its refreshes wait for the next minute, and the account card says so.'),
-    category: t('Channels'), liveApply: true,
-  },
-  // lane R5 (2026-09-26, the owner: "gmail一直被限速 你可能要控制下gmail默认的读取速度"):
-  // the PER-SECOND pace (src/channel-drain.js rule 18) — the vendor refuses
-  // bursts that stay inside its per-minute cap. Default = the adapter's
-  // `caps.pace.unitsPerSec`; the engine reads the SAME bounds (SETTING_BOUNDS).
-  'channels.gmailUnitsPerSec': {
-    type: 'number', default: 40, min: 5, max: 100, step: 5,
-    label: t('Gmail: quota units per second per account'),
-    description: t('Reads are spread evenly: at most this many quota units a second (a thread read costs 40, so 40 = one thread a second), and never faster than the per-minute budget above allows. Google refuses bursts well inside its 6000-a-minute cap; when it does, the account waits a few seconds and the card says so.'),
-    category: t('Channels'), liveApply: true,
-  },
-  'channels.larkRequestsPerSec': {
-    type: 'number', default: 5, min: 1, max: 50, step: 1,
-    label: t('Lark: requests per second per account'),
-    description: t('Requests are spread evenly: at most this many a second, and never faster than the per-minute budget above allows. Lark allows 50 a second per API for the whole app across every instance and user that shares it.'),
-    category: t('Channels'), liveApply: true,
-  },
+  // The per-VENDOR rows (Lark / Gmail requests per minute and per second) are DERIVED from
+  // src/channel-settings.js below (deriveChannelTable, B-df40 part 3) — the Channels "Per vendor" block.
   // ── lane channel-threads (2026-09-28, spec §3.7, drain rule 20): reactions + threads ──
   'channels.reactionsPerMin': {
     type: 'number', default: 20, min: 0, max: 600, step: 5,
     label: t('Reactions: list calls per minute per account'),
-    description: t('Reactions are read only for the messages an open window shows, one call per message, at most this many a minute per account (0 = never list — reactions arrive only as live events). Checked before the per-minute budget above, so reading reactions never takes the budget new messages need.'),
+    description: t('Reactions are read only for the messages an open window shows, one call per message, at most this many a minute per account (0 = never list — reactions arrive only as live events). Checked before the account\'s per-minute vendor budget, so reading reactions never takes the budget new messages need.'),
+    tier: 'advanced',
     category: t('Channels'), liveApply: true,
   },
   'channels.reactionsTtlMin': {
     type: 'number', default: 10, min: 1, max: 1440, step: 1,
     label: t('Reactions: minutes a fetched list stays fresh'),
     description: t('A visible message whose reactions were read within this many minutes is not read again; the chips show the stored count and their tooltip says how old it is.'),
+    tier: 'advanced',
     category: t('Channels'), liveApply: true,
   },
   'channels.threadFloorSec': {
     type: 'number', default: 60, min: 10, max: 3600, step: 10,
     label: t('Threads: seconds between two loads of one thread'),
     description: t('Opening a thread loads its replies from the vendor (where they are not listed with the conversation — Lark topics); the same thread is loaded again at most this often.'),
+    tier: 'advanced',
     category: t('Channels'), liveApply: true,
   },
   // lane lark-threads (A2, 2026-10-01): THE RECENT-ROOTS RECHECK — a message read before anyone answered it in a thread
@@ -1034,6 +1101,7 @@ const SETTINGS_SCHEMA = {
     type: 'number', default: 3600, min: 300, max: 86400, step: 300,
     label: t('Threads: seconds between two checks of a chat for new threads'),
     description: t('Where thread replies are not listed with the conversation (Lark), a message read before anyone replied to it in a thread is found again by re-reading the newest page of each chat active in the last 14 days this often — one request per chat. Pressing Refresh in a chat checks it at once.'),
+    tier: 'advanced',
     category: t('Channels'), liveApply: true,
   },
   // lane lark-threads (B5): how a Lark person's name is SHOWN — the nickname the organization gives them, else their
@@ -1045,6 +1113,7 @@ const SETTINGS_SCHEMA = {
       { value: 'jobTitle', label: t('Name (job title)') },
     ], label: t('Lark: how people are named'),
     description: t('A person is shown by the nickname your organization gives them, else their name, followed by their department or job title in parentheses when you choose one — the way Lark shows it. Reading profiles needs the sign-in to allow it (the account card says when it does not). A name you set yourself on an author always wins.'),
+    when: { channel: 'lark' },
     category: t('Channels'), liveApply: true,
   },
   // lane lark-search-poll (B-5aab, design §8 + owner decision 4): THE CHANGE FEED — one account-wide search per tick
@@ -1053,24 +1122,28 @@ const SETTINGS_SCHEMA = {
     type: 'number', default: 30, min: 10, max: 300, step: 5,
     label: t('New-message search: seconds between two searches'),
     description: t('An account that offers a new-message search (Lark) asks it this often which conversations have new messages — one request finds them all, including single chats and thread replies.'),
+    tier: 'advanced',
     category: t('Channels'), liveApply: true,
   },
   'channels.feedOverlapSec': {
     type: 'number', default: 60, min: 30, max: 600, step: 10,
     label: t('New-message search: seconds each search re-reads'),
     description: t('Each search also covers the last seconds of the previous one, so a message the vendor indexes late is still found. At least 30.'),
+    tier: 'advanced',
     category: t('Channels'), liveApply: true,
   },
   'channels.feedBackfillDays': {
     type: 'number', default: 7, min: 0, max: 30, step: 1,
     label: t('New-message search: days of single chats found at first'),
     description: t('The first search after an account is connected (or re-authorized) also lists the single chats of this many days — as read, waking nobody. 0 = only new ones.'),
+    tier: 'advanced',
     category: t('Channels'), liveApply: true,
   },
   'channels.relaxedPollSec': {
     type: 'number', default: 300, min: 60, max: 900, step: 30,
     label: t('Once the search finds everything: seconds between checks of each chat'),
     description: t('When the search has been measured to find every new message (at most 2 % missed over 200), each conversation is still checked on its own at least this often — an open window stays at the fast cadence. If the search starts missing messages, the normal cadence returns by itself.'),
+    tier: 'advanced',
     category: t('Channels'), liveApply: true,
   },
   // ── Channels outbox GUARDS (design §9.1, decision 9, P3): they stack on
@@ -1099,12 +1172,14 @@ const SETTINGS_SCHEMA = {
     type: 'string', default: '09:00',
     label: t('Outbox: working hours start (HH:MM)'),
     description: t('Only used when the time zone above is set. Mon–Fri.'),
+    when: { setting: 'channels.offHoursTz', isNot: '' },
     category: t('Channels'), liveApply: true,
   },
   'channels.offHoursEnd': {
     type: 'string', default: '18:00',
     label: t('Outbox: working hours end (HH:MM)'),
     description: t('Only used when the time zone above is set.'),
+    when: { setting: 'channels.offHoursTz', isNot: '' },
     category: t('Channels'), liveApply: true,
   },
   // ── The sender honesty line (design §9.5, decision 17 as overruled, P4):
@@ -1145,6 +1220,7 @@ const SETTINGS_SCHEMA = {
     type: 'json', default: null,
     label: t('Usage dashboard panels'),
     description: t('The configurable panel layout of the Usage window ({metric, dim, chart, span, topN} per panel). Managed by the Usage window itself (Panels… menu, per-panel ✎/⋯); edit by hand only if you know what you are doing.'),
+    tier: 'advanced',
     category: t('Session'), liveApply: true,
   },
   'telemetry.enabled': {
@@ -1157,24 +1233,29 @@ const SETTINGS_SCHEMA = {
     type: 'text', default: '',
     label: t('Forward diagnostics to a central collector (URL)'),
     description: t('Optional, for team deployments: POST event batches (with an anonymous per-instance id) to this URL so one maintainer can see errors across all instances. Leave empty to keep everything local.'),
+    tier: 'advanced',
     category: t('Session'), liveApply: true,
   },
   'telemetry.forwardToken': {
     type: 'text', default: '',
     label: t('Central collector token'),
     description: t('Sent as a Bearer Authorization header with forwarded batches when the collector requires a shared token (a VibeSpace collector always does). Leave empty if none is required.'),
+    when: { setting: 'telemetry.forwardUrl', isNot: '' },
+    tier: 'advanced',
     category: t('Session'), liveApply: true,
   },
   'usage.otelTruth': {
     type: 'boolean', default: true,
     label: t('Per-request billing truth (local telemetry)'),
     description: t('New LOCAL claude sessions export the CLI’s own OpenTelemetry api_request events to this VibeSpace instance over loopback (never to any external endpoint). Each event names the organization that ACTUALLY billed the request, so the usage ledger, quota estimates and pool decisions stay correct even while a running session still holds a pre-switch token after a pool account switch. Zero extra Anthropic traffic — the CLI pushes locally. Applies to sessions started after the change.'),
+    tier: 'advanced',
     category: t('Session'), liveApply: true,
   },
   'accounts.activeUsagePolling': {
     type: 'boolean', default: false, confirmOn: true,
     label: t('⚠ Actively poll subscription usage (automation risk)'),
     description: t('OFF (recommended): usage bars are captured passively from your live terminal sessions — VibeSpace never contacts Anthropic on its own. Turning this ON restores the old behavior: the server calls Anthropic’s usage endpoint on a ~90s timer with each subscription’s token, even for idle accounts. That off-CLI, fixed-cadence, non-human traffic is exactly what can get a Pro/Max account flagged as automated and BANNED — a real account was banned+refunded for this. Only enable it if you accept that risk (e.g. to see live usage for chat-only or idle accounts).'),
+    tier: 'advanced',
     category: t('Session'), liveApply: true,
   },
 
@@ -1182,12 +1263,14 @@ const SETTINGS_SCHEMA = {
     type: 'number', default: 6, min: 2, max: 60,
     label: t('Notification popup duration (seconds)'),
     description: t('How long toast cards (new inbox items, errors, confirmations) stay on screen. They appear next to the inbox button and every one is kept in the inbox popup’s Notifications tab.'),
+    tier: 'advanced',
     category: t('Toolbar & Layout'), liveApply: true,
   },
   'mounts.vfsCacheMaxSizeGB': {
     type: 'number', default: 10, min: 1, max: 500,
     label: t('Storage mount cache size (GB)'),
     description: t('Per-mount disk budget for the rclone read/write cache (vfs-cache-mode full). Reads are cached chunk-wise on local disk; writes land locally and upload in the background — the cache survives crashes and resumes uploading on reconnect. Applied when a mount (re)connects.'),
+    tier: 'advanced',
     category: t('Session'), liveApply: true,
   },
 
@@ -1284,17 +1367,11 @@ const SETTINGS_SCHEMA = {
     description: t('Choose which fields to show in the expanded session card'),
     category: t('Session Card'), liveApply: true,
   },
-  'sessionCard.detailTruncation': {
-    type: 'enum', default: 'left',
-    options: [
-      { value: 'left', label: t('Truncate left (show end)') },
-      { value: 'right', label: t('Truncate right (show start)') },
-    ],
-    label: t('Detail value truncation'),
-    description: t('When text overflows, truncate from the left (shows filename) or right (shows path start)'),
-    category: t('Session Card'), liveApply: true,
-  },
 };
+
+// RETIRED KEYS (B-df40 part 1): a key listed there never comes back as a row — scripts/test-architecture.mjs 44d.
+// PURE (CJS), shared by identity with the boot migration 2026-10-settings-rows-retired that strips the stored values.
+export { RETIRED_SETTING_KEYS } from '../retired-settings.js';
 
 // ── HARNESS SECTIONS ARE DERIVED (docs/design-harness-settings.zh.md §4) ──
 // The Claude / Codex / OpenCode categories are not hand-written rows any more:
@@ -1313,6 +1390,11 @@ function deriveHarnessRow(tbl, r) {
   const entry = { type: r.type, default: r.default, label: t(r.label), description: t(r.description), category: t(tbl.category), liveApply: true, harness: tbl.prefix, apply: r.apply };
   if (r.options) entry.options = r.options.map((o) => ({ value: o.value, label: t(o.label) }));
   for (const k of ['combobox', 'min', 'max', 'step']) if (r[k] !== undefined) entry[k] = r[k];
+  // the view fields (settings-view.js): the row's own tier, and the TABLE's `when` on every row of it
+  // (`when: { harness: 'codex' }` hides the whole Codex section where that CLI is not installed)
+  if (r.tier !== undefined) entry.tier = r.tier;
+  const when = [...whenClauses(tbl.when), ...whenClauses(r.when)];
+  if (when.length) entry.when = when.length === 1 ? when[0] : when;
   return entry;
 }
 function deriveHarnessTable(tbl) {
@@ -1366,6 +1448,38 @@ export function harnessFileRel(prefix, fileId) {
   return f ? '~/' + f.rel.join('/') : null;
 }
 export function harnessSettingPaths(prefix) { return [...(HARNESS_SETTING_OWNERS.get(prefix)?.paths || [])]; }
+/** The section title of a harness prefix ('Codex') — the name in "the Codex CLI is not installed on this machine". */
+export function harnessCategory(prefix) { return HARNESS_SETTING_OWNERS.get(prefix)?.category || null; }
+
+// ── Per-VENDOR channel rows, DERIVED (B-df40 part 3, the design desk's settings-cleanup §2 P3) ──
+// The harness precedent applied to channel adapters: src/channel-settings.js declares each vendor's budget / pace rows
+// ONCE; the adapter's caps spread them, the engine's SETTING_BOUNDS derives its bounds from them, and here each becomes
+// a Channels row under today's key (`channels.budgetLarkPerMin` …). Every derived row is advanced (a per-minute or
+// per-second pace — the tier rule), matters only while an account of that vendor is linked (`when: { channel }`), and
+// carries `channel` (the Settings window draws it in the "Per vendor" block with "Read by the Channels engine · Lark").
+const CHANNEL_SETTING_OWNERS = new Map(); // vendor → { vendorName, paths[] }
+function deriveChannelRow(tbl, r) {
+  return {
+    type: r.type, default: r.default, min: r.min, max: r.max, ...(r.step !== undefined ? { step: r.step } : {}),
+    label: t(r.label), description: t(r.description),
+    tier: 'advanced', when: { channel: tbl.vendor },
+    category: t('Channels'), liveApply: true, channel: tbl.vendor,
+  };
+}
+function deriveChannelTable(tbl) {
+  const paths = [];
+  for (const r of tbl.rows) { const p = channelSettingPath(r.key); SETTINGS_SCHEMA[p] = deriveChannelRow(tbl, r); paths.push(p); }
+  CHANNEL_SETTING_OWNERS.set(tbl.vendor, { vendorName: tbl.vendorName, paths });
+  return paths;
+}
+for (const tbl of Object.values(CHANNEL_SETTINGS)) deriveChannelTable(tbl);
+/** The settings paths a vendor's table derived (`['channels.budgetLarkPerMin', 'channels.larkRequestsPerSec']`). */
+export function channelSettingPaths(vendor) { return [...(CHANNEL_SETTING_OWNERS.get(vendor)?.paths || [])]; }
+/** A channel vendor's name in the user's language ('Lark', 'Gmail'); a vendor without a table reads its slug capitalised. */
+export function channelVendorName(vendor) {
+  const own = CHANNEL_SETTING_OWNERS.get(vendor);
+  return own ? t(own.vendorName) : String(vendor || '').charAt(0).toUpperCase() + String(vendor || '').slice(1);
+}
 
 
 // Ordered category list for UI rendering.
@@ -1395,6 +1509,7 @@ const SETTINGS_CATEGORIES = [
   t('Background Work'),
   t('Spending'),
   t('Agent browser'),
+  t('Desktop apps'),
   t('Channels'),
   t('Claude'),
   t('Codex'),
@@ -1456,7 +1571,7 @@ const SETTINGS_GROUPS = [
   { id: 'appearance', label: t('Appearance & layout'), categories: [t('Toolbar & Layout'), t('Window'), t('Sidebar'), t('Session Card')] },
   { id: 'sessions', label: t('Sessions & chat'), categories: [t('Session'), t('Chat'), t('Terminal')] },
   { id: 'harness', label: t('Harnesses'), categories: [t('Claude'), t('Codex'), t('OpenCode')] },
-  { id: 'services', label: t('Services'), categories: [t('Integration'), t('Channels'), t('Background Work'), t('Agent browser')] }, // Agent browser (agent browser v2, 2.369.134; the category was 'Browser' before the direction-B rename) is a service the instance runs — profiles, keeper, proxy
+  { id: 'services', label: t('Services'), categories: [t('Integration'), t('Channels'), t('Background Work'), t('Agent browser'), t('Desktop apps')] }, // Agent browser (agent browser v2, 2.369.134; the category was 'Browser' before the direction-B rename) is a service the instance runs — profiles, keeper, proxy
   { id: 'spending', label: t('Spending'), categories: [t('Spending')] },
   { id: 'plugins', label: t('Plugins'), categories: [] },
   { id: 'other', label: t('Other'), categories: [] },
@@ -1499,3 +1614,6 @@ export function clampToSchema(schema, num) {
 }
 
 export { SETTINGS_SCHEMA, SETTINGS_CATEGORIES, SETTINGS_GROUPS };
+// The closed `when` tag set, the facts and the tiers (defined in settings-view.js, PURE) — exported here too,
+// beside the rows they annotate: lane channel-declared-settings derives `when: { channel }` rows on this set.
+export { WHEN_KINDS, WHEN_FACTS, TIERS } from './settings-view.js';

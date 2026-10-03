@@ -95,6 +95,12 @@ export function keyInputOf(e) {
 }
 const pointerMods = (e) => ({ shift: !!e.shiftKey, control: !!e.ctrlKey, alt: !!e.altKey, meta: !!e.metaKey });
 
+/** Design 009 §B8: the pane's one starting line — "Starting…", then "Starting… 8 s" once a second has passed. PURE. */
+export function startingText(ms) {
+  const n = Math.floor(Math.max(0, Number(ms) || 0) / 1000);
+  return n >= 1 ? t('Starting… {n} s', { n }) : t('Starting…');
+}
+
 /**
  * createXpraView(host, opts) — mounts the seamless picture view into `host`.
  *   url           — the bridge ws url or a FUNCTION (a fresh per-socket viewer id each connect)
@@ -263,7 +269,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
       wins.set(win.wid, w);
       place(win, w);
       stage.appendChild(el);
-      if (wins.size === 1) setStatus(t('Connected'));
+      if (wins.size === 1) { everMapped = true; stopWait(); setStatus(t('Connected')); }
       fitStage();
       return;
     }
@@ -451,16 +457,31 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
   function onRatio() { relayout(); watchRatio(); }
   watchRatio();
 
+  // ── STARTING (design 009 §B8, the owner saw "Waiting for the app window…" for 10 s and more): until the app's FIRST
+  // window maps in this pane, every wait word (starting, connecting, waiting for the window) is ONE line that counts the
+  // seconds — "Starting… 8 s" (PURE startingText); a reconnect after the app has shown itself keeps its own words. Any other
+  // status (an error, the ended sentence, a window) stops the count. ──
+  let waitSince = 0, waitTimer = null, everMapped = false;
+  const stopWait = () => { if (waitTimer) clearInterval(waitTimer); waitTimer = null; waitSince = 0; };
+  const waitWords = (fallback) => {
+    if (everMapped) { stopWait(); setStatus(fallback); return; }
+    if (!waitSince) waitSince = Date.now();
+    setStatus(startingText(Date.now() - waitSince));
+    if (!waitTimer) waitTimer = setInterval(() => { if (everMapped || !waitSince || shell.closed) { stopWait(); return; } setStatus(startingText(Date.now() - waitSince)); }, 1000);
+  };
+  const statusFromOutside = (...a) => { stopWait(); setStatus(...a); };
+
   // ── the session ──────────────────────────────────────────────────────────
   const connect = async () => {
     if (shell.closed) return;
     shell.want();
-    setStatus(L.starting);
+    waitWords(L.starting);
     emit('starting');
     if (before) {
       let gate = null;
       try { gate = await before(); } catch {}
       if (!gate || !gate.ok) {
+        stopWait();
         setStatus(gate?.error || L.unavailable, { error: true, reconnect: true });
         emit('error', gate?.error || L.unavailable);
         shell.scheduleRetry(connect);
@@ -468,7 +489,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
       }
     }
     if (shell.closed) return;
-    setStatus(t('Connecting…'));
+    waitWords(t('Connecting…'));
     emit('connecting');
     try { client?.close(); } catch {}
     clearWindows();
@@ -482,12 +503,13 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
       on: {
         status: (st, detail) => {
           if (shell.closed) return;
-          if (st === 'connected') { shell.resetLadder(); setStatus(t('Waiting for the application window…')); emit('connected', detail); ime.focus({ preventScroll: true }); return; }
+          if (st === 'connected') { shell.resetLadder(); waitWords(t('Waiting for the application window…')); emit('connected', detail); ime.focus({ preventScroll: true }); return; }
           if (st === 'closed') {
             const reason = detail && detail !== 'closed by the window' ? String(detail) : '';
             const ours = detail === 'closed by the window';
             // x5: the bridge CUT this pane (another client resumed here, close 4001) — reconnect at once as a blocked viewer
             // (the upstream Protocol.js words an unmapped close code as "4001: '<reason>'")
+            stopWait();
             if (!ours && /(^|\D)4001(\D|$)/.test(reason) && shell.wanted) { setStatus(t('Active on another client')); emit('disconnected', { clean: true, reason: 'blocked' }); clearWindows(); shell.resetLadder(); setTimeout(() => { if (!shell.closed && shell.wanted) connect(); }, 0); return; }
             setStatus(ours ? t('Disconnected') : reason ? `${t('Connection lost')}: ${reason}` : t('Connection lost'), { error: !ours, reconnect: true });
             emit('disconnected', { clean: ours, reason });
@@ -520,7 +542,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
   reBtn.onclick = () => { shell.resetLadder(); connect(); };
 
   const disconnect = () => { shell.unwant(); releaseWmHold(null); press = null; try { client?.close(); } catch {} client = null; clearWindows(); try { onMain?.(null); } catch {} };
-  const dispose = () => { shell.close(); disconnect(); ro?.disconnect(); clearTimeout(resizeTimer); if (moveRaf) cancelAnimationFrame(moveRaf); try { dprMq?.removeEventListener?.('change', onRatio); } catch {} };
+  const dispose = () => { stopWait(); shell.close(); disconnect(); ro?.disconnect(); clearTimeout(resizeTimer); if (moveRaf) cancelAnimationFrame(moveRaf); try { dprMq?.removeEventListener?.('change', onRatio); } catch {} };
   const focus = () => { try { ime.focus({ preventScroll: true }); } catch {} };
   const setViewOnly = (v) => { viewOnly = !!v; if (client) client.viewOnly = viewOnly || mode !== 'active'; pane.classList.toggle('xpra-view-only', viewOnly || mode !== 'active'); };
   /** x5: 'active' (this pane drives the app) | 'watch' (an agent drives: fit-scaled, nothing sent) | 'blocked' (another client is active: dormant). */
@@ -542,5 +564,5 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
   const closeApp = () => (client ? client.closeMain() : false);
   /** seamless: the display is told what our window did (maximized / iconified) — the client's setMainState. */
   const setAppState = (st) => (client ? client.setMainState(st) : false);
-  return { container, bar, mount, pane, stage, ime, status, chip, fitBadge, resnap, connect, disconnect, setStatus, addControl, focus, dispose, setViewOnly, setMode, windows, closeApp, setAppState, rootToClient, setFloatingChip: shell.setFloatingChip, get wmHeld() { return !!wmHold; }, get mode() { return mode; }, get stageScale() { return stageScale; }, get ratio() { return drawRatio; }, get pictureScale() { return drawK; }, get minSize() { return minSize ? { ...minSize } : null; }, get stageOffset() { return { ...stageOffset }; }, get client() { return client; }, get state() { return shell.state; }, get wanted() { return shell.wanted; }, get chipText() { return shell.copiedText; }, get hintShown() { return shell.hintShown; }, get copyHint() { return shell.copyHint; }, get pasteOpen() { return shell.pasteOpen; } };
+  return { container, bar, mount, pane, stage, ime, status, chip, fitBadge, resnap, connect, disconnect, setStatus: statusFromOutside, starting: () => waitWords(L.starting), addControl, focus, dispose, setViewOnly, setMode, windows, closeApp, setAppState, rootToClient, setFloatingChip: shell.setFloatingChip, get wmHeld() { return !!wmHold; }, get mode() { return mode; }, get stageScale() { return stageScale; }, get ratio() { return drawRatio; }, get pictureScale() { return drawK; }, get minSize() { return minSize ? { ...minSize } : null; }, get stageOffset() { return { ...stageOffset }; }, get client() { return client; }, get state() { return shell.state; }, get wanted() { return shell.wanted; }, get chipText() { return shell.copiedText; }, get hintShown() { return shell.hintShown; }, get copyHint() { return shell.copyHint; }, get pasteOpen() { return shell.pasteOpen; } };
 }

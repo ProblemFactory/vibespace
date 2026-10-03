@@ -23,6 +23,14 @@
 //     `no-store`; a picture older than the newest 5000 records is found by its
 //     message; a disabled account fetches nothing; a cache HIT no longer
 //     rewrites the LRU ledger (coalesced, flushed on close)
+//   ③b THE AGENT'S ROUTE (lane channel-attach-read, B-d6b9 — design 005 §2.A; the REAL agent routes on the same
+//     server, two sessions by bearer token): the read route's reach FIRST (hidden ≡ requestable ≡ no such
+//     conversation, the same body, no vendor call — a cached picture included; a disabled account too, while the
+//     owner's window is still served from the cache: rule 1, stated); a job token refused; the bytes with their
+//     Content-Length, never rendered, who-sent-it-where in one header; a cache hit FREE; a fetch in flight JOINED
+//     (one call, the owner's charge); a vendor fetch charged to the AGENTS' share and refused past it by name with
+//     the wait (the owner is not); an account grant reaches; a revoke landing inside the fetch = the uniform
+//     not-found. Each rule's patched copy turns its leg red (reach, share, attribution, the re-asked reach)
 //   ④ NEGATIVE CONTROLS (scripts/mutant-copy.mjs — scratch copies, never src/):
 //     an engine without the single-flight join, an engine that never
 //     remembers a refusal, a store that writes the ledger on every hit, a
@@ -145,17 +153,20 @@ function worldModule(kind, W, { budgetDefault = 100 } = {}) {
         async convCaps() { meter(1); return { read: 'yes', sendAs: [], why: 'read-only-mailbox', at: Date.now() }; },
         async history(id, { anchor = null, limit = 50 } = {}) {
           meter(1); W.calls.history++;
+          if (W.histGate) { W.histHit = true; await W.histGate; }   // verify r2: a refresh held at the vendor
           const idx = anchor ? W.recs.findIndex((m) => m.vendorId === anchor) + 1 : 0;
           const pending = W.recs.slice(idx), page = pending.slice(0, limit), drained = page.length === pending.length;
           return { records: page.map(rec), anchor: page.length ? page[page.length - 1].vendorId : anchor, reachedAnchor: drained, complete: drained };
         },
         async older() { meter(1); return { records: [], exhausted: true }; },
         async fetchAttachment(id, { messageId, attachmentId } = {}) {
+          const s = W.script[attachmentId] || 'ok';
+          if (s === 'late') await W.late;   // verify r1: Lark meters AFTER `await pace(1)` — the units land past an await
           meter(1); W.calls.attach.push(attachmentId);
           if (W.gate) await W.gate;
-          const s = W.script[attachmentId] || 'ok';
           if (s === 'forbidden') throw new CH.ChannelError('forbidden', `vendor refuses ${attachmentId}`);
           if (s === 'rate-limited') throw new CH.ChannelError('rate-limited', 'HTTP 429', { retryable: true, detail: { retryAfterSec: 9 } });
+          if (W.byMsg && W.byMsg[messageId]) return W.byMsg[messageId];
           return { data: fake.fixturePng(attachmentId), mime: 'image/png', name: 'image' };
         },
       };
@@ -166,9 +177,10 @@ function seed(dataDir, id, kind) {
   fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
   fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id, kind, label: id, enabled: true, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: { enabled: true, claimedExclusive: 'unknown', state: null, lastEventAt: null, missRate: 0, demotedAt: null, demotedWhy: null, samples: [] }, scan: null }] }));
 }
-async function rig(name, { engineMod = ENG, budgetDefault = 100 } = {}) {
+async function rig(name, { engineMod = ENG, budgetDefault = 100, more = null } = {}) {
   const W = makeWorld();
   for (let i = 0; i < 8; i++) W.add(`m${i}`, [{ id: `pic-${i}`, name: 'image', mime: 'image/*', placeholder: '[image]' }]);
+  if (more) more(W);
   const registry = CH.createChannelRegistry();
   registry.register(worldModule('pics', W, { budgetDefault }));
   const dataDir = path.join(ROOT, name);
@@ -189,7 +201,7 @@ async function rig(name, { engineMod = ENG, budgetDefault = 100 } = {}) {
   const base = `http://127.0.0.1:${server.address().port}`;
   const get = async (id, q = '&inline=1') => { const res = await fetch(`${base}/api/channels/pics/room/attachment/${encodeURIComponent(id)}?msg=m${id.split('-')[1]}${q}`); const buf = Buffer.from(await res.arrayBuffer()); let json = null; try { json = JSON.parse(buf.toString('utf-8')); } catch {} return { status: res.status, headers: res.headers, buf, json }; };
   const spent = () => eng.budgetOf('pics').spent;
-  return { W, eng, server, get, spent, dataDir, events };
+  return { W, eng, server, get, spent, dataDir, events, app };
 }
 {
   const R = await rig('main', { budgetDefault: 6 });
@@ -263,6 +275,240 @@ async function rig(name, { engineMod = ENG, budgetDefault = 100 } = {}) {
   ok(deep.status === 200, 'a picture older than the newest 5000 records is found by ITS MESSAGE (the route names it) and drawn', JSON.stringify([deep.status, deep.json]));
   for (const x of [R, R2, R3]) { x.server.close(); x.eng.stop(); }
 }
+// ═══ ③b the agent's route ══════════════════════════════════════════════════
+console.log('③b the agent\'s route (lane channel-attach-read): reach first, a cache hit free, one flight, the agents\' share');
+const ARmod = require(path.join(REPO, 'src/agent-routes.js'));
+const { NOT_FOUND_TEXT } = require(path.join(REPO, 'src/channel-acl.js'));
+const AL = { kind: 'agent', id: 'agent-A', name: 'Alpha' }, BE = { kind: 'agent', id: 'agent-B', name: 'Beta' };
+const ROOM = { kind: 'conversation', convId: 'room' };
+/** A rig with the REAL agent routes mounted on its server: Alpha (vsst_A) and Beta (vsst_B), no access yet. */
+async function agentRig(name, opts = {}) {
+  const R = await rig(name, opts);
+  const sessions = new Map([
+    ['w-A', { agentToken: 'vsst_A', claudeSessionId: 'agent-A', name: 'Alpha', cwd: '/tmp', _toolsIntroSeen: true, _mgrIntroSeen: true }],
+    ['w-B', { agentToken: 'vsst_B', claudeSessionId: 'agent-B', name: 'Beta', cwd: '/tmp', _toolsIntroSeen: true, _mgrIntroSeen: true }],
+  ]);
+  ARmod.setupAgentRoutes({
+    app: R.app, activeSessions: sessions,
+    tasks: { groupsForSession: () => [], _persistRescueLine: () => '', backlogNudgeFor: () => '' },
+    sessionStatus: { consumeNotices: () => [], get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' },
+    userTodos: {}, sessionStatusKey: (x) => 'claude:' + (x.claudeSessionId || 'none'), serverSetting: () => undefined,
+    integrationEnabled: () => true, scheduleCtxSync() {}, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => null, deliver: null,
+    getChannels: () => R.eng, getGroups: () => null,
+  });
+  const base = `http://127.0.0.1:${R.server.address().port}`;
+  R.agentGet = async (id, { token = 'vsst_A', conv = 'pics/room', msg = `m${id.split('-')[1]}` } = {}) => {
+    const res = await fetch(`${base}/api/agent/channels/attachment?${new URLSearchParams({ conv, msg, id })}`, { headers: token ? { Authorization: 'Bearer ' + token } : {} });
+    const buf = Buffer.from(await res.arrayBuffer());
+    let json = null; try { json = JSON.parse(buf.toString('utf-8')); } catch {}
+    let info = null; try { info = JSON.parse(decodeURIComponent(res.headers.get('x-vibespace-attachment') || '')); } catch {}
+    return { status: res.status, headers: res.headers, buf, json, info };
+  };
+  R.agentSpent = () => R.eng.budgetOf('pics').spentBy.agent;
+  R.calls = (id) => R.W.calls.attach.filter((x) => x === id).length;
+  R.close = () => { R.server.close(); try { R.eng.stop(); } catch {} };
+  return R;
+}
+const uniform = (r) => r.status === 404 && r.json && r.json.code === 'not-found' && r.json.error === NOT_FOUND_TEXT;
+{
+  clock += 61e3;
+  const R = await agentRig('agent-main');
+  const nowhere = await R.agentGet('pic-0', { conv: 'pics/nope' });
+  const hidden = await R.agentGet('pic-0');
+  ok(uniform(hidden) && JSON.stringify(hidden.json) === JSON.stringify(nowhere.json) && R.calls('pic-0') === 0, 'REACH FIRST: a conversation the agent may not read answers EXACTLY what a nonexistent one does (404, the same body) — and no vendor call', JSON.stringify([hidden.status, hidden.json, nowhere.json]));
+  await R.eng.setReach('pics', 'room', { principal: AL, level: 'requestable' });
+  const reqable = await R.agentGet('pic-0');
+  ok(uniform(reqable) && JSON.stringify(reqable.json) === JSON.stringify(nowhere.json) && R.calls('pic-0') === 0, '…a REQUESTABLE one too (the agent may ask for it; it may not read it)', JSON.stringify(reqable.json));
+  const job = await R.agentGet('pic-0', { token: 'jbt_job' });
+  ok(job.status === 401 && R.calls('pic-0') === 0, `a JOB token is refused (${job.status}) like every channel verb but withdraw — no vendor call`);
+  await R.eng.setAccess('pics', ROOM, [{ principal: AL, authority: 'draft' }]);
+  const a0 = R.agentSpent(), c0 = R.W.calls.attach.length;
+  const got = await R.agentGet('pic-0');
+  const png = fake.fixturePng('pic-0');
+  ok(got.status === 200 && got.buf.equals(png) && R.W.calls.attach.length === c0 + 1, `VISIBLE: the bytes, whole (${got.buf.length} bytes, one vendor call)`, JSON.stringify([got.status, got.json]));
+  ok(got.headers.get('content-length') === String(png.length) && got.headers.get('content-type') === 'application/octet-stream' && got.headers.get('x-content-type-options') === 'nosniff' && /sandbox/.test(got.headers.get('content-security-policy') || '') && got.headers.get('content-disposition') === 'attachment' && got.headers.get('cache-control') === 'no-store', '…with their Content-Length, never rendered (octet-stream, nosniff, a sandbox CSP, attachment, no-store)', JSON.stringify([...got.headers]));
+  ok(got.info && got.info.mime === 'image/png' && got.info.from === 'Ada' && got.info.bytes === png.length && got.info.conversation && got.info.conversation.key === 'pics/room' && got.info.conversation.title === 'Room', '…and ONE header says the type, who sent it and where (the head `read` prints)', JSON.stringify(got.info));
+  ok(R.agentSpent() === a0 + 1, `CHARGED TO THE AGENTS: the vendor fetch is on the agents' share of the minute (${a0} → ${R.agentSpent()})`);
+  // the owner's window fetched pic-1 first: the agent's ask of it is a cache hit — free
+  ok((await R.get('pic-1')).status === 200, 'FIXTURE: the owner\'s window fetched pic-1');
+  const a1 = R.agentSpent(), c1 = R.W.calls.attach.length, s1 = R.spent();
+  const hitA = await R.agentGet('pic-1');
+  ok(hitA.status === 200 && hitA.buf.equals(fake.fixturePng('pic-1')) && R.W.calls.attach.length === c1 && R.agentSpent() === a1 && R.spent() === s1, 'A CACHE HIT IS FREE: a picture already fetched is served with no vendor call and no charge');
+  // one flight: the owner's fetch in flight, the agent asks the same picture
+  let open; R.W.gate = new Promise((r) => { open = r; });
+  const a2 = R.agentSpent(), s2 = R.spent();
+  const ownerP = R.get('pic-2');
+  await sleep(50);
+  const agentP = R.agentGet('pic-2');
+  await sleep(50); open(); R.W.gate = null;
+  const [ow, ag] = await Promise.all([ownerP, agentP]);
+  ok(ow.status === 200 && ag.status === 200 && ag.buf.equals(ow.buf) && R.calls('pic-2') === 1 && R.spent() === s2 + 1 && R.agentSpent() === a2, `JOINED: an agent asking a picture the owner's window is fetching rides that ONE call (${R.calls('pic-2')}) and that ONE charge (the owner's; agents' share ${a2} → ${R.agentSpent()})`);
+  // another agent: Beta may read nothing — not even what is cached
+  const beta = await R.agentGet('pic-0', { token: 'vsst_B' });
+  ok(uniform(beta) && JSON.stringify(beta.json) === JSON.stringify(nowhere.json), 'ANOTHER AGENT: Beta asking a CACHED picture of a conversation only Alpha may read gets the uniform not-found', JSON.stringify(beta.json));
+  await R.eng.setAccess('pics', { kind: 'account' }, [{ principal: BE, authority: 'draft' }]);
+  ok((await R.agentGet('pic-0', { token: 'vsst_B' })).status === 200, '…and an ACCOUNT grant reaches it');
+  // a disabled account: the agent's reach is the read route's (none); the owner's window keeps its cache (rule 1, stated)
+  await R.eng.setEnabled('pics', false);
+  const disA = await R.agentGet('pic-0'), disO = await R.get('pic-0');
+  ok(uniform(disA) && disO.status === 200, `A DISABLED ACCOUNT: the agent gets the uniform not-found (read's rule) while the owner's window is still served the cached picture (rule 1 of the order — stated, not changed): ${disA.status} / ${disO.status}`);
+  await R.eng.setEnabled('pics', true);
+  R.close();
+}
+/** The agents' share at its boundary (budget 8/min ⇒ share 2): the third vendor fetch is refused by name with the
+ *  wait and NO call; the owner is not held by it. Returns the third answer's status (the control runs it on a copy). */
+async function shareLeg(engineMod, name) {
+  clock += 61e3;
+  const R = await agentRig(name, { engineMod, budgetDefault: 8 });
+  await R.eng.setAccess('pics', ROOM, [{ principal: AL, authority: 'draft' }]);
+  clock += 61e3;   // a fresh minute: the pass's units are behind it
+  const one = await R.agentGet('pic-1'), two = await R.agentGet('pic-2');
+  const c = R.W.calls.attach.length;
+  const three = await R.agentGet('pic-3');
+  const owner = await R.get('pic-3');
+  R.close();
+  return { one: one.status, two: two.status, three, calls: R.W.calls.attach.length - c, owner: owner.status };
+}
+{
+  const r = await shareLeg(ENG, 'agent-share');
+  ok(r.one === 200 && r.two === 200 && r.three.status === 429 && r.three.json.code === 'vendor-budget' && r.three.json.share && r.three.json.share.pct === 25 && r.three.json.share.limit === 2 && Number(r.three.headers.get('retry-after')) > 0 && /25 %/.test(r.three.json.error), `THE AGENTS' SHARE: past 25 % of the minute (2 of 8) the next vendor fetch is refused 429 vendor-budget, naming the share and the wait`, JSON.stringify(r.three.json));
+  ok(r.calls === 1 && r.owner === 200, `…with NO vendor call for the refused ask, while the OWNER's window still fetches it (calls after the refusal: ${r.calls} — the owner's)`);
+}
+/** A revoke landing INSIDE the agent's fetch: reach is asked again after the await. Returns the agent's status. */
+async function revokeLeg(engineMod, name) {
+  clock += 61e3;
+  const R = await agentRig(name, { engineMod });
+  await R.eng.setAccess('pics', ROOM, [{ principal: AL, authority: 'draft' }]);
+  let open; R.W.gate = new Promise((r) => { open = r; });
+  const p = R.agentGet('pic-4');
+  await sleep(50);
+  await R.eng.setAccess('pics', ROOM, []);
+  open(); R.W.gate = null;
+  const r = await p;
+  const after = await R.agentGet('pic-4');
+  R.close();
+  return { r, after };
+}
+{
+  const { r, after } = await revokeLeg(ENG, 'agent-revoke');
+  ok(uniform(r) && uniform(after), `A REVOKE INSIDE THE FETCH: the answer is the uniform not-found (reach re-asked after the await), and so is the next ask of the now-cached picture: ${r.status} / ${after.status}`);
+}
+/** Reach first / attribution as functions of the engine module (the controls run them on copies). */
+async function hiddenLeg(engineMod, name) {
+  clock += 61e3;
+  const R = await agentRig(name, { engineMod });
+  const r = await R.agentGet('pic-0');
+  R.close();
+  return { status: r.status, calls: R.calls('pic-0') };
+}
+async function chargeLeg(engineMod, name) {
+  clock += 61e3;
+  const R = await agentRig(name, { engineMod });
+  await R.eng.setAccess('pics', ROOM, [{ principal: AL, authority: 'draft' }]);
+  const a = R.agentSpent();
+  await R.agentGet('pic-5');
+  const d = R.agentSpent() - a;
+  R.close();
+  return d;
+}
+{
+  const ESRC = ENGINE_SRC;
+  const cut = (label, from, to = '') => { ok(ESRC.split(from).length === 2, `CONTROL ${label}: the anchor is spelled once in the engine`); return MUT.load('src/server/channels-engine.js', ESRC.replace(from, to), label); };
+  const noReach = cut('agent-no-reach', "if (agent && !(ctx && ctx.kind === 'agent' && stillSees(ctx, adapterId, convId))) return ACL.notFound();");
+  // the answer is re-judged after the await (agentAttachmentAnswer), so a copy without the FIRST check still answers 404 —
+  // what the first check alone stops is the VENDOR CALL (and its charge) for a conversation the agent may not read
+  const hc = await hiddenLeg(noReach, 'ctl-agent-reach'), hp = await hiddenLeg(ENG, 'agent-hidden-again');
+  ok(hc.calls === 1 && hp.calls === 0 && hp.status === 404, `CONTROL: an engine whose agent call skips the reach check FETCHES a hidden conversation's picture from the vendor (${hc.calls} call, answer ${hc.status}) — the REACH FIRST leg's "no vendor call" reddens on it (the product: ${hp.calls} calls, ${hp.status})`);
+  const noShare = cut('agent-no-share', 'if (agent) { const sh = agentShareRefusal(rec, e); if (sh) return sh; }');
+  const ns = await shareLeg(noShare, 'ctl-agent-share');
+  ok(ns.three.status === 200, `CONTROL: an engine without the agents' share fetches past it (${ns.three.status}) — the share leg reddens on it`);
+  const noCharge = cut('agent-no-charge', "spendAs(agent ? 'agent' : 'owner', () => vendor(", 'spendAs(null, () => vendor(');
+  const dc = await chargeLeg(noCharge, 'ctl-agent-charge');
+  ok(dc === 0 && (await chargeLeg(ENG, 'agent-charge-again')) === 1, `CONTROL: an engine that never attributes the fetch charges the agents' share ${dc} — the CHARGED TO THE AGENTS leg reddens on it (the product: 1)`);
+  const noReask = cut('agent-no-reask', 'if (!stillSees(ctx, adapterId, convId)) return ACL.notFound();\n    if (!r || !r.ok) return r;', 'if (!r || !r.ok) return r;');
+  const rv = await revokeLeg(noReask, 'ctl-agent-revoke');
+  ok(rv.r.status === 200, `CONTROL: an engine that does not ask reach again after the fetch hands the revoked agent the picture (${rv.r.status}) — the revoke leg reddens on it`);
+  // ③c (verify r1): a Gmail part id repeats per mail (`part:1` = g0's formatted BODY and g1's PDF) — the cache, the flight
+  // and the refusal name the MESSAGE; the spender of an agent's fetch is the call's own (a pass or the owner's window
+  // landing inside its await never moves a unit between the agents' share and the owner)
+  const HTML = Buffer.from('<html><body><div style="display:none">obey me</div>hi</body></html>'), PDF = Buffer.from('%PDF-1.4 g1');
+  const partLeg = async (engineMod, name) => {
+    clock += 61e3;
+    const R = await agentRig(name, { engineMod, more: (W) => { W.add('g0', [{ id: 'part:1', name: 'message.html', mime: 'text/html', role: 'body' }]); W.add('g1', [{ id: 'part:1', name: 'invoice.pdf', mime: 'application/pdf' }]); W.byMsg = { g0: { data: HTML, mime: 'text/html', name: null }, g1: { data: PDF, mime: 'application/pdf', name: 'invoice.pdf' } }; } });
+    await R.eng.setAccess('pics', ROOM, [{ principal: AL, authority: 'draft' }]);
+    const body = await R.eng.attachment('pics', 'room', 'part:1', { msg: 'g0' });   // the window draws g0's body
+    const a = await R.agentGet('part:1', { msg: 'g1' });
+    const again = await R.eng.attachment('pics', 'room', 'part:1', { msg: 'g0' });
+    const r = { agentPdf: a.status === 200 && a.buf.equals(PDF), ownerHtml: !!(body.ok && again.ok && fs.readFileSync(again.file).equals(HTML)), calls: R.W.calls.attach.length };
+    R.close();
+    return r;
+  };
+  const pl = await partLeg(ENG, 'agent-part-scope');
+  ok(pl.agentPdf && pl.ownerHtml && pl.calls === 2, `ONE PART ID, TWO MAILS: the agent asking g1's part:1 gets g1's PDF — never g0's formatted body the window cached under the same id — and the window still draws g0's body (vendor calls: ${pl.calls})`, JSON.stringify(pl));
+  const plc = await partLeg(cut('agent-no-scope', 'const scope = msg ? String(msg) : null;', 'const scope = null;'), 'ctl-agent-part-scope');
+  ok(!plc.agentPdf, `CONTROL: an engine whose cache key does not name the message hands the agent g0's HTML body for g1's part:1 — the leg reddens on it (${JSON.stringify(plc)})`);
+  // ③c (verify r2): THE UPGRADE PATH — a file cached under the BARE id (written before the key named the message; the
+  // route asked without `msg` still writes one) is the window's only while ONE message of the conversation carries that
+  // id: a Gmail part id repeats per mail, so the bare file is whichever mail was drawn first — fetched again by its message
+  const bareLeg = async (engineMod, name) => {
+    clock += 61e3;
+    const R = await agentRig(name, { engineMod, more: (W) => { W.add('g0', [{ id: 'part:1', name: 'message.html', mime: 'text/html', role: 'body' }]); W.add('g1', [{ id: 'part:1', name: 'invoice.pdf', mime: 'application/pdf' }]); W.byMsg = { g0: { data: HTML, mime: 'text/html', name: null }, g1: { data: PDF, mime: 'application/pdf', name: 'invoice.pdf' } }; } });
+    const bare = await R.eng.attachment('pics', 'room', 'part:1');   // no message named: the bare id — g0's body, the first carrier
+    await R.eng.attachment('pics', 'room', 'pic-3');
+    const n = R.W.calls.attach.length;
+    const pdf = await R.eng.attachment('pics', 'room', 'part:1', { msg: 'g1' });
+    const one = await R.eng.attachment('pics', 'room', 'pic-3', { msg: 'm3' });
+    const r = { bareHtml: !!(bare.ok && fs.readFileSync(bare.file).equals(HTML)), pdf: !!(pdf.ok && fs.readFileSync(pdf.file).equals(PDF)), oneCached: !!(one.ok && one.cached), calls: R.W.calls.attach.length - n };
+    R.close();
+    return r;
+  };
+  const bl = await bareLeg(ENG, 'owner-bare-id');
+  ok(bl.bareHtml && bl.pdf && bl.oneCached && bl.calls === 1, `A BARE-ID FILE OF A REPEATED PART: the window opening g1's part:1 after g0's body was cached under the bare id gets g1's PDF (fetched: ${bl.calls}); a picture only m3 carries is still served from its bare-id file`, JSON.stringify(bl));
+  const blc = await bareLeg(cut('owner-bare-any', 'return carriers.length === 1 && String(carriers[0].vendorId) === scope ? o : null;', 'return o;'), 'ctl-owner-bare-id');
+  ok(!blc.pdf, `CONTROL: an engine that serves any bare-id file to the window hands it g0's formatted body as g1's PDF — the leg reddens on it (${JSON.stringify(blc)})`);
+  const spenderLeg = async (engineMod, name) => {
+    clock += 61e3;
+    const R = await agentRig(name, { engineMod });
+    await R.eng.setAccess('pics', ROOM, [{ principal: AL, authority: 'draft' }]);
+    clock += 61e3;
+    const by = () => R.eng.budgetOf('pics').spentBy;
+    let open; R.W.gate = new Promise((res) => { open = res; });
+    const a0 = by().agent, o0 = by().owner;
+    const ap = R.agentGet('pic-6');
+    await sleep(40);
+    const op = R.get('pic-7');   // the owner's window opens a picture inside the agent's await
+    await sleep(40); open(); R.W.gate = null;
+    await Promise.all([ap, op]);
+    const during = { agent: by().agent - a0, owner: by().owner - o0 };
+    R.W.script['pic-5'] = 'late'; let go; R.W.late = new Promise((res) => { go = res; });
+    const a1 = by().agent;
+    const lp = R.agentGet('pic-5');
+    await sleep(40);
+    await R.eng.pass('pics', { force: true });   // a pass inside an agent fetch that meters after its await
+    go();
+    const late = await lp;
+    const lateAgent = by().agent - a1;   // read before the clock moves the window on
+    // verify r2: the owner's window opens a picture while the AGENT'S OWN REFRESH awaits the vendor (the pass's `e.chargeBy` is 'agent')
+    clock += 61e3;
+    let release; R.W.histGate = new Promise((res) => { release = res; });
+    const rp = R.eng.agentRefresh(AL, 'pics', 'room');
+    for (let i = 0; i < 100 && !R.W.histHit; i++) await sleep(20);
+    const m0 = by();
+    const ro = await R.get('pic-4');
+    const inRefresh = { held: !!R.W.histHit, status: ro.status, agent: by().agent - m0.agent, owner: by().owner - m0.owner };
+    release(); R.W.histGate = null;
+    await rp;
+    const r = { during, late: late.status, lateAgent, inRefresh };
+    R.close();
+    return r;
+  };
+  const sp = await spenderLeg(ENG, 'agent-spender');
+  ok(sp.during.agent === 1 && sp.during.owner === 1 && sp.late === 200 && sp.lateAgent === 1 && sp.inRefresh.held && sp.inRefresh.status === 200 && sp.inRefresh.owner === 1 && sp.inRefresh.agent === 0, `THE SPENDER IS THE CALL'S (the owner's window inside an agent refresh's await: owner +${sp.inRefresh.owner}, agents +${sp.inRefresh.agent}): an owner fetch inside an agent fetch's await is the owner's (agents +${sp.during.agent}, owner +${sp.during.owner}); a pass inside an agent fetch that meters late leaves it on the agents' share (+${sp.lateAgent})`, JSON.stringify(sp));
+  const spc = await spenderLeg(cut('agent-no-spender', "spendAs(agent ? 'agent' : 'owner', () => vendor(", 'spendAs(null, () => vendor('), 'ctl-agent-spender');
+  const spo = await spenderLeg(cut('owner-no-spender', "spendAs(agent ? 'agent' : 'owner', () => vendor(", "spendAs(agent ? 'agent' : null, () => vendor("), 'ctl-owner-spender');
+  ok(spo.inRefresh.held && spo.inRefresh.agent === 1 && spo.inRefresh.owner === 0, `CONTROL: an engine whose owner fetch does not name its spender puts the owner's picture on the agents' share inside an agent refresh — the leg reddens on it (${JSON.stringify(spo.inRefresh)})`);
+  ok(spc.during.agent === 0 && spc.lateAgent === 0, `CONTROL: an engine that does not name the agent as the call's spender charges the agents' share nothing — the leg reddens on it (${JSON.stringify(spc)})`);
+}
 /** The deep leg as a function of the engine module (the control runs it on a copy). */
 async function deepLeg(engineMod, name) {
   const D = await rig(name, { engineMod });
@@ -335,7 +581,7 @@ console.log('④ negative controls (patched copies in this run\'s scratch dir)')
   const st = await deepLeg(noFind, 'ctl-deep');
   ok(st === 404, `CONTROL: an engine that only scans the newest 5000 records cannot find the picture (${st}) — the deep leg reddens on it`);
   ok((await deepLeg(ENG, 'deep-again')) === 200, '…while the product finds it (the same leg, the real engine)');
-  for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 7 })) ok(x.pass, 'tree: ' + x.name + (x.pass ? '' : ' — ' + x.detail));
+  for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 11 })) ok(x.pass, 'tree: ' + x.name + (x.pass ? '' : ' — ' + x.detail));
 }
 
 // ═══ ⑤ wiring pins ════════════════════════════════════════════════════════

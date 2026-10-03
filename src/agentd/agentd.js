@@ -465,7 +465,7 @@ function pidCmdline(pid) {
 // EVERY original flag (--dial/--dial-token/--host-token/…). Extracted to a
 // side-effect-free module so the regression test can import it without
 // executing the daemon.
-const { reExecArgv } = require('./reexec');
+const { reExecArgv, repointCurrent } = require('./reexec');
 
 // Exec-PROOF process identity: the start time survives execve while cmdline
 // does NOT — a pipe child spawned as `sh -lc '… exec env … claude …'` rewrites
@@ -589,18 +589,25 @@ function beginUpgrade(mux, { version, size }) {
       got += buf.length;
       mux.credit(1, buf.length);
       if (got >= size) {
-        fs.fsyncSync(fd);
-        fs.closeSync(fd);
-        // keep whatever filename THIS install runs under (fresh installs are
-        // vibespace-device.js, legacy ones agentd.js) — a hardcoded name here
-        // would silently rename the daemon back on its first self-upgrade
-        const selfName = path.basename(process.argv[1] || 'agentd.js');
-        fs.renameSync(tmp, path.join(dir, selfName));
-        // atomic current repoint: symlink swap via rename
-        const curTmp = path.join(ROOT, '.current.tmp');
-        try { fs.unlinkSync(curTmp); } catch { }
-        fs.symlinkSync(dir, curTmp);
-        fs.renameSync(curTmp, path.join(ROOT, 'current'));
+        // lane device-upgrade-stuck: a landing step that THROWS is SAID (the device's log + `upgrade-failed` to the hub).
+        // Pre-fix the throw died inside ws-min's swallowing emit — no line here, no answer there: the hub waited out its
+        // 30 s, three times, and gave up while this daemon kept running the old version (every Windows machine)
+        try {
+          fs.fsyncSync(fd);
+          fs.closeSync(fd);
+          // keep whatever filename THIS install runs under (fresh installs are
+          // vibespace-device.js, legacy ones agentd.js) — a hardcoded name here
+          // would silently rename the daemon back on its first self-upgrade
+          const selfName = path.basename(process.argv[1] || 'agentd.js');
+          fs.renameSync(tmp, path.join(dir, selfName));
+          // the current repoint — per platform (src/agentd/reexec.js: a junction on Windows, a symlink swap elsewhere)
+          repointCurrent(fs, { root: ROOT, dir });
+        } catch (e) {
+          const why = `${(e && e.code) || 'error'}: ${String((e && e.message) || e).replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 200)}`;
+          log(`upgrade to ${version} FAILED — ${why} — still running ${VERSION}`);
+          try { mux.control({ op: 'upgrade-failed', version, error: why }); } catch { }
+          return;
+        }
         mux.control({ op: 'upgrade-done', version });
         upgradeLanded = true;
         log(`upgrade to ${version} landed — re-exec`);
@@ -625,7 +632,9 @@ function beginUpgrade(mux, { version, size }) {
           // a restart — while its CHILDREN are protected from the moment this
           // bundle runs, because spawnEnv() sanitizes its base regardless.
           const child = spawn(process.execPath, reExecArgv(path.join(dir, path.basename(process.argv[1] || 'agentd.js'))), {
-            detached: true, stdio: 'ignore',
+            // windowsHide (lane device-upgrade-stuck): a DETACHED child on Windows gets its own console window — a
+            // visible black window whose close kills the daemon; the installer starts it hidden, so must the re-exec
+            detached: true, stdio: 'ignore', windowsHide: true,
             env: { ...daemonEnv(process.env), VIBESPACE_AGENTD_VERSION: version },
           });
           child.unref();

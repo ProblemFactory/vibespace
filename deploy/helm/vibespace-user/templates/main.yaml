@@ -39,16 +39,46 @@ stringData:
   {{- if and .Values.cephfs .Values.cephfs.secret }}
   cephfsSecret: {{ .Values.cephfs.secret | quote }}
   {{- end }}
-  {{- /* this release's preset layer: the OVERRIDE under the volume form (projected
-       to <mountPath>/override/), the env's source under presets.volume=false */}}
+  {{- /* this release's preset layer as the env's source (presets.volume=false
+       only — the volume form keeps it in the override Secret below) */}}
+  {{- if not $vol }}
   {{- if $ovG }}
   gdriveClients: {{ $ovG | toJson | quote }}
-  {{- else if and (not $vol) $gd.clientId }}
+  {{- else if $gd.clientId }}
   gdriveClientSecret: {{ $gd.clientSecret | quote }}
   {{- end }}
   {{- if $ovI }}
   integrations: {{ $ovI | toJson | quote }}
   {{- end }}
+  {{- end }}
+{{- if $vol }}
+---
+{{- /* THIS RELEASE'S PRESET OVERRIDE (B-8145), projected to <mountPath>/override/.
+     Its OWN Secret, rendered with `data:` — never `stringData:`: a key the
+     values drop must LEAVE the stored Secret on upgrade. helm's 3-way merge
+     deletes a key the new manifest no longer names from the field the old
+     manifest named it in; `stringData` is write-only (folded into `data`, never
+     stored), so a dropped `stringData` key stayed in `data` and kept
+     shadowing the cluster Secret per key (a later cluster rotation never
+     reached that user). The chart owns every key here. */}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}-preset-override
+  labels: {{- include "vs.labels" . | nindent 4 }}
+type: Opaque
+{{- if or $ovG $ovI }}
+data:
+  {{- if $ovG }}
+  gdriveClients: {{ $ovG | toJson | b64enc | quote }}
+  {{- end }}
+  {{- if $ovI }}
+  integrations: {{ $ovI | toJson | b64enc | quote }}
+  {{- end }}
+{{- else }}
+data: {}
+{{- end }}
+{{- end }}
 {{- if not .Values.storage.existingClaim }}
 ---
 apiVersion: v1
@@ -311,7 +341,8 @@ spec:
           persistentVolumeClaim: { claimName: {{ .Values.storage.existingClaim | default $name }} }
         {{- if $vol }}
         # ONE cluster-wide Secret every user's pod mounts (created once by the
-        # admin) + THIS release's own Secret as the per-key override. Both
+        # admin) + THIS release's override Secret (`data:`-rendered, above) as
+        # the per-key override. Both
         # optional: a missing Secret or key projects nothing, never a pod that
         # cannot start. The item list never depends on the values, so changing
         # an override touches only the Secret — no pod roll.
@@ -325,7 +356,7 @@ spec:
                     - { key: gdriveClients, path: gdrive-clients.json }
                     - { key: integrations, path: integrations.json }
               - secret:
-                  name: {{ $name }}
+                  name: {{ $name }}-preset-override
                   optional: true
                   items:
                     - { key: gdriveClients, path: override/gdrive-clients.json }

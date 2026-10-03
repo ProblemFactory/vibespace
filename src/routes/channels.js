@@ -426,9 +426,52 @@ router.put('/api/channels/adapters/:id', async (req, res) => {
   } catch (e) { fail(res, e); }
 });
 
-/** LIST — the whole panel in one read. */
+/** LIST — THE FIRST SCREEN, never every conversation (design 008, B-3cf8: userW's ≈ 50 000 rows were one 77.5 MB
+ *  answer, 1.49 s to first byte): the accounts, the counts, the totals, the attention rows and each account's newest
+ *  (`engine.digest({scope: 'first'})`). `?scope=accounts` = the accounts without rows (the window's Re-authorize),
+ *  `?scope=totals` = the rail badge's two numbers. Every other row: GET /api/channels/rows. Owner-only — an agent
+ *  lists through /api/agent/channels (its reach), never this. */
+const CHANNELS_LIST_IS_OWNERS = 'the channels list is the owner\'s — an agent lists conversations through vibespace-channels';
 router.get('/api/channels', (req, res) => {
-  try { forHost(req); res.json(engine().digest()); } catch (e) { fail(res, e); }
+  try {
+    forHost(req);
+    if (refuseAgentBearer(req, res, CHANNELS_LIST_IS_OWNERS)) return;
+    const scope = req.query.scope == null || req.query.scope === '' ? 'first' : String(req.query.scope);
+    if (!['first', 'accounts', 'totals'].includes(scope)) return bad(res, 400, 'scope must be first, accounts or totals', { code: 'bad-request' });
+    res.json(engine().digest({ scope }));
+  } catch (e) { fail(res, e); }
+});
+
+/** design 008: EVERY OTHER ROW, paged — `?view=all|focus&adapter=&q=&limit=&beforeAt=&beforeKey=` (the cursor of the
+ *  last row read), `?key=…` (repeated, ≤ 200 named rows) or `?conv=<id>` (one conversation id across accounts).
+ *  `{rows, next, total}`; a bound broken is refused by name (400 bad-request), an unknown account 404. */
+router.get('/api/channels/rows', (req, res) => {
+  try {
+    forHost(req);
+    if (refuseAgentBearer(req, res, CHANNELS_LIST_IS_OWNERS)) return;
+    const qy = req.query || {};
+    const one = (x) => (Array.isArray(x) ? x[0] : x);
+    // `key=` repeated: the query parser hands an array — past 20 an OBJECT of them (its arrayLimit); both are the list
+    const keyList = qy.key == null ? null : Array.isArray(qy.key) ? qy.key : typeof qy.key === 'object' ? Object.values(qy.key) : [qy.key];
+    const before = qy.beforeKey != null || qy.beforeAt != null ? { lastAt: Number(one(qy.beforeAt)), key: one(qy.beforeKey) } : null;
+    const r = engine().rows({
+      view: qy.view == null ? 'all' : String(one(qy.view)), adapter: qy.adapter == null ? null : String(one(qy.adapter)), q: qy.q == null ? '' : String(one(qy.q)),
+      before, limit: qy.limit == null ? null : one(qy.limit), keys: keyList ? keyList.map((k) => (typeof k === 'string' ? k : '')) : null, conv: qy.conv == null ? null : String(one(qy.conv)),
+    });
+    if (!r.ok) return res.status(r.code === 'not-found' ? 404 : 400).json({ error: r.error, code: r.code });
+    res.json({ rows: r.rows, next: r.next, total: r.total });
+  } catch (e) { fail(res, e); }
+});
+
+/** THE ACCOUNTS, NOTHING ELSE (B-df40 part 2, 2026-10-03): the Settings window's
+ *  "is an account of this vendor linked" fact (`when: { channel }` rows) — read
+ *  ONCE when the window opens, never on a timer. Not the digest: that carries
+ *  every conversation, and on a large account it is the heavy read. */
+router.get('/api/channels/adapters', (req, res) => {
+  try {
+    forHost(req);
+    res.json({ adapters: engine().adapterRecords().adapters.map((r) => ({ id: r.id, kind: r.kind, builtin: !!r.builtin, enabled: r.enabled !== false })) });
+  } catch (e) { fail(res, e); }
 });
 
 /** SEARCH one account's messages (2026-09-26, design §6.5): the local logs,
@@ -441,6 +484,16 @@ router.get('/api/channels/search', async (req, res) => {
     const r = await engine().search(String(req.query.adapter || ''), String(req.query.q || ''), { limit: Number(req.query.limit) || 100 });
     if (!r.ok) return res.status(r.code === 'not-found' ? 404 : 400).json({ error: r.error, code: r.code });
     res.json(r);
+  } catch (e) { fail(res, e); }
+});
+/** THE VENDOR'S OWN SEARCH (design 010, B-c9be): the owner's Search press (no `page`: ≤ the row's pages per press) or
+ *  the dialog's scroll to the end of section two (`page` = the previous answer's `next`: one page). The person's act
+ *  is the intent; the engine's refusal table (scope, back-off, the 2 s floor, the endpoint's minute, the budget) answers
+ *  typed with its wait. Declared BEFORE `/api/channels/:adapterId/:convId` (two segments — it would swallow it). */
+router.get('/api/channels/search/full', async (req, res) => {
+  try {
+    forHost(req);
+    readerAnswer(res, await engine().searchVendor(String(req.query.adapter || ''), String(req.query.q || ''), { pageToken: req.query.page ? String(req.query.page) : null }));
   } catch (e) { fail(res, e); }
 });
 
@@ -619,6 +672,14 @@ router.post('/api/channels/:adapterId/:convId/older', async (req, res) => {
     readerAnswer(res, await engine().loadOlder(req.params.adapterId, req.params.convId, { before: Number.isFinite(before) ? before : null, beforeId: b.beforeId ? String(b.beforeId) : null, limit: Number(b.limit) || null }));
   } catch (e) { fail(res, e); }
 });
+/** A FOUND MESSAGE IN CONTEXT (design 010): `?msg=<vendor id>&at=<ms>` — the vendor's history around its instant
+ *  (two metered requests, the owner's), drawn by the window's own row renderer and NEVER stored (F8). */
+router.get('/api/channels/:adapterId/:convId/around', async (req, res) => {
+  try {
+    forHost(req);
+    readerAnswer(res, await engine().aroundOwner(req.params.adapterId, req.params.convId, { vendorId: req.query.msg ? String(req.query.msg) : null, at: Number(req.query.at) || null }));
+  } catch (e) { fail(res, e); }
+});
 /** ONE THREAD (spec §9): the root + its replies from the LOCAL log — never a vendor call. `msg` = the root's
  *  vendorId (a reply's id answers its thread); a message the log does not hold answers `thread-not-loaded`. */
 router.get('/api/channels/:adapterId/:convId/thread/:msg', (req, res) => {
@@ -672,6 +733,17 @@ router.post('/api/channels/:adapterId/:convId/messages/:msg/reactions', async (r
 router.delete('/api/channels/:adapterId/:convId/messages/:msg/reactions/:key', async (req, res) => {
   try { forHost(req); answerRx(res, await engine().unreact(req.params.adapterId, req.params.convId, req.params.msg, req.params.key, { by: 'user' })); } catch (e) { fail(res, e); }
 });
+/** A MESSAGE'S FACTS (lane message-facts, B-f066): the folded list for `?msg=` — a side hit is free; a message stored
+ *  before its facts makes ONE metered read of its whole thread (single-flight, the budget, refusals by name; `all` = every
+ *  message of the thread it filled). The OWNER's Details click only — an agent token is refused by name (an agent's
+ *  read prints what is stored, it never spends the account's budget on a backfill). */
+router.get('/api/channels/:adapterId/:convId/facts', async (req, res) => {
+  try {
+    forHost(req);
+    if (refuseAgentBearer(req, res, 'a message\'s details are read by the owner\'s window — an agent reads them with `vibespace-channels read`')) return;
+    readerAnswer(res, await engine().messageFacts(req.params.adapterId, req.params.convId, typeof req.query.msg === 'string' ? req.query.msg : ''));
+  } catch (e) { fail(res, e); }
+});
 /** ONE ATTACHMENT (design §6.5): fetched through the adapter on first use,
  *  then served from the account's 0600 LRU cache. NEVER EXECUTED and never
  *  rendered in our origin: `nosniff`, a `default-src 'none'; sandbox` CSP,
@@ -679,6 +751,32 @@ router.delete('/api/channels/:adapterId/:convId/messages/:msg/reactions/:key', a
  *  (png / jpeg / gif / webp; never svg) asked `?inline=1`, which is what the
  *  window's `img.src` thumbnails load. */
 const INLINE_IMAGE = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+// design 005 §2.B (B-fd1f): a proposal's attachment for the OWNER's card (its thumbnail / its download) — the read
+// route's headers: nosniff, a sandbox CSP, inline only for the four raster types the server SNIFFED (an HTML page or an
+// SVG named .png downloads), never cached. No agent route serves an outbox file. Declared BEFORE the read route below,
+// whose `/:adapterId/:convId/attachment/:id` would otherwise take `/outbox/<id>/attachment/<n>`. verify r1: an agent's / a job's
+// bearer is refused by name (C3, the owner views' agent_forbidden — sign-in off has no cookie gate); the engine re-hashes
+// the bytes against the record and a rewritten file is a 409, never served (C2).
+router.get('/api/channels/outbox/:id/attachment/:n', async (req, res) => {
+  try {
+    if (isAgentBearer(req)) return res.status(403).json({ error: 'the user\'s view — not an agent route', code: 'agent_forbidden' });
+    forHost(req);
+    const r = await engine().outboxAttachment(req.params.id, req.params.n);
+    res.setHeader('Cache-Control', 'no-store');
+    if (r && r.code === 'attachment-changed') return bad(res, 409, r.error, { code: r.code });
+    if (!r || !r.ok) return readerAnswer(res, r);
+    const mime = String(r.meta.mime || '').toLowerCase();
+    const raster = INLINE_IMAGE.has(mime);
+    const inline = raster && String(req.query.inline || '') === '1';
+    const name = String(r.meta.name || 'attachment');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+    res.setHeader('Content-Type', raster ? mime : 'application/octet-stream');
+    res.setHeader('Content-Disposition', contentDisposition(name, inline ? 'inline' : 'attachment') || (inline ? 'inline' : 'attachment')); // THE builder (lane raw-filename): both forms, a CR/LF or a quote never reaches the header
+    res.setHeader('Content-Length', String(r.data.length));
+    res.end(r.data);
+  } catch (e) { fail(res, e); }
+});
 router.get('/api/channels/:adapterId/:convId/attachment/:id', async (req, res) => {
   try {
     forHost(req);

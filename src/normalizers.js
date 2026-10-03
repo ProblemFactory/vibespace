@@ -1,5 +1,5 @@
 const { HARNESSES } = require('./harnesses');
-const { MessageManager } = require('./message-manager');
+const { MessageManager, PEER_RECORDED } = require('./message-manager');
 const { helperParentOf: helperParentFromTaskRecords } = require('./helper-ask.js'); // PURE (lane S1)
 const { cardBlock: browserCardBlock } = require('./browser-sessions.js'); // PURE (2026-09-27): the browser-session card's block
 const GC = require('./group-card.js'); // PURE (lane group-report-card): a group message's card — its key, its ring, its place in a rebuild
@@ -350,7 +350,9 @@ function feedBrowserCard(session, card) {
  *  rendered record answers for ONE card (a same-body repeat, delivered twice and recorded twice, keeps its two cards:
  *  the 2.362.2 lesson). A display-only card (no `recorded`: the takeover card, an auto-resume notice, a stash drain)
  *  is always replayed — the transcript never carries it. */
-const peerTextOf = (m) => { const c = m && m.content; return Array.isArray(c) ? c.map((b) => (b && typeof b.text === 'string' ? b.text : '')).join('\n') : String(c || ''); };
+// lane peer-card-sender (B-9fd6): a record whose card was re-drawn from a framed group report is matched by the words the
+// CLI RECORDED (message-manager PEER_RECORDED), never by its card text
+const peerTextOf = (m) => { if (m && typeof m[PEER_RECORDED] === 'string') return m[PEER_RECORDED]; const c = m && m.content; return Array.isArray(c) ? c.map((b) => (b && typeof b.text === 'string' ? b.text : '')).join('\n') : String(c || ''); };
 /** lane group-report-card: a WAKE's card after a restart. The CLI recorded the ladder's post (a peer user record the
  *  rebuild just rendered as a name-less "Message from another session" card holding the whole agent-facing report);
  *  the ring kept the card's facts and `recordedHead`. The record that holds that text is UPGRADED IN PLACE into the
@@ -359,7 +361,8 @@ const peerTextOf = (m) => { const c = m && m.content; return Array.isArray(c) ? 
 function upgradeWakeCards(mm, ring) {
   const wakes = GC.ringWakeCards(ring);
   if (!wakes.length || !mm || !Array.isArray(mm.messages)) return 0;
-  const pool = mm.messages.filter((m) => m && m.originKind === 'peer-message' && !m.peerGroup);
+  // a record already drawn from its OWN framed report (B-9fd6, the fallback) is upgraded too: the ring's card is the one it was live
+  const pool = mm.messages.filter((m) => m && m.originKind === 'peer-message' && (!m.peerGroup || typeof m[PEER_RECORDED] === 'string'));
   let n = 0;
   for (const c of wakes) {
     const i = pool.findIndex((m) => m && peerTextOf(m).includes(c.recordedHead));

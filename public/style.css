@@ -98,7 +98,7 @@ html, body {
    popover, toast, chooser or tab chip says none ITSELF, so one built inside a selectable region (a popover given a
    parent in the chat list) never inherits `text` and a stray selection never lands on its words. Unprefixed like the
    page rule: a -webkit- none inherited by a field breaks typing on older iOS. */
-[data-popover], .context-menu, #global-toasts, .global-toast, .overlap-switcher, .tab-item, .chat-msg-more { user-select: none; }
+[data-popover], .context-menu, #global-toasts, .global-toast, .overlap-switcher, .tab-item, .chat-msg-more, .chanmsg-tmore { user-select: none; }
 
 /* ── Shared popover base (position set by JS createPopover) ── */
 .status-filter-menu, .overlap-switcher, .groups-popover,
@@ -1035,8 +1035,6 @@ body.customize-mode #toolbar > .toolbar-center { flex-wrap: wrap; row-gap: 4px; 
 .window.window-active { border-color: var(--border-active); box-shadow: var(--shadow-active); }
 .window.window-active.highlight-subtle { border-color: var(--border); box-shadow: var(--shadow-window); }
 .window.window-active.highlight-strong { border-color: var(--accent); box-shadow: var(--shadow-active), 0 0 0 1px var(--accent); }
-.window.window-bounce { animation: win-bounce 0.3s ease-out; }
-@keyframes win-bounce { 0% { transform: scale(1); } 40% { transform: scale(1.015); } 100% { transform: scale(1); } }
 .window.dragging { opacity: 0.85; cursor: grabbing; }
 .window.dragging .window-content { pointer-events: none; }
 /* THE DRAG SHIELD (lane-drag-release, userW's inc-muq7uk0f-e59s): while ANY window is dragged or resized no window's
@@ -1604,6 +1602,8 @@ body.wm-dragging .window iframe, body.wm-dragging .window canvas, body.wm-draggi
 .dialog-body input:focus, .dialog-body select:focus, .dialog-body textarea:focus { outline: none; border-color: var(--accent); }
 .dialog-hint { font-size: 11px; color: var(--text-dim); line-height: 1.45; margin: 0; }
 .dialog-hint.hidden { display: none; } /* no global .hidden in this project */
+.dialog-list { margin: 0; padding-left: 18px; max-height: 40vh; overflow-y: auto; font-size: 12px; line-height: 1.5; color: var(--text); } /* B-a67c: what a confirm ends (a group close's tab names) */
+.dialog-list li { overflow-wrap: anywhere; }
 /* A CHECKBOX row inside a dialog body. `.dialog-body label.dialog-check-row`
    must out-rank `.dialog-body label` (0,1,1), whose column flex would stack
    the box above its text — same precedent as label.pool-mem-row. The hint is
@@ -1731,6 +1731,14 @@ body.wm-dragging .window iframe, body.wm-dragging .window canvas, body.wm-draggi
 }
 .settings-reset-btn:hover { color: var(--accent); }
 .settings-empty { padding: 24px; text-align: center; color: var(--text-dim); font-size: 12px; }
+/* settings tiers (B-df40 part 2): the header's advanced switch, the row chips, the "N advanced settings hidden · Show" line */
+.settings-header-actions { flex-wrap: wrap; justify-content: flex-end; }
+.settings-adv-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary); cursor: pointer; user-select: none; }
+.settings-row-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.settings-chip { font-size: 9px; padding: 1px 6px; border-radius: var(--radius); font-weight: 500; letter-spacing: 0.2px; border: 1px solid var(--border); color: var(--text-dim); }
+.settings-chip-unused { color: var(--text-secondary); background: var(--bg-hover); }
+.settings-adv-hidden { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding: 8px 0 2px; font-size: 11px; color: var(--text-dim); }
+.settings-adv-hidden .settings-link-btn { margin-top: 0; }
 
 /* Toggle switch */
 .settings-toggle { position: relative; display: inline-block; width: 36px; height: 20px; cursor: pointer; }
@@ -2505,6 +2513,25 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .desktop-launch .dialog-body { max-height: 80vh; overflow: auto; }
 .desktop-launch-intro { margin: 0; font-size: 12px; line-height: 1.5; color: var(--text); }
 .desktop-launch-avail { font-size: 11px; color: var(--text-secondary); }
+/* design 009 §B3: apps first — a head row (the machine picker + "Install an app…"), the setup lines in a muted FOOTER,
+   Layer 1's banner on top when an install was interrupted */
+.desktop-launch-head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin: 0 0 6px; }
+.desktop-launch-head > .desktop-launch-machines { flex: 1 1 auto; margin: 0; }
+.desktop-launch-install-app { margin-left: auto; width: auto; padding: 0 12px; min-height: 30px; }
+@media (max-width: 768px) { .desktop-launch-install-app { min-height: 36px; } } /* one tap on a phone */
+.desktop-launch-avail-head:empty { display: none; }
+.desktop-launch-foot { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+.desktop-launch-foot .desktop-launch-intro { font-size: 11px; color: var(--text-secondary); }
+.desktop-launch-foot .desktop-launch-sec h4 { margin: 0 0 4px; font-weight: 400; font-size: 11px; flex-wrap: wrap; }
+.desktop-launch-desk:empty { display: none; }
+.desktop-launch-banner { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin: 0 0 8px; padding: 6px 10px; font-size: 12px;
+  border: 1px solid var(--yellow); border-radius: var(--radius); background: var(--bg-input); }
+.desktop-launch-banner.is-empty { display: none; }
+.desktop-launch-banner-text { flex: 1 1 auto; min-width: 0; }
+.desktop-launch-banner-go { width: auto; padding: 0 10px; }
+.desktop-install-handoff { width: auto; padding: 0 12px; }
+.desktop-launch-card-scale:not(.has-default) { min-width: 26px; padding: 0 4px; display: inline-flex; align-items: center; justify-content: center; }
+.desktop-launch-card-scale svg { width: 14px; height: 14px; }
 .desktop-app-chip-host { color: var(--text-secondary); }
 .desktop-app-chip-host.is-offline { color: var(--yellow); border-color: var(--yellow); }
 /* lane C2: the launch dialog's machine picker — one pill per machine, greyed with its reason (never hidden) */
@@ -2565,6 +2592,10 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .app-plan-pkg-list { font-family: var(--font-mono, monospace); font-size: 11px; max-height: 120px; overflow: auto; overflow-wrap: anywhere; padding: 4px 0; }
 .desktop-launch-apps-note { margin: 0 0 6px; font-size: 11px; color: var(--text-secondary); }
 .app-sec-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+/* design 009 §C: the section's status line at its foot ("5 apps · 3 updates · [Update…]") + Layer 1's base-change row */
+.app-sec-foot { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.app-sec-rebase:empty { display: none; }
+.app-search-handoff { width: auto; padding: 0 12px; margin: 4px 0; }
 .app-sec-updates { flex: 1; font-size: 11px; color: var(--text-secondary); }
 .app-sec-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
 .app-sec-status { font-size: 12px; color: var(--text-secondary); }
@@ -2589,6 +2620,30 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .ut-action-app { width: auto; padding: 0 8px; font-size: 11px; font-weight: 600; border-radius: var(--radius-sm); } /* a WORDED button on the 24 px .ut-act icon box — its own width (the exit ask's rule) */
 .ut-app-answer .ut-action-app { height: 24px; min-width: 64px; }
 .ut-app-answer .ut-app-install { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+/* design 009: an app install's ONE card (src/lib/user-todos-row.js appCardHtml) — its lines, two buttons, progress, Details */
+.ut-app-card { margin-top: 3px; font-size: 12px; color: var(--text); }
+.ut-app-icon { float: right; width: 32px; height: 32px; margin: 0 0 4px 8px; object-fit: contain; }
+.ut-app-line { margin-top: 2px; overflow-wrap: anywhere; }
+.ut-app-from, .ut-app-gives, .ut-app-first { color: var(--text-dim); }
+.ut-app-note, .ut-app-changed { color: var(--yellow); }
+.ut-app-changed { font-weight: 600; }
+.ut-app-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; font-weight: 600; }
+.ut-app-progress[data-kind="failed"] { color: var(--red); }
+.ut-app-progress[data-kind="done"] { color: var(--green); }
+.ut-app-progress .ut-action-app { height: 24px; min-width: 64px; background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.ut-app-spin { width: 10px; height: 10px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: ut-app-spin 0.8s linear infinite; }
+@keyframes ut-app-spin { to { transform: rotate(360deg); } }
+.ut-app-details { margin-top: 4px; }
+.ut-app-dline { font-size: 11px; margin-top: 2px; overflow-wrap: anywhere; user-select: text; }
+.ut-app-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+.app-card-summary { margin-bottom: 8px; }
+.app-card-sum-title { font-size: 14px; font-weight: 600; }
+.app-card-sum-line { margin-top: 3px; overflow-wrap: anywhere; }
+.app-card-sum-from, .app-card-sum-gives, .app-card-sum-first { color: var(--text-dim); }
+.app-card-sum-note { color: var(--yellow); }
+.app-install-details { margin: 6px 0 8px; }
+.app-install-root { margin: 6px 0 4px; font-size: 12px; }
+.desktop-install-app .desktop-install-note:empty { display: none; }
 @media (max-width: 768px) {
   .ut-app-answer .ut-action-app { min-height: 36px; min-width: 72px; }
   .app-sec-row { flex-wrap: wrap; }
@@ -2609,13 +2664,15 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .dialog-body label.desktop-launch-check input { margin: 0; width: auto; flex: none; }
 /* The catalog: app CARDS in an auto-filling grid, one click launches. An
    unavailable app stays visible, dimmed, with its reason — never hidden. */
-.desktop-launch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+.desktop-launch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; } /* design 009 §B4: 200 px keeps "LibreOffice Impress" + its Install… whole in two lines */
 .desktop-launch-card { display: grid; grid-template-columns: 22px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 8px; row-gap: 1px;
   align-items: center; text-align: left; min-width: 0; padding: 8px 10px; background: var(--bg-input); border: 1px solid var(--border);
   border-radius: var(--radius); color: inherit; cursor: pointer; font: inherit; }
 .desktop-launch-card-icon { grid-row: 1 / span 2; display: inline-flex; width: 22px; height: 22px; align-items: center; justify-content: center; color: var(--accent); font-size: 18px; }
 .desktop-launch-card-icon svg { width: 18px !important; height: 18px !important; }
-.desktop-launch-card-label { font-size: 12px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* design 009 §B4: a name wraps to TWO lines (never "Li…"), broken anywhere only when one word is longer than the card */
+.desktop-launch-card-label { font-size: 12px; font-weight: 600; min-width: 0; overflow: hidden; white-space: normal; overflow-wrap: anywhere; line-height: 1.3;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 .desktop-launch-card-sub { font-size: 10px; color: var(--text-secondary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desktop-launch-card:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--accent); }
 .desktop-launch-card:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
@@ -4700,6 +4757,12 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-grain-line:hover { color: var(--text); }
 .chan-more-btn { display: block; margin: 4px auto 6px; font-size: 10px; color: var(--text-secondary); background: transparent; border: none; cursor: pointer; }
 .chan-more-btn:hover { color: var(--text); text-decoration: underline; }
+/* design 008 + owner 2026-10-03: a paged list's END — a sentinel while idle, a skeleton row while the next page is read */
+.chan-list-end { height: 2px; }
+.chan-list-end:focus-visible { outline: 2px solid var(--accent, #4a90e2); outline-offset: -2px; height: 12px; }
+.chan-list-end.chan-row-skeleton { height: 28px; margin: 4px 8px; border-radius: 6px; background: linear-gradient(90deg, rgba(127,127,127,.10) 25%, rgba(127,127,127,.22) 50%, rgba(127,127,127,.10) 75%); background-size: 200% 100%; animation: chan-skel 1.2s linear infinite; }
+@keyframes chan-skel { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .chan-list-end.chan-row-skeleton { animation: none; } }
 /* the search dialog */
 .chan-search-row { display: flex; gap: 6px; align-items: center; }
 .chan-search-row input { flex: 1; min-width: 0; }
@@ -4710,6 +4773,17 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-search-head b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chan-search-who { color: var(--text-dim); font-size: 10px; white-space: nowrap; }
 .chan-search-text { font-size: 11px; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 4.4em; overflow: hidden; }
+/* design 010 (B-c9be): the saved copy, then the vendor's own search — two sections, a chip, a skeleton, the scroll sentinel */
+.chan-search-sec + .chan-search-sec { margin-top: 6px; border-top: 1px solid var(--border); padding-top: 4px; }
+.chan-search-sec-head { font-size: 11px; font-weight: 600; color: var(--text-secondary); margin: 4px 7px 1px; }
+.chan-search-cov, .chan-search-vstatus { font-size: 10px; color: var(--text-dim); margin: 0 7px 2px; overflow-wrap: anywhere; }
+.chan-search-vstatus .chan-sec-verb { margin-left: 6px; }
+.chan-search-chip { font-size: 9px; padding: 0 5px; border-radius: 8px; border: 1px solid var(--border); color: var(--text-dim); white-space: nowrap; flex: none; }
+.chan-search-skel { height: 34px; margin: 2px 7px; border-radius: var(--radius-sm); background: var(--bg-hover); opacity: .6; }
+.chan-search-sentinel { height: 1px; }
+.chan-around .chan-around-list { max-height: 60vh; overflow: auto; display: flex; flex-direction: column; }
+.chan-around .chan-around-open { margin-top: 8px; align-self: flex-start; }
+.chanmsg.chanmsg-found { background: var(--bg-hover); border-radius: var(--radius-sm); }
 /* the narrow rail (the 200px sidebar = 143px of content): the two needs-you
    badges collapse to ONE accent pill carrying their sum, the breakdown in its
    tooltip — the account roster's ≥/< 340px pattern, at this panel's own
@@ -4934,7 +5008,6 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chanmsg-self .chanmsg-head b { color: var(--attn-text); }
 .chanmsg-syn { font-size: 9px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 999px; padding: 0 5px; flex-shrink: 0; }
 .chanmsg-body { font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; -webkit-user-select: text; user-select: text; cursor: text; } /* B-ff04: a message's words are selectable + copyable (the app's root is user-select:none) */
-@media (hover: none) and (pointer: coarse) { .chanmsg-body { -webkit-user-select: none; user-select: none; cursor: default; } } /* the 2.369.202 integration: on a touch-first device a long press on a message is its menu (Copy text inside — B-ff04's touch door, reaction-hover's); words selectable there turn that press into a selection (press-select) and leave the phone no door */
 .chan-at { cursor: pointer; } /* B-ff04: an agent-group mention chip — the member's name by id; a click opens its session */
 /* lane group-pending (2026-10-01): WHERE A GROUP MESSAGE STANDS with its recipients — one dim line under every
    message ("Waiting for beta's next turn" / "Read by beta" / "1 waiting · 1 read"), keyed and patched in place;
@@ -5041,6 +5114,20 @@ a.chanmsg-file:hover .chanmsg-att-dl { color: var(--accent); }
 .chanwin-rx-note[hidden] { display: none; }
 .chanwin-rx-note-x { margin-left: auto; width: 20px; height: 20px; }
 .chanmsg-placeline { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
+/* lane message-facts (B-f066): a message's FACTS — the dim summary line (a button), its chips, the details list */
+.chanmsg-facts { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.chanmsg-facts-sum, .chanmsg-facts-ask { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-width: 0; font: inherit; font-size: 11px; line-height: 1.5; color: var(--text-dim); background: transparent; border: none; padding: 0; cursor: pointer; text-align: left; }
+.chanmsg-facts-sum:hover, .chanmsg-facts-ask:hover { color: var(--accent); }
+.chanmsg-facts-ask { border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; font-size: 10px; }
+.chanmsg-facts-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.chanmsg-facts-chips { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; min-width: 0; }
+.chanmsg-fact-chip { font-size: 10px; color: var(--text-secondary); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.chanmsg-facts-details { flex-basis: 100%; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px; margin: 2px 0 4px; font-size: 11px; line-height: 1.5; -webkit-user-select: text; user-select: text; }
+.chanmsg-fact-key { color: var(--text-dim); margin: 0; }
+.chanmsg-fact-val { color: var(--text-secondary); margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.chanmsg-fact-more { font: inherit; font-size: 10px; color: var(--accent); background: transparent; border: 1px solid var(--border); border-radius: 999px; padding: 0 5px; margin-left: 4px; cursor: pointer; }
+.chanmsg-fact-note, .chanmsg-facts-none { color: var(--text-dim); font-size: 11px; margin-left: 4px; }
+@media (max-width: 768px) { .chanmsg-facts-sum, .chanmsg-facts-ask, .chanmsg-fact-more { min-height: 36px; } }
 .chanmsg-replyq { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-width: 0; font: inherit; font-size: 11px; line-height: 1.5; color: var(--text-secondary); background: transparent; border: none; border-left: 2px solid var(--border); border-radius: 0; padding: 0 6px; cursor: pointer; text-align: left; }
 .chanmsg-replyq:hover { color: var(--accent); border-left-color: var(--accent); }
 .chanmsg-replyq-who { font-weight: 600; flex-shrink: 0; }
@@ -5118,6 +5205,18 @@ a.chanmsg-file:hover .chanmsg-att-dl { color: var(--accent); }
 /* a TOUCH device (the phone, a tablet's finger) — never "no hover" alone: headless Chrome and a pen report hover: none
    with a fine pointer, and there the bar is still the only door (the product's ⋯ rule since verify r2) */
 @media (hover: none) and (pointer: coarse) { .chanmsg-bar { display: none; } }
+/* THE TOUCH … (lane channel-touch-menu, 2.369.203 — the chat's precedent, lane mobile-select): there a long press on the
+   words is the platform's SELECTION (press-select.js), so the message's menu (the bar's actions + Copy text) opens from
+   a … button — created only on a touch-first device, drawn only under the same query, in the bar's corner. The row keeps
+   a 44 px right gutter, so the button covers no words; its height never passes the row's (a one-line continuation's
+   button never reaches into the next row's). */
+.chanmsg-tmore { display: none; }
+@media (hover: none) and (pointer: coarse) {
+  .chanmsg:has(> .chanmsg-tmore) { padding-right: 44px; }
+  .chanmsg-tmore { position: absolute; top: 0; right: 0; width: 44px; height: 44px; max-height: 100%; display: flex; align-items: center; justify-content: center; padding: 0; border: none; border-radius: var(--radius-sm); background: transparent; color: var(--text-dim); cursor: pointer; -webkit-touch-callout: none; }
+  .chanmsg-tmore svg { width: 16px; height: 16px; }
+  .chanmsg-tmore:active { background: var(--bg-hover); color: var(--text); }
+}
 /* the QUOTE a reply answers, at the top of the composer box (the bar's Quote; ✕ takes it back) */
 .chanwin-quote { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 6px 8px 0 10px; font-size: 11px; color: var(--text-secondary); }
 .chanwin-quote-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -5188,6 +5287,12 @@ a.chanmsg-file:hover .chanmsg-att-dl { color: var(--accent); }
 .chan-prop-reason { font-size: 11px; color: var(--text-secondary); line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
 .chan-prop-reason.chan-warn { color: var(--warn-text); }
 .chan-prop-foot { font-size: 10px; color: var(--text-dim); line-height: 1.4; overflow-wrap: anywhere; }
+/* design 005 §2.B: an agent's attachments on its approval card */
+.chan-prop-files { display: flex; flex-direction: column; gap: 4px; margin: 4px 0; }
+.chan-prop-file { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; font-size: 11px; }
+.chan-prop-file-thumb { max-width: 96px; max-height: 72px; border-radius: var(--radius-sm); object-fit: contain; background: var(--bg-input); }
+.chan-prop-file-name { overflow-wrap: anywhere; min-width: 0; }
+.chan-prop-file-meta, .chan-prop-file-note { color: var(--text-secondary); font-size: 10px; overflow-wrap: anywhere; }
 .chan-prop-honesty-line { font: inherit; font-size: 10px; color: var(--text-secondary); background: color-mix(in srgb, var(--accent) 10%, transparent); border-radius: var(--radius-sm); padding: 1px 6px; }
 .chan-prop-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; margin-top: 2px; }
 .chan-prop-edit { width: 100%; box-sizing: border-box; min-height: 64px; font: inherit; font-size: 12px; line-height: 1.4; padding: 6px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-input); color: var(--text); resize: vertical; }
@@ -6184,6 +6289,26 @@ label.chan-cap-row { cursor: default; }
 .design-comment-input { width: 100%; resize: vertical; min-height: 64px; padding: 6px 8px; font: inherit; font-size: 12px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .design-comment-input:focus { outline: none; border-color: var(--accent); }
 .design-composer-foot { display: flex; justify-content: flex-end; gap: 8px; }
+/* the changes strip (lane design-changes): the pending chips + "N changes · Send all", at the stage's TOP (the status chip
+   owns the bottom); the composer's Style row (four nudges previewed in the frame) */
+.design-changes { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 3; display: flex; align-items: center; gap: 8px; max-width: min(760px, 94%); padding: 4px 4px 4px 12px; border-radius: 999px; background: var(--bg-dialog); border: 1px solid var(--border); box-shadow: 0 6px 18px rgba(0,0,0,0.3); font-size: 11px; color: var(--text); }
+.design-changes.design-changes-empty { padding: 5px 12px; color: var(--text-secondary); }
+.design-changes-count { flex: none; font-weight: 600; white-space: nowrap; }
+.design-changes-empty .design-changes-count { flex: 1 1 auto; font-weight: 400; white-space: normal; }
+.design-changes-chips { display: flex; gap: 6px; min-width: 0; overflow-x: auto; scrollbar-width: thin; }
+.design-change-chip { flex: none; display: inline-flex; align-items: center; gap: 2px; max-width: 280px; padding: 2px 2px 2px 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text-secondary); }
+.design-change-chip.design-change-text { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.design-change-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.design-change-x { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 999px; border: none; background: transparent; color: var(--text-secondary); cursor: pointer; }
+.design-change-x:hover { color: var(--accent); background: var(--hover-overlay); }
+.design-change-x svg { width: 12px; height: 12px; }
+.design-changes-send { flex: none; padding: 4px 12px; border-radius: 999px; font-size: 11px; }
+.design-style-toggle { align-self: flex-start; padding: 2px 8px; font: inherit; font-size: 11px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-input); color: var(--text-secondary); cursor: pointer; }
+.design-style-toggle[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+.design-style-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }
+.design-style-field { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 11px; color: var(--text-secondary); }
+.design-style-field input[type=color] { width: 36px; height: 22px; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); }
+.design-style-field input[type=number] { width: 64px; height: 22px; padding: 0 4px; font: inherit; font-size: 11px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .design-print-frame { position: fixed; left: -100000px; top: 0; border: 0; visibility: hidden; pointer-events: none; }
 .design-publish-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; font-size: 12px; }
 .design-publish-public { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12px; }
@@ -6212,4 +6337,125 @@ label.chan-cap-row { cursor: default; }
   .design-composer-sheet .design-composer-foot button { min-height: 44px; min-width: 88px; }
   .design-chip { bottom: 10px; }
   .design-chip-x { width: 44px; height: 44px; }
+  .design-changes { left: 6px; right: 6px; transform: none; max-width: none; border-radius: var(--radius); flex-wrap: wrap; }
+  .design-changes-chips { flex: 1 1 100%; order: 3; }
+  .design-change-chip { min-height: 44px; }
+  .design-change-x { width: 44px; height: 44px; }
+  .design-changes-send { min-height: 44px; margin-left: auto; }
+  .design-style-toggle { min-height: 44px; }
+  .design-style-field input[type=color], .design-style-field input[type=number] { min-height: 44px; }
+}
+/* lane design-ask: the questions sheet over the canvas (a bottom sheet on the phone) + its folded pill */
+.design-ask { position: absolute; inset: 0; z-index: 5; display: flex; align-items: flex-start; justify-content: center; padding: 24px 16px; overflow: auto; background: color-mix(in srgb, var(--bg-workspace) 72%, transparent); }
+.design-ask-card { width: min(560px, 100%); display: flex; flex-direction: column; gap: 14px; padding: 16px; border-radius: var(--radius); background: var(--bg-dialog); border: 1px solid var(--border); box-shadow: 0 8px 24px rgba(0,0,0,0.35); color: var(--text); }
+.design-ask-title { font-size: 14px; font-weight: 600; }
+.design-ask-sub { margin-top: 2px; font-size: 12px; color: var(--text-secondary); }
+.design-ask-list { display: flex; flex-direction: column; gap: 14px; }
+.design-ask-item { display: flex; flex-direction: column; gap: 6px; }
+.design-ask-q { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.design-ask-kind { font-size: 11px; font-weight: 400; color: var(--text-dim); }
+.design-ask-help { font-size: 11px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.design-ask-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.design-ask-pill { max-width: 100%; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text); font: inherit; font-size: 12px; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.design-ask-pill:hover { border-color: var(--accent); }
+.design-ask-pill[aria-pressed="true"] { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+.design-ask-pill.design-ask-decide, .design-ask-pill.design-ask-other-pill { color: var(--text-secondary); border-style: dashed; }
+.design-ask-pill.design-ask-decide[aria-pressed="true"], .design-ask-pill.design-ask-other-pill[aria-pressed="true"] { color: var(--accent); border-style: solid; }
+.design-ask-other { width: 100%; font-size: 12px; }
+.design-ask-error { font-size: 12px; color: var(--red, #e55); overflow-wrap: anywhere; }
+.design-ask-error.design-ask-note { color: var(--accent); }
+.design-ask-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.design-ask-skip { margin-right: auto; padding: 4px 0; border: none; background: none; color: var(--text-secondary); font: inherit; font-size: 12px; text-decoration: underline; cursor: pointer; }
+.design-ask-skip:hover { color: var(--accent); }
+.design-ask-reopen { position: absolute; top: calc(10px + var(--design-top-dock, 0px)); right: 10px; z-index: 4; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--accent); background: var(--bg-dialog); color: var(--accent); font: inherit; font-size: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.25); cursor: pointer; }
+@media (max-width: 768px) {
+  .design-ask { align-items: flex-end; padding: 0; }
+  .design-ask-card { width: 100%; max-height: 88%; overflow: auto; border-radius: var(--radius) var(--radius) 0 0; border-bottom: none; }
+  .design-ask-pill { min-height: 44px; padding: 6px 14px; }
+  .design-ask-foot button, .design-ask-reopen { min-height: 44px; }
+  .design-ask-foot .design-ask-skip { width: 100%; text-align: left; }
+}
+/* lane design-tweaks: the Tweaks panel — a side panel on the canvas's LEFT under the top dock (the questions' pill owns the
+   top-right, the status chip the bottom), a bottom sheet on the phone */
+.design-tweaks { position: absolute; left: 10px; top: calc(10px + var(--design-top-dock, 0px)); z-index: 4; width: 264px; max-width: calc(100% - 20px); max-height: calc(100% - 72px - var(--design-top-dock, 0px)); display: flex; flex-direction: column; border-radius: var(--radius); background: var(--bg-dialog); border: 1px solid var(--border); box-shadow: 0 8px 24px rgba(0,0,0,0.35); color: var(--text); font-size: 12px; }
+.design-tweaks-head { display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 12px; border-bottom: 1px solid var(--border); }
+.design-tweaks-title { flex: 1 1 auto; font-size: 13px; font-weight: 600; }
+.design-tweaks-reset { padding: 2px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-input); color: var(--text-secondary); font: inherit; font-size: 11px; cursor: pointer; }
+.design-tweaks-reset:hover { border-color: var(--accent); color: var(--accent); }
+.design-tweaks-reset.design-tweaks-reset-idle { color: var(--text-dim); }
+.design-tweaks-x { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: none; border-radius: 999px; background: transparent; color: var(--text-secondary); cursor: pointer; }
+.design-tweaks-x:hover { color: var(--accent); background: var(--hover-overlay); }
+.design-tweaks-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
+.design-tweaks-list { display: flex; flex-direction: column; gap: 12px; }
+.design-tweak { display: flex; flex-direction: column; gap: 5px; }
+.design-tweak-label { color: var(--text-secondary); font-size: 11px; overflow-wrap: anywhere; }
+.design-tweak-ctl { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.design-tweak-ctl input[type=range] { flex: 1 1 auto; min-width: 0; margin: 0; accent-color: var(--accent); }
+.design-tweak-ctl input[type=color] { flex: none; width: 36px; height: 24px; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); cursor: pointer; }
+.design-tweak-value { flex: none; min-width: 48px; color: var(--text); font-family: var(--font-mono, monospace); font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }
+.design-tweak-color .design-tweak-value, .design-tweak-toggle .design-tweak-value { text-align: left; }
+.design-tweak-toggle .design-tweak-value { color: var(--text-secondary); font-family: inherit; }
+.design-tweak-pills { display: flex; flex-wrap: wrap; gap: 4px; }
+.design-tweak-pill { padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text-secondary); font: inherit; font-size: 11px; cursor: pointer; }
+.design-tweak-pill:hover { border-color: var(--accent); }
+.design-tweak-pill[aria-checked="true"] { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+.design-tweak-select { flex: 1 1 auto; min-width: 0; height: 26px; padding: 0 6px; font: inherit; font-size: 12px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.design-tweak-switch { -webkit-appearance: none; appearance: none; position: relative; flex: none; width: 34px; height: 20px; margin: 0; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-input); cursor: pointer; }
+.design-tweak-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 999px; background: var(--text-secondary); transition: transform .15s; }
+.design-tweak-switch:checked { border-color: var(--accent); background: var(--accent-dim); }
+.design-tweak-switch:checked::after { transform: translateX(14px); background: var(--accent); }
+.design-tweak-switch:focus-visible, .design-tweak-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.design-tweaks-note { color: var(--text-secondary); font-size: 11px; overflow-wrap: anywhere; }
+.design-tweaks-refused { color: var(--red, #e55); }
+.design-tweaks-foot { padding: 6px 12px 8px; border-top: 1px solid var(--border); color: var(--text-dim); font-size: 10px; }
+.design-tweaks-foot:empty { display: none; }
+.design-tweaks-empty { display: flex; flex-direction: column; gap: 8px; }
+.design-tweaks-empty-head { font-size: 12px; font-weight: 600; }
+.design-tweaks-empty-sub { color: var(--text-secondary); font-size: 11px; }
+.design-tweaks-ask { width: 100%; height: 28px; padding: 0 8px; font: inherit; font-size: 12px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.design-tweaks-ask:focus { outline: none; border-color: var(--accent); }
+.design-tweaks-request { align-self: flex-end; }
+@media (max-width: 768px) {
+  .design-tweaks { left: 0; right: 0; top: auto; bottom: 0; width: auto; max-width: none; max-height: 55%; border-radius: var(--radius) var(--radius) 0 0; border-bottom: none; }
+  .design-tweaks-foot { display: none; }
+  .design-tweak-ctl { min-height: 44px; }
+  .design-tweaks-reset, .design-tweak-pill, .design-tweak-select, .design-tweaks-ask, .design-tweaks-request { min-height: 44px; }
+  .design-tweaks-x { width: 44px; height: 44px; }
+  .design-tweak-ctl input[type=color] { width: 44px; height: 44px; }
+  .design-tweak-ctl input[type=range] { height: 44px; }
+  .design-tweak-switch { width: 52px; height: 32px; }
+  .design-tweak-switch::after { width: 26px; height: 26px; }
+  .design-tweak-switch:checked::after { transform: translateX(20px); }
+}
+/* the Design window's home (lane design-systems-home): every design + design system as keyed rows; the chip's system select */
+.design-home-bar { gap: 8px; }
+.design-bar > .design-home-find { flex: 1 1 auto; min-width: 120px; max-width: 420px; height: 26px; padding: 0 8px; font: inherit; font-size: 12px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.design-bar > .design-home-find:focus { outline: none; border-color: var(--accent); }
+.design-home-list { flex: 1; min-height: 0; overflow: auto; padding: 6px 10px 12px; }
+.design-home-head { margin: 10px 2px 4px; font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
+.design-home-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid transparent; cursor: default; }
+.design-home-row:hover, .design-home-row:focus-visible { background: var(--hover-overlay); border-color: var(--border); outline: none; }
+.design-home-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.design-home-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.design-home-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 13px; font-weight: 500; }
+.design-home-badge { flex: none; padding: 1px 6px; border-radius: 999px; font-size: 10px; color: var(--accent); border: 1px solid var(--accent); }
+.design-home-meta { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; }
+.design-home-meta > span { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.design-home-meta > .design-home-dot { flex: none; color: var(--text-dim); }
+.design-home-dir { font-family: var(--font-mono, monospace); }
+.design-home-link { flex: none; color: var(--accent); text-decoration: none; }
+.design-home-link:hover { text-decoration: underline; }
+.design-home-open, .design-home-more { flex: none; display: inline-flex; align-items: center; justify-content: center; height: 26px; padding: 0 10px; font: inherit; font-size: 12px; background: var(--bg-input); color: var(--text-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
+.design-home-more { width: 28px; padding: 0; }
+.design-home-open:hover, .design-home-more:hover { border-color: var(--accent); color: var(--accent); }
+.design-home-rename { flex: 1 1 auto; min-width: 0; height: 24px; padding: 0 6px; font: inherit; font-size: 13px; background: var(--bg-input); color: var(--text); border: 1px solid var(--accent); border-radius: var(--radius-sm); }
+.design-home-empty { padding: 32px 12px; text-align: center; color: var(--text-secondary); }
+.chat-design-system-select { max-width: 160px; font: inherit; font-size: 12px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.chat-design-all { align-self: flex-start; padding: 2px 0; border: none; background: none; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; }
+.chat-design-all:hover { text-decoration: underline; }
+@media (max-width: 768px) {
+  .design-home-row { padding: 10px 8px; }
+  .design-home-open, .design-home-more { min-height: 44px; min-width: 44px; }
+  .design-bar > .design-home-find { height: 36px; font-size: 16px; }
+  .chat-design-all { min-height: 44px; }
 }

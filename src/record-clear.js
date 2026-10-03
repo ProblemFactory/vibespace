@@ -56,7 +56,7 @@ const clearedWords = (lang) => CLEARED_WORDS[lang] || CLEARED_WORDS.en;
 // A path is `a`, `a.b` (a nested object) or `a[].b` (every element of an array).
 const SHAPES = Object.freeze({
   activity: Object.freeze([['note', 'text'], ['detail', 'drop']]),
-  todo: Object.freeze([['text', 'text'], ['detail', 'drop'], ['i18n', 'drop'], ['options', 'drop'], ['reply', 'drop']]),
+  todo: Object.freeze([['text', 'text'], ['detail', 'drop'], ['i18n', 'drop'], ['options', 'drop'], ['reply', 'drop'], ['card', 'drop']]), // card: design 009's install card (an app's name, the agent's why)
   // a history entry: the reason (the one-liner) + its detail; a `vcs` event row's branch name
   status: Object.freeze([['reason', 'text'], ['detail', 'drop'], ['branch', 'drop']]),
   // a job: its name + note + context brief + progress line + the notify action's text, and what its

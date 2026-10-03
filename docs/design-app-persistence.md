@@ -67,3 +67,9 @@ D1 the persistent tier is the app system (chroot), not an overlay cache · D2 ev
 
 ## §8 Risks, stated
 Two userlands confuse people (terminal `sudo apt` is ephemeral, `vibespace-app` persists; an IDE in the app system sees its own toolchain) — the tripwire + Adopt + the first line of the agent manual. Patch ownership moves to the user (§3). The app system shares the PVC with `data/`. Layer 2's boot latency exists only on capability-less pods and only after listen. The kernel is shared (no DKMS/modules) and there is no GPU (GL = llvmpipe).
+
+---
+
+## §9 As built
+- **The pin of an approved third-party source (2.369.203, verify-r1 H1):** `/etc/apt/preferences.d/vibespace-<id>.pref` per source (root's copy in `~/.vibespace/apps/sys/sources/<id>.pref`): everything from the source's host (`Pin: origin "<host>"`, no port) at priority 1 — taken only when no version of that package is installed — and the packages the user installed FROM it (attributed before apt runs with `--print-uris`, kept in `sys/entries/<id>.pin`) at 500. Rewritten by every root run, restored before apt in both replay rungs; the manifest's `sources[].pin.packages` mirrors it; the Refresh card names each update's origin. Measured in Debian 12 containers against a signed https fixture source (details in the Chinese file §9). Every root run re-pins before its first apt-get; source mode writes the pin before the source goes live; a source on a host the machine's own apt sources use is refused (`shared-host`), because `Pin: origin` matches a host and would pin the machine's own archive too.
+- **One read of a .deb / key (H2)** and **a boot replay waits out a busy slot (H3)** — see the Chinese file §9.

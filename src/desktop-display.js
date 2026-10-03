@@ -661,7 +661,8 @@ async function startWindowManager({ bins, env, logFd = 'ignore' }) {
 /** Spawn the APPLICATION itself, detached, stdout/err to the app log.
  *  Resolves the child once SPAWNED; rejects a spawn failure by name. */
 function startApp({ exec, args = [], cwd, env, logFd = 'ignore' }) {
-  return spawnDetached(exec, args, { env, cwd, logFd, name: path.basename(String(exec)) }).spawned;
+  // design 009 §B8: an app with no cwd of its own starts in the user's HOME — never in the server's checkout
+  return spawnDetached(exec, args, { env, cwd: cwd || (env && env.HOME) || os.homedir(), logFd, name: path.basename(String(exec)) }).spawned;
 }
 
 /**

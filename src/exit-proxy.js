@@ -556,7 +556,7 @@ class ExitProxyManager {
     const again = E.exitVerdict(this.access(h.id), 'run', this.ctxFor(session, sessionId));
     if (!again.ok) { card({ outcome: 'not_granted', cmd }); throw this._refused(session, sessionId, { code: again.code, grant: 'run', h, has: j.has, cmd }); }
     const t0 = this.now();
-    let r, interpreter = XS.POSIX_SHELL, platform = null;
+    let r, interpreter = XS.POSIX_SHELL, platform = null, outdated = null;
     try {
       const dm = await this.hosts.deviceBounded(h.id, 8000);
       // lane-exit-run-output E1: THE SHELL IS THE DEVICE'S FACT. A daemon that advertises `run-shell` is handed the LINE
@@ -568,10 +568,15 @@ class ExitProxyManager {
       platform = typeof info.platform === 'string' ? info.platform.replace(/[^a-z0-9]/gi, '').slice(0, 16) || null : null; // verify r1 F5a: a daemon's word, bounded to a platform name's shape
       const useShell = caps.includes(XS.RUN_SHELL_CAP);
       const opts = { timeoutMs: E.EXIT_RUN_TIMEOUT_MS, waitMs: E.EXIT_RUN_TIMEOUT_MS + 10000 };
-      r = useShell ? await dm.runShell(cmd, opts) : await dm.runCmd(XS.POSIX_SHELL, ['-lc', cmd], opts);
-      // verify r1 F5a: the reply's `interpreter` is read through the CLOSED set — a daemon's raw string (`<system-reminder`,
-      // an RLO) reached the agent's sentence, the card, the audit and the history as itself; off the set ⇒ what the hub asked for
-      interpreter = XS.knownInterpreter(r && r.interpreter) || (useShell ? XS.interpreterOf(platform) : XS.POSIX_SHELL);
+      // lane device-upgrade-stuck: a Windows agent WITHOUT run-shell can run no line (no `sh` there) — the hub KNOWS it from
+      // the hello and refuses by name below; pre-fix it sent `sh -lc` anyway and the card read "exit 1 · 0.0 s · no output"
+      if (!XS.canRunLine(platform, caps)) outdated = { agentVersion: E.agentVersionOf(info.daemonVersion) };
+      else {
+        r = useShell ? await dm.runShell(cmd, opts) : await dm.runCmd(XS.POSIX_SHELL, ['-lc', cmd], opts);
+        // verify r1 F5a: the reply's `interpreter` is read through the CLOSED set — a daemon's raw string (`<system-reminder`,
+        // an RLO) reached the agent's sentence, the card, the audit and the history as itself; off the set ⇒ what the hub asked for
+        interpreter = XS.knownInterpreter(r && r.interpreter) || (useShell ? XS.interpreterOf(platform) : XS.POSIX_SHELL);
+      }
     } catch (e) {
       const offline = /offline|not dialed in|unreachable|timed out connecting|ECONNREFUSED/i.test(String(e && e.message));
       const outcome = offline ? 'offline' : 'run_failed';
@@ -580,6 +585,15 @@ class ExitProxyManager {
       throw this._refused(session, sessionId, { code: offline ? 'offline' : 'run_failed', grant: 'run', h, cmd, error: e && e.message });
     }
     const ms = this.now() - t0;
+    if (outdated) {
+      const { agentVersion } = outdated, by0 = { key: this.keyOf(session, sessionId), name: (session && session.name) || '' };
+      try { this.hosts.setLastRun?.(h.id, E.runRecord({ cmd, code: null, ms, by: by0, at: t0, outcome: 'agent_outdated', agentVersion })); } catch (e) { this.log(`last run not recorded: ${e.message}`); }
+      this.audit({ hostId: h.id, machine, sessionId, sessionKey: by0.key, name: session && session.name || null, grant: 'run', verb: 'run', cmd, code: null, ms, ok: false, refusal: 'device_agent_outdated', ...(platform ? { platform } : {}), ...(agentVersion ? { agentVersion } : {}), via: again.via, asked });
+      this.log(`${machine}: did not run "${cmd.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 80)}" for ${(session && session.name) || sessionId} — agent ${agentVersion || '?'} on ${platform} has no run-shell (needs ${XS.RUN_SHELL_SINCE}+)`);
+      card({ outcome: 'agent_outdated', cmd, agentVersion });
+      try { this.bcastAll({ type: 'hosts-updated' }); } catch { }
+      throw namedError('device_agent_outdated', E.refusalText('device_agent_outdated', { machine, cmd, agentVersion }), { grant: 'run', platform, agentVersion, needVersion: XS.RUN_SHELL_SINCE });
+    }
     // a revoke DURING the daemon's run cannot stop the command (no cancel op; ≤ 30 s) — it is recorded as such
     const revokedDuringRun = !E.exitVerdict(this.access(h.id), 'run', this.ctxFor(session, sessionId)).ok;
     const by = { key: this.keyOf(session, sessionId), name: (session && session.name) || '' };

@@ -536,9 +536,9 @@ console.log('§3 the view under the fake DOM (xpra-view.js): both clipboard bran
   await A.view.connect();
   const wk = await until(() => FakeWorker.instances[FakeWorker.instances.length - 1]);
   await until(() => wk.sent('hello').length);
-  ok(same(wk.sent('hello')[0][1].display.desktop_size, [800, 500]) && A.view.status.textContent === 'Connecting…', 'connect ⇒ the hello carries the PANE size; the chip says Connecting…');
+  ok(same(wk.sent('hello')[0][1].display.desktop_size, [800, 500]) && A.view.status.textContent === 'Starting…', 'connect ⇒ the hello carries the PANE size; before the first window the chip says the ONE starting line (design 009 §B8: "Starting…", counting seconds)');
   wk.feed(['hello', { 'packet-types': ['keyboard-config', 'display-configure'] }]);
-  ok(A.view.status.textContent === 'Waiting for the application window…' && A.statuses.includes('connected') && pane.children[1].focused >= 1, 'the server hello ⇒ "Waiting for the application window…", the IME textarea takes focus');
+  ok(A.view.status.textContent === 'Starting…' && A.statuses.includes('connected') && pane.children[1].focused >= 1, 'the server hello ⇒ still the starting line until a window maps (design 009 §B8), the IME textarea takes focus');
   wk.feed(['new-window', 1, 0, 0, 300, 200, { title: 'xterm', 'size-constraints': { increment: [8, 16], 'base-size': [0, 0] } }]);
   const winEl = A.view.stage.children[0];
   ok(winEl && winEl.className === 'xpra-win xpra-win-main' && winEl.style.left === '0px' && winEl.style.width === '800px' && winEl.style.height === '496px' && winEl.children[0].width === 800 && winEl.children[0].height === 496 && A.view.status.textContent === 'Connected', 'a window ⇒ one canvas element sized to the FITTED geometry (800×496 on 8×16 cells), the chip says Connected');

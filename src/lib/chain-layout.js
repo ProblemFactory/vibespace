@@ -641,6 +641,28 @@ function tabDragMode({ mode = null, dx = 0, dy = 0, y = null, band = null, reord
   return ax > ay && reorderable ? 'reorder' : 'detach';
 }
 
+// ── WHICH CLOSE ASKS FIRST (B-a67c, 2026-10-02) ──
+// The owner: "当窗口是tabbed或者side by side的时候，注意点击整体的关闭要有个警告提示确认要关闭x个标签页吗，避免想关闭tab但点错".
+// A tab group's frame carries two kinds of ✕ a few pixels apart: each tab's own (it ends that tab) and the frame's (it
+// ends the group). Before B-a67c the frame's ✕ — and the taskbar's "Close group" — ended only tabs[0], the host, which
+// is usually NOT the tab on show. Now every group door ends every member, and asks first in words that name each tab.
+// A close of ONE window never asks; a programmatic close (a layout replay, a session ended elsewhere, a desktop's
+// record, the Stage) never asks — nobody is there to answer.
+/** `scope` = what the door ends: 'group' (every member of the window's chain — the frame's ✕, the frame's own menu
+ *  Close, the taskbar group's "Close group") | 'tab' (one window — a tab's ✕ or menu, Ctrl+\ x, the phone's ✕);
+ *  `members` = how many windows the close would end; `user` = a person's act. → true when the door must ask. */
+function closeAsks({ scope = 'tab', members = 1, user = false } = {}) {
+  return user === true && scope === 'group' && Number(members) >= 2;
+}
+/** What a group close names: the chain's members in STRIP order (a split's left half, then its right — the order the
+ *  tab strip draws) with the name each tab shows. `titleOf(id)` → the tab's label (a throw or a blank ⇒ the id);
+ *  `exists(id)` (optional) drops an id with no window. → `{ ids, names }` (new arrays). */
+function groupCloseList(chain, titleOf, exists = null) {
+  const ids = visualTabOrder(chain).filter((id) => { try { return typeof exists !== 'function' || !!exists(id); } catch { return false; } });
+  const names = ids.map((id) => { try { const n = typeof titleOf === 'function' ? titleOf(id) : null; return n == null || String(n).trim() === '' ? String(id) : String(n); } catch { return String(id); } });
+  return { ids, names };
+}
+
 // ── the ownership badge (§4.6) ──
 // The colour is derived PER SESSION and deliberately NOT the task-group colour
 // (a session in no group has none to draw; two sessions in one group share
@@ -696,5 +718,7 @@ module.exports = {
   revealTab, pressTab,
   // inc-muly2izg-cks3: a reorder that leaves the strip's band tears the tab off (the tab drag's one classification)
   TAB_DRAG_DECIDE_PX, TAB_TEAR_PX, tabDragMode,
+  // B-a67c: which close asks first (a whole group, by a person) and what it names
+  closeAsks, groupCloseList,
   ownerSeq, ownerColor, ownerBadge, ownerDots,
 };

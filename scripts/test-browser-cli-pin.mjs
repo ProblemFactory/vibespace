@@ -542,7 +542,7 @@ console.log('— ⑥ controls');
   ok(fw.install.running && fw.pinned.installed === true && fw.pinned.path.endsWith('agent-browser.js') && fs.existsSync(path.join(Dw, 'browser-tools', 'cli-pin.json')), 'control (c): …the half-written package\'s LAUNCHER was pinned while npm still ran (the pin file written) — exactly what ②\'s mid-install leg catches', { install: fw.install, pinned: fw.pinned });
   await waitFor(async () => !(await kw.cliFacts()).install.running, 6000);
   // verify r1 (F3): a keeper whose re-attach knows the CLI install only ⇒ a restart mid-CloakBrowser-install frees the slot
-  const cliOnly = ks.replace("    if (!m || !['cli', 'cloak'].includes(m.kind) || !Number.isInteger(m.pid))", "    if (!m || m.kind !== 'cli' || !Number.isInteger(m.pid))");
+  const cliOnly = ks.replace("    if (!m || !['cli', 'cloak', 'chrome-build'].includes(m.kind) || (!Number.isInteger(m.pid) && m.kind !== 'chrome-build'))", "    if (!m || m.kind !== 'cli' || !Number.isInteger(m.pid))");
   ok(cliOnly !== ks, 'control (d): the patch (a re-attach that drops a CloakBrowser marker) applies');
   const Kr = MUT.load('src/server/browser-keeper.js', cliOnly, 'cli-only');
   const Dr = path.join(ROOT, 'data-cr'); const Tr = path.join(Dr, 'browser-tools'); fs.mkdirSync(Tr, { recursive: true });

@@ -373,7 +373,10 @@ ok(M.renderNotifStash(stash, { budget: 250, spillPath: '/data/job-notifications-
   const failed = (lane, okv = true) => ({ id: 'jb-c', kind: 'task', state: 'failed', owner: { conversation: { id: 'conv-A' } }, runs: [{ startedAt: T0, endedAt: T0 + 60e3, exit: 1 }], notifyLog: [{ ts: T0 + 61e3, lane, ok: okv }] });
   const stranded = [...okLanes].filter((lane) => M.ackState(failed(lane), T0 + D).by !== 'notified');
   ok(stranded.length === 0, 'every lane the ladder / engine journals ok:true on ACKNOWLEDGES' + (stranded.length ? ' — stranded: ' + stranded.join(', ') : ''));
-  ok(M.ACK_LANES && [...M.ACK_LANES].every((l) => okLanes.has(l)), 'ACK_LANES names no lane nobody produces (a dead entry fails too): ' + (M.ACK_LANES ? [...M.ACK_LANES].join(', ') : 'NOT EXPORTED'));
+  ok(M.ACK_LANES && [...M.ACK_LANES].every((l) => okLanes.has(l) || M.RETIRED_ACK_LANES?.has(l)), 'ACK_LANES names no lane nobody produces unless it is declared RETIRED (a dead entry fails too): ' + (M.ACK_LANES ? [...M.ACK_LANES].join(', ') : 'NOT EXPORTED'));
+  // B-df40 (lane settings-prune): the channel rung is gone — its lane is RETIRED: nothing journals it, old entries still acknowledge
+  ok(M.RETIRED_ACK_LANES && [...M.RETIRED_ACK_LANES].every((l) => M.ACK_LANES.has(l) && !okLanes.has(l) && !notOkLanes.has(l)) && M.RETIRED_ACK_LANES.has('channel'), 'a RETIRED lane (channel) is produced by nobody — ladder or engine — yet still acknowledges: ' + (M.RETIRED_ACK_LANES ? [...M.RETIRED_ACK_LANES].join(', ') : 'NOT EXPORTED'));
+  ok(M.ackState(failed('channel'), T0 + D).by === 'notified', 'a journal entry written before the removal (lane channel, ok:true) still acknowledges its failure');
   ok(M.ackState(failed('rpc-queue'), T0 + D).by === 'notified', "a codex delivery (lane 'rpc-queue', ok:true) acknowledges");
   // control: the lanes that deliver NOTHING never acknowledge — not even on an entry whose ok is flipped
   ok(onlyNotOk.length >= 3 && ['stash', 'off', 'suppressed'].every((l) => onlyNotOk.includes(l)), 'the ok:false-only lanes are exactly the non-delivering ones (stash / off / suppressed present)');

@@ -345,6 +345,60 @@ ok('Background Work sender-click opens the jobs panel (not a session lookup)', c
   fs.rmSync(dir11, { recursive: true, force: true });
 }
 
+// 12. lane design-present (design 003 §2.6): a design PRESENTS from its link. The shell lets its frame go fullscreen
+//     and hands it EXACTLY `#present` (a fragment never reaches a server — the raw page can only learn it from the
+//     shell); the published design carries present (▶, #present, its words) inside its one file — size printed.
+{
+  const vm = await import('node:vm');
+  const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+  authed = true;
+  const pgR = pages.publishContent({ html: '<html><body>d</body></html>', name: 'deck', srcKey: 'local:/designs/deck' });
+  const sh = await (await fetch(`${base}/p/${pgR.page.id}`)).text();
+  okc(/<iframe src="\/p\/pg[a-z0-9]{10}\/raw" sandbox="allow-scripts allow-popups allow-downloads allow-modals allow-forms allow-popups-to-escape-sandbox" allow="clipboard-write; fullscreen"/.test(sh), 'lane design-present: the shell lets its frame go fullscreen (a design presents full-screen from its link) — the sandbox list unchanged, never allow-same-origin');
+  // the shell's own script, run with a stand-in page: which address does its frame end up loading?
+  const runShell = (html, hash) => {
+    const script = (/<script nonce="[^"]+">([\s\S]*?)<\/script>/.exec(html) || [])[1] || '';
+    const frame = { src: '/p/X/raw', getAttribute: (n) => (n === 'src' ? '/p/X/raw' : null), addEventListener() {}, contentWindow: { postMessage() {} } };
+    vm.runInNewContext(script, { document: { querySelector: () => frame }, location: { hash, pathname: '/p/X' }, navigator: {}, addEventListener() {}, window: {}, setTimeout });
+    return frame.src;
+  };
+  const HASHES = ['#present', '', '#Present', '#present?x=1', '#presentx', '#/../../api/x', '#present#present'];
+  const WANT = ['/p/X/raw#present', '/p/X/raw', '/p/X/raw', '/p/X/raw', '/p/X/raw', '/p/X/raw', '/p/X/raw'];
+  const table = (html) => HASHES.map((h) => runShell(html, h));
+  okc(JSON.stringify(table(sh)) === JSON.stringify(WANT), 'the shell hands its frame EXACTLY #present — any other fragment stays with the shell', table(sh));
+  // CONTROL: a shell that hands over any fragment
+  const C = mutantCopies('pages-present', REPO);
+  const PREL = 'src/server/published-pages.js';
+  const psrc = fs.readFileSync(path.join(REPO, PREL), 'utf8');
+  const a = `if(location.hash==='#present')f.src=f.getAttribute('src')+'#present';`;
+  if (psrc.split(a).length !== 2) okc(false, 'CONTROL setup: the shell\'s #present line is in the module exactly once', a);
+  else {
+    const dirM = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pages-present-'));
+    const PM = C.load(PREL, psrc.replace(a, `if(location.hash)f.src=f.getAttribute('src')+location.hash;`), 'any-hash');
+    const pm = PM.create({ dataDir: dirM, requestAuthed: () => true, publicUrl: () => 'https://inst.example' });
+    const appM = express(); pm.registerRoutes(appM);
+    const srvM = appM.listen(0); await new Promise((r) => srvM.on('listening', r));
+    const pg = pm.publishContent({ html: '<html><body>m</body></html>', name: 'm', srcKey: 'local:/m' });
+    const shM = await (await fetch(`http://127.0.0.1:${srvM.address().port}/p/${pg.page.id}`)).text();
+    okc(JSON.stringify(table(sh)) === JSON.stringify(WANT) && JSON.stringify(table(shM)) !== JSON.stringify(WANT), 'CONTROL (the shell hands over ANY fragment): the real shell passes the table, the patched copy FAILS it', table(shM));
+    srvM.close();
+    fs.rmSync(dirM, { recursive: true, force: true });
+  }
+  for (const r of copiesCensus(C.files, C.dir, REPO, { minCopies: 1, label: '12 ' })) okc(r.pass, r.name, r.detail);
+  // the published design with present: the runtime built in-process exactly as npm run build builds it
+  const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
+  const js = esbuild.buildSync({ entryPoints: [path.join(REPO, 'src/design-viewer-entry.js')], bundle: true, minify: true, write: false, format: 'iife', platform: 'browser', target: 'es2020' }).outputFiles[0].text;
+  const DM = require(path.join(REPO, 'src/design-model.js'));
+  const deck = DM.bundleCanvas({ manifest: { title: 'Deck', artboards: [{ file: 'S1.html', x: 0, y: 0, w: 1280, h: 720 }, { file: 'S2.html', x: 1360, y: 0, w: 1280, h: 720 }] }, files: { 'S1.html': '<!doctype html><html><body>one</body></html>', 'S2.html': '<!doctype html><html><body>two</body></html>' }, runtimeJs: js });
+  const bytes = Buffer.byteLength(deck, 'utf8');
+  console.log(`  · a published 2-artboard design with present: ${(bytes / 1024).toFixed(1)} KB (its runtime ${(Buffer.byteLength(js, 'utf8') / 1024).toFixed(1)} KB, inlined)`);
+  const esc = (w) => w.replace(/[^\x00-\x7f]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0')).toLowerCase();
+  const has = (w) => deck.includes(w) || deck.toLowerCase().includes(esc(w));
+  okc(DM.readBundle(deck).ok && has('dv-present') && has('#present') && has('dc-present-bar') && ['Present', 'End the presentation', '演示', '结束演示', 'プレゼン', 'プレゼンを終了'].every(has), 'a published design carries present inside its ONE file (▶, #present, the canvas core\'s present chrome, the words in en / zh / ja)');
+  const sv = DM.sizeVerdict(bytes);
+  okc(sv.ok && !sv.warn && bytes < 100 * 1024, `…and stays small (${(bytes / 1024).toFixed(1)} KB for two artboards; the warning is at 8 MB)`);
+}
+
 srv.close();
 fs.rmSync(dir, { recursive: true, force: true });
 fs.rmSync(srcDir, { recursive: true, force: true });

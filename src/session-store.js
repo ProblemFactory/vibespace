@@ -508,34 +508,46 @@ function parseSessionJsonl(claudeSessionId, cwd) {
 
 // Session metadata cache (cwd + first user message)
 const _sessionMetaCache = new Map();
+const META_SCAN_CHUNK = 65536;
+const META_SCAN_MAX = 2 * 1024 * 1024;
 
 function extractSessionMeta(filePath) {
-  try {
-    const mtimeMs = fs.statSync(filePath).mtimeMs;
-    const cached = _sessionMetaCache.get(filePath);
-    if (cached && cached.mtimeMs === mtimeMs) return cached.meta;
-  } catch {}
+  let st = null;
+  try { st = fs.statSync(filePath); } catch {}
+  const cached = _sessionMetaCache.get(filePath);
+  if (cached && st && cached.mtimeMs === st.mtimeMs) return cached.meta;
+  // A HEAD WITH NO NAME YET IS RESUMED (lane peer-card-sender): a delivery never names a session (discovery-facts
+  // nameFromUserRecord), so a worker whose every user record is a wake has no name in its head — and a live file's
+  // mtime moves on every write. The scan continues where it stopped (the same file, grown) instead of re-reading
+  // the head; past the cap the answer cannot change.
+  const resume = cached && st && !cached.meta.name && cached.ino === st.ino && st.size >= cached.size ? cached : null;
+  if (resume && resume.pos >= META_SCAN_MAX) {
+    _sessionMetaCache.set(filePath, { ...resume, mtimeMs: st.mtimeMs, size: st.size });
+    return resume.meta;
+  }
 
-  let cwd = '', name = '';
+  let cwd = resume ? resume.meta.cwd : '', name = '';
+  let pos = resume ? resume.pos : 0;
   try {
     // Stream in 64KB chunks with a leftover-line buffer until both cwd + name
     // are found (cap at 2MB). A fixed 32KB read truncated the meta whenever an
     // early line carried a large attachment (>32KB) — the line JSON.parse threw
     // and `cwd` stayed empty, so the session became silently un-resumable
     // (wrong/empty cwd → resume no-ops). (issue #18)
+    // Lines are cut on the BYTES ('\n'), so `pos` (the end of the last whole line) is exact for the resume.
     const fd = fs.openSync(filePath, 'r');
     try {
-      const CHUNK = 65536;
-      const MAX_BYTES = 2 * 1024 * 1024;
-      const chunk = Buffer.alloc(CHUNK);
-      let leftover = '', pos = 0;
-      while (pos < MAX_BYTES) {
-        const bytesRead = fs.readSync(fd, chunk, 0, CHUNK, pos);
+      const chunk = Buffer.alloc(META_SCAN_CHUNK);
+      let leftover = Buffer.alloc(0), readPos = pos;
+      while (readPos < META_SCAN_MAX) {
+        const bytesRead = fs.readSync(fd, chunk, 0, META_SCAN_CHUNK, readPos);
         if (bytesRead <= 0) break;
-        pos += bytesRead;
-        const lines = (leftover + chunk.toString('utf-8', 0, bytesRead)).split('\n');
-        leftover = lines.pop() || ''; // last (possibly partial) line carries over
-        for (const line of lines) {
+        readPos += bytesRead;
+        const buf = leftover.length ? Buffer.concat([leftover, chunk.subarray(0, bytesRead)]) : chunk.subarray(0, bytesRead);
+        let at = 0;
+        for (let nl = buf.indexOf(10, at); nl >= 0; nl = buf.indexOf(10, at)) {
+          const line = buf.toString('utf-8', at, nl);
+          at = nl + 1;
           if (!line.trim()) continue;
           try {
             const d = JSON.parse(line);
@@ -549,7 +561,10 @@ function extractSessionMeta(filePath) {
               if (cand) name = cand;
             }
           } catch {}
+          if (cwd && name) break;
         }
+        leftover = Buffer.from(buf.subarray(at));   // a copy: `chunk` is reused by the next read
+        pos = readPos - leftover.length;
         if (cwd && name) break;
       }
     } finally { fs.closeSync(fd); }
@@ -557,7 +572,7 @@ function extractSessionMeta(filePath) {
 
   const meta = { cwd, name };
   try {
-    _sessionMetaCache.set(filePath, { mtimeMs: fs.statSync(filePath).mtimeMs, meta });
+    _sessionMetaCache.set(filePath, { mtimeMs: st ? st.mtimeMs : fs.statSync(filePath).mtimeMs, size: st ? st.size : 0, ino: st ? st.ino : 0, pos, meta });
     if (_sessionMetaCache.size > 8192) _sessionMetaCache.delete(_sessionMetaCache.keys().next().value);
   } catch {}
   return meta;
@@ -1362,6 +1377,7 @@ function dedupWebuiSockets(entries) {
 
 module.exports = {
   warmSessionJsonlAsync, jsonlCacheClear,
+  extractSessionMeta,
   SESSIONS_DIR,
   dedupWebuiSockets,
   isPidAlive,

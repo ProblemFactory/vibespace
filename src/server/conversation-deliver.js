@@ -2,8 +2,8 @@
 // ONE delivery ladder for "get a message into a conversation" (2.362.0,
 // B-274d/B-dfd2) — extracted from jobs-wiring so background-job notifications
 // and agent-to-agent messages ride the SAME implementation (CS law: transport
-// is selected inside, callers never branch). Rungs, in order:
-//   0. VibeSpace channel socket (EXPERIMENTAL, agents.vibespaceChannel)
+// is selected inside, callers never branch). Rungs, in order (the experimental
+// rung 0 — the VibeSpace channel socket — was removed in 2.369.202, B-df40):
 //   1. LOCAL CLI inbox — scan this machine's ~/.claude/sessions registry
 //   2. REMOTE machine — conversation-index names the owner host; that host's
 //      agentd runs the SAME findPeer+postToPeer against ITS registry via the
@@ -21,8 +21,8 @@ const { capsOf, notificationDelivery } = require('../backend-caps.js');
 const { wrapperCaps } = require('./wrapper-files.js');
 const { vibespaceNoticeText, withoutNoticeHead } = require('../notification-senders.js'); // lane S3: every kind:'notification' delivery opens with the ONE head naming VibeSpace as the speaker
 // verify r6 (lane channel-withdraw, 2026-09-27): THE ONE PREDICATE behind "which live session carries this conversation" —
-// a pending fork carries its PARENT's id, and the three raw lookups below (rung 0, rung 1.5, the charged identity) handed
-// the parent's frame to the fork's wrapper / channel socket and the parent's turn to the fork's credential slot
+// a pending fork carries its PARENT's id, and the raw lookups below (rung 1.5, the charged identity; the since-removed
+// channel-socket rung 0 was the third) handed the parent's frame to the fork's wrapper and the parent's turn to the fork's credential slot
 const { addressableId } = require('../claude-lock-capture.js');
 const stashSummary = require('../stash-summary.js'); const { kindOf: stashKindOf } = stashSummary; // PURE: an entry's kind (a peer's by its sender's name, VibeSpace's own by its path)
 const { RESERVE_TTL_MS } = require('../spend-authorizer.js'); // the park re-judges a parked delivery's authorization once its hold's TTL has passed (lane notify-retry)
@@ -1129,20 +1129,6 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       // renders THAT record and skips the held card (normalizers.replayCard), never both; the card's own text may be a summary
       // `group` (lane group-report-card): a group WAKE's card names the sender → the group (src/group-card.js; the card door keys it)
       const cardOk = () => { try { emitPeerCard?.(cid, { fromName: opts.fromName || null, text: opts.cardText || text, recorded: text, kind, ...(opts.channel ? { channel: opts.channel } : {}), ...(opts.group ? { group: opts.group } : {}) }); } catch (e) { log('[deliver] card emit failed:', e.message); } };   // `channel` (B-c127): a channel notice's conversation — its name is the card's link
-      // rung 0: VibeSpace channel socket (experimental, per-session opt-in)
-      try {
-        if (!noWake && serverSetting?.('agents.vibespaceChannel') === true && activeSessions) {
-          for (const [wid, s] of activeSessions) {
-            if (addressableId(s) !== cid) continue;   // verify r6: the same rule as every rung
-            const sock = path.join(dataDir, 'channel-socks', wid + '.sock');
-            if (!fs.existsSync(sock)) continue;
-            const undo0 = armTurn();
-            let rc = null;
-            try { rc = await peerMsg.postChannelEvent(sock, text, { kind: 'peer_message' }); } finally { if (!(rc && rc.ok)) undo0(); }
-            if (rc.ok) { spent(); cardOk(); return { ok: true, lane: 'channel', kind, peerName: s.name || null }; }
-          }
-        }
-      } catch (e) { log('[deliver] channel lane failed (falling through):', e.message); }
       // rung 1: this machine's CLI inbox registry
       let undo1 = null;
       try {

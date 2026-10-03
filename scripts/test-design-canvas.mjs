@@ -14,12 +14,19 @@
 //   ④b THE PICKER, run — src/lib/design-pick.js's injected source under a mini DOM: it obeys only its PARENT's
 //      design-mode, a click while picking is swallowed and named (the hub's elementPath grammar, bounded), Escape, the
 //      message it sends passes the canvas's fence unchanged; a census of every kind it sends / listens to
+//      (lane design-changes: a text's pick waits out a double-click, which edits it in place — Enter reports old → new,
+//      Esc puts it back, typing never reaches the page; the parent's nudge / undo; editFence + frameSay tabled in ④)
 //   ⑤ the frame documents — headInsertAt / frameSrcdoc (the picker FIRST, a bounded head window — never a regex over
 //      the artboard), printCss / printSrcdoc
 //   ⑥ wiring pins — the canvas core: sandbox="allow-scripts" ONLY (no allow-same-origin anywhere in the design
 //      sources), ONE message listener through routeMessage on the caller's signal, no App / utils / i18n import
 //   ⑦ the model imports ONE module — the hub's PURE src/design-model.js — and touches no DOM
 //   ⑧ controls — a patched copy of each rule (scripts/mutant-copy.mjs) turns its table red
+//   ⑨ PRESENT + PRINT ALL (lane design-present, design 003 §2.6): the reading order (rows top to bottom, each left to
+//      right; a page's own), the presented view (whole, fitted, scaled up to fill), keys / clicks / swipes / steps, and
+//      Print all's document (one named page per artboard at its own size, each artboard in its own script-only frame,
+//      attribute-escaped); wiring pins on the core (frames shielded while presenting, fullscreen only when asked and a
+//      refusal swallowed), the window's module, the published page's ▶ and #present; its controls ride ⑧
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -186,7 +193,7 @@ const TABLES = {
     const long = m.pickFence({ kind: 'design-pick', path: 'x'.repeat(100000), tag: 'div', text: 'y'.repeat(100000) }, fr);
     const hidden = m.pickFence({ kind: 'design-pick', path: 'a', tag: 'a', text: 'ok\u202eevil\u200b' }, fr);
     return [
-      [eq(good, { kind: 'design-pick', file: 'Main.html', path: 'header > nav > a.cta', tag: 'a', text: 'Get started', rect: { x: 0, y: 10, w: 1280, h: 20 } }), true, 'a pick: the frame names the file, the tag lower-cased, text collapsed, the rect clamped to the artboard'],
+      [eq(good, { kind: 'design-pick', file: 'Main.html', path: 'header > nav > a.cta', tag: 'a', text: 'Get started', rect: { x: 0, y: 10, w: 1280, h: 20 }, ref: '', css: null }), true, 'a pick: the frame names the file, the tag lower-cased, text collapsed, the rect clamped to the artboard'],
       [long.path.length === m.PICK_LIMITS.path && long.text.length === m.PICK_LIMITS.text, true, 'every string is bounded (path 200, text 120)'],
       [hidden.text, 'okevil', 'bidi / zero-width characters REMOVED (a word they hid in stays one word — src/peer-text.js\'s rule; the line reads as it is)'],
       [m.pickFence({ kind: 'design-pick', path: 'a', tag: 'a', text: 'Ge​t‮ sta­rted\u0007now !' }, fr).text, 'Get started now !', 'L4 B②: a soft hyphen / ZWSP / RLO vanish, a control or a line separator is one space (before: every hidden character became a space — "Ge t sta rted")'],
@@ -199,9 +206,40 @@ const TABLES = {
       [eq(m.pickFence({ kind: 'design-key', key: 'Escape' }, fr), { kind: 'design-key', file: 'Main.html', key: 'Escape' }), true, 'the Escape key'],
       [m.pickFence({ kind: 'design-key', key: 'Enter' }, fr), null, 'any other key ⇒ dropped'],
       [m.pickFence({ kind: 'design-pick', path: 'a', tag: 'a' }, { file: '../x' }), null, 'a frame record without an artboard name ⇒ dropped'],
-      [m.PICK_KINDS.join(','), 'design-pick,design-key', 'THE CLOSED SET is exactly two kinds'],
+      [m.PICK_KINDS.join(','), 'design-pick,design-key,design-edit', 'THE CLOSED SET is exactly three kinds (lane design-changes added design-edit)'],
+      [eq(m.pickFence({ kind: 'design-pick', path: 'a', tag: 'a', ref: 'k3x9-12', css: { color: 'rgb(1, 2, 3)', background: 'url("javascript:x")<b>', size: '16px', pad: '8px 16px', evil: 'x' } }, fr), { kind: 'design-pick', file: 'Main.html', path: 'a', tag: 'a', text: '', rect: { x: 0, y: 0, w: 0, h: 0 }, ref: 'k3x9-12', css: { color: 'rgb(1, 2, 3)', background: 'url(javascriptx)b', size: '16px', pad: '8px 16px' } }), true, 'a pick carries the frame\'s ref and the css snapshot: four known keys, CSS-value characters only'],
+      [[m.pickFence({ kind: 'design-pick', path: 'a', tag: 'a', ref: '../x' }, fr).ref, m.pickFence({ kind: 'design-pick', path: 'a', tag: 'a', ref: 7 }, fr).ref, m.pickFence({ kind: 'design-pick', path: 'a', tag: 'a', css: 'x' }, fr).css], ['', '', null], 'a ref outside the grammar is dropped (the pick still names the element); a css that is not an object is null'],
     ];
   },
+  editFence: (m) => {
+    const fr = { file: 'Main.html', w: 1280, h: 800 };
+    const T = { kind: 'design-edit', edit: 'text', ref: 'k3x9-2', path: 'header > h1', tag: 'H1', from: 'Hello', to: '  Hi\n there\u202e ' };
+    const S = { kind: 'design-edit', edit: 'style', ref: 'k3x9-2', path: 'h1', tag: 'h1', prop: 'font-size', from: '48px', to: '56px' };
+    const long = m.pickFence({ ...T, from: 'x'.repeat(100000), to: 'y'.repeat(100000) }, fr);
+    return [
+      [eq(m.pickFence(T, fr), { kind: 'design-edit', file: 'Main.html', edit: 'text', ref: 'k3x9-2', path: 'header > h1', tag: 'h1', from: 'Hello', to: 'Hi there' }), true, 'a text edit: the frame names the file, before / after one folded line each'],
+      [[long.from.length, long.to.length], [m.PICK_LIMITS.edit, m.PICK_LIMITS.edit], 'before / after are bounded (500)'],
+      [eq(m.pickFence(S, fr), { kind: 'design-edit', file: 'Main.html', edit: 'style', ref: 'k3x9-2', path: 'h1', tag: 'h1', prop: 'font-size', from: '48px', to: '56px' }), true, 'a style nudge: one of the four props, the value in its grammar'],
+      [['position', 'background', 'font-family', '__proto__', 'transform'].map((prop) => m.pickFence({ ...S, prop }, fr)), [null, null, null, null, null], 'a property outside the closed four ⇒ dropped (unknown props refused)'],
+      [['20em', 'red', 'expression(alert(1))', '#fff', '9999px', '56px;color:red'].map((to) => m.pickFence({ ...S, to }, fr)), [null, null, null, null, null, null], 'a value outside the grammar (#rrggbb / 0–400 px) ⇒ dropped'],
+      [m.pickFence({ ...S, prop: 'color', to: '#12abEF', from: 'rgb(0, 0, 0)</style>' }, fr).from, 'rgb(0, 0, 0)style', '`from` (the frame\'s computed value) keeps CSS-value characters only'],
+      [['', '../x', 'A-1', 'x'.repeat(30) + '-1', 12, null].map((ref) => m.pickFence({ ...T, ref }, fr)), [null, null, null, null, null, null], 'a ref outside the frame grammar ⇒ dropped (an edit must name the element it previewed)'],
+      [[m.pickFence({ ...T, edit: 'html' }, fr), m.pickFence({ ...T, edit: undefined }, fr), m.pickFence({ ...T, tag: '<b>' }, fr)], [null, null, null], 'an edit kind outside text | style, or a tag that is not a tag name ⇒ dropped'],
+      [m.pickFence({ ...T, file: 'Other.html' }, fr).file, 'Main.html', 'an edit cannot claim another artboard (the frame names it)'],
+    ];
+  },
+  frameSay: (m) => [
+    [m.FRAME_KINDS.join(','), 'design-mode,design-style,design-undo,design-tweak', 'THE CLOSED SET the canvas says to a frame: four kinds (lane design-tweaks added design-tweak)'],
+    [m.frameSay({ kind: 'design-mode', pick: 'yes', color: 'x'.repeat(99) }), { kind: 'design-mode', pick: false, color: 'x'.repeat(40) }, 'design-mode: pick exactly true, the colour bounded'],
+    [m.frameSay({ kind: 'design-style', ref: 'k3x9-2', prop: 'color', value: '#00ff88', extra: 1 }), { kind: 'design-style', ref: 'k3x9-2', prop: 'color', value: '#00ff88' }, 'design-style: ref + one of the four + a value of its grammar, nothing else'],
+    [[m.frameSay({ kind: 'design-style', ref: 'k3x9-2', prop: 'color', value: 'red' }), m.frameSay({ kind: 'design-style', ref: 'k3x9-2', prop: 'margin', value: '4px' }), m.frameSay({ kind: 'design-style', ref: 'bad', prop: 'color', value: '#000000' })], [null, null, null], 'a nudge outside the closed set / grammar, or without a ref, never leaves the canvas'],
+    [[m.frameSay({ kind: 'design-undo', ref: 'k3x9-2', edit: 'text', prop: 'x' }), m.frameSay({ kind: 'design-undo', ref: 'k3x9-2', edit: 'style', prop: 'padding' }), m.frameSay({ kind: 'design-undo', ref: 'k3x9-2', edit: 'style', prop: 'margin' })], [{ kind: 'design-undo', ref: 'k3x9-2', edit: 'text' }, { kind: 'design-undo', ref: 'k3x9-2', edit: 'style', prop: 'padding' }, null], 'design-undo: a text, or one of the four props'],
+    [[m.frameSay({ kind: 'design-eval', ref: 'k3x9-2' }), m.frameSay('design-mode'), m.frameSay(null)], [null, null, null], 'any other kind / shape ⇒ nothing said'],
+    // lane design-tweaks: a knob moved — ONE custom property or ONE root data attribute, a value of the tweak grammar
+    [[m.frameSay({ kind: 'design-tweak', var: '--accent', value: '#00ff88', ref: 'x' }), m.frameSay({ kind: 'design-tweak', attr: 'data-density', value: 'compact' })], [{ kind: 'design-tweak', var: '--accent', value: '#00ff88' }, { kind: 'design-tweak', attr: 'data-density', value: 'compact' }], 'design-tweak: one property or one root data attribute + its value, nothing else'],
+    [['#000}body{x:1', 'a;b', '</style><script>', 'x\\y', 'red !important', '/* c */', '"open', 'x'.repeat(81), '', 7].map((value) => m.frameSay({ kind: 'design-tweak', var: '--accent', value })), Array(10).fill(null), 'design-tweak: a value that could close the rule, the block or the quote — or empty, too long, not text — never leaves the canvas'],
+    [[m.frameSay({ kind: 'design-tweak', var: 'accent', value: '1' }), m.frameSay({ kind: 'design-tweak', attr: 'class', value: 'x' }), m.frameSay({ kind: 'design-tweak', attr: 'onload', value: 'x' }), m.frameSay({ kind: 'design-tweak', attr: 'data-vibespace-tweaks', value: '1' }), m.frameSay({ kind: 'design-tweak', var: '--a', attr: 'data-a', value: '1' })], [null, null, null, null, null], 'design-tweak: a target that is not ONE custom property or ONE data- attribute (never a handler, never our marker) ⇒ nothing said'],
+  ],
   frameKeyGate: (m) => {
     // L4 B①: a hostile artboard posted 200 `design-key` Escapes and ended Comment mode the instant it started
     let g = null;
@@ -265,6 +303,65 @@ const TABLES = {
       [pdoc.indexOf('@page{size:390px 844px') > pdoc.indexOf('window.mine') && pdoc.indexOf('<style media="print">') < pdoc.indexOf('</head>') && /print\(\)/.test(pdoc), true, 'the print stylesheet goes at the head\'s END (after the artboard\'s own styles) with the print call'],
     ];
   },
+  // ── lane design-present ──
+  presentOrder: (m) => {
+    const F = (file, x, y, page = '', w = 400, h = 300) => ({ file, x, y, w, h, page });
+    const grid = [F('C.html', 960, 0), F('A.html', 0, 10), F('B.html', 480, -6), F('E.html', 480, 400), F('D.html', 0, 420)];
+    const auto = m.framesOf({ artboards: [{ file: 'Main.html' }, { file: 'Two.html' }, { file: 'Three.html' }] }, ['Main.html', 'Two.html', 'Three.html']);
+    return [
+      [m.presentOrder(grid, ''), ['A.html', 'B.html', 'C.html', 'D.html', 'E.html'], 'rows top to bottom, each left to right — hand-placed rows a few px apart stay ONE row'],
+      [m.presentOrder([F('Tall.html', 0, 0, '', 400, 2000), F('Side.html', 500, 900)], ''), ['Tall.html', 'Side.html'], 'a frame whose top sits above a tall row\'s middle joins that row (read left to right)'],
+      [m.presentOrder([F('Low.html', 0, 400), F('High.html', 500, 0)], ''), ['High.html', 'Low.html'], 'a frame below the row\'s middle starts the next row, whatever its x'],
+      [m.presentOrder([F('B.html', 0, 0), F('A.html', 0, 0)], ''), ['B.html', 'A.html'], 'equal places keep the given (manifest) order'],
+      [m.presentOrder([F('P1.html', 0, 0, 'p1'), F('P2a.html', 500, 0, 'p2'), F('P2b.html', 0, 0, 'p2')], 'p2'), ['P2b.html', 'P2a.html'], 'only the page asked for, in its own reading order'],
+      [m.presentOrder([{ file: '../x.html', x: 0, y: 0 }, { file: 'A.html', x: NaN, y: 0 }, null, F('Ok.html', 0, 0)], ''), ['Ok.html'], 'a non-artboard name or a frame with no place is left out'],
+      [m.presentOrder(auto, ''), ['Main.html', 'Two.html', 'Three.html'], 'the hub\'s own auto-placed row reads in manifest order'],
+    ];
+  },
+  presentView: (m) => {
+    const slide = { x: 100, y: 50, w: 1280, h: 720 };
+    const v = m.presentView(slide, { w: 1920, h: 1080 });
+    const phone = m.presentView({ x: 0, y: 0, w: 390, h: 844 }, { w: 1920, h: 1080 });
+    return [
+      [near(v.z, 1.5) && near(v.x, -150) && near(v.y, -75), true, 'a 1280×720 slide on a 1920×1080 screen fills it exactly (×1.5, its corner at the screen\'s)'],
+      [near(phone.z, 1080 / 844) && near(phone.y, 0) && near(phone.x, (1920 - 390 * 1080 / 844) / 2), true, 'a phone artboard is fitted to the height and centred'],
+      [m.presentView({ x: 0, y: 0, w: 120, h: 120 }, { w: 4000, h: 4000 }).z, m.ZOOM_MAX, 'scaled up, never past ZOOM_MAX'],
+      [m.presentView({ x: 0, y: 0, w: 3840, h: 2160 }, { w: 1920, h: 1080 }).z, 0.5, 'a big artboard is fitted down, whole'],
+      [eq(m.presentView(slide, { w: 0, h: 0 }), { x: 0, y: 0, z: 1 }), true, 'a pane with no size yet ⇒ the identity'],
+      [near(m.presentView(slide, { w: 1920, h: 1080 }, { pad: 40 }).z, Math.min((1920 - 80) / 1280, (1080 - 80) / 720)), true, 'a margin only when asked'],
+    ];
+  },
+  presentSteps: (m) => [
+    [['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'].map(m.presentKey), ['next', 'next', 'next', 'next', 'next'], '→ ↓ PageDown Space Enter = next'],
+    [['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace'].map(m.presentKey), ['prev', 'prev', 'prev', 'prev'], '← ↑ PageUp Backspace = previous'],
+    [[m.presentKey('Home'), m.presentKey('End'), m.presentKey('Escape')], ['first', 'last', 'exit'], 'Home / End / Esc'],
+    [[m.presentKey('a'), m.presentKey('Tab'), m.presentKey('F11'), m.presentKey(undefined)], [null, null, null, null], 'every other key stays the browser\'s (Tab, F11, typing)'],
+    [m.presentGesture(1, 2), 'next', 'a click / a tap (it barely moved) = next'],
+    [m.presentGesture(-120, 10), 'next', 'a swipe to the left = next'],
+    [m.presentGesture(120, -10), 'prev', 'a swipe to the right = previous'],
+    [m.presentGesture(20, 300), null, 'a vertical drag does nothing'],
+    [m.presentGesture(60, 50), null, 'an unclear diagonal does nothing'],
+    [m.presentGesture(30, 0), null, 'a short drag under the swipe threshold does nothing'],
+    [[m.presentStep(0, 3, 'next'), m.presentStep(2, 3, 'next'), m.presentStep(0, 3, 'prev'), m.presentStep(1, 3, 'last'), m.presentStep(2, 3, 'first')], [1, 2, 0, 2, 0], 'steps clamp at both ends — the last one stays, never wraps to the first'],
+    [[m.presentStep(9, 3, 'next'), m.presentStep(0, 0, 'next'), m.presentStep('x', 3, 'prev')], [2, -1, 0], 'an index out of range is clamped first; nothing to present = -1'],
+  ],
+  printAll: (m) => {
+    const evil = '<!doctype html><html><head><title>q</title></head><body><p title="a&quot;b">" onload="top.x=1" </iframe><script>window.mine=1</script></body></html>';
+    const doc = m.printAllSrcdoc([{ file: 'A.html', w: 1280, h: 800, html: '<p>A &amp; "B"</p>' }, { file: 'R.html', w: 300, h: 300, html: null }, { file: 'P.html', w: 390, h: 844, html: evil }]);
+    // the frames, read quote-aware (an attribute value holds no raw " — the escaping under test)
+    const frames = doc.split('<iframe ').slice(1).map((c) => (/^((?:[^">]|"[^"]*")*)>/.exec(c) || [])[1] || '');
+    const srcdocs = frames.map((f) => (/ srcdoc="([^"]*)"/.exec(' ' + f) || [])[1]);
+    const unattr = (v) => String(v).replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+    return [
+      [frames.length, 2, 'one frame per artboard that has a document — a refused one (no html) is left out'],
+      [/@page a0\{size:1280px 800px;margin:0\}/.test(doc) && /@page a1\{size:390px 844px;margin:0\}/.test(doc) && /\.s0\{page:a0;width:1280px;height:800px;overflow:hidden\}/.test(doc) && /\.s1\{page:a1;width:390px;height:844px;overflow:hidden;break-before:page\}/.test(doc), true, 'ONE named page per artboard at its own size (the PDF gets one page each), every later one on a new page'],
+      [frames.every((f) => /^sandbox="allow-scripts" /.test(f) && !/allow-same-origin|allow-modals|allow-top|allow-popups/.test(f)), true, 'each artboard in its own script-only frame (no same-origin; no modals — only the outer print frame prints)'],
+      [srcdocs.map(unattr), ['<p>A &amp; "B"</p>', evil], 'each frame carries its artboard EXACTLY, attribute-escaped (& and ") — a quote, an </iframe> or an onload inside an artboard cannot leave its srcdoc'],
+      [frames.map((f) => (f.replace(/ srcdoc="[^"]*"/, '').match(/onload="/g) || []).length), [1, 1], 'the only onload on a frame is ours'],
+      [doc.indexOf('function l()') > 0 && doc.indexOf('function l()') < doc.indexOf('<iframe') && /print\(\)/.test(doc) && doc.includes(`setTimeout(go,${m.PRINT_ALL_WAIT_MS})`), true, 'the countdown is defined BEFORE the frames; the last load (or the bound) calls print()'],
+      [m.printAllSrcdoc([]).includes(';go()') && !m.printAllSrcdoc([]).includes('<iframe'), true, 'no frame ⇒ it prints at once (nothing to wait for)'],
+    ];
+  },
 };
 function runTable(m, rule) {
   let rows;
@@ -275,8 +372,9 @@ const SECTIONS = [
   ['① the view', ['zoom', 'zoomAt', 'pinch', 'fitView', 'focusView']],
   ['② the world', ['framesOf', 'pages']],
   ['③ the read and the published page', ['normalizeRead']],
-  ['④ THE PICK FENCE', ['pickFence', 'frameKeyGate', 'routeMessage', 'quoteLine']],
+  ['④ THE PICK FENCE', ['pickFence', 'editFence', 'frameSay', 'frameKeyGate', 'routeMessage', 'quoteLine']],
   ['⑤ the frame documents', ['frameDocs']],
+  ['⑨ present + print all (lane design-present)', ['presentOrder', 'presentView', 'presentSteps', 'printAll']],
 ];
 for (const [title, rules] of SECTIONS) {
   console.log(title);
@@ -287,9 +385,11 @@ console.log('④b THE PICKER, run under a mini DOM');
 // The picker is injected as SOURCE TEXT into a frame; here the same text runs with a fake window. `runPicker(src)` →
 // {fire(type, ev), posts, parent}: listeners by type (capture flag kept), the parent's postMessage recorded.
 function miniDom() {
+  const mkStyle = () => ({ props: {}, getPropertyValue(p) { return this.props[p] ? this.props[p][0] : ''; }, getPropertyPriority(p) { return this.props[p] ? this.props[p][1] : ''; }, setProperty(p, v, pr) { this.props[p] = [v, pr || '']; }, removeProperty(p) { delete this.props[p]; } });
   const mkEl = (tag, { id = '', cls = [], text = '', attrs = {}, parent = null, rect = { left: 10, top: 20, width: 30, height: 40 } } = {}) => {
-    const el = { nodeType: 1, tagName: tag.toUpperCase(), id, classList: cls, innerText: text, textContent: text, parentElement: parent, parentNode: parent,
-      getAttribute: (k) => (k in attrs ? attrs[k] : null), getBoundingClientRect: () => rect, style: {}, isConnected: true };
+    const el = { nodeType: 1, tagName: tag.toUpperCase(), id, classList: cls, innerText: text, textContent: text, innerHTML: text, parentElement: parent, parentNode: parent,
+      getAttribute: (k) => (k in attrs ? attrs[k] : null), setAttribute: (k, v) => { attrs[k] = String(v); }, removeAttribute: (k) => { delete attrs[k]; },
+      getElementsByTagName: () => [], contains: (x) => x === el, focus() {}, getBoundingClientRect: () => rect, style: mkStyle(), isConnected: true, attrs };
     return el;
   };
   const html = mkEl('html'); const body = mkEl('body', { parent: html });
@@ -303,14 +403,19 @@ async function runPicker(src) {
   const posts = [];
   const parentWin = { postMessage: (m, o) => posts.push({ m: JSON.parse(JSON.stringify(m)), o }) };
   const add = (type, fn, capture) => L.push({ type, fn, capture: !!capture });
-  new Function('addEventListener', 'parent', 'document', src)(add, parentWin, D.doc);
-  const fire = (type, ev) => { const e = { type, defaultPrevented: false, stopped: false, preventDefault() { this.defaultPrevented = true; }, stopPropagation() { this.stopped = true; }, stopImmediatePropagation() { this.stopped = true; }, ...ev }; for (const l of L.filter((x) => x.type === type)) l.fn(e); return e; };
-  return { D, L, posts, parentWin, fire };
+  // the frame's clock and computed styles, faked (a text's pick waits out a double-click on a timer — `flush` runs it)
+  const timers = new Map(); let tid = 0;
+  const setT = (fn) => { timers.set(++tid, fn); return tid; }, clearT = (id) => { timers.delete(id); };
+  const flush = () => { for (const [id, fn] of [...timers]) { timers.delete(id); fn(); } };
+  const gcs = (el) => ({ color: 'rgb(17, 24, 39)', backgroundColor: 'rgba(0, 0, 0, 0)', fontSize: '16px', padding: '8px 16px', getPropertyValue: (p) => ({ color: 'rgb(17, 24, 39)', 'background-color': 'rgba(0, 0, 0, 0)', 'font-size': '16px', padding: '8px 16px' })[p] || '' });
+  new Function('addEventListener', 'parent', 'document', 'setTimeout', 'clearTimeout', 'getComputedStyle', 'getSelection', src)(add, parentWin, D.doc, setT, clearT, gcs, () => null);
+  const fire = (type, ev) => { const e = { type, detail: 1, defaultPrevented: false, stopped: false, preventDefault() { this.defaultPrevented = true; }, stopPropagation() { this.stopped = true; }, stopImmediatePropagation() { this.stopped = true; }, ...ev }; for (const l of L.filter((x) => x.type === type)) l.fn(e); return e; };
+  return { D, L, posts, parentWin, fire, flush, timers };
 }
 const P = await import(pathToFileURL(path.join(REPO, 'src/lib/design-pick.js')).href);
 async function pickerTable(src) {
   const R = await runPicker(src);
-  const { D, posts, parentWin, fire } = R;
+  const { D, posts, parentWin, fire, flush } = R;
   const header = D.mkEl('header', { parent: D.body });
   const nav = D.mkEl('nav', { parent: header });
   const a = D.mkEl('a', { cls: ['cta', 'big', 'third'], text: '  Get\n started ', parent: nav, rect: { left: 5, top: 6, width: 70, height: 20 } });
@@ -325,8 +430,12 @@ async function pickerTable(src) {
   rows.push([posts.length, 0, 'pick must be exactly true']);
   fire('message', { source: parentWin, data: { kind: 'design-mode', pick: true, color: 'red;background:url(x)' } });
   const c1 = fire('click', { target: a });
+  rows.push([posts.length, 0, 'a TEXT\'s pick waits out a double-click (nothing said yet)']);
+  flush();
   const m1 = posts[0] && posts[0].m;
-  rows.push([eq(m1, { kind: 'design-pick', path: 'header > nav > a.cta.big', tag: 'a', text: 'Get started', rect: { x: 5, y: 6, w: 70, h: 20 } }), true, 'while picking, a click NAMES the element: the hub\'s path grammar (≤ 2 classes), the text collapsed, its rect']);
+  const ref1 = m1 && m1.ref;
+  rows.push([/^[a-z0-9]{1,12}-1$/.test(String(ref1)), true, 'the pick carries this frame\'s ref for the element (<seed>-<n>)']);
+  rows.push([eq(m1 && { ...m1, ref: 'R' }, { kind: 'design-pick', path: 'header > nav > a.cta.big', tag: 'a', text: 'Get started', rect: { x: 5, y: 6, w: 70, h: 20 }, ref: 'R', css: { color: 'rgb(17, 24, 39)', background: 'rgba(0, 0, 0, 0)', size: '16px', pad: '8px 16px' } }), true, 'while picking, a click NAMES the element: the hub\'s path grammar (≤ 2 classes), the text collapsed, its rect, the css snapshot']);
   rows.push([c1.defaultPrevented && c1.stopped, true, '…and the click is swallowed (a link does not navigate, the page\'s handlers never see it)']);
   rows.push([posts[0] && posts[0].o, '*', 'posted to the parent (the frame is an opaque origin; the canvas fences by source)']);
   let deep = D.body;
@@ -343,11 +452,54 @@ async function pickerTable(src) {
   rows.push([eq(posts[4] && posts[4].m, { kind: 'design-key', key: 'Escape' }), true, 'Escape inside the frame is said to the canvas']);
   fire('keydown', { key: 'a' });
   rows.push([posts.length, 5, 'any other key is the page\'s own']);
+  // ── edit in place (lane design-changes) ──
+  const h1 = D.mkEl('h1', { parent: header, text: 'Hello' });
+  fire('click', { target: h1, detail: 1 });
+  const dbl = fire('click', { target: h1, detail: 2 });
+  flush();
+  rows.push([[posts.length, h1.attrs.contenteditable, dbl.defaultPrevented], [5, 'plaintext-only', true], 'a double-click on a text: no pick (the waiting one is dropped) — the element is editable in place']);
+  const typed = fire('keydown', { key: 'x', target: h1 });
+  rows.push([[typed.stopped, typed.defaultPrevented, posts.length], [true, false, 5], 'typing stays in the element: the page\'s own key handlers never see it, nothing is said']);
+  const caret = fire('click', { target: h1, detail: 1 });
+  rows.push([[caret.defaultPrevented, posts.length, R.timers.size], [false, 5, 0], 'a click INSIDE the edited text is the caret\'s (not swallowed, not a pick)']);
+  h1.innerText = 'Hello  there'; h1.innerHTML = 'Hello  there';
+  const enter = fire('keydown', { key: 'Enter', target: h1 });
+  const e1 = posts[5] && posts[5].m;
+  rows.push([enter.defaultPrevented && h1.attrs.contenteditable === undefined, true, 'Enter ends the edit (no newline, no longer editable) — the words stay as a PREVIEW']);
+  rows.push([eq(e1 && { ...e1, ref: 'R' }, { kind: 'design-edit', edit: 'text', ref: 'R', path: 'header > h1', tag: 'h1', from: 'Hello', to: 'Hello there' }), true, '…and is reported: design-edit {edit:text, ref, path, tag, from, to}']);
+  fire('click', { target: h1, detail: 1 }); fire('click', { target: h1, detail: 2 }); flush();
+  h1.innerHTML = 'scratch'; h1.innerText = 'scratch';
+  fire('keydown', { key: 'Escape', target: h1 });
+  rows.push([[h1.innerHTML, posts.length, h1.attrs.contenteditable], ['Hello  there', 6, undefined], 'Esc while editing puts THIS edit\'s words back, says nothing (not even the canvas\'s Escape)']);
+  fire('message', { source: parentWin, data: { kind: 'design-undo', ref: e1 && e1.ref, edit: 'text' } });
+  rows.push([h1.innerHTML, 'Hello', 'design-undo {edit:text} from the parent: the element as the page drew it']);
+  // the parent's nudge: a preview inline, reported with the computed value before it
+  fire('message', { source: { other: true }, data: { kind: 'design-style', ref: ref1, prop: 'font-size', value: '20px' } });
+  fire('message', { source: parentWin, data: { kind: 'design-style', ref: ref1, prop: 'font-size', value: '20em' } });
+  fire('message', { source: parentWin, data: { kind: 'design-style', ref: ref1, prop: 'position', value: '20px' } });
+  rows.push([[posts.length, a.style.getPropertyValue('font-size')], [6, ''], 'a nudge from anything but the parent, a value outside the grammar or a prop outside the four: nothing drawn, nothing said']);
+  fire('message', { source: parentWin, data: { kind: 'design-style', ref: ref1, prop: 'font-size', value: '20px' } });
+  const s1 = posts[6] && posts[6].m;
+  rows.push([[a.style.getPropertyValue('font-size'), a.style.getPropertyPriority('font-size')], ['20px', 'important'], 'design-style: the preview is inline on the element its ref names (!important)']);
+  rows.push([eq(s1, { kind: 'design-edit', edit: 'style', ref: ref1, path: 'header > nav > a.cta.big', tag: 'a', prop: 'font-size', from: '16px', to: '20px' }), true, '…and reported with the computed value it replaced']);
+  fire('message', { source: parentWin, data: { kind: 'design-undo', ref: ref1, edit: 'style', prop: 'font-size' } });
+  rows.push([a.style.getPropertyValue('font-size'), '', 'design-undo {edit:style}: the element\'s own inline value back (none)']);
   fire('message', { source: parentWin, data: { kind: 'design-mode', pick: false } });
   const c2 = fire('click', { target: a });
-  rows.push([posts.length === 5 && !c2.defaultPrevented, true, 'pick off: clicks are the page\'s again']);
+  rows.push([posts.length === 7 && !c2.defaultPrevented, true, 'pick off: clicks are the page\'s again']);
+  // lane design-tweaks: a knob restyles the root in place — from the parent only, the grammar re-judged, nothing reported
+  const nPosts = posts.length;
+  fire('message', { source: parentWin, data: { kind: 'design-tweak', var: '--accent', value: '#00ff88' } });
+  fire('message', { source: parentWin, data: { kind: 'design-tweak', attr: 'data-density', value: 'compact' } });
+  fire('message', { source: { other: true }, data: { kind: 'design-tweak', var: '--radius', value: '9px' } });
+  fire('message', { source: parentWin, data: { kind: 'design-tweak', var: '--x', value: '1}body{display:none' } });
+  fire('message', { source: parentWin, data: { kind: 'design-tweak', attr: 'onload', value: 'x' } });
+  fire('message', { source: parentWin, data: { kind: 'design-tweak', attr: 'data-vibespace-tweaks', value: '0' } });
+  const root = D.html;
+  rows.push([[root.style.getPropertyValue('--accent'), root.style.getPropertyPriority('--accent'), root.getAttribute('data-density'), root.style.getPropertyValue('--radius'), root.style.getPropertyValue('--x'), root.getAttribute('onload'), root.getAttribute('data-vibespace-tweaks'), posts.length - nPosts], ['#00ff88', 'important', 'compact', '', '', null, null, 0], 'design-tweak: the root\'s custom property (inline, important) and data attribute set; from another window, a value that could close a rule, a handler or our marker — ignored; nothing reported back']);
   const fr = { file: 'Main.html', w: 1280, h: 800 };
   rows.push([eq(sortKeys(M.pickFence(m1, fr)), sortKeys({ ...m1, file: 'Main.html' })), true, 'what the picker sends passes the canvas\'s fence unchanged']);
+  rows.push([eq(sortKeys(M.pickFence(e1, fr)), sortKeys({ ...e1, file: 'Main.html' })) && eq(sortKeys(M.pickFence(s1, fr)), sortKeys({ ...s1, file: 'Main.html' })), true, '…and so do its edit reports (text and style)']);
   rows.push([M.quoteLine(M.pickFence(m1, fr)), 'Main.html › header > nav > a.cta.big ("Get started")', '…and reads as the contract\'s quote line']);
   return rows;
 }
@@ -366,10 +518,10 @@ async function pickerTable(src) {
     ok(rows.length > 10 && rows.every(([x, y]) => eq(x, y)) && minified.length < P.pickerSource().length, `the MINIFIED picker (what the bundle injects, ${minified && minified.length} B) passes the same table`);
   }
   const code = codeOnly(read('src/lib/design-pick.js'));
-  const sent = [...code.matchAll(/post\(\{ kind: '([a-z-]+)'/g)].map((x) => x[1]);
-  ok(sent.length === 2 && sent.every((k) => M.PICK_KINDS.includes(k)), `census: every kind the picker sends is in the canvas's closed set (${sent.join(', ')})`);
-  const heard = [...code.matchAll(/d\.kind !== '([a-z-]+)'/g)].map((x) => x[1]);
-  ok(heard.length === 1 && M.FRAME_KINDS.includes(heard[0]) && /if \(e\.source !== parent\) return;/.test(code), `census: the picker hears ONE kind (${heard.join(', ')}), from its parent only`);
+  const sent = [...new Set([...code.matchAll(/\{ kind: '([a-z-]+)'/g)].map((x) => x[1]))].sort();
+  ok(eq(sent, [...M.PICK_KINDS].sort()), `census: every kind the picker sends is in the canvas's closed set, and the set is what it sends (${sent.join(', ')})`);
+  const heard = [...new Set([...code.matchAll(/d\.kind [!=]== '([a-z-]+)'/g)].map((x) => x[1]))].sort();
+  ok(eq(heard, [...M.FRAME_KINDS].sort()) && (code.match(/addEventListener\('message'/g) || []).length === 1 && /if \(e\.source !== parent\) return;/.test(code), `census: the picker hears exactly the canvas's words (${heard.join(', ')}), from its parent only`);
   ok((code.match(/postMessage\(/g) || []).length === 1 && /parent\.postMessage\(msg, '\*'\)/.test(code), 'census: ONE postMessage site, to the parent');
   ok(!/\b(fetch|XMLHttpRequest|localStorage|sessionStorage|document\.cookie|WebSocket|eval)\b/.test(code), 'the picker reads no storage, cookie or network and evals nothing');
   ok(P.PICK_KIND === 'design-pick' && P.KEY_KIND === 'design-key' && P.MODE_KIND === 'design-mode', 'the exported kind names are the model\'s');
@@ -386,18 +538,29 @@ console.log('⑥ wiring pins — the canvas core');
   const sandboxes = [...code.matchAll(/sandbox[^\n]{0,80}/g)].map((x) => x[0]);
   ok(sandboxes.every((s) => !/allow-(same-origin|top-navigation|popups|forms|modals)/.test(s)), 'the canvas core\'s frame sandbox carries no other allowance (scripts only)', sandboxes.join(' | '));
   const msgs = [...code.matchAll(/addEventListener\('message'/g)];
-  ok(msgs.length === 1 && /addEventListener\('message', \(ev\) => \{[\s\S]{0,600}?routeMessage\(ev, frames\)[\s\S]{0,400}?\}, L\);/.test(code), 'ONE message listener, through routeMessage, bound to the canvas\'s signal');
+  ok(msgs.length === 1 && /addEventListener\('message', \(ev\) => \{[\s\S]{0,600}?routeMessage\(ev, frames\)[\s\S]{0,1800}?\}, L\);/.test(code), 'ONE message listener, through routeMessage, bound to the canvas\'s signal');
   ok(/frames\.push\(\{ win: rec\.iframe\.contentWindow, file/.test(code), 'routeMessage is handed exactly this canvas\'s frames (their contentWindow, at message time)');
   ok(/if \(!rec \|\| !rec\.iframe \|\| doc\.activeElement !== rec\.iframe\) return;\n\s+const g = frameKeyGate\(keyGates\.get\(hit\.frame\.file\), Date\.now\(\)\);\n\s+keyGates\.set\(hit\.frame\.file, g\.gate\);\n\s+if \(g\.allow\) onKey\?\.\(hit\.msg, hit\.frame\);/.test(code), 'L4 B①: a frame\'s KEY is admitted only from the frame that HAS the keyboard (its iframe is the active element), through the frame-key gate — a script\'s flood from any frame is muted; a pick is never gated (the composer shows the fence\'s own text)');
   const winSrc = codeOnly(read('src/lib/design-window.js'));
   ok(/onKey: \(msg, frame\) => frameEscape\(frame\),/.test(winSrc) && /function frameEscape\(frame\) \{\n\s+if \(composer\) return;\n\s+if \(canvas\.pick\(\)\) \{ canvas\.setPick\(false\); hideChip\(\); return; \}\n\s+if \(canvas\.focused\(\) && frame && frame\.file === canvas\.focused\(\)\) canvas\.focus\(null\);/.test(winSrc), 'the window: a frame\'s Escape never closes the composer (the typed words stay), ends Comment mode, and leaves the focused view only when it IS that frame');
   ok(/onKey: \(m, frame\) => \{ if \(canvas\.focused\(\) && frame && frame\.file === canvas\.focused\(\)\) canvas\.focus\(null\); \}/.test(codeOnly(read('src/design-viewer-entry.js'))), 'the published page: a frame\'s Escape leaves the focused view only when it IS that frame (another artboard\'s script cannot kick the reader out)');
-  ok(/postMessage\(\{ kind: 'design-mode', pick: st\.pick, color: st\.pickColor \}, '\*'\)/.test(code) && (code.match(/postMessage\(/g) || []).length === 1, 'the canvas says ONE thing to its frames (design-mode) and nothing else');
+  ok(/function say\(rec, msg\) \{\n\s+const m = frameSay\(msg\);[\s\S]{0,160}?if \(!m \|\| !w\) return false;\n\s+try \{ w\.postMessage\(m, '\*'\); return true; \}/.test(code) && (code.match(/postMessage\(/g) || []).length === 1 && /function sayMode\(rec\) \{ say\(rec, \{ kind: 'design-mode', pick: st\.pick, color: st\.pickColor \}\); \}/.test(code) && /tell\(file, msg\) \{ return say\(els\.get\(file\), msg\); \}/.test(code), 'the canvas says to its frames only what frameSay lets out — ONE postMessage site (design-mode, and the changes strip\'s design-style / design-undo through tell)');
+  ok(/if \(hit\.msg\.edit === 'text'\) \{\n\s+if \(\(!st\.pick && !\(Date\.now\(\) - pickOffAt < EDIT_GRACE_MS\)\) \|\| !typedIn\(hit\.frame\.file\)\) return;\n\s+const g = frameKeyGate\(editGates\.get\(hit\.frame\.file\), Date\.now\(\)\);/.test(code) && /return !!r && !!r\.iframe && \(cur === file \|\| Date\.now\(\) - \(r\.leftAt \|\| 0\) < EDIT_GRACE_MS\);/.test(code) && /win\.addEventListener\('blur', \(\) => \{ kbFile = frameOf\(doc\.activeElement\) \|\| kbFile; \}, L\);/.test(code), 'lane design-changes: a frame\'s TEXT edit reaches the subscribers only while picking, from the frame that has (or left < EDIT_GRACE_MS ago) the keyboard — tracked on this page\'s window blur / focus, Chrome fires no blur on the iframe element — through its own rate gate: a script in another frame cannot add a change');
   ok(!/from '\.\/(utils|i18n|app|ws|window)\.js'/.test(core) && /from '\.\/design-canvas-model\.js'/.test(core), 'the core imports only the model — no App, utils, i18n or ws (the published page bundles it)');
   ok(/el\.textContent = n\.text/.test(code) && /rec\.card\.textContent = /.test(code) && !/innerHTML/.test(code), 'notes and refusal cards are text; the core writes no innerHTML');
   ok(/rec\.iframe\.srcdoc = srcdoc/.test(code) && /if \(rec\.srcdoc !== srcdoc\)/.test(code), 'updateFrame swaps ONE srcdoc in place, and only when it changed');
   ok(/setPointerCapture\(e\.pointerId\)/.test(code) && /'pointercancel', end/.test(code) && /'lostpointercapture', end/.test(code), 'a drag captures its pointer at the door and ends on up / cancel / lost capture');
   ok(/vp\.addEventListener\('dblclick', \(e\) => \{[\s\S]{0,200}?toWorld\(st\.view, local\(e\)\)[\s\S]{0,200}?onActivate\?\.\(hit\.file, 'dblclick'\)/.test(code) && !/shield\.addEventListener\('dblclick'/.test(code), 'a dblclick is read on the VIEWPORT by the world point under it (the drag\'s pointer capture retargets the click pair away from the shield — measured in Chrome: a shield listener never fired)');
+}
+
+{
+  // lane design-present — the core's present mode
+  const code = codeOnly(read('src/lib/design-canvas.js'));
+  ok(/const live = !st\.present && \(st\.pick \|\| st\.focused === rec\.file\);/.test(code), 'lane design-present: while presenting every frame stays SHIELDED (nothing in an artboard takes the presenter\'s key or click)');
+  ok(/if \(fullscreen && doc\.fullscreenEnabled && !doc\.fullscreenElement && typeof vp\.requestFullscreen === 'function'\) \{/.test(code) && /Promise\.resolve\(vp\.requestFullscreen\(\)\)\.catch\(\(\) => \{ if \(st\.present\) st\.present\.fs = false; \}\)/.test(code), '…fullscreen is asked for only when asked, allowed and free — a refusal is swallowed and the viewport fills its pane');
+  ok(/doc\.addEventListener\('fullscreenchange', \(\) => \{[\s\S]{0,200}?if \(p\.fs\) endPresent\(\);\n\s+\}, L\);/.test(code), '…the browser\'s own way out of fullscreen ends the presentation with it (on the canvas\'s signal)');
+  ok(/const step = presentKey\(e\.key\);\n\s+if \(!step\) return;\n\s+e\.preventDefault\(\);\n\s+e\.stopPropagation\(\);\n\s+presentGo\(step\);/.test(code) && /presentGesture\(rec\.x - rec\.x0, rec\.y - rec\.y0, DRAG_SLOP_PX\)/.test(code) && /e\.preventDefault\(\);\n\s+if \(st\.present\) return;\s*\n\s+const unit = e\.deltaMode/.test(code), '…a key goes through presentKey (any other key stays the browser\'s), a release through presentGesture; the wheel never moves the presented view');
+  ok(/ptitle\.textContent = f \? f\.title : '';/.test(code) && /pcount\.textContent = `\$\{p\.i \+ 1\} \/ \$\{p\.order\.length\}`;/.test(code), '…the chrome is text (the counter, the artboard\'s title — agent-written)');
 }
 
 console.log('⑥b wiring pins — the Design window');
@@ -408,6 +571,29 @@ console.log('⑥b wiring pins — the Design window');
   ok(/const openSpec = \{ action: 'openDesign', host: h, dir: d, sessionId: sessionId \|\| '' \};/.test(code), 'the openSpec is {action, host, dir, sessionId} (the contract §3.5)');
   ok(/app\.wm\.revealWindow\(existing\.id, \{ replay: !!syncId \}\)/.test(code), 'ONE window per (host, dir): an open one is revealed through the door (§62)');
   ok(!/addEventListener\('message'/.test(code), 'the window adds NO message listener of its own — the canvas core\'s fenced one is the only door from a frame');
+  {
+    const ch = codeOnly(read('src/lib/design-changes.js'));
+    ok(!/addEventListener\('message'|postMessage\(/.test(ch) && /canvas\.listen\(/.test(ch) && (ch.match(/canvas\.tell\(/g) || []).length === 3, 'the changes strip (lane design-changes) hears frames ONLY through the canvas core (listen) and speaks only through its fenced tell — no message listener, no postMessage of its own');
+    ok(/if \(m\.edit === 'style' && pending\.get\(\[m\.file, m\.ref, m\.prop\]\.join\('\\u0001'\)\) !== m\.to\) return;/.test(ch), '…and a style report becomes a chip only when it is the nudge the strip itself asked for');
+    ok(/fetchJson\('\/api\/design\/changes', \{ method: 'POST'[\s\S]{0,140}?body: JSON\.stringify\(\{ sessionId: winInfo\._design\.sessionId, host, dir, items: itemsOf\(sent\) \}\) \}\)/.test(ch) && /mountDesignChanges\(\{ winInfo, canvas, stage, signal, phone, host: h, dir: d, sayChip, closeComposer, composer: \(\) => composer \}\)/.test(code) && /changes\.composer\(box, foot, ta\);/.test(code), 'Send all = ONE POST /api/design/changes {sessionId, host, dir, items}; the window mounts the strip in one line + one composer seam');
+    const inner = [...ch.matchAll(/\.innerHTML = ([^\n;]+);/g)].map((x) => x[1].trim());
+    ok(inner.every((r) => /^UI_ICONS\.\w+$/.test(r)) && /words\.textContent = chipWords\(c\)/.test(ch), `the strip draws chips as text (every innerHTML write an icons.js constant: ${inner.join(' | ')})`);
+    const ck = [...ch.matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)].map((x) => x[1].replace(/\\'/g, "'"));
+    const zz = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-zh.js')).href)).default, jj = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-ja.js')).href)).default;
+    const miss = [...new Set(ck)].filter((k) => !zz[k] || !jj[k]);
+    ok(ck.length >= 20 && miss.length === 0, `every t() literal of the changes strip (${new Set(ck).size}) has a zh AND a ja entry`, miss.join(' | '));
+  }
+  {
+    // lane design-present
+    const pr = codeOnly(read('src/lib/design-present.js'));
+    ok(!/addEventListener\('message'|postMessage\(/.test(pr) && /mountDesignPresent\(\{ winInfo, canvas, button: presentBtn, signal, host: h, dir: d, sayChip, stopPick: \(\) => \{ if \(canvas\.pick\(\)\) togglePick\(\); \} \}\);/.test(code) && /ROW_ACTS\.present = \(\) => present\.start\(\);/.test(code), 'lane design-present: the window mounts ▶ Present / Print all / the downloads in ONE line (+ its bar button and ⋯ row); the module adds no message door');
+    ok(/ifr\.setAttribute\('sandbox', 'allow-scripts allow-modals'\);/.test(pr) && /ifr\.srcdoc = printAllSrcdoc\(list\);/.test(pr) && /const order = presentOrder\(all, canvas\.page\(\)\);/.test(pr) && /if \(!f && frames\.length > 1\) \{ present\.printAll\(\); return; \}/.test(code), '…Print all = the page\'s artboards in reading order in ONE transient frame sandboxed allow-scripts allow-modals (Print\'s twin); Print with nothing open on a page of several = all of them');
+    ok(/fetch\('\/api\/design\/bundle\?' \+ q\.toString\(\)\)/.test(pr) && /save\('\/api\/download-zip\?' \+ q\.toString\(\), ''\);/.test(pr) && /sayChip\(j && j\.error \? t\('Download failed: \{why\}'/.test(pr), '…Download HTML = GET /api/design/bundle (a refusal is the chip in the hub\'s words); Download folder = the File Explorer\'s /api/download-zip');
+    const pk = [...pr.matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)].map((x) => x[1].replace(/\\'/g, "'"));
+    const zp = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-zh.js')).href)).default, jp = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-ja.js')).href)).default;
+    const missP = [...new Set(pk)].filter((k) => !zp[k] || !jp[k]);
+    ok(pk.length >= 10 && missP.length === 0, `every t() literal of the present module (${new Set(pk).size}) has a zh AND a ja entry`, missP.join(' | '));
+  }
   ok(/createDesignCanvas\(canvasHost, \{\s*signal, counterZoom: COUNTER_ZOOM, pickerSrc: pickerSource\(\)/.test(code), 'the canvas is made on the window\'s listener signal, at net zoom 1, with the picker');
   ok(/fetchJson\('\/api\/design\?' \+ qs\(h, d\)\)/.test(code) && /normalizeRead\(await fetchJson\('\/api\/design\?/.test(code), 'the read is GET /api/design?host&dir through normalizeRead (a failure is loud)');
   ok(/onFileChanged\(\(det\) => \{[\s\S]{0,300}?\}, \{ signal \}\);/.test(code), 'the file-changed relay is bound to the window\'s signal');
@@ -451,7 +637,15 @@ console.log('⑥c the published page\'s runtime (the second esbuild entry)');
   const esbuild = createRequire(import.meta.url)(path.join(REPO, 'node_modules/esbuild'));
   const out = esbuild.buildSync({ entryPoints: [path.join(REPO, 'src/design-viewer-entry.js')], bundle: true, minify: true, write: false, format: 'iife', platform: 'browser', target: 'es2020' });
   const kb = out.outputFiles[0].contents.length / 1024;
-  ok(kb > 8 && kb < 60, `built in-process exactly as npm run build builds it: ${kb.toFixed(1)} KB (the design's budget ~40 KB; under 60)`);
+  // the bound guards against a wrong import (the i18n dictionaries are 1.5 MB; utils / the App far more): lanes A + B grew
+  // design-model.js (bundled whole — CJS) to 56 KB; present (lane design-present) adds ~8 KB
+  ok(kb > 8 && kb < 80, `built in-process exactly as npm run build builds it: ${kb.toFixed(1)} KB (2.369.202: 44.6 KB; under 80)`);
+  {
+    const ec2 = codeOnly(read('src/design-viewer-entry.js'));
+    ok(/const play = button\('dv-present', W\.present, W\.present\);/.test(ec2) && /play\.onclick = \(\) => \{ hint\.remove\(\); canvas\.present\(true, \{ words: PW \}\); \};/.test(ec2), 'lane design-present: the published page\'s ▶ Present = the canvas core\'s present mode (fullscreen on the reader\'s press)');
+    ok(/return win\.location\.hash === '#present';/.test(ec2) && /canvas\.present\(true, \{ words: PW, fullscreen: false \}\)/.test(ec2) && /win\.addEventListener\('hashchange', presentFromHash\)/.test(ec2), '…and an address ending in #present presents from the first look, WITHOUT asking for fullscreen (no press of the reader\'s)');
+    ok(/root\.classList\.toggle\('dv-presenting', !!s\.present\);/.test(ec2) && /\.dv-presenting \.dv-bar,\.dv-presenting \.dv-hint\{display:none\}/.test(V.VIEWER_CSS) && /createElementNS\('http:\/\/www\.w3\.org\/2000\/svg', 'svg'\)/.test(ec2), 'its bar steps aside while presenting; the ▶ mark is an SVG drawn by createElementNS (never an emoji, never innerHTML)');
+  }
 }
 
 console.log('⑦ the model is PURE');
@@ -481,6 +675,20 @@ console.log('⑧ controls — a patched copy of each rule turns its table red');
     ['frameDocs', 'the picker appended at the end (after the artboard\'s own scripts)', 'const at = headInsertAt(s);\n  return s.slice(0, at) + `<script>${scriptText(pickerSrc)}</script>` + s.slice(at);', 'return s + `<script>${scriptText(pickerSrc)}</script>`;'],
     ['frameDocs', 'the head search over the whole artboard (no bounded window)', "const lower = s.slice(0, HEAD_WINDOW).toLowerCase();\n  for (const tag of ['head', 'html', '!doctype'])", "const lower = s.toLowerCase();\n  for (const tag of ['head', 'html', '!doctype'])"],
     ['quoteLine', 'the text shown unfolded (a bidi override reorders the line the person approves)', 'text: cleanLine(p.text, PICK_LIMITS.text) });', 'text: p.text });'],
+    ['editFence', 'unknown props accepted (a nudge of any CSS property reaches the strip)', "  if (!CHANGE_PROPS.includes(data.prop) || !styleValueOk(data.prop, data.to)) return null;\n  return { ...base,", "  return { ...base,"],
+    ['editFence', 'an edit\'s words left unbounded', "from: cleanLine(data.from, PICK_LIMITS.edit), to: cleanLine(data.to, PICK_LIMITS.edit) };", "from: String(data.from), to: String(data.to) };"],
+    ['frameSay', 'the Tweaks word unfenced (any target and value said into a frame)', "  if (msg.kind === 'design-tweak') return tweakSay(msg);", "  if (msg.kind === 'design-tweak') return { kind: 'design-tweak', var: msg.var, attr: msg.attr, value: msg.value };"],
+    ['frameSay', 'a nudge\'s value unchecked (any CSS text said into a frame)', "CHANGE_PROPS.includes(msg.prop) && styleValueOk(msg.prop, msg.value) ? { kind: 'design-style'", "CHANGE_PROPS.includes(msg.prop) ? { kind: 'design-style'"],
+    // lane design-present
+    ['presentOrder', 'no row tolerance (a frame 6 px higher jumps ahead of its row)', '    if (row && it.f.y < row.mid) row.items.push(it);\n', '    if (row && it.f.y === row.items[0].f.y) row.items.push(it);\n'],
+    ['presentOrder', 'every page presented (the page filter dropped)', "&& (typeof f.page === 'string' ? f.page : '') === page);", ');'],
+    ['presentView', 'never scaled up (a slide on a big screen stays small)', 'return fitView(rect, pane, { pad, maxZ: ZOOM_MAX });', 'return fitView(rect, pane, { pad });'],
+    ['presentSteps', 'the swipe directions swapped', "return x < 0 ? 'next' : 'prev';", "return x < 0 ? 'prev' : 'next';"],
+    ['presentSteps', 'next on the last one wraps to the first', 'if (step === \'next\') return Math.min(cnt - 1, cur + 1);', 'if (step === \'next\') return (cur + 1) % cnt;'],
+    ['presentSteps', 'Tab taken by the presentation', "case 'ArrowRight': case 'ArrowDown':", "case 'Tab': case 'ArrowRight': case 'ArrowDown':"],
+    ['printAll', 'the srcdoc attribute not escaped (an artboard\'s quote ends it)', ".replace(/&/g, '&amp;').replace(/\"/g, '&quot;');", ";"],
+    ['printAll', 'one page size for all (no named page per artboard)', '@page a${i}{size:${w}px ${h}px;margin:0}.s${i}{page:a${i};', '.s${i}{'],
+    ['printAll', 'a refused artboard printed as an empty frame', ".filter((f) => isObj(f) && typeof f.html === 'string')", ".filter((f) => isObj(f)).map((f) => ({ ...f, html: String(f.html || '') }))"],
   ];
   for (const [rule, what, a, b] of MUTANTS) {
     if (!src.includes(a)) { ok(false, `${rule} CONTROL: the patch anchor is still in the module`, a); continue; }
@@ -500,6 +708,22 @@ console.log('⑧ controls — a patched copy of each rule turns its table red');
       const real = (await pickerTable(P.pickerSource())).every(([x, y]) => eq(x, y));
       const mut = (await pickerTable(pm.pickerSource())).every(([x, y]) => eq(x, y));
       ok(real && !mut, 'picker CONTROL (the parent check removed — any window may switch picking on): the real picker passes its table, the patched copy FAILS it');
+    }
+    // lane design-tweaks: a knob's value taken unjudged (a value that closes a rule restyles the page)
+    const a3 = "    if (typeof v !== 'string' || !v || v.length > 80 || TW_BAD.test(v) || !root) return;\n";
+    if (!psrc.includes(a3)) ok(false, 'picker CONTROL 3: the patch anchor is still in the module', a3);
+    else {
+      const f3 = C.write(PREL, psrc.replace(a3, "    if (typeof v !== 'string' || !root) return;\n"), 'picker-tweak-unjudged');
+      const pm3 = await import(pathToFileURL(f3).href);
+      ok(!(await pickerTable(pm3.pickerSource())).every(([x, y]) => eq(x, y)), 'picker CONTROL (a knob\'s value taken unjudged — one that closes a rule restyles the page): the patched copy FAILS the table');
+    }
+    // lane design-changes: typing in an edited text handed to the page's own key handlers
+    const a2 = '      e.stopImmediatePropagation(); // the words being typed are the user\'s, never the page\'s shortcuts\n';
+    if (!psrc.includes(a2)) ok(false, 'picker CONTROL 2: the patch anchor is still in the module', a2);
+    else {
+      const f2 = C.write(PREL, psrc.replace(a2, ''), 'picker-typing-leaks');
+      const pm2 = await import(pathToFileURL(f2).href);
+      ok(!(await pickerTable(pm2.pickerSource())).every(([x, y]) => eq(x, y)), 'picker CONTROL (typing in an edited text reaches the page\'s key handlers): the patched copy FAILS the table');
     }
   }
   for (const r of copiesCensus(C.files, C.dir, REPO, { minCopies: MUTANTS.length + 1, label: '⑧ ' })) ok(r.pass, r.name, r.detail);

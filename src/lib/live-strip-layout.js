@@ -69,6 +69,7 @@ function stripOrder(prevOrder, rows) {
 /** 0 = the tab you are looking at (never folds), 1 = a browser running a command, 2 = the rest. */
 function stripPriority(row, shownRef) {
   if (row && row.ref === shownRef) return 0;
+  if (row && row.keep) return 0; // lane live-watch-polish G3: a `keep` row (the tab row's watched tab) never folds either
   return row && row.state === 'running' ? 1 : 2;
 }
 
@@ -145,12 +146,13 @@ function rowStateWords(row, rows) {
 
 /**
  * lane browser-resume C (§3.9, the owner's ruling 3): THE TAB ROW's fold — the SAME rule as the strip's (stripFold): the tab
- * on show never folds (0), a tab the viewer can act on (the viewed agent's, his own) outlasts one it cannot (another
+ * on show never folds (0) — nor the tab this view WATCHES (`watchedRef`, lane live-watch-polish G3: the row always shows both), a tab the viewer can act on (the viewed agent's, his own) outlasts one it cannot (another
  * conversation's, nobody's — 2), ties right to left; the row's end ("Close all tabs…") is always there (`endPx`).
  * `rows` = src/browser-tabs.js tabRowModel's rows (targetId, title, owner, active). → { visible, folded } (target ids).
  */
-function tabRowFold({ rows = [], widths = {}, avail = Infinity, endPx = 0, morePx = MORE_PX } = {}) {
-  const list = (rows || []).filter((r) => r && r.targetId).map((r) => ({ ref: r.targetId, label: r.title || '', state: r.owner === 'agent' || r.owner === 'you' ? 'running' : 'idle' }));
+function tabRowFold({ rows = [], widths = {}, avail = Infinity, endPx = 0, morePx = MORE_PX, watchedRef = null } = {}) {
+  const watched = watchedRef ? String(watchedRef).toUpperCase() : null;
+  const list = (rows || []).filter((r) => r && r.targetId).map((r) => ({ ref: r.targetId, label: r.title || '', state: r.owner === 'agent' || r.owner === 'you' ? 'running' : 'idle', keep: !!watched && String(r.targetId).toUpperCase() === watched }));
   const shown = ((rows || []).find((r) => r && r.active) || {}).targetId || null;
   return stripFold({ rows: list, widths, avail, shownRef: shown, chipPx: endPx, morePx });
 }

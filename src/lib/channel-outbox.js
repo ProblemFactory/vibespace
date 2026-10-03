@@ -132,6 +132,36 @@ function revealInto(node, s) {
   }
   return names;
 }
+/** design 005 §2.B: the attachment rows (keyed by the card — a changed record redraws the card) */
+function appendAttachments(card, p) {
+  const files = P.storedAttachments(p);
+  if (!files.length) return;
+  const gone = !!p.attachmentsGoneAt;
+  const box = el('div', 'chan-prop-files');
+  for (const a of files) {
+    const row = el('div', 'chan-prop-file');
+    const url = `/api/channels/outbox/${encodeURIComponent(p.id)}/attachment/${encodeURIComponent(String(a.n))}`;
+    if (!gone && P.INLINE_RASTER.includes(a.mime)) {
+      const img = document.createElement('img');
+      img.className = 'chan-prop-file-thumb';
+      img.alt = '';
+      img.loading = 'lazy';
+      img.src = `${url}?inline=1`;
+      row.appendChild(img);
+    }
+    let name;
+    if (gone) name = el('span', 'chan-prop-file-name');
+    else { name = document.createElement('a'); name.className = 'chan-prop-file-name'; name.href = url; name.setAttribute('download', ''); }
+    revealInto(name, a.name);
+    row.appendChild(name);
+    row.appendChild(el('span', 'chan-prop-file-meta', `${P.attachmentSize(a.bytes)} · ${a.mime} · sha256 ${String(a.sha256).slice(0, 12)}…`));
+    const mm = P.nameTypeMismatch(a.name, a.mime);
+    if (mm) row.appendChild(el('span', 'chan-prop-file-chip chan-warn', t('named .{ext}, but its bytes are {type}', { ext: mm.ext, type: a.mime })));
+    box.appendChild(row);
+  }
+  box.appendChild(el('div', 'chan-prop-file-note', gone ? t('The files are no longer kept — the card keeps their names, sizes and checksums.') : t('Exactly these bytes are sent; if a file changes, the send is refused.')));
+  card.appendChild(box);
+}
 /** F4 (r6 verify): ONE envelope fact per line — its label, then its value, wrapping, never clipped. */
 function envRow(cls, label, value) {
   const row = el('div', `chan-prop-env ${cls}`);
@@ -314,6 +344,10 @@ export function renderProposalCard(app, p, { compact = false } = {}) {
     orig.appendChild(origText);
     card.appendChild(orig);
   }
+  // ── design 005 §2.B (B-fd1f): WHAT LEAVES WITH IT — one row per attachment: a thumbnail for a picture the server
+  //    SNIFFED as one of the four raster types (served by the owner-only route; anything else is never drawn), the name,
+  //    the size, the sniffed type (a chip when the name's extension says another), the sha256 shortened; a row downloads ──
+  appendAttachments(card, p);
   // ── ONE meta line: why · the policy verdict · the identity · expiry · the sender line ──
   const meta = el('div', 'chan-prop-meta');
   // WHY — a structured reference the panel can link, never an agent's sentence.

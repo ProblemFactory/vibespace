@@ -223,9 +223,12 @@ console.log('§2c agents never receive HTML: the agent route census + every agen
     propose: 'the agent\'s own draft', compose: 'the agent\'s own draft', replaceProposal: 'the agent\'s own draft (replacing its own)',
     withdrawProposal: 'a proposal id and its fate', request: 'a reach request record (the agent\'s own reason)',
     // the .197 integration: lane channel-threads' agent verbs, judged by what they hand an agent
+    readAroundFor: 'design 010: the vendor\'s records around a hit it was shown, through withView\'s agent branch (viewsOf → agentCopy) — reach asked before AND after the await (stillSees); never stored',
     readThreadFor: 'a thread\'s records through withView\'s agent branch (viewsOf → agentCopy: no tree, no role:body attachment, frame-inert) — the same door as readFor',
     agentThreadRefresh: 'counts + the thread\'s key — no record',
     proposeReaction: 'the agent\'s own reaction proposal (a key + the reacted message\'s id)',
+    // lane channel-attach-read (B-d6b9)
+    attachment: 'the bytes of a part a message of a readable conversation carries — never its role:body part (not-found, even cached); the sender / title / type through the belt; driven below and in test-channels-images ③b',
   };
   ok(handlers.length >= 9 && called.every((k) => k in JUDGED) && Object.keys(JUDGED).every((k) => called.includes(k)), `THE ROUTE CENSUS: every engine method the ${handlers.length} agent channel handlers call is judged for what it hands an agent (${called.join(', ')})`, JSON.stringify({ called, unjudged: called.filter((k) => !(k in JUDGED)), dead: Object.keys(JUDGED).filter((k) => !called.includes(k)) }));
   // the fake world's mail room is read from process.env by the adapter (the server's own seam)
@@ -247,14 +250,25 @@ console.log('§2c agents never receive HTML: the agent route census + every agen
     answers.search = await eng.searchFor(AG, 'mail', {});
     answers.status = eng.statusFor(AG, null);
     answers.access = eng.accessFor(AG);
+    // lane channel-attach-read: the ATTACHMENT verb never hands an agent the formatted body — a part:N id is guessable,
+    // and the window may have cached it (fetched here first, as the owner); the leak check below reads its answer too
+    const bodyRec = (Array.isArray(owner) ? owner : []).find((r) => (r.attachments || []).some((a) => a.role === 'body'));
+    const bodyAtt = bodyRec ? bodyRec.attachments.find((a) => a.role === 'body') : null;
+    let bodyCached = false;
+    if (bodyAtt) {
+      const own = await eng.attachment('fake-push', 'fake-push-mail', bodyAtt.id, { msg: bodyRec.vendorId });
+      bodyCached = !!(own && own.ok);
+      answers.attachmentBody = await eng.attachment('fake-push', 'fake-push-mail', bodyAtt.id, { msg: bodyRec.vendorId, by: 'agent', principal: AG });
+    }
     eng.stop();
     const leaks = Object.entries(answers).filter(([, v]) => HTML_RE.test(JSON.stringify(v))).map(([k, v]) => `${k}: ${(JSON.stringify(v).match(HTML_RE) || [])[0]}`);
     const mailRead = answers['read:fake-push-mail'];
-    return { ownerBodies, convs: convs.length, mailRecords: mailRead && mailRead.ok ? mailRead.records.length : 0, searchHits: (answers.search.results || []).length, leaks };
+    return { bodyCached, bodyAnswer: answers.attachmentBody || null, ownerBodies, convs: convs.length, mailRecords: mailRead && mailRead.ok ? mailRead.records.length : 0, searchHits: (answers.search.results || []).length, leaks };
   };
   const real = await drive(ENG, 'real');
   ok(real.ownerBodies >= 6 && real.convs >= 3 && real.mailRecords >= 8 && real.searchHits > 0, `FIXTURE: the owner's read carries ${real.ownerBodies} formatted bodies; the agent (account access) sees ${real.convs} conversations, reads ${real.mailRecords} mails of the mail room, finds ${real.searchHits} search hits`, JSON.stringify(real));
-  ok(!real.leaks.length, 'every agent answer — list, read of every conversation, search, status, access — carries no body attachment, no text/html, no render tree, no markup', real.leaks.join('; '));
+  ok(!real.leaks.length, 'every agent answer — list, read of every conversation, search, status, access, an attachment — carries no body attachment, no text/html, no render tree, no markup', real.leaks.join('; '));
+  ok(real.bodyCached && real.bodyAnswer && real.bodyAnswer.code === 'not-found', `the ATTACHMENT verb (lane channel-attach-read): a mail's formatted body the owner's window cached is the agent's not-found (${JSON.stringify(real.bodyAnswer && real.bodyAnswer.code)})`, JSON.stringify(real.bodyAnswer));
   // CONTROL: the same drive on an engine whose readFor forgets withoutBlocks
   const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
   const M = mutantCopies('chan-acl-html', REPO);
@@ -263,7 +277,12 @@ console.log('§2c agents never receive HTML: the agent route census + every agen
   const noStrip = engSrc.replace('const base = agent ? viewsOf(rec, records).map(agentCopy) : withBlocks(rec, records);', 'const base = agent ? viewsOf(rec, records) : withBlocks(rec, records);');
   const bad = await drive(M.load('src/server/channels-engine.js', noStrip, 'read-keeps-body'), 'control');
   ok(noStrip !== engSrc && bad.leaks.some((l) => /^read:fake-push-mail: ("role":"body"|text\/html)$/.test(l)), 'CONTROL: an engine whose readFor forgets withoutBlocks hands the mail\'s text/html body attachment to the agent (the census above would be red)', bad.leaks.join('; '));
-  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(c.pass, c.name, c.detail);
+  // CONTROL (lane channel-attach-read): an engine whose agent attachment serves a role:body part hands the agent the text/html body
+  const BODY_GATE = "if (!part || part.role === 'body') return";
+  const bodyOpen = engSrc.replace(BODY_GATE, 'if (!part) return');
+  const badBody = await drive(M.load('src/server/channels-engine.js', bodyOpen, 'agent-body-part'), 'control-body');
+  ok(engSrc.split(BODY_GATE).length === 2 && badBody.leaks.some((l) => /^attachmentBody: text\/html$/.test(l)), 'CONTROL: an engine whose agent attachment serves the role:body part hands the agent the mail\'s text/html body (the leak census above would be red)', badBody.leaks.join('; '));
+  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(c.pass, c.name, c.detail);
   for (const [k, v] of Object.entries(prevEnv)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
 }
 

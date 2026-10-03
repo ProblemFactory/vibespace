@@ -151,7 +151,7 @@ const machine = (extra = {}) => DS.install({ dataDir: path.join(root, `m${++seq}
 console.log('§1 the census');
 const OPS = DS.DESKTOP_SERVE_OPS;
 const AS = require('../src/app-serve.js');
-ok(Array.isArray(OPS) && Object.isFrozen(OPS) && JSON.stringify(OPS) === JSON.stringify(['facts', 'launch', 'stop', 'status', 'list', 'windows', 'fit', 'keep-alive', 'relaunch', ...AS.APP_OPS]) && JSON.stringify(AS.APP_OPS) === JSON.stringify(['app-status', 'app-plan', 'app-install', 'app-remove', 'app-refresh', 'app-adopt-drift']), `the closed op set is the design's nine + Layer 0's six app ops (${OPS.join(' ')})`);
+ok(Array.isArray(OPS) && Object.isFrozen(OPS) && JSON.stringify(OPS) === JSON.stringify(['facts', 'launch', 'stop', 'status', 'list', 'windows', 'fit', 'keep-alive', 'relaunch', ...AS.APP_OPS]) && JSON.stringify(AS.APP_OPS) === JSON.stringify(['app-status', 'app-plan', 'app-install', 'app-remove', 'app-refresh', 'app-adopt-drift', 'app-fetch', 'app-unstage']), `the closed op set is the design's nine + Layer 0's eight app ops (design 009: app-fetch, app-unstage) (${OPS.join(' ')})`);
 const serveSrc = read('src/desktop-serve.js');
 const runnerSrc = serveSrc.slice(serveSrc.indexOf('async function runDesktopServeOp('));
 const appRunnerSrc = read('src/app-serve.js').slice(read('src/app-serve.js').indexOf('async function runAppOp('));
@@ -253,7 +253,7 @@ console.log('§3 the daemon wiring (three-touch rule) and the SHARED tier');
   const reqs = [...serveSrc.matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]);
   ok(reqs.every((r) => ['fs', 'os', 'path', './desktop-apps', './office-open' /* §7.9: PURE — the LibreOffice rows + the open-with verdict */, './keeper-limits', './desktop-display', './app-serve' /* Layer 0 apps: SHARED (builtins + the PURE app-manifest + desktop-apps) */].includes(r)), `the SHARED module requires only builtins + the PURE models + the machine facts (${reqs.join(' ')}) — never src/server`);
   const asReqs = [...read('src/app-serve.js').matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]);
-  ok(asReqs.every((r) => ['fs', 'path', 'os', 'crypto', 'child_process', 'https', './app-manifest.js', './desktop-apps.js'].includes(r)) && read('src/app-manifest.js').match(/require\(/g) === null, `…and src/app-serve.js requires only builtins + the two PURE models (${asReqs.join(' ')}); src/app-manifest.js requires NOTHING`);
+  ok(asReqs.every((r) => ['fs', 'path', 'os', 'crypto', 'child_process', 'https', 'dns', './app-manifest.js', './desktop-apps.js', './app-squashfs.js'].includes(r)) && read('src/app-manifest.js').match(/require\(/g) === null, `…and src/app-serve.js requires only builtins + the two PURE models (${asReqs.join(' ')}); src/app-manifest.js requires NOTHING`);
   ok(caps && /'app-install'/.test(caps[1]) && /if \(\/\^app-\/\.test\(String\(action\)\) && !conn\.info\?\.capabilities\?\.includes\?\.\('app-install'\)\) \{[^\n]*e\.code = 'host_needs_daemon'; throw e; \}/.test(meth) && meth.indexOf("includes?.('app-install')") < meth.indexOf('_request('), 'Layer 0: the hello-ack names `app-install` and the client asks the app-* actions ONLY of a daemon that names it — before any request (an older daemon is never asked)');
   const bundle = path.join(REPO, 'data/bin/vibespace-agentd.js');
   if (fs.existsSync(bundle)) { const b = read('data/bin/vibespace-agentd.js'); ok(/capabilities: \[[^\]]*["']desktop-serve["'][^\]]*\]/.test(b) && /function runDesktopServeOp/.test(b), 'the BUILT daemon bundle carries the capability and the runner (npm run build:agentd)'); }

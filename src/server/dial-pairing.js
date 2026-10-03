@@ -269,8 +269,12 @@ async function deviceForDial(deviceId, _retried = false) {
       bundlePath: path.join(rootDir, 'data', 'bin', 'vibespace-agentd.js'),
       version: require('../../package.json').version,
       transport: { kind: 'stream', hostToken: agentdHostToken('dial-' + deviceId), getStream: () => agentdDials.get(deviceId) || null },
-      log: (...a) => console.log('[device-dial]', ...a),
+      // lane device-upgrade-stuck: the line NAMES the device — two devices' upgrade lines read as one machine's "two versions"
+      log: (...a) => console.log('[device-dial]', JSON.stringify(String(deviceId)), ...a),
       upgradeLedger: upgradeLedgerFor(deviceId), // the loop breaker's count outlives this instance (verify-r1 C1)
+      // lane device-upgrade-stuck: THE door (hosts.onAgentUpgrade → src/server/device-upgrade-watch.js)
+      onUpgradeStuck: (from, to, info) => { const h = hosts.findByDeviceId(deviceId); hosts.onAgentUpgrade?.('stuck', { ...(info || {}), hostKey: h ? h.id : 'host-dial-' + deviceId, machine: (h && h.name) || deviceId, from, to }); },
+      onVersionMatch: (v) => { const h = hosts.findByDeviceId(deviceId); hosts.onAgentUpgrade?.('matched', { hostKey: h ? h.id : 'host-dial-' + deviceId, version: v }); },
     });
     agentdDialDevices.set(deviceId, dm);
   }

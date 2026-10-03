@@ -75,6 +75,7 @@ import { track } from './telemetry-client.js';
 // §25: THE ONE body path — the record's typed tree (or the generic rung over its
 // text) through the ONE renderer; the pictures a tree places are drawn IN PLACE
 import { renderBlocks, placedAttachments, blocksOfRecord } from './channel-blocks-view.js';
+import { renderFacts } from './channel-facts-view.js';   // lane message-facts (B-f066): a message's facts — the summary line, chips, details
 // verify round 3: THE UPWARD PAGE'S VERDICT — a scroll event is displacement; the person's input is intent (PURE)
 import { pageUpVerdict, isGutterPress, isUpKey, isTypingTarget, wheelTowardOlder, nestedScrollTop, holdUntilAfter, atTail, PULL_PX } from './channel-paging.js';
 // §25: the read-only footer's Re-authorize is the account's own re-auth dialog
@@ -99,8 +100,8 @@ import { renderReactionStrip, patchReactionStrip, toggleReaction, loadEmojiSet, 
 // lane reaction-hover (2026-10-01): ONE hover action bar per message — add a reaction · reply in thread · quote (an agent
 // group's row: its ⋯) — an overlay at the message's right edge, never a line in the flow; the phone's long press = the
 // same actions as a menu. PURE rules + the DOM half.
-import { msgBarActions, barKey } from './msg-bar-model.js';
-import { renderMsgBar, syncMsgBar, holdBarOpen, msgActionMenu } from './channel-msg-bar.js';
+import { msgBarActions, msgMenuActions, barKey } from './msg-bar-model.js';
+import { renderMsgBar, syncMsgBar, holdBarOpen, msgActionMenu, renderMsgMore, isTouchFirst } from './channel-msg-bar.js';
 import * as P from '../channel-policy.js';
 import { firstLine } from '../channel-thread.js';
 
@@ -365,6 +366,13 @@ function renderRecord(rec, { cont = false, base = null, folds = null, mail = nul
     when.title = full;
     row.appendChild(when);
   }
+  // lane message-facts (B-f066): the message's FACTS under the head (a continuation row too — a mail's recipients differ
+  // per message); facts that are only chips sit beside the time
+  {
+    const fx = renderFacts(rec, { folds, ask: ctx && ctx.askFacts });
+    const head = fx && !cont ? row.querySelector(':scope > .chanmsg-head') : null;
+    if (fx && head && fx.classList.contains('chanmsg-facts-inline')) head.appendChild(fx); else if (fx) row.appendChild(fx);
+  }
   // W1 (lane channel-threads): the QUOTE LINE of what this reply answers (a click jumps to it) and, for a reply the
   // main list shows inside a thread, the dim "in thread" tag (a click opens the pane on its root). In the pane a
   // reply to the ROOT carries no quote (the root is right above it); a nested reply does.
@@ -407,8 +415,17 @@ function renderRecord(rec, { cont = false, base = null, folds = null, mail = nul
     row._acts = () => ctx.bar(rec, ctx, row);
     const bar = renderMsgBar(row._acts());
     if (bar) row.appendChild(bar);
+    // lane channel-touch-menu: the row's MENU = the bar's actions + Copy text; on a touch-first device the words are
+    // selectable (a long press = a selection), so a … button opens it
+    row._menu = () => menuActs(row._acts(), rec);
+    if (isTouchFirst() && row._menu().length) row.appendChild(renderMsgMore((b) => { const r = b.getBoundingClientRect(); msgActionMenu(r.left, r.bottom + 2, row._menu(), row.querySelector(':scope > .chanmsg-head') || row); }));
   }
   return row;
+}
+/** The menu's actions (PURE `msgMenuActions`): the bar's own, then Copy text — the WHOLE message, as the chat's menu. */
+function menuActs(acts, rec) {
+  const words = String((rec && rec.text) || '');
+  return msgMenuActions(acts.map((a) => a.id), { text: words }).map((id) => acts.find((a) => a.id === id) || (id === 'copy' ? { id, label: t('Copy text'), run: () => { copyText(words); showToast(t('Copied')); } } : null)).filter(Boolean);
 }
 /** A day separator: a centred pill on a hairline. */
 function daySeparator(ms) {
@@ -423,6 +440,23 @@ function daySeparator(ms) {
  * — the registry's `singleton` flag is per KIND, which is not what we want:
  * two different conversations are two windows, the same one twice is not.
  */
+/** design 010 (B-c9be): THE WINDOW'S OWN ROW RENDERER for the search dialog's "around this message" sheet — the
+ *  vendor's records around a found message (never stored), each a `renderRecord` row (a run of one author folds like
+ *  the window's), the found one marked. Everything textContent, like every row. */
+export function renderAroundRows(records, { base = null, focus = null } = {}) {
+  const out = [];
+  let prev = null;
+  for (const rec of Array.isArray(records) ? records : []) {
+    if (!rec) continue;
+    const cont = !!(prev && prev.author && rec.author && prev.author.id === rec.author.id && Number(rec.at) - Number(prev.at) < 5 * 60e3);
+    const row = renderRecord(rec, { cont, base });
+    if (focus && rec.vendorId === focus) row.classList.add('chanmsg-found');
+    out.push(row);
+    prev = rec;
+  }
+  return out;
+}
+
 export function openChannelWindow(app, adapterId, convId, opts = {}) {
   // `_openSpec` is where WindowManager.createWindow parks it (window.js:125) —
   // the underscore is the storage, not a private we are reaching around.
@@ -670,7 +704,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
         ro.dataset.channelReadonly = 'reauth';
         ro.appendChild(el('span', '', t('Read-only — this account needs a re-authorization to reply')));
         const fix = btn(t('Re-authorize'), async () => {
-          const d = await fetchJson('/api/channels');
+          const d = await fetchJson('/api/channels?scope=accounts');   // design 008: the accounts, never the rows
           if (!d || d.error) { showToast(routeErrorText(d), { type: 'error' }); return; }
           const acct = (d.adapters || []).find((x) => x.id === a.id) || a;
           showReauthAccountDialog(app, acct, { kinds: d.kinds || [] });
@@ -723,7 +757,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       const fix = btn(t('Re-authorize'), async () => {
         // the consent asks for the read permission only when the account says so (the adapter's `reactions` option)
         await fetchJson(`/api/channels/adapters/${encodeURIComponent(a.id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ options: { reactions: 'read' } }) });
-        const d = await fetchJson('/api/channels');
+        const d = await fetchJson('/api/channels?scope=accounts');
         if (!d || d.error) { showToast(routeErrorText(d), { type: 'error' }); return; }
         const acct = (d.adapters || []).find((x) => x.id === a.id) || a;
         showReauthAccountDialog(app, acct, { kinds: d.kinds || [] });
@@ -881,7 +915,24 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     }
   }
   /** THE ROW CONTEXT every renderRecord of this window gets (the list's; the pane passes `inPane` + its root). */
+  /** lane message-facts (B-f066): Details on a message stored before its facts — ONE ask (a side hit is free; a miss reads
+   *  the whole thread once, server-side single-flight); every other row of the thread it filled is redrawn in place. */
+  async function askFacts(rec) {
+    const r = await fetchJson(`${base}/facts?msg=${encodeURIComponent(rec.vendorId || '')}`);
+    if (!r || r.error || !r.ok) { showToast(routeErrorText(r), { type: 'error' }); return null; }
+    for (const [vid, facts] of Object.entries(r.all && typeof r.all === 'object' ? r.all : {})) {
+      if (vid === rec.vendorId) continue;
+      for (const row of rowsFor(vid)) {
+        const ask = row.querySelector(':scope > .chanmsg-facts-ask');
+        if (!ask) continue;
+        const next = renderFacts({ vendorId: vid, facts: Array.isArray(facts) ? facts : [] }, { folds });
+        if (next && next.classList.contains('chanmsg-facts-inline') && row.querySelector(':scope > .chanmsg-head')) { row.querySelector(':scope > .chanmsg-head').appendChild(next); ask.remove(); } else if (next) ask.replaceWith(next); else ask.remove();
+      }
+    }
+    return Array.isArray(r.facts) ? r.facts : [];
+  }
   const rowCtx = {
+    askFacts,
     onAuthor,
     strip: (rec) => stripCtx(rec),
     bar: (rec, c, row) => barActs(rec, c, row),
@@ -1256,7 +1307,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     if (!row || !row._acts || ev.target.closest('a[href], img, textarea, input, .chanmsg-bar')) return;
     const sel = window.getSelection ? window.getSelection() : null;
     if (sel && !sel.isCollapsed && sel.anchorNode && row.contains(sel.anchorNode)) return;
-    const acts = row._acts();
+    const acts = row._menu ? row._menu() : row._acts();
     if (!acts.length) return;
     ev.preventDefault(); ev.stopPropagation();
     msgActionMenu(ev.clientX, ev.clientY, acts, row.querySelector(':scope > .chanmsg-head') || row);
@@ -1460,6 +1511,8 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
       // long-press is the door (the bar is not drawn there). Its click is the list's delegated `.chanmsg-more` handler.
       const bar = renderMsgBar(msgBarActions({ group: true }).map((id) => ({ id, label: t('More actions'), cls: 'chanmsg-more' })));
       if (bar) row.appendChild(bar);
+      // lane channel-touch-menu: the touch … (a long press on the words selects them) — the same delegated handler
+      if (isTouchFirst()) row.appendChild(renderMsgMore(null, 'chanmsg-more'));
     }
     return row;
   }

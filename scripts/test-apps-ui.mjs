@@ -10,9 +10,10 @@
 //   ① the user's door: Desktop apps → Your installed apps → Install an app… → search → pick → THE install dialog (the
 //      plan's facts: packages, sizes, how it comes back after a rebuild; every command) → Install (a real click) → the
 //      log streams, the dialog says done, the entry is a row of "Your installed apps"
-//   ② the agent's proposal: `vibespace-app install hello --why …` → ONE For-you item (origin apps) → the For-you window's
-//      Install… (a real click) opens THE install dialog on the proposal (who proposed it, why) → Install → done; the
-//      item resolved; the agent's `vibespace-app wait` prints done
+//   ② the agent's proposal: `vibespace-app install hello --why …` → ONE For-you item (origin apps) carrying ONE CARD
+//      (design 009: its title, who asks and why, two buttons, the rest behind ⋯) → ONE real click on Install in the card
+//      (no second dialog) → installing… → Installed in the card; the item resolved; the agent's `vibespace-app wait` prints done
+//   ⑥ zh at 390 px: the card in the For-you sheet reads in Chinese, one click installs, the words census holds on the page
 //   ③ Not now: a second proposal declined from the For-you window; the agent's `wait` hears it
 //   ④ an agent's token on the user's install route ⇒ 403 agent_forbidden
 //   ⑤ the phone (390 px): the apps section fits — nothing wider than the screen
@@ -128,12 +129,14 @@ try {
   check('a real click on Search', await realClick('#app-search-dialog .app-search-go') === true);
   check('the result lists xterm', await waitFor(`!!document.querySelector('#app-search-dialog .app-search-result[data-pkg="xterm"]')`, 10000));
   await realClick('#app-search-dialog .app-search-result[data-pkg="xterm"]');
-  const planShown = await waitFor(`(() => { const d = document.querySelector('#desktop-install-dialog'); if (!d) return false; const f = d.querySelector('.desktop-install-facts'); const pre = d.querySelector('.desktop-install-pre'); return !!f && f.style.display !== 'none' && /packages ·/.test(f.textContent) && /after the server starts/.test(f.textContent) && /install -y xterm/.test(pre.textContent); })()`, 10000);
+  const planShown = await waitFor(`(() => { const d = document.querySelector('#desktop-install-dialog'); if (!d) return false; const f = d.querySelector('.desktop-install-facts'); const pre = d.querySelector('.desktop-install-pre'); return !!f && f.style.display !== 'none' && /packages? ·/.test(f.textContent) && /after the server starts/.test(f.textContent) && /install -y xterm/.test(pre.textContent); })()`, 10000);
   check('THE install dialog shows the plan: its facts (packages · download · on disk, how it comes back after a rebuild) and every command', planShown, await evalJs(`document.querySelector('#desktop-install-dialog')?.textContent?.slice(0, 600) || null`));
   check('…titled by what it installs', await evalJs(`/Install xterm on this machine/.test(document.querySelector('#desktop-install-dialog h3')?.textContent || '')`));
+  check('design 009 B: the dialog LEADS with the card\'s summary; the root sentence and the commands fold under a closed Details', await evalJs(`(() => { const d = document.querySelector('#desktop-install-dialog'); const sum = d.querySelector('.app-card-summary'); const det = d.querySelector('.app-install-details'); const pre = d.querySelector('.desktop-install-pre'); return !!sum && sum.style.display !== 'none' && /Install xterm\\?/.test(sum.textContent) && /From this machine’s package sources/.test(sum.textContent) && !!det && !det.open && det.contains(pre) && /as root/.test(det.textContent) && sum.compareDocumentPosition(det) === Node.DOCUMENT_POSITION_FOLLOWING; })()`) === true);
   await shot('apps-plan');
   check('a real click on Install', await realClick('#desktop-install-dialog .desktop-install-actions .btn-create') === true);
   check('the log streams and the dialog says done (the app is in the Applications list)', await waitFor(`(() => { const d = document.querySelector('#desktop-install-dialog'); return !!d && /apt-get install -y xterm/.test(d.querySelector('.desktop-install-log')?.textContent || '') && /XTerm is installed on this machine/.test(d.querySelector('.desktop-install-note')?.textContent || ''); })()`, 15000));
+  check('review I13: the log hides the slot\'s `= run …` / `= ok` markers', await evalJs(`!/^= (run|ok)/m.test(document.querySelector('#desktop-install-dialog .desktop-install-log')?.textContent || '')`) === true);
   await evalJs(`document.querySelector('#desktop-install-dialog .dialog-close')?.click(); true`);
   check('"Your installed apps" lists it', await waitFor(`!!document.querySelector('#desktop-launch-dialog .app-sec-entry[data-entry="xterm"]') && /XTerm/.test(document.querySelector('#desktop-launch-dialog .app-sec-entry[data-entry="xterm"]').textContent)`, 10000));
 
@@ -159,11 +162,18 @@ try {
   const waiter = cli(['wait', pid], TOKEN);
   await evalJs(`app.openInbox({ itemId: ${JSON.stringify(item && item.id)} }); true`);
   check('the For-you window shows the item with Install… and Not now', await waitFor(`!!document.querySelector('[data-act="app-install"]') && !!document.querySelector('[data-act="app-reject"]')`, 10000));
-  check('a real click on Install…', await realClick('[data-act="app-install"]') === true);
-  check('THE install dialog opens ON the proposal: who proposed it and why, its plan', await waitFor(`(() => { const d = document.querySelector('#desktop-install-dialog'); return !!d && /Image work proposed this/.test(d.textContent) && /Why: a friendly greeting program/.test(d.textContent) && /install -y hello/.test(d.querySelector('.desktop-install-pre')?.textContent || ''); })()`, 10000));
+  await sleep(900); // a card's Install arms ARM_MS after its pane is shown (an Install that just appeared is not the one the user read)
+  check('design 009: the For-you window shows ONE card — its title, who asks and why, TWO buttons (Install / Not now) and ⋯', await waitFor(`(() => { const p = document.querySelector('.iw-item'); if (!p) return false; const acts = [...p.querySelectorAll('.iw-actions [data-act]')].map((b) => b.dataset.act); return /Install hello\\?/.test(p.querySelector('.iw-title').textContent) && /Image work wants to install it: a friendly greeting program/.test(p.textContent) && acts.join() === 'app-install,app-reject,more'; })()`, 10000), await evalJs(`document.querySelector('.iw-item')?.textContent?.slice(0, 400) || null`));
+  check('the card\'s face says no package-system word (Details may)', await evalJs(`(() => { const c = document.querySelector('.iw-item .ut-app-card').cloneNode(true); c.querySelector('.ut-app-details')?.remove(); const face = document.querySelector('.iw-item .iw-title').textContent + ' ' + c.textContent + ' ' + [...document.querySelectorAll('.iw-item .iw-actions .iw-act-label')].map((x) => x.textContent).join(' '); return !/\\bdebs?\\b|appimage|\\bapt(-get)?\\b|\\bdpkg\\b|\\broot\\b|\\bsudo\\b|\\bsha(256)?\\b/i.test(face) && /apt-get/.test(document.querySelector('.iw-item .ut-app-details').textContent); })()`) === true);
   await shot('apps-proposal');
-  check('a real click on Install', await realClick('#desktop-install-dialog .desktop-install-actions .btn-create') === true);
-  check('done', await waitFor(`/hello is installed on this machine/.test(document.querySelector('#desktop-install-dialog .desktop-install-note')?.textContent || '')`, 15000));
+  await evalJs(`(() => { if (!window.__vsF) { window.__vsF = []; const f0 = window.fetch; window.fetch = async (...a) => { const r = await f0(...a); try { r.clone().text().then((t) => window.__vsF.push([String(a[0]), r.status, t.slice(0, 300)])); } catch { } return r; }; } return true; })()`);
+  check('ONE real click on Install, in the card', await realClick('[data-act="app-install"]') === true);
+  await sleep(400);
+  const diag2 = await evalJs(`JSON.stringify({ f: (window.__vsF || []).filter((x) => /apps/.test(x[0])), toasts: [...document.querySelectorAll('[class*=toast]')].map((e) => e.textContent).slice(-4) })`);
+  check('…and no second dialog', await evalJs(`!document.querySelector('#desktop-install-dialog')`) === true);
+  const carded = await (async () => { for (let i = 0; i < 60; i++) { const r = await api('GET', '/api/user-todos'); const it = [...(r.body?.todos?.open || []), ...(r.body?.todos?.resolved || [])].find((x) => x.id === item.id); if (it && it.card && it.card.state === 'done') return it; await sleep(250); } return null; })();
+  check('installed: the item\'s card says done (the card followed the run; resolved by apps)', !!carded && carded.status === 'done' && carded.resolvedBy === 'apps', carded ? { status: carded.status, card: carded.card && carded.card.state } : diag2);
+  check('the pane shows Installed in the card', await waitFor(`[...document.querySelectorAll('.ut-app-progress')].some((p) => /Installed/.test(p.textContent))`, 8000));
   const w = await waiter;
   check('the agent\'s `wait` prints the move and done', w.code === 0 && /done/.test(w.out) && /approved by the user and is done/.test(w.out), w);
   const after = await api('GET', '/api/user-todos');
@@ -197,6 +207,84 @@ try {
   const wide = await evalJs(`(() => { const sec = document.querySelector('#desktop-launch-dialog .desktop-launch-apps-sec'); const W = document.documentElement.clientWidth; return [...sec.querySelectorAll('*')].filter((e) => e.getBoundingClientRect().right > W + 1).map((e) => e.className).slice(0, 5); })()`);
   check('the apps section fits a 390 px phone (nothing wider than the screen)', Array.isArray(wide) && wide.length === 0, wide);
   await shot('apps-phone');
+
+  console.log('⑥ zh at 390 px — the card in the For-you sheet: Chinese words, one click');
+  await evalJs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); localStorage.setItem('vibespace.lang', 'zh'); true`);
+  await cdp('Page.reload', {});
+  await evalJs('new Promise((res, rej) => { const t0 = Date.now(); (function w() { if (window.app) return res(app.ready); if (Date.now() - t0 > 20000) return rej(new Error("no app after 20s")); setTimeout(w, 200); })(); })');
+  await sleep(600);
+  const pr3 = await cli(['install', 'gimp', '--why', '你让我装个修图软件'], TOKEN); // gimp was declined in ③ — a new ask is a new proposal
+  const pid3 = (/Proposed (ap-[0-9a-f]{6})/.exec(pr3.out) || [])[1];
+  const item3 = await (async () => { for (let i = 0; i < 40; i++) { const r = await api('GET', '/api/user-todos'); const it = (r.body?.todos?.open || []).find((x) => x.action && x.action.id === pid3); if (it) return it; await sleep(250); } return null; })();
+  check('a third proposal is its own card', !!item3 && !!item3.card, pr3);
+  await evalJs(`document.getElementById('taskbar-user-todos')?.click(); true`);
+  const row3 = `#user-todos-popup .ut-item[data-id=${JSON.stringify(item3 && item3.id)}]`;
+  check('the For-you sheet shows the card in Chinese: 安装 …？ / 「Image work」想装它：… / 来自这台机器的软件源 / [安装] [暂不]', await waitFor(`(() => { const r = document.querySelector(${JSON.stringify(row3)}); if (!r) return false; const btns = [...r.querySelectorAll('.ut-app-answer button')].map((b) => b.textContent); return /^安装 .+？$/.test(r.querySelector('.ut-text').textContent) && /「Image work」想装它：你让我装/.test(r.textContent) && /来自这台机器的软件源/.test(r.textContent) && btns.join('|') === '安装|暂不' && !!r.querySelector('.ut-more') && !r.querySelector('.ut-done') && !r.querySelector('.ut-dismiss'); })()`, 10000), await evalJs(`document.querySelector(${JSON.stringify(row3)})?.textContent?.slice(0, 300) || null`));
+  const fit3 = await evalJs(`(() => { const r = document.querySelector(${JSON.stringify(row3)}); const W = document.documentElement.clientWidth; const b = [...r.querySelectorAll('.ut-app-answer button')].map((x) => x.getBoundingClientRect()); return { wide: [...r.querySelectorAll('*')].filter((e) => e.getBoundingClientRect().right > W + 1).length, minH: Math.min(...b.map((q) => q.height)) }; })()`);
+  check('the card fits the 390 px sheet and its two buttons are phone-sized (≥ 36 px)', fit3 && fit3.wide === 0 && fit3.minH >= 36, fit3);
+  await shot('apps-zh-390-card');
+  await sleep(900);
+  check('ONE real click on 安装', await realClick(`${row3} .ut-app-install`) === true);
+  const done3 = await (async () => { for (let i = 0; i < 60; i++) { const r = await api('GET', '/api/user-todos'); const it = [...(r.body?.todos?.open || []), ...(r.body?.todos?.resolved || [])].find((x) => x.id === (item3 && item3.id)); if (it && it.card && it.card.state === 'done') return it; await sleep(250); } return null; })();
+  check('installed from the card (no dialog)', !!done3 && await evalJs(`!document.querySelector('#desktop-install-dialog')`) === true);
+  check('the sheet\'s card says 已安装', await waitFor(`/已安装/.test(document.querySelector(${JSON.stringify(row3)})?.textContent || '')`, 8000), await evalJs(`document.querySelector(${JSON.stringify(row3)})?.textContent?.slice(0, 300) || null`));
+  await shot('apps-zh-390-done');
+
+  // ⑦ design 009 §B3/§B4 (lane apps-interface): the Apps dialog SEEN in zh at 390 px and in en at 1440 px — apps first, the
+  // head's "Install an app…" on the first screen, the setup lines in the footer, and the RECT CENSUS of the cards: every
+  // name inside its card, at most two lines, shown whole (never "Li…"); a planted long name clamps at exactly two lines
+  const appsCensus = `(() => {
+    const d = document.querySelector('#desktop-launch-dialog'); if (!d) return null;
+    const R = (e) => e.getBoundingClientRect();
+    const vis = (e) => !!e && getComputedStyle(e).display !== 'none' && R(e).height > 0;
+    const top = (sel) => { const e = d.querySelector(sel); return vis(e) ? R(e).top + d.querySelector('.dialog-body').scrollTop : null; };
+    const cards = [...d.querySelectorAll('.desktop-launch-card')].filter(vis);
+    const bad = [];
+    for (const c of cards) {
+      const l = c.querySelector('.desktop-launch-card-label'), rc = R(c), rl = R(l);
+      const lh = parseFloat(getComputedStyle(l).lineHeight) || 16;
+      if (rl.left < rc.left - 1 || rl.right > rc.right + 1 || rl.top < rc.top - 1 || rl.bottom > rc.bottom + 1) bad.push({ id: c.dataset.appId, why: 'outside its card' });
+      if (rl.height > 2 * lh + 1) bad.push({ id: c.dataset.appId, why: 'more than two lines', h: rl.height, lh });
+      if (l.scrollHeight > l.clientHeight + 1 && !c.dataset.planted) bad.push({ id: c.dataset.appId, why: 'cut', text: l.textContent });
+    }
+    for (let i = 0; i < cards.length; i++) for (let j = i + 1; j < cards.length; j++) { const a = R(cards[i].parentElement), b = R(cards[j].parentElement); if (a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1) bad.push({ why: 'overlap', a: cards[i].dataset.appId, b: cards[j].dataset.appId }); }
+    const ib = d.querySelector('.desktop-launch-install-app');
+    return { title: document.querySelector('#desktop-launch-dialog .dialog-header h3, #desktop-launch-dialog h3')?.textContent || '', n: cards.length, bad,
+      order: [top('.desktop-launch-head'), top('.desktop-launch-catalog-sec'), top('.desktop-launch-apps-sec'), top('.desktop-launch-foot')],
+      install: ib && vis(ib) ? { bottom: R(ib).bottom, h: R(ib).height, vh: innerHeight, text: ib.textContent } : null,
+      autoWord: [...d.querySelectorAll('.desktop-launch-card-scale')].some((e) => /^(Auto|自动)$/.test(e.textContent.trim())),
+      status: d.querySelector('.app-sec-foot .app-sec-updates')?.textContent || '' };
+  })()`;
+  console.log('⑦ design 009: the Apps dialog in zh at 390 px and en at 1440 px — the rect census');
+  await evalJs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); localStorage.setItem('vibespace.lang', 'zh'); true`);
+  await cdp('Page.reload', {});
+  await sleep(600);
+  await waitFor(`!!window.app && !!app._desktopAppsAvailable && !!document.getElementById('btn-desktop-apps') && !document.getElementById('loading-screen')`, 20000); // the page is ready (the splash is gone)
+  await evalJs(`document.getElementById('btn-desktop-apps').click(); true`);
+  await waitFor(`document.querySelectorAll('#desktop-launch-dialog .desktop-launch-card').length > 2 && !!document.querySelector('#desktop-launch-dialog .app-sec-entry')`, 15000);
+  await sleep(300);
+  const zh390 = await evalJs(appsCensus);
+  check('zh 390: the dialog is called 应用 and reads head · Apps · your installed apps · footer, top to bottom', !!zh390 && zh390.title.trim() === '应用' && zh390.order.every((v) => v != null) && zh390.order.every((v, i) => !i || v > zh390.order[i - 1]), zh390 && { title: zh390.title, order: zh390.order });
+  check('zh 390: "安装应用…" sits on the first screen, a phone-sized target', !!zh390 && !!zh390.install && zh390.install.text === '安装应用…' && zh390.install.bottom <= zh390.install.vh && zh390.install.h >= 36, zh390 && zh390.install);
+  check(`zh 390: rect census over ${zh390 ? zh390.n : 0} cards — every name inside its card, ≤ 2 lines, shown whole; no two cards overlap; no permanent 自动`, !!zh390 && zh390.n > 2 && zh390.bad.length === 0 && !zh390.autoWord, zh390 && zh390.bad.slice(0, 5));
+  check('zh 390: the section\'s foot says how many apps in words (N 个应用 · …, never 条进展)', !!zh390 && /^\d+ 个应用/.test(zh390.status) && !/进展/.test(zh390.status), zh390 && zh390.status);
+  const planted = await evalJs(`(() => { const c = document.querySelector('#desktop-launch-dialog .desktop-launch-card'); const l = c.querySelector('.desktop-launch-card-label'); c.dataset.planted = '1'; l.textContent = '一个名字特别特别长的应用程序，用来确认名字最多显示两行而且不会跑出卡片之外，也不会盖住旁边的卡片'; return true; })()`);
+  await sleep(150);
+  const zhLong = await evalJs(appsCensus);
+  const clamp = await evalJs(`(() => { const l = document.querySelector('#desktop-launch-dialog .desktop-launch-card[data-planted] .desktop-launch-card-label'); const lh = parseFloat(getComputedStyle(l).lineHeight); return { h: l.getBoundingClientRect().height, lh, cut: l.scrollHeight > l.clientHeight + 1 }; })()`);
+  check('zh 390: a planted long name clamps at EXACTLY two lines, inside its card, overlapping nothing (the census sees it)', planted && !!zhLong && zhLong.bad.length === 0 && clamp.cut && Math.abs(clamp.h - 2 * clamp.lh) <= 2, { bad: zhLong && zhLong.bad.slice(0, 3), clamp });
+  await shot('apps-zh-390');
+  await evalJs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); localStorage.setItem('vibespace.lang', 'en'); true`);
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await cdp('Page.reload', {});
+  await sleep(600);
+  await waitFor(`!!window.app && !!app._desktopAppsAvailable && !!document.getElementById('btn-desktop-apps') && !document.getElementById('loading-screen')`, 20000); // the page is ready (the splash is gone)
+  await evalJs(`document.getElementById('btn-desktop-apps').click(); true`);
+  await waitFor(`document.querySelectorAll('#desktop-launch-dialog .desktop-launch-card').length > 2`, 15000);
+  await sleep(300);
+  const en1440 = await evalJs(appsCensus);
+  check(`en 1440 (the review's "Li… / Calculator (…" case): rect census over ${en1440 ? en1440.n : 0} cards in the multi-column grid — every name whole, ≤ 2 lines, inside its card`, !!en1440 && en1440.n > 2 && en1440.bad.length === 0 && en1440.title.trim() === 'Apps', en1440 && { title: en1440.title, bad: en1440.bad.slice(0, 5) });
+  await shot('apps-en-1440');
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) { check('the suite ran to its end', false, e.stack || String(e)); }
 done();

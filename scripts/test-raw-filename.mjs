@@ -411,6 +411,7 @@ const CENSUS = [
   { file: 'src/routes/files.js', has: 'child.stdout.pipe(res);', route: 'GET /api/download-zip', verdict: 'named', how: "attachment; filename*=UTF-8''<dir>.zip" },
   { file: 'src/routes/files.js', has: "res.sendFile(filePath);\n", route: 'GET /api/file/serve/*', verdict: 'declared', why: 'path-addressed: the URL ENDS in the file\'s own name (the HTML preview\'s <base href> assets), so a save is named by it' },
   { file: 'src/remote-fs.js', has: 'child.stdout.pipe(res, { end: false });', route: 'RemoteFs._streamChild (the ssh downloads)', verdict: 'named', how: 'the caller\'s name: attachment set by downloadTo / downloadZipTo, inline through beforeBody; withdrawn on a 404 / 502' },
+  { file: 'src/agent-routes.js', has: 'st.pipe(res);', route: 'GET /api/agent/channels/attachment', verdict: 'declared', why: 'an AGENT bearer only, never a browser: the CLI writes the bytes to the path it chose (`vibespace-channels attachment … --out`), so no save is named by a header — the bare `attachment` keeps a stray page from rendering it (lane channel-attach-read, classified at the 2.369.203 integration)' },
   { file: 'src/routes/channels.js', has: 'st.pipe(res);', route: 'GET /api/channels/…/attachment/:id', verdict: 'named', how: 'inline (raster) / attachment, both forms' },
   { file: 'src/server/published-pages.js', has: 'fs.createReadStream(fp).pipe(res);', route: 'GET /p/:id (a non-HTML snapshot)', verdict: 'named', how: 'inline / attachment; filename="…" ASCII only — a CJK name becomes underscores (finding, not changed here)' },
   { file: 'src/server/published-pages.js', has: 'return res.sendFile(fp);', route: 'GET /p/:id (the HTML page, shim failed)', verdict: 'declared', why: 'an HTML page — a browser saves a page by its title' },
@@ -486,6 +487,7 @@ console.log('⑦ the spelling census — every Content-Disposition value is ASCI
 // cannot hold such a character.
 const SPELLINGS = [
   { file: 'src/routes/channels.js', has: "filename=\"${ascii}\"; filename*=UTF-8''${encodeURIComponent(name)}", why: 'both forms spelled inline: `ascii` is the name with [\\r\\n"] and then every non-[\\x20-\\x7e] character replaced by _, and encodeURIComponent returns ASCII' },
+  { file: 'src/agent-routes.js', has: "res.setHeader('Content-Disposition', 'attachment');", why: 'the bare word, no file name — ASCII by construction (the agent attachment route: the CLI names the file it writes)' },
   { file: 'src/routes/files.js', has: "attachment; filename*=UTF-8''${encodeURIComponent(base)}.zip", why: 'local /api/download-zip: filename* only, encodeURIComponent returns ASCII (the CJK leg in ④ downloads it)' },
   { file: 'src/server/published-pages.js', has: 'filename="${dispositionName(rec.name)}"', why: 'dispositionName replaces every run of [^\\w.\\-] (\\w is ASCII without the u flag) by _ — ASCII, though a CJK name degrades to underscores (a finding)' },
   { file: 'src/routes/persistence.js', has: 'attachment; filename="${name}"', why: 'the config export: name = vibespace-config-<ISO date>.json, ASCII by construction' },

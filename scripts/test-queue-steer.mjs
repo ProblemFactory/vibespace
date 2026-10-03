@@ -1159,7 +1159,7 @@ console.log('— wiring + docs pins');
   ok('the Compact-now button re-enables itself when the send is refused',
     /if \(this\._onSendText\('\/compact'\) === false\) btn\.disabled = false;/.test(read('src/lib/chat-renderers.js')));
   ok('the design dropdown keeps the typed brief when the send is refused (it closed BEFORE the send)',
-    /if \(this\._onDesignRequest\(brief, \{ public: pubCb\.checked \}\) === false\) return;\n\s*dropdown\.remove\(\);/.test(read('src/lib/chat-status-bar.js'))
+    /if \(this\._onDesignRequest\(brief, \{ public: pubCb\.checked[^}]*\}\) === false\) return;\n\s*dropdown\.remove\(\);/.test(read('src/lib/chat-status-bar.js'))
     && /return this\._chatInput\.sendText\(msg, \{ carriesUserText: true \}\) !== false;/.test(read('src/lib/chat-view.js')));
   const cw = read('data/bin/codex-chat-wrapper.js');
   const aw = read('data/bin/acp-wrapper.js');

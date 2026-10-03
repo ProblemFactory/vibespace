@@ -193,8 +193,11 @@ function costBetweenMulti(usageHistory, accountIds, fromMs, toMs) {
       // cache WRITES burn ~half per $, cache READS are nearly free (real-data
       // fit: cw-full ~$443, cr-full ~$2556, fresh ~$185). cw and cr priced
       // alone; other = fresh input + output.
-      const cw = usageHistory._cost({ ...ev, i: 0, o: 0, cr: 0 });
-      const cr = usageHistory._cost({ ...ev, i: 0, o: 0, cw5: 0, cw1: 0 });
+      // priced as parts of the WHOLE request: a long-context row (OpenAI >272K)
+      // is decided on the request's prompt, so the parts still add up to `c`
+      const whole = (ev.i || 0) + (ev.cr || 0) + (ev.cw5 || 0) + (ev.cw1 || 0);
+      const cw = usageHistory._cost({ ...ev, i: 0, o: 0, cr: 0 }, whole);
+      const cr = usageHistory._cost({ ...ev, i: 0, o: 0, cw5: 0, cw1: 0 }, whole);
       out.byClass.cw += cw; out.byClass.cr += cr; out.byClass.other += Math.max(0, c - cw - cr);
     }
   } catch { }

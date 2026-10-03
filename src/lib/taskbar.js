@@ -184,7 +184,8 @@ function _rebuildTaskbarItems(app, container, entries) {
 //    resume / locate / properties over ctx.s) plus two window-flavoured ones
 //    (rename via the sidebar, terminate WITHOUT the card's confirm — as before).
 //    ctx = { app, id, win, s (the sidebar session behind a chat/terminal
-//    window, else null), switchSubmenu, closeLabel }. Items carry `kind`; the
+//    window, else null), switchSubmenu, closeLabel, group (the menu is a WHOLE
+//    tab group's — its Close ends every tab, asked first: B-a67c) }. Items carry `kind`; the
 //    renderer fires onAction(kind) after each action (children inherit their
 //    parent's kind — Task Groups / Move to Desktop — never the Switch-window
 //    submenu, which had none).
@@ -198,7 +199,7 @@ export function registerWindowMenu() {
   registerCommand({ id: 'window.minimizeOrRestore', title: (c) => (c.win.isMinimized ? t('Restore') : t('Minimize')), run: (c) => { c.app.wm.witnessGeometry?.(c.id); c.win.isMinimized ? c.app.wm.restore(c.id) : c.app.wm.minimize(c.id); } }); // the user's act: witnessed (verify r4 ③)
   registerCommand({ id: 'window.renameSession', title: () => t('Rename…'), run: (c) => c.app.sidebar?.renameSession?.(c.s, c.s.name) });
   registerCommand({ id: 'window.terminateSession', title: () => t('Terminate session'), run: (c) => c.app.killSession(c.s.webuiId) });
-  registerCommand({ id: 'window.close', title: () => t('Close'), run: (c) => c.app.wm.requestClose(c.id) });
+  registerCommand({ id: 'window.close', title: () => t('Close'), run: (c) => (c.group ? c.app.wm.requestCloseGroup(c.id) : c.app.wm.requestClose(c.id)) }); // ctx.group = a WHOLE group's menu (the frame's, the taskbar group's): asked first (B-a67c)
   // Title-bar variant (2.212.0): the whole right-click used to BE the overlap
   // switcher — now it's a submenu whose scope is user-configurable.
   registerMenuItem({ menu: M, group: 'navigation', order: 10, id: 'window/switch-window', when: (c) => !!c.switchSubmenu, label: () => t('Switch window'), children: (c) => switchWindowItems(c.app, c.id) });
@@ -264,7 +265,7 @@ export function registerWindowMenu() {
 registerWindowMenu();
 // end registerWindowMenu (scripts/test-contributions.mjs extracts the block above)
 
-export function showWindowContextMenu(app, id, x, y, { closeLabel = null, onAction, switchSubmenu = false } = {}) {
+export function showWindowContextMenu(app, id, x, y, { closeLabel = null, onAction, switchSubmenu = false, group = false } = {}) {
   const win = app.wm.windows.get(id);
   if (!win) return;
   closeLabel = closeLabel || '✕ ' + t('Close');
@@ -272,7 +273,7 @@ export function showWindowContextMenu(app, id, x, y, { closeLabel = null, onActi
   // plugin adds rows through the same call). Every kinded action — and each
   // child of a kinded submenu — reports onAction(kind) after it runs.
   const sess = sessionForWin(app, win);
-  const ctx = { app, id, win, s: sess, switchSubmenu, closeLabel };
+  const ctx = { app, id, win, s: sess, switchSubmenu, closeLabel, group: !!group };
   const wrapAct = (item, kind = item.kind) => {
     const out = { ...item };
     if (kind && typeof item.action === 'function') out.action = () => { item.action(); onAction?.(kind); };
@@ -524,7 +525,7 @@ function _buildGroupItem(app, container, item, hostWin, starPrefix, group) {
     e.preventDefault();
     step('press');
     _chooserOf(hostId)?.remove();
-    showWindowContextMenu(app, hostId, e.clientX, e.clientY, { closeLabel: '\u2715 ' + t('Close group') });
+    showWindowContextMenu(app, hostId, e.clientX, e.clientY, { closeLabel: '\u2715 ' + t('Close group'), group: true }); // its Close ends every tab, asked first (B-a67c)
   });
   container.appendChild(item);
 }

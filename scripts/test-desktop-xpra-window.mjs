@@ -920,7 +920,7 @@ try {
   check(`the canvas backing store is 2× its CSS size (${o.x && o.x.canvas && `${o.x.canvas.w}×${o.x.canvas.h} in ${o.x.canvas.rw.toFixed(1)}×${o.x.canvas.rh.toFixed(1)}`}) — one app pixel per screen pixel`, !!o.x && !!o.x.canvas && Math.abs(o.x.canvas.w - o.x.canvas.rw * 2) <= 2 && Math.abs(o.x.canvas.h - o.x.canvas.rh * 2) <= 2, o.x && o.x.canvas);
   check(`xterm's character cell is ${inc[0]}×${inc[1]} DEVICE px (the X resources gave it an Xft face at 2× before it started; its 6×13 bitmap at 1× — the text is drawn at the screen's resolution, not blown up)`, inc[0] >= 12 && inc[1] >= 26, inc);
   check(`the pointer at DPR 2 lands on X at TWICE the CSS point (${JSON.stringify(o.pointer)})`, !XDOTOOL || (Array.isArray(o.pointer) && o.pointer.length === 2 && o.pointer.every((q) => q.x && Math.abs(q.x[0] - 2 * q.css[0]) <= 2 && Math.abs(q.x[1] - 2 * q.css[1]) <= 2)), o.pointer);
-  check('the status strip names the scale (the chip says "2× · auto" since round 3 A3; lane D: its tooltip ends "Click to change the scale" — the chip is the control) and the backend chip says what xpra is', !!o.x && !!o.x.chip && o.x.chip.shown && o.x.chip.text === '2× · auto' && /Click to change the scale$/.test(o.x.chip.title) && /streams each app window as pixels/.test(o.x.backendTitle), o.x && { chip: o.x.chip, backend: o.x.backendTitle });
+  check('design 009 §B2: an AUTOMATIC scale puts no chip on the strip (it lives under ⋯; the hidden chip keeps its tooltip, ending "Click to change the scale") and the (never shown) backend chip still carries what xpra is', !!o.x && !!o.x.chip && !o.x.chip.shown && o.x.chip.text === '' && /Click to change the scale$/.test(o.x.chip.title) && /streams each app window as pixels/.test(o.x.backendTitle), o.x && { chip: o.x.chip, backend: o.x.backendTitle });
   if (CALC6) {
     console.log(`  ours calculator: record ${JSON.stringify(o.calcRec)}, constraints ${JSON.stringify(o.c0 && o.c0.constraints)}, min pane ${JSON.stringify(o.c1 && o.c1.minSize)}; window min ${o.c1 && `${o.c1.win.minW}×${o.c1.win.minH}`} layout px; after a drag 700 px past it: window ${o.c1 && `${o.c1.win.w.toFixed(0)}×${o.c1.win.h.toFixed(0)}`}, pane ${o.c1 && `${o.c1.pane.w}×${o.c1.pane.h}`}, main ${o.c1 && o.c1.main && `${o.c1.main.w}×${o.c1.main.h}`} device, stage ${o.c1 && o.c1.scale}; '7' clicked twice ⇒ the calculator copies "${o.seven}"`);
     const cmin = (o.c0 && o.c0.constraints && o.c0.constraints['minimum-size']) || [0, 0];
@@ -1648,7 +1648,7 @@ try {
         // text fits inside the 2× buttons; and 360x616 at 1.5× / 144): the widgets half is asserted here, the TEXT half is
         // measured where a text-bound window exists — test-desktop-app-keeper §20 (a) (xterm's 40×10 cells, 1.25× at 120 dpi)
         check(`§11 (1): the calculator draws its widgets at 3× — its minimum ${JSON.stringify(min0)} is the 3× floor 1080x1848 (1×: 360x616), shown at 0.8333 = 2.5×`, min0[0] >= 1080 && min0[1] >= 1848, min0);
-        check(`§11 (1): the chip names the value AND its origin (${JSON.stringify(s0 && s0.chip)}) and the ⋯ button is there (an SVG)`, !!s0 && !!s0.chip && s0.chip.shown && s0.chip.text === '2.5× · auto' && /devicePixelRatio 2 × UI scale 125%/.test(s0.chip.title) && /widgets 2\.5×, text at 96 dpi/.test(s0.chip.title) && /Drawn at 3× and shown at 83\.3%/.test(s0.chip.title) && !!s0.more && s0.more.shown && s0.more.svg, s0 && { chip: s0.chip, more: s0.more });
+        check(`§11 (1): an automatic 2.5× puts no chip on the strip (design 009 §B2 — ${JSON.stringify(s0 && s0.chip)}), its numbers stay the hidden chip's tooltip, and the ⋯ button is there (an SVG)`, !!s0 && !!s0.chip && !s0.chip.shown && s0.chip.text === '' && /devicePixelRatio 2 × UI scale 125%/.test(s0.chip.title) && /widgets 2\.5×, text at 96 dpi/.test(s0.chip.title) && /Drawn at 3× and shown at 83\.3%/.test(s0.chip.title) && !!s0.more && s0.more.shown && s0.more.svg, s0 && { chip: s0.chip, more: s0.more });
         // (2) a second client (DPR 1) holds the same window (the layout sync), blocked — its menu is disabled with the reason
         B = await mkPage(O11, { width: 1200, height: 850, deviceScaleFactor: 1, mobile: false });
         const onB = await until(() => B.p.evalJs(`!![...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id0)})`), 15000, 250); if (!onB) await B.p.evalJs(`app.openDesktopApp(${JSON.stringify(id0)}); true`);
@@ -1688,7 +1688,7 @@ try {
             console.log(`  §11 (4): relaunch → ready ${readyMs} ms; successor scale ${r1.scale} dpi ${r1.dpi} origin ${r1.scaleOrigin}; inside: GDK_SCALE=${in1.gdk}, Xft.dpi ${in1.xft}; minimum ${JSON.stringify(min1)}; chip ${JSON.stringify(s1 && s1.chip && s1.chip.text)}; old ${old.state} stoppedBy ${old.stoppedBy} replacedBy ${old.replacedBy}, its app pid ${r0.pids.app} alive ${D.pidAlive(r0.pids.app)}; desktop-app windows: A ${s1 && s1.n}, B ${nB && nB.n}`);
             check(`§11 (4): the successor runs at the CHOSEN 1.5× — the record (${r1.scale}×, ${r1.dpi} dpi, GDK_SCALE ${r1.gdkScale} × ${r1.pictureScale}, ${r1.scaleOrigin}) and MEASURED inside its display (GDK_SCALE=${in1.gdk}, Xft.dpi ${in1.xft}: lane D (a) — widgets AND text 1.5×)`, r1.scale === 1.5 && r1.dpi === 96 && r1.gdkScale === 2 && r1.pictureScale === 0.75 && r1.scaleOrigin === 'chosen' && in1.gdk === '2' && in1.xft === 96, { r1: { scale: r1.scale, dpi: r1.dpi, gdk: r1.gdkScale, pic: r1.pictureScale, origin: r1.scaleOrigin }, in1 });
             check(`§11 (4): the picture reconnected to the successor (${s1 && s1.status}) and its widgets are drawn at 2× (minimum ${JSON.stringify(min1)}: the 2× floor 720x1232, under the 3× one) and shown at 0.75`, !!s1 && s1.status === 'Connected' && min1[0] >= 720 && min1[0] < 1080 && min1[1] >= 1232 && min1[1] < 1848, min1);
-            check(`§11 (4): the chip says "1.5× · chosen" (${JSON.stringify(s1 && s1.chip && s1.chip.text)})`, !!s1 && !!s1.chip && s1.chip.text === '1.5× · chosen', s1 && s1.chip);
+            check(`§11 (4): a chosen 1.5× is on the strip in words, "Larger 1.5×" (design 009 §B2 — ${JSON.stringify(s1 && s1.chip && s1.chip.text)})`, !!s1 && !!s1.chip && s1.chip.text === 'Larger 1.5×', s1 && s1.chip);
             // desktop A r1: the seat is CARRIED — the client that chose the scale (A) holds the successor's seat with no Resume,
             // the other one (B, blocked before) is blocked again, whichever retargeted first (the verifier saw B win the race)
             const SEAT11 = (id) => `(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)}); if (!w) return null; const s = w._desktopSeats || {}; const ov = w.content.querySelector('.desktop-app-blocked'); return { pane: w._desktopPaneKey, active: s.active || null, known: !!s.known, mode: w._desktopAppView && w._desktopAppView.mode, overlay: !!ov && getComputedStyle(ov).display !== 'none' }; })()`;
@@ -2120,7 +2120,7 @@ try {
       // (1) the card's control: a sibling button, "Auto"; its menu stores 1.5× and launches nothing; the other client hears it
       const c0 = await openDialog14(A.p);
       const cB0 = await openDialog14(B.p);
-      check(`§14 (1): the xterm card carries a default-scale control BESIDE it (a ${c0 && c0.tag}, a sibling in .desktop-launch-card-wrap — never nested in the card's button), reading "${c0 && c0.text}", aria-haspopup=${c0 && c0.haspopup}`, !!c0 && c0.tag === 'BUTTON' && !c0.nested && c0.sameParent && c0.text === 'Auto' && c0.haspopup === 'menu' && /^Default scale for xterm: Auto/.test(c0.title) && !!cB0, c0);
+      check(`§14 (1): the xterm card carries a default-scale control BESIDE it (a ${c0 && c0.tag}, a sibling in .desktop-launch-card-wrap — never nested in the card's button), reading "${c0 && c0.text}" (design 009 §B4: the ⋯ glyph, no permanent "Auto"), aria-haspopup=${c0 && c0.haspopup}`, !!c0 && c0.tag === 'BUTTON' && !c0.nested && c0.sameParent && c0.text === '' && c0.haspopup === 'menu' && /^Default scale for xterm: Auto/.test(c0.title) && !!cB0, c0);
       check(`§14 (1) geometry: the control sits right of the card on the same row (card ${c0 && `${c0.card.x.toFixed(0)}..${c0.card.r.toFixed(0)}`}, control ${c0 && `${c0.ctl.x.toFixed(0)}..${c0.ctl.r.toFixed(0)}`}), the label inside the card, the control's text unclipped`, !!c0 && c0.ctl.x >= c0.card.r - 1 && Math.abs(c0.ctl.y - c0.card.y) <= 1 && Math.abs(c0.ctl.b - c0.card.b) <= 1 && c0.label.r <= c0.card.r + 0.5 && c0.label.w > 0 && !c0.clipped, c0 && { card: c0.card, ctl: c0.ctl, label: c0.label });
       const apps0 = (await A.p.evalJs(`fetch('/api/desktop/apps').then((r) => r.json()).then((l) => l.apps.filter((a) => a.state === 'ready' || a.state === 'launching').length)`));
       await trustedClickAt(A.p, c0.ctl.x + c0.ctl.w / 2, c0.ctl.y + c0.ctl.h / 2); await sleep(250);
@@ -2182,7 +2182,7 @@ try {
         await ensureActive(A.p, id0);
         await sizeWinOn(A.p, id0, 900, 560);
         const k0 = await until(async () => { const v = await A.p.evalJs(CHIP14(id0)); return v && v.status === 'Connected' && v.shown ? v : null; }, 30000, 250);
-        check(`§14 (3): the chip reads "${k0 && k0.text}" and says where it came from and what a click does ("${k0 && k0.title}")`, !!k0 && k0.text === '1.5× · App default' && /the default you chose for this app/.test(k0.title) && /Click to change the scale$/.test(k0.title), k0 && { text: k0.text, title: k0.title });
+        check(`§14 (3): the chip reads "${k0 && k0.text}" and says where it came from and what a click does ("${k0 && k0.title}")`, !!k0 && k0.text === 'Larger 1.5×' && /the default you chose for this app/.test(k0.title) && /Click to change the scale$/.test(k0.title), k0 && { text: k0.text, title: k0.title });
         check(`§14 (3): the chip is a CONTROL — role=${k0 && k0.role}, tabindex ${k0 && k0.tabindex}, aria-haspopup ${k0 && k0.haspopup}`, !!k0 && k0.role === 'button' && k0.tabindex === '0' && k0.haspopup === 'menu' && k0.control, k0);
         await ensureActive(A.p, id0);
         const hit3 = await A.p.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id0)}); const c = w.content.querySelector('.desktop-app-chip-scale'); const r = c.getBoundingClientRect(); const x = r.x + r.width / 2, y = r.y + r.height / 2; const e = document.elementFromPoint(x, y); return { x, y, hit: e === c, under: e ? (e.className || e.tagName) : null }; })()`);
@@ -2209,7 +2209,7 @@ try {
           const fa = await until(async () => { const v = await A.p.evalJs(`(() => { const w = app.wm.windows.get(${JSON.stringify(k0.wmId)}); return w && w._desktopAppId !== ${JSON.stringify(id0)} ? w._desktopAppId : null; })()`); return v; }, 20000, 100);
           if (fa) ids14.push(fa);
           const r1 = fa && await readyOn(A.p, fa);
-          const k1 = r1 && await until(async () => { const v = await A.p.evalJs(CHIP14(fa)); return v && v.status === 'Connected' && v.text === '2× · chosen' ? v : null; }, 30000, 250);
+          const k1 = r1 && await until(async () => { const v = await A.p.evalJs(CHIP14(fa)); return v && v.status === 'Connected' && v.text === 'Larger 2×' ? v : null; }, 30000, 250);
           check(`§14 (4): the SAME window (${k0.wmId}) now shows the successor ${fa} at ${r1 && r1.scale}× (${r1 && r1.scaleOrigin}), connected, the chip "${k1 && k1.text}" (${Date.now() - t0} ms)`, !!r1 && r1.scale === 2 && r1.scaleOrigin === 'chosen' && !!k1, { r1: r1 && { scale: r1.scale, origin: r1.scaleOrigin }, k1: k1 && k1.text });
           // (5) "Make 2× the default for this app" — stores 2 (every client hears it), nothing relaunches
           if (k1) {
@@ -2257,13 +2257,17 @@ try {
         const rC = idC && await until(() => A.p.evalJs(`fetch('/api/desktop/apps/${idC}').then((r) => r.json()).then((r) => (r.state === 'ready' ? r : null))`), 40000);
         check(`CONTROL: on the copy the card (control reads "${cc && cc.text}" — the stored 1.5×) launches at ${rC && rC.scale}× origin ${rC && rC.scaleOrigin}: the default never left the page — §14 (2) is the launch field's doing`, !!cc && cc.text === '1.5×' && !!rC && rC.scale === 1 && rC.scaleOrigin === 'auto', rC && { scale: rC.scale, origin: rC.scaleOrigin });
         if (rC) {
-          const onC = await until(() => A.p.evalJs(`!![...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(idC)})`), 10000, 200);
-          if (!onC) await A.p.evalJs(`app.openDesktopApp(${JSON.stringify(idC)}); true`);
-          const kc = await until(async () => { const v = await A.p.evalJs(CHIP14(idC)); return v && v.status === 'Connected' && v.shown ? v : null; }, 30000, 250);
+          // design 009 §B2: an AUTOMATIC scale puts no chip on the strip, so the chip half of the control needs a window at a
+          // CHOSEN scale — launched straight through the route (the copy's launcher no longer sends the default)
+          const idK = await A.p.evalJs(`fetch('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ appId: 'xterm', scaleChoice: 1.5, dpr: devicePixelRatio, uiScale: 1 }) }).then((r) => r.json()).then((r) => r.id || null)`);
+          const rK = idK && await until(() => A.p.evalJs(`fetch('/api/desktop/apps/${idK}').then((r) => r.json()).then((r) => (r.state === 'ready' ? r : null))`), 40000);
+          const onC = rK && await until(() => A.p.evalJs(`!![...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(idK)})`), 10000, 200);
+          if (rK && !onC) await A.p.evalJs(`app.openDesktopApp(${JSON.stringify(idK)}); true`);
+          const kc = rK && await until(async () => { const v = await A.p.evalJs(CHIP14(idK)); return v && v.status === 'Connected' && v.shown ? v : null; }, 30000, 250);
           if (kc) { await escMenu(A.p); await trustedClickAt(A.p, kc.x, kc.y); await sleep(400); }
           const rowsC = await menuRows(A.p);
           check(`CONTROL: on the copy the chip (role ${kc && kc.role}) opens NOTHING on a trusted click (${rowsC ? rowsC.length + ' rows' : 'no menu'}) — §14 (3) is the control's doing`, !!kc && kc.role === null && !rowsC, { kc: kc && { role: kc.role, text: kc.text }, rowsC });
-          await fetch(`http://127.0.0.1:${PORTD}/api/desktop/apps/${idC}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+          for (const id of [idC, idK].filter(Boolean)) await fetch(`http://127.0.0.1:${PORTD}/api/desktop/apps/${id}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
         }
       }
       try { sd.kill('SIGKILL'); } catch {}

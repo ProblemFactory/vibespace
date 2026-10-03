@@ -21,6 +21,7 @@ import { nameHelpers } from './browser-who-dialog.js';
 import { installConfirmWords, installOutcomeWords } from './browser-switcher-model.js';
 import { providerChoices, machineChoices, createBody, createRefusalWords, adoptFormOf } from './browser-new-profile-model.js';
 import { buildRows, choiceOfRow, installHint, buildRefusalWords } from './browser-build-model.js'; // lane browser-admin 2a: the build section
+import { downloadRow, mountDownloadPicker } from './browser-build-dialog.js'; // lane chrome-builds-download: "Download another build…"
 
 const DIALOG_ID = 'browser-new-profile-dialog';
 const jsonPost = (body) => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
@@ -75,6 +76,11 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
   const buildList = el('div', 'bwho-answers bnew-builds'); buildList.setAttribute('role', 'radiogroup'); buildList.setAttribute('aria-label', t('Chrome build'));
   const buildHint = el('div', 'bbuild-hint chat-status-dim');
   buildWrap.append(el('div', 'bnew-section-head', t('Chrome build')), buildList, buildHint);
+  // lane chrome-builds-download: the picker opens in the build section (the rows step aside); a landed build comes back picked
+  const buildPicker = el('div', 'bbuild-picker'); buildPicker.style.display = 'none'; buildWrap.appendChild(buildPicker);
+  let buildPick = null;
+  const openBuildPicker = () => { buildList.style.display = 'none'; buildHint.style.display = 'none'; buildPicker.style.display = ''; buildPick = mountDownloadPicker(buildPicker, { onBack: () => closeBuildPicker(), onDownloaded: (v) => { closeBuildPicker(); st.buildKey = 'v:' + v; st.buildsFor = undefined; loadBuilds(); } }); };
+  const closeBuildPicker = () => { buildPick?.stop(); buildPick = null; buildPicker.replaceChildren(); buildPicker.style.display = 'none'; buildList.style.display = ''; drawBuilds(); };
   let buildPath = null;
   if (adopt !== 'keep') body.appendChild(buildWrap);
 
@@ -202,13 +208,14 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
     const show = st.provider === 'chromium';
     buildWrap.style.display = show ? '' : 'none';
     if (!show) return;
-    const rows = buildRows(st.builds, { choice: null, local: !st.host, machine: st.host || '', t });
+    const rows = buildRows(st.builds, { choice: null, local: !st.host, machine: st.host || '', t, download: st.buildDownload || null });
     if (!rows.some((r) => r.key === st.buildKey && r.pickable)) st.buildKey = 'default';
     const keep = new Map([...buildList.children].map((n) => [n.dataset.key, n]));
     const order = [];
     for (const r of rows) {
       let row = keep.get(r.key);
       if (r.kind === 'note') { if (!row) { row = el('div', 'bbuild-note chat-status-dim'); row.dataset.key = r.key; } if (row.textContent !== r.label) row.textContent = r.label; order.push(row); continue; }
+      if (r.kind === 'download') { order.push(row || downloadRow(r, openBuildPicker)); continue; }
       if (!row) {
         row = el('label', 'bwho-answer bnew-build'); row.dataset.key = r.key;
         const input = document.createElement('input'); input.type = 'radio'; input.name = 'bnew-build'; input.value = r.key; input.className = 'bwho-radio';
@@ -226,7 +233,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
       order.push(row);
     }
     buildList.replaceChildren(...order);
-    const h = installHint({ command: st.buildHint, local: !st.host }, t) || '';
+    const h = installHint({ command: st.buildHint, local: !st.host, download: st.buildDownload || null }, t) || '';
     if (buildHint.textContent !== h) buildHint.textContent = h;
     buildHint.style.display = h ? '' : 'none';
   }
@@ -240,6 +247,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
     if (st.closed || st.buildsFor !== h) return;
     st.builds = r && !r.error ? r.listing : (r && r.code ? { ok: false, code: r.code, error: r.error } : null);
     st.buildHint = r && !r.error ? r.installCommand : null;
+    st.buildDownload = r && !r.error ? r.download || null : null;
     drawBuilds();
   }
   async function installCloak() {

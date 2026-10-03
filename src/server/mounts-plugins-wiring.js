@@ -756,8 +756,11 @@ function createSessionMessages(session, sessionId) {
     try { browserKept = require('./browser-kept').create({ dataDir: path.join(rootDir, 'data'), keeper: () => browserKeeper, serverSetting, broadcast: (m) => bcastAll(m), liveKeys: () => new Set([...activeSessions.values()].map((s) => s && s._browserKey).filter(Boolean)), onChange: () => browserKeeper?.factsMoved?.() }); } // lane B: a kept change moves the browser fact (Resume)
     catch (e) { browserKept = null; console.warn('[browser] kept browsers unavailable — a conversation\'s browser loses its logins and tabs when it stops: ' + (e && e.message)); }
     browserKeeper = require('./browser-keeper').create({
-      ...(testEgressMap.size ? { egressResolve: (h) => testEgressMap.get(String(h || '').toLowerCase()) || h } : {}),
       dataDir: path.join(rootDir, 'data'), env: () => agentEnv(), broadcast: (m) => bcastAll(m),
+      ...(testEgressMap.size ? { egressResolve: (h) => testEgressMap.get(String(h || '').toLowerCase()) || h } : {}),
+      // lane chrome-builds-download: the same HEAVY-GATE aid for the build download's own fetch — a RESERVED `.test` name only
+      // (a real host is never in the map), its url fetched over plain http on loopback at the url's own port
+      ...(testEgressMap.size ? { chromeBuildsResolve: (u) => { try { const x = new URL(u); const ip = testEgressMap.get(x.hostname.toLowerCase()); return ip ? `http://${ip}:${x.port || 80}${x.pathname}${x.search}` : u; } catch { return u; } } } : {}),
       kept: browserKept, // lane browser-resume (§3.9)
       vncDisplay: process.env.VIBESPACE_VNC_DISPLAY || ':7', // B-d635: the desktop singleton's display (src/vnc.js VNC_DISPLAY) — the display probe names it, so no surface says "no desktop session" beside it
       serverSetting, serverNotice, getTelemetry,

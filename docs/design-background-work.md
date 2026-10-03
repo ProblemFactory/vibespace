@@ -507,9 +507,8 @@ disable source atomically.
    minimal panels into M1 (the QR/code case is the live pain)?
 3. The jobs digest budget (600 B default) — enough, or make it a setting under
    `agents.*`?
-4. Channel research-preview drift: `--channels` syntax/protocol may change —
-   re-verify `vibespace-channel.js` against the channels-reference on CLI
-   upgrades while `agents.vibespaceChannel` users exist.
+4. ~~Channel research-preview drift~~ — moot: the experimental VibeSpace
+   channel was removed in 2.369.202 (B-df40, docs/settings.md "Removed 2026-10").
 
 ## 12. Owner auto-notify (2.344.0, owner-approved B-0bf4 — SHIPPED)
 
@@ -559,17 +558,13 @@ section (effective state + deciding layer); the job detail shows the last
 notify outcome (lane + age + per-job override); toggles live in Settings →
 Integration (global) and the Task Group window (tri-state).
 
-**VibeSpace channel (EXPERIMENTAL, default OFF, `agents.vibespaceChannel`).**
-`data/bin/vibespace-channel.js` is a dependency-free MCP stdio server
-declaring `claude/channel`; new local claude spawns register it via
-`--mcp-config` + `--dangerously-load-development-channels server:vibespace`
-(research preview: custom channels stay on the dev flag; org
-`channelsEnabled` policy still applies). The jobs deliver ladder prefers its
-per-session unix socket (`data/channel-socks/<webuiId>.sock`) when present —
-events arrive as `<channel source="vibespace">` — falling through to the GA
-inbox lane. This is the foundation for external chat-tool bridges (owner
-direction), not the primary notify lane. Cross-machine delivery stays parked
-with the rest of §11-adjacent cross-machine work.
+**VibeSpace channel — REMOVED in 2.369.202 (B-df40).** The experimental
+Claude Code channel (2.344.0–2.369.201: an MCP stdio server registered per
+spawn with the development-channels flag, preferred by the deliver ladder as
+rung 0 through a per-session socket) was superseded — external chat tools
+arrived as the Channels feature instead — and is gone with its setting, its
+socket and its script; the boot migration `2026-10-settings-rows-retired`
+clears what it left. The ladder now starts at the local CLI inbox.
 
 **2.345.0–2.347.0 additions (owner-directed, all shipped same-day):** context
 echo fixed for the production `{payload}` shape (live-E2E catch — the unit

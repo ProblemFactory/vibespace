@@ -5,6 +5,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createRequire } from 'node:module';
+import net from 'node:net';
+import crypto from 'node:crypto';
+import { mutantCopies } from './mutant-copy.mjs';
+const REPO_ROOT = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
 const { runMigrations } = require('../src/migration-runner.js');
 const { create } = require('../src/server/migrations.js');
@@ -1700,6 +1704,270 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const res4b = runOnly(create({ rootDir: r4, homeDir: scratchHomeDir, serverNotice: () => { } }), r4).find((x) => x.id === ID);
       ok(res4b && res4b.status === 'ran' && !fs.existsSync(path.join(r4, 'data', 'design-kit')), '…and the next boot finishes it');
     }
+  }
+  // ── 2026-10-settings-rows-retired (B-df40 part 1, lane settings-prune: the VibeSpace channel + three dead rows out) ──
+  {
+    console.log('2026-10-settings-rows-retired');
+    const ID = '2026-10-settings-rows-retired';
+    const { RETIRED_SETTING_KEYS, stripRetiredSettings } = require('../src/retired-settings.js');
+    const runOnly = (mm, r) => runMigrations({ ledgerPath: path.join(r, 'data', 'migrations.json'), migrations: mm.MIGRATIONS.filter((x) => x.id === ID), log: () => { }, warn: () => { } });
+    const mkRoot = (tag) => { const r = path.join(tmp, 'sr-' + tag); fs.mkdirSync(path.join(r, 'data'), { recursive: true }); return r; };
+    const settingsOf = (r) => path.join(r, 'data', 'settings.json');
+    // a data/ fingerprint minus the two things this migration may touch (V4: nothing else under data/ changes)
+    const dataHash = (r) => {
+      const h = crypto.createHash('sha256');
+      (function walk(d, rel) {
+        for (const e of fs.readdirSync(d, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+          const rp = rel + '/' + e.name;
+          if (rp === '/settings.json' || rp === '/channel-socks' || rp === '/migrations.json') continue;
+          if (e.isDirectory()) walk(path.join(d, e.name), rp); else h.update(rp + '\0' + (e.isFile() ? fs.readFileSync(path.join(d, e.name)) : '') + '\0');
+        }
+      })(path.join(r, 'data'), '');
+      return h.digest('hex');
+    };
+    ok(RETIRED_SETTING_KEYS.length === 7 && ['agents.vibespaceChannel', 'window.enableBounceOnFocus', 'terminal.preserveCustomTitle', 'sessionCard.detailTruncation', 'agentd.dataPlane', 'agentd.remoteSessions', 'agentd.sessions'].every((k) => RETIRED_SETTING_KEYS.includes(k)) && Object.isFrozen(RETIRED_SETTING_KEYS), 'the retired list names the seven keys of the design (frozen)');
+    // the PURE strip: input untouched, order kept, an own "__proto__" stays an own key
+    {
+      const input = JSON.parse('{"a":1,"agents.vibespaceChannel":true,"__proto__":{"x":1},"b":[2]}');
+      const before = JSON.stringify(input);
+      const { doc, stripped } = stripRetiredSettings(input);
+      ok(JSON.stringify(input) === before && JSON.stringify(doc) === '{"a":1,"__proto__":{"x":1},"b":[2]}' && JSON.stringify(stripped) === '{"agents.vibespaceChannel":true}' && Object.getPrototypeOf(doc) === Object.prototype, 'stripRetiredSettings: a NEW doc (input never mutated), the rest in its order, an own "__proto__" kept as data');
+      ok(stripRetiredSettings([1]).doc.length === 1 && JSON.stringify(stripRetiredSettings(null).stripped) === '{}', 'a non-object document comes back as-is, nothing stripped');
+    }
+    // the check the controls re-run: (a) every retired key + live keys, (b) none of them (a compact, hand-written file), (c) no file
+    const live = { 'chat.compactMode': true, 'channels.offHoursTz': 'Asia/Shanghai', 'agents.vibespaceIntegration': false, 'toolbar.zz': { nested: [1, 'two', { three: 3 }] } };
+    const retiredVals = { 'agents.vibespaceChannel': true, 'window.enableBounceOnFocus': true, 'terminal.preserveCustomTitle': false, 'sessionCard.detailTruncation': 'right', 'agentd.dataPlane': true, 'agentd.remoteSessions': true, 'agentd.sessions': true };
+    const scenario = async (create, tag) => {
+      const out = {};
+      const r1 = mkRoot(tag + '-a');
+      const mixed = { 'chat.compactMode': true, 'agents.vibespaceChannel': true, 'channels.offHoursTz': 'Asia/Shanghai', 'window.enableBounceOnFocus': true, 'agents.vibespaceIntegration': false, 'terminal.preserveCustomTitle': false, 'toolbar.zz': live['toolbar.zz'], 'sessionCard.detailTruncation': 'right', 'agentd.dataPlane': true, 'agentd.remoteSessions': true, 'agentd.sessions': true };
+      fs.writeFileSync(settingsOf(r1), JSON.stringify(mixed, null, 2), { mode: 0o600 });
+      fs.mkdirSync(path.join(r1, 'data', 'archive'), { recursive: true });
+      fs.writeFileSync(path.join(r1, 'data', 'archive', 'old.json'), '{"keep":1}');
+      fs.writeFileSync(path.join(r1, 'data', 'jobs.json'), '{"jobs":{}}');
+      const sockDir = path.join(r1, 'data', 'channel-socks');
+      fs.mkdirSync(sockDir, { recursive: true, mode: 0o700 });
+      const servers = [];
+      for (const w of ['w-1', 'w-2']) { const srv = net.createServer(); await new Promise((res) => srv.listen(path.join(sockDir, w + '.sock'), res)); servers.push(srv); }
+      const h0 = dataHash(r1);
+      const res = runOnly(create({ rootDir: r1, homeDir: scratchHomeDir, serverNotice: () => { } }), r1).find((x) => x.id === ID);
+      for (const srv of servers) await new Promise((res2) => srv.close(() => res2()));
+      const after = fs.readFileSync(settingsOf(r1), 'utf8');
+      out.ran = !!res && res.status === 'ran';
+      out.stripsExactly = JSON.stringify(JSON.parse(after)) === JSON.stringify(live);
+      out.liveBytes = after === JSON.stringify(live, null, 2) && (fs.statSync(settingsOf(r1)).mode & 0o777) === 0o600;
+      const led = JSON.parse(fs.readFileSync(path.join(r1, 'data', 'migrations.json'), 'utf8'));
+      out.archived = !!led.reports && !!led.reports[ID] && JSON.stringify(led.reports[ID].stripped) === JSON.stringify(retiredVals);
+      out.socks = res && res.report && res.report.socks && res.report.socks.dir === 'removed' && res.report.socks.sockets === 2 && !fs.existsSync(sockDir);
+      out.restUntouched = dataHash(r1) === h0;
+      out.once = runOnly(create({ rootDir: r1, homeDir: scratchHomeDir, serverNotice: () => { } }), r1).find((x) => x.id === ID).status === 'already';
+      // (b) a file holding none of them, written compactly by hand: never rewritten (byte-identical, mtime kept)
+      const r2 = mkRoot(tag + '-b');
+      const compact = '{"chat.compactMode":true,  "sidebar.position":"right"}\n';
+      fs.writeFileSync(settingsOf(r2), compact);
+      const old = new Date(Date.now() - 3600e3); fs.utimesSync(settingsOf(r2), old, old);
+      const mt = fs.statSync(settingsOf(r2)).mtimeMs;
+      const res2 = runOnly(create({ rootDir: r2, homeDir: scratchHomeDir, serverNotice: () => { } }), r2).find((x) => x.id === ID);
+      out.cleanUntouched = res2.status === 'ran' && fs.readFileSync(settingsOf(r2), 'utf8') === compact && fs.statSync(settingsOf(r2)).mtimeMs === mt && res2.report.settings === 'untouched' && res2.report.socks.dir === 'absent';
+      // (c) no settings file, no socket dir: a no-op that creates nothing
+      const r3 = mkRoot(tag + '-c');
+      const res3 = runOnly(create({ rootDir: r3, homeDir: scratchHomeDir, serverNotice: () => { } }), r3).find((x) => x.id === ID);
+      out.absentNoop = res3.status === 'ran' && res3.report.settings === 'absent' && !fs.existsSync(settingsOf(r3)) && !fs.existsSync(path.join(r3, 'data', 'channel-socks'));
+      return { out, res };
+    };
+    const { out, res } = await scenario(create, 'real');
+    ok(out.ran, 'registered as a ledger-keyed one-shot and ran', res);
+    ok(out.stripsExactly, 'strips EXACTLY the seven retired keys — every live key keeps its value, in its order');
+    ok(out.liveBytes, 'V2: the live keys are byte-for-byte what the settings route writes (2-space JSON, no reformat of a value), the file mode kept');
+    ok(out.archived, 'the stripped values are ARCHIVED in the ledger report ({stripped: {key: value}}), each value as it was stored', res && res.report);
+    ok(out.socks, 'data/channel-socks/: both live sockets removed, the directory gone', res && res.report && res.report.socks);
+    ok(out.restUntouched, 'V4: nothing else under data/ changed (a hash of data/ minus settings.json, channel-socks/ and the ledger)');
+    ok(out.once, 'run-at-most-once (the ledger)');
+    ok(out.cleanUntouched, 'a settings.json holding none of the keys is NOT rewritten (byte-identical, mtime kept) and an absent socket dir is reported absent');
+    ok(out.absentNoop, 'no settings.json, no socket dir ⇒ ran, nothing created');
+    // the socket half keeps what is not a socket, and never follows a link
+    {
+      const r4 = mkRoot('keep');
+      const sd = path.join(r4, 'data', 'channel-socks'); fs.mkdirSync(sd, { recursive: true });
+      const srv = net.createServer(); await new Promise((res4) => srv.listen(path.join(sd, 'w-9.sock'), res4));
+      fs.writeFileSync(path.join(sd, 'notes.txt'), 'not a socket');
+      const res4 = runOnly(create({ rootDir: r4, homeDir: scratchHomeDir, serverNotice: () => { } }), r4).find((x) => x.id === ID);
+      await new Promise((r) => srv.close(() => r()));
+      ok(res4.status === 'ran' && res4.report.socks.dir === 'kept' && res4.report.socks.sockets === 1 && fs.readFileSync(path.join(sd, 'notes.txt'), 'utf8') === 'not a socket' && !fs.existsSync(path.join(sd, 'w-9.sock')), 'a non-socket entry in data/channel-socks/ is kept (and named), the directory with it; the socket beside it goes', res4.report);
+      const r5 = mkRoot('link');
+      const target = path.join(tmp, 'sr-link-target'); fs.mkdirSync(target, { recursive: true });
+      const srv5 = net.createServer(); await new Promise((res5) => srv5.listen(path.join(target, 'w-1.sock'), res5));
+      fs.symlinkSync(target, path.join(r5, 'data', 'channel-socks'));
+      const res5 = runOnly(create({ rootDir: r5, homeDir: scratchHomeDir, serverNotice: () => { } }), r5).find((x) => x.id === ID);
+      const targetSockLives = fs.existsSync(path.join(target, 'w-1.sock'));
+      await new Promise((r) => srv5.close(() => r()));
+      ok(res5.status === 'ran' && res5.report.socks.dir === 'kept' && res5.report.socks.why === 'symlink' && targetSockLives && fs.lstatSync(path.join(r5, 'data', 'channel-socks')).isSymbolicLink(), 'a link at data/channel-socks is never followed (what it names keeps its socket)', res5.report);
+      const r6 = mkRoot('bad');
+      fs.writeFileSync(settingsOf(r6), '{"agents.vibespaceChannel": true,');
+      const res6 = runOnly(create({ rootDir: r6, homeDir: scratchHomeDir, serverNotice: () => { } }), r6).find((x) => x.id === ID);
+      ok(res6.status === 'ran' && res6.report.settings === 'unparseable' && fs.readFileSync(settingsOf(r6), 'utf8') === '{"agents.vibespaceChannel": true,', 'an unparseable settings.json is left exactly as it is (never rewrite what we cannot read)');
+    }
+    // NEGATIVE CONTROLS — PATCHED COPIES of src/server/migrations.js (scripts/mutant-copy.mjs): the same scenario must go red
+    {
+      const M = mutantCopies('migrations-retired', REPO_ROOT);
+      const src = fs.readFileSync(path.join(REPO_ROOT, 'src/server/migrations.js'), 'utf8');
+      const guard = "    if (!Object.keys(stripped).length) return { settings: 'untouched', stripped };\n";
+      const ret = "    return { settings: 'rewritten', stripped };\n";
+      ok(src.split(guard).length === 2 && src.split(ret).length === 2, 'CONTROL scope: the two lines the patched copies remove are present once each');
+      const always = M.load('src/server/migrations.js', src.replace(guard, ''), 'always-rewrite');
+      const c1 = (await scenario(always.create, 'mut1')).out;
+      ok(!c1.cleanUntouched && c1.stripsExactly, 'NEGATIVE CONTROL: a copy that rewrites even when nothing was stripped is caught by the byte-identical leg (and only by it)');
+      const noArchive = M.load('src/server/migrations.js', src.replace(ret, "    return { settings: 'rewritten', stripped: {} };\n"), 'no-archive');
+      const c2 = (await scenario(noArchive.create, 'mut2')).out;
+      ok(!c2.archived && c2.stripsExactly, 'NEGATIVE CONTROL: a copy that strips without archiving is caught by the archive leg');
+    }
+    // settings-prune verify r1: the strip must SURVIVE the running server. Boot reads settings.json into the persistence
+    // cache BEFORE the migrations run, so GET kept serving the stripped keys and the first save (the client POSTs its whole
+    // `_values`) wrote all seven back for good; a tab loaded before the update (refetch never deletes a key) did the same.
+    // Reproduced on a real boot (/var/tmp/vibespace-lanes/settings-prune/r1-repro/boot-cache.mjs): 7 back, 0 after the fix.
+    {
+      const sv = fs.readFileSync(path.join(REPO_ROOT, 'server.js'), 'utf8');
+      ok(/\.runLocalMigrations\(\); persistenceRouter\.reloadSettings\?\.\(\)/.test(sv), 'server.js drops the settings cache right after the boot migrations ran');
+      const express = require('express');
+      const survive = async (P, tag) => {
+        const r = mkRoot('cache-' + tag);
+        fs.writeFileSync(settingsOf(r), JSON.stringify({ 'chat.compactMode': true, ...retiredVals }, null, 2));
+        P.setup({ dataDir: path.join(r, 'data'), wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
+        const early = Object.keys(P.router.readSettings()).length;   // boot: a setting is read before the migrations run
+        runOnly(create({ rootDir: r, homeDir: scratchHomeDir, serverNotice: () => { } }), r);
+        P.router.reloadSettings?.();                                   // what server.js does next
+        const app = express(); app.use(express.json()); app.use(P.router);
+        const srv = await new Promise((res) => { const x = app.listen(0, '127.0.0.1', () => res(x)); });
+        const base = `http://127.0.0.1:${srv.address().port}/api/settings`;
+        const backOnDisk = () => Object.keys(JSON.parse(fs.readFileSync(settingsOf(r), 'utf8'))).filter((k) => k in retiredVals).length;
+        const served = await (await fetch(base)).json();
+        const post = (body) => fetch(base, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        await post({ ...served, 'chat.fontSize': 15 });                // a fresh tab: _values = what GET served
+        const fresh = backOnDisk();
+        await post({ 'chat.compactMode': true, ...retiredVals, 'chat.fontSize': 16 });   // a tab loaded before the update
+        const stale = backOnDisk();
+        await new Promise((res) => srv.close(res));
+        return { early, served: Object.keys(served).filter((k) => k in retiredVals).length, fresh, stale, kept: JSON.parse(fs.readFileSync(settingsOf(r), 'utf8'))['chat.fontSize'] === 16 };
+      };
+      const PSRC = fs.readFileSync(path.join(REPO_ROOT, 'src/routes/persistence.js'), 'utf8');
+      const v = await survive(require('../src/routes/persistence.js'), 'real');
+      ok(v.early === 8 && v.served === 0 && v.fresh === 0 && v.stale === 0 && v.kept, 'r1: after the boot migration GET serves no retired key, and neither a fresh tab\'s save nor a stale tab\'s whole-object save writes one back (the live value lands)', v);
+      const M2 = mutantCopies('migrations-retired-cache', REPO_ROOT);
+      const guardLine = '    if (back.length) { data = { ...data }; for (const k of back) delete data[k]; }\n';
+      const reloadLine = '  router.reloadSettings = () => { _settingsCache = null; };\n';
+      ok(PSRC.split(guardLine).length === 2 && PSRC.split(reloadLine).length === 2, 'CONTROL scope: the writer guard and the cache drop are present once each');
+      const noGuard = await survive(M2.load('src/routes/persistence.js', PSRC.replace(guardLine, ''), 'no-guard'), 'mut-guard');
+      ok(noGuard.stale === 7 && noGuard.fresh === 0, 'NEGATIVE CONTROL: without the writer guard a stale tab writes all seven retired keys back', noGuard);
+      const noReload = await survive(M2.load('src/routes/persistence.js', PSRC.replace(reloadLine, ''), 'no-reload'), 'mut-reload');
+      ok(noReload.served === 7 && noReload.fresh === 7, 'NEGATIVE CONTROL: without the cache drop GET still serves the seven stripped keys and the first save writes them back (the guard trusts the stale cache as "the file still holds it")', noReload);
+    }
+  }
+  // ── 2026-10-archive-codex-fork-replays (2.369.203): a forked codex rollout's
+  // replay of its ancestors' requests was counted under the fork's thread. Only
+  // a LOCAL row of a fork's thread, inside the 2 s replay window, whose ORIGINAL
+  // (earlier, another thread, same total + tokens) is still in the ledger goes —
+  // archived with a reason, every copy of its rid; idempotent.
+  {
+    const ID = '2026-10-archive-codex-fork-replays';
+    const { purgeCodexForkReplays } = require('../src/codex-fork-ledger-purge.js');
+    const root = path.join(tmp, 'cxfork'), hist = path.join(root, 'data', 'usage-history');
+    const fhome = path.join(tmp, 'cxfork-home'), sess = path.join(fhome, '.codex', 'sessions', '2026', '08', '24');
+    fs.mkdirSync(hist, { recursive: true }); fs.mkdirSync(sess, { recursive: true });
+    const P = '01a035c8-ae04-75a1-b116-5c1859cdbcd5', F = '01a0371e-4f99-7102-bae2-125bb8f992b1', G = '01a0371e-4f99-7102-bae2-000000000003', N = '01a0371e-4f99-7102-bae2-000000000004';
+    const T0 = Date.parse('2026-08-24T22:00:00Z'), TF = Date.parse('2026-08-25T04:12:08.473Z'), TG = Date.parse('2026-08-25T05:00:00.000Z');
+    const meta = (id, forkOf, ts) => fs.writeFileSync(path.join(sess, `rollout-2026-08-24T21-12-08-${id}.jsonl`), JSON.stringify({ timestamp: new Date(ts).toISOString(), type: 'session_meta', payload: { id, ...(forkOf ? { forked_from_id: forkOf } : {}), timestamp: new Date(ts).toISOString(), base_instructions: 'x'.repeat(300000) } }) + '\n');
+    meta(P, null, T0 - 1000); meta(F, P, TF); meta(G, F, TG); meta(N, null, TF);
+    const row = (sid, total, ts, tok, extra = {}) => JSON.stringify({ rid: `cx:${sid}:${total}`, be: 'codex', ts, sid, model: 'gpt-5.6-sol', i: tok[0], cr: tok[1], o: tok[2], cw5: 0, cw1: 0, ...extra });
+    const lines = [
+      row(P, 69585610, T0, [1203, 230784, 94]),                       // the original — KEEP
+      row(P, 69900000, T0 + 9000, [500, 1000, 10]),                   // KEEP
+      row(F, 69585610, TF + 25, [1203, 230784, 94], { model: null }), // the fork's replay — ARCHIVE
+      row(F, 69585610, TF + 25, [1203, 230784, 94], { model: null }), // …a crash-duplicate line of it — ARCHIVE too
+      row(F, 69900000, TF + 27, [999, 1000, 10]),                     // same total, DIFFERENT tokens — a real request, KEEP
+      row(F, 70100000, TF + 14000, [3000, 0, 70]),                    // the fork's own request — KEEP
+      row(G, 69585610, TG + 10, [1203, 230784, 94]),                  // depth-2 replay — ARCHIVE
+      row(N, 69585610, TF + 40, [1203, 230784, 94]),                  // a NON-fork thread's identical request — KEEP
+      row(F, 69585610, TF + 3000, [1203, 230784, 94], { rid: `cx:${F}:69585610-late` }), // not a cx:<thread>:<total> rid — KEEP
+      row(G, 69900000, TG + 5000, [500, 1000, 10]),                   // twin, but outside the 2 s window — KEEP
+      JSON.stringify({ rid: 'req_claude', be: 'claude', ts: T0, sid: 's', model: 'claude-opus-5-5', i: 1, cr: 0, o: 1, cw5: 0, cw1: 0 }),
+      'not json',
+    ];
+    lines.splice(9, 0, row(P, 69585610, TF + 30, [1203, 230784, 94], { sid: P, host: 'h1', rid: `cx:${'01a0371e-4f99-7102-bae2-000000000009'}:69585610` })); // a HOST row: its rollout is not here — KEEP
+    fs.writeFileSync(path.join(hist, 'events-2026-08.ndjson'), lines.join('\n') + '\n');
+    const prevCH = process.env.CODEX_HOME; delete process.env.CODEX_HOME;
+    try {
+      const mm = create({ rootDir: root, homeDir: fhome, serverNotice: () => { } });
+      ok(mm.MIGRATIONS.some((x) => x.id === ID), 'registered as a ledger-keyed one-shot');
+      const res = runMigrations({ ledgerPath: path.join(root, 'data', 'migrations.json'), migrations: mm.MIGRATIONS.filter((x) => x.id === ID), log: () => { }, warn: () => { } }).find((x) => x.id === ID);
+      ok(res && res.status === 'ran', 'it ran', res);
+    } finally { if (prevCH !== undefined) process.env.CODEX_HOME = prevCH; }
+    const left = fs.readFileSync(path.join(hist, 'events-2026-08.ndjson'), 'utf8').split('\n').filter(Boolean);
+    const gone = lines.filter((l) => !left.includes(l));
+    ok(left.length === lines.length - 3 && gone.length === 3 && gone.every((l) => /"rid":"cx:01a0371e-4f99-7102-bae2-(125bb8f992b1|000000000003):69585610"/.test(l)),
+      `exactly the fork's replay (both copies) and the depth-2 replay left the shard; the original, the real same-total request, the fork's own request, the non-fork twin, the out-of-window twin, the host row, the claude row and the unparseable line stay (${left.length}/${lines.length})`, gone);
+    const arch = fs.readdirSync(path.join(root, 'data', 'archive')).filter((f) => /^codex-fork-replays-\d{4}-\d{2}-\d{2}\.ndjson$/.test(f));
+    const al = arch.length ? fs.readFileSync(path.join(root, 'data', 'archive', arch[0]), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
+    ok(al.length === 3 && al.every((a) => a.migration === ID && /fork replay/.test(a.reason) && a.entry && a.file === 'events-2026-08.ndjson'), 'each archived line carries the migration, a reason and the row itself', al.map((a) => a.reason));
+    const again = purgeCodexForkReplays({ dataDir: path.join(root, 'data'), codexSessionsDir: path.join(fhome, '.codex', 'sessions'), id: 'again' });
+    ok(again.archived === 0 && again.keptNotFork >= 1 && again.keptOutsideWindow === 1 && again.keptHost === 1, 'idempotent: a second run archives nothing (and names what it kept)', again);
+  }
+  // …a CRASH between a shard's archive append and its rename (verify r1): the
+  // runner records nothing, the next boot reruns — the rows leave the shard,
+  // and the archive holds each exactly ONCE. A ledger with no codex row is
+  // byte-identical and gets no archive. CONTROL: the rerun without the
+  // already-archived check writes the shard's rows a second time.
+  {
+    const ID = '2026-10-archive-codex-fork-replays';
+    const PURGE = require.resolve('../src/codex-fork-ledger-purge.js');
+    const { purgeCodexForkReplays } = require(PURGE);
+    const root = path.join(tmp, 'cxcrash'), hist = path.join(root, 'data', 'usage-history');
+    const fhome = path.join(tmp, 'cxcrash-home'), sess = path.join(fhome, '.codex', 'sessions', '2026', '08', '24');
+    fs.mkdirSync(hist, { recursive: true }); fs.mkdirSync(sess, { recursive: true });
+    const P = '01a035c8-ae04-75a1-b116-5c1859cd0001', F = '01a0371e-4f99-7102-bae2-125bb8f90002';
+    const T0 = Date.parse('2026-08-24T22:00:00Z'), TF = Date.parse('2026-08-25T04:12:08.473Z');
+    const meta = (id, forkOf, ts) => fs.writeFileSync(path.join(sess, `rollout-2026-08-24T21-12-08-${id}.jsonl`), JSON.stringify({ timestamp: new Date(ts).toISOString(), type: 'session_meta', payload: { id, ...(forkOf ? { forked_from_id: forkOf } : {}), timestamp: new Date(ts).toISOString() } }) + '\n');
+    meta(P, null, T0 - 1000); meta(F, P, TF);
+    const row = (sid, total, ts, tok) => JSON.stringify({ rid: `cx:${sid}:${total}`, be: 'codex', ts, sid, model: 'gpt-5.6-sol', i: tok[0], cr: tok[1], o: tok[2], cw5: 0, cw1: 0 });
+    // the originals in July's shard, the fork's replays in August's (two shards ⇒ the crash lands on the SECOND)
+    const jul = [row(P, 100, T0 - 86400e3 * 30, [10, 20, 3]), row(P, 200, T0 - 86400e3 * 30 + 5, [11, 21, 4])];
+    const aug = [row(F, 100, TF + 20, [10, 20, 3]), row(F, 200, TF + 21, [11, 21, 4]), row(F, 300, TF + 9000, [50, 0, 5])];
+    fs.writeFileSync(path.join(hist, 'events-2026-07.ndjson'), jul.join('\n') + '\n');
+    fs.writeFileSync(path.join(hist, 'events-2026-08.ndjson'), aug.join('\n') + '\n');
+    const go = (mod) => mod.purgeCodexForkReplays({ dataDir: path.join(root, 'data'), codexSessionsDir: path.join(fhome, '.codex', 'sessions'), id: ID, now: Date.parse('2026-10-03T05:00:00Z') });
+    const realRename = fs.renameSync;
+    fs.renameSync = (a, b) => { if (String(b).endsWith('events-2026-08.ndjson')) throw new Error('simulated crash before the shard rename'); return realRename(a, b); };
+    let crashed = null;
+    try { go({ purgeCodexForkReplays }); } catch (e) { crashed = e.message; } finally { fs.renameSync = realRename; }
+    const archFile = path.join(root, 'data', 'archive', 'codex-fork-replays-2026-10-03.ndjson');
+    const archLines = () => fs.readFileSync(archFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    ok(crashed && archLines().length === 2 && fs.readFileSync(path.join(hist, 'events-2026-08.ndjson'), 'utf8').split('\n').filter(Boolean).length === 3, 'the crash: the 2 replay rows are archived, the shard still holds them', crashed);
+    const re = go({ purgeCodexForkReplays });
+    const al = archLines();
+    const left = fs.readFileSync(path.join(hist, 'events-2026-08.ndjson'), 'utf8').split('\n').filter(Boolean);
+    ok(re.archived === 2 && re.alreadyArchived === 2 && al.length === 2 && new Set(al.map((a) => a.entry.rid)).size === 2 && left.length === 1 && JSON.parse(left[0]).rid === `cx:${F}:300`,
+      `the rerun finishes the shard and archives NOTHING twice (${al.length} archive lines, ${left.length} row left)`, re);
+    ok(fs.readFileSync(path.join(hist, 'events-2026-07.ndjson'), 'utf8') === jul.join('\n') + '\n', "the originals' shard is untouched");
+    // CONTROL: a copy without the already-archived check, same crash, same rerun
+    const ctlRoot = path.join(tmp, 'cxcrash-ctl'); fs.mkdirSync(path.join(ctlRoot, 'data', 'usage-history'), { recursive: true });
+    fs.writeFileSync(path.join(ctlRoot, 'data', 'usage-history', 'events-2026-07.ndjson'), jul.join('\n') + '\n');
+    fs.writeFileSync(path.join(ctlRoot, 'data', 'usage-history', 'events-2026-08.ndjson'), aug.join('\n') + '\n');
+    const psrc = fs.readFileSync(PURGE, 'utf8');
+    const cut = "const fresh = out.filter((line) => !archived.has(name + '\\n' + JSON.parse(line).rid));";
+    const ctlFile = path.join(tmp, 'purge-no-resume.js');
+    fs.writeFileSync(ctlFile, psrc.replace(cut, 'const fresh = out;'));
+    const ctlMod = require(ctlFile);
+    const goC = () => ctlMod.purgeCodexForkReplays({ dataDir: path.join(ctlRoot, 'data'), codexSessionsDir: path.join(fhome, '.codex', 'sessions'), id: ID, now: Date.parse('2026-10-03T05:00:00Z') });
+    fs.renameSync = (a, b) => { if (String(b).endsWith('events-2026-08.ndjson')) throw new Error('simulated crash'); return realRename(a, b); };
+    try { goC(); } catch { } finally { fs.renameSync = realRename; }
+    goC();
+    const ctlArch = fs.readFileSync(path.join(ctlRoot, 'data', 'archive', 'codex-fork-replays-2026-10-03.ndjson'), 'utf8').split('\n').filter(Boolean);
+    ok(psrc.includes(cut) && ctlArch.length === 4, `CONTROL: without the check the rerun archives the 2 rows a second time (${ctlArch.length} archive lines)`);
+    // a ledger with no codex row: byte-identical, no archive
+    const nroot = path.join(tmp, 'cxnone'); fs.mkdirSync(path.join(nroot, 'data', 'usage-history'), { recursive: true });
+    const claudeOnly = JSON.stringify({ rid: 'req_1', be: 'claude', ts: T0, sid: 's', model: 'claude-opus-5-5', i: 1, cr: 0, o: 1, cw5: 0, cw1: 0 }) + '\r\n\n' + 'not json\n';
+    fs.writeFileSync(path.join(nroot, 'data', 'usage-history', 'events-2026-08.ndjson'), claudeOnly);
+    const nr = purgeCodexForkReplays({ dataDir: path.join(nroot, 'data'), codexSessionsDir: path.join(fhome, '.codex', 'sessions'), id: ID });
+    ok(nr.archived === 0 && fs.readFileSync(path.join(nroot, 'data', 'usage-history', 'events-2026-08.ndjson'), 'utf8') === claudeOnly && !fs.existsSync(path.join(nroot, 'data', 'archive')), 'a ledger without codex rows: byte-identical (even a CRLF, a blank and a torn line), no archive dir', nr);
   }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });

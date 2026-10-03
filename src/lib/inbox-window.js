@@ -20,7 +20,8 @@
 // A registered window type (`inbox`, singleton), so layout restore, cross-client sync,
 // desktops, tab groups and the taskbar work for free; `app.openInbox({itemId, sessionKey})`
 // is THE door (the popup's ⤢, a row's ⤢, the mini inbox's ⤢, ⚙ Communication ▸ For you…).
-import { t, tc } from './i18n.js';
+import { t, tc, resolveLang } from './i18n.js';
+import { cardWords } from './app-card-model.js'; // design 009: THE words of an app install's one card
 import { Marked } from 'marked';
 import { sanitizeHtml } from './safe-html.js';
 import { copyText, escHtml, showContextMenu, showToast } from './utils.js';
@@ -30,7 +31,7 @@ import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
 import { inboxModel, actionWords } from './user-todos-actions.js'; // THE store + the verbs (one implementation with the popup)
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, isNotice, noticeGroups, tabCounts, originOf, ORIGIN_LABELS } from './user-todos-layout.js'; // PURE: the popup's order, notices, counts
-import { reconcileKeyed, agoText, expiresText, resolvedByText } from './user-todos-row.js'; // THE keyed reconciler + the row words
+import { reconcileKeyed, agoText, expiresText, resolvedByText, appCardHtml } from './user-todos-row.js'; // THE keyed reconciler + the row words
 import { TABS, nextSelection, holdSelection, paneMode, scopeRows, rowPreview, itemView } from './inbox-window-layout.js'; // PURE: the window's rules (test-inbox-window-model)
 
 // The taskbar For-you button's own glyph (UI_ICONS.inbox's paths), in the registry's 16px chrome.
@@ -320,11 +321,15 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     'proposal-approve': () => actBtn('proposal-approve', UI_ICONS.check, t('Approve'), t('Runs exactly what this card says'), 'iw-act-primary iw-act-exit'),
     'proposal-reject': () => actBtn('proposal-reject', UI_ICONS.close, t('Reject'), t('Reject'), 'iw-act-exit'),
     // Layer 0 apps: an agent's install proposal — Install… opens THE install dialog (the plan first), Not now declines
-    'app-install': () => actBtn('app-install', UI_ICONS.check, t('Install…'), t('Shows the plan first — nothing runs until you confirm'), 'iw-act-primary iw-act-exit'),
+    // design 009: a CARD's Install installs (one click — the label is its kind's verb); an item filed before the card opens THE dialog
+    'app-install': (it) => (it && it.card ? actBtn('app-install', UI_ICONS.check, cardWords(it.card, t, resolveLang()).go, t('Runs exactly what this card says'), 'iw-act-primary iw-act-exit') : actBtn('app-install', UI_ICONS.check, t('Install…'), t('Shows the plan first — nothing runs until you confirm'), 'iw-act-primary iw-act-exit')),
+    'app-retry': () => actBtn('app-retry', UI_ICONS.refresh, t('Try again'), t('Runs exactly what this card says'), 'iw-act-primary'),
+    'app-open': () => actBtn('app-open', null, t('Open'), t('Open'), 'iw-act-primary'),
+    more: () => actBtn('more', null, '⋯', t('More')),
     'app-reject': () => actBtn('app-reject', UI_ICONS.close, t('Not now'), t('Not now'), 'iw-act-exit'),
   };
   const viewOf = (it, e) => itemView(it, {
-    t, words: model.wordsOf(it), detail: model.detailOf(it), name: model.nameFor(it.sessionKey, [it]),
+    t, words: it.card && it.action && it.action.type === 'app-install' ? cardWords(it.card, t, resolveLang()).title : model.wordsOf(it), detail: model.detailOf(it), replyOpen: st.replyOpen === it.id, name: model.nameFor(it.sessionKey, [it]),
     origin: { origin: originOf(it), label: ORIGIN_LABELS[originOf(it)] || '' }, notice: isNotice(it), resolved: !!(e && e.resolved) || it.status !== 'open',
     reply: model.replyState(it), ago: (ts) => agoText(ts, t), expires: (ts) => expiresText(ts, t), resolvedBy: (by) => resolvedByText(by, t),
     detailState: !it.detailTruncated ? 'whole' : (st.loadErr && st.loadErr.id === it.id ? 'failed' : 'loading'), loadError: st.loadErr && st.loadErr.id === it.id ? st.loadErr.why : '',
@@ -370,6 +375,9 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     paneNone.style.display = 'none';
     if (!st.cur || st.cur.id !== id) {
       if (st.cur) { stash(st.cur); st.cur.el.remove(); }
+      // design 009: the pane's item changed HERE — its one-click Install (and an Allow / Approve) arms from now; render()'s
+      // stamp ran before holdSelection could move the selection (a pane opened onto an item stayed unarmed: every press refused)
+      if (st.armId !== id) { st.armId = id; st.armAt = performance.now(); }
       st.cur = buildItem(id);
       pane.append(st.cur.el);
       pane.scrollTop = 0;
@@ -401,11 +409,15 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     const verbatim = isCmd || !!(it.action && it.action.type === 'helper-ask');
     // lane browser-propose: a browser proposal's detail is what its Approve runs, line for line — verbatim too, never markdown
     const plain = verbatim || !!(it.action && it.action.type === 'browser-proposal');
-    const detailSig = (plain ? 'cmd\u0000' : 'md\u0000') + v.detail;
+    // design 009: an app install's ONE card — its lines, progress and Details fold (escaped; its buttons are the action row)
+    const card = it.card && it.action && it.action.type === 'app-install' ? it.card : null;
+    const detailSig = card ? 'card\u0000' + (v.resolved ? 'r' : 'o') + JSON.stringify(card) : (plain ? 'cmd\u0000' : 'md\u0000') + v.detail;
     if (c.sig.detail !== detailSig) {
-      if (plain) { const pre = mk('pre', 'iw-exit-cmd'); pre.textContent = v.detail; c.detail.replaceChildren(pre); }
+      if (card) { c.detail.innerHTML = appCardHtml(it, t, { lang: resolveLang(), resolved: v.resolved, buttons: false }); c.detail.style.display = ''; }
+      else if (plain) { const pre = mk('pre', 'iw-exit-cmd'); pre.textContent = v.detail; c.detail.replaceChildren(pre); }
       else mdInto(c.detail, v.detail);
-      c.detail.style.display = v.detail ? '' : 'none'; c.sig.detail = detailSig;
+      if (!card) c.detail.style.display = v.detail ? '' : 'none';
+      c.sig.detail = detailSig;
     }
     // a PREVIEWED detail (a resolved item's snapshot): the rest is loaded once, and the pane SAYS it is not whole yet
     if (it.detailTruncated) loadDetail(id);
@@ -427,9 +439,9 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     c.reply.style.display = v.reply.show ? '' : 'none';
     // the action row, keyed by the verdict's action list
     // …and, last, Clear content… on an item that still has words (a cleared one has nothing left to clear)
-    const acts = model.isCleared(it) ? v.actions : [...v.actions, 'clear'];
+    const acts = model.isCleared(it) || v.actions.includes('more') ? v.actions : [...v.actions, 'clear']; // a card's Clear content… is in its ⋯
     const actSig = acts.join(',');
-    if (c.sig.actions !== actSig) { c.actions.replaceChildren(...acts.map((a) => ACT[a]())); c.sig.actions = actSig; }
+    if (c.sig.actions !== actSig) { c.actions.replaceChildren(...acts.map((a) => ACT[a](it))); c.sig.actions = actSig; }
     // the verdict's sentence sits under the box — or, with no box, where the box would be
     // (a helper's ask is answered on its card, a job item in the job panel: itemView's `why`)
     if (!v.reply.show) { if (c.why.parentNode !== c.el) c.el.insertBefore(c.why, c.actions); }
@@ -583,7 +595,26 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
       copyText(itemView(cur, { t, words: model.wordsOf(cur), detail: model.detailOf(cur) }).copy); showToast(t('Copied')); return;
     }
     if (a === 'producer') { model.runAction(it); return; }
-    if (a === 'app-install') { model.runAction(it, 'install'); return; }
+    if (a === 'app-install' || a === 'app-retry') {
+      // design 009: a card's Install runs on this click — a pane shown a moment ago is not a press on what the user read
+      if (it.card && a === 'app-install') { const pv = pressVerdict({ since: st.armId === id ? st.armAt : null, now: performance.now() }); if (!pv.ok) { showToast(t('That Install moved under the pointer just now — read it, then press it again')); return; } }
+      model.runAction(it, 'install'); return;
+    }
+    if (a === 'app-open') { model.runAction(it, 'open'); return; }
+    if (a === 'more') {
+      // design 009: the card's ⋯ — Reply (opens the box), Mark done, Ignore (both decline it), Copy, Clear content…
+      const b = st.cur && st.cur.actions.querySelector('[data-act="more"]');
+      const r = b ? b.getBoundingClientRect() : { left: 0, bottom: 0 };
+      const rs = model.replyState(it);
+      showContextMenu(r.left, r.bottom, [
+        ...(rs.show && it.status === 'open' ? [{ label: t('Reply'), action: () => { st.replyOpen = id; renderPane(); if (st.cur && !st.cur.ta.disabled) st.cur.ta.focus(); } }] : []),
+        { label: t('Mark done'), action: () => act('done', id) },
+        { label: tc('inbox', 'Dismiss'), action: () => act('dismiss', id) },
+        { label: t('Copy'), action: () => act('copy', id) },
+        ...model.menuFor(id),
+      ]);
+      return;
+    }
     if (a === 'app-reject') { if (await model.runAction(it, 'reject')) advance(id); return; }
     if (a === 'clear') { model.clearContent(id); return; } // the store's broadcast repaints the pane (and drops this button)
     if (a === 'proposal-approve' || a === 'proposal-reject') {

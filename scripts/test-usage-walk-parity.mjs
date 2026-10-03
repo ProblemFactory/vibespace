@@ -208,6 +208,143 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
   ok(JSON.stringify(modLate) === JSON.stringify(scLate), 'module: identical late event (parity across the boundary)');
 }
 
+// ── CODEX FORK REPLAY (2.369.203): a forked rollout opens by replaying its
+// ancestors' token_counts, all stamped at the fork instant — the same requests,
+// already counted from the parent under ITS thread id. All three walkers skip
+// them (a token_count within 2 s of a fork's session_meta) and keep the fork's
+// own requests; the fork instant persists in the cursor, so a scan that stops
+// mid-replay still skips the rest. CONTROL: the scanner with the skip removed
+// counts the replay. ──
+{
+  const fkHome = path.join(dataDir, 'fk-home');
+  const PID = 'aaaaaaaa-1111-4222-8333-444444444444', FID = 'aaaaaaaa-1111-4222-8333-555555555555';
+  const at = (s, ms = 0) => new Date(Date.UTC(2026, 7, 24, 4, 0, s, ms)).toISOString();
+  const tc = (ts, tot, inp, cached, out) => ({ timestamp: ts, type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: inp, cached_input_tokens: cached, output_tokens: out }, total_token_usage: { total_tokens: tot } } } });
+  const dir = path.join(fkHome, '.codex', 'sessions', '2026', '08', '24');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(path.join(fkHome, '.claude', 'projects'), { recursive: true });
+  const parent = [
+    { timestamp: at(0), type: 'session_meta', payload: { id: PID, cwd: '/tmp/fk', cli_version: '0.149.1' } },
+    { timestamp: at(0), type: 'turn_context', payload: { model: 'gpt-5.6-sol', cwd: '/tmp/fk' } },
+    tc(at(5), 1050, 1000, 800, 50), tc(at(9), 2330, 1200, 1100, 80),
+  ];
+  fs.writeFileSync(path.join(dir, `rollout-2026-08-24T04-00-00-${PID}.jsonl`), parent.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  // the fork, written in TWO appends: the first ends mid-replay
+  const forkA = [
+    { timestamp: at(30), type: 'session_meta', payload: { id: FID, forked_from_id: PID, timestamp: at(30), cwd: '/tmp/fk', cli_version: '0.149.1' } },
+    tc(at(30, 25), 1050, 1000, 800, 50),
+  ];
+  const forkB = [
+    { timestamp: at(30, 26), type: 'turn_context', payload: { model: 'gpt-5.6-sol', cwd: '/tmp/fk' } }, // the replay carries the parent's turn_contexts too
+    tc(at(30, 27), 2330, 1200, 1100, 80),
+    { timestamp: at(30, 28), type: 'event_msg', payload: { type: 'thread_settings_applied' } },
+    { timestamp: at(41), type: 'turn_context', payload: { model: 'gpt-5.6-sol', cwd: '/tmp/fk' } },
+    tc(at(44), 2700, 300, 0, 70), // the fork's OWN request
+  ];
+  const forkFile = path.join(dir, `rollout-2026-08-24T04-00-30-${FID}.jsonl`);
+  fs.writeFileSync(forkFile, forkA.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  const env = { ...process.env, HOME: fkHome, CODEX_HOME: path.join(fkHome, '.codex') };
+  const scan = (bin, cur) => execFileSync(process.execPath, [bin], { encoding: 'utf8', env: { ...env, VIBESPACE_USAGE_CURSOR: cur }, timeout: 30000 }).split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.be === 'codex');
+  const scBin = path.join(REPO, 'data/bin/vibespace-usage-scan');
+  const sc1 = scan(scBin, path.join(dataDir, 'fk-scan-cursor.json'));
+  fs.appendFileSync(forkFile, forkB.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  const sc2 = scan(scBin, path.join(dataDir, 'fk-scan-cursor.json'));
+  const scAll = [...sc1, ...sc2];
+  const rids = (evs) => evs.map((e) => e.rid).sort().join(' ');
+  const WANT = ['cx:' + PID + ':1050', 'cx:' + PID + ':2330', 'cx:' + FID + ':2700'].sort().join(' ');
+  ok(rids(scAll) === WANT, `scanner: the parent's 2 requests + the fork's own 1 — the replay (2 rows, one across a scan boundary) is skipped (${rids(scAll)})`);
+  ok(scAll.find((e) => e.sid === FID)?.model === 'gpt-5.6-sol', 'the fork\'s own request carries its model (no null-model replay row)');
+
+  const { runUsageWalk: walkF } = require(path.join(REPO, 'src/usage-walker.js'));
+  const prev = process.env.CODEX_HOME; process.env.CODEX_HOME = env.CODEX_HOME;
+  const modEvs = walkF({ home: fkHome, cursorFile: path.join(dataDir, 'fk-mod-cursor.json') }).events.map((l) => JSON.parse(l)).filter((e) => e.be === 'codex');
+  const uhF = new UsageHistory({ dataDir: path.join(dataDir, 'fk-uh'), homeDir: fkHome });
+  await uhF.scan({ force: true });
+  if (prev === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prev;
+  const lf = uhF._loadEvents(); const localF = (lf?.events || lf || []).filter((e) => e.be === 'codex');
+  const strip = (evs) => JSON.stringify(evs.map(({ rid, sid, model, i, cr, o, ts }) => ({ rid, sid, model, i, cr, o, ts })).sort((a, b) => a.rid < b.rid ? -1 : 1));
+  ok(strip(modEvs) === strip(scAll), 'module walk = the scanner over the whole fork (three-walker parity)');
+  ok(rids(localF) === WANT, 'LOCAL ledger walk: the same three rows');
+
+  const ctl = path.join(dataDir, 'scan-no-fork-skip');
+  const src = fs.readFileSync(scBin, 'utf8');
+  const cut = "if (cur.forkTs && ts <= cur.forkTs + 2000) return;";
+  fs.writeFileSync(ctl, src.replace(cut, ''));
+  const ctlEvs = scan(ctl, path.join(dataDir, 'fk-ctl-cursor.json'));
+  ok(src.includes(cut) && ctlEvs.length === 5 && ctlEvs.filter((e) => e.sid === FID).length === 3, `CONTROL: without the skip the scanner counts the 2 replayed requests again under the fork's thread (${ctlEvs.length} rows)`);
+}
+
+// ── FORK REPLAY ENDS BY IDENTITY (verify r1): the 2 s window alone drops a
+// fork's OWN first request when it completes inside the window (a thread/fork
+// followed at once by a short turn). Codex mints thread and turn ids as UUIDv7:
+// the fork's own task_started carries a turn id minted AFTER the fork's thread
+// id, a replayed (ancestor) turn one minted BEFORE it — that line ends the
+// replay, in all three walkers, across a scan boundary. CONTROLS: the scanner
+// without the identity end drops the fast request; the scanner that lets ANY
+// turn id end the replay counts the replayed request again. ──
+{
+  const fkHome = path.join(dataDir, 'fk7-home');
+  const v7 = (ms, tail) => { const h = ms.toString(16).padStart(12, '0'); return `${h.slice(0, 8)}-${h.slice(8, 12)}-7${tail}`; };
+  const T0 = Date.UTC(2026, 7, 24, 5, 0, 0);
+  const PID = v7(T0, '000-8000-000000000001'), FID = v7(T0 + 30000, '000-8000-000000000002');
+  const PT = v7(T0 + 1000, '000-8000-0000000000a1'), OT = v7(T0 + 30010, '000-8000-0000000000b1');
+  const iso = (ms) => new Date(ms).toISOString();
+  const tc = (ms, tot, inp, cached, out) => ({ timestamp: iso(ms), type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: inp, cached_input_tokens: cached, output_tokens: out }, total_token_usage: { total_tokens: tot } } } });
+  const dir = path.join(fkHome, '.codex', 'sessions', '2026', '08', '24');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(path.join(fkHome, '.claude', 'projects'), { recursive: true });
+  const parent = [
+    { timestamp: iso(T0), type: 'session_meta', payload: { id: PID, cwd: '/tmp/fk7', cli_version: '0.153.0' } },
+    { timestamp: iso(T0 + 1000), type: 'event_msg', payload: { type: 'task_started', turn_id: PT } },
+    { timestamp: iso(T0 + 1000), type: 'turn_context', payload: { turn_id: PT, model: 'gpt-5.6-sol', cwd: '/tmp/fk7' } },
+    tc(T0 + 5000, 1050, 1000, 800, 50),
+  ];
+  fs.writeFileSync(path.join(dir, `rollout-2026-08-24T05-00-00-${PID}.jsonl`), parent.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  const forkA = [
+    { timestamp: iso(T0 + 30000), type: 'session_meta', payload: { id: FID, forked_from_id: PID, timestamp: iso(T0 + 30000), cwd: '/tmp/fk7', cli_version: '0.153.0' } },
+    { timestamp: iso(T0 + 30001), type: 'event_msg', payload: { type: 'task_started', turn_id: PT } }, // replayed: the ANCESTOR's turn id (older) does not end it
+    { timestamp: iso(T0 + 30001), type: 'turn_context', payload: { turn_id: PT, model: 'gpt-5.6-sol', cwd: '/tmp/fk7' } },
+    tc(T0 + 30002, 1050, 1000, 800, 50), // the replayed request
+  ];
+  const forkB = [
+    { timestamp: iso(T0 + 30010), type: 'event_msg', payload: { type: 'task_started', turn_id: OT } }, // the fork's OWN first turn
+    { timestamp: iso(T0 + 30020), type: 'turn_context', payload: { turn_id: OT, model: 'gpt-5.6-luna', cwd: '/tmp/fk7' } },
+    tc(T0 + 31500, 1400, 300, 0, 50), // its first request, 1.5 s after the fork — INSIDE the window
+  ];
+  const forkFile = path.join(dir, `rollout-2026-08-24T05-00-30-${FID}.jsonl`);
+  fs.writeFileSync(forkFile, forkA.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  const env = { ...process.env, HOME: fkHome, CODEX_HOME: path.join(fkHome, '.codex') };
+  const scan = (bin, cur) => execFileSync(process.execPath, [bin], { encoding: 'utf8', env: { ...env, VIBESPACE_USAGE_CURSOR: cur }, timeout: 30000 }).split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.be === 'codex');
+  const scBin = path.join(REPO, 'data/bin/vibespace-usage-scan');
+  const sc1 = scan(scBin, path.join(dataDir, 'fk7-scan-cursor.json'));
+  fs.appendFileSync(forkFile, forkB.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  const sc2 = scan(scBin, path.join(dataDir, 'fk7-scan-cursor.json'));
+  const scAll = [...sc1, ...sc2];
+  const rids = (evs) => evs.map((e) => e.rid).sort().join(' ');
+  const WANT = ['cx:' + PID + ':1050', 'cx:' + FID + ':1400'].sort().join(' ');
+  ok(rids(scAll) === WANT, `scanner: the fork's own request 1.5 s after the fork counts, the replay does not, across a scan boundary (${rids(scAll)})`);
+  ok(scAll.find((e) => e.sid === FID)?.model === 'gpt-5.6-luna', "the fast request carries the fork's own model");
+
+  const { runUsageWalk: walkF } = require(path.join(REPO, 'src/usage-walker.js'));
+  const prev = process.env.CODEX_HOME; process.env.CODEX_HOME = env.CODEX_HOME;
+  const modEvs = walkF({ home: fkHome, cursorFile: path.join(dataDir, 'fk7-mod-cursor.json') }).events.map((l) => JSON.parse(l)).filter((e) => e.be === 'codex');
+  const uhF = new UsageHistory({ dataDir: path.join(dataDir, 'fk7-uh'), homeDir: fkHome });
+  await uhF.scan({ force: true });
+  if (prev === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prev;
+  const lf = uhF._loadEvents(); const localF = (lf?.events || lf || []).filter((e) => e.be === 'codex');
+  const strip = (evs) => JSON.stringify(evs.map(({ rid, sid, model, i, cr, o, ts }) => ({ rid, sid, model, i, cr, o, ts })).sort((a, b) => a.rid < b.rid ? -1 : 1));
+  ok(strip(modEvs) === strip(scAll), 'module walk = the scanner over the fast-turn fork (three-walker parity)');
+  ok(rids(localF) === WANT, 'LOCAL ledger walk: the same two rows');
+
+  const src = fs.readFileSync(scBin, 'utf8');
+  const end = "if (tid != null && tid >= cur.forkOwn && (r.type === 'turn_context' || p.type === 'task_started')) cur.forkTs = 0;";
+  const ctlScan = (name, text) => { const f = path.join(dataDir, name); fs.writeFileSync(f, text); return scan(f, path.join(dataDir, name + '-cursor.json')); };
+  const noEnd = ctlScan('scan-no-identity-end', src.replace(end, ''));
+  ok(src.includes(end) && rids(noEnd) === 'cx:' + PID + ':1050', `CONTROL: the window alone drops the fork's own fast request (${rids(noEnd)})`);
+  const anyId = ctlScan('scan-any-turn-ends', src.replace('tid >= cur.forkOwn &&', 'true &&'));
+  ok(anyId.filter((e) => e.sid === FID).length === 2, `CONTROL: if an ancestor's (older) turn id ended the replay, the replayed request would count again (${anyId.filter((e) => e.sid === FID).length} fork rows)`);
+}
+
 // ── ORIGIN, BOTH SPELLINGS (2026-09-10) ──────────────────────────────────
 // Every event says WHICH kind of transcript produced it, an agent event is
 // attributed to the PARENT project's cwd, and the agent's own directory rides

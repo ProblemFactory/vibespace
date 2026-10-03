@@ -31,12 +31,15 @@
  * for a missed event or an in-place edit of a plain directory's override/.
  *
  * ON A CHANGE: ONE re-read (single flight, debounced), the layers merged per
- * key (src/preset-layers.js), and only when the merged presets DIFFER: the
- * snapshot replaced, ONE journal line naming what changed (keys, never
- * values), then every listener (the integration store re-derives its
- * `cluster:<k>` rung and broadcasts; the wiring pushes the summary to every
- * client — the 2.309.0 rule). A file that cannot be read or parsed KEEPS ITS
- * PREVIOUS presets and says so ONCE per transition; it never throws.
+ * key (src/preset-layers.js), and only when the merged presets DIFFER — in
+ * their values OR in which layer supplies a key (B-8145: an override equal to
+ * the cluster's entry removed moves the key to the cluster with no value
+ * changing, and the summary must say so) — the snapshot replaced, ONE journal
+ * line naming what changed (keys, never values; only when a VALUE moved),
+ * then every listener (the integration store re-derives its `cluster:<k>`
+ * rung and broadcasts when a value moved; the wiring pushes the summary to
+ * every client — the 2.309.0 rule). A file that cannot be read or parsed
+ * KEEPS ITS PREVIOUS presets and says so ONCE per transition; it never throws.
  *
  * The boot read is synchronous on purpose: consumers ask synchronously
  * (`drivePresets()`, `resolveIntegration()`), the files are a few KiB on the
@@ -56,6 +59,8 @@ const MAX_BYTES = 1024 * 1024;
 const POLL_MS = 30 * 1000;
 const DEBOUNCE_MS = 300;
 const RE_READS = 3;              // a `..data` swap landing during a read ⇒ read the new tree, this many times at most
+/** Which layer supplies each key of a merged kind ('' = the kind is absent) — compared beside the values (B-8145). */
+const attributionOf = (m) => (m ? JSON.stringify(Object.entries(m.layerOf).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))) : '');
 
 /** Where the presets live for THIS process: an explicit `VIBESPACE_PRESETS_DIR`
  *  ('' = off), else — only when `useDefault` — the default when it is a directory. */
@@ -194,15 +199,16 @@ function create({ dir = null, log = console, now = () => Date.now(), pollMs = PO
     const diffs = Object.fromEntries(P.KINDS.map((k) => [k, P.diffEntries(k, merged[k] && merged[k].entries, next[k] && next[k].entries)]));
     const rungMoved = P.KINDS.filter((k) => !!merged[k] !== !!next[k]);
     const kinds = P.KINDS.filter((k) => !P.diffEmpty(diffs[k]) || rungMoved.includes(k));
-    if (!kinds.length && !errorsMoved) return null;
+    const sources = P.KINDS.filter((k) => attributionOf(merged[k]) !== attributionOf(next[k]));   // B-8145: the same values from another layer
+    if (!kinds.length && !sources.length && !errorsMoved) return null;
     const prev = merged; merged = next;
     if (kinds.length) {
       const words = P.KINDS.map((k) => P.diffWords(k, diffs[k])).filter(Boolean);
       const moved = rungMoved.map((k) => `${k === 'gdrive' ? 'Google clients' : 'integrations'} ${next[k] ? 'now from the presets directory' : 'no longer in the presets directory (the environment is the fallback)'}`);
       log.log(`[presets] changed (${dir}): ${[...words, ...moved].join(' · ')}`);
     }
-    // `kinds` empty = only a file's readability moved (its presets are kept): the summary still changes
-    const change = { kinds, prev, at: loadedAt };
+    // `kinds` empty = only a file's readability or a key's layer moved (`sources`): no line, the summary still changes
+    const change = { kinds, sources, prev, at: loadedAt };
     for (const fn of listeners) { try { fn(change); } catch (e) { log.warn('[presets] listener failed:', e && e.message); } }
     return change;
   }

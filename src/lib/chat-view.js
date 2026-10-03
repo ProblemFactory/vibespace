@@ -4527,10 +4527,14 @@ class ChatView {
    *  agent makes it with `vibespace-design` (its manual: `vibespace-docs design` — named in the text itself, so a
    *  harness the tools intro never reached still finds it), as plain-HTML artboards the user watches in the Design
    *  window. The words are the contract's (§3.5). Agent-facing text: English, not t(). */
-  _sendDesignRequest(brief, { public: pub = false } = {}) {
+  _sendDesignRequest(brief, { public: pub = false, ask: askFirst = false, system = undefined } = {}) {
     const b = String(brief || '').trim();
     if (!b || !this._chatInput) return false;
-    const msg = `[VibeSpace design request] ${b} — Make it with vibespace-design (manual: vibespace-docs design): new → write plain-HTML artboards under the printed dir → add → check; say the directory.${pub ? ' [--public requested]' : ''}`;
+    // lane design-ask: the chip's ticked box — the agent asks first (vibespace-design ask) and draws after the answers
+    const msg = `[VibeSpace design request] ${b} — Make it with vibespace-design (manual: vibespace-docs design): new → write plain-HTML artboards under the printed dir → add → check; say the directory.${pub ? ' [--public requested]' : ''}`
+      + (askFirst ? ' Ask me a few questions first: after new, vibespace-design ask, then wait for my answers before you draw.' : '')
+      // lane design-systems-home: the chip's "Design system" select — named, or "none" over this VibeSpace's default
+      + (system === 'none' ? ' Without a design system: vibespace-design new <slug> --system none.' : system ? ` Follow the design system "${String(system).replace(/["\r\n]+/g, ' ').trim().slice(0, 120)}": vibespace-design new <slug> --system "${String(system).replace(/["\r\n]+/g, ' ').trim().slice(0, 120)}".` : '');
     // ANSWER THE DIALOG (round-5): sendText refuses while a queued-message
     // edit owns the input, and the brief exists only in the dropdown's own
     // textarea — the caller keeps it open on a false. Every reachable false

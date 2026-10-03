@@ -25,6 +25,11 @@
 //      back once the cache has it; (b) an install that ran on a fresh root filesystem BEFORE the boot replay does not mark
 //      it replayed — the replay still puts every app back. CONTROL: a patched copy whose every run writes the marker
 //      (the pre-fix finish()) answers "replayed" in both, the apps not there
+//   §9 design 009 — an agent proposes an installer BY FILE: a real .deb read by dpkg-deb (its own desktop file + icon),
+//      installed by apt through the slot; an AppImage unpacked in its own directory with the cwd elsewhere; removed by kind
+//   §8 verify-r1 H1 — THE PIN: a signed https repository (fixture CA + OpenPGP key) serving a NEWER build of an
+//      installed package (hello) and a package the user installs FROM it (capp-third): Refresh takes capp-third's update
+//      (named from the source) and keeps Debian's hello; the pin file = the PURE sourcePin. CONTROL: no pin ⇒ hello upgraded
 // Run: node scripts/test-app-install.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -62,7 +67,7 @@ process.on('exit', cleanup);
 for (const s of ['SIGINT', 'SIGTERM']) process.on(s, () => process.exit(130));
 
 /** ONE container: root prepares (sudo, the user), then `su` runs the driver as the user. `net` false = no network. */
-function container({ net = true, prep = '', steps = [], timeoutMs = 15 * 60 * 1000 }) {
+function container({ net = true, prep = '', steps = [], timeoutMs = 15 * 60 * 1000, homeDir = home }) {
   const lines = [
     'set -e', 'export DEBIAN_FRONTEND=noninteractive LC_ALL=C',
     prep,
@@ -73,7 +78,7 @@ function container({ net = true, prep = '', steps = [], timeoutMs = 15 * 60 * 10
     'echo "$U ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/vs-test && chmod 0440 /etc/sudoers.d/vs-test',
     ...steps.map((s) => (s.root ? s.root : `su "$U" -s /bin/sh -c ${JSON.stringify(`cd /home/u && HOME=/home/u ${s.user}`)}`)),
   ].join('\n');
-  const args = ['run', '--rm', '--name', `${tag}-${++seq}`, ...(net ? [] : ['--network', 'none']), '-v', `${repo}:/repo:ro`, '-v', `${home}:/home/u`, '-v', `${share}:/share`, IMAGE, 'sh', '-c', lines];
+  const args = ['run', '--rm', '--name', `${tag}-${++seq}`, ...(net ? [] : ['--network', 'none']), '-v', `${repo}:/repo:ro`, '-v', `${homeDir}:/home/u`, '-v', `${share}:/share`, IMAGE, 'sh', '-c', lines];
   const r = spawnSync('docker', args, { encoding: 'utf8', timeout: timeoutMs, maxBuffer: 256 * 1024 * 1024 });
   const results = [];
   for (const l of String(r.stdout || '').split('\n')) if (l.startsWith('@@RESULT ')) { try { results.push(JSON.parse(l.slice(9))); } catch { results.push({ ok: false, error: 'unparseable' }); } }
@@ -325,4 +330,149 @@ const c7c = container({
 });
 const P7 = byStep(c7c);
 ok(P7.pr7 && P7.pr7.result && P7.pr7.result.ran === false && P7.pr7.result.why === 'replayed' && P7.ph7 && !/xterm/.test(P7.ph7.have), `CONTROL (F4): under the pre-fix rule the install marked the root filesystem replayed — the boot replay never ran, xterm is not here: [${P7.ph7 && P7.ph7.have.trim()}]`, { pr7: P7.pr7, ph7: P7.ph7 });
+
+console.log('§8 verify-r1 H1 — an approved third-party source is PINNED: its newer build of an installed package never wins');
+// a signed https repository (a fixture: our own CA + OpenPGP key, built in a throwaway container) serving a NEWER build
+// of hello (2.10-99 — the machine has Debian's 2.10-3, an approved entry) and capp-third (1.0, later 1.1 — the package
+// the user installs FROM it). With the pin, Refresh takes capp-third 1.1 and keeps hello; a later install of hello is
+// nothing to do. CONTROL: a patched copy whose pins() writes nothing — the same steps upgrade hello to the source's build.
+const FX = '/share/fx';
+fs.mkdirSync(path.join(share, 'fx'), { recursive: true });
+const fxBuild = container({
+  prep: NOSUDO_PREP,
+  steps: [{ root: [
+    'apt-get update -qq >/dev/null && apt-get install -y -qq gnupg openssl >/dev/null',
+    `F=${FX}; mkdir -p $F && cd $F`,
+    'openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=vs-fx-ca -keyout ca.key -out ca.pem 2>/dev/null',
+    'openssl req -newkey rsa:2048 -nodes -subj /CN=vs-fixture.test -keyout srv.key -out srv.csr 2>/dev/null',
+    "printf 'subjectAltName=DNS:vs-fixture.test\\n' > ext && openssl x509 -req -in srv.csr -CA ca.pem -CAkey ca.key -CAcreateserial -days 2 -extfile ext -out srv.pem 2>/dev/null",
+    'export GNUPGHOME=/tmp/g; mkdir -m 700 $GNUPGHOME',
+    "gpg --batch --pinentry-mode loopback --passphrase '' --quick-gen-key 'VS Fixture <fx@example.invalid>' rsa2048 sign 1d 2>/dev/null",
+    "mkdeb() { d=/tmp/b-$1-$2; mkdir -p $d/DEBIAN $d/usr/share/$1-fx; echo $2 > $d/usr/share/$1-fx/version; printf 'Package: %s\\nVersion: %s\\nArchitecture: all\\nMaintainer: VS Fixture <fx@example.invalid>\\nDescription: a fixture package\\n' $1 $2 > $d/DEBIAN/control; dpkg-deb --root-owner-group -b $d $F/$1_$2_all.deb >/dev/null; }",
+    'mkdeb hello 2.10-99 && mkdeb capp-third 1.0 && mkdeb capp-third 1.1',
+    'A0=$(dpkg --print-architecture)',
+    "repo() { r=$F/$1; shift; mkdir -p $r/pool $r/dists/stable/main/binary-all $r/dists/stable/main/binary-$A0; : > $r/dists/stable/main/binary-$A0/Packages; P=$r/dists/stable/main/binary-all/Packages; : > $P; for deb in \"$@\"; do cp $F/$deb $r/pool/; { dpkg-deb -f $r/pool/$deb; printf 'Filename: pool/%s\\nSize: %s\\nSHA256: %s\\n\\n' $deb $(stat -c %s $r/pool/$deb) $(sha256sum $r/pool/$deb | cut -d' ' -f1); } >> $P; done; { printf 'Origin: Debian\\nLabel: Debian\\nSuite: stable\\nCodename: stable\\nArchitectures: all %s\\nComponents: main\\nDate: %s\\nSHA256:\\n' $A0 \"$(date -Ru)\"; for f in main/binary-all/Packages main/binary-$A0/Packages; do printf ' %s %s %s\\n' $(sha256sum $r/dists/stable/$f | cut -d' ' -f1) $(stat -c %s $r/dists/stable/$f) $f; done; } > $r/dists/stable/Release; gpg --batch --yes --clearsign -o $r/dists/stable/InRelease $r/dists/stable/Release 2>/dev/null; gpg --armor --export > $r/key.asc; }",
+    'repo A hello_2.10-99_all.deb capp-third_1.0_all.deb && repo B hello_2.10-99_all.deb capp-third_1.1_all.deb',
+    'chmod -R a+rX $F && echo "@@RESULT {\\"step\\":\\"fx\\",\\"ok\\":true}"',
+  ].join(' && \\\n') }],
+});
+fs.writeFileSync(path.join(share, 'fx', 'srv.cjs'), [
+  "const https = require('https'), fs = require('fs'), path = require('path');",
+  "https.createServer({ key: fs.readFileSync('/share/fx/srv.key'), cert: fs.readFileSync('/share/fx/srv.pem') }, (q, s) => {",
+  "  const f = path.join(fs.realpathSync('/share/fx/cur'), decodeURIComponent(q.url.split('?')[0]).replace(/^\\/repo\\//, '/'));",
+  "  fs.readFile(f, (e, b) => { if (e) { s.writeHead(404); s.end(); } else { s.writeHead(200, { 'content-length': b.length }); s.end(b); } });",
+  "}).listen(Number(process.env.FX_PORT), '127.0.0.1', () => fs.writeFileSync(process.env.FX_UP, '1'));", // the CONTAINER's port + /tmp (its own netns / fs), set at its start below
+].join('\n'));
+if (!byStep(fxBuild).fx) {
+  skip(`§8 the signed https repository fixture could not be built (no network for gnupg/openssl in the container?): ${(fxBuild.stderr || '').trim().split('\n').slice(-3).join(' | ')}`);
+} else {
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const home8 = scratchDir('app-install-h1');
+  const FXSRC = { id: 'fx', uris: ['https://vs-fixture.test:8443/repo'], suites: ['stable'], components: ['main'], key: 'https://vs-fixture.test:8443/repo/key.asc' };
+  const FX_PREP = `${NOSUDO_PREP} && echo '127.0.0.1 vs-fixture.test' >> /etc/hosts && install -m 0644 ${FX}/ca.pem /etc/apt/vsfx-ca.pem && printf 'Acquire::https::vs-fixture.test::CAInfo "/etc/apt/vsfx-ca.pem";\\n' > /etc/apt/apt.conf.d/50vsfx && ln -sfn ${FX}/A ${FX}/cur && (FX_PORT=8443 FX_UP=/tmp/fx-up node ${FX}/srv.cjs > /tmp/fx.log 2>&1 &) && for i in $(seq 100); do [ -f /tmp/fx-up ] && break; sleep 0.1; done`;
+  const steps8 = (pre, t) => [
+    { user: pre + drv('run', { request: { kind: 'apt', packages: ['hello'] } }, t + 'hello') },
+    { user: 'NODE_EXTRA_CA_CERTS=/etc/apt/vsfx-ca.pem ' + pre + drv('run', { request: { kind: 'source', source: FXSRC } }, t + 'src') },
+    { user: pre + drv('run', { request: { kind: 'apt', packages: ['capp-third'] } }, t + 'third') },
+    { user: pre + drv('pin', { id: 'fx', expect: ['capp-third'], packages: ['hello', 'capp-third'] }, t + 'pin1') },
+    { root: `ln -sfn ${FX}/B ${FX}/cur && apt-get update -qq >/dev/null 2>&1` }, // the source publishes capp-third 1.1; the machine's lists are fresh
+    { user: pre + drv('plan', { request: { kind: 'refresh' } }, t + 'plan') },
+    { user: pre + drv('run', { request: { kind: 'refresh' } }, t + 'refresh') },
+    { user: pre + drv('plan', { request: { kind: 'apt', packages: ['hello'] } }, t + 'again') },
+    { user: pre + drv('pin', { id: 'fx', expect: ['capp-third'], packages: ['hello', 'capp-third'] }, t + 'pin2') },
+  ];
+  const c8 = container({ homeDir: home8, prep: FX_PREP, steps: steps8('', 's8') });
+  const S8 = byStep(c8);
+  ok(S8.s8hello && S8.s8hello.ok && S8.s8src && S8.s8src.ok && S8.s8third && S8.s8third.ok, 'hello (Debian) installed, the signed https source approved, capp-third installed FROM it', { hello: S8.s8hello && (S8.s8hello.error || S8.s8hello.ok), src: S8.s8src && (S8.s8src.error || S8.s8src.slotLog || S8.s8src.ok), third: S8.s8third && (S8.s8third.error || S8.s8third.slotLog || S8.s8third.ok) });
+  const p1 = S8.s8pin1;
+  ok(p1 && p1.ok && p1.etc === p1.want && p1.sys === p1.want && p1.host === 'vs-fixture.test' && same(p1.pin, { packages: ['capp-third'] }), 'THE PIN as apt reads it (/etc/apt/preferences.d) and root\'s copy (sys/sources/fx.pref) = the PURE sourcePin: everything from vs-fixture.test at 1, capp-third (approved from it) at 500; the index records the allow-list', p1);
+  ok(p1 && /2\.10-99 1\n\s+1 https:\/\/vs-fixture\.test:8443\/repo /.test(p1.policy) && /\*\*\* 1\.0 500\n\s+1 https:\/\/vs-fixture\.test:8443\/repo /.test(p1.policy), 'apt\'s own policy: the source\'s hello 2.10-99 at priority 1, capp-third (approved from it) at 500 — `Pin: origin` matched the bare host of an https://host:PORT source', p1 && p1.policy);
+  const pl = S8.s8plan && S8.s8plan.plan;
+  const ups = (pl && pl.updates) || [];
+  ok(pl && ups.some((u) => u.package === 'capp-third' && u.to === '1.1' && u.origin === 'fx' && u.source === 'fx') && !ups.some((u) => u.package === 'hello'), 'the Refresh card: capp-third 1.0 → 1.1 named FROM fx; the source\'s newer hello is not an update at all', ups);
+  const p2 = S8.s8pin2;
+  ok(S8.s8refresh && S8.s8refresh.ok && p2 && p2.versions.hello === '2.10-3' && p2.versions['capp-third'] === '1.1', `after Refresh: hello stays Debian's 2.10-3, capp-third is 1.1 (got hello ${p2 && p2.versions.hello}, capp-third ${p2 && p2.versions['capp-third']})`, { refresh: S8.s8refresh && (S8.s8refresh.error || S8.s8refresh.ok), p2 });
+  const again = S8.s8again && S8.s8again.plan;
+  ok(again && again.ok && !(again.closure || []).some((c) => c.package === 'hello' && c.version === '2.10-99'), 'a later install of hello takes nothing from the source (its 2.10-99 never wins)', again && again.closure);
+  // CONTROL: the same steps through a patched copy whose pins() writes nothing
+  const nopinDir = path.join(share, 'nopin');
+  fs.cpSync(path.join(repo, 'src'), path.join(nopinDir, 'src'), { recursive: true });
+  const npf = path.join(nopinDir, 'src', 'app-manifest.js');
+  const npText = fs.readFileSync(npf, 'utf8');
+  fs.writeFileSync(npf, npText.replace("'pins() {',", "'pins() { return 0',"));
+  ok(fs.readFileSync(npf, 'utf8') !== npText, 'CONTROL (no-pin): the patched copy\'s pins() writes nothing');
+  const home8c = scratchDir('app-install-h1c');
+  const c8c = container({ homeDir: home8c, prep: FX_PREP, steps: steps8('VS_REPO=/share/nopin ', 'c8') });
+  const C8 = byStep(c8c);
+  const cp2 = C8.c8pin2;
+  ok(C8.c8third && C8.c8third.ok && cp2 && cp2.etc === null && cp2.versions.hello === '2.10-99', `CONTROL (no-pin): the same Refresh took the source's hello 2.10-99 over Debian's (got ${cp2 && cp2.versions.hello})`, { third: C8.c8third && (C8.c8third.error || C8.c8third.ok), cp2 });
+  const cplan = C8.c8plan && C8.c8plan.plan;
+  ok(cplan && ((cplan.updates || []).some((u) => u.package === 'hello' && u.to === '2.10-99' && u.origin === 'fx')), 'CONTROL (no-pin): …and its Refresh card listed hello → 2.10-99 from fx', cplan && cplan.updates);
+  // verify r1 — a source on a host the machine's OWN apt sources use is refused (its pin would hold their updates at 1);
+  // a source approved before .203 (no pin anywhere) is pinned BEFORE the first Refresh's apt runs. CONTROL: the pre-fix
+  // order (a patched copy: no re-pin before the dispatch, the source live before its pin, no shared-host check)
+  const preDir8 = path.join(share, 'pre-order');
+  fs.cpSync(path.join(repo, 'src'), path.join(preDir8, 'src'), { recursive: true });
+  const pof = path.join(preDir8, 'src', 'app-manifest.js');
+  const poText = fs.readFileSync(pof, 'utf8');
+  fs.writeFileSync(pof, poText.replace("  'pins',\n  'case $MODE in',", "  'case $MODE in',").replace('"$R/sources/$ID.sources"; pins; install', '"$R/sources/$ID.sources"; install').replace(/\n {2}'  h=\$\(printf[^\n]*shared-host[^\n]*/, ''));
+  ok(!/shared-host/.test(fs.readFileSync(pof, 'utf8')) && /shared-host/.test(poText), 'CONTROL (pre-order): the patched copy has no shared-host check, no re-pin, the old source order');
+  // the machine's own source: another path on the SAME host (one URI with two Signed-By would be apt's own refusal)
+  const OWN_PREP = `${FX_PREP} && install -d -m 0755 /etc/apt/keyrings && install -m 0644 ${FX}/A/key.asc /etc/apt/keyrings/own.asc && ln -sfn . ${FX}/A/own && printf 'Types: deb\\nURIs: https://vs-fixture.test:8443/repo/own\\nSuites: stable\\nComponents: main\\nSigned-By: /etc/apt/keyrings/own.asc\\n' > /etc/apt/sources.list.d/own.sources`;
+  const LEFT = { root: 'if [ -e /etc/apt/sources.list.d/vibespace-fx.sources ]; then l=yes; else l=no; fi; echo "@@RESULT {\\"step\\":\\"left\\",\\"live\\":\\"$l\\"}"' };
+  const shared = (pre, homeDir) => byStep(container({ homeDir, prep: OWN_PREP, steps: [{ user: 'NODE_EXTRA_CA_CERTS=/etc/apt/vsfx-ca.pem ' + pre + drv('run', { request: { kind: 'source', source: FXSRC } }, 'shs') }, LEFT] }));
+  const home8s = scratchDir('app-install-h1s'), home8sc = scratchDir('app-install-h1sc');
+  const SH = shared('', home8s), SHC = shared('VS_REPO=/share/pre-order ', home8sc);
+  ok(SH.shs && !SH.shs.ok && /shared-host vs-fixture\.test/.test(JSON.stringify(SH.shs)) && SH.left && SH.left.live === 'no', 'a source on the host of one of the machine\'s own sources is refused (shared-host) and nothing of it is live', { shs: SH.shs && (SH.shs.error || SH.shs.ok), left: SH.left });
+  ok(SHC.shs && SHC.shs.ok && SHC.left && SHC.left.live === 'yes', 'CONTROL (pre-order): the same source was approved — its pin would hold the machine\'s own source at 1', { shs: SHC.shs && (SHC.shs.error || SHC.shs.ok), left: SHC.left });
+  const HELLO = { root: 'echo "@@RESULT {\\"step\\":\\"hv\\",\\"hello\\":\\"$(dpkg-query -W -f=\'${Version}\' hello)\\"}"' };
+  const legacy = (pre, homeDir) => byStep(container({ homeDir, prep: FX_PREP, steps: [
+    { user: pre + drv('run', { request: { kind: 'apt', packages: ['hello'] } }, 'uh') },
+    { user: 'NODE_EXTRA_CA_CERTS=/etc/apt/vsfx-ca.pem ' + pre + drv('run', { request: { kind: 'source', source: FXSRC } }, 'us') },
+    { root: 'rm -f /etc/apt/preferences.d/vibespace-fx.pref /home/u/.vibespace/apps/sys/sources/fx.pref' }, // a machine whose source was approved before .203: no pin anywhere
+    { user: pre + drv('run', { request: { kind: 'refresh' } }, 'ur') }, HELLO] }));
+  const home8u = scratchDir('app-install-h1u'), home8uc = scratchDir('app-install-h1uc');
+  const LG = legacy('', home8u), LGC = legacy('VS_REPO=/share/pre-order ', home8uc);
+  ok(LG.us && LG.us.ok && LG.ur && LG.ur.ok && LG.hv && LG.hv.hello === '2.10-3', `a source approved before .203 (no pin): the first Refresh pins it BEFORE apt runs — hello stays Debian's 2.10-3 (got ${LG.hv && LG.hv.hello})`, { us: LG.us && (LG.us.error || LG.us.ok), ur: LG.ur && (LG.ur.error || LG.ur.ok) });
+  ok(LGC.ur && LGC.ur.ok && LGC.hv && LGC.hv.hello === '2.10-99', `CONTROL (pre-order): the same first Refresh took the source's hello 2.10-99 (got ${LGC.hv && LGC.hv.hello})`, { ur: LGC.ur && (LGC.ur.error || LGC.ur.ok) });
+  for (const h of [home8s, home8sc, home8u, home8uc]) spawnSync('docker', ['run', '--rm', '-v', `${h}:/h`, IMAGE, 'sh', '-c', 'rm -rf /h/.vibespace /h/.cache'], { stdio: 'ignore' });
+  for (const h of [home8, home8c]) spawnSync('docker', ['run', '--rm', '-v', `${h}:/h`, IMAGE, 'sh', '-c', 'rm -rf /h/.vibespace /h/.cache'], { stdio: 'ignore' });
+}
+console.log('§9 design 009 — an agent PROPOSES an installer by file: a real .deb (dpkg-deb reads its own desktop file + icon, apt-get installs ./file.deb through the slot) and an AppImage unpacked in its own directory with the cwd elsewhere');
+{
+  const home9 = scratchDir('app-install-d9');
+  const A9 = 'mkdir -p /tmp/cc/DEBIAN /tmp/cc/usr/share/applications /tmp/cc/usr/share/icons/hicolor/48x48/apps /tmp/cc/usr/bin'
+    + " && printf 'Package: capp-vendor\\nVersion: 1.0\\nArchitecture: all\\nMaintainer: Test <test@example.invalid>\\nDescription: a vendor-style package with a desktop file\\n' > /tmp/cc/DEBIAN/control"
+    + " && printf '[Desktop Entry]\\nType=Application\\nName=Capp Chat\\nName[zh_CN]=卡普聊天\\nName[ja]=カップチャット\\nExec=/usr/bin/capp-chat\\nIcon=capp-chat\\n' > /tmp/cc/usr/share/applications/capp-vendor.desktop"
+    + " && printf '\\211PNG\\r\\n\\032\\n0000IHDR' > /tmp/cc/usr/share/icons/hicolor/48x48/apps/capp-chat.png && printf '#!/bin/sh\\necho capp\\n' > /tmp/cc/usr/bin/capp-chat && chmod 755 /tmp/cc/usr/bin/capp-chat"
+    + ' && dpkg-deb --root-owner-group --build /tmp/cc /tmp/capp-vendor_1.0_all.deb >/dev/null';
+  const STG = '/home/u/.vibespace/apps/staging', AIM = '/home/u/.vibespace/apps/appimage/capp-chat';
+  const c9 = container({ homeDir: home9, prep: SUDO_PREP, steps: [
+    { user: A9 },
+    { user: drv('propose', { request: { kind: 'installer', file: '/tmp/capp-vendor_1.0_all.deb' } }, 'propDeb') },
+    { user: drv('exec', { argv: ['stat', '-c', '%s', '/tmp/capp-vendor_1.0_all.deb'] }, 'sizeDeb') },
+    { user: drv('ls', { dirs: [STG] }, 'stgDeb') },
+    { user: drv('runp', {}, 'runDeb') },
+    { user: drv('status', {}, 'stDeb') },
+    { user: drv('exec', { argv: ['dpkg', '-s', 'capp-vendor'] }, 'dpkgDeb') },
+    { user: 'mkdir -p /tmp/elsewhere && cd /tmp/elsewhere && ' + drv('propose', { request: { kind: 'installer', file: '/repo/scripts/fixtures/apps-installers/capp-chat.AppImage' } }, 'propAI') },
+    { user: 'cd /tmp/elsewhere && ' + drv('runp', {}, 'runAI') },
+    { user: drv('ls', { dirs: ['/tmp/elsewhere', STG, AIM, AIM + '/root'] }, 'lsAI') },
+    { user: drv('exec', { argv: [AIM + '/root/AppRun'] }, 'execAI') },
+    { user: drv('propose', { request: { kind: 'remove', entryId: 'capp-chat' } }, 'propRm') },
+    { user: drv('runp', {}, 'runRm') },
+    { user: drv('ls', { dirs: [AIM, '/home/u/.vibespace/apps'] }, 'lsRm') },
+  ] });
+  const R9 = byStep(c9);
+  const pd = R9.propDeb && R9.propDeb.proposal;
+  ok(pd && pd.kind === 'deb' && pd.app.name === 'Capp Chat' && pd.app.labels && pd.app.labels.zh === '卡普聊天' && /\/icon$/.test(pd.app.icon || '') && pd.details.packages.includes('capp-vendor') && R9.stgDeb && R9.stgDeb.ls[STG].some((n) => n.endsWith('.deb')), 'a REAL .deb proposed by file: dpkg-deb lists it, its own desktop file (Name + Name[zh_CN]) and icon are read out WITHOUT installing it; the copy sits in staging', { pd, stg: R9.stgDeb });
+  ok(pd && R9.sizeDeb && pd.bytes.download === Number(R9.sizeDeb.out), 'apps-joint r1 F5: the card\'s download size of a .deb with nothing else to fetch = its file (apt\'s --print-uris lists the local file; never counted twice)', { bytes: pd && pd.bytes, size: R9.sizeDeb && R9.sizeDeb.out });
+  const st = R9.stDeb && R9.stDeb.status;
+  const ent = st && st.manifest.entries.find((e) => e.kind === 'deb');
+  ok(R9.runDeb && R9.runDeb.ok && R9.runDeb.result.done && R9.dpkgDeb && /Status: install ok installed/.test(R9.dpkgDeb.out) && ent && ent.deb.package === 'capp-vendor' && st.rows.some((r) => r.app === ent.id && r.labels && r.labels.zh === '卡普聊天'), 'the click: apt-get installs ./the staged .deb through the ONE slot (root checks the sha256), the row carries the localized label', { run: R9.runDeb && (R9.runDeb.error || R9.runDeb.log), ent, rows: st && st.rows });
+  const ls = R9.lsAI && R9.lsAI.ls;
+  ok(R9.propAI && R9.propAI.proposal && R9.propAI.proposal.kind === 'appimage' && R9.runAI && R9.runAI.ok && R9.runAI.cwd === '/tmp/elsewhere' && ls && ls['/tmp/elsewhere'].length === 0 && ls[STG].length === 0 && (ls[AIM + '/root'] || []).includes('AppRun') && !(ls[AIM] || ['x.AppImage']).some((n) => /AppImage$/.test(n)) && /capp-chat runs from/.test(R9.execAI && R9.execAI.out), 'an AppImage (the W4 control): unpacked into appimage/<id>/root with the cwd ELSEWHERE (it stays empty), the AppImage file and every staged file gone, its AppRun runs', { prop: R9.propAI, run: R9.runAI && (R9.runAI.error || R9.runAI.log), ls, exec: R9.execAI });
+  ok(R9.runRm && R9.runRm.ok && R9.lsRm && R9.lsRm.ls[AIM] === null && Array.isArray(R9.lsRm.ls['/home/u/.vibespace/apps']), 'Remove… of an AppImage: exactly its directory goes (no root), the apps directory stays', { rm: R9.runRm, ls: R9.lsRm });
+  spawnSync('docker', ['run', '--rm', '-v', `${home9}:/h`, IMAGE, 'sh', '-c', 'rm -rf /h/.vibespace /h/.cache'], { stdio: 'ignore' });
+}
 finish();

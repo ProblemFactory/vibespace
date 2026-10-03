@@ -131,7 +131,7 @@ import { registerMenuItem } from './contributions.js';
 import { ownerDots, livePlacement } from './chain-layout.js'; // P7 (§4.6): the per-SESSION owner colour, never the group's; MULTIVIEW D5: where a new live view goes
 import { stripOrder, stripFold, capChip, shortLabel, stoppableRows, rowStateWords, tabRowFold } from './live-strip-layout.js'; // MULTIVIEW §2 A1 / D4: the strip's order, fold and own/cap chip (PURE); lane browser-resume C: the tab row's fold
 import { tabRowModel, tabRefusalText } from '../browser-tabs.js';
-import { tabClickVerdict } from '../browser-windows.js'; // lane browser-windows (U3/U0b): what a chip click does — bring forward / switch (driving) · watch / follow (watching) // lane browser-resume C (§3.9, ruling 3): whose tab it is and what this viewer may do to it (PURE)
+import { tabClickVerdict, watchLineWords, foldMenuRows, watchRefusalWords } from '../browser-windows.js'; // lane browser-windows (U3/U0b): what a chip click does — bring forward / switch (driving) · watch / follow (watching) // lane browser-resume C (§3.9, ruling 3): whose tab it is and what this viewer may do to it (PURE)
 import { avatarOf } from './channel-avatar.js'; // lane browser-resume C (D3): a tab's badge = the host's initial on a stable hue (no network — never a favicon fetch)
 import { UI_ICONS } from './icons.js';
 import { STREAM_PATH, MAX_FPS_DEFAULT, EPHEMERAL_REF, pointerToDevice, deviceToViewport, drawnRect, liveTitle, mouseRecord, wheelRecord, keyRecord, touchRecord, modifiersOf, liveViewPlan, viewTargetRunning, browserListFor, clickCountNext } from '../browser-stream.js';
@@ -1085,6 +1085,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
       prev = el;
     }
     for (const [id, el] of have) if (!keep.has(id)) el.remove();
+    if (st.watch) renderWatchLine(); // live-watch-polish G2: the line names the tabs — a retitled or moved tab re-says it
     const q = quitRowOf();
     const qw = q ? '' : 'none'; if (tabRowQuit.style.display !== qw) tabRowQuit.style.display = qw;
     refoldTabs();
@@ -1097,7 +1098,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
       const chips = [...tabRowList.children];
       for (const c of chips) c.style.display = '';
       const widths = {}; for (const c of chips) widths[c.dataset.target] = c.offsetWidth + 3;
-      const f = tabRowFold({ rows: st.tabRow.rows, widths, avail: tabRow.clientWidth - 12, endPx: tabRowQuit.style.display === 'none' ? 0 : tabRowQuit.offsetWidth + 6, morePx: 44 });
+      const f = tabRowFold({ rows: st.tabRow.rows, widths, avail: tabRow.clientWidth - 12, endPx: tabRowQuit.style.display === 'none' ? 0 : tabRowQuit.offsetWidth + 6, morePx: 44, watchedRef: st.watch ? st.watch.targetId : null }); // live-watch-polish G3: the watched chip never folds
       st.tabFolded = f.folded;
       for (const c of chips) c.style.display = f.folded.includes(c.dataset.target) ? 'none' : '';
       tabRowMore.style.display = f.folded.length ? '' : 'none';
@@ -1111,11 +1112,15 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     const r = tabRowMore.getBoundingClientRect();
     const rows = (st.tabRow && st.tabRow.rows || []).filter((x) => st.tabFolded.includes(x.targetId));
     const items = [];
+    // live-watch-polish G1: a folded row asks the SAME click verdict as its chip and says the act (Watch / Back / Switch);
+    // a row with nothing to do is not listed — never a greyed row
+    const acts = new Map(foldMenuRows(rows, (x) => clickOf(x), t).map((m) => [m.targetId, m]));
     for (const x of rows) {
-      items.push({ label: `${x.title} · ${x.mark}`, ...(x.canSwitch ? { action: () => tabAct('switch', x) } : { disabled: true }) });
+      const m = acts.get(x.targetId);
+      if (m) items.push({ label: `${m.label} · ${x.mark}`, action: () => chipClick(x) });
       if (x.canClose) items.push({ label: t('Close tab') + ' — ' + x.title, action: () => tabAct('close', x) });
     }
-    showContextMenu(r.left, r.bottom + 2, items);
+    if (items.length) showContextMenu(r.left, r.bottom + 2, items);
   };
   /** One switch / ✕ on the row: sent to the bridge (the keeper re-judges every fact), answered by ONE `tab-ack`; a refusal
    *  or a failure is a toast in the device's words (never silence). */
@@ -1146,7 +1151,10 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     const driving = st.mode === 'takeover' && st.mine;
     let text = '', btn = '', act = null;
     if (st.watch) {
-      text = st.watch.mode === 'polling' ? t('Watching a background tab of the agent’s — a new picture every half second; the agent’s current tab is unchanged') : t('Watching another tab of the agent’s — the agent’s current tab is unchanged');
+      // live-watch-polish G2: the line names BOTH tabs (a page chose each title — bounded, set as textContent)
+      const rows = (st.tabRow && st.tabRow.rows) || [];
+      const wr = rows.find((x) => x.targetId === st.watch.targetId), cur = rows.find((x) => x.active);
+      text = watchLineWords({ watched: (wr && wr.title) || st.watch.title || '', current: cur ? cur.title : '', mode: st.watch.mode }, t);
       btn = t('Back to the agent’s tab'); act = () => watchTab(null);
     } else if (st.bg && st.bg.state === 'unresponsive') {
       // B-d635 (userW's inc-murizo36-ecri): a tab that sends no picture and does not answer is SAID — never a blank canvas with no words
@@ -1713,6 +1721,9 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
         renderMode(); renderViewers(); renderTitle(); renderStrip(); renderBackend(); renderRec(); syncTrace(); renderOwner(); renderBind();
         st.fitSent = null; reportFit(); renderFit(); // lane S4: this viewer's pane, at once (the bridge sizes the page to the ruling pane)
         st.dialog = null; st.dialogAnswering = false; renderDialog(); // lane browser-stuck: a (re)connected view is told again by the bridge's replay
+        // live-watch-polish G4: the bridge's watch died with the old socket — a view that was watching asks again (the bridge
+        // re-judges; a refusal clears the line by name), a view that drives now drops it: the line and the picture tell ONE truth
+        if (st.watch) { if (st.mode === 'takeover' && st.mine) st.watch = null; else { st.watch = { ...st.watch, pending: true }; send({ type: 'watch-tab', targetId: st.watch.targetId }); } renderTabRow(); renderWatchLine(); }
         break;
       // P3 (§4.3): the bridge's answer to a takeover/handback — ours or anybody's
       case 'mode': {
@@ -1821,7 +1832,8 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
       }
       // lane browser-windows (U3): the tab THIS view watches (or null: back on the agent's), its mode, a refusal said by name
       case 'watching': {
-        if (m.refused) { const why = m.refused === 'not_your_tab' ? tabRefusalText('not_your_tab', {}, t) : m.refused === 'driving' ? t('you drive this window — its chip switches the agent’s tab') : String(m.error || m.refused); showToast(t('Could not show that tab: {why}', { why }), { type: 'error' }); }
+        // live-watch-polish G5: a refusal is said by its code, in the device's words (never the server's English sentence)
+        if (m.refused) { const why = watchRefusalWords({ refused: m.refused, why: m.why, error: m.error }, t); showToast(t('Could not show that tab: {why}', { why }), { type: 'error' }); }
         if (m.targetId) st.watch = { targetId: String(m.targetId), mode: m.mode === 'polling' ? 'polling' : 'screencast', pending: !!m.pending, title: st.watch && st.watch.targetId === String(m.targetId) ? st.watch.title : '' };
         else { if (st.watch && m.ended) showToast(t('Back on the agent’s tab — the tab you watched is gone'), { duration: 3000 }); st.watch = null; }
         renderTabRow(); renderWatchLine();
@@ -2442,7 +2454,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     kbd: () => kbd, ownsKeyboard: () => !!(st.claimed && iOwn()), // lane J r2: the sink + the ownership fact (the suite types against both)
     geometry, frameClaim: () => (st.meta ? { ...st.meta } : null), pageReading: () => (st.page ? { ...st.page } : null), // lane J: {picW, picH, cssW, cssH, source}; the metadata's CLAIM and the page's own reading (the suite's control replays both)
     send, // P3: the suite drives the control verbs through the real socket
-    state: () => ({ sessionId, profileId: profileId || null, human: !!H, tabRow: { shown: tabRow.style.display !== 'none', rows: st.tabRow ? st.tabRow.rows.map((r) => ({ targetId: r.targetId, owner: r.owner, active: r.active, canSwitch: r.canSwitch, canClose: r.canClose, title: r.title, mark: r.mark })) : [], folded: st.tabFolded.slice(), quit: tabRowQuit.style.display !== 'none', quitText: tabRowQuit.textContent, owners: { ...st.tabOwners }, inFlight: st.tabActs.size, error: st.tabError, quitAsked: st.quitAsked }, // lane browser-resume C
+    state: () => ({ sessionId, profileId: profileId || null, human: !!H, tabRow: { shown: tabRow.style.display !== 'none', rows: st.tabRow ? st.tabRow.rows.map((r) => ({ targetId: r.targetId, owner: r.owner, active: r.active, canSwitch: r.canSwitch, canClose: r.canClose, title: r.title, mark: r.mark })) : [], folded: st.tabFolded.slice(), quit: tabRowQuit.style.display !== 'none', quitText: tabRowQuit.textContent, owners: { ...st.tabOwners }, inFlight: st.tabActs.size, error: st.tabError, watch: st.watch ? { targetId: st.watch.targetId, mode: st.watch.mode, pending: !!st.watch.pending } : null, watchLine: watchLine.style.display === 'none' ? '' : watchLineText.textContent, /* live-watch-polish: the tab this view watches + its line */ quitAsked: st.quitAsked }, // lane browser-resume C
       humanKey: H ? H.key : null, humanEnded: H ? H.ended : null, endLine: H ? endLine.textContent : null, shareLine: H && shareLine.style.display !== 'none' ? shareText.textContent : null, closeText: H ? closeBtn.textContent : null, quitText: H ? quitBtn.textContent : null, address: H ? addrInput.value : null, addrShown: addrRow.style.display !== 'none', takeText: takeBtn.style.display === 'none' ? null : takeBtn.textContent, kbdBtn: kbdBtn.style.display !== 'none', profileRef: st.profileRef, connected: st.connected, stopped: !!st.stopped, frames: st.frames, frameW: st.frameW, frameH: st.frameH, viewers: st.viewers, mode: st.mode, target: st.target, url: st.url, tabs: st.tabs.slice(), console: st.console.length, attachments: st.attachments.slice(), running: st.running, lastCommand: st.lastCommand, error: st.error, lastStatus: st.lastStatus, sidePane: st.sidePane,
       backend: backendBtn.style.display !== 'none' ? backendBtn.textContent : backendLabelEl.style.display !== 'none' ? backendLabelEl.textContent : null, backendIsButton: backendBtn.style.display !== 'none', blockedShown: blockedBar.style.display !== 'none', // P4 + the rebuilt dialog: the name, and whether it opens the dialog
       trace: timeline.state(), traceBtn: traceBtn.textContent, recording: recEl.textContent, recordingOn: recEl.classList.contains('on'), // P5

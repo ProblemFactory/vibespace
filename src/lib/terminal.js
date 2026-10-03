@@ -425,11 +425,8 @@ class TerminalSession {
       }
 
       // Update window title from Claude Code's OSC 0 title (strip status prefix)
-      const preserveTitle = s?.get('terminal.preserveCustomTitle') && winInfo._hasCustomTitle;
-      if (!preserveTitle) {
-        const title = data.replace(/^[\u2800-\u28FF\u2733\u2734\u2735\u273B\u273C\u273D\u00B7✻✶✽] ?/, '').trim();
-        if (title) { winInfo.title = title; winInfo.titleSpan.textContent = title; }
-      }
+      const title = data.replace(/^[\u2800-\u28FF\u2733\u2734\u2735\u273B\u273C\u273D\u00B7✻✶✽] ?/, '').trim();
+      if (title) { winInfo.title = title; winInfo.titleSpan.textContent = title; }
       return false;
     });
 

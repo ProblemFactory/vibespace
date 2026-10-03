@@ -979,6 +979,16 @@ const CLI_VERSION_RE = /^\d{1,3}\.\d{1,3}\.\d{1,3}$/;
  *  never runs; the package's own launcher makes its binary executable). A version the table was NOT measured on carries
  *  no numbers (the confirm says so). */
 const CLI_PIN_RECORD = Object.freeze({ package: CLI_PACKAGE, version: TABLE_VERSION, registryHost: 'registry.npmjs.org', tarballBytes: 52885291, unpackedBytes: 119129537, shasum: '429660c741782299f154e7fa7f03deb51bb32248', measured: '2026-10-01' });
+/** lane chrome-builds-download (design 004, B-80c1): CHROME FOR TESTING, MEASURED 2026-10-03 03:32 UTC — the ONE place its two
+ *  hosts are spelled. The version lists live on `listHost` (the 10 KB last-known-good file: four channels; the 5.2 MB
+ *  known-good file: 2 549 versions 113 → 157, every one with a linux64 chrome zip); every zip on `fileHost`. Neither document
+ *  carries a checksum: the object's own md5 (its plain etag / `x-goog-hash`) and length are the integrity witnesses, the TLS
+ *  connection to `fileHost` the authenticity. Only `platform` (Linux x64) has a measured layout (`layout` = the zip's one
+ *  top-level folder, renamed to the CLI's `chrome-<version>/`). Every URL the download fetches passes egressVerdict over
+ *  these two hosts first; a list's download URL on any other host is refused by name (`build_url_offhost`). */
+const CHROME_BUILDS_RECORD = Object.freeze({ listHost: 'googlechromelabs.github.io', fileHost: 'storage.googleapis.com', platform: 'linux64', layout: 'chrome-linux64/',
+  lists: Object.freeze({ lastKnownGood: '/chrome-for-testing/last-known-good-versions-with-downloads.json', knownGood: '/chrome-for-testing/known-good-versions-with-downloads.json' }),
+  measured: Object.freeze({ date: '2026-10-03', stable: '154.0.8037.92', bytes: 196202491, lastKnownGoodBytes: 10431, knownGoodBytes: 5177393, versions: 2549 }) });
 /** The setting `browser.cli` → `{mode:'path'}` (whatever agent-browser PATH has — every install before this lane) |
  *  `{mode:'pinned', version: TABLE_VERSION}` (the version the flag table was measured on) | `{mode:'version', version}`
  *  (another version the user names — the drift note stays: the table was measured on TABLE_VERSION). Anything else ⇒
@@ -1232,7 +1242,7 @@ module.exports = {
   KEEPER_MARK, // lane H verify r4: the keeper's launch mark (only the keeper writes it)
   // r4
   TABLE_VERSION, versionDrift, NAV_VERBS, localSchemeOf, stateFileVerdict, parseBatchStdin,
-  CLI_PACKAGE, CLI_PIN_RECORD, cliChoiceOf, cliInstallDirName, cliNativeName, cliInstallVerdict, cliPinVerdict, // lane browser-admin 2b: the pinned browser CLI
+  CLI_PACKAGE, CLI_PIN_RECORD, CHROME_BUILDS_RECORD, cliChoiceOf, cliInstallDirName, cliNativeName, cliInstallVerdict, cliPinVerdict, // lane browser-admin 2b: the pinned browser CLI
   cliForBrowser, browserCliGoneText, // verify r2 (H1): a running browser keeps the CLI it was launched with
   SWITCH_VERBS, pausedSwitchNote, // verify S2 r3: a paused refusal names a verb that would move the user's view
   // lane L r2

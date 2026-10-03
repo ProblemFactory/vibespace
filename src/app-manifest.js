@@ -16,7 +16,9 @@
  *                                     stanzas joined. A `file:` source: apt verifies every SHA256 itself.
  *   ~/.vibespace/apps/sys/            root:root 0755 — THE AUTHORITY root reads: entries/<id>.list (the approved
  *                                     top-level packages), entries/<id>.desktop (their .desktop files), keys/,
- *                                     sources/ (third-party sources + their keys, copied at approval), base/status +
+ *                                     sources/ (third-party sources + their keys, copied at approval; <id>.pref =
+ *                                     the source's apt pin), entries/<id>.pin (what an install took FROM an approved
+ *                                     source: "<source> <package>" lines — the pin's allow-list), base/status +
  *                                     base/sha (the dpkg set of the image the cache is completed against). The root
  *                                     script refuses a directory that is not root-owned and not group/other-writable,
  *                                     so a user-level process can only rearrange what root itself wrote.
@@ -42,7 +44,14 @@
  *   · driftVerdict — "installed outside VibeSpace" (the tripwire touched after VibeSpace's last run)
  *   · APP_SCRIPT + appArgv + appCommands — the ONE root script (packages are argv POSITIONS, never interpolated), the
  *     argv the machine's ONE package slot runs (src/desktop-apps.js installLauncherArgv), the commands a person reads
- *   · parseRunLog — the script's `= …` lines (delta / desktop / service / deb / entry / base / refused / ok)
+ *   · parseRunLog — the script's `= …` lines (delta / desktop / service / deb / entry / base / pin / refused / ok)
+ *   · fetchVerdict / addressVerdict / sniffInstaller / appImageOffset / debMembers / debIconOf / appImageRow / removePlanFor
+ *     — an installer the agent names by ADDRESS or FILE (design 009 §2 A): the address judged before any byte moves (https,
+ *     a public name, every redirect re-judged), the kind by the BYTES, the app's own .desktop out of the archive, the
+ *     removal of every kind
+ *   · pinHost / sourcePin / originOf / withPins — THE PIN of an approved third-party source (verify-r1 H1): every
+ *     package from its host at priority 1 (apt takes such a version only when nothing installed has that name), the
+ *     packages the user approved FROM it at 500; the Refresh card names each update's origin
  */
 
 const MANIFEST_V = 1;
@@ -58,6 +67,8 @@ const FPR_RE = /^[0-9A-F]{40}(?:[0-9A-F]{24})?$/;
  *  the user had (its bytes copied into the repo, sha256 kept). The user-level kinds (§3.4) live in HOME and need no
  *  replay; their CLI verb is HELD (the CLI's own permission card) and Layer 0 records nothing for them yet. */
 const ENTRY_KINDS = Object.freeze(['apt', 'deb', 'uv-tool', 'npm', 'appimage']);
+/** The kinds that live in the user's home (no root, nothing to replay — the home volume keeps them). */
+const HOME_KINDS = Object.freeze(['uv-tool', 'npm', 'appimage']);
 const BY_KINDS = Object.freeze(['user', 'agent']);
 /** Every refusal a plan may carry, by name (the dialog and the CLI word them). */
 const PLAN_CODES = Object.freeze(['no_facts', 'no_apt', 'bad_name', 'not_found', 'conflict', 'removes', 'needs_snap', 'bad_source', 'disk', 'no_sudo', 'shared', 'nothing']);
@@ -76,6 +87,13 @@ const APP_ID_PREFIX = 'app.';
 const SCRIPT_MODES = Object.freeze(['install', 'deb', 'remove', 'replay', 'replay-online', 'refresh', 'adopt', 'source', 'source-remove']);
 /** How long a tripwire touch may trail VibeSpace's own last run and still be VibeSpace's (dpkg's hook fires inside it). */
 const DRIFT_SLACK_MS = 2000;
+/** verify-r1 H1 — the pin's two priorities: everything from an approved source's host LOW (apt_preferences: 0 < P < 100
+ *  = "only when no version is installed" — a newer build of a package the machine has, or one another source also
+ *  carries, never wins), what the user approved from it at apt's default. */
+const PIN_LOW = 1;
+const PIN_APPROVED = 500;
+/** verify-r1 H2 — the most root copies out of a user-owned file (MiB; app-serve's DEB_MAX is 4 GiB). */
+const GRAB_MAX_MB = 4096;
 
 const isObj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
 const str = (x, max = 200) => (typeof x === 'string' ? x.slice(0, max) : null);
@@ -121,6 +139,25 @@ function validateSourceSpec(s) {
 function sourceDeb822(src, keyPath) {
   return ['Types: deb', `URIs: ${src.uris.join(' ')}`, `Suites: ${src.suites.join(' ')}`, ...(src.components && src.components.length ? [`Components: ${src.components.join(' ')}`] : []), `Signed-By: ${keyPath}`].join('\n') + '\n';
 }
+/** verify-r1 H1 — the host an approved source's `Pin: origin` names: the URI's host (apt's origin is the site, no port). */
+function pinHost(uri) { const m = /^https:\/\/([A-Za-z0-9.-]+)(?::\d{1,5})?(?:\/|$)/.exec(String(uri || '')); return m ? m[1] : null; }
+/** verify-r1 H1 — THE PIN of an approved source: every package from its host at PIN_LOW, the packages the user approved
+ *  FROM it (sorted, unique) at PIN_APPROVED. The same bytes the root script's pins() writes to
+ *  /etc/apt/preferences.d/vibespace-<id>.pref (and root's copy, sys/sources/<id>.pref). */
+function sourcePin({ host, packages = [] } = {}) {
+  const pk = [...new Set((packages || []).filter((p) => PKG_RE.test(p)))].sort();
+  const rec = (names, prio) => `Package: ${names}\nPin: origin "${host}"\nPin-Priority: ${prio}\n`;
+  return rec('*', PIN_LOW) + (pk.length ? '\n' + rec(pk.join(' '), PIN_APPROVED) : '');
+}
+/** verify-r1 H1 — where a .deb apt would fetch comes from: `{source, host}` — an approved source's id when its URI is
+ *  the URL's prefix, else null and the URL's host (null for a `file:` repository). */
+function originOf(url, sources = []) {
+  const u = String(url || '');
+  for (const s of sources || []) for (const b of (s && s.uris) || []) if (u.startsWith(String(b).replace(/\/+$/, '') + '/')) return { source: s.id, host: pinHost(b) };
+  const m = /^[a-z][a-z0-9+.-]*:\/\/([A-Za-z0-9.-]+)/i.exec(u);
+  return { source: null, host: m ? m[1] : null };
+}
+const normPin = (p) => (isObj(p) && Array.isArray(p.packages) ? { packages: p.packages.map(String).filter((x) => PKG_RE.test(x)).slice(0, 512) } : null);
 function normBy(b) {
   if (!isObj(b) || !BY_KINDS.includes(b.kind)) return null;
   const out = { kind: b.kind };
@@ -129,10 +166,19 @@ function normBy(b) {
   if (typeof b.sessionId === 'string' && b.sessionId) out.sessionId = b.sessionId.slice(0, 80);
   return out;
 }
+/** design 009 §2 A — a row's localized names `{zh?, ja?}` (the client picks by the device's language), or null. */
+function normLabels(l) {
+  if (!isObj(l)) return null;
+  const out = {};
+  for (const k of ['zh', 'ja']) if (typeof l[k] === 'string' && l[k].trim()) out[k] = l[k].replace(/[\r\n]/g, ' ').trim().slice(0, 80);
+  return Object.keys(out).length ? out : null;
+}
 function normRow(r) {
   if (!isObj(r) || typeof r.id !== 'string' || !r.id.startsWith(APP_ID_PREFIX)) return null;
   const out = { id: r.id.slice(0, 64), label: str(r.label, 80) || r.id, exec: str(r.exec, 512) || '', args: Array.isArray(r.args) ? r.args.filter((a) => typeof a === 'string').slice(0, 64) : [] };
   for (const k of ['icon', 'desktop', 'category', 'package']) if (typeof r[k] === 'string' && r[k]) out[k] = r[k].slice(0, 512);
+  const labels = normLabels(r.labels);
+  if (labels) out.labels = labels;
   return out;
 }
 function normEntry(e) {
@@ -152,6 +198,7 @@ function normEntry(e) {
     if (!isObj(d) || !SHA256_RE.test(String(d.sha256 || '')) || !PKG_RE.test(String(d.package || ''))) return { ok: false, error: `entry ${e.id}: a deb entry carries {package, sha256, name}` };
     out.deb = { package: d.package, sha256: d.sha256, name: str(d.name, 200) || `${d.package}.deb`, size: num(d.size) };
   }
+  if (e.kind === 'appimage' && isObj(e.appimage) && SHA256_RE.test(String(e.appimage.sha256 || ''))) out.appimage = { sha256: e.appimage.sha256, name: str(e.appimage.name, 200), size: num(e.appimage.size), from: str(e.appimage.from, 300) };
   return { ok: true, entry: out };
 }
 /** The index → `{ok, manifest}` (normalized: unknown keys dropped) | `{ok:false, error}`. */
@@ -173,7 +220,7 @@ function validateManifest(m) {
     if (!v.ok) return { ok: false, error: `source ${isObj(s) ? s.id : '?'}: ${v.error}` };
     if (sids.has(v.source.id)) return { ok: false, error: `source ${v.source.id} appears twice` };
     sids.add(v.source.id);
-    out.sources.push({ ...v.source, addedAt: num(s.addedAt), approvedAt: num(s.approvedAt), by: normBy(s.by) || { kind: 'user' } });
+    out.sources.push({ ...v.source, addedAt: num(s.addedAt), approvedAt: num(s.approvedAt), by: normBy(s.by) || { kind: 'user' }, ...(normPin(s.pin) ? { pin: normPin(s.pin) } : {}) });
   }
   const r = isObj(m.resolved) ? m.resolved : {};
   out.resolved = { codename: str(r.codename, 40), arch: str(r.arch, 20), baseSha: SHA256_RE.test(String(r.baseSha || '')) ? r.baseSha : null,
@@ -191,7 +238,13 @@ function withoutEntry(m, id) { return bump({ ...m, entries: m.entries.filter((e)
 function withSource(m, src) {
   const v = validateSourceSpec(src);
   if (!v.ok) throw new Error(v.error);
-  return bump({ ...m, sources: [...m.sources.filter((s) => s.id !== v.source.id), { ...v.source, addedAt: num(src.addedAt), approvedAt: num(src.approvedAt), by: normBy(src.by) || { kind: 'user' } }] });
+  return bump({ ...m, sources: [...m.sources.filter((s) => s.id !== v.source.id), { ...v.source, addedAt: num(src.addedAt), approvedAt: num(src.approvedAt), by: normBy(src.by) || { kind: 'user' }, ...(normPin(src.pin) ? { pin: normPin(src.pin) } : {}) }] });
+}
+/** verify-r1 H1 — the pins a root run printed (`= pin <source> <package…>`, parseRunLog's `pins`) recorded on their
+ *  sources: the index mirrors what root holds (root's sys/sources/<id>.pref is what a replay re-creates). */
+function withPins(m, pins) {
+  if (!isObj(pins) || !Object.keys(pins).length) return m;
+  return { ...m, sources: m.sources.map((s) => (Object.prototype.hasOwnProperty.call(pins, s.id) ? { ...s, pin: normPin({ packages: pins[s.id] }) } : s)) };
 }
 function withoutSource(m, id) { return bump({ ...m, sources: m.sources.filter((s) => s.id !== id) }); }
 /** An entry id for a request: the first package's name, dots/pluses as dashes; a taken id gets -2, -3 … */
@@ -325,10 +378,18 @@ function searchWords(q) {
   if (!w.length || !w.every((x) => /^[a-z0-9+.-]{2,40}$/.test(x))) return null;
   return w;
 }
-/** `apt-get -s upgrade` (or `--only-upgrade install`) → how many of THESE packages have an update. */
-function updatesOf(simText, packages) {
+/** `apt-get -s upgrade` (or `--only-upgrade install`) → how many of THESE packages have an update. With `debs` (the same
+ *  request's `--print-uris` files, parseUris) each update names its ORIGIN (verify-r1 H1): the approved source's id
+ *  (`source`) or the host apt fetches it from — `origin` is the word the Refresh card shows. */
+function updatesOf(simText, packages, { debs = null, sources = [] } = {}) {
   const mine = new Set(packages || []);
-  return parseSim(simText).inst.filter((i) => i.from && mine.has(i.package)).map((i) => ({ package: i.package, from: i.from, to: i.version }));
+  const urlOf = new Map();
+  for (const d of debs || []) { const p = String(d.file || '').split('_')[0]; if (!urlOf.has(p)) urlOf.set(p, d.url); }
+  return parseSim(simText).inst.filter((i) => i.from && mine.has(i.package)).map((i) => {
+    const u = { package: i.package, from: i.from, to: i.version };
+    if (debs) { const o = urlOf.has(i.package) ? originOf(urlOf.get(i.package), sources) : null; u.origin = o ? o.source || o.host : null; u.source = o ? o.source : null; }
+    return u;
+  });
 }
 
 // ── a .desktop file → one catalog row ─────────────────────────────────────────────────────────────────────────────
@@ -387,7 +448,7 @@ function rowIdFor(entry, desktopPath, primary) {
  */
 function parseDesktopFile(text, { entry, path: p = null, primary = true, pkg = null, validate = null } = {}) {
   if (!ENTRY_ID_RE.test(String(entry || ''))) return { ok: false, error: 'no entry id' };
-  const kv = {};
+  const kv = {}, names = {};
   let main = false;
   for (const raw of String(text || '').split('\n')) {
     const l = raw.replace(/\r$/, '');
@@ -397,6 +458,8 @@ function parseDesktopFile(text, { entry, path: p = null, primary = true, pkg = n
     if (!main) continue;
     const m = /^([A-Za-z0-9-]+)\s*=\s*(.*)$/.exec(l); // the unlocalised key only (Name[zh_TW]= does not match)
     if (m && !(m[1] in kv)) kv[m[1]] = m[2];
+    const n = /^Name\[([A-Za-z@_.-]{2,20})\]\s*=\s*(.*)$/.exec(l); // design 009: the localized names, read beside it
+    if (n && !(n[1] in names)) names[n[1]] = n[2];
   }
   if ((kv.Type || '') !== 'Application') return { ok: false, skip: 'not-an-application' };
   if (kv.NoDisplay === 'true') return { ok: false, skip: 'no-display' };
@@ -410,6 +473,8 @@ function parseDesktopFile(text, { entry, path: p = null, primary = true, pkg = n
   const label = unescapeValue(kv.Name || words[0].split('/').pop()).replace(/[\r\n]/g, ' ').trim().slice(0, 80);
   const row = { id: rowIdFor(entry, p, primary), label: label || words[0].split('/').pop().slice(0, 80), exec: terminal ? 'xterm' : words[0], args: terminal ? ['-e', ...words] : words.slice(1), category: categoryOf(kv.Categories) };
   if (kv.Icon) row.icon = unescapeValue(kv.Icon).slice(0, 512);
+  const labels = desktopNames(names);
+  if (labels) row.labels = labels;
   if (p) row.desktop = String(p);
   if (pkg) row.package = String(pkg);
   if (typeof validate === 'function') {
@@ -418,14 +483,22 @@ function parseDesktopFile(text, { entry, path: p = null, primary = true, pkg = n
   }
   return { ok: true, row };
 }
+/** design 009 §2 A — `Name[xx]` values → `{zh?, ja?}`: zh from Name[zh_CN] › Name[zh] › Name[zh_Hans] › Name[zh_SG] (never
+ *  zh_TW / zh_HK — the zh interface is simplified Chinese), ja from Name[ja] › Name[ja_JP]; null when neither exists. */
+function desktopNames(names) {
+  const pick = (...ks) => { for (const k of ks) { const v = names && typeof names[k] === 'string' ? unescapeValue(names[k]).replace(/[\r\n]/g, ' ').trim().slice(0, 80) : ''; if (v) return v; } return null; };
+  const zh = pick('zh_CN', 'zh', 'zh_Hans', 'zh_SG'), ja = pick('ja', 'ja_JP');
+  return zh || ja ? { ...(zh ? { zh } : {}), ...(ja ? { ja } : {}) } : null;
+}
 /** The directories a catalog row's .desktop may come from (root-owned, apt's). */
 const DESKTOP_DIRS = Object.freeze(['/usr/share/applications/', '/usr/local/share/applications/']);
 const desktopPathOk = (p) => typeof p === 'string' && /^\/usr(?:\/local)?\/share\/applications\/[A-Za-z0-9@._+-]+\.desktop$/.test(p) && !p.includes('/../');
 /** An icon NAME → the files the icon route may serve, best first (PNG/SVG only — a browser draws them). An absolute
  *  path is accepted only under /usr/share/{icons,pixmaps}. */
-function iconCandidates(icon) {
+function iconCandidates(icon, { appsDir = null } = {}) {
   const s = String(icon || '');
   if (!s) return [];
+  if (appsDir && s.startsWith(`${appsDir}/appimage/`)) { const rest = s.slice(appsDir.length + 10); return /^[a-z0-9][a-z0-9-]{0,39}\/icon\.(?:png|svg)$/.test(rest) ? [s] : []; } // an AppImage's icon, copied into its own directory
   if (s.startsWith('/')) return /^\/usr\/share\/(?:icons|pixmaps)\/[A-Za-z0-9@._+\/-]+\.(?:png|svg)$/.test(s) && !s.includes('/../') ? [s] : [];
   if (!/^[A-Za-z0-9@._+-]{1,120}$/.test(s)) return [];
   const out = [];
@@ -582,12 +655,13 @@ const APP_SCRIPT = [
   'own() { if [ -L "$1" ]; then refuse not-root-owned "$1"; fi; if [ -d "$1" ]; then [ "$(stat -c %u "$1")" = 0 ] && m=$(stat -c %a "$1") && [ $(( 0$m & 022 )) -eq 0 ] || refuse not-root-owned "$1"; elif [ -e "$1" ]; then refuse not-a-directory "$1"; else install -d -m 0755 -o root -g root "$1"; chmod g-s "$1"; fi; }',
   'for d in "$D" "$D/partial" "$R" "$R/entries" "$R/keys" "$R/sources" "$R/base" "$V"; do own "$d"; done',
   'T=$(mktemp -d); trap \'rm -rf "$T"\' EXIT',
+  ': > "$T/from"',
   `LOCK="-o DPkg::Lock::Timeout=${APT_LOCK_WAIT_S}"`,
   'CACHE="-o Dir::Cache::archives=$D/ -o APT::Keep-Downloaded-Packages=true -o APT::Sandbox::User=root"', // P15: apt's _apt user cannot enter a 0700 ~/.vibespace
   "q() { dpkg-query -W -f='${db:Status-Abbrev} ${Package}:${Architecture} ${Version}\\n' 2>/dev/null | awk 'substr($1, 2, 1) == \"i\" { print $2 \" \" $3 }' | sort -u; }", // verify-r1 F5: INSTALLED whatever the want flag (a held package is "hi") — the same set the PURE parseDpkgStatus reads
   // the drift tripwire: every dpkg run touches a marker; VibeSpace's own runs end by stamping slot-ended after it
   `hook() { [ -f ${DRIFT_HOOK} ] || printf '%s\\n' '// VibeSpace: marks a dpkg run so the Desktop apps dialog can name what was installed outside VibeSpace' 'DPkg::Post-Invoke { "if [ -d ${MARKER_DIR} ]; then touch ${DRIFT_MARKER}; fi"; };' > ${DRIFT_HOOK}; }`,
-  `finish() { q > "$V/last-dpkg.list.tmp" && mv -f "$V/last-dpkg.list.tmp" "${LAST_LIST}"; touch "${SLOT_ENDED}"; }`,
+  `finish() { pins; q > "$V/last-dpkg.list.tmp" && mv -f "$V/last-dpkg.list.tmp" "${LAST_LIST}"; touch "${SLOT_ENDED}"; }`,
   // verify-r1 F4: the replay marker says THIS root filesystem has every entry back — only a replay that put every entry
   // back writes it (an install / a partial replay never: the next boot would believe a replay that did not happen)
   `replayed() { [ -e "${REPLAY_MARKER}" ] || date +%s > "${REPLAY_MARKER}"; }`,
@@ -597,6 +671,34 @@ const APP_SCRIPT = [
   // install already ran would record the image PLUS the apps as "the image"
   `rebase() { if [ ! -e "${SLOT_ENDED}" ]; then rm -f "$R/base/status"; fi; base; }`,
   "field() { sed -n \"s/^$1: //p\" \"$2\" | head -1; }",
+  // verify-r1 H2: ONE read of a user-owned file into root's own copy — never through a link, never blocking on a FIFO (an
+  // O_NONBLOCK open reads what is there; the hash then refuses it), bounded; no `[ -f ] && cp` gap between test and read
+  `grab() { dd if="$1" of="$2" iflag=nofollow,nonblock bs=1M count=${GRAB_MAX_MB} 2>/dev/null && [ -f "$2" ] || refuse "$3"; }`,
+  // verify-r1 H1: which approved source a .deb apt fetches comes from — apt's own `--print-uris` lines ('URL' file size
+  // hash) → "<source> <package>" when the URL starts with the source's URI (PURE originOf is the same rule)
+  'srcs() { for s in "$R"/sources/*.sources; do [ -f "$s" ] && return 0; done; return 1; }',
+  // verify r1: the hosts the machine's OWN apt sources use (VibeSpace's vibespace-* aside). `Pin: origin` matches a host,
+  // so a source on one of them would pin the machine's own archive down with it (its updates, security ones too): refused
+  'mine() { { sed -n "s,^[[:space:]]*deb[-a-z]*[[:space:]].*://\\([^/:[:space:]]*\\).*,\\1,p" /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null || true; for f in /etc/apt/sources.list.d/*.sources; do case ${f##*/} in vibespace-*) continue ;; esac; [ -f "$f" ] && sed -n "s/^URIs:[[:space:]]*//p" "$f" | tr " " "\\n" | sed -n "s,^[a-z+]*://\\([^/:]*\\).*,\\1,p"; done; } | tr A-Z a-z | sort -u; }',
+  "from() { awk 'substr($1, 1, 1) == \"\\047\" { u = substr($1, 2, length($1) - 2); f = $2; sub(/_.*/, \"\", f); print u \" \" f }' | while read -r u p; do pkgok \"$p\" || continue; for s in \"$R\"/sources/*.sources; do [ -f \"$s\" ] || continue; b=$(field URIs \"$s\"); b=${b%/}; case $u in \"$b\"/*) i=${s##*/}; echo \"${i%.sources} $p\" ;; esac; done; done; }",
+  // verify-r1 H1: THE PIN of every approved source (PURE sourcePin is the same text): everything from its host at PIN_LOW,
+  // what the user approved FROM it (every entry's .pin) at PIN_APPROVED — root's copy sys/sources/<id>.pref, apt's in
+  // /etc/apt/preferences.d. Every run ends here (finish), a replay starts here (restore): no source is ever unpinned
+  'pins() {',
+  '  for s in "$R"/sources/*.sources; do',
+  '    [ -f "$s" ] || continue; i=${s##*/}; i=${i%.sources}; h=$(field URIs "$s" | sed "s,^https://,,; s,[:/].*,,")',
+  "    cat \"$R\"/entries/*.pin 2>/dev/null | awk -v i=\"$i\" '$1 == i { print $2 }' | while read -r p; do if pkgok \"$p\"; then echo \"$p\"; fi; done | sort -u > \"$T/allow\"",
+  `    { printf 'Package: *\\nPin: origin "%s"\\nPin-Priority: ${PIN_LOW}\\n' "$h"; if [ -s "$T/allow" ]; then printf '\\nPackage: %s\\nPin: origin "%s"\\nPin-Priority: ${PIN_APPROVED}\\n' "$(tr '\\n' ' ' < "$T/allow" | sed 's/ $//')" "$h"; fi; } > "$T/pref"`,
+  '    install -d -m 0755 /etc/apt/preferences.d; install -m 0644 -o root -g root "$T/pref" "$R/sources/$i.pref"; install -m 0644 -o root -g root "$T/pref" "/etc/apt/preferences.d/vibespace-$i.pref"',
+  '    say pin "$i" $(cat "$T/allow")',
+  '  done',
+  '}',
+  // the approved sources, their keys and their pins back on a fresh root filesystem (design §3.3: before rung 1)
+  'restore() {',
+  '  install -d -m 0755 /etc/apt/keyrings',
+  '  for s in "$R"/sources/*.sources; do [ -f "$s" ] || continue; i=${s##*/}; i=${i%.sources}; for k in "$R/keys/$i.asc" "$R/keys/$i.gpg"; do [ -f "$k" ] && install -m 0644 -o root -g root "$k" "/etc/apt/keyrings/vibespace-${k##*/}"; done; install -m 0644 -o root -g root "$s" "/etc/apt/sources.list.d/vibespace-$i.sources"; done',
+  '  pins',
+  '}',
   // the local repository: every .deb named <pkg>_<version without epoch>_<arch>.deb, one stanza each, one version per package, Packages rebuilt
   'index() {',
   '  for f in "$D"/*.deb; do',
@@ -644,19 +746,22 @@ const APP_SCRIPT = [
   '  for p in $(cat "$T/req"); do dpkg -L "$p" 2>/dev/null | grep -E "^/usr(/local)?/share/applications/[A-Za-z0-9@._+-]+\\.desktop$" | while read -r f; do say desktop "$p" "$f"; echo "$f" >> "$T/desktop"; done; done',
   '  comm -13 "$T/before" "$T/after" | while read -r p v; do dpkg -L "$p" 2>/dev/null | grep -E "^(/usr)?/lib/systemd/system/[A-Za-z0-9@._-]+\\.service$" | while read -r f; do say service "${p%%:*}" "${f##*/}"; done; done',
   '}',
-  'list() { cp "$T/req" "$R/entries/$ID.list.tmp" && mv -f "$R/entries/$ID.list.tmp" "$R/entries/$ID.list"; cp "$T/desktop" "$R/entries/$ID.desktop.tmp" && mv -f "$R/entries/$ID.desktop.tmp" "$R/entries/$ID.desktop"; }',
+  'list() { cp "$T/req" "$R/entries/$ID.list.tmp" && mv -f "$R/entries/$ID.list.tmp" "$R/entries/$ID.list"; cp "$T/desktop" "$R/entries/$ID.desktop.tmp" && mv -f "$R/entries/$ID.desktop.tmp" "$R/entries/$ID.desktop"; sort -u "$T/from" > "$R/entries/$ID.pin.tmp" && mv -f "$R/entries/$ID.pin.tmp" "$R/entries/$ID.pin"; }',
   'all() { cat "$R"/entries/*.list 2>/dev/null | sort -u; }',
+  // verify r1: EVERY run pins the approved sources BEFORE any apt runs (finish re-pins with what the run took): a source
+  // approved before the pin existed is never fetched from unpinned, not even by the first Refresh after the update
+  'pins',
   'case $MODE in',
   'install)',
   "  printf '%s\\n' \"$@\" > \"$T/req\"",
   '  hook; base; q > "$T/before"',
   '  echo "+ apt-get update"; apt-get $LOCK update',
+  '  if srcs; then mkdir -p "$T/arch/partial"; apt-get $LOCK -o Dir::Cache::archives="$T/arch/" --print-uris -y install "$@" 2>/dev/null | from > "$T/from" || true; fi',
   '  echo "+ apt-get install -y $*"; apt-get $LOCK $CACHE install -y "$@"',
   '  emit; index; fill "$@"; index; list; debs; finish; say ok ;;',
   'deb)',
   '  S=$1; H=$2',
-  '  [ -f "$S" ] && [ ! -L "$S" ] || refuse no-deb',
-  '  cp "$S" "$T/in.deb"',
+  '  grab "$S" "$T/in.deb" no-deb',
   '  [ "$(sha256sum "$T/in.deb" | cut -d" " -f1)" = "$H" ] || refuse deb-changed',
   '  p=$(dpkg-deb -f "$T/in.deb" Package) && pkgok "$p" || refuse bad-name "$p"',
   '  v=$(dpkg-deb -f "$T/in.deb" Version); a=$(dpkg-deb -f "$T/in.deb" Architecture)',
@@ -666,6 +771,7 @@ const APP_SCRIPT = [
   '  echo "$p" > "$T/req"',
   '  hook; base; q > "$T/before"',
   '  echo "+ apt-get update"; apt-get $LOCK update',
+  '  if srcs; then mkdir -p "$T/arch/partial"; apt-get $LOCK -o Dir::Cache::archives="$T/arch/" --print-uris -y install "$D/$n" 2>/dev/null | from > "$T/from" || true; fi',
   '  echo "+ apt-get install -y ./$n"; apt-get $LOCK $CACHE install -y "$D/$n"',
   '  emit; index; fill "$p"; index; list; debs; finish; say ok ;;',
   'remove)',
@@ -676,11 +782,11 @@ const APP_SCRIPT = [
   "  if [ -n \"$pk\" ]; then apt-get -s remove --autoremove -y $pk 2>/dev/null | awk '$1 == \"Remv\" { print $2 }' | while read -r p; do if grep -qxF \"$p\" \"$T/others\"; then echo \"$p\"; fi; done > \"$T/hit\"; if [ -s \"$T/hit\" ]; then refuse shared $(cat \"$T/hit\"); fi; fi",
   '  hook; q > "$T/before"',
   '  if [ -n "$pk" ]; then echo "+ apt-get remove --autoremove -y$pk"; apt-get $LOCK remove --autoremove -y $pk; fi',
-  '  emit; rm -f "$R/entries/$ID.list" "$R/entries/$ID.desktop"',
+  '  emit; rm -f "$R/entries/$ID.list" "$R/entries/$ID.desktop" "$R/entries/$ID.pin"',
   '  for s in "$D"/*.stanza; do [ -f "$s" ] || continue; p=$(field Package "$s"); if ! awk -v p="$p:" \'index($1, p) == 1 { f = 1 } END { exit !f }\' "$T/after"; then rm -f "$s" "${s%.stanza}.deb"; fi; done',
   '  index; fill $(all); index; debs; finish; say ok ;;',
   'replay)',
-  '  hook; rebase',
+  '  hook; rebase; restore',
   '  [ -s "$D/Packages" ] || refuse no-cache',
   '  mkdir -p "$T/lists/partial" "$T/none"',
   '  echo "deb [trusted=yes] file:$D ./" > "$T/sources.list"',
@@ -696,9 +802,7 @@ const APP_SCRIPT = [
   '  done',
   '  finish; if [ $bad -eq 0 ]; then replayed; say ok; else say partial "$bad"; fi ;;',
   'replay-online)',
-  '  hook; rebase',
-  '  install -d -m 0755 /etc/apt/keyrings',
-  '  for s in "$R"/sources/*.sources; do [ -f "$s" ] || continue; i=${s##*/}; i=${i%.sources}; for k in "$R/keys/$i.asc" "$R/keys/$i.gpg"; do [ -f "$k" ] && install -m 0644 -o root -g root "$k" "/etc/apt/keyrings/vibespace-${k##*/}"; done; install -m 0644 -o root -g root "$s" "/etc/apt/sources.list.d/vibespace-$i.sources"; done',
+  '  hook; rebase; restore',
   // the machine's own sources (third-party ones restored above) PLUS the local repository: a .deb the user had exists
   // nowhere else, so an online rung without it could never put that entry back
   '  mkdir -p "$T/parts"; for f in /etc/apt/sources.list.d/*; do [ -f "$f" ] && cp "$f" "$T/parts/"; done',
@@ -725,22 +829,25 @@ const APP_SCRIPT = [
   '  for p in "$@"; do dpkg-query -W -f=\'${db:Status-Abbrev}\' "$p" 2>/dev/null | grep -q "^.i" || refuse not-installed "$p"; done',
   "  printf '%s\\n' \"$@\" > \"$T/req\"",
   '  hook; base; q > "$T/before"',
+  '  if srcs; then for p in "$@"; do apt-get --print-uris download "$p=$(dpkg-query -W -f=\'${Version}\' "$p")" 2>/dev/null; done | from > "$T/from" || true; fi',
   '  for p in "$@"; do v=$(dpkg-query -W -f=\'${Version}\' "$p"); if (cd "$D" && apt-get -q -o APT::Sandbox::User=root download "$p=$v" > /dev/null 2>&1); then say cached "$p" "$v"; else say missing "$p" "$v"; fi; done',
   '  emit; index; fill "$@"; index; list; debs; finish; say ok ;;',
   'source)',
   '  U=$1; SU=$2; CO=${3:-}; H=$4; K=$5',
-  '  [ -f "$K" ] && [ ! -L "$K" ] || refuse no-key',
-  '  cp "$K" "$T/key"; [ "$(sha256sum "$T/key" | cut -d" " -f1)" = "$H" ] || refuse key-changed',
+  '  h=$(printf "%s" "$U" | sed "s,^https://,,; s,[:/].*,," | tr A-Z a-z); if mine | grep -qxF "$h"; then refuse shared-host "$h"; fi',
+  '  grab "$K" "$T/key" no-key; [ "$(sha256sum "$T/key" | cut -d" " -f1)" = "$H" ] || refuse key-changed',
   '  if head -c 64 "$T/key" | grep -q "BEGIN PGP"; then x=asc; else x=gpg; fi',
   '  install -d -m 0755 /etc/apt/keyrings',
   '  rm -f "$R/keys/$ID.asc" "$R/keys/$ID.gpg"; install -m 0644 -o root -g root "$T/key" "$R/keys/$ID.$x"; install -m 0644 -o root -g root "$T/key" "/etc/apt/keyrings/vibespace-$ID.$x"',
   "  { printf 'Types: deb\\nURIs: %s\\nSuites: %s\\n' \"$U\" \"$SU\"; [ -z \"$CO\" ] || printf 'Components: %s\\n' \"$CO\"; printf 'Signed-By: /etc/apt/keyrings/vibespace-%s.%s\\n' \"$ID\" \"$x\"; } > \"$T/src\"",
-  '  install -m 0644 -o root -g root "$T/src" "$R/sources/$ID.sources"; install -m 0644 -o root -g root "$T/src" "/etc/apt/sources.list.d/vibespace-$ID.sources"',
+  // verify r1: root's record, then THE PIN (pins reads root's records), only then the source apt reads — a crash at any
+  // point (apt-get update can take minutes) leaves no live source without its pin
+  '  install -m 0644 -o root -g root "$T/src" "$R/sources/$ID.sources"; pins; install -m 0644 -o root -g root "$T/src" "/etc/apt/sources.list.d/vibespace-$ID.sources"',
   '  echo "+ apt-get update"',
-  '  if ! apt-get $LOCK update; then rm -f "/etc/apt/sources.list.d/vibespace-$ID.sources" "/etc/apt/keyrings/vibespace-$ID.$x" "$R/sources/$ID.sources" "$R/keys/$ID.$x"; refuse source-update-failed; fi',
+  '  if ! apt-get $LOCK update; then rm -f "/etc/apt/sources.list.d/vibespace-$ID.sources" "/etc/apt/keyrings/vibespace-$ID.$x" "$R/sources/$ID.sources" "$R/keys/$ID.$x" "/etc/apt/preferences.d/vibespace-$ID.pref" "$R/sources/$ID.pref"; refuse source-update-failed; fi',
   '  hook; finish; say ok ;;',
   'source-remove)',
-  '  rm -f "/etc/apt/sources.list.d/vibespace-$ID.sources" "/etc/apt/keyrings/vibespace-$ID.asc" "/etc/apt/keyrings/vibespace-$ID.gpg" "$R/sources/$ID.sources" "$R/keys/$ID.asc" "$R/keys/$ID.gpg"',
+  '  rm -f "/etc/apt/sources.list.d/vibespace-$ID.sources" "/etc/apt/keyrings/vibespace-$ID.asc" "/etc/apt/keyrings/vibespace-$ID.gpg" "$R/sources/$ID.sources" "$R/keys/$ID.asc" "$R/keys/$ID.gpg" "/etc/apt/preferences.d/vibespace-$ID.pref" "$R/sources/$ID.pref"',
   '  echo "+ apt-get update"; apt-get $LOCK update || true',
   '  finish; say ok ;;',
   'esac',
@@ -776,9 +883,10 @@ function appCommands({ mode, packages = [], deb = null, source = null, entryLabe
     return [`# key ${source.key} — sha256 ${source.keySha256 || '?'}${source.fingerprints && source.fingerprints.length ? `, fingerprint ${source.fingerprints.join(' ')}` : ''}`,
       `sudo install -m 0644 <the key> /etc/apt/keyrings/vibespace-${source.id}.asc`,
       `sudo tee /etc/apt/sources.list.d/vibespace-${source.id}.sources  # Types: deb · URIs: ${source.uris.join(' ')} · Suites: ${source.suites.join(' ')}${source.components.length ? ` · Components: ${source.components.join(' ')}` : ''} · Signed-By: /etc/apt/keyrings/vibespace-${source.id}.asc`,
+      `sudo tee /etc/apt/preferences.d/vibespace-${source.id}.pref  # Package: * · Pin: origin "${pinHost(source.uris[0]) || '?'}" · Pin-Priority: ${PIN_LOW} — VibeSpace takes a package from this source only when nothing installed has that name; the packages you install from it later get its updates (${PIN_APPROVED})`,
       `sudo apt-get ${lock} update`];
   }
-  if (mode === 'source-remove' && source) return [`sudo rm /etc/apt/sources.list.d/vibespace-${source.id}.sources /etc/apt/keyrings/vibespace-${source.id}.asc`, `sudo apt-get ${lock} update`];
+  if (mode === 'source-remove' && source) return [`sudo rm /etc/apt/sources.list.d/vibespace-${source.id}.sources /etc/apt/keyrings/vibespace-${source.id}.asc /etc/apt/preferences.d/vibespace-${source.id}.pref`, `sudo apt-get ${lock} update`];
   return [];
 }
 /**
@@ -793,7 +901,7 @@ function parseRunLog(text, { id, nonce } = {}) {
     const m = /^= run (\S+) (\S+) (\S+)$/.exec(lines[i]);
     if (m && m[1] === id && m[2] === nonce) { start = i; mode = m[3]; }
   }
-  const out = { found: start >= 0, mode, ok: false, partial: null, refused: null, delta: { added: [], removed: [] }, desktops: [], services: [], debs: [], entries: {}, base: null, missing: [], kept: [], gc: [] };
+  const out = { found: start >= 0, mode, ok: false, partial: null, refused: null, delta: { added: [], removed: [] }, desktops: [], services: [], debs: [], entries: {}, base: null, missing: [], kept: [], gc: [], pins: {} };
   if (start < 0) return out;
   for (let i = start + 1; i < lines.length; i++) {
     const l = lines[i];
@@ -808,6 +916,7 @@ function parseRunLog(text, { id, nonce } = {}) {
     else if ((m = /^= missing (\S+) (\S+)$/.exec(l))) out.missing.push({ package: m[1], version: m[2] });
     else if ((m = /^= kept (\S+)$/.exec(l))) out.kept.push(m[1]);
     else if ((m = /^= gc (\S+)$/.exec(l))) out.gc.push(m[1]);
+    else if ((m = /^= pin ([a-z0-9][a-z0-9-]{0,39})((?: \S+)*)$/.exec(l))) out.pins[m[1]] = m[2].split(' ').filter((p) => PKG_RE.test(p));
     else if ((m = /^= refused (\S+)(?: (.*))?$/.exec(l))) out.refused = { code: m[1], detail: (m[2] || '').slice(0, 300) };
     else if ((m = /^= partial (\d+)$/.exec(l))) out.partial = Number(m[1]);
     else if (l === '= ok') out.ok = true;
@@ -815,9 +924,151 @@ function parseRunLog(text, { id, nonce } = {}) {
   return out;
 }
 
+// ── an installer the agent names by ADDRESS or FILE (design 009 §2 A) ───────────────────────────────────────────────
+/** The most bytes VibeSpace downloads for one installer, and how many redirects it follows (each one re-judged). */
+const FETCH_MAX = 2 * 1024 * 1024 * 1024;
+const FETCH_REDIRECTS = 5;
+/** Names that are never a public site: loopback, mDNS, the private-use suffixes people and clouds use, RFC 2606/6761. */
+const PRIVATE_NAMES = Object.freeze(['localhost', 'local', 'localdomain', 'internal', 'intranet', 'lan', 'home', 'corp', 'private', 'home.arpa', 'arpa', 'test', 'example', 'invalid', 'onion', 'alt']);
+/**
+ * THE ADDRESS VERDICT (PURE) — before any byte moves, and again for every redirect: `{ok, url, host}` |
+ * `{ok:false, code:'bad_address', error}`. https only; no user:password@; the host a public NAME (no IP literal in any
+ * spelling — the URL parser already turned `0x7f.1` / `2130706433` into dotted quads — no single-label name, nothing
+ * under PRIVATE_NAMES). `testHosts`: the reserved `.test` names a suite's resolve seam serves (never a real site).
+ */
+function fetchVerdict(url, { testHosts = [] } = {}) {
+  const bad = (error) => ({ ok: false, code: 'bad_address', error });
+  const raw = String(url == null ? '' : url);
+  if (raw.length > 2048 || /[\s\0]/.test(raw)) return bad('not a download address');
+  let u;
+  try { u = new URL(raw); } catch { return bad(`${JSON.stringify(raw.slice(0, 80))} is not an address`); }
+  if (u.protocol !== 'https:') return bad(`${u.protocol.replace(/:$/, '')}:// is refused — VibeSpace downloads over https only`);
+  if (u.username || u.password) return bad('an address with a user name or password is refused');
+  const host = u.hostname.toLowerCase().replace(/\.$/, '');
+  if (host.startsWith('[') || /^\d+(?:\.\d+){3}$/.test(host)) return bad(`${host} is an IP address — name the vendor's site`);
+  if (!/^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(host)) return bad(`${host.slice(0, 80)} is not a public site name`);
+  const test = (Array.isArray(testHosts) ? testHosts : []).map((h) => String(h).toLowerCase()).includes(host) && /\.test$/.test(host);
+  if (!test && PRIVATE_NAMES.some((n) => host === n || host.endsWith(`.${n}`))) return bad(`${host} is a private name, not a public site`);
+  return { ok: true, url: u.href, host, port: u.port ? Number(u.port) : 443 };
+}
+const v4n = (s) => { const p = String(s).split('.').map(Number); return p.length === 4 && p.every((x) => Number.isInteger(x) && x >= 0 && x <= 255) ? ((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8) + p[3] : null; };
+const V4_PRIVATE = [['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.0.2.0', 24], ['192.88.99.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15], ['198.51.100.0', 24], ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4]];
+/** IPv6 text → 8 groups, or null. */
+function v6groups(s) {
+  let t = String(s).toLowerCase().replace(/^\[|\]$/g, '').replace(/%.*$/, '');
+  const m4 = /(\d+\.\d+\.\d+\.\d+)$/.exec(t);
+  if (m4) { const n = v4n(m4[1]); if (n == null) return null; t = t.slice(0, -m4[1].length) + `${(n >>> 16).toString(16)}:${(n & 0xffff).toString(16)}`; }
+  const parts = t.split('::');
+  if (parts.length > 2) return null;
+  const head = parts[0] ? parts[0].split(':') : [], tail = parts.length === 2 && parts[1] ? parts[1].split(':') : [];
+  const fill = parts.length === 2 ? 8 - head.length - tail.length : 0;
+  if (fill < 0 || (parts.length === 1 && head.length !== 8)) return null;
+  const g = [...head, ...Array(fill).fill('0'), ...tail].map((x) => (/^[0-9a-f]{1,4}$/.test(x) ? parseInt(x, 16) : NaN));
+  return g.length === 8 && g.every((x) => Number.isInteger(x)) ? g : null;
+}
+/**
+ * THE RESOLVED ADDRESS VERDICT (PURE): null = a public address; else the reason. Every private / loopback / link-local
+ * / shared / documentation / multicast / reserved range of IPv4 and IPv6, an IPv4-mapped or NAT64 address judged as
+ * its IPv4. The fetch connects to exactly the address judged (no second lookup — a rebinding name cannot move it).
+ */
+function addressVerdict(ip) {
+  const s = String(ip || '');
+  const n = v4n(s);
+  if (n != null) { for (const [b, bits] of V4_PRIVATE) { const m = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0; if (((n & m) >>> 0) === ((v4n(b) & m) >>> 0)) return `${s} is a private or reserved address`; } return null; }
+  const g = v6groups(s);
+  if (!g) return `${s.slice(0, 60)} is not an address`;
+  const embedded = (hi, lo) => `${hi >>> 8}.${hi & 255}.${lo >>> 8}.${lo & 255}`;
+  if (g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff) return addressVerdict(embedded(g[6], g[7])); // ::ffff:a.b.c.d
+  if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) return addressVerdict(embedded(g[6], g[7])); // NAT64
+  if (g.every((x) => x === 0) || (g.slice(0, 7).every((x) => x === 0) && g[7] === 1)) return `${s} is a loopback or unspecified address`;
+  if ((g[0] & 0xfe00) === 0xfc00 || (g[0] & 0xffc0) === 0xfe80 || (g[0] & 0xff00) === 0xff00 || (g[0] === 0x2001 && g[1] === 0x0db8) || (g[0] === 0x0100 && g.slice(1, 4).every((x) => x === 0)) || g.slice(0, 6).every((x) => x === 0)) return `${s} is a private or reserved address`;
+  return null;
+}
+/**
+ * THE KIND, BY THE BYTES (PURE) — never by the name. `head` = the file's first ≥ 64 bytes → `{kind:'deb'|'appimage'}` |
+ * `{kind:null, why}`. A Debian archive is an ar archive whose first member is `debian-binary`; an AppImage (type 2) is
+ * an ELF with `AI\x02` at offset 8 (the spec's magic). A type-1 AppImage (an ISO image) is named and refused.
+ */
+function sniffInstaller(head) {
+  const b = head && typeof head.length === 'number' ? head : [];
+  const at = (i, str) => { for (let k = 0; k < str.length; k++) if (b[i + k] !== str.charCodeAt(k)) return false; return true; };
+  if (b.length >= 21 && at(0, '!<arch>\n') && at(8, 'debian-binary')) return { kind: 'deb' };
+  if (b.length >= 11 && b[0] === 0x7f && at(1, 'ELF')) {
+    if (b[8] === 0x41 && b[9] === 0x49 && b[10] === 0x02) return { kind: 'appimage' };
+    if (b[8] === 0x41 && b[9] === 0x49 && b[10] === 0x01) return { kind: null, why: 'an old-style (type 1) AppImage — VibeSpace opens type 2 only' };
+    return { kind: null, why: 'a program, not an installer' };
+  }
+  if (b.length >= 5 && /^\s*<(?:!doctype|html|\?xml|head|body)/i.test(String.fromCharCode(...Array.from(b).slice(0, 64)))) return { kind: null, why: 'a web page, not an installer (the address answers a page — find the file\'s own address)' };
+  return { kind: null, why: 'neither a Debian package nor an AppImage' };
+}
+/** An AppImage's file system starts where its ELF ends: e_shoff + e_shentsize × e_shnum (the spec's own rule) → the
+ *  offset, or null. `head` = the first 64 bytes. */
+function appImageOffset(head) {
+  const b = head;
+  if (!b || b.length < 64 || b[0] !== 0x7f) return null;
+  const le = b[5] === 1, is64 = b[4] === 2;
+  const u16 = (o) => (le ? b[o] | (b[o + 1] << 8) : (b[o] << 8) | b[o + 1]);
+  const u32 = (o) => (le ? (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16)) + b[o + 3] * 0x1000000 : ((b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]) + b[o] * 0x1000000);
+  const shoff = is64 ? (le ? u32(0x28) + u32(0x2c) * 0x100000000 : u32(0x2c) + u32(0x28) * 0x100000000) : u32(0x20);
+  const n = is64 ? u16(0x3a) * u16(0x3c) : u16(0x2e) * u16(0x30);
+  const off = shoff + n;
+  return Number.isSafeInteger(off) && off > 0 ? off : null;
+}
+/** `dpkg-deb -c` (tar's verbose listing) → `[{type, size, path, link}]`; `path` without the leading `.`. */
+function debMembers(listing) {
+  const out = [];
+  for (const l of String(listing || '').split('\n')) {
+    const m = /^([-dlhcbps])[rwxsStT-]{9}\s+\S+\s+(\d+)\s+\d{4}-\d\d-\d\d \d\d:\d\d(?::\d\d)?\s+\.(\/.*?)(?: -> (.*)| link to (.*))?$/.exec(l);
+    if (m) out.push({ type: m[1] === '-' ? 'file' : m[1] === 'd' ? 'dir' : m[1] === 'l' ? 'symlink' : m[1] === 'h' ? 'hardlink' : 'other', size: Number(m[2]), path: m[3], link: m[4] || m[5] || null });
+    if (out.length >= 200000) break;
+  }
+  return out;
+}
+const memberOk = (m, max) => m && m.type === 'file' && m.size <= max && !/(^|\/)\.\.(\/|$)/.test(m.path) && /^\/[A-Za-z0-9@._+\/-]+$/.test(m.path);
+/** The .desktop files a .deb would install where a launcher looks (regular files only — a symlink, a `..`, a huge file
+ *  is never read), the one named after the package first. */
+function debDesktopOf(members, { pkg = null, max = 256 * 1024 } = {}) {
+  const ok = (members || []).filter((m) => memberOk(m, max) && /^\/usr(?:\/local)?\/share\/applications\/[A-Za-z0-9@._+-]+\.desktop$/.test(m.path));
+  const score = (m) => { const b = m.path.split('/').pop().replace(/\.desktop$/, ''); return pkg && b === pkg ? 2 : pkg && b.includes(pkg) ? 1 : 0; };
+  return ok.sort((a, b) => score(b) - score(a) || (a.path < b.path ? -1 : 1)).map((m) => m.path);
+}
+/** The icon a .deb carries for `icon` (a name or an absolute path): a PNG / SVG ≤ 1 MiB, the largest hicolor size first. */
+function debIconOf(members, icon, { max = 1024 * 1024 } = {}) {
+  const s = String(icon || '');
+  if (!s) return null;
+  const files = new Map((members || []).filter((m) => memberOk(m, max) && /\.(?:png|svg)$/.test(m.path)).map((m) => [m.path, m]));
+  if (s.startsWith('/')) return files.has(s) ? s : null;
+  if (!/^[A-Za-z0-9@._+-]{1,120}$/.test(s)) return null;
+  for (const c of iconCandidates(s)) if (files.has(c)) return c;
+  for (const p of files.keys()) if (/^\/(?:usr\/share|opt)\//.test(p) && p.endsWith(`/${s}.png`)) return p;
+  return null;
+}
+/** design 009 S2 — an AppImage's catalog row: its own .desktop (parsed like any other), run as `<dir>/AppRun` of the
+ *  tree VibeSpace unpacked, its icon the copy in its directory. → `{ok, row}` | the parse's refusal. */
+function appImageRow({ entry, desktopText, dir, icon = null, validate = null }) {
+  const r = parseDesktopFile(desktopText, { entry, primary: true, validate: null });
+  if (!r.ok) return r;
+  const apprun = `${dir}/root/AppRun`;
+  const row = { ...r.row, exec: r.row.exec === 'xterm' ? 'xterm' : apprun, args: r.row.exec === 'xterm' ? ['-e', apprun, ...r.row.args.slice(2)] : r.row.args };
+  if (icon) row.icon = icon; else delete row.icon;
+  if (typeof validate === 'function') { const v = validate(row); if (!v || !v.ok) return { ok: false, error: `the AppImage's desktop file: ${(v && v.error) || 'refused'}` }; }
+  return { ok: true, row };
+}
+/** design 009 S3 — the removal of an entry that lives in the user's home (no root): what runs and what a person reads. */
+function removePlanFor(entry, { appsDir = '~/.vibespace/apps' } = {}) {
+  if (!isObj(entry) || !HOME_KINDS.includes(entry.kind) || !ENTRY_ID_RE.test(String(entry.id || ''))) return { ok: false, code: 'not_found', error: 'not an app in your home' };
+  const name = String(entry.label || '');
+  const common = { ok: true, code: null, canRun: true, kind: 'remove', mode: 'home-remove', entryKind: entry.kind, entryId: entry.id, packages: [], closure: [], removes: [], downloadBytes: 0, installedBytes: 0, label: name || entry.id };
+  if (entry.kind === 'appimage') return { ...common, dir: `${appsDir}/appimage/${entry.id}`, closureKey: `home-remove appimage ${entry.id}`, commands: [`rm -r ~/.vibespace/apps/appimage/${entry.id}`, '# VibeSpace drops its row from Apps'] };
+  if (!/^[@a-z0-9][a-z0-9@/._+-]{0,120}$/i.test(name)) return { ok: false, code: 'bad_name', error: `${entry.id} names no tool` };
+  const argv = entry.kind === 'uv-tool' ? ['uv', 'tool', 'uninstall', name] : ['npm', 'uninstall', '-g', '--prefix', '~/.local', name];
+  return { ...common, homeArgv: argv, closureKey: `home-remove ${entry.kind} ${name}`, commands: [argv.join(' ')] }; // `homeArgv`, never `argv`: the root slot finds nothing to run in it
+}
+
 module.exports = {
   MANIFEST_V, APPS_REL, PKG_RE, ENTRY_ID_RE, NONCE_RE, SHA256_RE, FPR_RE, ENTRY_KINDS, BY_KINDS, PLAN_CODES, DISK_FLOOR_BYTES, APT_LOCK_WAIT_S,
   MARKER_DIR, REPLAY_MARKER, DRIFT_MARKER, SLOT_ENDED, LAST_LIST, DRIFT_HOOK, APP_ID_PREFIX, SCRIPT_MODES, DRIFT_SLACK_MS, DESKTOP_DIRS,
+  PIN_LOW, PIN_APPROVED, GRAB_MAX_MB, pinHost, sourcePin, originOf, withPins,
   emptyManifest, validateManifest, withEntry, withoutEntry, withSource, withoutSource, entryIdFor, validateSourceSpec, sourceDeb822,
   parseSize, parseSim, parseUris, parsePlan, diskVerdict, replayEstimate, parseSearch, searchWords, updatesOf, fmtBytes,
   unescapeValue, execWords, stripFieldCodes, categoryOf, rowIdFor, parseDesktopFile, desktopPathOk, iconCandidates,
@@ -825,4 +1076,5 @@ module.exports = {
   debFileName, packagesStanza, packagesIndex, parseStanza, cacheVerdict,
   replayRungs, driftVerdict,
   APP_SCRIPT, appArgv, appCommands, parseRunLog,
+  HOME_KINDS, FETCH_MAX, FETCH_REDIRECTS, PRIVATE_NAMES, fetchVerdict, addressVerdict, sniffInstaller, appImageOffset, debMembers, debDesktopOf, debIconOf, appImageRow, removePlanFor, desktopNames, normLabels,
 };

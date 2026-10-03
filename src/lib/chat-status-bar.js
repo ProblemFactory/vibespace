@@ -1,6 +1,7 @@
 import { pillMode, billingPillForms, billingPillHtml } from './title-chips.js'; // lane phone-chip: the billing pill folds, never cuts
 import { escHtml, showInputDialog, showConfirmDialog, uiScale, showToast, fetchJson, copyText, absUrl, onOutsidePress } from './utils.js';
 import { UI_ICONS } from './icons.js';
+import { systemSelect } from './design-home.js'; // lane design-systems-home: the design chip's "Design system" select
 import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, noteModelCatalog, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel } from './agent-meta.js';
 import { t } from './i18n.js';
 import { shortWorkflowName } from '../workflow-name.js';
@@ -1033,6 +1034,14 @@ export class ChatStatusBar {
     const pubCb = document.createElement('input');
     pubCb.type = 'checkbox';
     pubLabel.append(pubCb, document.createTextNode(' ' + t('Public link (anyone with the link)')));
+    // lane design-ask: ticked by default — the agent asks 3–6 questions in the Design window before it draws
+    const askLabel = document.createElement('label');
+    askLabel.className = 'chat-design-public chat-design-ask';
+    const askCb = document.createElement('input');
+    askCb.type = 'checkbox';
+    askCb.checked = true;
+    askLabel.append(askCb, document.createTextNode(' ' + t('Ask me a few questions first')));
+    const sys = systemSelect(); // lane design-systems-home: the design system the new design follows (the default preselected)
     const go = document.createElement('button');
     go.className = 'btn-create chat-design-go';
     go.textContent = t('Create design');
@@ -1043,10 +1052,11 @@ export class ChatStatusBar {
       // dropdown first meant a REFUSED send — a queued-message edit owns the
       // chat input — took the typed brief with it, right after a toast told
       // the user to finish that edit and come back.
-      if (this._onDesignRequest(brief, { public: pubCb.checked }) === false) return;
+      const s = sys.value();
+      if (this._onDesignRequest(brief, { public: pubCb.checked, ask: askCb.checked, system: s === null ? undefined : (s || (sys.hasDefault() ? 'none' : undefined)) }) === false) return;
       dropdown.remove();
     };
-    row.append(pubLabel, go);
+    row.append(askLabel, pubLabel, sys.el, go);
     box.append(ta, row);
     const designs = document.createElement('div');
     designs.className = 'chat-design-designs' + (this._designs.length ? '' : ' hidden');
@@ -1056,6 +1066,12 @@ export class ChatStatusBar {
     list.className = 'chat-design-pages' + (this._pages.length ? '' : ' hidden');
     this._designListEl = list; // refilled in place on page-published while the popover is open
     box.appendChild(list);
+    const all = document.createElement('button'); // lane design-systems-home: the Design window's home (every design, every system)
+    all.type = 'button';
+    all.className = 'chat-design-all';
+    all.textContent = t('All designs…');
+    all.onclick = () => { dropdown.remove(); this._onOpenDesign?.({ host: '', dir: '' }); };
+    box.appendChild(all);
     dropdown.appendChild(box);
     this._refillDesignList(); // AFTER the append: _refillDesignList bails on a
     // detached node (that guard exists for broadcasts arriving with no popover

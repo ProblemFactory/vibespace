@@ -123,9 +123,11 @@ cluster Secret. A release MAY carry its own `presets.override`
 `gdrive.clients` / `integrations:` blocks, which now mean the same thing. The
 override is layered over the cluster Secret **per key**: an entry whose key
 the cluster also names replaces it for that user; the cluster's other entries
-stay. The override lives in the release's own Secret and is projected next to
-the cluster's; changing it is a helm upgrade that touches only that Secret,
-so the pod does not roll and the instance picks it up live.
+stay. The override lives in the release's override Secret
+(`vibespace-<user>-preset-override`, owned by the chart) and is projected next
+to the cluster's; changing it is a helm upgrade that touches only that Secret,
+so the pod does not roll and the instance picks it up live. A key you drop
+from the values leaves that Secret on the same upgrade.
 
 Chart values: `presets.volume` (default `true`), `presets.clusterSecret`
 (default `vibespace-cluster-presets`), `presets.mountPath` (default
@@ -147,6 +149,36 @@ before) until it does. The pod's entrypoint says it on every start (a
 presets reader` line in the pod log) until the checkout carries the reader —
 the boot auto-update normally brings it with the first pull. Create `vibespace-cluster-presets` first so the
 switched instances have the company's clients from their first boot.
+
+**Drop the blocks the cluster Secret now carries.** After the switch a
+release's legacy `gdrive.clients` / `integrations:` blocks are its per-key
+override: an entry whose key the cluster Secret also names keeps replacing
+it, so a later rotation in the cluster Secret never reaches that user. When
+a block equals the cluster's, drop it in the same upgrade
+(`--set gdrive.clients=null --set integrations=null`, or empty lists in the
+values file) and keep only the entries that really differ for that user.
+
+**A release switched with an older chart (before 2.369.203)** kept its
+override in the release's own Secret, written through `stringData`, and a
+helm upgrade never removes a `stringData` key from the stored Secret — a
+dropped block stays there. Upgrading to this chart stops projecting it (the
+override moves to its own Secret; this upgrade rolls the pod once), but the
+stale credential copy stays in the release Secret: list its key names and
+remove the leftover `gdriveClients` / `integrations` keys (only on the volume
+form — under `presets.volume=false` the env reads them):
+
+```
+kubectl -n vibespace get secret vibespace-<user> \
+  -o go-template='{{range $k, $v := .data}}{{$k}}{{"\n"}}{{end}}'
+kubectl -n vibespace patch secret vibespace-<user> --type=json \
+  -p '[{"op":"remove","path":"/data/gdriveClients"}]'
+kubectl -n vibespace patch secret vibespace-<user> --type=json \
+  -p '[{"op":"remove","path":"/data/integrations"}]'
+```
+
+(`patch` refuses a key that is not there — harmless.) The instance follows
+within ~2 min; its Company presets line then says the entries come from the
+cluster.
 
 ### Rules
 

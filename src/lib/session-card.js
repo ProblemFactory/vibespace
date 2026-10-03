@@ -246,7 +246,9 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
   const date = new Date(s.startedAt);
   const customName = state.getCustomName(s);
   const cwdFolder = s.cwd ? s.cwd.replace(/\/+$/, '').split('/').pop() : '';
-  const originalName = s.name || s.webuiName || cwdFolder || s.sessionId.substring(0, 12) + '...';
+  // a name GIVEN to the live session (at creation / by a rename — `nameExplicit`, lane peer-card-sender) outranks the
+  // first message: a worker's first user record is a delivery, and its creator named it
+  const originalName = (s.nameExplicit && s.webuiName) || s.name || s.webuiName || cwdFolder || s.sessionId.substring(0, 12) + '...';
   const displayName = customName || originalName;
   const backendMeta = getBackendMeta(s.backend || 'claude');
   const agentKindMeta = getAgentKindMeta(s.agentKind || 'primary');
@@ -614,7 +616,6 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
 
   const visibleFields = settings?.get('sessionCard.visibleFields') ?? ['id', 'backend', 'cwd', 'started', 'status', 'groups'];
   const clickToCopy = settings?.get('sessionCard.clickToCopy') ?? false;
-  const truncation = settings?.get('sessionCard.detailTruncation') ?? 'left';
   const cwdShort = (s.cwd || '').replace(/^\/home\/[^/]+/, '~').replace(/^\/Users\/[^/]+/, '~');
 
   const fields = [

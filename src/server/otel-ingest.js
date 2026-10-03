@@ -54,6 +54,7 @@
 // channel — never argv). The auth.js cookie middleware exempts /otel/* and
 // THIS gate is the only door (same pattern as /svc per-mount auth).
 const fs = require('fs');
+const { timedSync } = require('../timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const path = require('path');
 const crypto = require('crypto');
 const { sameToken } = require('../pairing-token.js'); // B-8dda: the per-boot header is a secret too
@@ -107,7 +108,7 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
   try {
     if (fs.existsSync(file)) {
       const cutoff = Date.now() - KEEP_MS;
-      const lines = fs.readFileSync(file, 'utf-8').split('\n').filter(Boolean);
+      const lines = timedSync('otel-truth.read', () => fs.readFileSync(file, 'utf-8')).split('\n').filter(Boolean);
       const kept = [];
       for (const l of lines) {
         try {
@@ -118,8 +119,7 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
         } catch { }
       }
       if (fs.statSync(file).size > FILE_MAX) {
-        fs.writeFileSync(file + '.tmp', kept.join('\n') + (kept.length ? '\n' : ''));
-        fs.renameSync(file + '.tmp', file);
+        timedSync('otel-truth.write', () => { fs.writeFileSync(file + '.tmp', kept.join('\n') + (kept.length ? '\n' : '')); fs.renameSync(file + '.tmp', file); });
       }
     }
   } catch (e) { console.warn('[otel] truth stash load failed:', e.message); }
@@ -198,8 +198,8 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
       if (!dup) {
         try {
           fs.mkdirSync(path.dirname(file), { recursive: true });
-          fs.appendFileSync(file, JSON.stringify({ ...rec, acct: known ? acct : undefined, acctKnown: known,
-            ...(attributed !== undefined ? { attributed, labelMatchesSlot: attributed === (acct || null) } : {}) }) + '\n');
+          timedSync('otel-truth.append', () => fs.appendFileSync(file, JSON.stringify({ ...rec, acct: known ? acct : undefined, acctKnown: known,
+            ...(attributed !== undefined ? { attributed, labelMatchesSlot: attributed === (acct || null) } : {}) }) + '\n'));
           arrivals.stashed++;
         } catch { }
         global.__vsMetric?.('otel-truth-req', 1);

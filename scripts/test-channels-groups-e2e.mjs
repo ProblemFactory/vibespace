@@ -518,24 +518,28 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
   ok(f1 && f1.segs.map((x) => x.text).join(' | ') === `${groupsNow.length + N1} need attention | All ${ALL}`, `the header counts: "${f1 && f1.segs.map((x) => x.text).join(' | ')}"`);
   // ALL: the whole list, one switch away
   await p1.evaljs(`(() => { document.querySelector('.rail-panel-channels .chan-view-btn[data-view="all"]').click(); return 1; })()`);
-  const fa = await p1.evaljs(FOCUS);
+  // design 008: All is the server's pages (60 a read) — read on the switch, so it is awaited, never assumed in hand
+  const fa = (await until(`(() => { const f = ${FOCUS}; return f.view === 'all' && f.rows.length === ${ALL} ? f : null; })()`, 10000)) || (await p1.evaljs(FOCUS));
   ok(fa.view === 'all' && fa.rows.length === ALL && fa.segs.find((x) => x.view === 'all').on, `"All" shows the whole list (${fa.rows.length} of ${ALL}); a tagged row keeps its tag there`, JSON.stringify(fa.rows.length));
   // THE FILTER, in both views
   const typeQ = (q) => p1.evaljs(`(() => { const i = document.querySelector('.rail-panel-channels .chan-find-input'); i.value = ${JSON.stringify(q)}; i.dispatchEvent(new Event('input')); return 1; })()`);
   const one = readByBeta[0];
   const oneTitle = convs.find((c) => c.id === one).title;
   await typeQ(oneTitle);
-  const fq = await p1.evaljs(FOCUS);
+  // design 008: in All the filter is the SERVER's (250 ms after the last keystroke, then a page)
+  const fq = (await until(`(() => { const f = ${FOCUS}; return f.rows.some((r) => r.key === ${JSON.stringify(`fake-poll/${one}`)}) ? f : null; })()`, 10000)) || (await p1.evaljs(FOCUS));
   ok(fq.rows.some((r) => r.key === `fake-poll/${one}`) && fq.rows.every((r) => r.key.endsWith(one) || /Room/.test(oneTitle)), `the filter narrows ALL to "${oneTitle}" (${fq.rows.length} rows)`, JSON.stringify(fq.rows.map((r) => r.key)));
   await p1.evaljs(`(() => { document.querySelector('.rail-panel-channels .chan-view-btn[data-view="focus"]').click(); return 1; })()`);
   const untouched = ids[12];
   const untouchedTitle = convs.find((c) => c.id === untouched).title;
   await typeQ(untouchedTitle);
-  const fm = await p1.evaljs(`(() => { const f = ${FOCUS}; const more = document.querySelector('.rail-panel-channels [data-more-in-all]'); const sm = document.querySelector('.rail-panel-channels [data-search-messages]'); return { ...f, more: more ? { n: more.dataset.moreInAll, text: more.textContent } : null, search: sm ? sm.textContent : null }; })()`);
+  // design 008: "{n} more in All" is the server's count of the matches (250 ms after the last keystroke)
+  const fmExpr = `(() => { const f = ${FOCUS}; const more = document.querySelector('.rail-panel-channels [data-more-in-all]'); const sm = document.querySelector('.rail-panel-channels [data-search-messages]'); return { ...f, more: more ? { n: more.dataset.moreInAll, text: more.textContent } : null, search: sm ? sm.textContent : null }; })()`;
+  const fm = (await until(`(() => { const x = ${fmExpr}; return x.more ? x : null; })()`, 10000)) || (await p1.evaljs(fmExpr));
   ok(fm.view === 'focus' && !fm.rows.some((r) => r.key === `fake-poll/${untouched}`) && fm.more && Number(fm.more.n) >= 1 && /more in All/.test(fm.more.text), `in the attention view a match OUTSIDE it is offered, never hidden: "${fm.more && fm.more.text}"`, JSON.stringify(fm));
   ok(fm.search && /Search messages for "/.test(fm.search), `…and the words are a message search too ("${fm.search}")`);
   await p1.evaljs(`(() => { document.querySelector('.rail-panel-channels [data-more-in-all]').click(); return 1; })()`);
-  const fm2 = await p1.evaljs(FOCUS);
+  const fm2 = (await until(`(() => { const f = ${FOCUS}; return f.view === 'all' && f.rows.some((r) => r.key === ${JSON.stringify(`fake-poll/${untouched}`)}) ? f : null; })()`, 10000)) || (await p1.evaljs(FOCUS));
   ok(fm2.view === 'all' && fm2.rows.some((r) => r.key === `fake-poll/${untouched}`), '"more in All" switches to All with the words kept — the row is there');
   await typeQ('');
   // AT 375 px: one column, the tag UNDER the title

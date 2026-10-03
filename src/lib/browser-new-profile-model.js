@@ -39,7 +39,7 @@ export function providerChoices({ providers = [], install = null, host = null, t
     let state = 'ready', note = null, offer = null;
     if (r.leaseKind === 'window-target') { state = 'not-a-profile'; note = t(i18nKey('A window on your desktop is shared with an agent from the window itself — it is not a profile.')); }
     else if (v.ok === false && (v.code === 'provider_needs_local_key' || v.code === 'provider_local_only')) { state = 'other-machine'; note = t(i18nKey('Runs only on the computer VibeSpace runs on — pick This computer to use it.')); }
-    else if (v.ok === false) { state = 'unavailable'; note = v.code === 'provider_needs_consent' ? t(i18nKey('Off until you allow agents to use windows on your desktop (Settings → Agent browser).')) : t(i18nKey("Can't be used in this version of VibeSpace.")); }
+    else if (v.ok === false) { state = 'unavailable'; note = v.code === 'provider_needs_consent' ? t(i18nKey('Off until you allow agents to use windows on your desktop (Settings → Desktop apps).')) : t(i18nKey("Can't be used in this version of VibeSpace.")); }
     else if (id === 'cloak' && !host && install && install.code !== 'already_installed') {
       const s = install.state || {};
       if (s.running) { state = 'installing'; note = t(i18nKey('Installing… it can be chosen once it is done.')); }
@@ -137,7 +137,7 @@ export function createRefusalWords(r, t = (s) => s) {
     case 'unsupported-host': return t(i18nKey('That machine is not paired with this VibeSpace any more — pick another.'));
     case 'provider_needs_local_key': case 'provider_local_only': return t(i18nKey('This browser runs only on the computer VibeSpace runs on.'));
     case 'provider_unavailable': case 'provider_unknown': return t(i18nKey("This browser can't be used in this version of VibeSpace."));
-    case 'provider_needs_consent': return t(i18nKey('Off until you allow agents to use windows on your desktop (Settings → Agent browser).'));
+    case 'provider_needs_consent': return t(i18nKey('Off until you allow agents to use windows on your desktop (Settings → Desktop apps).'));
     case 'tier3_is_a_window_target': return t(i18nKey('A window on your desktop is shared with an agent from the window itself — it is not a profile.'));
     case 'sharing_refused': return t(i18nKey("Separate tabs can't be used here."));
     case 'dir_unwritable': return t(i18nKey("VibeSpace couldn't create the profile's folder on this computer."));

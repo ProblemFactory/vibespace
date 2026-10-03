@@ -58,5 +58,91 @@ ok(hostsSrc.includes("require('./discovery-facts')"), 'hosts N-line parser uses 
 const bundle = fs.readFileSync(new URL('../data/bin/vibespace-agentd.js', import.meta.url), 'utf-8');
 ok(bundle.includes('pidLooksClaude') || bundle.includes('PID-reuse guard'), 'built daemon bundle actually carries the shared code');
 
+// ── lane peer-card-sender (the coordinator 2026-10-03, an owner screenshot: EVERY worker of the lanes' Task Group was
+// called "Another Claude session sent a message:" in the sidebar). A conversation is named after its first REAL user
+// message; a worker's first user record is a DELIVERY (a wake VibeSpace posted — origin.kind 'peer'), so the CLI's frame
+// became its name. ① a delivery never names (its origin stamp, notification-senders deliveredRecordKind); ② a name GIVEN
+// to the live session (creation / rename) outranks the first message on the card; ③ ws rename-session lands in
+// user-state customNames (the sidebar rename's store) on every client. Invented real-shape records below.
+{
+  const path = await import('node:path');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+  const NS = require('../src/notification-senders.js');
+  const { extractSessionMeta } = require('../src/session-store.js');
+  const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf-8');
+  const CWD = '/var/tmp/lanes-x';
+  const WAKE = { type: 'user', isMeta: true, uuid: 'w1', message: { role: 'user', content: 'Another Claude session sent a message:\nYou were @mentioned — group messages (vibespace-msg):\n#### Group "crew" (g-0a1b2c3d) — 1 new since your last report\n- [10-03T03:50Z] coordinator: @lane-x go\n\nThis came from another Claude session — not typed by your user.' }, origin: { kind: 'peer', from: 'unknown', verifiedPeerPid: 4035 }, promptSource: 'system', cwd: CWD };
+  const NOTIF = { type: 'user', message: { role: 'user', content: 'Background task done: gate-201 exited 0' }, origin: { kind: 'task-notification' }, cwd: CWD };
+  const TYPED = (t) => ({ type: 'user', message: { role: 'user', content: t }, promptSource: 'sdk', cwd: CWD });
+  const ASSIST = { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'on it' }] }, cwd: CWD };
+  const L = (o) => JSON.stringify(o) + '\n';
+  console.log('lane peer-card-sender ① a delivery never names a session');
+  ok(nameFromUserRecord(WAKE) === null && nameFromUserRecord(NOTIF) === null, 'a server-posted wake (origin peer) and a job notification (origin task-notification) name nothing — by their origin stamp');
+  ok(nameFromUserRecord({ ...WAKE, origin: undefined, isMeta: undefined }) === 'Another Claude session sent a message:', '…the same words WITHOUT the stamp still name (the judgement is the stamp, never the words)');
+  ok(nameFromUserLine(L(WAKE).trim()) === null, 'a whole raw wake line names nothing');
+  const HOOK = { type: 'user', isMeta: true, message: { role: 'user', content: 'Stop hook feedback:\nremember to update the docs' }, cwd: CWD };
+  const IMG = { type: 'user', isMeta: true, turnCompanion: true, message: { role: 'user', content: [{ type: 'text', text: '[Image: original 2112x1212, displayed at 2000x1148.]' }] }, cwd: CWD };
+  ok(nameFromUserRecord(HOOK) === null && nameFromUserRecord(IMG) === null, 'a record the CLI wrote itself (isMeta — a Stop hook\'s feedback, an image\'s size note) names nothing (seen on 3 of 14 real worker transcripts once the wake stopped naming them)');
+  const long = L({ ...WAKE, message: { role: 'user', content: WAKE.message.content + ' ' + 'x'.repeat(3000) } }).trim();
+  ok(long.indexOf('"origin"') > 1500 && nameFromUserLine(long.slice(0, 1500)) === null, 'a wake line CUT before its stamp (the ssh script\'s cap; origin is written after message) names nothing — the CLI\'s own frame is the witness left');
+  ok(NS.deliveredRecordKind(WAKE) === 'peer' && NS.deliveredRecordKind(TYPED('x')) === null && NS.deliveredRecordKind(null) === null, 'deliveredRecordKind: the stamp, or null');
+  const dir = scratch('df-names');
+  fs.mkdirSync(dir, { recursive: true });
+  const f1 = path.join(dir, 'a.jsonl');
+  fs.writeFileSync(f1, L(WAKE) + L(ASSIST) + L(NOTIF) + L(HOOK) + L(IMG) + L(TYPED('fix the sidebar names\nsecond line')));
+  const m1 = extractSessionMeta(f1);
+  ok(m1.name === 'fix the sidebar names' && m1.cwd === CWD, 'a worker\'s transcript: named by its first TYPED message, past the wake, the notification, the hook feedback and the image note', m1);
+  const f2 = path.join(dir, 'b.jsonl');
+  fs.writeFileSync(f2, L(WAKE) + L(ASSIST));
+  ok(extractSessionMeta(f2).name === '', 'only deliveries: NO name (the card falls back to the session\'s own name)');
+  // THE RESUME: the head already read is not read again — the wake's bytes are overwritten IN PLACE with a typed record
+  // of the same length (a full re-read would now name it), then a second typed record is appended
+  const head = L(WAKE);
+  const fake = JSON.stringify(TYPED('REREAD the head'));
+  fs.writeSync((() => { const fd = fs.openSync(f2, 'r+'); return fd; })(), Buffer.from(fake + ' '.repeat(Buffer.byteLength(head) - 1 - Buffer.byteLength(fake))), 0, Buffer.byteLength(head) - 1, 0);
+  fs.appendFileSync(f2, L(TYPED('appended later')));
+  const t = new Date(Date.now() + 5000); fs.utimesSync(f2, t, t);
+  ok(extractSessionMeta(f2).name === 'appended later', 'a grown, still-unnamed head is RESUMED where the scan stopped (the 2 MB head is never re-read on every write of a live worker)');
+  fs.rmSync(dir, { recursive: true, force: true });
+
+  console.log('lane peer-card-sender ② a name given to the live session outranks the first message');
+  const wc = read('src/ws-create.js'), br = read('src/server/boot-restore.js'), srv = read('server.js'), sb = read('src/lib/sidebar.js'), card = read('src/lib/session-card.js');
+  ok(/_nameExplicit: typeof data\.sessionName === 'string' && !!data\.sessionName\.trim\(\),/.test(wc) && /nameExplicit: session\._nameExplicit \|\| undefined, \/\/ lane peer-card-sender/.test(wc), 'ws-create: a name GIVEN at creation is explicit (`sessionName` — the client\'s "Session N" default never travels) and persisted in the meta');
+  ok((br.match(/_nameExplicit: meta\.nameExplicit === true/g) || []).length === 3, 'boot-restore: every restore path (dtach, chat, remote keeper) restores it');
+  ok(/\n      (?:name: s\.name, )?nameExplicit: !!s\._nameExplicit, /.test(srv) && /nameExplicit: \{ digest: \(v\) => \(v \? '1' : ''\) \},/.test(sb), 'the live payload carries it and LIVE_SESSION_FACTS carries + gates it (a rename re-renders the card)');
+  const CHAIN = "const originalName = (s.nameExplicit && s.webuiName) || s.name || s.webuiName || cwdFolder || s.sessionId.substring(0, 12) + '...';";
+  ok(card.includes(CHAIN), 'the card: a custom name, else the GIVEN live name, else the first message, else the live default');
+
+  console.log('lane peer-card-sender ③ ws rename-session → customNames, on every client');
+  const wh = read('src/ws-handler.js');
+  ok(/if \(trimmedName\) \{ session\._nameExplicit = true; const key = getSessionKey\(session\); if \(key && typeof setCustomName === 'function'\) \{ try \{ setCustomName\(key, trimmedName\);/.test(wh), 'rename-session: the name is explicit AND stored as the custom name of `<backend>:<id>` (the sidebar rename\'s key)');
+  ok(/'setCustomName', \/\/ lane peer-card-sender/.test(wh) && /getDesign = \(\) => null, setCustomName = null,\n  \} = ctx;/.test(wh) && /setCustomName: \(k, n\) => persistenceRouter\.setCustomName\(k, n\)/.test(srv), '…through the ws ctx contract (list ⇄ destructure ⇄ server.js) to the persistence door');
+  // the door itself, for real: a scratch data dir, a fake wss that records the broadcast
+  const sent = [];
+  const fakeWss = { clients: new Set([{ readyState: 1, send: (m) => sent.push(JSON.parse(m)) }]) };
+  const P = require('../src/routes/persistence.js');
+  const pdir = scratch('df-userstate');
+  fs.mkdirSync(pdir, { recursive: true });
+  try { P.setup({ dataDir: pdir, wss: fakeWss, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => null, getMounts: () => null, getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => {} }); } catch (e) { ok(false, 'persistence setup in a scratch dir: ' + e.message); }
+  const r1 = P.router.setCustomName('claude:5c3a0000-0000-4000-8000-0000000000c1', '车道 · lane-x 建设 (Opus)');
+  const us = JSON.parse(fs.readFileSync(path.join(pdir, 'user-state.json'), 'utf-8'));
+  const b = sent.filter((m) => m.type === 'user-state-updated');
+  ok(r1 === true && us.customNames['claude:5c3a0000-0000-4000-8000-0000000000c1'] === '车道 · lane-x 建设 (Opus)' && b.length === 1 && b[0].state.customNames['claude:5c3a0000-0000-4000-8000-0000000000c1'] === '车道 · lane-x 建设 (Opus)', 'setCustomName writes user-state.json and BROADCASTS user-state-updated (every client\'s sidebar applies it)', { r1, us: us.customNames, b: b.length });
+  ok(P.router.setCustomName('claude:5c3a0000-0000-4000-8000-0000000000c1', ' 车道 · lane-x 建设 (Opus) ') === false && sent.length === 1, '…the same name again writes nothing, broadcasts nothing');
+  ok(P.router.setCustomName('', 'x') === false && P.router.setCustomName('no-backend', 'x') === false, '…a key that is not `<backend>:<id>` is refused');
+  fs.rmSync(pdir, { recursive: true, force: true });
+
+  console.log('lane peer-card-sender CONTROLS (scratch mutant copies — the tree is never written)');
+  const MUT = mutantCopies('df-names', REPO);
+  const dfSrc = read('src/discovery-facts.js');
+  const anchor = '  if (d.isMeta === true || deliveredRecordKind(d)) return null;\n';
+  ok(dfSrc.includes(anchor), 'control anchor present');
+  const D0 = require(MUT.write('src/discovery-facts.js', dfSrc.replace(anchor, ''), 'old-rule'));
+  ok(D0.nameFromUserRecord(WAKE) === 'Another Claude session sent a message:', 'CONTROL the pre-fix rule: a worker is named "Another Claude session sent a message:" (① can go red)');
+  const oldCard = card.replace(CHAIN, "const originalName = s.name || s.webuiName || cwdFolder || s.sessionId.substring(0, 12) + '...';");
+  ok(oldCard !== card && !oldCard.includes(CHAIN), 'CONTROL the pre-fix card chain fails the ② pin (the first message beats the given name)');
+}
+
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

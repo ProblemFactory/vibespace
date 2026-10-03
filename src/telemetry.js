@@ -12,6 +12,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 
 class Telemetry {
   constructor({ dataDir, version, getForwardUrl, getForwardToken }) {
@@ -192,7 +193,7 @@ class Telemetry {
     try { files = fs.readdirSync(this.dir).filter((f) => /^events-\d{4}-\d{2}\.ndjson$/.test(f)).sort().slice(-3); } catch {}
     for (const fn of files) {
       let data = '';
-      try { data = fs.readFileSync(path.join(this.dir, fn), 'utf-8'); } catch { continue; }
+      try { data = timedSync('telemetry.read', () => fs.readFileSync(path.join(this.dir, fn), 'utf-8')); } catch { continue; }
       for (const line of data.split('\n')) {
         if (!line) continue;
         let r; try { r = JSON.parse(line); } catch { continue; }

@@ -155,25 +155,4 @@ function postToPeer(peer, text, { timeoutMs = POST_TIMEOUT_MS } = {}) {
   });
 }
 
-// ── VibeSpace channel ingress (EXPERIMENTAL, 2.344.0) ──────────────────────
-// When a session was spawned with the VibeSpace channel enabled
-// (agents.vibespaceChannel, default OFF), data/bin/vibespace-channel.js holds
-// a per-session unix socket; one JSON line {content, meta?} = one
-// notifications/claude/channel event into that session. Ack is a literal
-// 'ok' line. Used as the preferred notify lane when present.
-function postChannelEvent(sockPath, content, meta, { timeoutMs = 4000 } = {}) {
-  return new Promise((resolve) => {
-    let settled = false;
-    const done = (ok, reason) => { if (!settled) { settled = true; try { sock.destroy(); } catch { } resolve({ ok, reason }); } };
-    const sock = net.connect(sockPath);
-    const timer = setTimeout(() => done(false, 'timeout'), timeoutMs);
-    timer.unref?.();
-    sock.on('error', (e) => done(false, 'socket error: ' + e.message));
-    sock.on('data', (d) => { done(String(d).trim().startsWith('ok'), 'nack'); });
-    sock.on('connect', () => {
-      try { sock.write(JSON.stringify({ content: String(content), meta: meta || {} }) + '\n'); } catch (e) { done(false, 'write failed: ' + e.message); }
-    });
-  });
-}
-
-module.exports = { findPeer, postToPeer, postChannelEvent, REGISTRY_DIR, TRANSIENT_CODES, pidAlive, POST_BOUND_MS };
+module.exports = { findPeer, postToPeer, REGISTRY_DIR, TRANSIENT_CODES, pidAlive, POST_BOUND_MS };

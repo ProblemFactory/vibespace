@@ -29,6 +29,11 @@
 const RUN_SHELL_CAP = 'run-shell';
 const POSIX_SHELL = 'sh';
 const WIN_SHELL = 'cmd.exe';
+// lane device-upgrade-stuck (2026-10-03): THE FIRST AGENT THAT CAN RUN A LINE ON WINDOWS — `run-shell` shipped in 2.369.200.
+// An older agent on Windows only knows the argv form; all the hub could hand it is `sh -lc`, and Windows has no `sh` — the
+// owner's 2.369.199 agent (its self-upgrade cannot land on Windows) answered "exit 1 · 0.0 s" to every command. So the hub
+// REFUSES by name before it asks (`canRunLine`); every other old agent keeps the `sh -lc` form it always ran.
+const RUN_SHELL_SINCE = '2.369.200';
 const WIN_LINE_MAX = 8191; // cmd.exe's own limit on one command line (verify r1 F6: a longer line is refused BY NAME before a spawn — cmd would answer "The input line is too long" as a bare exit)
 
 /** The interpreter a device of `platform` runs a shell line under. */
@@ -40,6 +45,12 @@ function knownInterpreter(x) { return x === POSIX_SHELL || x === WIN_SHELL ? x :
  *  an unknown / absent platform ⇒ null (the row says nothing rather than guessing). */
 const PLATFORM_LABELS = Object.freeze({ win32: 'Windows', darwin: 'macOS', linux: 'Linux', freebsd: 'FreeBSD', openbsd: 'OpenBSD', netbsd: 'NetBSD', sunos: 'SunOS', aix: 'AIX', android: 'Android' });
 function platformLabel(platform) { return Object.prototype.hasOwnProperty.call(PLATFORM_LABELS, String(platform || '')) ? PLATFORM_LABELS[platform] : null; }
+
+/** Can an agent of `platform` advertising `capabilities` run a shell line at all? false ONLY for a Windows agent
+ *  without `run-shell` (no `sh` there, and it cannot pick cmd.exe itself) — the hub refuses it by name, never `sh -lc`. */
+function canRunLine(platform, capabilities) {
+  return !(platform === 'win32' && !(Array.isArray(capabilities) && capabilities.includes(RUN_SHELL_CAP)));
+}
 
 /**
  * The spawn plan of a shell line ON a device of `platform` → `{ok: true, file, args, windowsVerbatimArguments,
@@ -87,4 +98,4 @@ function spawnFailureText(sf, { interpreter = POSIX_SHELL } = {}) {
   return `${code || 'spawn failed'}: ${String((sf && sf.message) || 'the command could not be started').slice(0, 200)}`;
 }
 
-module.exports = { RUN_SHELL_CAP, POSIX_SHELL, WIN_SHELL, WIN_LINE_MAX, PLATFORM_LABELS, interpreterOf, knownInterpreter, platformLabel, shellPlan, spawnFailure, spawnExitCode, spawnFailureText };
+module.exports = { RUN_SHELL_CAP, RUN_SHELL_SINCE, POSIX_SHELL, WIN_SHELL, WIN_LINE_MAX, PLATFORM_LABELS, canRunLine, interpreterOf, knownInterpreter, platformLabel, shellPlan, spawnFailure, spawnExitCode, spawnFailureText };

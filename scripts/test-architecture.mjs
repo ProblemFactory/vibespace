@@ -44,7 +44,7 @@ const resolveRel = (from, spec) => {
 };
 
 // ── Tier membership (path-based; NEW files inherit their directory's tier) ──
-const PURE = new Set(['src/record-lateness.js' /* lane-hot-switch: a late record is not a live fact — the stream clock + the look-ahead, imports nothing */, 'src/hidden-chars.js', 'src/assistant-note.js' /* B-40f8: text addressed to the assistant — the note rule + THE turn preview, server builders and client alike; imports nothing */, 'src/window-desktop.js', 'src/plugin-manifest.js', 'src/account-pool-auto.js', 'src/model-family.js', 'src/task-color-seq.js', 'src/ssh-key-format.js', 'src/session-schema.js', 'src/otel-truth.js', 'src/msg-acl.js', 'src/backend-caps.js',
+const PURE = new Set(['src/timed-sync.js' /* design 011 lane 1 (store-timing): the store-write clock — performance.now + counters, imports nothing; §72 */, 'src/channel-search.js' /* design 010 (B-c9be): the vendor snippet's ONE reader, the merge, the full-search refusal table, the dialog's coverage / status words — the store, the engine, the adapters and the dialog share them; imports only channel-record (PURE → PURE) */, 'src/channel-focus.js' /* design 008 (B-3cf8): the first screen's predicate (statusTag) + the first read's candidate test + the page rules — the engine's first read and the panel's keyed store share them; imports nothing */, 'src/app-recipes.js' /* design 009: the recipes table — imports nothing */, 'src/app-card.js' /* design 009: THE one card of an app install — its view + the digest of what it showed, shared by the engine and the client; imports nothing */, 'src/record-lateness.js' /* lane-hot-switch: a late record is not a live fact — the stream clock + the look-ahead, imports nothing */, 'src/hidden-chars.js', 'src/assistant-note.js' /* B-40f8: text addressed to the assistant — the note rule + THE turn preview, server builders and client alike; imports nothing */, 'src/window-desktop.js', 'src/plugin-manifest.js', 'src/account-pool-auto.js', 'src/model-family.js', 'src/task-color-seq.js', 'src/ssh-key-format.js', 'src/session-schema.js', 'src/otel-truth.js', 'src/msg-acl.js', 'src/backend-caps.js',
   // AGENT BROWSER (design-agent-browser-v2 §3.6): the identity/spawn-env decisions, the
   // registry + lease model and the keeper's verdicts — imports nothing (P0/P1); and the ONE
   // constants home every process keeper counts and bounds by (src/keeper-limits.js)
@@ -71,6 +71,7 @@ const PURE = new Set(['src/record-lateness.js' /* lane-hot-switch: a late record
   'src/browser-interrupt.js', // the owner's ruling (2026-09-27): the takeover's words (browser_interrupted), what was in flight off the trace, the takeover→handback cycle; imports nothing
   'src/browser-sessions.js', // browser SESSIONS (2026-09-27): markers, pairing, the chat cards of one conversation, the replay model; imports nothing
   'src/browser-recording-retention.js', // the video recordings' own 7 d / 200 MB bound (the trace became size-only, 2026-09-27); imports nothing
+  'src/retired-settings.js', // B-df40 part 1 (lane settings-prune): THE retired settings-key list + the pure strip the boot migration archives through; the schema re-exports it (44d) — imports nothing
   'src/browser-recipes.js', // lane browser-recipes (2026-10-02): the recipe pointer + the no-display sentence the status route, the first verb's refusal and the tools intro share; imports only browser-display (PURE → PURE)
   'src/browser-display.js', // lane headless-fallback (2026-09-28): headed is a preference, the display is a fact — the display verdict + the launch plan + the words; imports nothing (the keeper, the daemon's browser-serve and the client bundle share it)
   'src/search-card.js', // web-search card renderer + title query + twin key — shared server (codex normalizer) + browser (chat-renderers)
@@ -79,6 +80,7 @@ const PURE = new Set(['src/record-lateness.js' /* lane-hot-switch: a late record
   'src/collab-row.js', // codex multi-agent collab row labels/HTML — esc/t/icons injected, so the XSS rule is unit-provable
   'src/model-echo.js', // the CLI's `Set model to` echo — ONE parser for the status bar, the command-card label and the server's model-lock repin
   'src/design-model.js', // the Design window's canvas model (lane design-core): the manifest, the layout, one artboard's verdict, the ONE bundler, the comment line, the published page's state block — imports nothing (the hub requires it, the window bundles it)
+  'src/design-tokens.js', // lane design-systems-home: a design system's token check — tokens.css against an artboard's literal colours / font sizes (warnings); requires only design-model.js (the hub's alone: the viewer bundle stays budgeted)
   'src/server-root.js', // lane hook-root-guard: rootVerdict — is this server the owner's instance (checkout) or a worktree / tmp / override root that must never write the owner's CLI config; imports nothing
   'src/changelog-style.js', // the user changelog's style rules (lint + parity of CHANGELOG.md / .zh / .ja) — test-changelog-style runs them over the three files; imports nothing
   'src/preset-layers.js', // lane cluster-presets: the company presets' per-key merge (cluster < release override), the ONE parser of both preset JSON shapes, the value-free diff + the Integrations line's words — imports only the PURE registry (a row's label); the server reader and the bundle share it
@@ -177,6 +179,9 @@ const PURE = new Set(['src/record-lateness.js' /* lane-hot-switch: a late record
   //     (the fold of the side log, the vocabulary rule, the words — never a reactor's name to an agent). Both
   //     import only channel-record (PURE → PURE); the window, the pane, the engine and the suites share them.
   'src/channel-thread.js', 'src/channel-reactions.js',
+  //   channel-facts (lane message-facts, B-f066): a message's FACTS — the kinds' words, the fold, the summary / details /
+  //     chips, the agent's line; imports only channel-record (PURE → PURE), where the facts SCHEMA lives beside the record
+  'src/channel-facts.js',
   // INTEGRATIONS & KEYS (docs/design-communication-panel.zh.md §14.2, P0b): the
   // ONE table of integration rows — fields, cluster env names, setup blocks
   // (Lark's callback URL is defined HERE and only here), test declarations,
@@ -207,6 +212,10 @@ const PURE = new Set(['src/record-lateness.js' /* lane-hot-switch: a late record
   // DECLARED tables + validator + coerce + the plan builder — imports nothing, bundled into the
   // browser (settings-schema derives the harness sections), required by the server and the daemon
   'src/harness-settings.js',
+  // CHANNEL SETTINGS (B-df40 part 3, design desk settings-cleanup §2 P3): the per-vendor budget / pace tables — the
+  // harness precedent for channel adapters; imports nothing, bundled (settings-schema derives the "Per vendor" rows),
+  // required by the adapters (caps spread budgetOf / paceOf), the registry (undeclared keys refused) and the engine
+  'src/channel-settings.js',
   // THE node-pty DUCK's listener SET (B-ae4b): daemonPtyShim, the R6 pipe duck and the OpenCode
   // serve terminal share it so setupSessionPty's liveness stamp is never replaced by the consumer
   'src/pty-duck.js',
@@ -639,7 +648,10 @@ for (const [edge] of EXCEPTIONS) {
   // .docx (lane docx-viewer, 2026-09-27): a Word file is a ZIP container —
   // scripts/fixtures/docx/{apa-title-page,embedded-font,hostile,long-80-pages}.docx,
   // generated by scripts/fixtures/docx/gen.py and read by test-docx-viewer(-model).
-  const BINARY_EXT = new Set(['.zst', '.gz', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.woff', '.woff2', '.wasm', '.pdf', '.zip', '.tar', '.docx']);
+  // .AppImage (design 009 lane apps-install-core, 2026-10-03): an ELF stub + a SquashFS image —
+  // scripts/fixtures/apps-installers/{capp-chat,capp-chat-xz,capp-chat-zstd,hostile}.AppImage,
+  // read by test-app-manifest's SquashFS reader legs and test-apps-engine / test-app-install.
+  const BINARY_EXT = new Set(['.zst', '.gz', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.woff', '.woff2', '.wasm', '.pdf', '.zip', '.tar', '.docx', '.appimage']);
 
   const tmpDirs = [];
   const mkTmp = (tag) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), `arch-nul-${tag}-`)); tmpDirs.push(d); return d; };
@@ -1144,6 +1156,73 @@ for (const [edge] of EXCEPTIONS) {
     ok(/for \(const cat of orderedCategories\(\)\)/.test(ui) && /settingsGroupOf\(cat\)/.test(ui) && /settings-nav-group-head/.test(ui), 'the UI walks orderedCategories() for the sections and hangs each nav item under its group head');
     ok(/data-apply-kind|dataset\.applyKind/.test(ui) && /'cli-config'/.test(ui) && /'spawn'/.test(ui) && /'server'/.test(ui), 'a harness section renders three sub-blocks by apply kind (global cli-config / per-session spawn / VibeSpace server)');
   }
+  // 44e (B-df40 part 2, 2026-10-03): the two VIEW fields are a closed vocabulary, checked where the build runs.
+  // `when` decides whether a row is drawn and `tier` whether it waits for "Show advanced settings"
+  // (src/lib/settings-view.js); at runtime a clause the client cannot decide HIDES NOTHING, so a typo would be
+  // a silent no-op — this census makes it red instead: every clause carries exactly one WHEN_KINDS tag and only
+  // its own keys, a `setting` names a row that exists, a `fact` is one the Settings window builds (read off
+  // `_buildFacts`'s object literal), a `harness` is a declared table, a `channel` a slug; every `tier` ∈ TIERS.
+  // Category membership (§44 above) is untouched: a hidden row still renders when searched or modified.
+  {
+    const { WHEN_KINDS, WHEN_FACTS, TIERS } = schemaMod;
+    const factsBlock = (ui.match(/_buildFacts\(rerender\) \{[\s\S]*?const facts = \{([\s\S]*?)\n    \};/) || ['', ''])[1];
+    const built = [...factsBlock.matchAll(/^\s+([a-zA-Z]+):/gm)].map((m) => m[1]);
+    const OWN = { setting: ['setting', 'is', 'isNot'], fact: ['fact'], harness: ['harness'], channel: ['channel'] };
+    const HSM = await import('../src/harness-settings.js');
+    const harnesses = Object.keys((HSM.default || HSM).HARNESS_SETTINGS);
+    const whenCensus = (schema) => {
+      const errs = [];
+      for (const [p, r] of Object.entries(schema)) {
+        if (r.tier !== undefined && !TIERS.includes(r.tier)) errs.push(`${p}: tier ${JSON.stringify(r.tier)}`);
+        if (r.when === undefined) continue;
+        for (const c of Array.isArray(r.when) ? r.when : [r.when]) {
+          const tags = c && typeof c === 'object' ? WHEN_KINDS.filter((k) => k in c) : [];
+          if (tags.length !== 1) { errs.push(`${p}: a clause needs exactly one of ${WHEN_KINDS.join('|')} (${JSON.stringify(c)})`); continue; }
+          const k = tags[0];
+          const extra = Object.keys(c).filter((x) => !OWN[k].includes(x));
+          if (extra.length) errs.push(`${p}: ${k} clause with foreign keys ${extra.join(',')}`);
+          if (k === 'setting' && !schema[c.setting]) errs.push(`${p}: when.setting '${c.setting}' has no row`);
+          if (k === 'setting' && 'is' in c && 'isNot' in c) errs.push(`${p}: is AND isNot`);
+          if (k === 'fact' && (!WHEN_FACTS.includes(c.fact) || !built.includes(c.fact))) errs.push(`${p}: fact '${c.fact}' is not one the Settings window builds`);
+          if (k === 'harness' && !harnesses.includes(c.harness)) errs.push(`${p}: harness '${c.harness}' has no table`);
+          if (k === 'channel' && !/^[a-z][a-z0-9-]*$/.test(String(c.channel))) errs.push(`${p}: channel '${c.channel}' is not a vendor slug`);
+        }
+      }
+      return errs;
+    };
+    const withWhen = Object.values(SETTINGS_SCHEMA).filter((r) => r.when).length;
+    const advanced = Object.values(SETTINGS_SCHEMA).filter((r) => r.tier === 'advanced').length;
+    ok(withWhen >= 30 && advanced >= 60 && WHEN_FACTS.every((f) => built.includes(f)), `44e scope is non-vacuous (${withWhen} rows carry a when, ${advanced} are advanced; the facts the window builds: ${built.join(', ')})`);
+    const errs = whenCensus(SETTINGS_SCHEMA);
+    ok(errs.length === 0, `44e every \`when\` clause is one closed tag over a real row / built fact / declared harness, every tier ∈ {${TIERS.join(',')}}${errs.length ? ' — ' + errs.slice(0, 4).join('; ') : ''}`);
+    const planted = { ...SETTINGS_SCHEMA,
+      'zz.a': { category: 'Chat', when: { weather: 'rain' } }, 'zz.b': { category: 'Chat', when: { setting: 'chat.nope', is: true } },
+      'zz.c': { category: 'Chat', when: { fact: 'gpu' } }, 'zz.d': { category: 'Chat', tier: 'expert' }, 'zz.e': { category: 'Chat', when: [{ harness: 'zed' }] } };
+    ok(whenCensus(planted).length === 5, 'NEGATIVE CONTROL: an unknown tag, a dangling setting key, an unbuilt fact, an unknown tier and an undeclared harness are each reported (this census can go red)');
+    ok(/settingsViewModel\(SETTINGS_SCHEMA, \{ categories: SETTINGS_CATEGORIES/.test(ui), '44e the window draws the view model over the census list (the coupling the hiding rides on)');
+    // B-df40 part 3: the per-VENDOR rows DERIVED from src/channel-settings.js carry their view fields — advanced, and
+    // `when: { channel: <its vendor> }` — and `channel` on the entry names a vendor some table declares
+    const CSM = await import('../src/channel-settings.js');
+    const CST = CSM.default || CSM;
+    const channelCensus = (schema, tables) => {
+      const errs = [];
+      for (const tbl of Object.values(tables)) for (const r of tbl.rows) {
+        const p = CST.settingPath(r.key), e = schema[p];
+        if (!e) { errs.push(`${p}: no derived row`); continue; }
+        if (e.tier !== 'advanced') errs.push(`${p}: tier ${JSON.stringify(e.tier)}`);
+        if (!(Array.isArray(e.when) ? e.when : [e.when]).some((c) => c && c.channel === tbl.vendor)) errs.push(`${p}: no when: { channel: '${tbl.vendor}' }`);
+        if (e.channel !== tbl.vendor) errs.push(`${p}: channel ${JSON.stringify(e.channel)}`);
+      }
+      for (const [p, e] of Object.entries(schema)) if (e.channel !== undefined && !Object.prototype.hasOwnProperty.call(tables, e.channel)) errs.push(`${p}: channel '${e.channel}' has no table`);
+      return errs;
+    };
+    const chErrs = channelCensus(SETTINGS_SCHEMA, CST.CHANNEL_SETTINGS);
+    const derivedN = Object.values(SETTINGS_SCHEMA).filter((r) => r.channel).length;
+    ok(derivedN === 4 && !chErrs.length && !whenCensus(SETTINGS_SCHEMA).length, `44e the per-vendor rows derived from src/channel-settings.js (${derivedN}) are advanced and carry \`when: { channel }\` of their own vendor${chErrs.length ? ' — ' + chErrs.join('; ') : ''}`);
+    const lk = SETTINGS_SCHEMA['channels.budgetLarkPerMin'], gm = SETTINGS_SCHEMA['channels.gmailUnitsPerSec'];
+    const plantedCh = { ...SETTINGS_SCHEMA, 'channels.budgetLarkPerMin': { ...lk, tier: undefined }, 'channels.gmailUnitsPerSec': { ...gm, when: { channel: 'lark' } }, 'channels.zz': { category: 'Channels', channel: 'slack' } };
+    ok(channelCensus(plantedCh, CST.CHANNEL_SETTINGS).length === 3, 'NEGATIVE CONTROL: a derived row without its tier, one whose `when` names another vendor, and a row claiming an undeclared vendor are each reported');
+  }
   ok(/for \(const cat of SETTINGS_CATEGORIES\)/.test(ui) && /grouped\[cat\]/.test(ui),
     'SettingsUI still RENDERS by iterating SETTINGS_CATEGORIES (the coupling this census stands for)');
 
@@ -1166,6 +1245,64 @@ for (const [edge] of EXCEPTIONS) {
     'NEGATIVE CONTROL: a row in an unlisted category is silently dropped by the render loop (this census can go red)');
   ok(renderedPaths(ncSchema, [...SETTINGS_CATEGORIES, 'Nobody Listed This']).includes('zz.synthetic'),
     'POSITIVE CONTROL: listing that category is the whole fix (one array entry)');
+}
+
+// 44d. THE SETTINGS REFERENCE IS GENERATED, AND A RETIRED KEY STAYS RETIRED (B-df40 part 1, lane settings-prune).
+//     (i) docs/settings.md's "All Settings Reference" tables have ONE writer, scripts/gen-settings-reference.mjs, from
+//     SETTINGS_SCHEMA: the hand-written tables had drifted (40+ rows missing, dead rows documented — the 2026-10 audit).
+//     This leg regenerates in memory and fails when the file differs. docs/ sits OUTSIDE the partial-copy set the
+//     browser suites build (§43's scar): a suite that copies src/ onto a HEAD checkout while a row change is still
+//     UNCOMMITTED sees HEAD's tables — commit the regenerated file with the row (the §52 docs/agent census lives with
+//     the same exposure). (ii) RETIRED_SETTING_KEYS (src/retired-settings.js, re-exported by the schema; the boot
+//     migration 2026-10-settings-rows-retired strips their stored values) may never come back: no schema row, and no
+//     quoted literal of one anywhere under src/ or in server.js — a `serverSetting('…')`, a `settings.get('…')`, a
+//     listener list — outside the list's own file.
+{
+  const schemaMod = await import('../src/lib/settings-schema.js');
+  const { SETTINGS_SCHEMA, RETIRED_SETTING_KEYS } = schemaMod;
+  const gen = await import('./gen-settings-reference.mjs');
+  const doc = read('docs/settings.md');
+  let regenerated = null, genErr = null;
+  try { regenerated = gen.renderReference(SETTINGS_SCHEMA, doc); } catch (e) { genErr = e.message; }
+  const region = doc.slice(doc.indexOf(gen.REGION_BEGIN), doc.indexOf(gen.REGION_END));
+  const keys = Object.keys(SETTINGS_SCHEMA);
+  const undocumented = keys.filter((k) => !region.includes('| `' + k + '` |'));
+  ok(!genErr && region.length > 1000 && undocumented.length === 0, `44d scope: docs/settings.md carries the generated region and every one of the ${keys.length} schema rows has its table line${genErr ? ' — ' + genErr : undocumented.length ? ' — missing: ' + undocumented.slice(0, 6).join(', ') : ''}`);
+  ok(regenerated === doc, '44d the reference tables equal what scripts/gen-settings-reference.mjs renders from the schema' + (regenerated === doc ? '' : ' — STALE: run `node scripts/gen-settings-reference.mjs` and commit docs/settings.md with the row change'));
+  // NEGATIVE CONTROLS: a planted stale line, and a schema row the file has never seen, must both read as stale.
+  const lineOf = (k) => (doc.match(new RegExp('^\\| `' + k.replace(/\./g, '\\.') + '` \\|.*$', 'm')) || [''])[0];
+  const victim = lineOf('chat.compactMode') || lineOf(keys[0]);
+  const planted = doc.replace(victim, victim.replace(/\| \*\*/, '| **(stale) '));
+  ok(victim && planted !== doc && gen.renderReference(SETTINGS_SCHEMA, planted) !== planted, 'NEGATIVE CONTROL: a hand-edited table line is what 44d reports (the gate can go red)');
+  const grown = { ...SETTINGS_SCHEMA, 'zz.synthetic': { type: 'boolean', default: false, label: 'Synthetic', description: 'x', category: SETTINGS_SCHEMA[keys[0]].category } };
+  ok(gen.renderReference(grown, doc) !== doc && gen.renderReference(grown, doc).includes('| `zz.synthetic` |'), 'NEGATIVE CONTROL: a new schema row the tables lack reads as stale, and the generator adds its line');
+  ok(gen.renderReference(SETTINGS_SCHEMA, regenerated || doc) === (regenerated || doc), 'the generator is idempotent (a second run changes nothing)');
+
+  // (ii) the retired-key census
+  ok(Array.isArray(RETIRED_SETTING_KEYS) && RETIRED_SETTING_KEYS.length >= 7 && RETIRED_SETTING_KEYS.includes('agents.vibespaceChannel'), `44d the schema re-exports RETIRED_SETTING_KEYS (${(RETIRED_SETTING_KEYS || []).length} keys)`);
+  const asRow = (schema) => (RETIRED_SETTING_KEYS || []).filter((k) => Object.prototype.hasOwnProperty.call(schema, k));
+  ok(asRow(SETTINGS_SCHEMA).length === 0, `44d no retired key is a schema row${asRow(SETTINGS_SCHEMA).length ? ' — back: ' + asRow(SETTINGS_SCHEMA).join(', ') : ''}`);
+  const quoted = (texts) => {
+    const hits = [];
+    for (const [f, text] of texts) for (const k of RETIRED_SETTING_KEYS || []) {
+      if (new RegExp('[\'"`]' + k.replace(/\./g, '\\.') + '[\'"`]').test(text)) hits.push(f + ': ' + k);
+    }
+    return hits;
+  };
+  const srcTexts = [['server.js', read('server.js')]];
+  (function walk(dir) {
+    for (const e of fs.readdirSync(path.join(REPO, dir), { withFileTypes: true })) {
+      const p = dir + '/' + e.name;
+      if (e.isDirectory()) walk(p);
+      else if (/\.(js|mjs|cjs)$/.test(e.name) && p !== 'src/retired-settings.js') srcTexts.push([p, read(p)]);
+    }
+  })('src');
+  const reads = quoted(srcTexts);
+  ok(srcTexts.length > 300 && reads.length === 0, `44d no retired key is read or named in quotes under src/ or server.js (${srcTexts.length} files)${reads.length ? ' — ' + reads.slice(0, 6).join('; ') : ''}`);
+  ok(asRow({ ...SETTINGS_SCHEMA, 'agents.vibespaceChannel': { type: 'boolean', default: false, label: 'x', description: 'x', category: 'Integration' } }).length === 1
+    && quoted([['src/planted.js', "if (serverSetting('agents.vibespaceChannel') === true) spawnTheSocket();"]]).length === 1
+    && quoted([['src/planted.js', "settings?.get(\"sessionCard.detailTruncation\") ?? 'left'"]]).length === 1,
+    'NEGATIVE CONTROL: a re-added retired row and a planted serverSetting / settings.get read of a retired key are what 44d reports');
 }
 
 // 45. THE PER-ITEM SPAWN CENSUS (2026-09-09, userW's pod: 27 of 27 session
@@ -1498,7 +1635,7 @@ for (const [edge] of EXCEPTIONS) {
   ok([..."    type: 'boolean', default: true, category: 'Integration',".matchAll(/category:\s*'[^']+'/g)].length === 1, 'NEGATIVE CONTROL: a bare category literal is what 46b reports');
   // 46c. THE HARNESS SECTIONS ARE DERIVED, NOT HAND-WRITTEN: no `'claude.`/
   //      `'codex.`/`'opencode.` key literal remains in the schema except the
-  //      ONE generic legacy row (auto-resume, category Chat).
+  //      ONE generic legacy row (auto-resume, category Spending since 2.369.202).
   const literalRows = [...schema.matchAll(/^  '(claude|codex|opencode)\.[a-zA-Z]+':/gm)].map((m) => m[0].trim());
   ok(literalRows.length === 1 && literalRows[0] === "'claude.autoResumeOnLimit':", `the schema hand-writes exactly ONE harness-prefixed row — the generic legacy auto-resume default (found: ${literalRows.join(', ')})`);
 }
@@ -2535,6 +2672,7 @@ console.log('§62 every path where the user names a window goes through wm.revea
     'src/lib/chat-view.js': [2, 'the two sub-agent viewer dedupes'],
     'src/lib/workflow-detail.js': [2, 'the workflow window + its agent-log dedupe'],
     'src/lib/design-window.js': [1, 'the Design window\'s one-per-(host, dir) re-open (a replay passes { replay })'],
+    'src/lib/design-home.js': [1, 'the Design window home\'s one-per-client re-open (a replay passes { replay }) — lane design-systems-home'],
     ...Object.fromEntries(['settings-ui', 'usage-window', 'task-log', 'task-detail', 'session-props', 'channel-window', 'channel-outbox', 'channels-panel', 'jobs-panel', 'integrations-window', 'sidebar-rail', 'browser-trace-view', 'desktop-window', 'desktop-app-window', 'browser-live-window', 'inbox-window']
       .map((n) => ['src/lib/' + n + '.js', [1, n === 'browser-live-window' ? 'the fold-back (D3)' : 'the singleton re-open (a replay passes { replay })']])),
   };
@@ -2811,10 +2949,12 @@ console.log('§65 every producer that can carry a conversation\'s facts to an ag
   const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
   const GATE = /\b(?:ACL\.canSee\(|reachFor\(ctx\b|stillSees\((?:ctx|\{)|agentProposalView\((?:ctx|by)\b|mayHear\(|stillInEffect\(|stillWatched\b|drafterSees\(|withdrawRefusal\(|F\.rowNames\(r, ctx\))/g;
   const DATA = /\b(?:store\.(?:readTail|readSide|search|findRecord)\(|withView\(|threadRead\(|reactionsFor\(|proposalView\b|deliver\.(?:stashFor|deliverToConversation)\()/;
-  const FOLLOW = { withdrawProposal: ['withdrawNow'] };
+  // lane channel-attach-read: an agent's attachment hands EVERY answer to agentAttachmentAnswer, which asks reach again
+  const FOLLOW = { withdrawProposal: ['withdrawNow'], attachment: ['agentAttachmentAnswer'] };
   const EXEMPT_AWAIT = {
     request: 'answers the caller\'s OWN request record (its reason, the conversation key it named) — nothing the conversation produced; the await is the index write of that record',
     withdrawProposal: 'hands its answer to withdrawNow (judged as its own row)',
+    attachment: 'an agent\'s answer after the fetch / the join / the held write goes through agentAttachmentAnswer, which asks reach AGAIN (judged as its own row); the owner\'s window calls it with no principal',
   };
   const OWNER = {
     notify: 'the `channels-updated` broadcast to the owner\'s windows (the ws is the owner\'s cookie session)',
@@ -2873,7 +3013,7 @@ console.log('§65 every producer that can carry a conversation\'s facts to an ag
   const xctl = exitCliBad(xcli.replace("'/api/agent/exit/runs?'", "'/api/hosts/' + machine + '/exit-runs?'"));
   ok(xctl.length === 1 && /vibespace-exit calls \/api\/hosts\//.test(xctl[0]), '§65 (D) NEGATIVE CONTROL: the exit CLI pointed at the owner\'s command list (/api/hosts/…/exit-runs) is caught by name', xctl);
   ok(/isAnyBearer\(req\)\) return res\.status\(403\)\.json\(\{ error: 'the machine\\'s command history is the user\\'s/.test(read('src/server/exit-routes.js')), '§65 (C) the owner\'s command list refuses any bearer 403 human_only (exit-routes.js)');
-  const want = ['listFor', 'readFor', 'readThreadFor', 'agentRefresh', 'agentThreadRefresh', 'propose', 'proposeReaction', 'compose', 'replaceProposal', 'withdrawProposal', 'withdrawNow', 'searchFor', 'statusFor', 'accessFor', 'request'];
+  const want = ['listFor', 'readFor', 'readThreadFor', 'agentRefresh', 'agentThreadRefresh', 'propose', 'proposeReaction', 'compose', 'replaceProposal', 'withdrawProposal', 'withdrawNow', 'searchFor', 'statusFor', 'accessFor', 'request', 'attachment', 'agentAttachmentAnswer'];
   ok(want.every((n) => c.roster.includes(n)) && c.ladder.length >= 4 && c.paths.length >= 10, `§65 census scope is non-vacuous (${c.roster.length} agent answers, ${c.ladder.length} ladder producers: ${c.ladder.join(', ')}, ${c.owners.length} owner surfaces, ${c.paths.length} CLI paths)`, JSON.stringify(c.roster));
   ok(c.bad.length === 0, `§65 every agent answer asks reach first and again after an await, every stash/ladder producer carries a gate, every owner surface is named, the CLI names agent routes only${c.bad.length ? ' — ' + c.bad.join('; ') : ''}`);
   // NEGATIVE CONTROLS (string copies): one gate removed from one producer each
@@ -2884,6 +3024,7 @@ console.log('§65 every producer that can carry a conversation\'s facts to an ag
     ['the agent\'s walk without its re-ask', cut(esrc, "    if (!stillSees(ctx, adapterId, convId)) return ACL.notFound();\n    // a thread this conversation never named", "    // a thread this conversation never named"), /\(A2\) agentThreadRefresh/],
     ['the reaction digest without mayHear', cut(esrc, '      if (!mayHear(cid)) continue;\n', ''), null],
     ['a new owner surface', esrc.replace('  function reactionDigest(', '  function nudgeOwner(x) { return broadcast({ type: \'x\', x }); }\n  function reactionDigest('), /\(C\) nudgeOwner/],
+    ['the attachment answer without its re-ask', cut(esrc, '    if (!stillSees(ctx, adapterId, convId)) return ACL.notFound();\n    if (!r || !r.ok) return r;', '    if (!r || !r.ok) return r;'), /\(A1\) agentAttachmentAnswer never asks reach/],   // lane channel-attach-read (appended: controls[3] is patched by index below)
   ];
   // (the digest control: mayHear's declaration stays, so the census's (B) still finds a gate token — the RUNTIME leg,
   // test-channels-engine ⑱ (c), is that producer's control; here a digest with NO gate token at all)
@@ -3181,6 +3322,90 @@ console.log('§71 a raw secret is compared only through sameToken');
   const flagged = (l) => logical68(l).some((x) => bad68(x.t));
   const missed = caught.filter((l) => !flagged(l)), wrong = legal.filter((l) => flagged(l));
   ok(missed.length === 0 && wrong.length === 0, `§71 NEGATIVE CONTROLS: ${caught.length} planted compares caught, ${legal.length} legal lines pass${missed.length ? ' — missed: ' + missed.join(' | ') : ''}${wrong.length ? ' — wrongly caught: ' + wrong.join(' | ') : ''}`);
+}
+
+// §72 EVERY WRITE OF A NAMED STORE IS TIMED (design 011 lane 1, store-timing, 2026-10-03). src/timed-sync.js STORES is
+// the CLOSED list of named stores; a write row's `sites` are the functions that write its file. Census (comments
+// stripped): inside each site every sync write call — writeJsonAtomic / writeBuffersAtomic / writeFileSync /
+// appendFileSync / _writeAtomic — sits inside a `timedSync('<a row of that file and site>', …)` span; the unwrapped ones
+// are printed. Every timedSync call in server.js + src names a row by a literal; every row is used in its own file.
+// Planted controls prove the census sees an unwrapped write, a wrong name and a computed name.
+console.log('§72 every write of a named store is timed (src/timed-sync.js STORES)');
+{
+  const { STORES } = (await import('node:module')).createRequire(import.meta.url)(path.join(REPO, 'src/timed-sync.js'));
+  const strip72 = (t) => t.split('\n').map((ln) => (/^\s*(\/\*|\*)/.test(ln) ? '' : ln.replace(/(^|\s)\/\/.*$/, '$1'))).join('\n');
+  // the matching close of the bracket at `i` — strings, template literals and comments skipped
+  const close72 = (t, i) => {
+    const open = t[i], shut = open === '{' ? '}' : ')';
+    let depth = 0;
+    for (let k = i; k < t.length; k++) {
+      const c = t[k];
+      if (c === '"' || c === "'" || c === '`') { for (k++; k < t.length && t[k] !== c; k++) if (t[k] === '\\') k++; continue; }
+      if (c === '/' && t[k + 1] === '*') { k = t.indexOf('*/', k + 2) + 1 || t.length; continue; }
+      if (c === open) depth++;
+      else if (c === shut && --depth === 0) return k;
+    }
+    return -1;
+  };
+  const body72 = (t, fn) => {
+    const m = new RegExp(String.raw`(^|\n)[ \t]*(?:async\s+)?(?:function\s+)?${fn}\s*\([^)]*\)\s*\{`).exec(t);
+    if (!m) return null;
+    const at = m.index + m[0].length - 1;
+    return { text: t.slice(at, close72(t, at) + 1), at };
+  };
+  const WRITE72 = /\b(?:writeJsonAtomic|writeBuffersAtomic|writeFileSync|appendFileSync|_writeAtomic)\s*\(/g;
+  // not the store: writeIndex's VERIFY drift log (a debug env var), the OTel exporter's per-boot token file
+  const EXEMPT72 = [/fs\.appendFileSync\(verifyTo,/, /fs\.writeFileSync\(tokenFile,/];
+  const unwrapped72 = (text, okNames) => {
+    const spans = [];
+    for (const m of text.matchAll(/\btimedSync\(\s*'([^']+)'/g)) { const o = m.index + m[0].indexOf('('); spans.push({ name: m[1], a: o, b: close72(text, o) }); }
+    const out = [];
+    for (const m of text.matchAll(WRITE72)) {
+      const line = text.slice(text.lastIndexOf('\n', m.index) + 1, text.indexOf('\n', m.index) < 0 ? undefined : text.indexOf('\n', m.index));
+      if (EXEMPT72.some((re) => re.test(line))) continue;
+      if (!spans.some((sp) => sp.a < m.index && m.index < sp.b && okNames.includes(sp.name))) out.push(line.trim().slice(0, 110));
+    }
+    return out;
+  };
+  const rows72 = Object.entries(STORES);
+  const bad = [], seen = [];
+  for (const [name, row] of rows72.filter(([, r]) => r.kind === 'write')) {
+    const src = strip72(read(row.file));
+    for (const site of row.sites) {
+      const b = body72(src, site);
+      if (!b) { bad.push(`${row.file}: site ${site}() not found`); continue; }
+      const okNames = rows72.filter(([, r]) => r.file === row.file && r.sites.includes(site)).map(([n]) => n);
+      for (const l of unwrapped72(b.text, okNames)) bad.push(`${row.file} ${site}(): ${l}`);
+      if (b.text.includes(`timedSync('${name}'`)) seen.push(name + '@' + site);
+    }
+  }
+  ok(bad.length === 0, `§72 every sync write inside a named store's sites is inside its timedSync (${rows72.filter(([, r]) => r.kind === 'write').length} write rows)${bad.length ? ' — UNWRAPPED: ' + [...new Set(bad)].join(' | ') : ''}`);
+  const writeSites = rows72.filter(([, r]) => r.kind === 'write').flatMap(([n, r]) => r.sites.map((s) => n + '@' + s));
+  const dead = writeSites.filter((x) => !seen.includes(x));
+  ok(dead.length === 0, `§72 every write row's site really times under that row's name${dead.length ? ' — not used: ' + dead.join(' ') : ''}`);
+  const walk72 = (dir) => fs.readdirSync(path.join(REPO, dir), { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walk72(dir + '/' + d.name) : /\.(c|m)?js$/.test(d.name) ? [dir + '/' + d.name] : []));
+  const calls = [], computed = [];
+  for (const f of ['server.js', ...walk72('src')]) {
+    if (f === 'src/timed-sync.js') continue;
+    const t = strip72(read(f));
+    for (const m of t.matchAll(/\btimedSync\(\s*('([^']*)'|[^'\s])/g)) { if (m[2] === undefined) computed.push(f); else calls.push([f, m[2]]); }
+  }
+  const unknown = calls.filter(([f, n]) => !STORES[n] || STORES[n].file !== f);
+  ok(computed.length === 0 && unknown.length === 0 && calls.length >= rows72.length, `§72 ${calls.length} timedSync calls, each a literal row of the table, in that row's own file${computed.length ? ' — computed name in: ' + computed.join(' ') : ''}${unknown.length ? ' — unknown / misplaced: ' + unknown.map((x) => x.join(':')).join(' ') : ''}`);
+  const unused = rows72.filter(([n, r]) => !calls.some(([f, c]) => c === n && f === r.file)).map(([n]) => n);
+  ok(unused.length === 0, `§72 every row is used${unused.length ? ' — dead rows: ' + unused.join(' ') : ''}`);
+  // NEGATIVE CONTROLS: an unwrapped write, a write under another file's name, a write beside (not inside) its timedSync
+  const planted = [
+    ['  _save() {\n    fs.writeFileSync(tmp, JSON.stringify(this._state, null, 2));\n  }', 1],
+    ["  _save() {\n    timedSync('jobs.write', () => fs.writeFileSync(tmp, x));\n  }", 1],
+    ["  _save() {\n    timedSync('task-groups.write', () => 0); fs.writeFileSync(tmp, x);\n  }", 1],
+    ["  _save() {\n    timedSync('task-groups.write', () => { fs.writeFileSync(tmp, x); fs.renameSync(tmp, f); });\n  }", 0],
+  ];
+  const got = planted.map(([t]) => unwrapped72(body72(t, '_save').text, ['task-groups.write']).length);
+  ok(got.join() === planted.map(([, n]) => n).join(), `§72 NEGATIVE CONTROLS: unwrapped / wrong name / beside the span caught, a wrapped write passes (${got.join()})`);
+  const jobsBare = strip72(read('src/jobs.js')).replace("timedSync('jobs.write', () => writeJsonAtomic(this.file, [...this.jobs.values()]));", 'writeJsonAtomic(this.file, [...this.jobs.values()]);');
+  const hit = unwrapped72(body72(jobsBare, '_save').text, ['jobs.write', 'jobs-notifs.write']);
+  ok(hit.length === 1 && /writeJsonAtomic\(this\.file/.test(hit[0]), `§72 CONTROL: the real jobs.js _save with its jobs.json write unwrapped is printed (${hit.join(' | ')})`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

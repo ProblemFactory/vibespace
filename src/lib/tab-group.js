@@ -1,12 +1,12 @@
 import { createAgentKindIcon } from './agent-meta.js';
-import { escHtml , uiScale, showToast, showContextMenu } from './utils.js';
+import { escHtml , uiScale, showToast, showContextMenu, showConfirmDialog } from './utils.js';
 import { t } from './i18n.js';
 import { UI_ICONS } from './icons.js';
 import { inboxCountText } from './title-chips.js'; // lane G: the inbox chip never grows past icon + '99+'
 import { showWindowContextMenu } from './taskbar.js';
 import { dragEndVerdict } from './drag-end.js';
 import { captureOn, setDragShield, attachDragFeed, startPointerDrag } from './drag-feed.js'; // ONE feed for every drag door (lane-drag-release verify r1)
-import { normalizeChain, displayedPanes, clampRatio, splitColumns, paneMinPx, visualTabOrder, splitPartner, ownerColor, chainSyncKey, showTab, enterSplit, insertTab, moveTab, removeTab, swapSides, SPLIT_RATIO_DEFAULT, holdRatio, heldRatio, releaseRatio, ratioDiffers, followFor, foldBackTarget, tabDragMode } from './chain-layout.js';
+import { normalizeChain, displayedPanes, clampRatio, splitColumns, paneMinPx, visualTabOrder, splitPartner, ownerColor, chainSyncKey, showTab, enterSplit, insertTab, moveTab, removeTab, swapSides, SPLIT_RATIO_DEFAULT, holdRatio, heldRatio, releaseRatio, ratioDiffers, followFor, foldBackTarget, tabDragMode, closeAsks, groupCloseList } from './chain-layout.js';
 
 /**
  * Tab grouping — mixin methods for WindowManager.
@@ -60,6 +60,7 @@ export { TYPE_ICONS } from './window-types.js';
 // default = its 24 px + margins) and the least room a tab of the right half keeps beside it.
 const SPLIT_BTN_RESERVE_PX = 30;
 const SPLIT_TAIL_TAB_PX = 40;
+const _groupCloseAsks = new WeakMap(); // chain → the open group-close question (B-a67c: one per group)
 
 /**
  * Install tab group methods onto a WindowManager instance.
@@ -1534,6 +1535,42 @@ const tabGroupMethods = {
         if (best) this.focusWindow(best);
       }
     }
+  },
+
+  /** THE ONE GROUP CLOSE (B-a67c; the owner: "…点击整体的关闭要有个警告提示确认要关闭x个标签页吗，避免想关闭tab但点错").
+   *  Every door that ends a WHOLE tab group calls this with a member's id — the frame's ✕ (window.js), the frame's own
+   *  menu Close and the taskbar group's "Close group" (the window menu's `window.close` with `ctx.group`); nothing else
+   *  closes every member (test-tab-close-confirm's census). A lone window (no chain, a chain of one) is its own close —
+   *  `requestClose`, synchronously, never asked. A group asks first (PURE closeAsks) in the house dialog naming every
+   *  tab in strip order; Cancel / Esc keeps every tab; the confirm closes exactly the tabs it named that are still in
+   *  this group, each through the ONE user-close door (`requestClose` — a window may still answer first: a desktop app
+   *  asks its app), the guests first and the host last (no frame hand-over per close). One question per group: a second
+   *  door while it is open gets the same answer; a question that fails to open is a Cancel. → Promise<boolean> (true = the close went ahead). */
+  requestCloseGroup(id) {
+    const win = this.windows.get(id);
+    if (!win) return Promise.resolve(false);
+    const chain = win._tabChain && Array.isArray(win._tabChain.tabs) ? win._tabChain : null;
+    const list = chain ? groupCloseList(chain, (tid) => this.windows.get(tid)?.title, (tid) => this.windows.has(tid)) : { ids: [id], names: [] };
+    if (!chain || !closeAsks({ scope: 'group', members: list.ids.length, user: true })) return Promise.resolve(this.requestClose(id));
+    const open = _groupCloseAsks.get(chain);
+    if (open) return open;
+    let q;
+    try { q = this.confirmCloseGroup(list); } catch (err) { console.warn('[tab-group] the group-close question failed — nothing closes', err); q = false; }
+    const ask = Promise.resolve(q).catch((err) => { console.warn('[tab-group] the group-close question failed — nothing closes', err); return false; }).then((go) => {
+      if (go !== true) return false;
+      const named = new Set(list.ids);
+      const doomed = chain.tabs.filter((tid) => named.has(tid)).reverse(); // still in THIS group; tabs[0] (the host) last
+      for (const tid of doomed) if (this.windows.has(tid)) this.requestClose(tid);
+      return true;
+    }).finally(() => { if (_groupCloseAsks.get(chain) === ask) _groupCloseAsks.delete(chain); });
+    _groupCloseAsks.set(chain, ask);
+    return ask;
+  },
+
+  /** The question (B-a67c): "Close {n} tabs?" over the names the strip shows; "Close {n} tabs" (Enter) / Cancel (Esc). */
+  confirmCloseGroup({ names }) {
+    const n = names.length;
+    return showConfirmDialog({ title: t('Close {n} tabs?', { n }), items: names, confirmText: t('Close {n} tabs', { n }), danger: true });
   },
 
   _ungroupLast(chain) {

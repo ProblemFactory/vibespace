@@ -15,6 +15,11 @@
 //      is STILL open; the label says Hide
 //   ④ chat.foldPeerMessages off ⇒ every card whole (the ≤ 3-line census now FAILS — it is not vacuous); back on ⇒
 //      folded again, the opened card still open (the state is the view's, by message id)
+//   ⑤ B-9fd6 (lane peer-card-sender): the record a SERVER-POSTED group wake leaves in the transcript (name-less —
+//      origin {kind:'peer', from:'unknown'}, the CLI's frame around the framed report), opened from history: the head
+//      names the author and the group ("<author> → <group>"; a report of four senders "A, B, C and 1 more → <group>",
+//      each name its own link), the preview is the author's first line — never "Message from another session", never
+//      the CLI's framing lines
 // Requires google-chrome (SKIP without). Scratch: /tmp/vs-pcf-* only. Run: node scripts/test-peer-card-fold-ui.mjs
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -229,6 +234,50 @@ try {
   await sleep(700);
   const on = reports(await evalJs(CENSUS));
   check('setting back on ⇒ folded again; the card the user opened is still open', on.length === 3 && on.every((c) => c.folded) && on[1].open && !on[0].open && !on[2].open, on.map(({ text, ...c }) => c));
+  // ── ⑤ B-9fd6: a server-posted group report, opened from its transcript ──
+  console.log('⑤ a server-posted group report names its author(s) and its group (B-9fd6)');
+  {
+    const H_SID = '5c3a0000-0000-4000-8000-0000000009fd';
+    const H_CWD = path.join(fakeHome, 'hist');
+    fs.mkdirSync(H_CWD, { recursive: true });
+    const pdir = path.join(fakeHome, '.claude', 'projects', H_CWD.replace(/[/._]/g, '-'));
+    fs.mkdirSync(pdir, { recursive: true });
+    const GID = 'g-0a1b2c3d';
+    const WORDS = '@lane-beta report r1 done — final sha 1a2b3c4d; every gate green, the heavy leg too, the pre-fix control red as it should be; report /var/tmp/x/report.md — please merge it next';
+    const wake = (i, lines, n) => ({ type: 'user', isMeta: true, uuid: `hist-${i}`, sessionId: H_SID, cwd: H_CWD, timestamp: new Date(Date.UTC(2026, 9, 3, 3, 20 + i)).toISOString(), origin: { kind: 'peer', from: 'unknown', verifiedPeerPid: 4035, verifiedPeerProcStart: '10450' }, promptSource: 'system', turnOrigin: 'peer',
+      message: { role: 'user', content: 'Another Claude session sent a message:\n' + ['You were @mentioned — group messages (vibespace-msg):', `#### Group "Lane crew" (${GID}) — ${n} new since your last report`, ...lines, `Reply: vibespace-msg send ${GID} "..." — your notify mode here is mention (vibespace-msg group notify ${GID} <next-turn|mention|always|mute>)`].join('\n') + '\n\nThis came from another Claude session — not typed by your user, but very likely working on their behalf.' } });
+    const reply = (i) => ({ type: 'assistant', uuid: `hist-a${i}`, sessionId: H_SID, cwd: H_CWD, timestamp: new Date(Date.UTC(2026, 9, 3, 3, 20 + i, 30)).toISOString(), message: { id: `msg_h${i}`, type: 'message', role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text: 'Noted.' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } } });
+    const recs = [
+      wake(1, [`- [10-03T03:21Z] lane-alpha 建设 (Opus): ${WORDS}`], 1), reply(1),
+      wake(2, ['- [10-03T03:22Z] lane-alpha 建设 (Opus): first, the API is down', '- [10-03T03:22Z] lane-gamma: second, confirmed here', '- [10-03T03:22Z] User: third, from the owner', '- [10-03T03:22Z] lane-delta: @lane-beta the newest'], 4), reply(2),
+    ];
+    fs.writeFileSync(path.join(pdir, H_SID + '.jsonl'), recs.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    const got = await evalJs(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const before = new Set(document.querySelectorAll('.chat-message-list'));
+      window.app.viewSession(${JSON.stringify(H_SID)}, ${JSON.stringify(H_CWD)}, 'server-posted reports');
+      let list = null;
+      for (let i = 0; i < 100; i++) {
+        list = [...document.querySelectorAll('.chat-message-list')].find((l) => !before.has(l));
+        if (list && list.querySelectorAll(':scope > .chat-peer-message').length >= 2) break;
+        await sleep(200);
+      }
+      if (!list) return { cards: [] };
+      await sleep(600);
+      return { cards: [...list.querySelectorAll(':scope > .chat-peer-message')].map((el) => ({
+        title: el.querySelector('.chat-peer-title')?.textContent || '', links: [...el.querySelectorAll('.chat-peer-title .chat-peer-name')].map((x) => x.textContent),
+        group: !!el.querySelector('.chat-peer-title .chat-peer-group'), folded: !!el.querySelector(':scope > details.chat-peer-fold'),
+        preview: el.querySelector('.chat-peer-preview')?.textContent ?? null, text: el.innerText })) };
+    })()`);
+    const [c1, c2] = got.cards;
+    check('⑤ the two server-posted wakes are two peer cards', got.cards.length === 2, got.cards);
+    check('⑤ ONE sender: the head is "lane-alpha 建设 (Opus) → Lane crew" (the name a link, the group a link)', c1 && c1.title === 'lane-alpha 建设 (Opus) → Lane crew' && c1.links.join() === 'lane-alpha 建设 (Opus)' && c1.group, c1);
+    check('⑤ …folded, its preview the author\'s first line (the words, 160 code points)', c1 && c1.folded && c1.preview === Array.from(WORDS).slice(0, 159).join('').trimEnd() + '…', c1 && c1.preview);
+    check('⑤ FOUR senders: "lane-alpha 建设 (Opus), lane-gamma, User and 1 more → Lane crew" — each named sender its own link', c2 && c2.title === 'lane-alpha 建设 (Opus), lane-gamma, User and 1 more → Lane crew' && c2.links.join('|') === 'lane-alpha 建设 (Opus)|lane-gamma|User' && c2.group, c2);
+    check('⑤ …its preview is the first sender\'s first line', c2 && c2.preview === 'lane-alpha 建设 (Opus): first, the API is down', c2 && c2.preview);
+    const framing = /Another Claude session|You were @mentioned|#### Group|vibespace-msg group notify|This came from another/;
+    check('⑤ no head reads "another session" / "unknown"; no preview and no body is the CLI\'s framing', got.cards.every((c) => !/another session|another agent|unknown/i.test(c.title) && !framing.test(c.preview || '') && !framing.test(c.text)), got.cards.map((c) => [c.title, c.preview]));
+  }
   check('no page exception', pageErrors.length === 0, pageErrors.slice(0, 3));
   liveWs.close();
 } catch (e) {

@@ -8,7 +8,7 @@ import { api, oauthLinkRow, mountsDialog, wireOAuthConnect, reauthDialog } from 
 import { classifyPrivateKey } from '../ssh-key-format.js'; // shared with the server (CJS pulled into the bundle, like task-color-seq.js)
 import { dialRowState, pairNameVerdict, pairNameShown, deviceIdOf, commandOsOf } from '../dial-facts.js'; // lane-pairing ③: THE one dial state of a machine row (PURE, bundled); verify-r4 F6: the name rule + its collision verdict
 import { dialAddressPicker, dialStateText, generateConsequenceText } from './dial-address-picker.js'; // lane-pairing ①③: the address choice + the state's words
-import { openExitAccessDialog, exitSummaryText, lastRunText } from './exit-access-dialog.js'; // lane-pairing ⑥: "Who can use it" 
+import { openExitAccessDialog, exitSummaryText, lastRunText, agentUpgradeText } from './exit-access-dialog.js'; // lane-pairing ⑥: "Who can use it" 
 import { platformLabel } from '../exit-shell.js'; // lane-exit-run-output E1: the device's stated platform on its row (its shell follows it: Windows ⇒ cmd.exe)
 
 
@@ -787,6 +787,9 @@ export function installSidebarMounts(Sidebar) {
           lr.title = h.exit.lastRun.cmd || '';
           row.appendChild(lr);
         }
+        // lane device-upgrade-stuck: the agent's failed update stays on the row until the device reports the version
+        const up = agentUpgradeText(h);
+        if (up) { const ul = document.createElement('div'); ul.className = 'mounts-path mounts-exit-line mounts-agent-stuck'; ul.textContent = up; row.appendChild(ul); }
       }
       // Surface a FAILED probe in the row itself (real report: red dot with
       // no visible reason — the error lived only in the dot's hover tooltip,

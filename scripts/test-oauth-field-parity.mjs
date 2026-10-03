@@ -284,7 +284,7 @@ export const DESIGN_I18N = [
   { key: 'Type', where: 'channels' },
   { key: 'Connected · {filter} · polling · {n} conversations · {n} unread · last sync {ago}', built: ['Connected', 'polling', '{n} conversations', 'last sync {ago}'], where: 'channels', why: 'drawn as parts joined by " · " — the storage detail line\'s grammar; the filter is the account\'s own mailbox choice; 2026-09-26: every conversation is fetched, so the line counts them' },
   { key: 'connected but the sign-in has expired or been revoked — conversations come from cache while every fetch fails; re-authorize to fix', where: 'channels' },
-  { key: 'Show all {n} conversations', where: 'channels' },
+  { key: 'Show all {n} conversations', built: null, where: 'channels', why: 'design 008 (B-3cf8): retired — it built every row of a list; the lists page from the server ("Show more")' },
   { key: 'Duplicate "{name}"', where: 'channels' },
   { key: '{name} (copy)', where: 'channels' },
   { key: 'Copied from the original; you can change it.', where: 'channels' },

@@ -56,13 +56,18 @@ import { icon, btn, noteLine, el as chanEl, avatar, convAvatar } from './channel
 // that, because the digest is broadcast to every client at once while the
 // language is per DEVICE (localStorage).
 import * as chanCaps from '../channel-caps.js';
+import * as SR from '../channel-search.js';   // design 010 (PURE): coverage + the vendor tier's words
+import { renderAroundRows } from './channel-window.js';   // design 010: the window's own row renderer, for the around sheet
 // PURE, bundled: the credential `whyCode` → words (a3 i18n; the registry is
 // already in the bundle for the Integrations window).
 import * as R from '../integration-registry.js';
 // a3 i18n: a route failure is worded by its CODE here, never by the engine's sentence.
 import { routeErrorText, groupErrorText, statusTagParts, viewSwitchText } from './channel-words.js';
 // g3 (design §22): the IM-first list's arithmetic and the group dialogs.
-import { groupListRows, foldsFrom, GROUP_ADAPTER_ID, firstScreen, statusTag } from './channel-groups-view.js';
+import { groupListRows, foldsFrom, GROUP_ADAPTER_ID, firstScreen, statusTag, filterRows } from './channel-groups-view.js';
+// design 008 (B-3cf8): the rows this panel HOLDS — the first read + every page read, keyed (PURE)
+import { createRowStore, applyFirst, applyPage, applyBroadcast, listRows, focusRowsOf, ensureList, pageQueryOf, accountList } from './channel-rows.js';
+import { afterCursor, PAGE_MAX } from '../channel-focus.js';
 import { clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): a group row's cleared last line
 import { showGroupMembersDialog, showGroupDetail, renameGroup, archiveGroup } from './channel-group-dialogs.js';
 // R4: access and notification — two operations (Grant access… / Notify…),
@@ -356,36 +361,148 @@ function showSearchDialog(app, a, { q: initial = '' } = {}) {
   const list = document.createElement('div');
   list.className = 'chan-search-results';
   body.append(row, status, list);
+  // design 010 (B-c9be): TWO SECTIONS — the saved copy at once ("Saved messages" + what it covered), then the vendor's
+  // own search over its whole history on the SAME press ("Older messages — from Lark's search"), each hit marked "Not
+  // saved here"; the end of section two loads its next page on scroll (a sentinel one screen ahead, a skeleton row —
+  // the owner's rule: no "Show more"). Section two is built BELOW section one before anything lands: nothing in
+  // section one ever moves. A press is the person's intent; typing, opening, the panel's filter box ask nothing.
+  let gen = 0, observer = null;
+  const aroundCache = new Map();   // the sheet's records, for the dialog's life (never stored)
+  const vendorOf = (acc) => (acc.vendor ? t(acc.vendor) : (acc.label || acc.kind || acc.id));
+  const hitRow = (acc, head0, who0, text0, extra) => {
+    const it = document.createElement('div');
+    it.className = 'chan-search-hit';
+    const head = document.createElement('div');
+    head.className = 'chan-search-head';
+    const ti = document.createElement('b'); ti.textContent = head0;
+    const who = document.createElement('span'); who.className = 'chan-search-who'; who.textContent = who0;
+    head.append(ti, who);
+    if (extra) head.appendChild(extra);
+    const tx = document.createElement('div'); tx.className = 'chan-search-text'; tx.textContent = text0;
+    it.append(head, tx);
+    return it;
+  };
+  const section = (cls, words) => {
+    const sec = document.createElement('div'); sec.className = 'chan-search-sec ' + cls;
+    const h = document.createElement('div'); h.className = 'chan-search-sec-head'; h.textContent = words;
+    const note = document.createElement('div'); note.className = 'chan-search-cov';
+    const rows = document.createElement('div'); rows.className = 'chan-search-rows';
+    sec.append(h, note, rows);
+    list.appendChild(sec);
+    return { sec, h, note, rows };
+  };
+  const openAround = async (acc, hit) => {
+    const { body: sb, close: sclose } = createModalShell({ id: 'chan-around-sheet', title: t('Around this message'), dialogClass: 'chan-dialog chan-around', escapeToClose: true });
+    const note = chanLine('chan-flow-status', t("This is {vendor}'s history — VibeSpace did not save it", { vendor: vendorOf(acc) }));
+    const box = document.createElement('div'); box.className = 'chan-around-list';
+    sb.append(note, box);
+    if (hit.known) { const open = btn(t('Open the conversation'), () => { sclose(); close(); app.openChannel(acc.id, hit.convId); }, 'mounts-btn-primary'); open.classList.add('chan-around-open'); sb.appendChild(open); }
+    const k = `${acc.id}\u0000${hit.convId}\u0000${hit.vendorId}`;
+    let x = aroundCache.get(k);
+    if (!x) {
+      box.appendChild(chanLine('chan-search-cov', t('Loading the messages around it…')));
+      x = await fetchJson(`/api/channels/${encodeURIComponent(acc.id)}/${encodeURIComponent(hit.convId)}/around?msg=${encodeURIComponent(hit.vendorId)}&at=${encodeURIComponent(hit.at)}`);
+      if (x && x.ok) aroundCache.set(k, x);
+    }
+    box.textContent = '';
+    if (!x || !x.ok) { box.appendChild(chanLine('chan-search-cov', x && x.code ? routeErrorText(x) : t('Could not read the messages around it'))); return; }
+    const base = `/api/channels/${encodeURIComponent(acc.id)}/${encodeURIComponent(hit.convId)}`;
+    for (const r of renderAroundRows(x.records || [], { base, focus: hit.vendorId })) box.appendChild(r);
+    const f = box.querySelector('.chanmsg-found');
+    if (f && f.scrollIntoView) f.scrollIntoView({ block: 'center' });
+  };
   const run = async () => {
     const q = input.value.trim();
     if (q.length < 2) { status.textContent = t('Type at least 2 characters.'); return; }
+    if (go.disabled) return;   // a held Enter key: one press at a time (the server's 2 s floor is the belt)
+    const my = ++gen;
+    if (observer) { observer.disconnect(); observer = null; }
     go.disabled = true; status.textContent = t('Searching…');
-    const answers = await Promise.all(accounts.map((acc) => fetchJson(`/api/channels/search?adapter=${encodeURIComponent(acc.id)}&q=${encodeURIComponent(q)}`).then((x) => ({ acc, x }))));
-    go.disabled = false;
     list.textContent = '';
+    const s1 = section('chan-search-saved', t('Saved messages'));
+    const answers = await Promise.all(accounts.map((acc) => fetchJson(`/api/channels/search?adapter=${encodeURIComponent(acc.id)}&q=${encodeURIComponent(q)}`).then((x) => ({ acc, x }))));
+    if (my !== gen) return;
+    go.disabled = false;
     const bad = answers.find(({ x }) => !x || x.error);
     if (bad && answers.every(({ x }) => !x || x.error)) { status.textContent = routeErrorText(bad.x); return; }
     const r = { truncated: answers.some(({ x }) => x && x.truncated), results: [] };
-    for (const { acc, x } of answers) for (const hit of (x && x.results) || []) r.results.push({ ...hit, adapterId: acc.id });
+    const cov = { scanned: 0, total: 0, capped: false };
+    for (const { acc, x } of answers) {
+      for (const hit of (x && x.results) || []) r.results.push({ ...hit, adapterId: acc.id });
+      const c = SR.coverageOf(x && x.coverage);
+      cov.scanned += c.scanned; cov.total += c.total; cov.capped = cov.capped || c.capped;
+    }
     r.results.sort((m, n) => (Number(n.record && n.record.at) || 0) - (Number(m.record && m.record.at) || 0));
     status.textContent = r.results.length ? (r.truncated ? t('{n} results — more exist; narrow the words', { n: r.results.length }) : t('{n} results', { n: r.results.length })) : t('No message matches.');
+    s1.note.textContent = SR.coverageText(cov, { t });
     for (const hit of r.results) {
-      const it = document.createElement('div');
-      it.className = 'chan-search-hit';
-      const head = document.createElement('div');
-      head.className = 'chan-search-head';
-      const ti = document.createElement('b'); ti.textContent = hit.title || chanCaps.untitledText(null, { t });
-      const who = document.createElement('span'); who.className = 'chan-search-who'; who.textContent = `${(hit.record.author && (hit.record.author.name || hit.record.author.id)) || ''} · ${rowTime(hit.record.at)}`;
-      head.append(ti, who);
-      const tx = document.createElement('div'); tx.className = 'chan-search-text'; tx.textContent = String(hit.record.text || '').slice(0, 300);
-      it.append(head, tx);
+      const it = hitRow(null, hit.title || chanCaps.untitledText(null, { t }), `${(hit.record.author && (hit.record.author.name || hit.record.author.id)) || ''} · ${rowTime(hit.record.at)}`, String(hit.record.text || '').slice(0, 300));
       it.onclick = () => { close(); app.openChannel(hit.adapterId, hit.convId); };
-      list.appendChild(it);
+      s1.rows.appendChild(it);
+    }
+    // SECTION TWO — every searched account's own search, on this press
+    const asked = answers.filter(({ x }) => x && !x.error);
+    if (!asked.length) return;
+    const names = [...new Set(asked.filter(({ x }) => x.vendorSearch).map(({ acc }) => vendorOf(acc)))];
+    const s2 = section('chan-search-vendor', SR.sectionHead(asked.filter(({ x }) => x.vendorSearch).map(({ x }) => x.vendorSearch.adds), { t, vendor: names.join(' · ') || vendorOf(asked[0].acc) }));
+    const shown = new Set(r.results.map((h) => `${h.adapterId}\u0000${h.convId}\u0000${h.record && h.record.vendorId}`));
+    const skel = document.createElement('div'); skel.className = 'chan-search-skel'; skel.hidden = true;
+    const sentinel = document.createElement('div'); sentinel.className = 'chan-search-sentinel';
+    s2.sec.append(skel, sentinel);
+    const states = asked.map(({ acc, x }) => {
+      const line = document.createElement('div'); line.className = 'chan-search-vstatus'; s2.note.appendChild(line);
+      return { acc, line, offered: !!x.vendorSearch, next: null, busy: false, found: 0, match: x.vendorSearch && x.vendorSearch.match, adds: x.vendorSearch && x.vendorSearch.adds, retried: false };
+    });
+    const say = (st, v) => {
+      st.line.textContent = (states.length > 1 ? `${st.acc.label || st.acc.id}: ` : '') + SR.statusText(v, { t, vendor: vendorOf(st.acc) });
+      if (v.state === 'refused' && v.code === 'needs-scope' && !st.line.querySelector('button')) { const re = btn(t('Re-authorize'), () => { close(); showReauthAccountDialog(app, st.acc, { kinds: [] }); }); re.classList.add('chan-sec-verb'); st.line.appendChild(re); }
+    };
+    const busyAny = () => { skel.hidden = !states.some((st) => st.busy); };
+    const ask = async (st, page = null) => {
+      if (st.busy || my !== gen) return;
+      st.busy = true; busyAny();
+      if (!page) say(st, { state: 'asking' });
+      const x = await fetchJson(`/api/channels/search/full?adapter=${encodeURIComponent(st.acc.id)}&q=${encodeURIComponent(q)}${page ? `&page=${encodeURIComponent(page)}` : ''}`);
+      st.busy = false; busyAny();
+      if (my !== gen) return;
+      if (!x || x.ok === false || x.error) {
+        const code = (x && x.code) || 'failed';
+        if (['not-supported', 'needs-scope', 'backoff', 'search-floor', 'search-minute', 'vendor-budget'].includes(code)) {
+          say(st, { state: 'refused', code, retryAfterSec: x && x.retryAfterSec });
+          // the dialog retries by itself ONCE when the wait ends (never a loop)
+          if (code !== 'not-supported' && code !== 'needs-scope' && !st.retried && x && x.retryAfterSec) { st.retried = true; setTimeout(() => { if (my === gen && document.body.contains(list)) ask(st, page); }, Number(x.retryAfterSec) * 1000 + 250); }
+        } else say(st, { state: 'failed' });
+        return;
+      }
+      st.match = x.match || st.match; st.adds = x.adds || st.adds;
+      for (const h of x.hits || []) {
+        const key = `${st.acc.id}\u0000${h.convId}\u0000${h.vendorId}`;
+        if (shown.has(key)) continue;   // a hit section one already holds appears once (V6)
+        shown.add(key);
+        const chip = document.createElement('span'); chip.className = 'chan-search-chip'; chip.textContent = t('Not saved here');
+        const it = hitRow(st.acc, h.known ? (h.title || chanCaps.untitledText(null, { t })) : t('A conversation not yet synced'), `${h.author && h.author.name ? `${h.author.name} · ` : ''}${rowTime(h.at)}`, String(h.snippet || ''), chip);
+        it.classList.add('chan-search-vhit');
+        it.dataset.vid = h.vendorId;
+        it.onclick = () => openAround(st.acc, h);
+        s2.rows.appendChild(it);
+        st.found++;
+      }
+      st.next = x.next || null;
+      say(st, { state: 'done', found: st.found, match: st.match, adds: st.adds });
+    };
+    for (const st of states) { if (st.offered) ask(st); else say(st, { state: 'refused', code: 'not-supported' }); }
+    // the end of section two, ONE screen ahead: each account's next page, one request each
+    if (typeof IntersectionObserver === 'function') {
+      observer = new IntersectionObserver((ents) => {
+        if (my !== gen || !ents.some((en) => en.isIntersecting)) return;
+        for (const st of states) if (st.next && !st.busy) ask(st, st.next);
+      }, { root: list, rootMargin: '0px 0px 100% 0px' });
+      observer.observe(sentinel);
     }
   };
   go.onclick = run;
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); run(); } });
-  if (initial) { input.value = initial; run(); }
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if (!e.repeat) run(); } });
+  if (initial) { input.value = initial; run(); }   // the panel's "Search messages for …" — the owner's press on it
   setTimeout(() => input.focus(), 30);
 }
 
@@ -604,8 +721,11 @@ export function registerChannelAdapterMenu() {
   const M = 'channel-adapter';
   const A = (c) => c.adapter;
   const acct = (c) => !!A(c).connectable;
-  registerMenuItem({ menu: M, group: '1_rows', order: 5, when: (c) => acct(c) && (c.convs || []).length > 0, label: () => t('Open conversation window'), run: (c) => openConversationOf(c.app, c.convs) });
-  registerMenuItem({ menu: M, group: '1_rows', order: 8, when: (c) => !A(c).builtin && (c.convs || []).length > 0, label: () => t('Search messages…'), run: (c) => showSearchDialog(c.app, A(c)) });
+  // design 008: an account's rows may not be loaded (its head is the newest 30) — the verbs ask its COUNT (`count`, the
+  // kept facts) and the loaded rows only for what they open (the newest, which the head always holds)
+  const convCount = (c) => (Number.isFinite(c.count) ? c.count : (c.convs || []).length);
+  registerMenuItem({ menu: M, group: '1_rows', order: 5, when: (c) => acct(c) && convCount(c) > 0, label: () => t('Open conversation window'), run: (c) => openConversationOf(c.app, c.convs) });
+  registerMenuItem({ menu: M, group: '1_rows', order: 8, when: (c) => !A(c).builtin && convCount(c) > 0, label: () => t('Search messages…'), run: (c) => showSearchDialog(c.app, A(c)) });
   // R4 (2026-09-27, design §7.3): TWO OPERATIONS, ACCESS FIRST — who may see
   // and act on the whole account, then who is woken; a rule's conversations
   // are a grain of their own (a new rule starts with its access)
@@ -757,15 +877,20 @@ let ARCHIVED_OPEN = false;
  *  conversations is a real account): the first screen and each account card
  *  draw the newest rows first and the rest behind "Show all" (per page
  *  session, like the folds). */
-const FIRST_SCREEN_ROWS = 60;
-const ACCOUNT_ROWS = 30;
-let FIRST_ALL = false;
+//  design 008 (B-3cf8): the rows beyond come from the server, a page as the list's END comes near (60 in All, 200 in an
+//  account — src/lib/channel-rows.js; owner 2026-10-03: seamless, no "Show more"); "Show all N" built every row in the
+//  DOM and needed every row on the client.
+const SEARCH_DEBOUNCE_MS = 250;
+// owner 2026-10-03 (seamless lists): a re-read keeps the range a list had — at most this many pages of PAGE_MAX
+const REREAD_PAGES = 10;
+// a screen the pages do not fill reads on by itself — at most this many pages while the list's end stays in view
+const FILL_PAGES = 5;
+const raf = (f) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(f) : setTimeout(f, 16));
 /** R3 (2026-09-26, design §23 — the owner: "开头不要把所有消息都放进来 … 只放重要
  *  消息/conversation … 并展示一个小tag表示状态"): the first screen is the
  *  ATTENTION list (`focus`, the default) and the whole list is one switch away
  *  (`all`) — per page session, like the folds. */
 let VIEW = 'focus';
-const ACCOUNT_ALL = new Set();
 
 // ── THE SECONDARY SECTIONS' FOLDS (g3): persisted in user state
 // (`channelsPanelFolds`, PATCH merge-only, the jobsPanelFolds pattern) —
@@ -878,12 +1003,18 @@ export function renderChannelsPanel(app, c) {
   segFocus.type = 'button'; segFocus.dataset.view = 'focus';
   const segAll = chanEl('button', 'jobs-btn chan-view-btn');
   segAll.type = 'button'; segAll.dataset.view = 'all';
-  for (const b of [segFocus, segAll]) b.onclick = (ev) => { ev.stopPropagation(); VIEW = b.dataset.view; draw(); };
+  for (const b of [segFocus, segAll]) b.onclick = (ev) => { ev.stopPropagation(); VIEW = b.dataset.view; draw(); wantAll(); };
+  /** design 008: All draws its OWN list (newest first, read from the server) — read on first view or when stale. */
+  function wantAll() {
+    if (VIEW !== 'all') return;
+    const l = store.lists.get('all');
+    if (!l || !l.loaded || l.stale) readList('all').catch(() => {});
+  }
   seg.append(segFocus, segAll);
   summary.appendChild(seg);
   // …and the FILTER over the rows the list shows (title / source / last line),
   // outside the repainted list so a broadcast never eats a keystroke
-  const { row: find, input: findInput } = filterBox(() => draw());
+  const { row: find, input: findInput } = filterBox(() => { draw(); queueSearch(); });
   // the second row: the filter, then the two actions (New group, Outbox) — the switch
   // above gets the WHOLE width (measured: beside the two buttons at the 188 px rail it
   // cut "1 需关注" to "1 需…" and "全部 8" to "全…")
@@ -892,8 +1023,150 @@ export function renderChannelsPanel(app, c) {
   root.className = 'chan-list';
   c.append(bar, find, root);
 
-  /** The two inputs the list is drawn from — each replaced whole by its own broadcast. */
+  /** The two inputs the list is drawn from — `digest` = the accounts, counts and totals of the last read / broadcast
+   *  (design 008: its rows live in `store`, keyed), `groups` the group list (replaced whole by its broadcast). */
   let digest = null, groups = null;
+  const store = createRowStore();
+  // design 008: A LIST READ FROM THE SERVER — a page (its end came near), a re-read of what a stale list had, the search.
+  //  One read per list at a time; a row a broadcast wrote while the page was on its way keeps the broadcast's copy.
+  const reading = new Set();
+  async function readList(name, { more = false, q = '' } = {}) {
+    if (reading.has(name) || !c.isConnected) return;
+    if (name === 'search') ensureList(store, 'search', { q });
+    const qs = pageQueryOf(store, name, { more });
+    const gen = store.gen;
+    const l0 = store.lists.get(name);
+    // a RE-READ keeps the RANGE the list had (owner 2026-10-03: a reconnect / a whole broadcast never jumps a list back
+    //  to its top) — pages of PAGE_MAX until it holds what it held, at most REREAD_PAGES
+    const want = more || !l0 ? 0 : Math.max(l0.had || 0, l0.keys.size);
+    reading.add(name);
+    if (more && digest !== null && groups !== null) draw();   // the skeleton row at the list's end while the page is read
+    let landed = false;
+    try {
+      const url = (x) => '/api/channels/rows?' + new URLSearchParams(x).toString();
+      let page = await fetchJson(url(qs));
+      if (want > PAGE_MAX && page && !page.error) {
+        const acc = [...(page.rows || [])];
+        for (let k = 1; k < REREAD_PAGES && page.next && acc.length < want; k++) {
+          const nx = await fetchJson(url({ ...qs, limit: String(PAGE_MAX), beforeAt: String(page.next.lastAt), beforeKey: page.next.key }));
+          if (!nx || nx.error) break;
+          acc.push(...(nx.rows || []));
+          page = nx;
+        }
+        page = { ...page, rows: acc };
+      }
+      if (!c.isConnected || !page || page.error) return;
+      if (name === 'search' && (store.lists.get('search') || {}).q !== q) return;   // the words moved on while it was read
+      applyPage(store, name, page, { replace: !more, gen, q });
+      landed = true;
+    } finally {
+      reading.delete(name);
+      if (c.isConnected && digest !== null && groups !== null) draw();
+      // a screen the new rows do not fill reads on (FILL_PAGES bounds it)
+      if (landed) raf(() => { const el = ends.get(name); if (el && el.isConnected && nearEnd(el)) pull(name); });
+    }
+  }
+  // THE LIST'S END LOADS ITSELF (owner 2026-10-03: no "Show more" — seamless): a sentinel after the last row, watched by
+  //  an IntersectionObserver ONE SCREEN AHEAD (rootMargin = the scroll box's height), reads the next page; a skeleton row
+  //  stands there while it is read; at the end, nothing. A screen the pages do not fill reads on — at most FILL_PAGES
+  //  pages while the view does not move down the list, so a maximize / a resize can not chain reads without bound; the
+  //  end leaving the view, a scroll further down, or focus reaching it starts a new count. These are our own row pages, not a vendor's metered
+  //  list (channel-paging's "a scroll is not intent" rule is about those).
+  const ends = new Map();    // list name → its kept end element
+  const chain = new Map();   // list name → pages read while its end stayed in view
+  const chainTop = new Map();   // list name → the scroll box's scrollTop at its last read
+  let io = null, ioRoot = null, scrollAt = null, scrollQueued = false;
+  const scrollTopOf = () => (ioRoot ? ioRoot.scrollTop : ((document.scrollingElement || document.documentElement || {}).scrollTop || 0));
+  function pull(name) {
+    const l = store.lists.get(name);
+    if (!l || !l.next || reading.has(name) || !c.isConnected) return;
+    // a person scrolling DOWN asks again each time (verify r1: a fling that kept the end in view stopped after
+    //  FILL_PAGES) — the bound is for reads the view did not move for; a resize never moves scrollTop down the list
+    const top = scrollTopOf();
+    if (top > (chainTop.has(name) ? chainTop.get(name) : Infinity)) chain.set(name, 0);
+    chainTop.set(name, top);
+    const n = chain.get(name) || 0;
+    if (n >= FILL_PAGES) return;
+    chain.set(name, n + 1);
+    readList(name, { more: true, q: name === 'search' ? (findInput.value || '').trim() : '' }).catch(() => {});
+  }
+  /** The scroll box a list's end is watched in — the one that SCROLLS (`scrollerOf`: an `overflow: auto` box as tall as
+   *  its content scrolls nothing; verify r1: watching one made every end "near" and its scrollTop never moved) — else
+   *  the viewport (nothing overflows yet: every end is in view, and the fill bound holds). */
+  function scrollRootOf() { return scrollerOf(); }
+  /** Is the end drawn (a folded card's is not) and within one screen below what its scroll box shows? */
+  function nearEnd(el) {
+    if (!el.getClientRects().length) return false;
+    const r = el.getBoundingClientRect(), box = ioRoot ? ioRoot.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+    return r.bottom >= box.top && r.top <= box.bottom + (box.bottom - box.top);
+  }
+  function watchEnd(el) {
+    if (typeof IntersectionObserver !== 'function') return;
+    const r = scrollRootOf();
+    if (!io || ioRoot !== r) {
+      if (io) io.disconnect();
+      ioRoot = r;
+      io = new IntersectionObserver((entries) => {
+        if (!c.isConnected) { io.disconnect(); return; }
+        for (const e of entries) { const name = e.target.dataset.list; if (!e.isIntersecting) chain.set(name, 0); else pull(name); }
+      }, { root: r, rootMargin: '0px 0px 100% 0px' });
+      if (scrollAt) scrollAt.removeEventListener('scroll', onScroll);
+      scrollAt = r || window;
+      scrollAt.addEventListener('scroll', onScroll, { passive: true });
+      for (const s of ends.values()) if (s.isConnected) io.observe(s);
+    }
+    io.observe(el);
+  }
+  /** A scroll with an end still in view (the observer only speaks when it crosses) — once a frame; a panel gone lets go. */
+  function onScroll() {
+    if (!c.isConnected) { if (scrollAt) scrollAt.removeEventListener('scroll', onScroll); if (io) io.disconnect(); return; }
+    if (scrollQueued) return;
+    scrollQueued = true;
+    raf(() => { scrollQueued = false; for (const [name, el] of ends) if (el.isConnected && nearEnd(el)) pull(name); });
+  }
+  /** The END of a paged list: while the server has more, the sentinel (a skeleton row while a page is read); else null. */
+  function endOfList(name) {
+    const l = store.lists.get(name);
+    if (!l || !l.next) return null;
+    const el = keep('end:' + name, () => {
+      const s = document.createElement('div');
+      s.className = 'chan-list-end';
+      s.dataset.list = name;
+      s.tabIndex = 0;   // the keyboard and a screen reader reach the end too — focus there reads the next page
+      s.addEventListener('focus', () => { chain.set(name, 0); pull(name); });
+      return s;
+    });
+    const busy = reading.has(name);
+    el.classList.toggle('chan-row-skeleton', busy);
+    if (busy) { el.setAttribute('role', 'status'); el.setAttribute('aria-busy', 'true'); } else { el.removeAttribute('role'); el.removeAttribute('aria-busy'); }
+    el.setAttribute('aria-label', busy ? t('Loading more conversations…') : t('More conversations load here'));
+    ends.set(name, el);
+    raf(() => { if (el.isConnected) watchEnd(el); });
+    return el;
+  }
+  // focus on the LAST row's own parts (its ⋯ button) reads on too
+  root.addEventListener('focusin', (ev) => {
+    const row = ev.target && ev.target.closest ? ev.target.closest('.chan-grow, .chan-row') : null;
+    const end = row && row.nextElementSibling;
+    if (end && end.classList.contains('chan-list-end')) { chain.set(end.dataset.list, 0); pull(end.dataset.list); }
+  });
+  /** The lists a first read / reconnect / whole broadcast left stale: the one on screen re-reads now, the rest on view. */
+  function reread(names) {
+    for (const n of names || []) {
+      if (n === 'all' && VIEW === 'all') readList('all').catch(() => {});
+      else if (n === 'search' && (findInput.value || '').trim()) readList('search', { q: (findInput.value || '').trim() }).catch(() => {});
+      else if (n.startsWith('account:')) readList(n).catch(() => {});
+    }
+  }
+  // the filter's SERVER half (design 008): the attention rows filter locally at once; 250 ms after the last keystroke
+  //  the server answers how many rows of All match ("{n} more in All") — and the All view pages that answer
+  let searchTimer = null;
+  function queueSearch() {
+    if (searchTimer) clearTimeout(searchTimer);
+    const q = (findInput.value || '').trim();
+    if (!q) { store.lists.delete('search'); return; }
+    searchTimer = setTimeout(() => { searchTimer = null; readList('search', { q }).catch(() => {}); }, SEARCH_DEBOUNCE_MS);
+  }
 
   /** The nearest scroll container above the list (the rail's `#all-sessions-list`,
    *  a window's content) — the thing whose scrollTop a repaint must not move. */
@@ -958,13 +1231,33 @@ export function renderChannelsPanel(app, c) {
     const top = [];
     const into = { appendChild: (x) => { top.push(x); return x; } };
     const adapters = (d && d.adapters) || [];
-    const convs = (d && d.conversations) || [];
+    // design 008: the ATTENTION rows the store holds — the server's list (verify r1: a held row's stale tag never draws
+    //  it here); All and each account draw their own lists below
+    const convs = focusRowsOf(store, Date.now());
     const { rows, archived } = groupListRows({ groups: groups || [], conversations: convs, adapters, untitled: (kind) => chanCaps.untitledText(kind, { t }) });
     // R3 (§23): the ATTENTION list by default — what matters, one tag each (PURE firstScreen / statusTag)
     const q = findInput.value || '';
     const now = Date.now();
     const fs = firstScreen(rows, { view: VIEW, q, now });
-    const words = viewSwitchText({ focus: fs.focus, all: fs.all });
+    // design 008: THE COUNTS are the server's (kept facts) — the attention rows past the first read's cut and every row
+    //  of All are not on this client; All draws its own paged list (`search` under a query), groups interleaved by
+    //  activity down to the list's edge (a group older than the last row read waits for the next page)
+    const groupN = rows.filter((r) => r.kind === 'group').length;
+    const counts = (d && d.counts) || null;
+    const allN = counts ? groupN + (Number(counts.all) || 0) : fs.all;
+    const focusN = fs.focus + (Number(store.cut) || 0);
+    const allName = q.trim() ? 'search' : 'all';
+    const allList = store.lists.get(allName) || null;
+    const allReady = !!(allList && allList.loaded);
+    if (fs.view === 'all') {
+      const listed = groupListRows({ groups: groups || [], conversations: listRows(store, allName), adapters, untitled: (kind) => chanCaps.untitledText(kind, { t }) }).rows;
+      fs.shown = filterRows(allList && allList.next ? listed.filter((r) => r.kind !== 'group' || !afterCursor(r, allList.next)) : listed, q);
+    } else if (q.trim()) {
+      // "{n} more in All": the server's matches over every row, less the attention rows shown
+      const sl = store.lists.get('search');
+      fs.moreInAll = sl && sl.loaded && sl.q === q.trim() ? Math.max(0, (Number(sl.total) || 0) - fs.shown.filter((r) => r.kind === 'conv').length) : 0;
+    }
+    const words = viewSwitchText({ focus: focusN, all: allN });
     segFocus.textContent = words.focus; segFocus.title = t('What needs you or an agent: handed to an agent, read by one in the last 24 h, awaiting your approval, a held wake, or a reply of yours in the last 24 h');
     segAll.textContent = words.all; segAll.title = t('Every conversation of every connected account, newest first');
     segFocus.classList.toggle('chan-seg-on', fs.view === 'focus');
@@ -996,18 +1289,18 @@ export function renderChannelsPanel(app, c) {
     const list = { appendChild: (x) => { listKids.push(x); return x; } };
     if (!rows.length) {
       list.appendChild(chanLine('empty-hint chan-groups-empty', t('No groups yet. "New group" starts one with live agent sessions; an agent can too (vibespace-msg group create). Every conversation of an account you connect below appears here as well.')));
-    } else if (fs.view === 'focus' && !fs.focus) {
-      list.appendChild(chanLine('empty-hint chan-groups-empty chan-focus-empty', t('Nothing here needs you or an agent yet. A conversation appears here when you hand it to an agent, an agent reads it, a draft waits for your approval, a wake is held, or you reply in it. Every conversation is under All ({n}).', { n: fs.all })));
-    } else if (!fs.shown.length && q.trim()) {
+    } else if (fs.view === 'focus' && !focusN) {
+      list.appendChild(chanLine('empty-hint chan-groups-empty chan-focus-empty', t('Nothing here needs you or an agent yet. A conversation appears here when you hand it to an agent, an agent reads it, a draft waits for your approval, a wake is held, or you reply in it. Every conversation is under All ({n}).', { n: allN })));
+    } else if (!fs.shown.length && q.trim() && (fs.view === 'focus' || allReady)) {
       list.appendChild(chanLine('empty-hint chan-groups-empty', t('No conversation matches "{q}".', { q: q.trim() })));
     }
-    // the ALL view keeps its first-page cap (an aggregated account is 800+ rows); the attention list is short by construction
-    const capped = fs.view === 'all' && !q.trim() && !FIRST_ALL;
-    const shown = capped ? fs.shown.slice(0, FIRST_SCREEN_ROWS) : fs.shown;
-    for (const r of shown) list.appendChild(groupRow(r, now));
-    if (fs.shown.length > shown.length) list.appendChild(moreToggle(t('Show all {n} conversations', { n: fs.shown.length }), () => { FIRST_ALL = true; draw(); }));
+    // the ALL view is the server's pages — its end reads the next one as it comes near (design 008; owner 2026-10-03:
+    //  seamless, no button); the attention list is short by construction
+    for (const r of fs.shown) list.appendChild(groupRow(r, now));
+    const allEnd = fs.view === 'all' ? endOfList(allName) : null;
+    if (allEnd) list.appendChild(allEnd);
     if (fs.moreInAll > 0) {
-      const more = moreToggle(t('{n} more in All', { n: fs.moreInAll }), () => { VIEW = 'all'; draw(); });
+      const more = moreToggle(t('{n} more in All', { n: fs.moreInAll }), () => { VIEW = 'all'; draw(); wantAll(); });
       more.dataset.moreInAll = String(fs.moreInAll);
       list.appendChild(more);
     }
@@ -1042,7 +1335,7 @@ export function renderChannelsPanel(app, c) {
     const kinds = (d && Array.isArray(d.kinds)) ? d.kinds : [];
     into.appendChild(part('accounts', t('Accounts'), accounts.length ? String(accounts.length) : '', (b) => {
       if (!accounts.length && !kinds.length) b.appendChild(chanLine('empty-hint empty-hint-inline', t('No account connected.')));
-      for (const a of accounts) b.appendChild(section(a, convs.filter((x) => x.adapterId === a.id), siblings, ordinal));
+      for (const a of accounts) b.appendChild(section(a, listRows(store, accountList(a.id)), siblings, ordinal));
       // ONE entry at the bottom (r4 §8.1 #6/#11 — the storage footer's
       // "Connect storage"): the type-first dialog serves every type, so the
       // per-kind buttons and "Add account…" are retired
@@ -1066,7 +1359,7 @@ export function renderChannelsPanel(app, c) {
     if (watcher.length) {
       into.appendChild(part('watcher', t('Message watcher'), '', (b) => {
         b.appendChild(chanLine('chan-part-note', t('Follow a live agent session as a source: assign or filter it for another agent. To talk WITH agents, use a group.')));
-        for (const a of watcher) b.appendChild(section(a, convs.filter((x) => x.adapterId === a.id), siblings, ordinal));
+        for (const a of watcher) b.appendChild(section(a, listRows(store, accountList(a.id)), siblings, ordinal));
       }));
     }
     return top;
@@ -1233,16 +1526,18 @@ export function renderChannelsPanel(app, c) {
     if (dot.dataset.state !== dotState) dot.dataset.state = dotState;
     const dTitle = dotTitle(a);
     if (dot.title !== dTitle) dot.title = dTitle;
-    const unreadN = listed.reduce((n, x) => n + (Number(x.unread) || 0), 0);
-    const cntText = String(listed.length);
+    // design 008: the account's numbers are the kept facts (its rows are the head + the pages read)
+    const total = accountCount(a, listed.length);
+    const unreadN = a.scheduler && Number.isFinite(a.scheduler.unread) ? a.scheduler.unread : listed.reduce((n, x) => n + (Number(x.unread) || 0), 0);
+    const cntText = String(total);
     if (cnt.textContent !== cntText) cnt.textContent = cntText;
-    const cntTitle = unreadN ? t('{n} conversations · {k} unread', { n: listed.length, k: unreadN }) : t('{n} conversations', { n: listed.length });
+    const cntTitle = unreadN ? t('{n} conversations · {k} unread', { n: total, k: unreadN }) : t('{n} conversations', { n: total });
     if (cnt.title !== cntTitle) cnt.title = cntTitle;
     edit.title = t('Edit the account (client, filters, push)');
     edit.setAttribute('aria-label', t('Edit'));
     edit.onclick = (ev) => { ev.stopPropagation(); showEditAccountDialog(app, a, { kinds }); };
     more.title = t('More actions');
-    const openMenu = (x, y) => showContextMenu(x, y, menuItems('channel-adapter', { app, adapter: a, convs: mine, kinds }));
+    const openMenu = (x, y) => showContextMenu(x, y, menuItems('channel-adapter', { app, adapter: a, convs: mine, count: total, kinds }));
     // `ev.currentTarget`, never `more`: the handler is re-assigned onto the KEPT button every draw
     more.onclick = (ev) => { ev.stopPropagation(); const r = ev.currentTarget.getBoundingClientRect(); openMenu(r.left, r.bottom + 2); };
     h.onclick = () => {
@@ -1258,16 +1553,25 @@ export function renderChannelsPanel(app, c) {
     const rowsEl = keep('rows:' + a.id, () => { const el = document.createElement('div'); el.className = 'chan-rows'; return el; });
     const rowKids = [];
     const rows = { appendChild: (x) => { rowKids.push(x); return x; } };
-    const cap = ACCOUNT_ALL.has(a.id) ? listed.length : ACCOUNT_ROWS;
-    for (const conv of listed.slice(0, cap)) rows.appendChild(row(conv, { child: true }));
-    if (listed.length > cap) rows.appendChild(moreToggle(t('Show all {n} conversations', { n: listed.length }), () => { ACCOUNT_ALL.add(a.id); draw(); }));
+    for (const conv of listed) rows.appendChild(row(conv, { child: true }));
+    moreRows(a, rows);
     if (!listed.length && a.enabled !== false && (a.auth || {}).state === 'connected') rows.appendChild(chanLine('empty-hint empty-hint-inline chan-sec-empty', t('No conversations yet — the first pass lists them.')));
     reconcile(rowsEl, rowKids);
     sec.appendChild(rowsEl);
     reconcile(secEl, secKids);
     return secEl;
   }
-  /** "Show all N" — a quiet text button under a capped list. */
+  /** design 008: an account's list read past its head — its end reads the next page (200) as it comes near (seamless). */
+  function moreRows(a, rows) {
+    const end = endOfList(accountList(a.id));
+    if (end) rows.appendChild(end);
+  }
+  /** An account's listed conversations — the kept facts (`counts.byAdapter`), else what is held. */
+  function accountCount(a, held) {
+    const by = digest && digest.counts && digest.counts.byAdapter;
+    return by && Number.isFinite(by[a.id]) ? by[a.id] : held;
+  }
+  /** "{n} more in All" / "Search messages for …" — a quiet text button under a list. */
   function moreToggle(label, onClick) {
     const b = btn(label, onClick, 'chan-more-btn');
     b.dataset.showAll = '1';
@@ -1332,15 +1636,16 @@ export function renderChannelsPanel(app, c) {
     h.appendChild(dot);
     const cnt = document.createElement('span');
     cnt.className = 'chan-sec-count';
-    cnt.textContent = String(mine.length);
-    cnt.title = t('{n} conversations', { n: mine.length });
+    const total = accountCount(a, mine.length);
+    cnt.textContent = String(total);
+    cnt.title = t('{n} conversations', { n: total });
     h.appendChild(cnt);
     const more = document.createElement('button');
     more.type = 'button';
     more.className = 'icon-btn chan-sec-more';
     more.title = t('More actions');
     more.appendChild(icon('more', 13));
-    const openMenu = (x, y) => showContextMenu(x, y, menuItems('channel-adapter', { app, adapter: a, convs: mine, kinds: (digest && digest.kinds) || [] }));
+    const openMenu = (x, y) => showContextMenu(x, y, menuItems('channel-adapter', { app, adapter: a, convs: mine, count: total, kinds: (digest && digest.kinds) || [] }));
     // `ev.currentTarget`, never `more`: reconcile may adopt this handler onto the KEPT button (round 5) and `more` is then the fresh, detached one
     more.onclick = (ev) => { ev.stopPropagation(); const r = ev.currentTarget.getBoundingClientRect(); openMenu(r.left, r.bottom + 2); };
     h.appendChild(more);
@@ -1373,9 +1678,8 @@ export function renderChannelsPanel(app, c) {
       e.textContent = t('No conversations discovered yet.');
       rows.appendChild(e);
     }
-    const cap = ACCOUNT_ALL.has(a.id) ? listed.length : ACCOUNT_ROWS;
-    for (const conv of listed.slice(0, cap)) rows.appendChild(row(conv));
-    if (listed.length > cap) rows.appendChild(moreToggle(t('Show all {n} conversations', { n: listed.length }), () => { ACCOUNT_ALL.add(a.id); draw(); }));
+    for (const conv of listed) rows.appendChild(row(conv));
+    moreRows(a, rows);
     reconcile(rowsEl, rowKids);
     sec.appendChild(rowsEl);
     reconcile(secEl, secKids);
@@ -1482,12 +1786,16 @@ export function renderChannelsPanel(app, c) {
     const [d, g] = await Promise.all([fetchJson('/api/channels'), fetchJson('/api/channel-groups'), loadFolds(app)]);
     if (!c.isConnected) return;
     if (d && d.error) { root.textContent = ''; const e = document.createElement('div'); e.className = 'empty-hint'; e.textContent = d.error; root.appendChild(e); return; }
-    digest = d;
+    // design 008: the FIRST READ (bounded) — a reconnect's too; the lists it leaves stale are re-read below
+    const stale = applyFirst(store, d, Date.now());
+    digest = store.meta;
     // a refused group list is an EMPTY list plus a toast — the channel half still draws
     if (groupsGen !== g0) { /* a broadcast's list landed while this one was on its way — it is newer */ }
     else if (g && !g.error) groups = Array.isArray(g.groups) ? g.groups : [];
     else { groups = []; if (g && g.code !== 'unavailable') showToast(groupErrorText(g), { type: 'error' }); }
     draw();
+    reread(stale);
+    wantAll();
   }
 
   // THE HANDLER IS HELD IN A NAMED CONST AND REMOVED BY NAME (r2) — see the
@@ -1510,7 +1818,9 @@ export function renderChannelsPanel(app, c) {
       return;
     }
     if (msg.type !== 'channels-updated') return;
-    if (msg.digest) { digest = mergeDigest(digest, msg.digest); if (groups !== null) draw(); } else refresh().catch(() => {});
+    // design 008: a partial broadcast patches the held rows by key (the never-loaded rule); a whole one is the FIRST
+    //  READ's bounded shape — the list on screen re-reads what it had (≤ 200 rows), never a fetch per partial
+    if (msg.digest) { const r = applyBroadcast(store, msg.digest, Date.now()); digest = store.meta; if (groups !== null) draw(); reread(r.refetch); } else refresh().catch(() => {});
   };
   app.ws.onGlobal(onBroadcast);
   // A BROADCAST SENT WHILE THE SOCKET WAS DOWN NEVER ARRIVES (lane R2 verify
@@ -1557,19 +1867,8 @@ export function reconcile(parent, out) {
   for (let i = 0; i < out.length; i++) if (kids[i] !== out[i]) parent.insertBefore(out[i], kids[i] || null);
 }
 
-/** A PARTIAL broadcast (2026-09-26: an account of 873 conversations made the
- *  whole digest ~1 MB) carries the adapters, the totals and ONLY the rows
- *  that changed: those rows replace theirs by key; a whole digest replaces
- *  everything. Exported for the suite. */
-export function mergeDigest(prev, next) {
-  if (!next) return prev;
-  if (!next.partial || !prev) return next;
-  const byKey = new Map((prev.conversations || []).map((c) => [c.key, c]));
-  for (const c of next.conversations || []) byKey.set(c.key, c);
-  const adapterIds = new Set((next.adapters || []).map((a) => a.id));
-  const conversations = [...byKey.values()].filter((c) => adapterIds.has(c.adapterId)).sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
-  return { ...prev, ...next, conversations, partial: false };
-}
+// (design 008: `mergeDigest` — the whole list re-sorted on every partial broadcast — is retired; the keyed store's
+//  applyBroadcast, src/lib/channel-rows.js, is the rule.)
 
 /** Focus the rail's Channels panel (the ⚙ row and any deep link) — or, where
  *  no rail exists (mobile, `sidebar.activityRail` off), the SAME panel in a

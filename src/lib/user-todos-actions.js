@@ -17,10 +17,12 @@
 //
 // `inboxModel(app)` is memoized on the app: the first caller (the panel's
 // install at boot) builds it, the window asks for the same one.
-import { t } from './i18n.js';
+import { t, resolveLang } from './i18n.js';
 import { fetchJson, showToast } from './utils.js';
 import { replyButtonState, liveDotState, LIVE_DOT_WHY, restoreDetails } from './user-todos-layout.js'; // PURE: the reply verdict + the running dot (design-user-inbox-reply D1.5/D1.7); restoreDetails = the whole detail this client already saw survives a snapshot that previews it
-import { showInstallDialog } from './desktop-app-launcher.js'; // Layer 0 apps: THE install dialog an agent's install proposal opens (the same component as "Install xpra on {machine}…")
+import { showInstallDialog, launchDpr, launchUiScale } from './desktop-app-launcher.js';
+import { appRefusalText } from './app-install-dialog.js'; // a refusal code → the user's words (busy, a decided proposal…)
+import { shownDigest, openRowOf } from './app-card-model.js'; // design 009: the digest of the card pressed; the row an Installed card opens // Layer 0 apps: THE install dialog an agent's install proposal opens (the same component as "Install xpra on {machine}…")
 import { openResetCreditDialog } from './reset-credit-dialog.js'; // THE one reset-credit confirm dialog (design-reset-credits p2): the ask-mode item's button
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): THE confirm dialog + request path; a cleared item's words
 
@@ -91,6 +93,8 @@ export function inboxModel(app) {
     // B-c127: an item ABOUT a channel conversation (an approval pointer, a reach request, an unknown outcome) opens
     // THAT conversation — its 'channels' group is no session, and the click used to end in "Session not found"
     if (item?.action?.type === 'open-channel' && item.action.adapterId && item.action.convId) { close(); app.openChannel?.(item.action.adapterId, item.action.convId); return; }
+    // lane device-upgrade-stuck: a machine-level item (a device agent whose update failed) lands on Manage Agents → Machines
+    if (key === 'machines') { close(); try { localStorage.setItem('vibespace.agentsTab', 'machines'); } catch { } app._showAgentsDialog?.(); return; }
     const s = sessionFor(key);
     if (!s) { showToast(t('Session not found in the list yet — try from the sidebar'), { type: 'error' }); return; }
     close();
@@ -193,7 +197,26 @@ export function inboxModel(app) {
         showToast(r && r.code === 'proposal_state' ? t('That proposal was already decided') : (r && r.error) || t('server unreachable'), { type: 'error' });
         return false;
       }
-      showInstallDialog({ hostId: rec.action.host || 'local', label: rec.action.host && rec.action.host !== 'local' ? rec.action.host : null }, { what: 'app', proposalId: id });
+      const host = rec.action.host || 'local';
+      if (answer === 'open') {
+        // design 009: Installed · Open — the app the install added, started like a card in Apps
+        const row = openRowOf(rec.card);
+        if (!row) return false;
+        const r = await fetchJson('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ appId: row, dpr: launchDpr(), uiScale: launchUiScale(), ...(host !== 'local' ? { host } : {}) }) });
+        if (!r || r.error) { showToast((r && r.error) || t('Could not launch the application'), { type: 'error' }); return false; }
+        app.openDesktopApp(r.id);
+        return true;
+      }
+      if (rec.card) {
+        // design 009: THE ONE CLICK — the card's Install (or Try again) runs the stored plan; `shown` = the digest of the card
+        // this client drew. A card that is not the proposal as it stands is refused (nothing ran) and re-reads itself.
+        const r = await fetchJson(`/api/apps/proposals/${encodeURIComponent(id)}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shown: shownDigest(rec.card) }) });
+        if (r && r.ok) return true; // the card follows the run (the store's broadcast)
+        const code = r && r.code;
+        showToast(code === 'plan_changed' ? t('The plan changed — take another look.') : (code && appRefusalText(code)) || (r && r.error) || t('server unreachable'), { type: 'error' });
+        return false;
+      }
+      showInstallDialog({ hostId: host, label: host !== 'local' ? host : null }, { what: 'app', proposalId: id }); // an item filed before the one card
       return true;
     }
     if (!rec || !rec.action || rec.action.type !== 'reset-credit') return false;
@@ -326,7 +349,7 @@ export function inboxModel(app) {
     ingestLive, factFor, keyForWebui, webuiIdsFor, keysFor, replyState, patchDot, boardOf, drafts,
     /** THE row renderer's context (src/lib/user-todos-row.js) — the words,
      *  names and the live verdict; a surface passes it (or a copy with its flags) */
-    rowCtx: { t, nameFor, wordsOf, detailOf, replyState },
+    rowCtx: { t, nameFor, wordsOf, detailOf, replyState, lang: resolveLang },
     /** Subscribe: `todos` (every snapshot, the store's order), `live` (an
      *  active-sessions payload was ingested), `status` (the board statuses
      *  moved). A surface that closes passes its AbortSignal (or calls the

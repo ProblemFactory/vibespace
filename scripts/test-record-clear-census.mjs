@@ -134,8 +134,14 @@ const GROUPS_RAW_OK = new Set(['readFolded', 'originalsOf']);
 const CHANNELS_GATES = {
   flushPushBatch: 'store.index.entry(rec.id',           // the adapter record's own conversation
   loadOlder: 'known(',
+  storedHit: 'store.index.has(',                        // design 010: a vendor hit's "already stored?" — an index row first, then the conversation's oldest record / the id
+  vendorSearch: 'store.index.has(',                     // design 010 S6 (lane channels-followups): the `storedAt` hint — an index row first, then the id's stored instant (no text)
+  readAroundFor: 'ACL.canSee(',                         // design 010: the agent's --around — reach before the instant's look-up
   ownerRecordOf: { callers: ['attachment'] },           // a helper: every call site sits inside a gated function (attachment: known( before the call)
-  attachment: 'known(',                                 // reads through ownerRecordOf only
+  attachment: 'known(',                                 // reads through ownerRecordOf (and, for an agent, the named message's record) after it
+  agentAttachmentAnswer: 'stillSees(',                  // lane channel-attach-read: the agent's attachment answer — reach re-asked before the named message is read
+  storedOf: { callers: ['messageFacts'] },              // lane message-facts: a helper — its one call site sits inside messageFacts, after known(
+  messageFacts: 'known(',                               // lane message-facts (B-f066): the owner's Details on a message stored before its facts
   search: 'adapterRecords().adapters.find',
   markRead: 'known(',
   messages: 'known(',                                   // verify r1: the raw generic reader, gated since
@@ -323,6 +329,7 @@ const ROUTES = {
   'POST /api/sessions/:id/stash/hand-over': 'writes',  // src/server/stash-handover.js: reads BOTH stashes (peekNotifs / stashEntries) and delivers them as ONE turn; answers counts; a hand-over after a clear carries the sentence (the walk hands over after its clear)
   'GET /api/agent/channels/list': 'meta',              // msgCaller: the caller's identity + its group ids (jobByToken / groupsForSession) — adapter conversations, never a store's text
   'GET /api/agent/channels/read': 'meta',
+  'GET /api/agent/channels/attachment': 'meta',        // lane channel-attach-read: an attachment's bytes + who sent it where (the engine's attachment(); like read)
   'POST /api/agent/channels/:adapterId/:convId/refresh': 'meta',
   'POST /api/agent/channels/reply': 'meta',
   'POST /api/agent/channels/compose': 'meta',
@@ -350,6 +357,11 @@ const ROUTES = {
   'POST /api/agent/design/check': 'meta',
   'POST /api/agent/design/publish': 'meta',
   'GET /api/agent/designs': 'meta',
+  // lane design-ask: the same agentCaller — `ask` puts the agent's OWN questions on its registry row, `preview` answers one artboard of the folder; no record of the five kinds
+  'POST /api/agent/design/ask': 'meta',
+  'POST /api/agent/design/preview': 'meta',
+  'GET /api/agent/design/preview': 'meta',
+  'GET /api/agent/design/systems': 'meta', 'GET /api/agent/design/system': 'meta', // lane design-systems-home: the design systems' names (belted) + ONE system's tokens.css — registry rows and a folder's file, no record
   // ── the 2.369.202 integration: lane jobs-browser's job principal — agentFacts → jobAgentFacts / refuseAgentBearer ask the
   //    jobs store jobByToken (a jbt_ caller's identity, as the other agent routes do), never a record's text ──
   'GET /api/agent/browser/profiles': 'meta',
@@ -653,6 +665,7 @@ const STORAGE = {
   'src/lib/appearance-panel.js|localStorage|\'termFontFamily\'': ['pref', 'terminal font'],
   'src/lib/appearance-panel.js|localStorage|key': ['pref', 'a UI pref percentage (scale / font size)'],
   'src/lib/browser-live-window.js|localStorage|\'vibespace.deviceTag\'': ['ids', 'a random device tag'],
+  'src/lib/settings-ui.js|localStorage|SHOW_ADVANCED_KEY': ['pref', 'lane settings-tiers (B-df40 part 2): the Settings window\'s "Show advanced settings" switch (a "1" / "0" flag, never a record\'s words)'],
   'src/lib/browser-trace-view.js|localStorage|SHOW_FITS_KEY': ['pref', 'lane trace-fits: show the live view\'s page-size changes as rows (a "1" flag, never a record\'s words)'],
   'src/lib/channel-outbox.js|localStorage|DELIVER_KEY': ['pref', 'next-turn | wake-now (the Approve button\'s remembered delivery)'],
   'src/lib/code-editor.js|localStorage|\'editorSettings\'': ['pref', 'editor settings'],
@@ -671,6 +684,7 @@ const STORAGE = {
   'src/lib/layout.js|localStorage|\'taskbarHeight\'': ['pref', 'taskbar height'],
   'src/lib/manage-agents.js|localStorage|\'vibespace.quotaRefreshAck\'': ['marker', 'the quota-refresh explanation was acknowledged'],
   'src/lib/manage-agents.js|localStorage|\'vibespace.agentsTab\'': ['pref', 'the Agents dialog tab'],
+  'src/lib/user-todos-actions.js|localStorage|\'vibespace.agentsTab\'': ['pref', 'the Agents dialog tab a Machines item opens on (lane device-upgrade-stuck) — a tab name, never an item\'s words'],
   'src/lib/manage-agents.js|localStorage|\'vibespace.agentsMachOpen\'': ['ids', 'which machine rows are expanded (host ids)'],
   'src/lib/plugin-client.js|localStorage|storagePrefix + String(k)': ['plugin', 'a trusted plugin module\'s own key-value storage (vsp_<id>_ prefix)'],
   'src/lib/plugin-client.js|localStorage|k': ['plugin', 'a sandboxed iframe plugin\'s storage bridge (prefix + its key)'],
@@ -683,6 +697,7 @@ const STORAGE = {
   'src/lib/sidebar-state.js|localStorage|\'starredSessions\'': ['ids', 'starred session ids'],
   'src/lib/sidebar-state.js|localStorage|\'archivedSessions\'': ['ids', 'archived session ids'],
   'src/lib/sidebar-state.js|localStorage|\'archivedFolders\'': ['ids', 'archived folder keys'],
+  'src/lib/design-changes.js|localStorage|storeKey': ['owner', 'lane design-changes: the Design window\'s pending changes per design on this device — the owner\'s own comments and the before / after of the texts they edited and the nudges they made (previews not yet sent), each with the quote of the artboard element it is about; never a store record of the five kinds'],
   'src/lib/sidebar-state.js|localStorage|\'sessionCustomNames\'': ['owner', 'the names the owner typed for sessions (never a store record)'],
   'src/lib/sidebar-state.js|localStorage|\'sessionModes\'': ['ids', 'terminal | chat per session id'],
   'src/lib/sidebar-state.js|localStorage|\'sessionConfigs\'': ['pref', 'per-session model / effort / permission overrides'],
@@ -970,6 +985,7 @@ const BELT = [
   ['src/lib/channel-window.js', "const body = renderBlocks(blocksOfRecord(rec), { t, folds, foldKey: rec.vendorId || rec.id || '', fallbackText: rec.text || '' });", 'an ADAPTER conversation\'s system row (Lark / Gmail) — not a group message'],
   ['src/lib/channel-window.js', "t, folds, foldKey: rec.vendorId || rec.id || '', fallbackText: rec.text || '',", 'an ADAPTER conversation\'s row (Lark / Gmail) — not a group message'],
   ['src/lib/channel-window.js', "quoteTarget = { vid: rec.vendorId, who: (rec.author && (rec.author.name || rec.author.id)) || '', text: firstLine(rec.text || '', 80) };", 'lane reaction-hover: the Quote line above an ADAPTER conversation\'s composer (Lark / Gmail) — not a group message (msgBarActions gives a group row its ⋯ only)'],
+  ['src/lib/channel-window.js', "const words = String((rec && rec.text) || '');", 'lane channel-touch-menu: Copy text in an ADAPTER conversation\'s message menu (Lark / Gmail; the touch …, a long press on the chrome, a right click) — not a group message (the group window\'s menu is msgMenu)'],
   ['src/lib/channel-window.js', "default: return rec.text || '';", 'a group system record of an UNKNOWN kind (create / invite / leave / kick / rename / archive are worded); renderGroupRecord appends the cleared sentence under a cleared one'],
   ['src/lib/channel-window.js', "const words = (rec.raw && rec.raw.kind && rec.raw.kind !== 'message') ? groupSysText(rec, nameOf) : (rec.text || '');", 'the menu of a message NOT cleared (both doors return on isCleared(rec)); the dialog is spent at the answer'],
   ['src/lib/channels-panel.js', 'const sig = JSON.stringify([\'g\', r.kind, r.id, r.adapterId, r.title, r.lastAt, r.unread, r.archived, r.pair, r.memberCount, r.sourceLabel, r.lastText,', 'a row SIGNATURE (never drawn): lastText + lastCleared rebuild the row'],
@@ -1026,7 +1042,10 @@ const CACHES = {
   'src/lib/channel-window.js|clearedSeen': 'vendorId → a record a broadcast said was CLEARED (the sentence) — r5 ⑧',
   'src/lib/channels-panel.js|COLLAPSED': 'folded section keys',
   'src/lib/channels-panel.js|EXPANDED': 'expanded section keys',
-  'src/lib/channels-panel.js|ACCOUNT_ALL': 'account ids shown whole',
+  'src/lib/channels-panel.js|ends': 'list name → its end element (a sentinel / skeleton row — no words of a row)',
+  'src/lib/channels-panel.js|aroundCache': 'design 010: the search dialog\'s around sheets — the vendor\'s records per found message, a local of ONE dialog (gone with it; never stored)',
+  'src/lib/channels-panel.js|chain': 'list name → how many pages read while its end stayed in view (a number)',
+  'src/lib/channels-panel.js|chainTop': 'list name → the scroll box\'s scrollTop at its last page read (a number)',
   'src/lib/channels-panel.js|FOLD_LISTENERS': 'subscriber functions',
   'src/lib/channels-panel.js|rowMemo': 'key → {sig, el, r}: a row\'s signature holds lastText + lastCleared, so a cleared last line REPLACES the entry (and its row model)',
   'src/lib/channels-panel.js|memoSeen': 'keys drawn this pass',
@@ -1044,8 +1063,7 @@ const CACHES = {
   'src/lib/jobs-layout.js|sessions': 'a local of foldTasks (the fold model, per call over a fresh GET /api/jobs)',
   'src/lib/jobs-layout.js|live': 'a local of pruneFolds (keys, per call)',
   'src/lib/channels-panel.js|want': 'a local (keys, per call)',
-  'src/lib/channels-panel.js|byKey': 'a local of the digest merge (conversations by key, per call)',
-  'src/lib/channels-panel.js|adapterIds': 'a local (ids, per call)',
+  'src/lib/channels-panel.js|reading': 'list names with a page read in flight (design 008; a name, never a row)',
   'src/lib/channel-groups-view.js|adapterById': 'a local of the PURE row model (per call)',
   'src/lib/channel-groups-view.js|titles': 'a local (Task Group titles, per call)',
   'src/lib/channel-groups-view.js|ex': 'a local (ids, per call)',
@@ -1676,7 +1694,7 @@ const I_RECV = {
   'src/lib/user-todos-panel.js|wordsOf()': ['todo', 'a For-you item\'s words (the model\'s)'],
   'src/server/conversation-deliver.js|opts': ['carrier', 'the card label + text of a delivery (a job\'s `Background Work · <name>`)'],
   'src/server/conversation-deliver.js|shown[0]': ['carrier', 'the retry park\'s single landed entry at its card (notify-retry verify r2: the card is built AFTER the post from the words as they stand — a clear that reached it mid-flight already rewrote them to the sentence)'],
-  'src/server/groups-engine.js|rec': ['group-message', 'a group message a wake delivers'],
+  'src/server/groups-engine.js|wc': ['group-message', 'a wake\'s card words: the message that woke it, or each message its report showed (B-9fd6)'],
   'src/server/groups-engine.js|rep': ['group-message', 'a wake REPORT (a line per group message)'],
   'src/server/session-brain.js|fact': ['status', 'the vcs event entry of a session\'s status history (its branch) — the record itself'],
   'src/agent-routes.js|u': ['carrier', 'the jobs UPDATE a turn is injected with (job events\' words) — the journal prints its SIZE'],
@@ -1723,7 +1741,10 @@ const I_RECV = {
   'src/office-open.js|fv': ['file', 'a viewer verdict\'s label'], 'src/office-open.js|row': ['file', 'an office row\'s label'], 'src/office-open.js|served': ['file', 'a machine\'s refusal reason'], 'src/office-open.js|want': ['file', 'an office row\'s label'],
   'src/opencode-serve.js|info.error': ['harness', 'the serve\'s error name'], 'src/quota-model.js|byHint': ['quota', 'a limit\'s name'], 'src/quota-model.js|c': ['quota', 'a limit\'s name'],
   'src/remote-fs.js|h': ['host', 'a machine name'], 'src/routes/browser-trace.js|p': ['browser profile', 'a profile label'], 'src/routes/browser-trace.js|rs': ['browser profile', 'a recording\'s file name'],
+  // design 005 §2.B (B-fd1f): the refusal names the CALLER's own file (the name it gave, validated) — echoed to that caller
+  'src/channel-policy.js|nm': ['caller', 'the caller\'s own attachment name (safeAttachmentName\'s result) in its refusal'], 'src/channel-policy.js|big': ['caller', 'the caller\'s own attachment (its name and size) in the too-large refusal'],
   'src/routes/channels.js|b': ['caller', 'the request body — the owner\'s own proposal / consent words, handed to the engine'],
+  'src/routes/design.js|req.query': ['caller', 'the agent\'s own ?name= — the design system it asks for, handed to the engine (lane design-systems-home)'],
   'src/routes/desktop-apps.js|rec': ['desktop app', 'an app label'], 'src/routes/desktop-apps.js|row': ['desktop app', 'a machine\'s reason'], 'src/routes/desktop-apps.js|spec': ['desktop app', 'an app label'],
   'src/routes/files.js|shadow': ['mount', 'a storage name'],
   'src/server/browser-handback.js|sess.s': ['session', 'a session\'s name'], 'src/server/browser-propose.js|sess.s': ['session', 'a session\'s name'], 'src/server/browser-keeper.js|n': ['browser notice', 'the keeper\'s own notice (resources, a heal)'], 'src/server/browser-keeper.js|p': ['browser profile', 'a profile label'],
@@ -1755,6 +1776,7 @@ const I_RECV = {
   'data/bin/codex-chat-wrapper.js|r': ['harness', 'an app-server answer\'s reason / detail (an RPC refusal)'], 'data/bin/codex-chat-wrapper.js|st': ['harness', 'a steer answer\'s reason / detail (an RPC refusal)'],
   'src/accounts.js|to': ['account', 'a pool member (the deleted default\'s re-point target — lane pool-pin)'], 'src/accounts.js|pool': ['account', 'a pool'],
   'src/migration-runner.js|m': ['migration', 'a migration\'s own note'], 'src/normalizers.js|session': ['session', 'a session\'s name'],
+  'src/normalizers.js|e': ['chat card', 'a rebuild queue entry — its `card` is a chat card the transcript already holds (peer / browser / group / proposal), never a For-you item\'s card (design 009 named that field `card` too)'],
   'src/port-forward.js|h': ['host', 'a machine name'], 'src/server/auto-cli-loop.js|it.pj': ['quota', 'a projection\'s label'],
   'src/server/auto-resume.js|chk': ['quota', 'a pre-fire check\'s reason'], 'src/server/auto-resume.js|ident': ['account', 'a billing identity'],
   'src/server/boot-restore.js|h': ['host', 'a machine name'], 'src/server/boot-restore.js|session': ['session', 'a session\'s name'],
@@ -1814,6 +1836,8 @@ const I_RECV = {
   'src/server/apps-engine.js|by': ['session', 'the proposer\'s session name on the For-you item it files'],
   'src/design-model.js|ref': ['design file', 'an image name an artboard references (a file of the design folder) in a verdict sentence — lane design-core, no record of the five kinds'],
   'src/routes/design.js|b': ['design comment', 'the USER\'s own comment text handed to the engine (it becomes the user\'s message) — lane design-core, no record of the five kinds'],
+  // ── lane device-upgrade-stuck ──
+  'src/server/device-upgrade-watch.js|w': ['host', 'the stuck-upgrade item\'s words — a machine name and two agent versions (itemOf), the machine\'s own record'],
   // ── verify r9: the receivers of the one-level alias pass (a field copied into a local, then handed to a sink) ──
   'src/agent-routes.js|req.body||{}': ['status', 'the caller\'s OWN status write (the owner\'s route / the agent\'s vibespace-status), destructured — the record itself'],
   'src/desktop-apps.js|s': ['desktop app', 'an install spec\'s label'], 'src/lib/browser-switcher.js|st.view?.profile': ['browser profile', 'a profile label'],
@@ -1848,7 +1872,7 @@ const I_SITES = {
   'src/server/conversation-deliver.js|peer|shown[0].cardText': ['transcript', 'the parked delivery\'s landing card: the entry\'s card text as it stands (dropped by a clear)'],
   'src/server/conversation-deliver.js|peer|shown[0].text': ['transcript', 'the parked delivery\'s landing card: the entry\'s words as they stand after any clear (a mid-flight clear = the sentence; the frame the CLI holds is `recorded`)'],
   'src/server/groups-engine.js|peer|rep.text': ['transcript', 'a wake report delivered to a member (a refused one rides the next report; a handed-back one is the stash the door rewrites)'],
-  'src/server/groups-engine.js|peer|rec.text': ['transcript', 'a group message delivered to a member'],
+  'src/server/groups-engine.js|peer|wc.text': ['transcript', 'a group message delivered to a member (the wake card\'s words — B-9fd6)'],
   'src/server/session-brain.js|status|fact.branch': ['own', 'the vcs entry\'s own write (the door drops its branch)'],
   'src/agent-routes.js|journal|u.text': ['length', 'the injection\'s held line names the jobs update\'s SIZE, never its words'],
   'src/agent-routes.js|journal|rep.text': ['length', 'the injection\'s held line names the report\'s SIZE, never its words'],

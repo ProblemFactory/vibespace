@@ -37,6 +37,7 @@
 /** The CLOSED failure set. A code outside it is itself a contract violation. */
 // the reply PLACEMENT vocabulary (2026-09-28) — ONE spelling, the PURE outbox policy's (the verdict lives there)
 const { PLACEMENTS, ROOT_REPLIES, isThreadPlacement, placementsOf } = require('../channel-policy.js');
+const ChannelSettings = require('../channel-settings.js');   // B-df40 part 3: the declared per-vendor rows a caps settingKey must name
 
 const CHANNEL_ERROR_CODES = Object.freeze([
   'auth-expired',
@@ -132,7 +133,8 @@ function withoutSent(value, sent) {
 const Feed = require('../channel-feed.js');   // PURE (lane lark-search-poll): the change feed's hit shape + its bounds
 // PURE: THE ONE door for a NAME (verify r2 — `peerName` moved to channel-record, where every name of every shape takes it;
 // a described single chat's name, which has no constructor of its own, takes it here — verify r1 #2)
-const { peerName } = require('../channel-record.js');
+const { peerName, FACT_KIND_NAMES, validateFacts } = require('../channel-record.js');   // + lane message-facts: the closed fact kinds, the one validator
+const SR = require('../channel-search.js');   // design 010: the search row's enums + THE snippet bound (PURE)
 const RECEIVE_MODES = Object.freeze(['push', 'poll', 'scan']);
 const SCAN_SOURCES = Object.freeze(['store', 'ui']);
 const HISTORY_MODES = Object.freeze(['page', 'since', 'none']);
@@ -164,6 +166,23 @@ const PACE_COSTS = Object.freeze(['fetch', 'discover', 'scanHost', 'feed']);
 // thread reply the chat listing never shows) — declared by a change feed on an adapter whose thread replies are listed
 // separately (the two facts that make such a hit exist); → {kind (closed set), record|null, rootPatch|null, threadKey|null}
 const FEED_METHODS = Object.freeze(['changes', 'describe', 'messageById']);
+/**
+ * THE VENDOR'S OWN SEARCH (design 010, B-c9be, lane channels-full-search): a third row on the reading axis, beside the
+ * change feed (which asks the same endpoint with no words). Declared per ADAPTER; the engine never names the vendor:
+ *   search { via: 'query' (SR.SEARCH_VIA), pageSize, pagesPerPress, perMin (pages per sliding minute, the endpoint's
+ *            share beside the feed's), cost (budget units a page costs), snippet: bool (a hit carries the vendor's
+ *            snippet), context: 'around' | 'thread' | null (how a hit is read in context), match: 'substring' |
+ *            'tokens' | 'unknown' (VS3 — only a measured `substring` lets the words say "found"), scope?: the HELD
+ *            scope that turns it on }
+ * `search({query, pageToken, storedAt, shows})` → ONE page `{hits: [{convId, vendorId, at, fromId, threadKey, snippet}],
+ * next}` (`storedAt(convId, vendorId)` / `shows(convId)` = the engine's HINTS for an adapter that reads a hit's details
+ * one request at a time — lane channels-followups, Gmail: a held or unshown hit costs no read) — this wrapper bounds it (≤ pageSize hits, the closed field list, every id bounded, the snippet through the name door);
+ * `around(convId, {vendorId, at})` → `{records}` (≤ SR.AROUND_MAX, of that conversation only) — declared by
+ * `context: 'around' | 'thread'`. An adapter without the row is local-only: both methods answer `not-supported`.
+ */
+const SEARCH_METHODS = Object.freeze(['search', 'around']);
+const searchRowOf = (c) => (c && c.search && typeof c.search === 'object' ? c.search : null);
+const SEARCH_HIT_FIELDS = Object.freeze(['convId', 'vendorId', 'at', 'fromId', 'threadKey', 'snippet']);
 const PAGE_TOKEN_MAX = 2048;
 const TITLE_MAX = 200;
 /** §25 (2026-09-27): how a record is DRAWN — `text` (the default: the window's
@@ -270,6 +289,9 @@ const METHOD_GATES = Object.freeze({
   // asks when the reply is PROPOSED (stored, shown on the card, handed back
   // verbatim to `send` as `envelope`) — never decided at send time
   replyEnvelope: (c) => c.replyEnvelope === true && (c.sendAs || []).length > 0,
+  // lane message-facts (B-f066): the FACTS of a thread stored before its records carried them — `caps.factsOf === true`
+  // declares `factsOf(convId)` → {facts: {[vendorId]: [...]}}, asked only on a person's Details click (engine `messageFacts`)
+  factsOf: (c) => c.factsOf === true && Array.isArray(c.facts) && c.facts.length > 0,
   listConversations: (c) => c.listConversations !== false,
   // lane channel-threads (2026-09-28): the thread walk, the per-message reaction list, the two acts, the custom
   // emoji picture and the picker's vocabulary — each declared by its capability row
@@ -284,13 +306,27 @@ const METHOD_GATES = Object.freeze({
   changes: (c) => !!(c.changeFeed && typeof c.changeFeed === 'object'),
   describe: (c) => !!(c.changeFeed && typeof c.changeFeed === 'object' && c.changeFeed.describes === true),
   messageById: (c) => !!(c.changeFeed && typeof c.changeFeed === 'object') && threadsOf(c).listing === 'separate',
+  // design 010: the vendor's own search (a person's press) and a hit read in context — declared by `caps.search`
+  search: (c) => !!searchRowOf(c),
+  around: (c) => !!searchRowOf(c) && !!searchRowOf(c).context,
 });
 
 /**
  * Validate a static `caps` declaration. THROWS with the exact rule broken —
  * a registration bug must fail at module load, where every gate sees it.
  */
-function validateCaps(kind, caps) {
+/** B-df40 part 3: a setting an adapter READS must be a row its vendor's table DECLARES (src/channel-settings.js) —
+ *  that row is what the Settings window shows and what the engine bounds, so an undeclared key would be a knob
+ *  nobody can turn, read through the registry's sanity range. Refused at registration, by name. `tables` is the
+ *  shipped CHANNEL_SETTINGS unless a SUITE's registry declared its own (createChannelRegistry below). */
+function undeclaredKey(kind, role, key, bad, tables = ChannelSettings.CHANNEL_SETTINGS) {
+  if (key === undefined || key === null) return;
+  const want = ChannelSettings.declaredKey(kind, role, tables);
+  if (!want) bad(`caps.${role}.settingKey ${JSON.stringify(key)} is not declared — the ${JSON.stringify(kind)} adapter has no ${role} row in src/channel-settings.js (declare it there and spread ${role}Of(CHANNEL_SETTINGS.${kind}) into caps.${role})`);
+  if (key !== want) bad(`caps.${role}.settingKey ${JSON.stringify(key)} is not the ${role} row src/channel-settings.js declares for ${JSON.stringify(kind)} (${want})`);
+}
+
+function validateCaps(kind, caps, { channelSettings } = {}) {
   const c = caps || {};
   const bad = (m) => { throw new Error(`channel adapter '${kind}': ${m}`); };
 
@@ -304,12 +340,22 @@ function validateCaps(kind, caps) {
   if (c.compose !== undefined && typeof c.compose !== 'boolean') bad('caps.compose must be a boolean (true = the adapter can start a NEW conversation)');
   if (c.replyEnvelope !== undefined && typeof c.replyEnvelope !== 'boolean') bad('caps.replyEnvelope must be a boolean (true = a reply\'s recipients follow from the message it answers, resolved when it is proposed)');
   if (c.replyEnvelope === true && !(Array.isArray(c.sendAs) && c.sendAs.length)) bad('caps.replyEnvelope on a read-only adapter (caps.sendAs is empty)');
+  // lane message-facts (B-f066): the fact kinds the adapter EMITS — each one of channel-record's closed FACT_KIND_NAMES,
+  // no repeat (the contract suite fails an emit outside the list and a declared kind no shape fixture exercises)
+  if (c.facts !== undefined) {
+    if (!Array.isArray(c.facts)) bad('caps.facts must be an array of fact kinds (src/channel-facts.js)');
+    for (const k of c.facts) if (!FACT_KIND_NAMES.includes(k)) bad(`caps.facts holds ${JSON.stringify(k)} — not a declared fact kind (${FACT_KIND_NAMES.join('|')})`);
+    if (new Set(c.facts).size !== c.facts.length) bad('caps.facts names a kind twice');
+  }
+  if (c.factsOf !== undefined && typeof c.factsOf !== 'boolean') bad('caps.factsOf must be a boolean (true = factsOf(convId) reads a stored thread\'s facts)');
+  if (c.factsOf === true && !(Array.isArray(c.facts) && c.facts.length)) bad('caps.factsOf without caps.facts (which kinds would it read?)');
   if (c.budget !== undefined) {
     const b = c.budget;
     if (!b || typeof b !== 'object') bad('caps.budget must be an object {unit, default, settingKey?, metered?}');
     if (!BUDGET_UNITS.includes(b.unit)) bad(`caps.budget.unit must be one of ${BUDGET_UNITS.join('|')}`);
     if (!(Number(b.default) > 0)) bad('caps.budget.default must be a positive number (per minute)');
     if (b.settingKey !== undefined && b.settingKey !== null && !/^channels\.[A-Za-z0-9]+$/.test(String(b.settingKey))) bad('caps.budget.settingKey must be a channels.* setting key');
+    undeclaredKey(kind, 'budget', b.settingKey, bad, channelSettings);
   }
   // lane R5: the PER-SECOND pace (drain rule 18) — in the budget's unit, so a
   // pace without a budget has no unit and is refused
@@ -319,6 +365,7 @@ function validateCaps(kind, caps) {
     if (c.budget === undefined) bad('caps.pace needs caps.budget (the pace is counted in the budget\'s unit)');
     if (!(Number(p.unitsPerSec) > 0)) bad('caps.pace.unitsPerSec must be a positive number (per second)');
     if (p.settingKey !== undefined && p.settingKey !== null && !/^channels\.[A-Za-z0-9]+$/.test(String(p.settingKey))) bad('caps.pace.settingKey must be a channels.* setting key');
+    undeclaredKey(kind, 'pace', p.settingKey, bad, channelSettings);
     if (p.cost !== undefined) {
       if (!p.cost || typeof p.cost !== 'object') bad('caps.pace.cost must be an object {fetch?, discover?, scanHost?}');
       for (const [k, v] of Object.entries(p.cost)) {
@@ -330,6 +377,23 @@ function validateCaps(kind, caps) {
   if (c.render !== undefined && !RENDER_MODES.includes(c.render)) bad(`caps.render must be one of ${RENDER_MODES.join('|')}`);
   if (c.titleForm !== undefined && !TITLE_FORMS.includes(c.titleForm)) bad(`caps.titleForm must be one of ${TITLE_FORMS.join('|')}`);
   if (c.vendorName !== undefined && !(typeof c.vendorName === 'string' && c.vendorName.trim() && c.vendorName.length <= 40)) bad('caps.vendorName must be a non-empty string of at most 40 characters (the vendor as the card names it)');
+  // design 005 §2.B (B-fd1f): WHAT AN AGENT MAY ATTACH — absent / null ⇒ nothing (`attachments-not-offered`, with
+  // `sendAttachmentsWhy` as the reason); ONE row `{maxCount, maxTotalBytes, withText}` (text and files in one message) or
+  // TWO `{images?, files?}` each `{maxCount, maxBytes, withText}` (a vendor that sends pictures and files differently)
+  if (c.sendAttachments !== undefined && c.sendAttachments !== null) {
+    const a = c.sendAttachments;
+    const posInt = (v) => Number.isInteger(v) && v > 0;
+    if (typeof a !== 'object') bad('caps.sendAttachments must be an object, or null (none)');
+    if (!(c.sendAs || []).length) bad('caps.sendAttachments on a read-only adapter (caps.sendAs is empty) — an attachment rides a sent message');
+    if (a.images !== undefined || a.files !== undefined) {
+      for (const k of ['images', 'files']) {
+        const g = a[k];
+        if (g === undefined || g === null) continue;
+        if (typeof g !== 'object' || !posInt(g.maxCount) || !(Number(g.maxBytes) > 0) || typeof g.withText !== 'boolean') bad(`caps.sendAttachments.${k} must be {maxCount: a positive integer, maxBytes > 0, withText: boolean}`);
+      }
+    } else if (!posInt(a.maxCount) || !(Number(a.maxTotalBytes) > 0) || typeof a.withText !== 'boolean') bad('caps.sendAttachments must be {maxCount: a positive integer, maxTotalBytes > 0, withText: boolean}, or {images?, files?}');
+  }
+  if (c.sendAttachmentsWhy !== undefined && c.sendAttachmentsWhy !== null && !(typeof c.sendAttachmentsWhy === 'string' && c.sendAttachmentsWhy.trim() && c.sendAttachmentsWhy.length <= 300)) bad('caps.sendAttachmentsWhy must be a non-empty string of at most 300 characters (why this adapter takes no attachments)');
   // lane channel-threads (spec §2.1): the two rows, each an UPPER BOUND with its refusals named
   if (c.threads !== undefined) {
     const t = c.threads;
@@ -382,6 +446,18 @@ function validateCaps(kind, caps) {
     if (f.reader !== undefined && !(Number.isInteger(f.reader) && f.reader > 0 && f.reader <= 1000)) bad('caps.changeFeed.reader must be a positive integer (the hit reader\'s revision) or absent');
     if (c.listConversations === false) bad('caps.changeFeed on an adapter that cannot list its conversations — a group the feed finds is born by discovery');
   }
+  if (c.search !== undefined) {
+    const q = c.search;
+    if (!q || typeof q !== 'object') bad('caps.search must be an object {via, pageSize, pagesPerPress, perMin, cost, snippet, context, match, adds, scope?}');
+    if (!SR.SEARCH_VIA.includes(q.via)) bad(`caps.search.via must be one of ${SR.SEARCH_VIA.join('|')}`);
+    for (const k of ['pageSize', 'pagesPerPress', 'perMin', 'cost']) if (!(Number.isInteger(q[k]) && q[k] > 0)) bad(`caps.search.${k} must be a positive integer`);
+    if (q.pagesPerPress > q.perMin) bad('caps.search.pagesPerPress may not exceed caps.search.perMin (one press could never be answered)');
+    if (typeof q.snippet !== 'boolean') bad('caps.search.snippet must be a boolean');
+    if (q.context !== null && !SR.SEARCH_CONTEXT.includes(q.context)) bad(`caps.search.context must be one of ${SR.SEARCH_CONTEXT.join('|')} or null`);
+    if (!SR.SEARCH_MATCH.includes(q.match)) bad(`caps.search.match must be one of ${SR.SEARCH_MATCH.join('|')} (VS3 — 'unknown' until measured)`);
+    if (!SR.SEARCH_ADDS.includes(q.adds)) bad(`caps.search.adds must be one of ${SR.SEARCH_ADDS.join('|')} — what a hit adds to the saved copy (the words read it, never the adapter id)`);
+    if (q.scope !== null && q.scope !== undefined && !(typeof q.scope === 'string' && q.scope && q.scope.length <= 100)) bad('caps.search.scope must be a scope name or null');
+  }
   if (c.receive === 'push') {
     if (!c.pushTransport) bad("caps.receive 'push' must declare pushTransport");
     if (!Number.isFinite(Number(c.pushAckBudgetMs))) bad("caps.receive 'push' must declare pushAckBudgetMs (the vendor's own deadline — fence 11 acks AFTER durability)");
@@ -427,6 +503,10 @@ function validateMethods(kind, caps, mod) {
     if (THREAD_REACTION_METHODS.includes(name) && !declared(caps) && has) throw new Error(`channel adapter '${kind}': ${name} is implemented but its capability row does not declare it`);
     // lane lark-search-poll: a feed method present that `caps.changeFeed` does not declare is refused too
     if (FEED_METHODS.includes(name) && !declared(caps) && has) throw new Error(`channel adapter '${kind}': ${name} is implemented but caps.changeFeed does not declare it`);
+    // lane message-facts: `factsOf` declared ⇔ implemented
+    if (name === 'factsOf' && !declared(caps) && has) throw new Error(`channel adapter '${kind}': factsOf is implemented but caps.factsOf / caps.facts do not declare it`);
+    // design 010: a search method present that `caps.search` does not declare is refused too
+    if (SEARCH_METHODS.includes(name) && !declared(caps) && has) throw new Error(`channel adapter '${kind}': ${name} is implemented but caps.search does not declare it`);
   }
   for (const req of ['auth', 'history', 'convCaps']) {
     if (typeof mod[req] !== 'function' && !(req === 'auth' && mod.auth && typeof mod.auth.state === 'function')) {
@@ -441,8 +521,12 @@ function validateMethods(kind, caps, mod) {
  * `get()` is LOUD on an unknown kind — the core never falls through to a
  * default adapter, exactly as `src/harnesses/index.js` never falls through to
  * claude.
+ *
+ * `channelSettings` (B-df40 part 3) is a SUITE's seam: the per-vendor tables a caps settingKey is checked against —
+ * the shipped CHANNEL_SETTINGS when absent. A suite's scripted module that reads a budget key of its own declares
+ * it in a table for its kind (the S6 shape); NO production caller passes it (test-channel-adapter-contract ⑦'s census).
  */
-function createChannelRegistry() {
+function createChannelRegistry({ channelSettings } = {}) {
   const mods = new Map();
 
   function register(mod) {
@@ -450,7 +534,7 @@ function createChannelRegistry() {
     const kind = mod.kind;
     if (typeof kind !== 'string' || !kind) throw new Error('registerChannelAdapter: `kind` (non-empty string) is required');
     if (mods.has(kind)) throw new Error(`registerChannelAdapter: duplicate kind '${kind}'`);
-    validateCaps(kind, mod.caps);
+    validateCaps(kind, mod.caps, { channelSettings });
     if (typeof mod.create !== 'function') throw new Error(`channel adapter '${kind}': create(record, deps) is required`);
     // §25: `render: 'blocks'` is DECLARED ⇒ the stored-record rung must exist;
     // a rung nobody declared is refused (it would half-work on read only)
@@ -632,6 +716,7 @@ function createChannelRegistry() {
         if (!METHOD_GATES.send(caps)) return raw;   // read-only: `send-not-available`, said by the gate
         return async (convId, opts = {}) => {
           const o = opts && typeof opts === 'object' ? opts : {};
+          if (Array.isArray(o.attachments) && o.attachments.length && !caps.sendAttachments) throw new ChannelError('not-supported', `${kind}.send: attachments are not declared by caps.sendAttachments`, { retryable: false, detail: { why: 'attachments-not-offered' } });
           const placement = o.placement === undefined || o.placement === null ? (o.inThread === true ? 'thread' : o.replyTo ? 'quote' : 'chat') : o.placement;
           const offered = placementsOf(caps);
           if (!offered.includes(placement)) throw new ChannelError('not-supported', `${kind}.send: placement ${JSON.stringify(placement)} is not declared by caps.threads.placements (${offered.join('|') || 'none'})`, { retryable: false, detail: { placement, offered } });
@@ -640,7 +725,14 @@ function createChannelRegistry() {
           return raw(convId, { ...rest, placement, ...(isThreadPlacement(placement) ? { inThread: true } : {}) });
         };
       })(),
-      compose: gated('compose', impl.compose && impl.compose.bind(impl)),
+      compose: (() => {
+        const raw = gated('compose', impl.compose && impl.compose.bind(impl));
+        // design 005 §2.B: a new message with attachments needs the row too
+        return async (o = {}) => {
+          if (o && Array.isArray(o.attachments) && o.attachments.length && !caps.sendAttachments) throw new ChannelError('not-supported', `${kind}.compose: attachments are not declared by caps.sendAttachments`, { retryable: false, detail: { why: 'attachments-not-offered' } });
+          return raw(o);
+        };
+      })(),
       /** THE ACCOUNT's send identity for a NEW conversation, NARROWED to
        *  `caps.sendAs` exactly like `convCaps` (a resolution may only shrink
        *  the declaration). */
@@ -654,6 +746,20 @@ function createChannelRegistry() {
       },
       reconcile: gated('reconcile', impl.reconcile && impl.reconcile.bind(impl)),
       replyEnvelope: gated('replyEnvelope', impl.replyEnvelope && impl.replyEnvelope.bind(impl)),
+      /** lane message-facts (B-f066): a stored thread's facts — `{facts: {[vendorId]: [...]}}`, each list through the ONE
+       *  validator and held to `caps.facts` (an undeclared kind is dropped by name), ≤ 500 messages, ids bounded. */
+      async factsOf(convId) {
+        const r = (await gated('factsOf', impl.factsOf && impl.factsOf.bind(impl))(convId)) || {};
+        const declared = new Set(Array.isArray(caps.facts) ? caps.facts : []);
+        const out = {};
+        const src = r.facts && typeof r.facts === 'object' && !Array.isArray(r.facts) ? r.facts : {};
+        for (const [vid, list] of Object.entries(src).slice(0, 500)) {
+          if (!vid || vid.length > 512 || /[\u0000-\u001f\u007f]/.test(vid)) continue;
+          const v = validateFacts(Array.isArray(list) ? list.filter((f) => f && declared.has(f.k)) : []);
+          out[vid] = v.ok ? v.facts : [];
+        }
+        return { facts: out };
+      },
       fetchAttachment: gated('fetchAttachment', impl.fetchAttachment && impl.fetchAttachment.bind(impl)),
       /** lane channel-rich (D2): a message BODY the adapter read while normalizing (a mail's text/html part),
        *  handed to the engine ONCE (`{data: Buffer, mime}` | null) — synchronous, no vendor call, never throws. */
@@ -726,6 +832,40 @@ function createChannelRegistry() {
         const malformedFields = Feed.mergeFieldLists([], Array.isArray(r.malformedFields) ? r.malformedFields.slice(0, 16) : []);
         return { hits, more: r.more === true && tok !== null, pageToken: tok, total, malformed, malformedFields, stripped, requests: Math.max(1, Math.floor(Number(r.requests) || 1)), ...(fieldNames ? { fieldNames } : {}) };
       },
+      /**
+       * THE VENDOR'S OWN SEARCH, ONE PAGE (design 010): bounded before the engine sees it — more hits than the row's
+       * page size ⇒ the typed page-contract refusal; every hit through the CLOSED field list (anything else stripped and
+       * counted), ids bounded, the instant a number, the snippet through the name door again (≤ SR.SNIPPET_MAX — an
+       * adapter's reader is not trusted alone); the continuation token bounded; `facts` = the adapter's shape-only
+       * measurement (names, counts, booleans — never a value), passed through bounded.
+       */
+      async search(opts = {}) {
+        const r = (await gated('search', impl.search && impl.search.bind(impl))(opts)) || {};
+        const row = searchRowOf(caps) || {};
+        const size = Number(row.pageSize) || 30;
+        const raw = Array.isArray(r.hits) ? r.hits : [];
+        if (raw.length > size) throw new ChannelError('vendor-error', `${kind}.search returned ${raw.length} hits for a page size of ${size} — an adapter never returns more than a page`, { retryable: false, detail: { contract: 'page-size' } });
+        const idOk = (v) => (typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v))) && String(v).length > 0 && String(v).length <= 512 && !/[\u0000-\u001f\u007f]/.test(String(v));
+        let stripped = 0, malformed = 0;
+        const hits = [];
+        for (const h of raw) {
+          if (!h || typeof h !== 'object' || !idOk(h.convId) || !idOk(h.vendorId) || !(Number(h.at) > 0)) { malformed++; continue; }
+          if (Object.keys(h).some((k) => !SEARCH_HIT_FIELDS.includes(k))) stripped++;
+          hits.push({ convId: String(h.convId), vendorId: String(h.vendorId), at: Number(h.at), fromId: idOk(h.fromId) ? String(h.fromId) : null, threadKey: idOk(h.threadKey) ? String(h.threadKey) : null, snippet: typeof h.snippet === 'string' ? peerName(h.snippet, SR.SNIPPET_MAX) : null });
+        }
+        const next = typeof r.next === 'string' && r.next && r.next.length <= PAGE_TOKEN_MAX && !/[\u0000-\u001f]/.test(r.next) ? r.next : null;
+        const f = r.facts && typeof r.facts === 'object' ? r.facts : null;
+        const facts = f ? { shape: f.shape && typeof f.shape === 'object' ? { form: String(f.shape.form || 'absent').slice(0, 16), keys: Array.isArray(f.shape.keys) ? f.shape.keys.filter((k) => typeof k === 'string' && /^[A-Za-z0-9_.]{1,64}$/.test(k)).slice(0, 12) : [], length: Math.max(0, Math.floor(Number(f.shape.length) || 0)), markup: f.shape.markup === true, entities: f.shape.entities === true } : null, holding: Math.max(0, Math.floor(Number(f.holding) || 0)), of: Math.max(0, Math.floor(Number(f.of) || 0)) } : null;
+        return { hits, next, stripped, malformed: malformed + Math.max(0, Math.floor(Number(r.malformed) || 0)), ...(facts ? { facts } : {}) };
+      },
+      /** A HIT IN CONTEXT (design 010): ≤ SR.AROUND_MAX records of THAT conversation, never stored by the caller. */
+      async around(convId, opts = {}) {
+        const r = (await gated('around', impl.around && impl.around.bind(impl))(convId, opts)) || {};
+        const records = (Array.isArray(r.records) ? r.records : []).filter((x) => x && typeof x === 'object' && String(x.convId) === String(convId));
+        if (records.length > SR.AROUND_MAX) throw new ChannelError('vendor-error', `${kind}.around returned ${records.length} records — the bound is ${SR.AROUND_MAX}`, { retryable: false, detail: { contract: 'around-size' } });
+        const f = r.facts && typeof r.facts === 'object' ? r.facts : null;
+        return { records, requests: Math.max(1, Math.floor(Number(r.requests) || 1)), ...(f ? { facts: { before: Math.max(0, Math.floor(Number(f.before) || 0)), after: Math.max(0, Math.floor(Number(f.after) || 0)), target: f.target === true } } : {}) };
+      },
       /** A conversation the feed found, NAMED (`{title|null, kind|null, peers:[{id, name}]}`, every string bounded). */
       async describe(convId, opts = {}) {
         const r = (await gated('describe', impl.describe && impl.describe.bind(impl))(convId, opts)) || {};
@@ -752,6 +892,7 @@ function createChannelRegistry() {
 module.exports = {
   createChannelRegistry, ChannelError, validateCaps, validateMethods,
   CHANNEL_ERROR_CODES, RECEIVE_MODES, SCAN_SOURCES, HISTORY_MODES, SEND_IDENTITIES, IDENTITY_MARKING, TOS_RISK, METHOD_GATES, OLDER_HISTORY, BUDGET_UNITS, PACE_COSTS, RENDER_MODES, TITLE_FORMS, FEED_METHODS, BY_ID_KINDS,
+  SEARCH_METHODS, SEARCH_HIT_FIELDS, searchRowOf,
   peerName,
   THREAD_READ, THREAD_LISTING, REACTION_READ, REACTION_REMOVE, REACTION_VOCABULARY, REACTION_CUSTOM, NO_THREADS, NO_REACTIONS, THREAD_REACTION_METHODS, threadsOf, reactionsOf,
   retryAfterSeconds, sentSecrets, withoutSent, bearerOf, SENT_SECRET_FIELDS,

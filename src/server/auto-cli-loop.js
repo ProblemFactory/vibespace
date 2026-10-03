@@ -108,6 +108,8 @@ function lastBoughtInstant(reads) {
 /**
  * @param {object} d  deps: serverSetting, accounts, autoCliReady, USAGE_CACHE_DIR,
  *   usageIdentityGroupsCached, usageEstimator, projectionRereadFor,
+ *   projectionBillingIndex (optional: ONE who-bills-where pass per tick, handed
+ *   to every projectionRereadFor call of that tick — prod-stall-202),
  *   lastMemberReadAt, usage (refreshViaCliPanel), onMemberReadingFresh, dataDir;
  *   now/rand/log/warn/metric injectable for the suites.
  */
@@ -124,6 +126,13 @@ function createAutoCliLoop(d) {
       const now = clock();
       if (clampStamps(st, now)) warn('[auto-cli] the clock stepped back — pacing stamps clamped to now');
       const list = [];
+      // who bills where — resolved ONCE per tick, on the first account that asks, and dropped with
+      // the tick (prod-stall-202: per account it was accounts × sessions synchronous login-file reads,
+      // 6–15 s stalls on production). No await runs before `list` is complete: the index never
+      // outlives the synchronous segment that built it, so a session added or a link re-pointed is
+      // seen by the next tick exactly as before.
+      let billing;
+      const billingIndex = () => (billing === undefined ? (billing = d.projectionBillingIndex ? d.projectionBillingIndex() : null) : billing);
       for (const a of (d.accounts.list().accounts || [])) {
         if (a.type !== 'subscription' || !a.loggedIn || a.pooled || (a.backend || 'claude') !== 'claude' || !d.autoCliReady(a.id)) continue; // auto-cli spawns `claude -p /usage` — claude accounts only, and NOT READY IS NOT FAILED (autoCliReady, 2026-09-08)
         let raw = null, mem = [a.id];
@@ -145,7 +154,7 @@ function createAutoCliLoop(d) {
         // logged drift (it printed a 100-point "drift" old-window-vs-new); the
         // scheduler keeps its inputs (triggerDrift/moved) — the refresh was right
         const dr = cliRefreshDrift(est, raw, now);
-        const pj = d.projectionRereadFor(a.id, now), reads = mergedReads(mem);
+        const pj = d.projectionRereadFor(a.id, now, billingIndex()), reads = mergedReads(mem);
         // ONE attempt clock for both schedulers (lastMemberReadAt, 2026-09-08); pj = the estimator's PROJECTION (B-f69c ③):
         // a crossing before the next scheduled read asks this same rung now — once per BUCKET (projLabel/projResetsAt vs projReads, quota r2)
         list.push({ key: a.id, fetchedAt: raw?.fetchedAt || 0, lastAttemptAt: Math.max(...mem.map((x) => Math.max(attempts.get(x) || 0, d.lastMemberReadAt(x) || 0))), estDriftPct: dr.triggerDrift, activeBurn: dr.moved, drift: dr.drift, rolled: dr.rolled, projCrossInMs: pj ? pj.inMs : null, estBurnPtPerMin: pj ? pj.burnPtPerMin : 0, projLabel: pj ? pj.label : null, projResetsAt: pj ? (pj.resetsAt || 0) : 0, projReads: reads, projReadCrossAt: lastBoughtInstant(reads), pj, mem });

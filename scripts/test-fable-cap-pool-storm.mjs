@@ -242,8 +242,11 @@ console.log('— §1 placement follows the REQUEST model');
       const l2 = cap2.done();
       ok('§1 NEGATIVE CONTROL: without the rule the pool really does move it onto the Fable-dead member (the incident)',
         w2.linkOf('sess-6') === 'fish', w2.linkOf('sess-6') + ' | ' + l2.filter((l) => /per-session switch/.test(l)).join(' | ').slice(0, 200));
+      // (B-8a65 S5: on a hot pool the mis-projected conversation now leaves the Fable-rich member through the spare-lane tier,
+      // whose sentence names the family it wrongly believes the conversation does NOT use — the same wrong family, other words;
+      // §5, §7 and §11d read either sentence the same way)
       ok('§1 NEGATIVE CONTROL: …and the notice tells the owner it moved because of its OPUS quota',
-        w2.notices.some((n) => /opus quota/.test(n)), JSON.stringify(w2.notices).slice(0, 220));
+        w2.notices.some((n) => /opus quota|does not use Fable\b/.test(n)), JSON.stringify(w2.notices).slice(0, 220));
     }
 
     // CONTROL ①: a served model that changed WITHOUT a fallback (a CLI-side
@@ -760,7 +763,7 @@ const MASTER_SERVED_PATCH = [
         w2.linkOf('sess-6') === 'fish',
         w2.linkOf('sess-6') + ' | ' + l2.filter((l) => /per-session switch/.test(l)).join(' | ').slice(0, 200));
       ok('§5 NEGATIVE CONTROL: …and tells the owner it moved because of its FABLE quota',
-        w2.notices.some((n) => /fable quota/.test(n)), JSON.stringify(w2.notices).slice(0, 220));
+        w2.notices.some((n) => /fable quota|does not use Opus\b/.test(n)), JSON.stringify(w2.notices).slice(0, 220));
       const w2v = mkWorld({ roster: [{ tag: 'personal', name: 'Member P', u5: 0.20, u7: 0.20, fable: 0.10, opus: 1.00, hoursOut: 20 }], engineModule: mut.mod });
       const s2v = rerouted(w2v);
       const cap2v = quiet();
@@ -1069,7 +1072,7 @@ const R3R2_BELT_PATCH = [
         w2.linkOf('sess-6') === 'fish',
         w2.linkOf('sess-6') + ' | ' + l2.filter((l) => /per-session switch/.test(l)).join(' | ').slice(0, 200));
       ok('§7 NEGATIVE CONTROL: …and the notice tells the owner it moved because of its OPUS quota',
-        w2.notices.some((n) => /opus quota/.test(n)), JSON.stringify(w2.notices).slice(0, 220));
+        w2.notices.some((n) => /opus quota|does not use Fable\b/.test(n)), JSON.stringify(w2.notices).slice(0, 220));
       const capv = quiet();
       const v2 = w2.eng.quotaVerdictFor(w2.P, { model: w2.eng.sessionModelFor(s2), session: s2 });
       capv.done();
@@ -1938,7 +1941,7 @@ function playLatch({ stdoutModule = null, engineModule = engMod, restored = fals
         ok('§11d NEGATIVE CONTROL: …and the pool moves it onto the Fable-dead member (the incident)',
           worst.link === 'fish', worst.link + ' | ' + worst.switches.join(' | ').slice(0, 200));
         ok('§11d NEGATIVE CONTROL: …announcing an OPUS quota it is not the one spending',
-          worst.w.notices.some((n) => /opus quota/.test(n)), JSON.stringify(worst.w.notices).slice(0, 220));
+          worst.w.notices.some((n) => /opus quota|does not use Fable\b/.test(n)), JSON.stringify(worst.w.notices).slice(0, 220));
         ok('§11d NEGATIVE CONTROL: …and calls that member usable, which authorises a billed continue',
           worst.verdict.usable === true && worst.verdict.viaId === worst.w.id.fish,
           JSON.stringify({ usable: worst.verdict.usable, via: worst.verdict.viaId }).slice(0, 160));
@@ -3162,6 +3165,124 @@ console.log('— §18 a soft move of a warm mid-turn conversation waits for its 
 
 }
 
+
+// ═══ §19 THE SPARE LANE AT A SPAWN (B-8a65) ══════════════════════════════════
+// The incident's frozen caches: Member P (the pool DEFAULT) is the one member with Fable left (40 %); the
+// other four read Fable ≤ 1 %. The REAL chooser places a new conversation: an OPUS spawn starts on a
+// Fable-spent member that can settle (the soonest week among them, F), so P's 7d stays for the Fable
+// conversations that need it; a FABLE spawn starts exactly where the pool started it before this change.
+// S5 (owner 2026-10-03): the hot pool's per-session pass moves an IDLE running Opus conversation the same way.
+console.log('— §19 the spare lane at a spawn');
+{
+  const w = mkWorld();
+  if (!w) { ok('§19 SKIP — pools unsupported on this platform', true); }
+  else {
+    const tag = (id) => Object.keys(w.id).find((k) => w.id[k] === id) || String(id);
+    const place = (eng, P, model, hinted = false) => { const c = quiet(); try { return eng.poolChooserForModel(P, { model, hinted }); } finally { c.done(); } };
+    ok('§19 setup: the pool default is the Fable-rich member (P)', w.am.poolCurrent(w.P) === w.id.personal, tag(w.am.poolCurrent(w.P)));
+    ok('§19 an OPUS spawn starts on a Fable-SPENT member — F (Fable 0 %, the soonest week of the spent four)', tag(place(w.eng, w.P, 'claude-opus-4-8')) === 'fish', tag(place(w.eng, w.P, 'claude-opus-4-8')));
+    ok('§19 a FABLE spawn stays on the default (P), the only member whose Fable can serve it', tag(place(w.eng, w.P, 'claude-fable-5-1')) === 'personal' && tag(place(w.eng, w.P, 'claude-fable-5-1[1m]')) === 'personal');
+    ok('§19 a spawn with no model (no family, no projection) stays on the default', tag(place(w.eng, w.P, null)) === 'personal');
+    ok('§19 the chooser MOVES nothing: the pool default is untouched after every placement', w.am.poolCurrent(w.P) === w.id.personal);
+    // the default already on a Fable-spent member: an Opus spawn has nowhere strictly less spare to go
+    w.am.setPoolTarget(w.P, w.id.wmax);
+    ok('§19 a default that is itself Fable-spent (W) keeps an Opus spawn (strictly less only — F ties at 0 %)', tag(place(w.eng, w.P, 'claude-opus-4-8')) === 'wmax');
+    ok('§19 …and a Fable spawn leaves it for P exactly as before (W\'s Fable is its constraint — never spare)', tag(place(w.eng, w.P, 'claude-fable-5-1')) === 'personal');
+    w.am.setPoolTarget(w.P, w.id.personal);
+    // S5 (owner 2026-10-03, Q2 = yes): the per-session pass of this HOT pool moves an IDLE Opus conversation off P
+    {
+      const w5 = mkWorld();
+      w5.mkSession('sp-opus', 'personal', { _spawnModel: 'claude-opus-4-8' });                                // cold: no output on record
+      w5.mkSession('sp-warm', 'personal', { _spawnModel: 'claude-opus-4-8', _lastPtyDataAt: Date.now() });     // warm: output this second
+      w5.mkSession('sp-fable', 'personal', { _spawnModel: 'claude-fable-5-1' });
+      const c5 = quiet(); w5.eng.maybePoolAutoSwitchForPool(w5.P); const l5 = c5.done();
+      ok('§19 S5: a COLD Opus conversation on P moves to a Fable-spent member (F)', w5.linkOf('sp-opus') === 'fish', w5.linkOf('sp-opus') + ' | ' + l5.filter((l) => /\[pool\]/.test(l)).join(' | ').slice(0, 240));
+      ok('§19 S5: …a WARM one stays on P (the warm hold)', w5.linkOf('sp-warm') === 'personal', w5.linkOf('sp-warm'));
+      ok('§19 S5: …a FABLE conversation is never moved for it', w5.linkOf('sp-fable') === 'personal', w5.linkOf('sp-fable'));
+      ok('§19 S5: …and the ONE notice names the cap it keeps and where',
+        w5.notices.length === 1 && w5.notices[0] === 'Pool "全部": conversation "sp-opus" moved to Member F — it does not use Fable, so the Fable quota on Member P is kept for the conversations that do.', JSON.stringify(w5.notices));
+      const key = JSON.stringify('Pool "{pool}": conversation "{title}" moved to {target} — it does not use {lane}, so the {lane} quota on {source} is kept for the conversations that do.');
+      ok('§19 S5: …worded in zh and ja too (the key is in both dictionaries)', ['zh', 'ja'].every((l) => fs.readFileSync(path.join(REPO, `src/lib/i18n-${l}.js`), 'utf8').includes(key + ': ')));
+      const w6 = mkWorld({ sameDeadline: true });
+      w6.mkSession('sp-w', 'wmax', { _spawnModel: 'claude-opus-4-8' });
+      const c6 = quiet(); w6.eng.maybePoolAutoSwitchForPool(w6.P); c6.done();
+      ok('§19 S5: an Opus conversation already on a Fable-spent member (W) has no better member ⇒ stays, nothing said', w6.linkOf('sp-w') === 'wmax' && w6.notices.length === 0, w6.linkOf('sp-w') + ' ' + JSON.stringify(w6.notices).slice(0, 200));
+    }
+    // VERIFY r1: a RESUME's family is a guess (a claude resume commands no model; the instance default stands in) —
+    // a Fable conversation hinted as Opus must start where the pool would have put it, never on a Fable-spent member
+    ok('§19 r1: a HINTED family places nothing — an Opus-hinted resume starts on the default (P)', tag(place(w.eng, w.P, 'claude-opus-4-8', true)) === 'personal');
+    {
+      const mh = mutate('src/server/usage-pool-engine.js', 'hintplace', [['hot: true, placing: !hinted, readLogin:', 'hot: true, placing: true /* PATCHED: a guess places */, readLogin:']]);
+      const wh = mh.hit ? mkWorld({ engineModule: mh.mod }) : null;
+      const gotH = wh ? place(wh.eng, wh.P, 'claude-opus-4-8', true) : null;
+      ok('§19 r1 CONTROL: placing on the hint puts the (Fable) resume on F, whose Fable is spent', !!wh && gotH === wh.id.fish, mh.why || String(gotH));
+    }
+    // NEGATIVE CONTROL: the chooser without the one word
+    const mut = mutate('src/server/usage-pool-engine.js', 'noplacing', [[
+      'hot: true, placing: !hinted, readLogin: poolReadLogin(), membership,',
+      'hot: true, /* PRE-CHANGE: no placing */ readLogin: poolReadLogin(), membership,',
+    ]]);
+    ok('§19 NEGATIVE CONTROL: the patch hit the product source', mut.hit === true, mut.why || '');
+    if (mut.hit) {
+      const w2 = mkWorld({ engineModule: mut.mod });
+      const o2 = place(w2.eng, w2.P, 'claude-opus-4-8'), f2 = place(w2.eng, w2.P, 'claude-fable-5-1');
+      ok('§19 NEGATIVE CONTROL: pre-change, an Opus spawn started on the Fable-rich default (P) — spending the 7d its Fable needs', o2 === w2.id.personal, String(o2));
+      ok('§19 NEGATIVE CONTROL: …and a Fable spawn on P, the same member as now', f2 === w2.id.personal, String(f2));
+    }
+  }
+}
+
+// ═══ §20 THE SPARE LANE'S DWELL (B-8a65, verify r1 L3, design desk 2026-10-02) ═════════════
+// verify r1's F3 replay: the ONLY Fable-spent member (F) sits on its 5h settle line (13 % ± 4 left, seeded
+// jitter), its week later than the rich members' (the deadline tier stays silent). On the 3-min belt every
+// crossing re-pointed an idle Opus conversation P → F and the wobble threw it back — each move a cold start.
+// A 'spare-lane' move now waits SPARE_DWELL_MS (1 h) after the conversation's last move; the move OFF F when
+// its 5h dips keeps the 3-min belt. MIN_GAIN, the settle line and the inherited EDF jitter (F3b) are untouched.
+console.log('— §20 a spare-lane move waits an hour after the conversation\'s last move');
+{
+  const F3 = [
+    { tag: 'personal', name: 'P', u5: 0.2, u7: 0.3, fable: 0.30, hoursOut: 40 },
+    { tag: 'fish', name: 'F', u5: 0.87, u7: 0.5, fable: 1.0, hoursOut: 100 },
+    { tag: 'wmax', name: 'R', u5: 0.2, u7: 0.3, fable: 0.30, hoursOut: 120 }];
+  // 120 ticks × 60 s on a mocked clock; a move ONTO F (the one Fable-spent member) is a spare-lane move
+  const replay = (engineModule) => {
+    let seed = 7; const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+    const realNow = Date.now; let T = realNow();
+    Date.now = () => T;
+    try {
+      const w = mkWorld({ engineModule, roster: F3 });
+      if (!w) return null;
+      w.mkSession('x', 'personal', { _spawnModel: 'claude-opus-4-8' });
+      const hops = []; let prev = w.linkOf('x');
+      for (let i = 0; i < 120; i++) {
+        T += 60e3; const nowSec = Math.floor(T / 1000);
+        for (const m of F3) {
+          const u5 = Math.min(1, Math.max(0, m.u5 + (rnd() * 2 - 1) * 0.04)), r = w.nowSec + Math.round(m.hoursOut * 3600);
+          w.writeCache(w.id[m.tag], { fetchedAt: T - 30e3, source: 'on-demand', fiveHour: { utilization: u5, resetsAt: nowSec + 4 * 3600 }, sevenDay: { utilization: m.u7, resetsAt: r }, scopedWeekly: [{ name: 'Fable', utilization: m.fable, resetsAt: r }] });
+        }
+        const q = quiet(); try { w.eng.maybePoolAutoSwitchForPool(w.P, { force: true }); } finally { q.done(); }
+        const cur = w.linkOf('x'); if (cur !== prev) { hops.push(i + ':' + prev + '>' + cur); prev = cur; }
+      }
+      return { moves: hops.length, spare: hops.filter((h) => h.endsWith('>fish')).length, hops: hops.join(',') };
+    } finally { Date.now = realNow; }
+  };
+  const now1 = replay(engMod);
+  if (!now1) { ok('§20 SKIP — pools unsupported on this platform', true); }
+  else {
+    ok('§20 F3 replay, 2 h of 60 s ticks: at most 2 spare-lane moves (onto the spent member F)', now1.spare <= 2, JSON.stringify(now1));
+    ok('§20 …the tier still MOVES (held back, not off): at least 1 spare-lane move', now1.spare >= 1, JSON.stringify(now1));
+    ok('§20 …and the move OFF F when its 5h dips is never held by the hour (the 3-min belt only)', now1.moves - now1.spare >= 1, JSON.stringify(now1));
+    const mut = mutate('src/server/usage-pool-engine.js', 'sparedwell', [[
+      'const SPARE_DWELL_MS = 60 * 60 * 1000;',
+      'const SPARE_DWELL_MS = 180000; // PATCHED: the 3-min belt',
+    ]]);
+    ok('§20 NEGATIVE CONTROL: the patch hit the product source', mut.hit === true, mut.why || '');
+    if (mut.hit) {
+      const c = replay(mut.mod);
+      ok('§20 NEGATIVE CONTROL: on the 3-min belt the same replay makes more than 2 spare-lane moves', !!c && c.spare > 2, JSON.stringify(c));
+    }
+  }
+}
 
 // ── §tree THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
 // Measured HERE, while every patched copy this run made still exists (the exit

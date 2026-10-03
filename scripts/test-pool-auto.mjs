@@ -970,6 +970,240 @@ await (async () => {
 })();
 
 
+// ── THE SPARE LANE (B-8a65, owner 2026-10-02: 「如果一个claude session在用opus，自动选择账号的时候优先选择fable用尽了的，避免占据fable额度」):
+// a member's SPARE lane = a model-scoped cap THIS request does not draw (the family projection hands it back as `spareScoped`).
+// Within today's safety rules and the same manual-priority rank, the member whose spare lane has the LEAST left ranks first —
+// ahead of the EDF deadline (owner Q1); unknown sorts as rich. A spawn (`placing`, the chooser only) leaves a usable default for
+// a strictly less-spare member that can settle. Views without a spare lane decide byte-identically. ─────────────────────────
+await (async () => {
+  const fs = require('node:fs');
+  const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+  const REPO = path.resolve('.');
+  const M = mutantCopies('poolpin-spare', REPO);
+  const { spareLaneRemaining, rankPoolMembers, projectCacheAhead, SPARE_MOVE_MARGIN_PCT } = require(path.resolve('src/account-pool-auto.js'));
+  const { projectCacheForFamily } = require(path.resolve('src/model-family.js'));
+  // a claude member as this instance reads them (F5): 5h, 7d and ONE scoped lane "Fable" on the same weekly window; fu = Fable USED (null = no lane)
+  const fm = (u7, resetIn, fu, { u5 = 0 } = {}) => ({ fiveHour: { utilization: u5, resetsAt: NOW + 1800 }, sevenDay: { utilization: u7, resetsAt: NOW + resetIn },
+    scopedWeekly: fu == null ? [] : [{ name: 'Fable', utilization: fu, resetsAt: NOW + resetIn }] });
+  const view = (fam, caches) => (id) => projectCacheForFamily(caches[id] ?? null, fam);
+  // the RICH member is listed before the SPENT one: a tie in today's order (stable sort) goes to the rich one
+  const mem = [{ id: 'a', name: 'A' }, { id: 'r', name: 'Rich' }, { id: 's', name: 'Spent' }];
+  const dead = fm(0.99, 3 * D, 0.3); // the current member: 7d under its hard bar ⇒ it must move
+  const run2 = (mod, caches, fam, opts = {}) => mod.decidePoolSwitch({ currentId: 'a', members: mem, readCache: view(fam, caches), nowSec: NOW, explain: true, hot: true, ...opts });
+  const d = (caches, fam, opts) => run2({ decidePoolSwitch }, caches, fam, opts);
+  const src = fs.readFileSync(path.resolve('src/account-pool-auto.js'), 'utf8');
+  const ctl = (tag, from, to) => (src.includes(from) ? M.load('src/account-pool-auto.js', src.replace(from, to), tag) : null);
+  const noKey = ctl('nokey', '  const spare = (a.spare ?? 100) - (b.spare ?? 100);\n  if (spare) return spare;\n', '  // PATCHED: no spare key\n');
+  ck('spare CONTROL setup: the no-key copy (today\'s order) loaded', !!noKey);
+
+  // (1) same deadline, same 7d
+  const c1 = { a: dead, r: fm(0.4, 3 * D, 0.3), s: fm(0.4, 3 * D, 0.9) };
+  const o1 = d(c1, 'opus'), f1 = d(c1, 'fable');
+  ck('spare (1): same deadline, same 7d — an OPUS conversation goes to the Fable-SPENT member (10 % Fable left), not the Fable-rich one (70 %)', o1.to === 's' && o1.reason === 'exhausted', JSON.stringify(o1));
+  ck('spare (1): …a FABLE conversation (its view keeps Fable as a constraint — no spare lane) takes today\'s pick, the most Fable left', f1.to === 'r' && f1.reason === 'exhausted', JSON.stringify(f1));
+  ck('spare (1) CONTROL: without the key the Opus conversation gets the RICH member (the tie goes to the list order)', noKey && run2(noKey, c1, 'opus').to === 'r');
+  // (2) the spare lane outranks the deadline (owner Q1 = yes)
+  const c2 = { a: dead, r: fm(0.4, 1 * D, 0.3), s: fm(0.4, 5 * D, 0.9) };
+  ck('spare (2): spent + LATER deadline beats rich + sooner deadline for an Opus conversation', d(c2, 'opus').to === 's');
+  ck('spare (2): …a Fable conversation drains the sooner deadline exactly as today', d(c2, 'fable').to === 'r');
+  ck('spare (2) CONTROL: without the key the Opus conversation drains the sooner deadline (the Fable-rich member)', noKey && run2(noKey, c2, 'opus').to === 'r');
+  // (3) the manual priority outranks the spare lane
+  const p3 = d(c1, 'opus', { priority: ['r'] });
+  ck('spare (3): a LISTED #1 rich member keeps the pick (priority > spare)', p3.to === 'r' && p3.placedBy === 'priority' && p3.priorityRank === 1, JSON.stringify(p3));
+  const p3b = d(c1, 'opus', { priority: ['a'] });
+  ck('spare (3): …among two UNLISTED members the spare lane decides', p3b.to === 's' && p3b.priorityRank === null, JSON.stringify(p3b));
+  // (4) the rule may only REORDER what the safety rules leave
+  const c4 = (s) => ({ a: dead, r: fm(0.4, 3 * D, 0.3), s });
+  const bars = [
+    ['under its hard bar (7d 2 %)', c4(fm(0.98, 3 * D, 0.9)), {}],
+    ['with a dead login', c4(fm(0.4, 3 * D, 0.9)), { readLogin: (id) => (id === 's' ? { state: 'expired' } : { state: 'ok' }) }],
+    ['with a login 10 min from expiry', c4(fm(0.4, 3 * D, 0.9)), { readLogin: (id) => (id === 's' ? { state: 'expiring', msLeft: 10 * 60e3 } : { state: 'ok' }) }],
+    ['under the reserve floor (7d 10 % < 15)', c4(fm(0.9, 3 * D, 0.9)), { reserveFloorPct: 15 }],
+    ['on paid overage', c4(fm(0.4, 3 * D, 0.9)), { overageIds: ['s'] }],
+    ['on usage credits', c4(fm(0.4, 3 * D, 0.9)), { creditsIds: ['s'] }],
+    ['excluded (it just refused this conversation)', c4(fm(0.4, 3 * D, 0.9)), { exclude: ['s'] }],
+  ];
+  for (const [label, caches, opts] of bars) { const v = d(caches, 'opus', opts); ck(`spare (4): a Fable-spent member ${label} is never chosen for its spare lane — the rich one is`, v.to === 'r', JSON.stringify(v)); }
+  const soft = { a: fm(0.96, 3 * D, 0.3), r: fm(0.4, 3 * D, 0.3), s: fm(0.93, 3 * D, 0.9) };
+  const vs = d(soft, 'opus');
+  ck('spare (4): …and a soft move lands where it can SETTLE: the spent member under its settle bar (7d 7 %) ranks first and is passed over', vs.to === 'r' && vs.band === 'soft', JSON.stringify(vs));
+  // (5) an unknown spare lane sorts as RICH — ignorance never jumps the queue
+  const memU = [{ id: 'a', name: 'A' }, { id: 'u', name: 'Unknown' }, { id: 'r', name: 'Rich' }];
+  const c5 = { a: dead, u: fm(0.4, 3 * D, null), r: fm(0.4, 3 * D, 0.3) };
+  ck('spare (5): a member with NO spare lane does not jump a known one (70 %) — even listed first', d(c5, 'opus', { members: memU }).to === 'r');
+  const noNum = { ...fm(0.4, 3 * D, null), scopedWeekly: [{ name: 'Fable', resetsAt: NOW + 3 * D }] };
+  ck('spare (5): a spare lane WITHOUT a number reads null (no claim)', spareLaneRemaining(projectCacheForFamily(noNum, 'opus'), NOW) === null && spareLaneRemaining(projectCacheForFamily(c5.u, 'opus'), NOW) === null && spareLaneRemaining(null, NOW) === null);
+  ck('spare (5): …and decides like no lane at all', d({ ...c5, u: noNum }, 'opus', { members: memU }).to === 'r');
+  const c5b = { a: dead, u: fm(0.4, 5 * D, null), r: fm(0.4, 1 * D, null) };
+  ck('spare (5): two unknowns ⇒ today\'s order, byte for byte (the sooner deadline)', JSON.stringify(d(c5b, 'opus', { members: memU })) === JSON.stringify(run2(noKey, c5b, 'opus', { members: memU })) && d(c5b, 'opus', { members: memU }).to === 'r');
+  const zero = ctl('unknown0', '(a.spare ?? 100) - (b.spare ?? 100)', '(a.spare ?? 0) - (b.spare ?? 0) /* PATCHED: unknown = spent */');
+  ck('spare (5) CONTROL: with unknown read as SPENT the member with no lane jumps the queue', zero && run2(zero, c5, 'opus', { members: memU }).to === 'u');
+
+  // (6) byte-identity: every view WITHOUT a spare lane that differs decides exactly as the pre-change copy (seeded sweep)
+  const pre = await preFixCopy(M, '0e7dc5b4', 'src/account-pool-auto.js');
+  const master = pre.mod;
+  if (!master && pre.why === 'shallow') skipPreFix('spare: ', '0e7dc5b4');
+  else ck(`spare: the pre-change copy (0e7dc5b4) loaded${pre.why ? ` — ${pre.why}` : ''}`, !!master);
+  {
+    const ref = master || { decidePoolSwitch, rankPoolMembers };
+    let seed = 23; const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+    const r2 = (x) => Math.round(x * 100) / 100;
+    const ids = ['a', 'b', 'c', 'd'];
+    let n = 0, same = 0, diff = null, placed = 0, placedSame = 0;
+    for (let i = 0; i < 300; i++) {
+      const caches = {}; for (const id of ids) caches[id] = rnd() < 0.1 ? null : fm(r2(rnd()), Math.round(rnd() * 6 * D) + H, rnd() < 0.2 ? null : r2(rnd()), { u5: r2(rnd()) });
+      const ms = ids.filter(() => rnd() < 0.8).map((id) => ({ id, name: id.toUpperCase() }));
+      const base = { currentId: ids[Math.floor(rnd() * 4)], members: ms, nowSec: NOW, proactive: rnd() < 0.5, explain: true,
+        warm: rnd() < 0.3 ? { warm: rnd() < 0.5, agoSec: 5, ttlSec: 300, inTurn: rnd() < 0.5 } : null,
+        priority: rnd() < 0.3 ? ids.filter(() => rnd() < 0.5) : null, reserveFloorPct: rnd() < 0.3 ? 15 : 0, pessimism: rnd() < 0.2 ? { b: 10 } : {} };
+      base.hot = base.proactive || rnd() < 0.3;
+      const raw = (id) => caches[id] ?? null;
+      const want = JSON.stringify(ref.decidePoolSwitch({ ...base, readCache: raw }));
+      const lane = [{ name: 'Fable', utilization: r2(rnd()), resetsAt: NOW + 2 * D }];
+      const views = [
+        raw,                                                                // no spare lane anywhere
+        (id) => (caches[id] ? { ...caches[id], spareScoped: [] } : null),   // the shape every FABLE view has now
+        (id) => ({ ...(caches[id] || {}), spareScoped: lane }),             // every member the SAME spare lane — a tie at every rank
+        view('fable', caches),                                              // the real fable projection
+      ];
+      for (const rc of views) for (const pl of [undefined, false]) { n++; const got = JSON.stringify(decidePoolSwitch({ ...base, readCache: rc, placing: pl })); if (got === want) same++; else if (!diff) diff = { i, want, got }; }
+      // the chooser's own shape: with no spare lane that differs, `placing` never changes WHERE a conversation starts
+      for (const rc of [raw, view('fable', caches)]) {
+        placed++;
+        const ch = { ...base, readCache: rc, proactive: false, hot: true, explain: false, warm: null };
+        const a1 = decidePoolSwitch({ ...ch, placing: true }), a0 = ref.decidePoolSwitch(ch);
+        if (((a1 && a1.to) || null) === ((a0 && a0.to) || null)) placedSame++; else if (!diff) diff = { i, placing: true, a1, a0 };
+      }
+      const wantR = JSON.stringify(ref.rankPoolMembers({ members: ms, readCache: raw, nowSec: NOW }));
+      n++; if (JSON.stringify(rankPoolMembers({ members: ms, readCache: views[2], nowSec: NOW })) === wantR) same++; else if (!diff) diff = { i, rank: true };
+    }
+    ck(`spare (6): ${n} seeded verdicts + snapshots without a DIFFERING spare lane are byte-identical to ${master ? 'the pre-change copy' : 'the raw verdicts (ref-free)'}`, same === n, JSON.stringify(diff));
+    ck(`spare (6): …and ${placed} spawns with \`placing\` start where they started before (Fable conversations place exactly as today)`, placedSame === placed, JSON.stringify(diff));
+  }
+
+  // (7) placing — the spawn chooser's own shape (hot, not proactive)
+  const pl = (caches, opts = {}) => d(caches, 'opus', { placing: true, ...opts });
+  const c7 = { a: fm(0.4, 3 * D, 0.3), r: fm(0.4, 3 * D, 0.3), s: fm(0.5, 4 * D, 0.98) };
+  const v7 = pl(c7);
+  ck('spare (7) placing: a usable Fable-rich default + a Fable-spent member that settles ⇒ the spawn starts there (spare-lane)', v7.to === 's' && v7.reason === 'spare-lane' && v7.toRemaining === 50, JSON.stringify(v7));
+  ck('spare (7) placing: …a spent member under its settle bar (7d 7 %) ⇒ stay', pl({ ...c7, s: fm(0.93, 4 * D, 0.98) }).to === null);
+  ck('spare (7) placing: …equal spare lanes ⇒ stay (strictly less only)', pl({ ...c7, a: fm(0.4, 3 * D, 0.98) }).to === null);
+  ck('spare (7) placing: …a default with NO spare lane (unknown = rich) + a spent member ⇒ move', pl({ ...c7, a: fm(0.4, 3 * D, null) }).to === 's');
+  ck('spare (7) placing: …a Fable-SPENT default + rich members ⇒ stay', pl({ a: fm(0.4, 3 * D, 0.98), r: fm(0.4, 3 * D, 0.3), s: fm(0.4, 3 * D, 0.2) }).to === null);
+  ck('spare (7) placing: …the default is the owner\'s priority #1 ⇒ stay (also with the spent member listed #2)', pl(c7, { priority: ['a'] }).to === null && pl(c7, { priority: ['a', 's'] }).to === null);
+  const v7n = d(c7, 'opus');
+  ck('spare (7) placing: …without `placing` (every other caller) a usable default is never left for its spare lane', v7n.to === null && v7n.reason === 'healthy', JSON.stringify(v7n));
+  ck('spare (7) placing: …and a FABLE spawn on the same pool stays on the default (its view has no spare lane)', d(c7, 'fable', { placing: true }).to === null);
+  const memU2 = [{ id: 'a', name: 'A' }, { id: 'u', name: 'Unknown' }];
+  ck('spare (7) placing: …a candidate whose spare lane is UNKNOWN never takes a spawn off a known-rich default', pl({ a: fm(0.4, 3 * D, 0.3), u: fm(0.4, 3 * D, null) }, { members: memU2 }).to === null);
+  const nullTier = ctl('nulltier', '(curSpare ?? 100) - (bestSettle.spare ?? 100) : 0;', '(curSpare ?? 100) - bestSettle.spare : 0; /* PATCHED: the candidate side unguarded */');
+  ck('spare (7) CONTROL: an unguarded candidate side (`70 - null` is 70 in JS) moves the spawn onto the UNKNOWN member', nullTier && run2(nullTier, { a: fm(0.4, 3 * D, 0.3), u: fm(0.4, 3 * D, null) }, 'opus', { placing: true, members: memU2 }).to === 'u');
+  const noTier = ctl('notier', 'if (placing && spareGain > 0 && spareClaim) return spareMove();', 'if (false && placing && spareGain > 0 && spareClaim) return spareMove(); // PATCHED: no spawn tier');
+  ck('spare (7) CONTROL: without the tier the spawn stays on the Fable-rich default', noTier && run2(noTier, c7, 'opus', { placing: true }).to === null);
+  const noRank = ctl('norank', 'const spareGain = bestSettle && (!prioRank || prioRank(currentId) === prioRank(bestSettle.id)) ?', 'const spareGain = bestSettle /* PATCHED: across ranks */ ?');
+  ck('spare (7) CONTROL: without the equal-rank rule the spawn leaves the owner\'s #1', noRank && run2(noRank, c7, 'opus', { placing: true, priority: ['a'] }).to === 's');
+  // (8) placing never pre-empts exhaustion
+  const c8 = { ...c7, a: dead };
+  const v8 = pl(c8), v8n = d(c8, 'opus');
+  ck('spare (8) placing: an exhausted default ⇒ \'exhausted\' exactly as without `placing` (same target the order gives)', v8.reason === 'exhausted' && JSON.stringify(v8) === JSON.stringify(v8n) && v8.to === 's', JSON.stringify(v8));
+  // (9) a RUNNING conversation on a hot pool (S5, owner 2026-10-03: Q2 = yes) + the proactive 'edf' tier under the new order
+  const p9 = (caches, fam, opts = {}) => d(caches, fam, { proactive: true, ...opts });
+  const c9 = { a: fm(0.4, 5 * D, 0.3), r: fm(0.4, 1 * D, 0.3), s: fm(0.4, 6 * D, 0.98) };
+  const v9 = p9(c9, 'opus');
+  ck('spare (9) S5: a COLD Opus conversation on a Fable-rich member moves to the Fable-spent one — even with a later deadline (spare-lane, the lane named)', v9.to === 's' && v9.reason === 'spare-lane' && v9.spareLane.label === 'Fable' && v9.spareLane.from === 70 && v9.spareLane.to === 2, JSON.stringify(v9));
+  const v9w = p9(c9, 'opus', { warm: { warm: true, agoSec: 20, ttlSec: 300, inTurn: false } });
+  ck('spare (9) S5: …a WARM one is never moved (warm-cache, the move named and asked again next cycle)', v9w.to === null && v9w.reason === 'warm-cache' && v9w.wouldTo === 's' && v9w.why === 'spare-lane', JSON.stringify(v9w));
+  const v9t = p9(c9, 'opus', { warm: { warm: false, agoSec: 900, ttlSec: 300, inTurn: true } });
+  ck('spare (9) S5: …a cold one in the middle of a turn waits for its stop (spare-hold)', v9t.to === null && v9t.reason === 'spare-hold' && v9t.wouldTo === 's', JSON.stringify(v9t));
+  ck('spare (9) S5: …a FABLE conversation on the same pool is never moved for it (its view has no spare lane — today\'s edf → Rich)', p9(c9, 'fable').reason === 'edf' && p9(c9, 'fable').to === 'r');
+  ck('spare (9) S5: …a pool that is not hot never moves a running conversation for it', d(c9, 'opus').to === null && d(c9, 'opus').reason === 'healthy');
+  const g15 = (fu) => p9({ a: fm(0.4, 3 * D, 0.3), b: fm(0.4, 3 * D, fu) }, 'opus', { members: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }] });
+  ck(`spare (9) S5: no member better by MORE than ${SPARE_MOVE_MARGIN_PCT} points ⇒ no move (70 → 55 holds, 70 → 54 moves)`, SPARE_MOVE_MARGIN_PCT === 15 && g15(0.45).to === null && g15(0.46).to === 'b' && g15(0.46).reason === 'spare-lane');
+  ck('spare (9) S5: a current member whose spare lane is UNKNOWN is not left for it (a cold start is never bought on ignorance)', p9({ a: fm(0.4, 3 * D, null), s: fm(0.4, 3 * D, 0.98) }, 'opus', { members: [{ id: 'a', name: 'A' }, { id: 's', name: 'Spent' }] }).to === null);
+  const v9e = p9({ a: fm(0.4, 5 * D, 0.98), r: fm(0.4, 1 * D, 0.3), s: fm(0.4, 2 * D, 0.99) }, 'opus');
+  ck('spare (9) edf: between two Fable-SPENT members the sooner deadline still drains first (edf → Spent)', v9e.to === 's' && v9e.reason === 'edf', JSON.stringify(v9e));
+  const memAR = [{ id: 'a', name: 'A' }, { id: 'r', name: 'Rich' }];
+  const c9g = { a: fm(0.4, 5 * D, 0.98), r: fm(0.4, 1 * D, 0.3) };
+  const v9g = p9(c9g, 'opus', { members: memAR });
+  ck('spare (9) edf: …but never DRAGS an Opus conversation off a spent member onto a Fable-rich one for its sooner deadline', v9g.to === null && v9g.reason === 'hold', JSON.stringify(v9g));
+  const noGuard = ctl('noguard', ' && (bestSettle.spare ?? 100) <= (curSpare ?? 100) && (!prioRank', ' /* PATCHED: no spare guard on edf */ && (!prioRank');
+  ck('spare (9) edf CONTROL: without the guard the deadline tier drags it onto the Fable-rich member', noGuard && run2(noGuard, c9g, 'opus', { proactive: true, members: memAR }).to === 'r');
+  // V5: a wobbling reading never bounces a conversation (12 ticks, ±3 pt on every spare lane, cold every tick)
+  {
+    let seed = 7; const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+    const jit = (fu) => Math.min(1, Math.max(0, Math.round((fu + (Math.round(rnd() * 6) - 3) / 100) * 100) / 100));
+    const replay = (mod, start, members, shape) => {
+      let cur = start, moves = 0;
+      for (let t = 0; t < 12; t++) {
+        const v = mod.decidePoolSwitch({ currentId: cur, members, readCache: view('opus', shape()), nowSec: NOW, explain: true, proactive: true, hot: true });
+        if (v && v.to) { cur = v.to; moves++; }
+      }
+      return { cur, moves };
+    };
+    const memJ = [{ id: 'a', name: 'A' }, { id: 's1', name: 'S1' }, { id: 's2', name: 'S2' }];
+    const flat = () => ({ a: fm(0.4, 3 * D, jit(0.3)), s1: fm(0.4, 3 * D, jit(0.97)), s2: fm(0.4, 3 * D, jit(0.97)) });
+    const j1 = replay({ decidePoolSwitch }, 'a', memJ, flat), j2 = replay({ decidePoolSwitch }, 's1', memJ, flat);
+    ck('spare (9) V5: 12 jittered ticks from the rich member ⇒ ONE move (onto a spent one), none after', j1.moves === 1 && j1.cur !== 'a', JSON.stringify(j1));
+    ck('spare (9) V5: …12 jittered ticks between two equally spent members ⇒ no move at all', j2.moves === 0, JSON.stringify(j2));
+    const cross = () => ({ a: fm(0.4, 1 * D, jit(0.3)), s1: fm(0.4, 5 * D, jit(0.97)) });
+    const j3 = replay({ decidePoolSwitch }, 's1', memJ.slice(0, 2), cross);
+    ck('spare (9) V5: …a spent member + a rich one with the SOONER deadline ⇒ no move (the two tiers never undo each other)', j3.moves === 0, JSON.stringify(j3));
+    const noMargin = ctl('nomargin', 'const SPARE_MOVE_MARGIN_PCT = 15;', 'const SPARE_MOVE_MARGIN_PCT = 0; // PATCHED: no margin');
+    const j4 = noMargin && replay(noMargin, 's1', memJ, flat);
+    ck('spare (9) V5 CONTROL: without the margin the wobble bounces it between the two spent members', j4 && j4.moves >= 3, JSON.stringify(j4));
+    const j5 = noGuard && replay(noGuard, 's1', memJ.slice(0, 2), cross);
+    ck('spare (9) V5 CONTROL: without the deadline tier\'s guard the two tiers bounce it every tick (each a cold start)', j5 && j5.moves >= 10, JSON.stringify(j5));
+  }
+  // (10) MIN, not MAX
+  ck('spare (10): MIN over the spare lanes — Fable 0 % + an UNUSED known-family cap (Sonnet) at 100 % ⇒ 0 (MAX would read every member rich and mute the rule)',
+    spareLaneRemaining({ spareScoped: [{ name: 'Fable', utilization: 1, resetsAt: NOW + D }, { name: 'Sonnet', utilization: 0, resetsAt: NOW + D }] }, NOW) === 0);
+  const two = { ...fm(0.4, 3 * D, 1), scopedWeekly: [{ name: 'Fable', utilization: 1, resetsAt: NOW + 3 * D }, { name: 'Sonnet', utilization: 0, resetsAt: NOW + 3 * D }, { name: 'Nimbus Quill', utilization: 0, resetsAt: NOW + 3 * D }] };
+  const pv2 = projectCacheForFamily(two, 'opus');
+  ck('spare (10): …through the projection: an Opus view sets Fable + Sonnet aside (spare 0) and KEEPS the nameless codename cap as a constraint (fail closed)',
+    spareLaneRemaining(pv2, NOW) === 0 && pv2.spareScoped.map((b) => b.name).join() === 'Fable,Sonnet' && pv2.scopedWeekly.map((b) => b.name).join() === 'Nimbus Quill');
+  // STATUS QUO, pinned so any change is deliberate (design desk 2026-10-02, verify r1 L2): with TWO known lanes both in
+  // real use, MIN reads a member with ONE spent lane as spent though its other lane is rich. Unreachable today (15/15
+  // members carry only the Fable known lane ⇒ MIN = MAX). The planned change once a second known lane shows in real
+  // readings — "only lanes some pool member has spent on, then MAX" — must flip these two asserts on purpose.
+  const fs10 = (fu, su) => ({ ...fm(0.4, 3 * D, fu), scopedWeekly: [{ name: 'Fable', utilization: fu, resetsAt: NOW + 3 * D }, { name: 'Sonnet', utilization: su, resetsAt: NOW + 3 * D }] });
+  const c10 = { a: fs10(0.3, 0.3), r: fs10(0.3, 0.3), s: fs10(1, 0.1) };
+  ck('spare (10) STATUS QUO: two known lanes in real use — Fable spent + Sonnet 90 % left reads SPENT (0), not rich (MAX: 90)', spareLaneRemaining(projectCacheForFamily(c10.s, 'opus'), NOW) === 0);
+  const v10 = pl(c10);
+  ck('spare (10) STATUS QUO: …so an Opus spawn leaves the 70/70 default for it (spare-lane), spending the 7d its Sonnet headroom needs', v10.to === 's' && v10.reason === 'spare-lane' && v10.spareLane.to === 0, JSON.stringify(v10));
+  // (11) the projection's other doors
+  const pv = projectCacheForFamily(fm(0.4, 3 * D, 0.9), 'opus');
+  const ahead = projectCacheAhead(pv, { sevenDay: 0.0001 }, NOW, 600);
+  ck('spare (11): projectCacheAhead (the cold path\'s lead view) keeps `spareScoped`', ahead !== pv && ahead.projectedAheadSec === 600 && JSON.stringify(ahead.spareScoped) === JSON.stringify(pv.spareScoped) && spareLaneRemaining(ahead, NOW) === 10);
+  const rawC = fm(0.4, 3 * D, 0.9), noScoped = { fiveHour: rawC.fiveHour, sevenDay: rawC.sevenDay };
+  ck('spare (11): a null family (and a cache with no scoped lanes) is the cache OBJECT itself — no spare lane, every bucket counts', projectCacheForFamily(rawC, null) === rawC && projectCacheForFamily(noScoped, 'opus') === noScoped && !('spareScoped' in rawC));
+  // VERIFY r1 (B-8a65): S5 never moves a PINNED conversation nor one whose view keeps a model-scoped lane of its OWN
+  // family (a vendor's second lane must not start moving Fable conversations); an UNKNOWN default is no claim at a spawn.
+  {
+    const COLD = { warm: false, inTurn: false, agoSec: 9999, ttlSec: 300 };
+    const A0 = require(path.resolve('src/account-pool-auto.js'));
+    const cP = { a: fm(0.4, 3 * D, 0.3), r: fm(0.4, 3 * D, 0.3, { u5: 0.93 }), s: fm(0.4, 3 * D, 1.0) }; // r = the pin: 5h 7 %, usable but not settled
+    const pin = (mod, caches) => mod.decidePinnedPlacement({ pin: 'r', currentId: 'a', members: mem, readCache: view('opus', caches), nowSec: NOW, proactive: true, hot: true, warm: COLD });
+    const vp = pin(A0, cP);
+    ck('r1 pin: a pinned Opus conversation waiting off its recovering pin on a Fable-rich member is NOT moved for a spare lane', vp.to == null && vp.pinWhy === 'pin-recovering', JSON.stringify(vp));
+    ck('r1 pin: …an unpinned one in the same place is (S5)', d(cP, 'opus', { proactive: true, warm: COLD }).reason === 'spare-lane');
+    const noPin = ctl('nopinned', 'readCache: autoReadCache || readCache, pinned: true, explain: true', 'readCache: autoReadCache || readCache, explain: true /* PATCHED */');
+    ck('r1 pin CONTROL: without `pinned` the pinned conversation is cold-started onto the Fable-spent member', !!noPin && pin(noPin, cP).to === 's', noPin ? JSON.stringify(pin(noPin, cP)) : 'anchor');
+    const fs3 = (fu, su, o) => ({ ...fm(0.4, 3 * D, fu, o), scopedWeekly: [{ name: 'Fable', utilization: fu, resetsAt: NOW + 3 * D }, { name: 'Sonnet', utilization: su, resetsAt: NOW + 3 * D }] });
+    const cS = { a: fs3(0.3, 0.0), r: fs3(0.3, 0.0, { u5: 0.97 }), s: fs3(0.3, 1.0) };
+    const vS = d(cS, 'fable', { proactive: true, warm: COLD });
+    ck('r1 own lane: a FABLE conversation is never moved by S5, even when the vendor reports a Sonnet lane it does not draw', vS.to == null, JSON.stringify(vS));
+    ck('r1 own lane: …an OPUS conversation on the same members still is (its view keeps no lane of its own)', d(cS, 'opus', { proactive: true, warm: COLD }).reason === 'spare-lane');
+    const noOwn = ctl('noown', 'proactive && !pinned && !curOwnLane && curSpare != null', 'proactive && !pinned && curSpare != null /* PATCHED */');
+    ck('r1 own lane CONTROL: without the rule the Fable conversation is cold-started onto the Sonnet-spent member', !!noOwn && run2(noOwn, cS, 'fable', { proactive: true, warm: COLD }).to === 's');
+    const cU = { a: fm(0.4, 3 * D, null), r: fm(0.4, 3 * D, 0.01), s: fm(0.4, 3 * D, 0.01, { u5: 0.97 }) };
+    ck('r1 unknown default: a spawn never leaves a default with NO spare reading for a member with 99 % of it left', pl(cU).to == null, JSON.stringify(pl(cU)));
+    ck('r1 unknown default: …but does for one whose spare lane is measured SPENT (2 % — design (7))', pl({ ...cU, r: fm(0.4, 3 * D, 0.98) }).to === 'r');
+    const noClaim = ctl('noclaim', 'if (placing && spareGain > 0 && spareClaim) return spareMove();', 'if (placing && spareGain > 0) return spareMove(); /* PATCHED */');
+    ck('r1 unknown default CONTROL: without the claim rule the spawn lands on the member with 99 % Fable left', !!noClaim && run2(noClaim, cU, 'opus', { placing: true }).to === 'r');
+  }
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: master ? 8 : 7, label: 'spare: ' })) ck(r.name, r.pass);
+})();
+
 // ── MANUAL PRIORITY on the REAL engine + the REAL routes ──────────────────────────────────────────────────
 await (async () => {
   const fs = require('node:fs');
@@ -1717,6 +1951,13 @@ await (async () => {
     const arrowRe = /chooseMember: (\([^)]*\) => poolChooser\?\.\(.*\)),$/m;
     const arrowTxt = (arrowRe.exec(fs.readFileSync(path.resolve('src/ws-create.js'), 'utf8')) || [])[1] || null;
     ck('r2 chooser: the chooser arrow is read off ws-create (it takes the pool the store resolved)', !!arrowTxt && /^\(poolId, how = \{\}\) => poolChooser\?\.\(poolId, /.test(arrowTxt), arrowTxt);
+    { // B-8a65 verify r1: a RESUME (no commanded model — the instance default stands in) is HINTED, so no spare-lane placement on a guess
+      const hintOf = (txt, data) => { let o = null; new Function('poolChooser', 'data', 'accounts', 'return ' + txt)((pid, opts) => { o = opts; return null; }, data, null)('p'); return o; };
+      const res = arrowTxt && hintOf(arrowTxt, { _placementModelHint: 'claude-opus-4-8' }), cmd = arrowTxt && hintOf(arrowTxt, { model: 'claude-opus-4-8' });
+      ck('r1 chooser: a resume\'s family is HINTED (hinted:true), a commanded model is not', !!res && res.hinted === true && res.model === 'claude-opus-4-8' && !!cmd && cmd.hinted === false, JSON.stringify({ res, cmd }));
+      const bare = arrowTxt && arrowTxt.replace('hinted: !data.model, ', '');
+      ck('r1 chooser CONTROL: an arrow without the flag hands the chooser a guess it would place on', !!bare && bare !== arrowTxt && !hintOf(bare, { _placementModelHint: 'claude-opus-4-8' }).hinted);
+    }
     const seen = [];
     const stub = (poolId, o = {}) => { seen.push(poolId); return poolId === CP ? o.pin || null : poolId === P1 ? B : null; };
     const chooser = (txt, data) => new Function('poolChooser', 'data', 'accounts', 'return ' + txt)(stub, data, ram);

@@ -1883,7 +1883,7 @@ app.get('/api/agent/channels/list', (req, res) => {
   // lane channel-agent-watch W2: `?all=1` adds the account directories' rows (titles the agent may REQUEST, never read)
   chanAnswer(res, eng.listFor(channelPrincipal(s, id), { all: req.query.all === '1' || req.query.all === 'true' }));
 });
-app.get('/api/agent/channels/read', (req, res) => {
+app.get('/api/agent/channels/read', async (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
   if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
@@ -1893,13 +1893,71 @@ app.get('/api/agent/channels/read', (req, res) => {
   const key = splitConvKey(req.query.conv);
   if (!key) return res.status(400).json({ error: 'conv is required (<adapter>/<conversation id>, as vibespace-channels list prints it)', code: 'bad-request' });
   const since = req.query.since !== undefined && req.query.since !== '' ? Number(req.query.since) : null;
+  // design 010: `around=<msg>` = the vendor's history around a found message (two requests, the agents' share) — printed,
+  // never stored; reach is asked before and after the await by the engine
+  const around = req.query.around !== undefined && req.query.around !== '' ? String(req.query.around).slice(0, 512) : null;
   // lane channel-threads (spec §5.1): `thread=<msg>` = that thread's local fold — never a vendor call (walked:false says so)
   const thread = req.query.thread !== undefined && req.query.thread !== '' ? String(req.query.thread).slice(0, 512) : null;
-  const r = thread && typeof eng.readThreadFor === 'function'
+  let r;
+  try {
+    r = around && typeof eng.readAroundFor === 'function' ? await eng.readAroundFor(channelPrincipal(s, id), key.adapterId, key.convId, around)
+    : thread && typeof eng.readThreadFor === 'function'
     ? eng.readThreadFor(channelPrincipal(s, id), key.adapterId, key.convId, thread, { limit: Number(req.query.limit) || 50 })
     : eng.readFor(channelPrincipal(s, id), key.adapterId, key.convId, { limit: Number(req.query.limit) || 50, since: Number.isFinite(since) ? since : null });
+  } catch (e) { return res.status(500).json({ error: e.message }); }
   if (r && r.ok) touchChannel(id, [{ op: 'read', adapterId: key.adapterId, convId: key.convId, title: r.conversation && r.conversation.title, count: (r.records || []).length }]);
   chanAnswer(res, r);
+});
+// lane channel-attach-read (B-d6b9, design 005 §2.A — the owner expected the coordinator to SEE a screenshot a peer sent
+// in a Lark chat): AN ATTACHMENT OF A CONVERSATION THE AGENT MAY READ. The engine's ONE order (`attachment()`: cache first
+// · a remembered refusal · ours only · fetchable · joined · the back-off · the budget · fetch) behind the read route's
+// reach (the uniform not-found — `requestable` and `hidden` are no conversation at all) and the agents' share of the
+// account's minute (`by: 'agent'`; a cache hit is free, a fetch in flight joined with no second charge). The bytes stream
+// with their Content-Length and are never rendered (nosniff, a sandbox CSP, `attachment`, `no-store`); who sent it, where
+// and the vendor's type ride ONE header, every piece through the belt (the engine's agentAttachmentAnswer). A job token
+// is refused like every verb but withdraw (agentSession takes a session token only). Its own status table: chanAnswer's
+// is the refresh census's source (test-channels-agent-cli), and these codes are not the refresh's.
+const ATT_STATUS = Object.freeze({ 'not-found': 404, 'not-supported': 409, disabled: 409, 'account-changed': 409, 'too-large': 413, 'vendor-budget': 429, backoff: 429, 'rate-limited': 429, stopped: 503 });
+const attAnswer = (res, r) => {
+  const code = (r && r.code) || 'error';
+  res.setHeader('Cache-Control', 'no-store');
+  if (r && r.retryAfterSec) res.setHeader('Retry-After', String(r.retryAfterSec));
+  return res.status(ATT_STATUS[code] || 502).json({ ...(r || {}), error: (r && r.error) || 'refused', code });
+};
+app.get('/api/agent/channels/attachment', async (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
+  const eng = channelsEngine();
+  if (!eng || typeof eng.attachment !== 'function') return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
+  const [s, id] = hit;
+  const key = splitConvKey(req.query.conv);
+  const msg = typeof req.query.msg === 'string' ? req.query.msg.slice(0, 512) : '';
+  const att = typeof req.query.id === 'string' ? req.query.id.slice(0, 512) : '';
+  if (!key || !msg || !att) return res.status(400).json({ error: 'conv, msg and id are required (vibespace-channels read prints all three on each attachment line)', code: 'bad-request' });
+  let r, fh = null;
+  try {
+    r = await eng.attachment(key.adapterId, key.convId, att, { msg, by: 'agent', principal: channelPrincipal(s, id) });
+    if (!r || !r.ok) return attAnswer(res, r);
+    // the file as it is NOW, held open: the LRU may evict it the next moment — the size said is the size streamed
+    try { fh = await require('fs').promises.open(r.file, 'r'); } catch { return attAnswer(res, { ok: false, code: 'gone', error: 'the attachment left the cache while it was served — fetch it again' }); }
+    const size = (await fh.stat()).size;
+    touchChannel(id, [{ op: 'read', adapterId: key.adapterId, convId: key.convId, title: r.conversation && r.conversation.title, count: 1 }]);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'attachment');
+    res.setHeader('Content-Length', String(size));
+    res.setHeader('X-VibeSpace-Attachment', encodeURIComponent(JSON.stringify({ mime: r.mime || null, bytes: size, from: r.from || null, conversation: r.conversation || null })));
+    const st = fh.createReadStream();
+    fh = null;   // the stream owns (and closes) it now
+    st.on('error', () => res.destroy());
+    st.pipe(res);
+  } catch (e) {
+    if (fh) fh.close().catch(() => {});
+    if (!res.headersSent) res.status(500).json({ error: e.message }); else res.destroy();
+  }
 });
 // THE AGENT'S OWN REFRESH (2026-09-26, design §6.5): reach first (invisible =
 // the uniform not-found), then the per-conversation floor
@@ -2066,7 +2124,8 @@ app.get('/api/agent/channels/search', async (req, res) => {
   if (!eng || typeof eng.searchFor !== 'function') return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
   const [s, id] = hit;
   try {
-    const r = await eng.searchFor(channelPrincipal(s, id), String(req.query.q || ''), { adapterId: req.query.account ? String(req.query.account) : null, limit: Number(req.query.limit) || 50 });
+    // design 010: `full=1` = ONE page of the account's OWN search (the agents' share, a 20 s floor, reach after the answer)
+    const r = await eng.searchFor(channelPrincipal(s, id), String(req.query.q || ''), { adapterId: req.query.account ? String(req.query.account) : null, limit: Number(req.query.limit) || 50, full: req.query.full === '1' || req.query.full === 'true' });
     if (r && r.ok) touchChannel(id, searchTouches(r.results));   // one touch per conversation hit (the most hits first, bounded)
     chanAnswer(res, r);
   }

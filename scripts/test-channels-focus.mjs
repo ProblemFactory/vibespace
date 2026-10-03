@@ -59,7 +59,7 @@ let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const FOCUS_PATH = path.join(REPO, 'src/lib/channel-focus.js');
+const FOCUS_PATH = path.join(REPO, 'src/channel-focus.js');   // design 008: the predicate moved to the shared tier (src/lib/channel-focus.js re-exports it)
 const Fo = await import(pathToFileURL(FOCUS_PATH).href);
 const V = await import(pathToFileURL(path.join(REPO, 'src/lib/channel-groups-view.js')).href);
 const Wd = await import(pathToFileURL(path.join(REPO, 'src/lib/channel-words.js')).href);
@@ -78,6 +78,8 @@ fs.rmSync(ROOT, { recursive: true, force: true });
 fs.mkdirSync(ROOT, { recursive: true });
 const quiet = { log() {}, warn() {}, error() {} };
 const MUT = mutantCopies('chan-focus', REPO);
+// design 008: `digest()` is the FIRST READ (bounded); a leg that reads EVERY row asks for every key (the old whole list)
+const wholeOf = (e) => e.digest({ keys: Object.keys(e.store.index.live()) });
 
 const NOW = Date.UTC(2026, 8, 26, 12, 0, 0);
 const H = 3600e3, D = 24 * H;
@@ -250,12 +252,17 @@ let SPEC = null;
   const awaitingId = ids[40];
   await eng.store.outbox.update((ob) => { ob.proposals = ob.proposals || {}; ob.proposals['p-fixture'] = { id: 'p-fixture', key: `im/${awaitingId}`, adapterId: 'im', convId: awaitingId, state: 'awaiting-approval', text: 'draft', draftedBy: { kind: 'agent', id: 'cid-a9' }, at: clock, updatedAt: clock }; });
   const screen = () => {
-    const d = eng.digest();
+    const d = wholeOf(eng);
     const { rows } = V.groupListRows({ groups: [], conversations: d.conversations, adapters: d.adapters });
     return { d, rows, fs: Fo.firstScreen(rows, { now: clock }) };
   };
   const tagsOf = (fs0) => Object.fromEntries(fs0.shown.map((r) => [r.id, Fo.statusTag(r, clock)]));
   const { d, fs: fs1 } = screen();
+  {
+    const f = eng.digest();   // design 008: the FIRST READ — one pass, a rowView only for a candidate or a head
+    const keysOf = (xs) => JSON.stringify(xs.map((x) => x.key).sort());
+    ok(f.scope === 'first' && f.attention.total === 7 && keysOf(f.conversations.filter((c) => Fo.statusTag(c, clock))) === keysOf(fs1.shown), `design 008: the FIRST READ carries the same 7 attention rows, key for key (attention ${JSON.stringify(f.attention)}, ${f.conversations.length} rows with the heads)`);
+  }
   ok(d.conversations.length === 50, 'the digest lists all 50 conversations');
   const grains = d.conversations.reduce((m, c) => { const g = c.assignment ? c.assignment.source : 'none'; m[g] = (m[g] || 0) + 1; return m; }, {});
   ok(grains.conversation === 3 && grains.pattern === 11 && grains.account === 36 && !grains.none, `every one of the 50 is handed over: 3 on their own, 11 by the rule, 36 by the account (${JSON.stringify(grains)})`);
@@ -333,23 +340,23 @@ console.log('③ the stamp, the wake\'s name, the owner\'s own message');
   await eng.refresh('im', 'c02');
   await eng.settleWakes();
   const lw = eng.store.index.peek('im/c02').stats.wakes.slice(-1)[0];
-  const rowC2 = eng.digest().conversations.find((c) => c.id === 'c02');
+  const rowC2 = wholeOf(eng).conversations.find((c) => c.id === 'c02');
   ok(delivered.length >= 1 && lw && lw.name === 'Alpha' && lw.ok === true && rowC2.touch.wake.name === 'Alpha' && rowC2.touch.wake.ok === true, 'the wake NAMES whom it reached (the ledger entry and the row\'s touch)', JSON.stringify(lw));
   W.refuse = true;
   W.convs.get('c02').recs.push({ vendorId: 'c02-news2', at: clock + 500, author: { id: 'u2', name: 'Brook', isSelf: false, isBot: false }, text: 'more news' });
   clock += 31e3;
   await eng.refresh('im', 'c02');
   await eng.settleWakes();
-  const rowHeld = eng.digest().conversations.find((c) => c.id === 'c02');
+  const rowHeld = wholeOf(eng).conversations.find((c) => c.id === 'c02');
   const tagHeld = Fo.statusTag(rowHeld, clock) || {};
   ok(rowHeld.touch.wake.ok === false && rowHeld.touch.wake.lane === 'none' && rowHeld.touch.pending >= 1 && tagHeld.code === 'assigned' && tagHeld.held === true, 'a wake the ladder refused (no stash) is HELD: the row says so and its tag turns amber', JSON.stringify(rowHeld.touch));
   W.refuse = false;
   // the owner's own newest message
-  const rowC1 = eng.digest().conversations.find((c) => c.id === 'c01');
+  const rowC1 = wholeOf(eng).conversations.find((c) => c.id === 'c01');
   ok(rowC1.touch && rowC1.touch.selfAt === SELF_AT, 'a record the vendor marks as the OWNER\'s (`isSelf`) is the row\'s `selfAt`', JSON.stringify(rowC1.touch));
   ok(Fo.statusTag(rowC1, clock).code === 'replied', '…and the row is on the first screen as "You replied …"');
   await eng.store.outbox.update((ob) => { ob.proposals = ob.proposals || {}; ob.proposals['p-own'] = { id: 'p-own', key: 'im/c00', adapterId: 'im', convId: 'c00', state: 'sent', text: 'mine', draftedBy: { kind: 'user' }, at: clock - 10e3, updatedAt: clock - 9e3, result: { at: clock - 9e3 } }; });
-  const rowC0 = eng.digest().conversations.find((c) => c.id === 'c00');
+  const rowC0 = wholeOf(eng).conversations.find((c) => c.id === 'c00');
   ok(rowC0.touch.selfAt === clock - 9e3, 'the owner\'s OWN send from here (a sent proposal the owner drafted) counts before the vendor echoes it back', JSON.stringify(rowC0.touch.selfAt));
   // the one-shot derivation for rows that predate the field
   await eng.store.index.update(() => { const e2 = eng.store.index.entry('im', 'c01', { create: false }); delete e2.selfAt; });
@@ -426,7 +433,7 @@ console.log('⑤ negative controls (patched copies in this run\'s scratch dir)')
 {
   const load = async (tag, a, b) => {
     ok(FOCUS_SRC.includes(a), `CONTROL ${tag}: the edit's anchor is spelled once`);
-    return import(pathToFileURL(MUT.write('src/lib/channel-focus.js', FOCUS_SRC.replace(a, b), tag, { esm: true })).href);
+    return import(pathToFileURL(MUT.write('src/channel-focus.js', FOCUS_SRC.replace(a, b), tag)).href);
   };
   const reds = (F) => FIXTURE.filter(([r, want]) => { const g = F.statusTag({ kind: 'conv', conv: r }, NOW); return (g ? g.code : null) !== want; }).map(([r]) => r.id);
   const inclusive = await load('inclusive-edge', 'return a > 0 && now - a < win;', 'return a > 0 && now - a <= win;');
@@ -465,7 +472,7 @@ console.log('⑥ wiring pins');
   const A = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
   ok(/const fs = firstScreen\(rows, \{ view: VIEW, q, now \}\);/.test(P) && /const st = r\.kind === 'conv' \? statusTag\(r, now\) : null;/.test(P) && /const tag = statusTagParts\(st, \{ now \}\);/.test(P), 'PIN: the first screen is firstScreen(view, filter); each row asks statusTag and words it with statusTagParts');
   ok(/chanEl\('span', `chan-grow-tag chan-tag-\$\{tag\.tone\}`\)/.test(P) && /chanEl\('span', 'chan-tag-who', tag\.who\)/.test(P), 'PIN: the tag is built with channel-chrome\'s el() — the name in its own `.chan-tag-who` (a data path), no innerHTML');
-  ok(/let VIEW = 'focus';/.test(P) && /segFocus\.dataset\.view = 'focus'/.test(P) && /segAll\.dataset\.view = 'all'/.test(P) && /input\.dataset\.channelFilter = '1';/.test(P) && /const \{ row: find, input: findInput \} = filterBox\(\(\) => draw\(\)\);/.test(P), 'PIN: the default view is the attention list; the header is the two-way switch; the filter box');
+  ok(/let VIEW = 'focus';/.test(P) && /segFocus\.dataset\.view = 'focus'/.test(P) && /segAll\.dataset\.view = 'all'/.test(P) && /input\.dataset\.channelFilter = '1';/.test(P) && /const \{ row: find, input: findInput \} = filterBox\(\(\) => \{ draw\(\); queueSearch\(\); \}\);/.test(P), 'PIN: the default view is the attention list; the header is the two-way switch; the filter box (design 008: the attention rows filter at once, the server answers for All 250 ms after the last keystroke)');
   ok((ENGINE_SRC.match(/stampAgentRead\(/g) || []).length === 2 && /stampAgentRead\(en\.key, ctx, upTo\);/.test(ENGINE_SRC) && /eng\.readFor\(channelPrincipal\(s, id\)/.test(A), 'PIN: the stamp has ONE door — readFor, the agent route\'s read — and one definition');
   ok(/touch: touchView\(en, lw, ob\),/.test(ENGINE_SRC) && /name: target\.name \? String\(target\.name\)\.slice\(0, 80\) : null,/.test(ENGINE_SRC), 'PIN: the row carries `touch`; the wake names its target');
   ok(!/\b(lark|gmail|fake-poll)\b/.test(FOCUS_SRC.replace(/^\s*\/\/.*$/gm, '')), 'channel-focus.js names no adapter id (a fact, never a kind)');
@@ -511,7 +518,7 @@ console.log('⑦ the R3 × R4 seam (2.369.191): a DIGEST watcher\'s open window 
   await eng.refresh('im', 'c00');
   await eng.settleWakes();
   await drainIndex(eng);
-  const r00 = eng.digest().conversations.find((c) => c.id === 'c00');
+  const r00 = wholeOf(eng).conversations.find((c) => c.id === 'c00');
   const pfor = r00 && r00.touch && r00.touch.pendingFor;
   ok(delivered.length === 0 && r00.touch.pending === 1 && Array.isArray(pfor) && pfor.length === 1 && pfor[0].p === 'agent:cid-ops' && pfor[0].n === 1 && pfor[0].oldest > 0 && r00.watchers.length === 1 && r00.watchers[0].notify === 'digest', 'the engine: the digest\'s hit WAITS on the conversation (nothing delivered), and the row says for whom — touch.pendingFor + the R4 watcher row', JSON.stringify({ delivered: delivered.length, touch: r00 && r00.touch, watchers: r00 && r00.watchers }));
   const conv00 = { kind: 'conv', conv: r00 };
@@ -522,7 +529,7 @@ console.log('⑦ the R3 × R4 seam (2.369.191): a DIGEST watcher\'s open window 
   // CONTROLS: the pre-seam rule (any pending hit is held) and a statusTag that does not pass the row's watchers
   const loadSeam = async (tag, a, b) => {
     ok(FOCUS_SRC.split(a).length === 2, `CONTROL ${tag}: the edit's anchor is spelled once`);
-    return import(pathToFileURL(MUT.write('src/lib/channel-focus.js', FOCUS_SRC.replace(a, b), tag, { esm: true })).href);
+    return import(pathToFileURL(MUT.write('src/channel-focus.js', FOCUS_SRC.replace(a, b), tag)).href);
   };
   const preSeam = await loadSeam('pre-seam', '  if (heldPending(touch, now, watchers) > 0) return true;', '  if (num(touch.pending) > 0) return true;');
   const pr = seamReds(preSeam);

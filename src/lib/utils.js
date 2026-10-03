@@ -106,7 +106,8 @@ export function showConfirmDialog(opts = {}, legacyMessage) {
   // strings and rendered a blank "Confirm / OK" (setup-flows' layout restore, then plugins-ui's Stop frp / Tailscale).
   // A string first argument is read as that pair; the approval census (test-approval-census) also refuses the form
   if (typeof opts === 'string') opts = { title: opts, message: typeof legacyMessage === 'string' ? legacyMessage : '' };
-  const { title = t('Confirm'), message = '', confirmText = t('OK'), danger = false } = opts || {};
+  const { title = t('Confirm'), message = '', confirmText = t('OK'), danger = false, items = null } = opts || {};
+  const list = Array.isArray(items) ? items.map((x) => String(x)) : []; // B-a67c: what the confirm ends, one row each (a group close names every tab)
   return new Promise((resolve) => {
     const { overlay, body, okBtn, cancelBtn, closeBtn } = _modalShell(title);
     okBtn.textContent = confirmText;
@@ -115,7 +116,13 @@ export function showConfirmDialog(opts = {}, legacyMessage) {
     p.className = 'dialog-hint';
     p.style.fontSize = '12px';
     p.textContent = message;
-    body.appendChild(p);
+    if (message || !list.length) body.appendChild(p);
+    if (list.length) {
+      const ul = document.createElement('ul');
+      ul.className = 'dialog-list';
+      for (const x of list) { const li = document.createElement('li'); li.textContent = x; ul.appendChild(li); }
+      body.appendChild(ul);
+    }
     const done = (result) => { overlay.remove(); resolve(result); };
     okBtn.onclick = () => done(true);
     cancelBtn.onclick = closeBtn.onclick = () => done(false);
@@ -531,15 +538,19 @@ export function createPopover(anchor, className, opts = {}) {
   (opts.parent || document.body).appendChild(pop);
   // Clamp to viewport after render so content is measured. Clamp math runs in
   // VIEWPORT space (pr + innerWidth agree), only the final write divides.
-  requestAnimationFrame(() => {
+  const clamp = () => {
     const pr = pop.getBoundingClientRect();
     const vw = window.innerWidth, vh = window.innerHeight;
     if (pr.right > vw) pop.style.left = (Math.max(0, vw - pr.width - 4) / Z) + 'px';
     if (pr.bottom > vh) pop.style.top = (Math.max(0, vh - pr.height - 4) / Z) + 'px';
     if (pr.left < 0) pop.style.left = '4px';
     if (pr.top < 0) pop.style.top = '4px';
-    pop.style.visibility = '';
-  });
+  };
+  requestAnimationFrame(() => { clamp(); pop.style.visibility = ''; });
+  // design 009 (lane apps-interface): a popover whose content grows AFTER it opened (a picker filling in, a row toggled)
+  // is clamped again — the Apps dialog's footer share row opened its picker 733 px down an 813 px page and its rows grew
+  // off-screen, where a click closed it as an outside press
+  if (typeof ResizeObserver === 'function') { const ro = new ResizeObserver(() => { if (pop.isConnected) clamp(); else ro.disconnect(); }); ro.observe(pop); }
   attachPopoverClose(pop, anchor);
   return pop;
 }
@@ -659,9 +670,15 @@ export function showContextMenu(x, y, items, className = 'context-menu') {
 
 /** What the DOM says about a press at (x, y) on `target` — the facts PURE pressTargetClass (press-select.js) reads:
  *  inside a text field / the terminal, on a control, a glyph under the finger, and that glyph's effective
- *  user-select. Never throws (a fact it cannot read is the conservative one: no glyph ⇒ the menu keeps working). */
+ *  user-select. Never throws (a fact it cannot read is the conservative one: no glyph ⇒ the menu keeps working).
+ *  THE FINGER'S POINT DECIDES, not the event's target (channel-touch-menu verify r1, measured): Chrome's touch
+ *  adjustment retargets a touchstart to a control NEAR the finger — a long press on a channel message's first word,
+ *  11 px under its author's name (a role=button), arrived with target = the name and clientX/Y on the word — while the
+ *  platform's own long press selected the word under the point. Judged by the target, the door armed its timer and our
+ *  menu (500 ms) held that selection off. The element under (x, y) is judged; the target only when nothing is there. */
 export function pressFacts(target, x, y) {
-  const el = target?.nodeType === 1 ? target : target?.parentElement;
+  const hit = typeof document.elementFromPoint === 'function' && Number.isFinite(x) && Number.isFinite(y) ? document.elementFromPoint(x, y) : null;
+  const el = hit || (target?.nodeType === 1 ? target : target?.parentElement);
   if (!el?.closest) return { native: false, chrome: true, overText: false, userSelect: 'none' };
   if (el.closest(NATIVE_PRESS_SELECTOR)) return { native: true, chrome: false, overText: false, userSelect: 'auto' };
   if (el.closest(PRESS_CHROME_SELECTOR)) return { native: false, chrome: true, overText: false, userSelect: 'none' };

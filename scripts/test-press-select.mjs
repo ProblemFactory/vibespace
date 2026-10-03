@@ -343,10 +343,12 @@ console.log('§4 the user-select census (grep-derived over public/*.css and src/
 // A new opt-in without a row is red; so is a row nothing declares; so is a row that names a chrome surface.
 const OPT_INS = {
   '.chat-message-list': 'the chat transcript — the surface this lane is about',
-  '.chanmsg-body': 'a channel / agent-group message\'s words (lane group-chat-ui B-ff04: selectable and copyable with a mouse; on a touch-first device a long press stays the message menu, Copy text inside — composed at the 2.369.202 integration)',
+  '.chanmsg-body': 'a channel / agent-group message\'s words (lane group-chat-ui B-ff04: selectable and copyable; on a touch-first device too — a long press selects, the message\'s … button opens its menu: lane channel-touch-menu, 2.369.203, §7)',
   '.chat-permission-cmd, .chat-helper-ask-cmd': 'the command a permission card asks about (copied to check it)',
   '.ut-text, .ut-detail, .ut-hist-msg': 'For-you item text and history (agent-written words a person copies)',
   '.iw-title': 'the For-you window\'s item title',
+  '.ut-app-dline': 'an app install card\'s Details lines — the plan\'s facts and commands a person copies to check (design 009, lane apps-one-card; classified at the 2.369.203 integration)',
+  '.chanmsg-facts-details': 'a message\'s facts (To / Cc / Bcc, sender, list, subject…) — addresses a person copies (lane message-facts B-f066; classified at the 2.369.203 integration)',
   '.iw-detail': 'the For-you window\'s item body',
   '.iw-replied': 'the reply a person already sent, shown under the item',
   '.integ-cb-url': 'the OAuth callback URL a person pastes into a vendor console (all: one tap selects it whole)',
@@ -407,7 +409,7 @@ ok(chromeOpt.length === 0, `no opt-in names a chrome surface (${CHROME_TOKENS.jo
   const style = read('public/style.css').replace(/\/\*[\s\S]*?\*\//g, '');
   const m = /([^{}]*\[data-popover\][^{}]*)\{\s*user-select:\s*none;\s*\}/.exec(style);
   const sels = m ? m[1].split(',').map((s) => s.trim()) : [];
-  const want = ['[data-popover]', '.context-menu', '#global-toasts', '.global-toast', '.overlap-switcher', '.tab-item', '.chat-msg-more'];
+  const want = ['[data-popover]', '.context-menu', '#global-toasts', '.global-toast', '.overlap-switcher', '.tab-item', '.chat-msg-more', '.chanmsg-tmore'];
   ok(want.every((s) => sels.includes(s)), `the chrome rule says user-select:none ITSELF for every surface (menus, popovers, toasts, the taskbar chooser, tab chips, the … button): ${JSON.stringify(sels)}`);
   ok(/html, body \{[^}]*user-select: none;/.test(style), 'the page default stays none (content opts in)');
   ok(!/-webkit-user-select:\s*none/.test(m ? m[0] : ''), 'the chrome rule is unprefixed like the page rule (an inherited -webkit- none breaks typing in a field on older iOS)');
@@ -469,6 +471,50 @@ const M = mutantCopies('msel', repo);
   const PM = await import(pathToFileURL(clsF).href);
   ok(PM.pressTargetClass({ overText: true, userSelect: 'none' }) === 'text' && PS.pressTargetClass({ overText: true, userSelect: 'none' }) === 'chrome', 'CONTROL (a class that ignores user-select): a user-select:none label reads as text — its menu would be lost; the real class keeps it chrome');
   for (const row of copiesCensus(M.files, M.dir, repo, { label: 'mutant copies: ' })) ok(row.pass, row.name, row.detail);
+}
+
+// ── §7 THE CHANNEL MESSAGE ON A TOUCH-FIRST DEVICE (lane channel-touch-menu, 2.369.203). The .202 transition made a
+//    channel body user-select:none under (hover: none) and (pointer: coarse) — the long-press menu was the phone's only
+//    door to the message bar. The chat's shape now: the words selectable, a … button opens THE same menu.
+console.log('§7 the channel message on a touch-first device (lane channel-touch-menu)');
+{
+  const MB = await import('../src/lib/msg-bar-model.js');
+  const rows = [
+    [['react', 'thread', 'quote'], 'hi', ['react', 'thread', 'quote', 'copy']],
+    [['react'], '  ', ['react']],
+    [[], 'words', ['copy']],
+    [[], '', []],
+    [['more'], 'x', ['more', 'copy']],
+    [['react', 'bogus'], 'x', ['react', 'copy']],
+  ];
+  for (const [ids, text, want] of rows) ok(JSON.stringify(MB.msgMenuActions(ids, { text })) === JSON.stringify(want), `msgMenuActions(${JSON.stringify(ids)}, ${JSON.stringify(text)}) = ${JSON.stringify(want)}`, MB.msgMenuActions(ids, { text }));
+  ok(!MB.MSG_ACTIONS.includes('copy'), 'the BAR\'s vocabulary has no copy (desktop hover unchanged) — Copy text is the menu\'s');
+  ok(MB.TOUCH_QUERY === '(hover: none) and (pointer: coarse)', 'the touch-first query is the bar\'s own CSS query');
+  // THE CSS CENSUS: no rule makes a channel body unselectable (the transition), the … is drawn only under the query
+  const census = (css) => {
+    const flat = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    const none = [...flat.matchAll(/([^{}]*)\{([^{}]*)\}/g)].filter((m) => /\.chanmsg-body\b/.test(m[1]) && /user-select:\s*none/.test(m[2])).map((m) => m[1].trim());
+    const media = [...flat.matchAll(/@media\s*\(hover: none\) and \(pointer: coarse\)\s*\{((?:[^{}]*\{[^{}]*\})*)\s*\}/g)].map((m) => m[1]).join('\n');
+    const shown = /\.chanmsg-tmore \{[^}]*width: 44px; height: 44px;[^}]*display: flex;/.test(media) && /\.chanmsg:has\(> \.chanmsg-tmore\) \{ padding-right: 44px; \}/.test(media);
+    const hidden = /(^|\n)\.chanmsg-tmore \{ display: none; \}/.test(flat);
+    return { none, shown, hidden };
+  };
+  const style = read('public/style.css');
+  const c = census(style);
+  ok(c.none.length === 0, 'no rule makes a channel message body user-select:none (the .202 transition is gone: a long press on the words is a selection)', c.none);
+  ok(c.shown && c.hidden, 'the … button: hidden by default, drawn (a 44 × 44 box in a 44 px right gutter) only under (hover: none) and (pointer: coarse)', c);
+  // the wiring: created only on a touch-first device, the same menu as the long press / the right click
+  const cw = read('src/lib/channel-window.js'), mb = read('src/lib/channel-msg-bar.js');
+  ok(/row\._menu = \(\) => menuActs\(row\._acts\(\), rec\);/.test(cw) && /if \(isTouchFirst\(\) && row\._menu\(\)\.length\) row\.appendChild\(renderMsgMore\(/.test(cw), 'renderRecord: the row\'s menu = the bar\'s actions + Copy text; a … button opens it on a touch-first device');
+  ok(/const acts = row\._menu \? row\._menu\(\) : row\._acts\(\);/.test(cw), 'the long press on the chrome / a right click opens the SAME menu (Copy text included)');
+  ok(/if \(isTouchFirst\(\)\) row\.appendChild\(renderMsgMore\(null, 'chanmsg-more'\)\);/.test(cw), 'the agent-group row: the touch … is a `.chanmsg-more` (the list\'s delegated menu: Copy text · Clear content…)');
+  ok(/export const isTouchFirst = \(\) => !!\(typeof matchMedia === 'function' && matchMedia\(TOUCH_QUERY\)\.matches\);/.test(mb) && /b\.appendChild\(icon\('more', 16\)\);/.test(mb) && /b\.setAttribute\('aria-label', t\('Message actions'\)\);/.test(mb), 'renderMsgMore: the library SVG, named, created only when the touch-first query matches');
+  // CONTROL: the transition's rule back ⇒ the census is red
+  const TRANSITION = '@media (hover: none) and (pointer: coarse) { .chanmsg-body { -webkit-user-select: none; user-select: none; cursor: default; } }';
+  const anchor = '.chanmsg-body { font-size: 13px;';
+  ok(style.includes(anchor), 'the control\'s anchor (the body rule) is in style.css');
+  const back = census(style.replace(anchor, TRANSITION + '\n' + anchor));
+  ok(back.none.length === 1, 'CONTROL (the .202 transition\'s rule back): the census names it — red', back.none);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

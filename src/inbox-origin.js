@@ -20,6 +20,8 @@
  *              closing: the heal budget's ONE notice, lane H verify r5)
  *   machines — src/exit-proxy.js (lane-pairing ⑥: an exit's "ask me each time" — Allow / Deny a command an
  *              agent wants to run ON a paired machine, 60 s)
+ *              + src/server/device-upgrade-watch.js (a device agent the hub could not update — ONE item per
+ *              machine and version, retracted when the device reports it; lane device-upgrade-stuck)
  *   apps     — src/server/apps-engine.js (Layer 0 of docs/design-app-persistence.zh.md: an agent's PROPOSAL to install /
  *              remove an app or add a package source — Install opens the install dialog, Not now declines — and the
  *              one notice when apps could not be put back after a rebuilt machine)

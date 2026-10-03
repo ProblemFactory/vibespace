@@ -3087,7 +3087,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
         stale.rep.globalFile === 'archived' && stale.body.rateLimit?.sevenDay?.resetsAt === WB && stale.body.accounts?.[A]?.sevenDay?.resetsAt === WB,
         JSON.stringify([stale.body.rateLimit?.sevenDay, stale.body.accounts?.[A]?.sevenDay]));
       ok('§16c(h) WIRING PIN: server.js calls usage.reloadRateLimitCache() right after runLocalMigrations(), and usage-routes exports it',
-        /runLocalMigrations\(\);\s*usage\.reloadRateLimitCache\?\.\(\)/.test(read('server.js')) && /reloadRateLimitCache,/.test(read('src/usage-routes.js')));
+        /runLocalMigrations\(\);(?:\s*persistenceRouter\.reloadSettings\?\.\(\)\s*(?:\/\*[^*]*\*\/)?\s*;)?\s*usage\.reloadRateLimitCache\?\.\(\)/.test(read('server.js')) && /reloadRateLimitCache,/.test(read('src/usage-routes.js')));
     }
     ok('§16c …and a second run has nothing left to do (idempotent: the copy is gone, and what re-seeded it came FROM the repaired directory)',
       (() => { const r2 = repair.repairByWindow({ dataDir: dd, roster: ROSTER, accounts: ACCT_MAIL, id: 'W8h2' }); return r2.globalFile === 'clean' && sibOf(dd)?.sevenDay?.resetsAt === WA; })(), '');

@@ -253,6 +253,21 @@ ok(regs.some((r) => r.file === 'task-log.js' && r.fn === 'registerOpenAction' &&
   "task-log / session-props attach their actions to the shared 'task' kind via registerOpenAction");
 ok([...new Set(regs.map((r) => r.file))].every((f) => /from '\.\/window-types\.js'/.test(src[f])), 'every registering module imports window-types.js (a bare call is the 2.330.1 free-variable class)');
 
+// THE DESIGN WINDOW WITH NO FOLDER IS THE HOME (lane design-systems-home, design 003 §2 S6): the same kind and the
+// same action — no new window kind — so layout restore, cross-client sync and the phone replay a home like any
+// Design window; the replay passes `dir` through as is ('' = the home).
+{
+  const dw = src['design-window.js'], dh = src['design-home.js'] || '';
+  const HOME_PIN = /if \(!d\) return openDesignHome\(app, \{ syncId \}\);/;
+  ok(HOME_PIN.test(dw) && !/No design folder was named/.test(dw), 'openDesign with no folder opens the home (the old "no folder" refusal toast is gone)');
+  ok(/import \{ openDesignHome \} from '\.\/design-home\.js'/.test(dw), 'design-window.js takes the home from its own module (design-home.js)');
+  const reg = typeRegs.find((r) => r.type === 'design');
+  ok(!!reg && /dir: spec\.dir\b/.test(reg.replay), `the design replay passes spec.dir through as is ('' = the home): ${reg && reg.replay}`);
+  ok(/createWindow\(\{[^}]*type: 'design'[^}]*openSpec[^}]*\}\)/.test(dh) && /const openSpec = \{ action: 'openDesign', host: '', dir: '', sessionId: '' \};/.test(dh), "the home is a 'design' window whose openSpec is openDesign with dir '' (no new kind, no new action)");
+  ok(/w\._designHome\)/.test(dh) && /revealWindow\(existing\.id, \{ replay: !!syncId \}\)/.test(dh), 'one home per client: an open one is revealed (a replay only raises)');
+  ok(!HOME_PIN.test("  if (!d) { showToast(t('No design folder was named'), { type: 'error' }); return null; }"), 'negative control: the pre-lane no-folder line fails the home pin');
+}
+
 // census: every `createWindow({ ... type: '<lit>' })` literal in src/lib is a registered kind
 const censusTypes = new Set();
 for (const [file, s] of Object.entries(src)) {

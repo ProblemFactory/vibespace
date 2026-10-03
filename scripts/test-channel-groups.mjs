@@ -1392,6 +1392,35 @@ console.log('§7 the cards: a group message handed to a turn is SEEN in that cha
   const s4c = { claudeSessionId: B, backend: 'claude', mode: 'chat', _groupCards: ring4, _normalizer: N.createMessageManager('claude', 'w-b4c') };
   await N.rebuildHistory(s4c, 'w-b4c', [wakeRecords[1]]);
   ok(peerMsgs(s4c._normalizer).length === 0, '…and a wake whose record is not in the transcript draws nothing on a rebuild (never a card the CLI did not take)');
+  // (g3) lane peer-card-sender (B-9fd6): a wake whose report carried SEVERAL messages — every sender named, every message
+  // the agent was shown in the card (one transcript record = one card; the head "alpha, gamma → crew")
+  const wakeOfThree = async (fx) => {
+    const g = (await fx.eng.create({ by: A, name: 'crew', members: [B, C], quiet: true })).group.id;
+    // next-turn (int203): the two unnamed messages wait, the @ wakes, and the report carries all three — a `mention`
+    // member is handed only what @mentions it (B-a354, lane group-chat-ui), so its wake would carry one message
+    await fx.eng.setNotify({ by: B, group: g, notify: 'next-turn' });
+    await fx.eng.post({ group: g, from: A, text: 'first: the API is down' });
+    await fx.eng.post({ group: g, from: C, text: 'second:\nconfirmed here' });
+    const p = await fx.eng.post({ group: g, from: A, text: '@beta please look now' });
+    return { g, p, cards: fx.cards.filter((c) => c.group && c.cid === B) };
+  };
+  const THREE_TEXT = 'alpha: first: the API is down\n\ngamma: second:\nconfirmed here\n\nalpha: @beta please look now';
+  const threeOk = (w) => w.p.woke.length === 1 && w.cards.length === 1 && Array.isArray(w.cards[0].group.authors) && w.cards[0].group.authors.map((a) => a.name).join() === 'alpha,gamma'
+    && w.cards[0].group.authorsMore === 0 && w.cards[0].text === THREE_TEXT && w.cards[0].group.from === 'alpha' && w.cards[0].group.at === w.p.message.at;
+  const f7 = fixture('gc-sp');
+  const w7 = await wakeOfThree(f7);
+  ok(threeOk(w7), 'B-9fd6: a WAKE carrying three messages (alpha, gamma, alpha): ONE card naming BOTH senders (report order), each message as "<sender>: <words>", the waker still its sender + key', w7.cards);
+  const s7 = liveSession('w-b7');
+  ok(N.feedPeerCard(s7, w7.cards[0]) === true && peerMsgs(s7._normalizer).length === 1 && peerMsgs(s7._normalizer)[0].peerGroup.authors.length === 2 && peerMsgs(s7._normalizer)[0].peerFrom === 'alpha',
+    '…through the REAL door: `peerGroup.authors` survives the sanitizer (the chat head names them all)', peerMsgs(s7._normalizer)[0] && peerMsgs(s7._normalizer)[0].peerGroup);
+  ok(s7._groupCards[0] && s7._groupCards[0].card.group.authors.length === 2 && s7._groupCards[0].card.text === THREE_TEXT, '…and the RING keeps the senders + the words (a restart draws the same card)', s7._groupCards[0]);
+  const one7 = fixture('gc-sp1');
+  const g71 = (await one7.eng.create({ by: A, name: 'solo', members: [B], quiet: true })).group.id;
+  await one7.eng.setNotify({ by: B, group: g71, notify: 'mention' });
+  await one7.eng.post({ group: g71, from: A, text: '@beta just one' });
+  const c71 = one7.cards.filter((c) => c.group && c.cid === B);
+  ok(c71.length === 1 && c71[0].text === '@beta just one' && !('authors' in c71[0].group), '…a ONE-message wake is exactly what it was (its words, no `authors`)', c71);
+  one7.close();
   // the codex rung: the frame carries the group, the wrapper's marker hands it to the normalizer
   const cd = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
   ok(/type: 'peer-message', text, fromName: opts\.fromName \|\| null, cardText: opts\.cardText \|\| null, kind, (?:\.\.\.\(opts\.channel \? \{ channel: opts\.channel \} : \{\}\), )?\.\.\.\(opts\.group \? \{ group: opts\.group \} : \{\}\) \}/.test(cd), 'the codex (rpc-queue) frame carries `group`');
@@ -1501,9 +1530,17 @@ console.log('§7 the cards: a group message handed to a turn is SEEN in that cha
   const LateStamp = MUT.load('src/server/conversation-deliver.js', cdSrc.replace(armLine, "          undo1 = () => {};\n"), 'late-stamp');
   const stc = await stampLeg(LateStamp, 'gc-st3', true);
   ok(stc.ok && stc.during[0] === true, 'CONTROL the stamp only AFTER the post (the pre-fix ladder): the hook during the post reads the wake\'s turn as the USER\'s (§7 (g2) can go red)', stc);
+  const geSrc = fs.readFileSync(path.join(REPO, 'src/server/groups-engine.js'), 'utf8');
+  const wakeLine = '        const wc = wakeCardOf(rep, rec);\n';
+  if (!geSrc.includes(wakeLine)) throw new Error('mutation anchor missing: the wake card of several messages');
+  const OneSender = MUT.load('src/server/groups-engine.js', geSrc.replace(wakeLine, "        const wc = { text: rec.text, authors: {} };\n"), 'one-sender');
+  const f8 = fixture('gc-sp0', { ge: OneSender });
+  const w8 = await wakeOfThree(f8);
+  ok(!threeOk(w8) && w8.cards.length === 1 && w8.cards[0].text === '@beta please look now' && !w8.cards[0].group.authors, 'CONTROL the pre-fix wake card (the waker only): gamma and alpha\'s first message are on NO card (§7 (g3) can go red)', w8.cards);
+  f8.close();
   for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 5, label: '§7 ' })) ok(c.pass, c.name, c.detail);
   N.setGroupCardPersist(null);
-  for (const x of [f, f2, f3, f4, f5, f6, fc]) x.close();
+  for (const x of [f, f2, f3, f4, f5, f6, f7, fc]) x.close();
 }
 
 console.log('§5 censuses');

@@ -39,7 +39,7 @@ const WHO_MAX = 64;
 const REFUSALS = Object.freeze(['not_granted', 'groups_unreadable', 'unknown_shape', 'fork_pending', 'no_machine', 'ambiguous',
   'no_exits', 'offline', 'ask_pending', 'ask_denied', 'ask_changed', 'ask_expired', 'ask_settled', 'ask_unfiled', 'human_only',
   'session_token_required', 'bad_command', 'bad_grant', 'bad_mode', 'bad_principal', 'empty_list',
-  'too_many', 'list_changed', 'run_failed', 'conversation_gone', 'remote_session', 'spawn_failed']);
+  'too_many', 'list_changed', 'run_failed', 'conversation_gone', 'remote_session', 'spawn_failed', 'device_agent_outdated']);
 /** THE run bound: the device daemon kills a `run-cmd` child at 30 s (src/agentd/agentd.js `Math.min(…, 30000)`);
  *  the exit route used to promise 120 s and never got it. ONE number: the daemon's cap, the CLI's help, the card
  *  (test-architecture pins the daemon's literal to this). */
@@ -110,11 +110,15 @@ function spawnErrorOf(x) {
   // verify r1 F5a: the message is a DAEMON's words toward the user and the agent — the belt (invisibles folded, a frame inert)
   return { code: x.code.replace(/[^A-Z0-9_]/g, '').slice(0, 24) || 'ESPAWN', message: PT.toAgentText(cleanCmd(x.message, 200), { max: 200, kind: 'line' }) };
 }
+/** A daemon's stated version, bounded to a version's shape (a daemon's word toward the user and the agent) — else null. */
+function agentVersionOf(v) { return typeof v === 'string' && /^[0-9A-Za-z][0-9A-Za-z.+-]{0,39}$/.test(v) ? v : null; }
+/** lane device-upgrade-stuck — THE one step for an agent too old for what was asked: the device's install command. */
+const reinstallStep = (machine) => `rerun the device's install command (Remote → ${String(machine || 'the machine').slice(0, 60)} → Pairing command)`;
 function normLastRun(x) {
   if (!x || typeof x !== 'object') return null;
   const by = x.by && typeof x.by === 'object' ? { key: String(x.by.key || '').slice(0, 200), name: cleanCmd(x.by.name, 120) } : null;
   const sf = spawnErrorOf(x.spawnError);
-  return { at: Number(x.at) || 0, by, cmd: cleanCmd(x.cmd, LAST_RUN_CMD_MAX), code: x.code === null || x.code === undefined ? null : (Number.isFinite(Number(x.code)) ? Number(x.code) : null), ms: Number(x.ms) || 0, outcome: String(x.outcome || 'ran').slice(0, 20), ...(x.timedOut ? { timedOut: true } : {}), ...(x.revokedDuringRun ? { revokedDuringRun: true } : {}), ...(sf ? { spawnError: sf } : {}), ...(knownInterpreter(x.interpreter) ? { interpreter: knownInterpreter(x.interpreter) } : {}) };
+  return { at: Number(x.at) || 0, by, cmd: cleanCmd(x.cmd, LAST_RUN_CMD_MAX), code: x.code === null || x.code === undefined ? null : (Number.isFinite(Number(x.code)) ? Number(x.code) : null), ms: Number(x.ms) || 0, outcome: String(x.outcome || 'ran').slice(0, 20), ...(x.timedOut ? { timedOut: true } : {}), ...(x.revokedDuringRun ? { revokedDuringRun: true } : {}), ...(sf ? { spawnError: sf } : {}), ...(knownInterpreter(x.interpreter) ? { interpreter: knownInterpreter(x.interpreter) } : {}), ...(agentVersionOf(x.agentVersion) ? { agentVersion: x.agentVersion } : {}) };
 }
 /**
  * THE ONE READER of a host record's exit access (every shape on disk):
@@ -279,8 +283,8 @@ function answerVerdict(ask, { answer, by, now = Date.now() } = {}) {
 
 // ── the run ledger ──────────────────────────────────────────────────────────
 /** The stored `lastRun` (the row's "last run"): the command's first 120 chars, control characters as spaces. */
-function runRecord({ cmd, code = null, ms = 0, by = null, at = Date.now(), outcome = 'ran', timedOut = false, revokedDuringRun = false, spawnError = null, interpreter = null } = {}) {
-  return normLastRun({ at, by, cmd, code, ms, outcome, timedOut, revokedDuringRun, spawnError, interpreter });
+function runRecord({ cmd, code = null, ms = 0, by = null, at = Date.now(), outcome = 'ran', timedOut = false, revokedDuringRun = false, spawnError = null, interpreter = null, agentVersion = null } = {}) {
+  return normLastRun({ at, by, cmd, code, ms, outcome, timedOut, revokedDuringRun, spawnError, interpreter, agentVersion });
 }
 
 // ── the output (lane-exit-run-output, 2026-10-01) ────────────────────────────
@@ -415,9 +419,13 @@ const head = (cmd, n = 80) => { const c = cleanCmd(cmd, 100000).replace(/`/g, "'
  * never another conversation's name, a Task Group title or a key (the words census poisons all three).
  * `has` = the other grant this caller DOES hold (`{use}` / `{run}`) — the sentence offers it.
  */
-function refusalText(code, { machine = '', grant = 'run', has = {}, cmd = '', error = '', where = '', same = false, hidden = null, spawnError = null, interpreter = null, platform = null } = {}) {
+function refusalText(code, { machine = '', grant = 'run', has = {}, cmd = '', error = '', where = '', same = false, hidden = null, spawnError = null, interpreter = null, platform = null, agentVersion = null } = {}) {
   const M = q(machine);
   switch (code) {
+    // lane device-upgrade-stuck: a Windows agent without run-shell CANNOT run a line (no `sh` there; it cannot pick cmd.exe)
+    // — refused BEFORE anything is sent, by name: the machine, its agent, the first agent that can, the one step
+    case 'device_agent_outdated':
+      return `did not run \`${head(cmd)}\` on ${M} — its device agent (${agentVersionOf(agentVersion) || 'an older version'}) cannot run commands on Windows; agents from ${XS.RUN_SHELL_SINCE} on can. Nothing ran. Ask the user to ${reinstallStep(machine)} — its automatic update did not take.`;
     // lane-exit-run-output: the child NEVER STARTED (the owner's Windows box had no `sh`) — why, that nothing ran, what
     // the machine runs commands under, and that an `sh` failure on a Windows machine means its agent is older than this
     // VibeSpace (an older daemon only knows the argv form the hub ran as `sh -lc`)
@@ -480,6 +488,8 @@ function cardText(rec, { machine = '' } = {}) {
   if (r.outcome === 'run_failed') return `could not finish \`${c}\` on ${machine} — the link was lost while it ran`;
   // lane-exit-run-output: the child never started — the card says WHY (the owner read "exit 1 · 0.0 s" four times)
   if (r.outcome === 'spawn_failed') return `could not start \`${c}\` on ${machine} — ${XS.spawnFailureText(spawnErrorOf(r.spawnError), { interpreter: r.interpreter || XS.POSIX_SHELL })}`;
+  // lane device-upgrade-stuck: refused before it was sent — never "exit 1"
+  if (r.outcome === 'agent_outdated') return `did not run \`${c}\` on ${machine} — its agent${agentVersionOf(r.agentVersion) ? ' ' + r.agentVersion : ''} cannot run commands on Windows (${XS.RUN_SHELL_SINCE} or later can): ${reinstallStep(machine)}`;
   return `did not run \`${c}\` on ${machine} — this conversation may not run commands there`;
 }
 /** The CLI's stderr line for a terminal-mode session (no chat card). */
@@ -509,6 +519,7 @@ function migrateExitAccess(h, { now = Date.now() } = {}) {
 }
 
 module.exports = {
+  agentVersionOf, reinstallStep,
   GRANTS, MODES, WHO_MAX, REFUSALS, EXIT_RUN_TIMEOUT_MS, ASK_TTL_MS, CMD_MAX, LAST_RUN_CMD_MAX, ASK_STATES, WAY_OUT,
   OUTPUT_HEAD_BYTES, RUNS_DEFAULT, RUNS_MAX, RUN_SHELL_CAP,
   sessionKeyOf, callerKeys, principalsNow, cmdBytes, hiddenOrderOf,

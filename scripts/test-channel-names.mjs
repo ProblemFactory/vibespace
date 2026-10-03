@@ -61,6 +61,7 @@ const JUDGED = [
   ['src/channel-filter.js', '#### ${safeInline(g.title || g.convId', 'AGENT-FACING scope digest section (the CLI addresses a conversation by its id)'],
   ['src/channel-filter.js', '`### Channel digest —', 'AGENT-FACING digest block head (the engine hands it the ladder name)'],
   ['src/channel-policy.js', 'Channel receipt —', 'AGENT-FACING receipt block head (the engine hands it the ladder name)'],
+  ['src/lib/channel-rows.js', 'textMatches([r.title || r.id, r.adapterLabel, r.lastText]', '③ — the store matches a held row the way the server\'s `q` does (the ladder name, else the id); r.title is the ladder name (rowView humanNameOf)'],
   ['src/channel-touch.js', 'const title = (row && (row.title || row.convId))', '③ — the touch title is the ladder name, set at record time (src/server/channel-touches.js nameOf)'],
   ['src/channel-touch.js', 'return `${t(\'Channels\')} ·', '③ — the touch title is the ladder name, set at record time'],
   ['src/lib/channel-account-dialogs.js', 'access: {conv} → {who}', '③ — the engine names the ref by the ladder (referencesOf → conversationName)'],

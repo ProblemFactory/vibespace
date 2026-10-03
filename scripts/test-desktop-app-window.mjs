@@ -507,7 +507,11 @@ try {
       await sleep(250);
       const rows = await p1.evalJs(`[...document.querySelectorAll('.context-menu > .context-menu-item')].map((e) => e.childNodes[0] ? e.childNodes[0].textContent.trim() : e.textContent.trim())`);
       check(`the ⋯ menu carries "Share with agent…" and "Ask an agent to take control…" — and no Scale ▸ / Show window frame ▸ on a whole-display rung (${JSON.stringify(rows)})`, rows.includes('Share with agent…') && rows.includes('Ask an agent to take control…') && !rows.some((r) => /^Scale|^Show window frame/.test(r)), rows);
-      await trustedClick(p1, '.context-menu > .context-menu-item:nth-child(' + (rows.indexOf('Share with agent…') + 1) + ')');
+      // design 009 §B2: the ⋯ opens with the "About this window" fact line + a separator — address the row by its place
+      // among ALL the menu's children (nth-child counts the separator too)
+      check('design 009 §B2: the ⋯ opens with ONE plain "About this window" line (memory + how it is shown, no PSS / CPU)', /^About this window: \d+(\.\d)? [MG]B memory · shown with vnc-display/.test(rows[0] || '') && !/PSS|CPU/.test(rows[0] || ''), rows[0]);
+      const shareNth = await p1.evalJs(`[...document.querySelector('.context-menu').children].findIndex((e) => e.classList.contains('context-menu-item') && (e.childNodes[0] ? e.childNodes[0].textContent.trim() : e.textContent.trim()) === 'Share with agent…') + 1`);
+      await trustedClick(p1, '.context-menu > :nth-child(' + shareNth + ')');
     }
     const dlg = await until(() => p1.evalJs(`(() => { const d = document.getElementById('window-share-dialog'); if (!d || !d.querySelector('.wshare-picker')) return null; return { sessions: [...d.querySelectorAll('.wshare-pick .pp-row')].map((i) => i.dataset.key).filter((k) => k.startsWith('session:')).map((k) => k.slice(8)), groups: [...d.querySelectorAll('.wshare-pick .pp-row')].map((i) => i.dataset.key).filter((k) => k.startsWith('group:')).map((k) => k.slice(6)), mode: d.querySelector('.wshare-mode-btn.active')?.dataset.mode, intro: d.querySelector('.wshare-intro')?.textContent || '' }; })()`), 8000, 150);
     check('"Share with agent…" opens the dialog: the live agent (by its conversation key) and the Task Group in the ONE principal picker, the mode Auto', !!dlg && (!stubLive || dlg.sessions.includes(LANE_E_KEY)) && dlg.groups.includes(gid) && dlg.mode === 'auto' && /Hidden from every agent until you share it/.test(dlg.intro), dlg || { toasts: await p1.evalJs(`[...document.querySelectorAll('#global-toasts > *')].map((e) => e.textContent)`), menu: await p1.evalJs(`[...document.querySelectorAll('.context-menu')].length`), reach: await reach() });
@@ -567,7 +571,15 @@ try {
       check(`the launch dialog has the "Share with agents" row under the machine picker, hidden-by-default in its words ("${row && row.text}")`, !!row && row.shown && /Hidden from agents/.test(row.text), row);
       await trustedClick(p1, '#desktop-launch-dialog .desktop-launch-share-btn');
       await until(() => p1.evalJs(`!!document.querySelector('.wshare-popover .pp-row[data-key^="group:"]')`), 4000, 100);
+      // design 009 §B3: the row sits in the dialog's FOOTER now — its picker opens near the page's bottom and must stay on
+      // the page as it fills (createPopover re-clamps on resize; measured before: the group row at y 928 on an 813 px page)
+      // a person sees the picker only after its first frame (createPopover places it then, visibility hidden until) — wait for
+      // that, as the eye does, instead of clicking an unplaced picker
+      const frames = () => p1.evalJs('new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))');
+      const popIn = await until(() => p1.evalJs(`(() => { const p = document.querySelector('.wshare-popover'); if (!p || p.style.visibility === 'hidden') return null; const r = p.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, vh: innerHeight }; })()`), 3000, 50);
+      check('the share picker opened from the footer row lies wholly on the page (re-clamped as it fills)', !!popIn && popIn.top >= 0 && popIn.bottom <= popIn.vh + 1, popIn);
       await trustedClick(p1, `.wshare-popover .pp-row[data-key=${JSON.stringify('group:' + gid)}]`);
+      await frames(); // the toggle re-renders the picker; a size change re-clamps it on the next frame
       await trustedClick(p1, '.wshare-popover .wshare-mode-btn[data-mode="pixels"]');
       const sum = await p1.evalJs(`document.querySelector('#desktop-launch-dialog .desktop-launch-share-btn').textContent`);
       check(`the popover picks the Task Group and Pixels; the row says so ("${sum}")`, /Lane E group/.test(sum) && /Pixels/.test(sum), sum);

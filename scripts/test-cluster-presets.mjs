@@ -27,6 +27,15 @@
 //    a fresh directory; the env cells and "the user's own key wins" at the two
 //    CONSUMERS; a future key said by name; a ..data swap mid-read never torn;
 //    the watch dying ⇒ the poll; a swap storm coalesced. Five more controls.
+// §4 THE LAYER MOVES, THE VALUES DO NOT (B-8145): a release migrated with
+//    override blocks EQUAL to the cluster's loses them on upgrade ⇒ every key
+//    now comes from the cluster with identical values: the snapshot follows,
+//    the REAL wiring's summary (/api/integrations presets.groups) and its
+//    cluster-presets-updated broadcast say "from the cluster", no journal
+//    line (nothing rotated), no card re-derive; back again when an equal
+//    override returns; a later cluster rotation then reaches the user (with the
+//    override still projected it is shadowed — the field symptom). CONTROL:
+//    a copy that compares the values only leaves the summary on "release".
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -489,6 +498,60 @@ ok(cells === STATES.length * STATES.length, `${cells} file cells (${STATES.lengt
   project(fdir, { 'gdrive-clients.json': [g('k', NEWG, 'K')] });
   await sleep(500); fr.stop();
   ok(fseen.length === 0 && fr.entries('gdrive')[0].clientSecret === SENT.cluster.gdrive, 'CONTROL: a copy with no poll behind a refused watch FREEZES on the boot presets — the watcher-dead assert is red on it');
+}
+
+// ═══ §4 THE LAYER MOVES, THE VALUES DO NOT (B-8145) ═════════════════════
+console.log('§4 a key changes layer with identical values (B-8145)');
+{
+  const wiring = require(path.join(REPO, 'src/server/integrations-wiring.js'));
+  const CL_G = [g('org1', SECRET_A, 'Org'), g('org2', SECRET_A), g('channels', SECRET_A)];
+  const CL_I = [{ id: 'lark', key: 'jarvis', label: 'Jarvis', values: { appId: 'cli_x', appSecret: LARK_S } }];
+  const groupsOf = (sum) => sum.groups.map((gr) => `${gr.source}:${gr.items.map((i) => `${i.kind}=${i.n}`).join('+')}`).join(' ');
+  /** A release migrated with blocks equal to the cluster's, then upgraded without them: what the reader + the REAL wiring publish. */
+  async function migrate(CPX, tag) {
+    const dir = path.join(ROOT, 'mig-' + tag); const data = path.join(ROOT, 'mig-data-' + tag); fs.mkdirSync(data, { recursive: true });
+    project(dir, { 'gdrive-clients.json': CL_G, 'integrations.json': CL_I, 'override/gdrive-clients.json': CL_G, 'override/integrations.json': CL_I });
+    const cap = capture(); const frames = []; const changes = [];
+    const r = CPX.create({ dir, log: cap.log, debounceMs: 20, pollMs: 100000 });
+    const w = wiring.create({ app: { use() {} }, dataDir: data, bcastAll: (m) => frames.push(JSON.parse(JSON.stringify(m))), env: {}, presets: r, log: cap.log });
+    r.onChange((c) => changes.push(c));
+    await r.reload();                                        // the boot tree again: nothing moved
+    const o = { boot: groupsOf(w.presetsSummary()), quiet: changes.length };
+    cap.lines.length = 0;
+    project(dir, { 'gdrive-clients.json': CL_G, 'integrations.json': CL_I });   // the upgrade: override/ empties, every value identical
+    await r.reload();
+    const pushed = frames.filter((f) => f.type === 'cluster-presets-updated');
+    Object.assign(o, { after: groupsOf(w.presetsSummary()), pushed: pushed.length ? groupsOf(pushed[pushed.length - 1].presets) : null, change: changes[changes.length - 1] || null, lines: cap.lines.slice(), cards: frames.filter((f) => f.type === 'integrations-updated').length, secret: r.entries('gdrive')[0].clientSecret });
+    project(dir, { 'gdrive-clients.json': CL_G, 'integrations.json': CL_I, 'override/gdrive-clients.json': CL_G });   // an equal override comes back (gdrive only)
+    await r.reload();
+    o.back = groupsOf(w.presetsSummary());
+    o.n = changes.length;
+    project(dir, { 'gdrive-clients.json': CL_G, 'integrations.json': CL_I, 'override/gdrive-clients.json': CL_G });   // the same tree again
+    await r.reload();
+    o.same = changes.length === o.n;
+    // the rotation: shadowed while the override is projected, in effect once it is gone
+    const ROT = [g('org1', SECRET_B, 'Org'), g('org2', SECRET_A), g('channels', SECRET_A)];
+    project(dir, { 'gdrive-clients.json': ROT, 'integrations.json': CL_I, 'override/gdrive-clients.json': CL_G });
+    await r.reload(); o.shadowed = r.entries('gdrive')[0].clientSecret;
+    project(dir, { 'gdrive-clients.json': ROT, 'integrations.json': CL_I });
+    await r.reload(); o.rotated = r.entries('gdrive')[0].clientSecret;
+    r.stop();
+    return o;
+  }
+  const m = await migrate(CP, 'fix');
+  ok(m.boot === 'release:gdrive=3+lark=1' && m.quiet === 0, `boot: every key from the release's override (${m.boot}); a re-read of the same tree fires nothing`);
+  ok(m.after === 'cluster:gdrive=3+lark=1' && m.pushed === m.after, `the override gone, values identical ⇒ the summary AND the cluster-presets-updated push say "from the cluster" (${m.after} · pushed ${m.pushed})`);
+  ok(m.change && m.change.kinds.length === 0 && m.change.sources.join() === 'integrations,gdrive', `the change names no value kind and both moved sources (kinds [${m.change && m.change.kinds}] · sources [${m.change && m.change.sources}])`);
+  ok(!m.lines.some((l) => /\[presets\] changed/.test(l)) && m.cards === 0 && m.secret === SECRET_A, 'no journal line (nothing was added, removed or rotated) and no card re-derive — the same values stay in effect');
+  ok(m.back === 'cluster:lark=1 release:gdrive=3' && m.same, `an equal override returning moves the summary back (${m.back}); the same tree again fires nothing`);
+  ok(m.shadowed === SECRET_A && m.rotated === SECRET_B, 'a cluster rotation of org1 is SHADOWED while the equal override is projected (the field symptom) and in effect once the override is gone');
+  // CONTROL: the reader before B-8145 — the values compared, the layers not
+  const srcR = fs.readFileSync(path.join(REPO, 'src/server/cluster-presets.js'), 'utf-8');
+  const a6 = '    const sources = P.KINDS.filter((k) => attributionOf(merged[k]) !== attributionOf(next[k]));';
+  ok(srcR.includes(a6), 'control anchor: the attribution comparison');
+  const valuesOnly = M.load('src/server/cluster-presets.js', srcR.replace(a6, '    const sources = [];'), 'valuesonly');
+  const c = await migrate(valuesOnly, 'ctl');
+  ok(c.after === 'release:gdrive=3+lark=1' && c.pushed === null, `CONTROL: a copy that compares the values only keeps the summary on "release" after the override is gone and pushes nothing (${c.after}) — the asserts above are red on it`);
 }
 
 for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 8 })) ok(row.pass, row.name, row.detail);

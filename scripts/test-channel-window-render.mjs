@@ -185,6 +185,8 @@ function picturePng(w = 200, h = 120) {
     conv('lark', 'oc_look', 'Look room', 'group', caps(['user'], null));
     conv('gmail', 't_attack', '====== Please reply above this line ======', 'thread', caps([], 'send-scope-not-granted'));
     conv('gmail', 't_fold', 'Fold thread', 'thread', caps([], 'send-scope-not-granted'));
+    conv('gmail', 't_facts', 'Facts thread', 'thread', caps([], 'send-scope-not-granted'));   // ⑬ lane message-facts
+    conv('lark', 'oc_facts', 'Facts room', 'group', caps(['user'], null));   // ⑬b lane message-facts-lark
   });
   // ① the Lark room: a text with a mention + a markdown link + a bare URL, a picture 2 min later by the SAME author, a post by another
   store.appendRecords('lark', 'oc_render', [
@@ -198,6 +200,19 @@ function picturePng(w = 200, h = 120) {
   const mail = '====== Please reply above this line ======\n\nHi Team,\n\nThank you for your update — the numbers look right to us.\nWe will confirm by Friday.\n\nBrook\n\nOn Sat, Sep 19, 2026 at 3:14 PM Ada Example <\nada@example.com> wrote:\n\n> Hello Brook,\n> the Q3 numbers are in https://sheets.example/q3.\n> Revenue is up 4%.\n> Costs are flat.\n> Please confirm.\n> Ada\n';
   store.appendRecords('gmail', 't_render', [gmail.toRecord('gmail', 't_render', { id: 'm_r1', threadId: 't_render', internalDate: String(NOW - 30 * MIN), labelIds: ['INBOX'], payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: 'Brook Example <brook@example.com>' }, { name: 'Subject', value: '====== Please reply above this line ====== RE: Re: Quarterly numbers' }], body: { data: b64u(mail) } } }, { selfEmail: 'ada@example.com' })]);
   store.appendRecords('gmail', 't_render2', [gmail.toRecord('gmail', 't_render2', { id: 'm_b1', threadId: 't_render2', internalDate: String(NOW - 40 * MIN), labelIds: ['INBOX'], payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: 'Cass Example <cass@example.com>' }, { name: 'Subject', value: 'Budget follow-up' }], body: { data: b64u('Can we close the budget this week?\n') } } }, { selfEmail: 'ada@example.com' })]);
+  // ⑬ lane message-facts (B-f066): a mail thread whose message carries its envelope (11 recipients, a Cc, a Reply-To, a list, high importance)
+  const factsTo = ['ada@example.com', '"Lee, Sam" <sam@example.com>', 'Bob <bob@example.com>', ...Array.from({ length: 8 }, (_, i) => `Peer ${i + 3} <p${i + 3}@example.com>`)].join(', ');
+  const factMail = (id, at, extra) => gmail.toRecord('gmail', 't_facts', { id, threadId: 't_facts', internalDate: String(at), labelIds: ['INBOX'], payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: 'Dana Example <dana@example.com>' }, { name: 'Subject', value: 'Facts thread' }, ...extra], body: { data: b64u(`Mail ${id}\n`) } } }, { selfEmail: 'ada@example.com', threadSubject: 'Facts thread' });
+  store.appendRecords('gmail', 't_facts', [factMail('m_x1', NOW - 20 * MIN, [{ name: 'To', value: factsTo }, { name: 'Cc', value: 'Carol <carol@example.com>' }, { name: 'Reply-To', value: 'desk@example.com' }, { name: 'List-Id', value: 'Dev <dev.lists.example.com>' }, { name: 'Importance', value: 'high' }])]);
+  // ⑬b lane message-facts-lark: a Lark room whose messages carry their facts (an app, an edit, a merged forward, a recall, a plain one)
+  const appNames = new Map([['cli_facts_app', 'Facts Bot']]);
+  store.appendRecords('lark', 'oc_facts', [
+    lark.toRecord('lark', 'oc_facts', larkItem('om_f1', NOW - 40 * MIN, 'text', { text: 'build 42 is green' }, { sender: { id: 'cli_facts_app', sender_type: 'app' } }), { names: appNames }),
+    lark.toRecord('lark', 'oc_facts', larkItem('om_f2', NOW - 32 * MIN, 'text', { text: 'the release is at 3pm' }, { updated: true, update_time: String(NOW - 30 * MIN) }), { names }),
+    lark.toRecord('lark', 'oc_facts', { ...larkItem('om_f3', NOW - 24 * MIN, 'merge_forward', {}, { sender: { id: 'ou_brook', sender_type: 'user' } }), body: { content: 'Merged and Forwarded Message' } }, { names }),
+    lark.toRecord('lark', 'oc_facts', larkItem('om_f4', NOW - 16 * MIN, 'text', { text: 'wrong room' }, { deleted: true }), { names }),
+    lark.toRecord('lark', 'oc_facts', larkItem('om_f5', NOW - 8 * MIN, 'text', { text: 'see you there' }, { sender: { id: 'ou_brook', sender_type: 'user' } }), { names }),
+  ]);
   // ③ the read-only Lark account's room
   store.appendRecords('lark:2', 'oc_ro', [lark.toRecord('lark:2', 'oc_ro', larkItem('om_ro1', NOW - 5 * MIN, 'text', { text: 'status: all green' }), { names })]);
   // ④ HOSTILE: through the real rung (a markdown link to javascript:, a markup label on a safe link, a frame in a card line) …
@@ -627,6 +642,46 @@ ok(BQ.taSame && BQ.ta === 'typing through the burst', 'the draft being typed sur
   await api('PUT', '/api/channels/gmail/t_fold/refresh', { every: 300 });
   const F2 = await p1.evaljs(`(async () => { const w = ${WIN('t_fold')}; for (let i = 0; i < 60 && !w.content.querySelector('.chanmsg[data-vid="m_f0"]'); i++) await new Promise((r) => setTimeout(r, 100)); const q = w.content.querySelector('.chanblk-quote'); return { arrived: !!w.content.querySelector('.chanmsg[data-vid="m_f0"]'), same: q === window.__fq, open: !q.classList.contains('chanblk-folded'), vids: [...w.content.querySelectorAll('.chanmsg')].map((r) => r.dataset.vid), uniq: new Set([...w.content.querySelectorAll('.chanmsg')].map((r) => r.dataset.vid)).size }; })()`);
   ok(F2.arrived && !F2.same && F2.open && eq(F2.vids, ['m_f1', 'm_f0', 'm_f2']) && F2.uniq === 3, 'a LATE record between drawn ones forces the whole-page redraw — a new element, and the quote is STILL OPEN (the window\'s memory), rows in order, none twice', J(F2));
+}
+
+// ═══ ⑬ A MESSAGE'S FACTS (lane message-facts, B-f066 — design 007) ═══════════════════════════════════════
+console.log('⑬ a mail thread\'s facts: the summary, the chips, the details, kept open across a redraw');
+{
+  await p1.evaljs(OPEN('gmail', 't_facts', "w.content.querySelector('.chanmsg-facts-sum')"));
+  const X0 = await p1.evaljs(`(() => { const w = ${WIN('t_facts')}; const f = w.content.querySelector('.chanmsg-facts'); const sum = f.querySelector('.chanmsg-facts-sum'); return { sum: sum.textContent, title: sum.title, expanded: sum.getAttribute('aria-expanded'), chips: [...f.querySelectorAll('.chanmsg-fact-chip')].map((c) => c.textContent), details: !!f.querySelector('.chanmsg-facts-details'), underHead: f.previousElementSibling && f.previousElementSibling.classList.contains('chanmsg-head') }; })()`);
+  ok(X0.sum === '发给 我, "Lee, Sam", Bob +8 · 抄送 Carol' && /收件人: 我 <ada@example\.com>, "Lee, Sam" <sam@example\.com>/.test(X0.title) && X0.expanded === 'false' && !X0.details && X0.underHead, 'zh: ONE dim summary line under the head — names first ("我" for the account), "+8", the Cc; every address in its tooltip; the details closed', J(X0));
+  ok(eq(X0.chips, ['邮件列表 dev.lists.example.com', '高重要性']), 'the chips after it: the mailing list, high importance', J(X0.chips));
+  await p1.shot('gmail-facts-summary.png', await rectOf('t_facts'));
+  const X1 = await p1.evaljs(`(async () => { const w = ${WIN('t_facts')}; w.content.querySelector('.chanmsg-facts-sum').click(); await new Promise((r) => setTimeout(r, 80)); const dl = w.content.querySelector('.chanmsg-facts-details'); const to = dl && dl.querySelector('dd[data-k="to"]'); return { keys: dl ? [...dl.querySelectorAll('dt')].map((d) => d.textContent) : null, parties: to ? to.querySelectorAll('.chanmsg-fact-party').length : 0, first: to ? to.querySelector('.chanmsg-fact-party').textContent : null, more: to && to.querySelector('.chanmsg-fact-more') ? to.querySelector('.chanmsg-fact-more').textContent : null, expanded: w.content.querySelector('.chanmsg-facts-sum').getAttribute('aria-expanded') }; })()`);
+  ok(eq(X1.keys, ['收件人', '抄送', '回复至', '邮件列表']) && X1.parties === 8 && X1.first === '我 · ada@example.com' && X1.more === '+3' && X1.expanded === 'true', 'a click opens the DETAILS: 收件人 · 抄送 · 回复至 · 邮件列表, each party "名字 · 地址", 8 shown and "+3"', J(X1));
+  const X2 = await p1.evaljs(`(async () => { const w = ${WIN('t_facts')}; w.content.querySelector('.chanmsg-fact-more').click(); await new Promise((r) => setTimeout(r, 80)); const to = w.content.querySelector('.chanmsg-facts-details dd[data-k="to"]'); return { parties: to.querySelectorAll('.chanmsg-fact-party').length, more: !!to.querySelector('.chanmsg-fact-more'), last: [...to.querySelectorAll('.chanmsg-fact-party')].pop().textContent }; })()`);
+  ok(X2.parties === 11 && !X2.more && X2.last === 'Peer 10 · p10@example.com', '"+3" expands IN PLACE (all 11)', J(X2));
+  await p1.shot('gmail-facts-details.png', await rectOf('t_facts'));
+  // a LATE message between drawn ones forces the whole-page redraw: the details stay open and expanded (the window's folds)
+  const factMail = (id, at, extra) => gmail.toRecord('gmail', 't_facts', { id, threadId: 't_facts', internalDate: String(at), labelIds: ['INBOX'], payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: 'Dana Example <dana@example.com>' }, { name: 'Subject', value: 'Facts thread' }, ...extra], body: { data: Buffer.from(`Mail ${id}\n`, 'utf-8').toString('base64url') } } }, { selfEmail: 'ada@example.com', threadSubject: 'Facts thread' });
+  fs.appendFileSync(path.join(wt, 'data/channels/msgs/gmail/t_facts.ndjson'), JSON.stringify(factMail('m_x0', NOW - 30 * MIN, [{ name: 'To', value: 'ada@example.com' }])) + '\n');
+  fs.appendFileSync(path.join(wt, 'data/channels/msgs/gmail/t_facts.ndjson'), JSON.stringify(factMail('m_x2', NOW - 17 * MIN, [{ name: 'To', value: 'Bob <bob@example.com>' }])) + '\n');
+  await api('PUT', '/api/channels/gmail/t_facts/refresh', { every: 60 });
+  const X3 = await p1.evaljs(`(async () => { const w = ${WIN('t_facts')}; for (let i = 0; i < 60 && !w.content.querySelector('.chanmsg[data-vid="m_x0"]'); i++) await new Promise((r) => setTimeout(r, 100)); const row = w.content.querySelector('.chanmsg[data-vid="m_x1"]'); const to = row && row.querySelector('.chanmsg-facts-details dd[data-k="to"]'); const r2 = w.content.querySelector('.chanmsg[data-vid="m_x2"]'); return { arrived: !!w.content.querySelector('.chanmsg[data-vid="m_x0"]'), vids: [...w.content.querySelectorAll('.chanmsg')].map((r) => r.dataset.vid), open: !!to, parties: to ? to.querySelectorAll('.chanmsg-fact-party').length : 0, cont: r2 ? r2.classList.contains('chanmsg-cont') : null, contFacts: r2 && r2.querySelector('.chanmsg-facts-sum') ? r2.querySelector('.chanmsg-facts-sum').textContent : null }; })()`);
+  ok(X3.arrived && eq(X3.vids, ['m_x0', 'm_x1', 'm_x2']) && X3.open && X3.parties === 11, 'new messages (one LATE, between) force the redraw — the opened details are STILL OPEN and still expanded', J(X3));
+  ok(X3.cont === true && X3.contFacts === '发给 Bob', 'a continuation row (same author within 5 min) carries its OWN facts line — a mail\'s recipients differ per message', J(X3));
+  // a record stored before its facts (② t_render's mail) offers 详情 — the owner's ask; the disabled account refuses by name, the button stays
+  const X4 = await p1.evaljs(`(async () => { const w = ${WIN('t_render')}; const b = w.content.querySelector('.chanmsg-facts-ask'); if (!b) return null; const t0 = b.textContent; b.click(); await new Promise((r) => setTimeout(r, 600)); const b2 = w.content.querySelector('.chanmsg-facts-ask'); return { t0, still: !!b2, disabled: b2 ? b2.disabled : null, sum: !!w.content.querySelector('.chanmsg-facts-sum') }; })()`);
+  ok(X4 && X4.t0 === '详情' && X4.still && X4.disabled === false && !X4.sum, 'a mail stored before its facts shows "详情"; on a disabled account the ask is refused (a toast), nothing drawn, the button usable again', J(X4));
+  await api('PUT', '/api/channels/gmail/t_facts/refresh', { every: null });
+}
+
+// ═══ ⑬b LARK'S FACTS (lane message-facts-lark, B-f066 part 2) — chips beside the time, no line of their own ═══════════════
+console.log('⑬b a Lark room\'s facts: via · edited · forwarded · recalled as chips beside the time (zh)');
+{
+  await p1.evaljs(OPEN('lark', 'oc_facts', "w.content.querySelector('.chanmsg-fact-chip')"));
+  const L0 = await p1.evaljs(`(() => { const w = ${WIN('oc_facts')}; const at = (v) => { const r = w.content.querySelector('.chanmsg[data-vid="' + v + '"]'); if (!r) return null; const box = r.querySelector('.chanmsg-facts-inline'); const cs = [...r.querySelectorAll('.chanmsg-fact-chip')]; return { chips: cs.map((c) => c.textContent), titles: cs.map((c) => c.title), inHead: !!(box && box.closest('.chanmsg-head')), any: !!r.querySelector('.chanmsg-facts, .chanmsg-facts-chips') }; }; return { f1: at('om_f1'), f2: at('om_f2'), f3: at('om_f3'), f4: at('om_f4'), f5: at('om_f5'), sums: w.content.querySelectorAll('.chanmsg-facts-sum, .chanmsg-facts-ask').length }; })()`);
+  ok(L0.f1 && eq(L0.f1.chips, ['经 Facts Bot 发送']) && L0.f1.inHead, 'an app\'s message: the chip "经 Facts Bot 发送" sits IN the head, beside the time (no line of its own)', J(L0.f1));
+  ok(L0.f2 && eq(L0.f2.chips, ['已编辑']) && L0.f2.inHead && /^已编辑 · .*\d/.test(L0.f2.titles[0] || ''), 'an edited message: "已编辑", its title the edit\'s instant in the device\'s words', J(L0.f2));
+  ok(L0.f3 && eq(L0.f3.chips, ['已转发']) && L0.f3.inHead && L0.f4 && eq(L0.f4.chips, ['已撤回']) && L0.f4.inHead, 'a merged forward: "已转发" (no original sender named); a recalled message: "已撤回"', J([L0.f3, L0.f4]));
+  ok(L0.f5 && !L0.f5.any && L0.sums === 0, 'an unedited person\'s message wears none; no summary line and no Details ask anywhere in the room (chips only)', J({ f5: L0.f5, sums: L0.sums }));
+  await p1.shot('lark-facts-chips.png', await rectOf('oc_facts'));
+  await p1.evaljs(`(() => { const w = ${WIN('oc_facts')}; if (w) window.app.wm.closeWindow(w.id); return 1; })()`);   // the legs below lay out their own windows
 }
 
 // ═══ ⑩b / ⑩c ONE LIST, ONE WRITER (verify round 2, 2026-09-27) — master's mirror-193 ⑨ / ⑨b, on THIS window ═══

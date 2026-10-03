@@ -1251,8 +1251,9 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
       if (rn && !seen.rate) seen.rate = rn;
       // a "暂停" pill during the wait must be the owner's OWN override (the ④ leg paused a room) — never the vendor's wait: judged against the server's digest
       if (rn && !seen.pausedJudged) {
-        const d = await (await fetch(`http://127.0.0.1:${PORT}/api/channels`)).json();
-        const byKey = new Map((d.conversations || []).filter((x) => x.adapterId === 'fake-poll').map((x) => [`${x.adapterId}/${x.id}`, x]));
+        // design 008: the account's EVERY row is the paged route's (the first read holds its newest 30)
+        const d = await (await fetch(`http://127.0.0.1:${PORT}/api/channels/rows?adapter=fake-poll&limit=200`)).json();
+        const byKey = new Map((d.rows || []).filter((x) => x.adapterId === 'fake-poll').map((x) => [`${x.adapterId}/${x.id}`, x]));
         const pausedPills = c.pills.filter((x) => /暂停/.test(x.pill));
         const serverPaused = [...byKey.values()].filter((x) => x.freshness && x.freshness.state === 'paused');
         seen.pausedJudged = { pills: pausedPills.length, notOverride: pausedPills.filter((x) => !(byKey.get(x.conv) && byKey.get(x.conv).refresh && byKey.get(x.conv).refresh.every === 'paused')).map((x) => x.conv), serverPaused: serverPaused.length, serverNotOverride: serverPaused.filter((x) => !(x.refresh && x.refresh.every === 'paused')).map((x) => x.id), rows: byKey.size };

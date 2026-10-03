@@ -678,9 +678,8 @@ console.log('§2 the routes over the REAL engine + store + ladder');
     const dlsrc = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
     const RPC = "        if (addressableId(s) !== cid) continue;   // verify r6: a pending fork (its parent's id) is never the wrapper this frame is written into";
     const LOC = "      for (const [, s] of activeSessions) if (addressableId(s) === cid) return s;";
-    const CH0 = "            if (addressableId(s) !== cid) continue;   // verify r6: the same rule as every rung";
-    ok(dlsrc.split(RPC).length === 2 && dlsrc.split(LOC).length === 2 && dlsrc.split(CH0).length === 2 && !/\(s\.backendSessionId \|\| s\.claudeSessionId\) (!==|===) cid/.test(dlsrc), 'the ladder reads every "which session carries this conversation" through addressableId (rung 0, rung 1.5, the charged identity) — no raw read remains');
-    const DLc = M6.load('src/server/conversation-deliver.js', dlsrc.replace(RPC, "        if ((s.backendSessionId || s.claudeSessionId) !== cid) continue;").replace(LOC, "      for (const [, s] of activeSessions) if ((s.backendSessionId || s.claudeSessionId) === cid) return s;").replace(CH0, "            if ((s.backendSessionId || s.claudeSessionId) !== cid) continue;"), 'ladder-raw');
+    ok(dlsrc.split(RPC).length === 2 && dlsrc.split(LOC).length === 2 && !/\(s\.backendSessionId \|\| s\.claudeSessionId\) (!==|===) cid/.test(dlsrc), 'the ladder reads every "which session carries this conversation" through addressableId (rung 1.5, the charged identity — rung 0, the channel socket, was removed in B-df40) — no raw read remains');
+    const DLc = M6.load('src/server/conversation-deliver.js', dlsrc.replace(RPC, "        if ((s.backendSessionId || s.claudeSessionId) !== cid) continue;").replace(LOC, "      for (const [, s] of activeSessions) if ((s.backendSessionId || s.claudeSessionId) === cid) return s;"), 'ladder-raw');
     const lcC = await ladderLeg(DLc, 'r6-ladder-codex-ctl', { shape: 'codex' });
     ok(lcC.ok && lcC.lane === 'rpc-queue' && lcC.forkFrames === 1 && lcC.charged.includes('slot-FORK'), `CONTROL: with the raw lookups the parent's frame is written into the FORK's wrapper and charged to the fork's slot (${JSON.stringify(lcC)}) — the leg would go red`);
     const lkC = await ladderLeg(DLc, 'r6-ladder-claude-ctl', { shape: 'claude' });
@@ -791,7 +790,7 @@ console.log('§2c the addressing-read census (r7): every raw "which session carr
   ok(guarded.length === 1 && guarded[0].file === 'src/agent-routes.js', 'exactly one raw idiom is an ADDRESSING decision, and it is fenced by liveForkPending; every other is harmless with a stated reason');
   // the CORRECT ladder sites read the predicate, not the idiom (a revert to raw would re-add unlisted idiom hits)
   const dl = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
-  ok(!IDIOM.test(dl) && (dl.match(/addressableId\(s\) (?:===|!==) cid/g) || []).length === 3, 'the delivery ladder\'s three cid→session lookups read addressableId(s), never the raw idiom (a revert re-reddens §2c)');
+  ok(!IDIOM.test(dl) && (dl.match(/addressableId\(s\) (?:===|!==) cid/g) || []).length === 2, 'the delivery ladder\'s two cid→session lookups (rung 1.5, the charged identity — rung 0\'s went with the channel socket, B-df40) read addressableId(s), never the raw idiom (a revert re-reddens §2c)');
   const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf-8');
   ok(/if \(addressableId\(s\) !== cid \|\| !s\._normalizer\) continue;/.test(srv), 'emitPeerCard reads addressableId(s), never the raw idiom');
   // NEGATIVE CONTROL: a fresh raw addressing read on a NEW site is caught (a synthetic src file under a scratch root)

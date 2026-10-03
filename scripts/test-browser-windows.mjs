@@ -14,6 +14,9 @@
 //         agent's frames), its mode is said, another conversation's tab is refused by name, `null` follows the agent's again
 //         (the last agent frame resent), a takeover ends the watch, the holder's watch is refused (`driving`).
 //      c. every chip act is JOURNALED and answered: a bring-forward, a refusal.
+//   lane live-watch-polish (B-93d7, design 006 G1–G5): ① the "▾+N" menu asks the chip's verdict (never a disabled row), the
+//      watch line names both tabs (en/zh/ja, a page title bounded), the watched chip never folds (+ CONTROL), a refusal is
+//      worded by its code; ② b a re-sent watch of the agent's current tab is answered, a capture's failure code reaches the view.
 // ~8 s, no browser, no vendor call, port 0 / free ports, scratch dir only.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -81,6 +84,60 @@ console.log('— ① PURE: the click verdict, the watch verb, the strip\'s drive
   ok(W.BACKGROUND_SILENCE_MS === 2000 && W.WATCH_POLL_MS === 500 && W.WATCH_FIRST_FRAME_MS === 1000 && W.UNRESPONSIVE_MS === 8000 && /bgSilenceMs = WIN\.BACKGROUND_SILENCE_MS, bgTickMs = 1000, bgPollMs = WIN\.WATCH_POLL_MS, bgHungMs = WIN\.UNRESPONSIVE_MS \}/.test(bsrc0), 'the SHIPPED clocks: 2 s of silence before the page is asked, a 1 s tick, a 500 ms poll (≤ 2 fps), 8 s without an answer before "not responding" — the bridge\'s defaults are the PURE constants (the gate below runs on short ones)');
   const kp = read('src/server/browser-keeper.js');
   ok(/if \(v\.noop && act === 'switch' && !eph\)/.test(kp) && /broughtForward: true/.test(kp) && /tabVisibilityFor, captureTabFor, watchTabFor,/.test(kp), 'the keeper: a driving click on the agent\'s CURRENT tab brings it forward (never a silent no-op); the visibility / capture / watch seams are exported');
+  // ── lane live-watch-polish (B-93d7, design 006 G1–G5) ──
+  const ZH = (await import('../src/lib/i18n-zh.js')).default, JA = (await import('../src/lib/i18n-ja.js')).default;
+  const fillW = (s, p) => String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m));
+  const tOfD = (d) => (s, p) => fillW(d[s] !== undefined ? d[s] : s, p);
+  const NEWKEYS = ['Watching “{watched}” — the agent is on “{current}”', 'Watching “{watched}” — a new picture every half second; the agent is on “{current}”', 'Watch — {title}', 'Back to the agent’s tab — {title}', 'Bring to the front — {title}', 'Switch to — {title}', 'this server cannot show another tab', 'the tab could not be reached', 'the tab refused a screencast', 'the tab is gone', 'the tab could not be shown'];
+  const missingK = NEWKEYS.flatMap((k) => [ZH, JA].filter((d) => typeof d[k] !== 'string' || !d[k] || (k.match(/\{\w+\}/g) || []).some((q) => !d[k].includes(q))).map(() => k));
+  ok(!missingK.length, `live-watch-polish: the ${NEWKEYS.length} new keys have zh + ja (every {param} kept)`, missingK);
+  // G1 — the "▾+N" menu over driving × watching × mediated × owner
+  const MR = [{ targetId: T1, title: 'Agent now', owner: 'agent', active: true, canSwitch: false }, { targetId: T2, title: 'Docs', owner: 'agent', active: false, canSwitch: false }, { targetId: T3, title: 'Other conv', owner: 'other', active: false, canSwitch: false }];
+  const menuOf = (o, tIn = null) => W.foldMenuRows(MR, (r) => W.tabClickVerdict({ owner: r.owner, driving: !!o.driving, mediated: !!o.mediated, active: r.active, watching: o.watching || null, targetId: r.targetId }), tIn);
+  const brief = (o) => menuOf(o).map((m) => m.act + ':' + m.targetId.slice(0, 2)).join(' ');
+  const mcases = [
+    ['watching nothing: a folded agent tab ⇒ Watch; the agent\'s current and another conversation\'s ⇒ not listed', {}, 'watch:B2'],
+    ['watching T2: the watched one ⇒ not listed; the agent\'s current ⇒ Back', { watching: T2 }, 'follow:A1'],
+    ['driving: the current ⇒ bring to the front, another ⇒ switch', { driving: true }, 'front:A1 switch:B2'],
+    ['driving a mediated browser: nothing to do ⇒ nothing listed', { driving: true, mediated: true }, ''],
+  ];
+  const mbad = mcases.filter(([, o, want]) => brief(o) !== want).map(([n, o, want]) => ({ n, want, got: brief(o) }));
+  const hisMenu = W.foldMenuRows(MR.map((r) => ({ ...r, canSwitch: r.targetId !== T1 })), () => ({ act: 'none' }), null).map((m) => m.act + ':' + m.targetId.slice(0, 2)).join(' ');
+  ok(!mbad.length && hisMenu === 'switch:B2 switch:C3', 'G1 the "▾+N" menu asks the chip\'s click verdict: Watch / Back / Switch, his own window keeps the row\'s switch, a row with nothing to do is not listed', { mbad, hisMenu });
+  const allE = [{}, { watching: T2 }, { driving: true }, { driving: true, mediated: true }].flatMap((o) => menuOf(o, tOfD(ZH)));
+  ok(allE.length === 4 && allE.every((e) => !('disabled' in e) && /^(查看|回到 agent 的标签页|提到最前面|切换到) — (Docs|Agent now)$/.test(e.label)), 'G1 no menu entry is ever disabled; each says its act and the tab (zh)', allE);
+  const lwG = read('src/lib/browser-live-window.js');
+  const moreSrc = lwG.slice(lwG.indexOf('tabRowMore.onclick'), lwG.indexOf('function clickOf('));
+  ok(/foldMenuRows\(rows, \(x\) => clickOf\(x\), t\)/.test(moreSrc) && /action: \(\) => chipClick\(x\)/.test(moreSrc) && !/disabled: true/.test(moreSrc), 'G1 source: the client\'s "▾+N" handler builds its entries from foldMenuRows and runs chipClick — no `disabled: true` left');
+  // G2 — the watch line names both tabs (bounded; en / zh / ja)
+  const longT = 'L'.repeat(300) + '<b>x</b>';
+  const g2 = { en: W.watchLineWords({ watched: 'Docs', current: 'Agent now' }, null), poll: W.watchLineWords({ watched: 'Docs', current: 'Agent now', mode: 'polling' }, null), zh: W.watchLineWords({ watched: 'Docs', current: 'Agent now' }, tOfD(ZH)), ja: W.watchLineWords({ watched: 'Docs', current: 'Agent now', mode: 'polling' }, tOfD(JA)), cut: W.watchLineWords({ watched: longT, current: 'B' }, null), none: W.watchLineWords({ watched: 'Docs', current: '' }, null) };
+  ok(g2.en === 'Watching “Docs” — the agent is on “Agent now”' && g2.poll === 'Watching “Docs” — a new picture every half second; the agent is on “Agent now”' && g2.zh === '正在查看“Docs” — agent 在“Agent now”上' && g2.ja.includes('「Docs」') && g2.ja.includes('「Agent now」') && g2.ja.includes('0.5 秒'), 'G2 the watch line names BOTH tabs — en, the polling clause kept, zh, ja', g2);
+  const cutT = (g2.cut.match(/“(.*?)”/) || [])[1] || '';
+  ok(Array.from(cutT).length === W.WATCH_TITLE_MAX && cutT.endsWith('…') && !g2.cut.includes('<b>') && g2.none === 'Watching another tab of the agent’s — the agent’s current tab is unchanged', `G2 a 300-character page title is cut to ${W.WATCH_TITLE_MAX} characters (…) before it is said; a title not known keeps the unnamed sentence`, g2);
+  // G3 — the watched chip never folds
+  const FR = Array.from({ length: 6 }, (_, i) => ({ targetId: String(i + 1).repeat(32), title: 'Tab ' + i, owner: 'agent', active: i === 0 }));
+  const FW = Object.fromEntries(FR.map((r) => [r.targetId, 100]));
+  const LSL = require('../src/lib/live-strip-layout.js');
+  const foldBad = []; let foldsWithout = 0;
+  for (const avail of [0, 120, 250, 360, 500, 900]) for (const wi of [1, 3, 5]) {
+    const f = LSL.tabRowFold({ rows: FR, widths: FW, avail, morePx: 44, watchedRef: FR[wi].targetId.toLowerCase() });
+    if (f.folded.includes(FR[0].targetId) || f.folded.includes(FR[wi].targetId)) foldBad.push({ avail, wi, f });
+    if (LSL.tabRowFold({ rows: FR, widths: FW, avail, morePx: 44 }).folded.includes(FR[wi].targetId)) foldsWithout++;
+  }
+  ok(!foldBad.length && foldsWithout > 0, `G3 tabRowFold keeps the tab on show AND the watched one at every width (6 widths × 3 watched tabs; without watchedRef the watched one folds in ${foldsWithout} cells)`, foldBad);
+  const lsSrc = read('src/lib/live-strip-layout.js'); const KEEP = '  if (row && row.keep) return 0;';
+  if (ok(lsSrc.includes(KEEP), 'G3 control setup: the keep clause is found')) {
+    const Lc = M.load('src/lib/live-strip-layout.js', lsSrc.replace(KEEP, ''), 'no-watched-keep');
+    ok(Lc.tabRowFold({ rows: FR, widths: FW, avail: 250, morePx: 44, watchedRef: FR[5].targetId }).folded.includes(FR[5].targetId), 'G3 CONTROL: a layout copy without the watched keep folds the watched chip at 250 px — the leg above can go red');
+  }
+  ok(/watchedRef: st\.watch \? st\.watch\.targetId : null/.test(lwG), 'G3 source: the client\'s refold passes the watched tab');
+  // G4 + G5 — the client's reading (the bridge's halves are in ② b)
+  const helloSrc = lwG.slice(lwG.indexOf("      case 'hello':"), lwG.indexOf("      case 'mode': {"));
+  ok(/if \(st\.watch\) \{ if \(st\.mode === 'takeover' && st\.mine\) st\.watch = null; else \{ st\.watch = \{ \.\.\.st\.watch, pending: true \}; send\(\{ type: 'watch-tab', targetId: st\.watch\.targetId \}\); \}/.test(helloSrc), 'G4 source: the client\'s hello re-sends its watch (or drops it when it drives now) — one truth after a reconnect');
+  const RW = (refused, why, d = null) => W.watchRefusalWords({ refused, why, error: 'SERVER ENGLISH' }, d ? tOfD(d) : null);
+  const g5 = { en: W.WATCH_REFUSALS.map((c) => RW(c)), why: ['unreachable', 'no_screencast', 'no_tab', 'odd'].map((w) => RW('unreadable', w)), zh: [RW('unavailable', '', ZH), RW('unreadable', 'no_tab', ZH)], ja: RW('unreadable', 'unreachable', JA), unknown: RW('brand_new') };
+  ok(![...g5.en, ...g5.why, ...g5.zh, g5.ja].some((x) => /SERVER ENGLISH/.test(x)) && g5.why.join('|') === 'the tab could not be reached|the tab refused a screencast|the tab is gone|the tab could not be shown' && g5.zh.join('|') === '这台服务器无法显示另一个标签页|那个标签页已经关闭' && g5.ja === JA['the tab could not be reached'] && g5.unknown === 'SERVER ENGLISH' && /watchRefusalWords\(\{ refused: m\.refused, why: m\.why, error: m\.error \}, t\)/.test(lwG), 'G5 a refusal is worded BY CODE (driving / not_your_tab / unavailable / unreadable + the capture\'s why) in en/zh/ja — never the server\'s sentence; an unknown code keeps it', g5);
 }
 
 // ═══ ② THE REAL BRIDGE ════════════════════════════════════════════════════
@@ -113,7 +170,7 @@ function stubKeeper(U, { visibility = 'hidden' } = {}) {
     tabOwnersFor: async () => ({ ok: true, owners: { [T1]: 'agent', [T2]: 'agent', [T3]: 'other' }, mediated: false, adoptable: false }),
     tabVisibilityFor: async (t, id) => { calls.vis.push(id); const v = typeof visibility === 'function' ? visibility() : visibility; return v && typeof v === 'object' ? v : { ok: true, visibility: v }; }, // B-d635: an object = the keeper's own answer (a tab that never answers)
     captureTabFor: async (t, id) => { calls.cap.push(id); return { ok: true, data: jpegOf(800, 600, 'bg' + calls.cap.length), clientWidth: 800, clientHeight: 600 }; },
-    watchTabFor: async (t, id, hooks) => { calls.watch.push(id); watches.push({ id, hooks }); return { ok: true, close: () => { calls.stops++; } }; },
+    watchTabFor: async (t, id, hooks) => { if (k.watchFail) return k.watchFail; calls.watch.push(id); watches.push({ id, hooks }); return { ok: true, close: () => { calls.stops++; } }; },
     userTabAct: async ({ act, targetId }) => {
       calls.acts.push([act, targetId]);
       if (targetId === T3) { const e = new Error('that tab is not this conversation\'s'); e.code = 'not_your_tab'; throw e; }
@@ -321,6 +378,16 @@ async function staleLeg(BSmod) {
   Wv.send({ type: 'watch-tab', targetId: null });
   ok(await until(() => calls.stops > stops0 && Wv.of('watching').filter((m) => m.targetId === null).length > nulls0 && Wv.frames.length > f0, 1500) && !(Wv.frames.at(-1).metadata || {}).watched, 'watch-tab null ⇒ the pump is closed, the view says it follows the agent\'s tab again and gets the agent\'s last picture at once');
   ok(B.logs.some((l) => /viewer \d+ watches the agent's tab B2222222 \(its current tab A1111111 is unchanged\)/.test(l)) && B.logs.some((l) => /follows the agent's tab again/.test(l)), 'every watch and every return is journaled (whose tab, the agent\'s current tab unchanged)');
+  // lane live-watch-polish G4: a re-sent watch of the tab the agent is on NOW (a reconnected view's, the agent moved there) is answered
+  const nullsF = Wv.of('watching').filter((m) => m.targetId === null).length, wF = calls.watch.length;
+  Wv.send({ type: 'watch-tab', targetId: T1 });
+  ok(await until(() => Wv.of('watching').filter((m) => m.targetId === null).length > nullsF, 1500) && calls.watch.length === wF, 'G4 a watch-tab of the agent\'s CURRENT tab (a reconnected view re-sending its watch after the agent moved there) is ANSWERED `watching null` — no pump opened, the view\'s line clears');
+  // lane live-watch-polish G5: a capture that fails carries its CODE to the view (`why`) — the client words it
+  k.watchFail = { ok: false, code: 'unreachable', error: 'the tab could not be reached' };
+  Wv.send({ type: 'watch-tab', targetId: T2 });
+  const g5m = (await until(() => Wv.of('watching').some((m) => m.refused === 'unreadable'), 1500)) ? Wv.of('watching').find((m) => m.refused === 'unreadable') : null;
+  k.watchFail = null;
+  ok(!!g5m && g5m.why === 'unreachable' && W.watchRefusalWords(g5m, null) === 'the tab could not be reached', 'G5 a capture that could not reach the tab is refused `unreadable` WITH its code (`why: unreachable`) — the view words it by code', g5m);
   Wv.send({ type: 'watch-tab', targetId: T2 });
   await until(() => calls.watch.filter((x) => x === T2).length === 3, 1500);
   const stops1 = calls.stops;

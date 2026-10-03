@@ -34,7 +34,8 @@ const M = require(path.join(REPO, 'src/design-model.js'));
 const MANUAL = read('docs/agent/design-manual.md');
 const SKILL = read('docs/agent/design-skill.md');
 const CLI = read('data/bin/vibespace-design');
-const HUB_CODES = ['not_registered'];   // the engine's own refusal the manual names (src/server/design-engine.js)
+const HUB_CODES = ['not_registered', 'bad_questions', 'not_yours', 'bad_file', 'not_previewable', 'no_system', 'ambiguous', 'no_tokens', 'bad_tokens'];   // + lane design-systems-home: new --system   // the engine's own refusals the manual names (src/server/design-engine.js; lane design-ask: ask / preview)
+const DE_STATUS = require(path.join(REPO, 'src/server/design-engine.js')).STATUS;
 
 // ── the censuses, as functions over a text (the controls run them over planted variants) ──
 /** ① The manual's example manifest: the FIRST ```json block. */
@@ -109,6 +110,7 @@ console.log('— ① the manual vs the PURE model');
 {
   const p = modelCensus(MANUAL);
   ok(p.length === 0, `the example design.json validates; ${[...new Set(Object.values(M.KEYS).flat())].length} keys, ${M.NOTE_COLORS.length} colours, ${M.PRINT_MODES.length} print modes, the bounds and the §5 codes are the model's`, p);
+  ok(HUB_CODES.every((c) => Object.prototype.hasOwnProperty.call(DE_STATUS, c)), 'every hub code the manual\'s §5 may name is one the engine answers (its STATUS table)', HUB_CODES.filter((c) => !(c in DE_STATUS)));
 }
 console.log('— ② the manual vs the CLI');
 {

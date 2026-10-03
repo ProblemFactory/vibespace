@@ -1130,7 +1130,7 @@ function providerControl(provider, { host = null, desktopConsent = undefined } =
     const reason = why ? `its §7.2.1 egress measurement is recorded as ${why.refusal} (${why.date}): ${why.detail}` : (row.unwiredWhy || 'not wired in this release');
     return { ok: false, code: 'provider_unavailable', error: `provider "${id}" (${row.label}) cannot be used on this build — ${reason}` };
   }
-  if (row.consent && desktopConsent !== true) return { ok: false, code: 'provider_needs_consent', error: `provider "${id}" addresses windows on the user's REAL desktop and is off until the user turns on "${row.consent}" (Settings → Agent browser, a switch with its own confirmation) — nothing on the desktop is listed or addressable before that`, consent: row.consent };
+  if (row.consent && desktopConsent !== true) return { ok: false, code: 'provider_needs_consent', error: `provider "${id}" addresses windows on the user's REAL desktop and is off until the user turns on "${row.consent}" (Settings → Desktop apps, a switch with its own confirmation) — nothing on the desktop is listed or addressable before that`, consent: row.consent };
   return { ok: true, row };
 }
 /** The refusal for ONE control a provider lacks (a disabled button's title):

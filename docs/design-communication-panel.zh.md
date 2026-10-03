@@ -314,6 +314,8 @@ CLAUDE.md 的路由表是"一个新改动该去哪"的法。这个功能横跨�
 一个 adapter 由一个接收 `(record, deps)` 的工厂造出来。它**对策略是无状态的**, 只拥有
 恰好三样东西: vendor 认证、vendor 分页, 以及 vendor 的消息形状。
 
+> 2026-10-03 (B-df40 第 3 部分): adapter 自己的可调设置 (每分钟预算 `caps.budget`、每秒速率 `caps.pace`) 在 `src/channel-settings.js` 每个 vendor 声明一次 (`CHANNEL_SETTINGS.<vendor>.rows`, role budget|pace), caps 用 `...budgetOf(...)` / `...paceOf(...)` 按身份引用; 设置页的行 (Channels → 「按服务商」)、引擎的 SETTING_BOUNDS 都从这张表派生, 注册时引用了表里没声明的 key 按名拒绝。新接一个 vendor = 表里一项 + caps 引用它。
+
 **它在两个轴上与别的 adapter 不同, 而这两个轴是被建模出来的、不是被抹平的**(r3/Q3):
 一个是**只读 vs 可发送**(而且是按会话、按身份 —— 用户身份还是 bot 身份), 一个是
 **接收是同步还是异步**(push / poll / scan)。两个轴都住在 `caps` 里, 而第一个轴还有一
@@ -1698,6 +1700,17 @@ conversation — a delivery now would open a billed turn"), 没有一份唤醒; 
 例的记录, 而不是别人的收件箱。
 
 ---
+
+### 9.6 Agent 附带的文件 (2026-10-03, B-fd1f, design 005 §2.B, lane channel-attach-send)
+
+- **字节随提案而来**: agent 运行的 CLI (`reply` / `compose` 的 `--attach <path>`, 可重复) 在它所在的机器上读文件, 把字节放进提案请求 (`attachments: [{name, data: base64}]`)。服务端从不打开 agent 给的路径。上限: 10 个文件、合计 25 MB、每个至少 1 字节; 文件名只是名字 (无分隔符、无控制 / 不可见 / 方向字符、首尾无空格、≤ 200 字符), 违者按名拒绝, 什么都不创建。
+- **先判后写**: 服务端解码、算 sha256、按字节嗅探类型 (png / jpeg / gif / webp 为图片, 其余为文件), 用适配器的 `caps.sendAttachments` 行判定 (`attachVerdict`; 空 ⇒ `attachments-not-offered`, 带渠道名与原因); 全部通过后才同步写入 `channels/outbox-files/<提案 id>/<n>` (0600), 记录只保留 `{n, name, bytes, sha256, mime, kind}`。被拒的提案不留任何文件。
+- **批准绑定字节**: `shownFields` 纳入每个附件的 `[name, bytes, sha256]` (无附件的提案摘要不变); 卡片显示的不是这份字节 ⇒ `changed-since-shown`。发送时引擎重读并重算每个文件, 交给适配器的正是这些缓冲; 不一致或缺失 ⇒ `attachment-changed`, 不调用适配器。
+- **审批规则 (主人 Q2 = 否, 2026-10-02)**: 不加「永远审批」的覆盖; 沿用现有开关 `channels.guardAttachmentsReview` (默认开 ⇒ 原因 `attachments`) 与渠道策略: 开关关闭 + 直发策略 + send 权限 ⇒ 直接发出 (字节同样校验)。
+- **卡片**: 每个附件一行 — 服务端嗅探为四种栅格图时显示缩略图 (仅经主人路由 `GET /api/channels/outbox/:id/attachment/:n`: nosniff、sandbox CSP、no-store、只有这四种可内联), 名称、大小、嗅探类型 (扩展名不符时显示提示)、sha256 前缀, 以及「发送的正是这些字节」。agent 路由不提供任何发件箱文件。
+- **Gmail**: `buildMime` 生成 multipart/mixed (正文 + 每个文件一部分: 嗅探类型、`attachment` 处置、ASCII 回退名 + RFC 2231 `filename*` 分段续写、76 列 base64、头部值去除控制字符); `raw` 超过 4 MB 时改走上传形式 (`/upload/…?uploadType=multipart`, Google 文档所述 JSON 请求体上限 5 MB — 未在主人账号上实测)。行: `{maxCount: 10, maxTotalBytes: 25e6, withText: true}`。
+- **Lark**: 行为空, 原因写明 — 文档显示 `im/v1/images` / `im/v1/files` 只接受应用的 tenant token (LA1), 以用户身份发送的消息能否携带应用上传的 key (LA3) 无法不经真实调用证明; LA2 (权限 `im:resource` 或 `im:resource:upload`) 与 LA4 (图片 ≤ 10 MB, 文件 ≤ 30 MB) 取自文档。Agents 渠道无行。
+- **保留**: 拒绝 / 撤回 / 过期时立即删除; 已发送 / 失败的 7 天后由每分钟的清扫删除 (记录仍留名称、大小、sha256, 卡片注明文件不再保留); 被修剪的记录连同文件夹一起删除; 孤儿文件夹与崩溃留下的暂存夹也会被清理。
 
 ## 10. 面板
 
@@ -3913,3 +3926,17 @@ owner (2026-09-28): "从 lark pull 消息可以通过搜索空格+时间范围�
 **门。** fast: test-channel-feed (新; 窗口 / 判页 / 折叠 / 欠账 / 诞生 / 摘要普查 (模块 + 注册表 + 引擎的 `feedPage`) / 测量 / 滑动一分钟 + 4 个 patched-copy 对照) · test-channel-drain (规则 21: 搭在 mixed / paced 的种子上、表、5 个 mutant) · test-channel-caps ⑧b · test-channel-adapter-contract ⑫ · test-channels-lark-shape ⑬ · test-oauth-loopback ⑨b · test-channels-engine ㉒ (流程、账号授予唤醒私聊、线程遍历记在计时器上、429、重启、欠账先于游标 + 对照、scope 门、忽略时间窗、承载 → 降级、摘要) · test-channels-focus (`direct`) · test-channel-filter (定案 2)。heavy: test-channels-aggregate ⑫ (873 个会话: 测量中 = ② + 一页; 承载 = 只抓开着的窗口与欠账行, 5 分钟网; 突发 600 条 ⇒ 任意 60 s ≤ 10 页, 窗口跨趟与重启完成; 5 % 漏 ⇒ 降级, ② 自己回来) + ⑤ (推送独占仍胜) + ⑪ (c) 忽略打开窗口的承载 (d) 只在内存里的欠账。
 
 **待验证 (U)。** U1 消息 id 的字段名 (读 `meta_data.message_id`, 否则条目的 `message_id` / `id`; 第一页的字段**名**每个进程说一次) · U2 `time_range` 是否被尊重 (第一页即探针) · U3 空查询是否返回所有消息类型 (测量回答) · U4 索引延迟 (重叠 + 测量) · U5 时间单位 (声明 ms) · U6 根消息的 `thread_position` (未钉住前两个都标) · U7 p2p id 的聊天查询 (describe 阶梯 + 最后一次读取的回退) · U8 page_token 寿命 (5 分钟, 拒绝 ⇒ 从第 1 页重来) · U9 分页参数放在 query string (Lark 的 POST 搜索惯例; 形状被拒 ⇒ 按名停放)。
+
+## 30. 消息的信封与各家的独特事实: 一套声明的方案 (2026-10-03, lane message-facts, backlog B-f066; 设计 007)
+
+owner 2026-10-02: 「gmail thread 展示的时候缺乏细节（原邮件收件人，发件人，cc 人，reply-to 啥的），同时可能要考虑下不同 provider 可能针对消息都有类似的独特机制，怎么制定统一方案处理。」(设计 007 写作"§26"; 本文 §26–§29 已占, 故编为 §30。)
+
+- **记录多一个可选的、封闭的、有类型的列表 `facts: [{k, v, more?, cut?}]`** (src/channel-record.js, 像 `blocks` 一样在记录旁边定义 schema): 七种值类型 `FACT_TYPES` —— `parties` / `party` / `time` / `line` / `level` / `count` / `flag` —— 渲染器和给 agent 的打印只认识这七种类型, 从不认识某个 kind。`validateFacts` 管封闭的 kind、值类型、上限 (每个列表 ≤ 50 人, 其余记 `more`; 整个列表 ≤ 16 KB, 超出时最长的列表把尾部让给 `more`), 每个字符串 (名字、地址、行) 都过名字之门 (frame、bidi、隐形字符、换行)。不合法的 fact **按名拒绝**, 记录照存; 没有 facts 的记录与以前逐字节相同。
+- **kind 是一张声明的表** (`FACT_KINDS`, src/channel-facts.js, PURE): 每行 = 类型 + 标签 (英文即 i18n 键) + 位置 (`summary` 摘要行 / `chip` 标签 / `details` 详情) + agent 怎么读 (`line` / `count` / `none`)。现在只声明 Gmail 发出的十种: `to` `cc` `bcc` `reply-to` `sender` `list` `delivered-to` `subject` `importance` `automated` (没人发出的行不声明 —— 死行规则)。纸面测试 (scripts/test-channel-facts.mjs §5) 把 Slack / Telegram / Outlook 形状的消息映射上来: 没有新类型; 它们要加的行 (`via` `edited` `forwarded-from` `read-by` `pinned` `restricted`) 每个都是现有类型的一行。Lark 的四种 (edited / recalled / forwarded-from / via) 是下一条车道 message-facts-lark。
+- **适配器声明它发出什么**: `caps.facts: [...]` (注册时对照封闭 kind 校验), `caps.factsOf: true` 声明 `factsOf(convId)` (声明 ⇔ 实现)。`author.isBot` / `external`、`sys` 块、`raw` 原样不动 —— facts 只是补上缺的那个家, 零迁移。
+- **以后才知道的 fact 走 side log**: `{k:'fx', msg, at, src, facts}` (`SIDE_KINDS` 第四种, 就是 §28 预留的 "edit" 位), 同一个 `validateFacts`; 读时 `foldFacts` (同一 kind 后者胜; flag 不会撤销); store 的 trim 把一条消息的 fx 折成一行。
+- **Gmail**: 入库时 `toRecord` 从 `format=full` 已带的头里读 (`factsFromHeaders`, 用 `addressList` / `addressParts` —— 从不取注释里的最后一个 `<`; RFC 2047 名字解码; 超过 16 KB 的头 = 没有人的 fact + `cut: true`, 不解析): Bcc 只在本账户自己发的邮件上; Sender = From 不算; Delivered-To 是本账户自己时不算; Subject 去掉 Re:/Fwd: 后与线程相同时不算。之前存的线程: owner 在窗口里第一次点「详情」时, ONE `threads.get?format=metadata` (经 gate 计量) 给这个线程的**每一条**消息写 fx (`GET /api/channels/:a/:c/facts?msg=` → 引擎 `messageFacts`: side 命中免费; 未命中按线程 single-flight, 走账户预算和退避, 拒绝按名; 只写本会话日志里有的消息 id; agent token 被拒)。入库从不回填, agent 的 read 从不回填。
+- **窗口**: 每条消息头下一个 `chanmsg-facts` (续行也有 —— 每封邮件的收件人不同): 摘要按钮「发给 我, Alice Chen, Bob +3 · 抄送 Carol」(先名字; 地址在 tooltip), 后跟标签 (邮件列表 / 高重要性 / 自动发送); 点开 = 详情 (收件人 · 抄送 · 密送 · 回复至 · 代发者 · 邮件列表 · 投递至 · 主题, 每人「名字 · 地址」), 打开状态记在 `folds` (新消息到达不会关上), 行里的「+N」原地展开。只有标签的 fact 放在时间旁边。src/lib/channel-facts-view.js 只按值类型画, textContent only。
+- **Lark (lane message-facts-lark, B-f066 第二部分)**: 表里多四行, 全是标签 (chip, 不进摘要也不进详情 —— 聊天消息只有标签时放在时间旁边): `via` (party: `sender_type: app` 的应用 id + 头部同一个名字; 应用名后来才解析到时, `recordView` 读时连同头部一起改名, 经记录的校验器) · `forwarded-from` (party: `merge_forward`; 列表接口从不给原发送人, 所以是**无名 party** `v: {}` —— schema 行声明 `nameless: true` 才允许, 标签只说「已转发」, agent 行只打键名) · `edited` (time: `updated: true` 时取 `update_time`; 读不出时刻就不发 —— 时间从不编造; 标签的 tooltip 用设备语言写出时刻) · `recalled` (flag: `deleted: true`, 即撤回)。`caps.facts` 声明这四种; 没有 `factsOf` (之前存的 Lark 消息不回填)。存入之后才发生的编辑 / 撤回: `fx` 的路径已在 (读时折叠, 后者胜, 撤回不会撤销), "发现"它的读者不在这条车道。契约「发出 ⊆ 声明」= scripts/test-channel-facts.mjs §10 对每一条录制的 Lark 消息跑真实 `toRecord` (加一个多发未声明 kind 的副本 = 红); 名字之门 = 一个跳过 peerName 的副本把原始应用名存进来 = 红。
+- **agent**: `agentCopy` / `withView` 经新的皮带门 `agentFacts` (名字 peerName, 地址和行走皮带的 line 规则; count 只给数字), CLI 在消息下打一行 `to: … · cc: … · reply-to: … · list: … · importance: …` (`agentFactLines`, 整行再过 line 规则)。wake 块不变。
+

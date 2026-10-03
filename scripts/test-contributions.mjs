@@ -629,17 +629,17 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
     const lab = blk.match(/label: \(\) => t\('([^']+)'\)/);
     return { file, parent: g('parent'), group: g('group'), order: o ? Number(o[1]) : 0, label: lab && lab[1], gated: /\bwhen:/.test(blk) };
   };
-  const owners = ['src/lib/channels-panel.js', 'src/lib/channel-outbox.js', 'src/lib/integrations-window.js', 'src/lib/desktop-app-launcher.js', 'src/lib/browser-trace-view.js', 'src/lib/inbox-window.js'].map(ownerSpec);
+  const owners = ['src/lib/channels-panel.js', 'src/lib/channel-outbox.js', 'src/lib/integrations-window.js', 'src/lib/desktop-app-launcher.js', 'src/lib/browser-trace-view.js', 'src/lib/inbox-window.js', 'src/lib/design-home.js'].map(ownerSpec);
   // 2.369.125 (docs/design-mobile-gaps.md #2): the Channels row lost its `when` gate — on a phone the rail is never built, so a gated row meant NO entry point; focusChannelsPanel now falls back to a window
   // §9 of design-user-inbox-reply (2026-09-27): the For-you WINDOW's row leads Communication ▸ (ungated: a window works everywhere)
-  ok(J(owners.map((o) => [o.label, o.parent, o.order, o.gated])) === J([['Channels…', 'comm', 10, false], ['Outbox…', 'comm', 20, false], ['Integrations…', 'comm', 30, false], ['Desktop apps…', 'tools', 30, true], ['Agent browser…', 'tools', 35, true], ['For you…', 'comm', 5, false]]),
-    'the six external owners file under comm / tools with DISTINCT orders (the two order-45 twins are gone; Desktop apps and Agent browser stay gated on their digests, Channels is ungated since 2.369.125 — its window fallback; For you… leads Communication)', J(owners));
+  ok(J(owners.map((o) => [o.label, o.parent, o.order, o.gated])) === J([['Channels…', 'comm', 10, false], ['Outbox…', 'comm', 20, false], ['Integrations…', 'comm', 30, false], ['Apps…', null, 18, true], ['Agent browser…', 'tools', 35, true], ['For you…', 'comm', 5, false], ['Designs…', 'tools', 38, false]]),
+    'the seven external owners file under comm / tools / the top level with DISTINCT orders (Designs… = the Design window\'s home, ungated — lane design-systems-home; the two order-45 twins are gone; Apps… — a top-level row since design 009 §B6 — and Agent browser stay gated on their digests, Channels is ungated since 2.369.125 — its window fallback; For you… leads Communication)', J(owners));
   // the three browser faces (design-browser-faces direction B): the agent's face wears the browser-live glyph, defined once in icons.js — the globe is the web view's alone
   { const tv = read('src/lib/browser-trace-view.js'); const i = tv.indexOf("menu: 'gear'"); const blk = tv.slice(tv.lastIndexOf('registerMenuItem({', i), tv.indexOf('});', i));
     ok(/\bicon: UI_ICONS\.browserLive\b/.test(blk) && !/UI_ICONS\.(globe|web)\b/.test(blk), 'the ⚙ Agent browser… row wears UI_ICONS.browserLive (the window with a dot), never a globe', blk.slice(0, 200)); }
-  ok(owners.every((o) => !o.group), 'owner rows carry no `group` — inside a head, group sorts BEFORE order, so a grouped member would sink below every ungrouped core row');
-  for (const o of owners) registerMenuItem({ menu: 'gear', id: 'owner/' + o.label, parent: o.parent, order: o.order, label: o.label,
-    when: o.gated ? ((c) => (o.label === 'Desktop apps…' ? !!c.app._desktopAppsAvailable : o.label === 'Agent browser…' ? !!c.app._browserProfiles : !!c.app._railEl)) : undefined, run: (c) => c.app['owner:' + o.label]?.() });
+  ok(owners.every((o) => !o.group || (!o.parent && o.file === 'src/lib/desktop-app-launcher.js' && o.group === '1_admin')), 'owner rows inside a head carry no `group` — group sorts BEFORE order, so a grouped member would sink below every ungrouped core row (the one top-level owner, Apps…, rides the core rows\' group 1_admin)');
+  for (const o of owners) registerMenuItem({ menu: 'gear', id: 'owner/' + o.label, parent: o.parent, ...(o.group ? { group: o.group } : {}), order: o.order, label: o.label,
+    when: o.gated ? ((c) => (o.label === 'Apps…' ? !!c.app._desktopAppsAvailable : o.label === 'Agent browser…' ? !!c.app._browserProfiles : !!c.app._railEl)) : undefined, run: (c) => c.app['owner:' + o.label]?.() });
 
   // VERBATIM legacy row list (pre-registry app.js _showGlobalSettings, 2.369.37): [icon, label, danger] + seps — the CENSUS baseline
   const legacy = (app) => {
@@ -668,18 +668,18 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
     const language = row(I.globe, `${t('Language')}: 中文`, { children: [row(undefined, t('Auto (system)'), { checked: false }), row(undefined, 'English', { checked: false }), row(undefined, '中文', { checked: true }), row(undefined, '日本語', { checked: false })] });
     const appearance = row(I.sliders, t('Appearance'), { caption: 'cap:' + app._fontSize, panel: true, children: [...(app.isMobile ? [] : [row(I.brush, t('Customize UI…'))]), language] });
     const pluginWins = app.pluginClient?.contributedWindows?.() || [];
-    const tools = row(I.wrench, t('Tools'), { children: [row(I.chart, t('Usage…')), row(I.chart, t('Background Work…')), row(undefined, t('Desktop apps…')), row(undefined, t('Agent browser…')), row(I.puzzle, t('Plugins…')), ...(pluginWins.length ? [SEP, ...pluginWins.map((w) => row(PLUGIN_ICON, w.title))] : [])] });
+    const tools = row(I.wrench, t('Tools'), { children: [row(I.chart, t('Usage…')), row(I.chart, t('Background Work…')), row(undefined, t('Agent browser…')), row(undefined, t('Designs…')), row(I.puzzle, t('Plugins…')), ...(pluginWins.length ? [SEP, ...pluginWins.map((w) => row(PLUGIN_ICON, w.title))] : [])] });
     const comm = row(I.chat, t('Communication'), { children: [row(undefined, t('For you…')), row(undefined, t('Channels…')), row(undefined, t('Outbox…')), row(undefined, t('Integrations…'))] });
     const system = row(I.cog, t('System'), { children: [row(I.alert || I.pulse, t('Report a problem…')), row(I.pulse, t('Diagnostics report…')), SEP, row(I.exp || I.pulse, t('Restore a previous layout…')), row(I.exp, t('Backup & migrate…')), row(I.lock, app._authEnabled ? t('Change password…') : t('Set password…'))] });
     const help = row(I.help, t('Help'), { children: [row(I.tour, t('Welcome tour'))] });
-    return [appearance, SEP, row(I.key, t('Manage agents…')), row(I.cog, t('All Settings...')), tools, comm, system, ...(app._repoDir ? [row(I.key, t('Update VibeSpace…'))] : []), help, ...(app._authEnabled ? [SEP, row(I.out, t('Sign out'), { danger: true })] : [])];
+    return [appearance, SEP, row(I.key, t('Manage agents…')), row(I.cog, t('All Settings...')), row(undefined, 'Apps…'), tools, comm, system, ...(app._repoDir ? [row(I.key, t('Update VibeSpace…'))] : []), help, ...(app._authEnabled ? [SEP, row(I.out, t('Sign out'), { danger: true })] : [])];
   };
   const proj = (items) => items.map((i) => (i.separator ? { sep: 1 } : { ...(i.icon !== undefined ? { icon: i.icon } : {}), label: i.label, ...(i.danger ? { danger: true } : {}), ...(i.checked !== undefined ? { checked: i.checked } : {}), ...(i.caption ? { caption: i.caption } : {}), ...(i.panel ? { panel: true } : {}), ...(i.children ? { children: proj(i.children) } : {}) }));
   const flatten = (items) => items.flatMap((i) => (i.sep ? [] : [i.label, ...(i.children ? flatten(i.children) : [])]));
   // every label the tree ADDS beyond the legacy flat list — the five heads, the
   // five owner rows (never in gear-menu.js), the four Language choices and
   // All Settings (a quick-pref link before, a DIRECT row since 2.369.131)
-  const ADDED = [id('Appearance'), id('Tools'), id('Communication'), id('System'), id('Help'), 'For you…', 'Channels…', 'Outbox…', 'Integrations…', 'Desktop apps…', 'Agent browser…', 'Auto (system)', 'English', '中文', '日本語', 'All Settings...'];
+  const ADDED = [id('Appearance'), id('Tools'), id('Communication'), id('System'), id('Help'), 'For you…', 'Channels…', 'Outbox…', 'Integrations…', 'Apps…', 'Agent browser…', 'Designs…' /* lane design-systems-home */, 'Auto (system)', 'English', '中文', '日本語', 'All Settings...'];
   let n = 0, bad = null, census = null, budget = null, dangers = null;
   for (const [isMobile, _repoDir, _authEnabled, nPlugins] of cartesian([false, true], [null, '/repo'], [false, true], [0, 2])) {
     const wins = Array.from({ length: nPlugins }, (_, i) => ({ pluginId: 'p', windowId: 'w' + i, title: 'Plugin win ' + i }));
@@ -695,14 +695,14 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
     const missing = [...wantSet].filter((l) => !gotSet.has(l)), extra = [...gotSet].filter((l) => !wantSet.has(l)), dup = gotFlat.filter((l, i) => gotFlat.indexOf(l) !== i);
     if ((missing.length || extra.length || dup.length) && !census) census = { isMobile, _repoDir, _authEnabled, nPlugins, missing, extra, dup };
     const topRows = items.filter((i) => !i.separator).length;
-    if (topRows > 9 && !budget) budget = { isMobile, _repoDir, _authEnabled, nPlugins, topRows };
+    if (topRows > 10 && !budget) budget = { isMobile, _repoDir, _authEnabled, nPlugins, topRows };
     const dangerCount = (list) => list.reduce((n, i) => n + (i.danger ? 1 : 0) + (i.children ? dangerCount(i.children) : 0), 0);
     const nDanger = dangerCount(proj(items));
     if (nDanger !== (_authEnabled ? 1 : 0) && !dangers) dangers = { isMobile, _repoDir, _authEnabled, nPlugins, nDanger };
   }
   ok(!bad, `gear menu: registry tree ≡ the TREE FIXTURE over ${n} states (icon/label/danger/checked/caption/panel/separators per level, incl. the plugin-windows block under Tools)`, bad && `first diff ${J({ ...bad, got: undefined, want: undefined })}\n    got  ${bad.got}\n    want ${bad.want}`);
   ok(!census, `CENSUS over ${n} states: every legacy row lands in exactly one head or at the top level, none twice, none lost; the additions are exactly the named ones`, census && J(census));
-  ok(!budget, 'top-level row budget: ≤ 9 rows in every state (9 at most: Appearance / Manage agents / All Settings / Tools / Communication / System / Update / Help / Sign out)', budget && J(budget));
+  ok(!budget, 'top-level row budget: ≤ 10 rows in every state (10 at most: Appearance / Manage agents / All Settings / Apps (design 009 §B6) / Tools / Communication / System / Update / Help / Sign out)', budget && J(budget));
   ok(!dangers, 'exactly one danger row (Sign out) when auth is on, none when it is off — at any depth', dangers && J(dangers));
   ok(panels.length === 0, 'menuItems() passes the Appearance panel BUILDER through untouched — the renderer calls it, the registry never does');
   const rows = menuItems('gear', { app: { isMobile: false, _repoDir: '/r', _authEnabled: true, _fontSize: 14, _railEl: {}, _desktopAppsAvailable: true, _browserProfiles: { profiles: [] } }, pop: {} });
@@ -718,8 +718,8 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
   const leaves = (items) => items.flatMap((i) => (i.separator ? [] : (i.children ? leaves(i.children) : [i])));
   const r2 = leaves(menuItems('gear', { app, pop: {} }));
   calls.length = 0;
-  for (const l of ['Customize UI…', 'Auto (system)', 'English', '中文', '日本語', 'Manage agents…', 'Usage…', 'Background Work…', 'Desktop apps…', 'Agent browser…', 'Plugins…', 'PW', 'For you…', 'Channels…', 'Outbox…', 'Integrations…', 'Report a problem…', 'Diagnostics report…', 'Restore a previous layout…', 'Backup & migrate…', 'Set password…', 'Update VibeSpace…', 'Welcome tour', 'All Settings...']) r2.find((i) => i.label === l).action();
-  ok(J(calls) === J([['customize'], ['setLang', 'auto'], ['setLang', 'en'], ['setLang', 'zh'], ['setLang', 'ja'], ['_showAgentsDialog'], ['openUsage'], ['openJobs'], ['owner:Desktop apps…'], ['owner:Agent browser…'], ['openPluginsDialog'], ['pluginOpen', 'p', 'w'], ['owner:For you…'], ['owner:Channels…'], ['owner:Outbox…'], ['owner:Integrations…'], ['captureIncident'], ['_openDiagnostics'], ['_showLayoutHistory'], ['_showTransferDialog'], ['_showPasswordDialog'], ['_showUpdateConfirmDialog'], ['_showOnboarding', true], ['settingsOpen']]),
+  for (const l of ['Customize UI…', 'Auto (system)', 'English', '中文', '日本語', 'Manage agents…', 'Usage…', 'Background Work…', 'Apps…', 'Agent browser…', 'Plugins…', 'PW', 'For you…', 'Channels…', 'Outbox…', 'Integrations…', 'Report a problem…', 'Diagnostics report…', 'Restore a previous layout…', 'Backup & migrate…', 'Set password…', 'Update VibeSpace…', 'Welcome tour', 'All Settings...']) r2.find((i) => i.label === l).action();
+  ok(J(calls) === J([['customize'], ['setLang', 'auto'], ['setLang', 'en'], ['setLang', 'zh'], ['setLang', 'ja'], ['_showAgentsDialog'], ['openUsage'], ['openJobs'], ['owner:Apps…'], ['owner:Agent browser…'], ['openPluginsDialog'], ['pluginOpen', 'p', 'w'], ['owner:For you…'], ['owner:Channels…'], ['owner:Outbox…'], ['owner:Integrations…'], ['captureIncident'], ['_openDiagnostics'], ['_showLayoutHistory'], ['_showTransferDialog'], ['_showPasswordDialog'], ['_showUpdateConfirmDialog'], ['_showOnboarding', true], ['settingsOpen']]),
     'every leaf of the tree calls the same app method the legacy row did (+ the four Language choices → setLang, All Settings → _settingsUI.open)', J(calls));
   ok(r2.every((i) => typeof i.action === 'function') && menuItems('gear', { app, pop: {} }).filter((i) => i.submenu).every((i) => !i.action), 'every leaf has an action; no head has one');
   const gm = read('src/lib/gear-menu.js');

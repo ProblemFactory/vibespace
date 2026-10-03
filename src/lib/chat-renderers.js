@@ -739,8 +739,18 @@ class ChatRenderers {
     // never a VibeSpace notice. Every string escaped; the facts are the normalizer's sanitized `peerGroup`.
     const g = msg.peerGroup && typeof msg.peerGroup === 'object' && msg.peerGroup.id ? msg.peerGroup : null;
     const groupSpan = g ? `<span class="chat-peer-group" role="link" tabindex="0">${escHtml(g.name || g.id)}</span>` : '';
-    const whoHtml = !g ? '' : g.self ? escHtml(t('You')) : !msg.peerFrom ? escHtml(t('another agent'))
-      : impostor ? t('an agent calling itself “{name}”', { name: nameSpan }) : nameSpan;
+    // A REPORT OF SEVERAL SENDERS (lane peer-card-sender, B-9fd6 — the owner: "我看到的全是another啥啥啥"): every one is
+    // named, "A, B, C and N more → <group>" (the sanitized `authors`, ≤ 3, the owner "You"), each its own link
+    const authorHtml = (a) => {
+      if (a.self) return escHtml(t('You'));
+      const sp = `<span class="chat-peer-name" role="link" tabindex="0" data-peer="${escHtml(a.name)}">${escHtml(a.name)}</span>`;
+      return impersonatesVibespace(a.name) ? t('an agent calling itself “{name}”', { name: sp }) : sp;
+    };
+    const several = !!g && Array.isArray(g.authors) && g.authors.length + (Number(g.authorsMore) || 0) > 1;
+    const namesHtml = several ? g.authors.map(authorHtml).join(', ') : '';
+    const whoHtml = !g ? '' : several ? (g.authorsMore > 0 ? t('{names} and {n} more', { names: namesHtml, n: g.authorsMore }) : namesHtml)
+      : g.self ? escHtml(t('You')) : !msg.peerFrom ? escHtml(t('another agent'))
+        : impostor ? t('an agent calling itself “{name}”', { name: nameSpan }) : nameSpan;
     const nameHtml = g ? t('{from} → {group}', { from: whoHtml, group: groupSpan })
       : !msg.peerFrom ? escHtml(t('Message from another session'))
         : impostor ? t('Message from an agent calling itself “{name}”', { name: nameSpan })
@@ -765,9 +775,9 @@ class ChatRenderers {
     // The offer is the normalizer's sanitized `{available, mode, accountKey}`
     // (src/reset-credit.js offerOf) — numbers, a mode and a plain id, never markup.
     this._appendResetCreditBtn(el, msg);
+    // each named sender is its own link (a report of several names them all — B-9fd6)
+    for (const nameEl of el.querySelectorAll('.chat-peer-name')) nameEl.onclick = (e) => { e.stopPropagation(); this._jumpToPeer(nameEl.dataset.peer || msg.peerFrom); };
     if (msg.peerFrom) {
-      const nameEl = el.querySelector('.chat-peer-name');
-      if (nameEl) nameEl.onclick = (e) => { e.stopPropagation(); this._jumpToPeer(msg.peerFrom); };
       el.querySelector('.chat-peer-head').oncontextmenu = (e) => {
         e.preventDefault(); e.stopPropagation();
         if (!impostor && /^Background Work · /.test(String(msg.peerFrom || ''))) { // an agent CALLING itself Background Work gets the peer menu
@@ -884,11 +894,12 @@ class ChatRenderers {
     line.appendChild(a);
     if (rest) line.appendChild(document.createTextNode(rest));
   }
-  /** The ONE door. A rebuilt card knows the conversation's id but not its account's: the panel's own list resolves it. */
+  /** The ONE door. A rebuilt card knows the conversation's id but not its account's: the server resolves it by id
+   *  across accounts (design 008: `rows?conv=` — the first screen no longer holds every conversation). */
   async _openChannelRef(ref) {
     if (ref.adapterId) { this.app?.openChannel?.(ref.adapterId, ref.convId); return; }
-    const d = await fetchJson('/api/channels');
-    const rows = d && Array.isArray(d.conversations) ? d.conversations : [];
+    const d = await fetchJson('/api/channels/rows?conv=' + encodeURIComponent(String(ref.convId || '')));
+    const rows = d && Array.isArray(d.rows) ? d.rows : [];
     const hit = rows.find((c) => c && c.id === ref.convId && (!ref.account || c.adapterLabel === ref.account)) || rows.find((c) => c && c.id === ref.convId);
     if (hit) this.app?.openChannel?.(hit.adapterId, hit.id);
     else showToast(t('This conversation is not in Channels any more'), { type: 'error' });
