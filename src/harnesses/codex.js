@@ -40,9 +40,12 @@ function parseCodexAuthFile(file) {
 const parseCodexAuth = (dir) => parseCodexAuthFile(path.join(dir, 'auth.json'));
 
 // THE CLI config files VibeSpace may write for codex (design-harness-settings
-// §2): paths spelled ONCE in the PURE table's `files`, resolved here.
-const HOOKS_FILE = cliConfigFile(HARNESS_SETTINGS.codex.files.hooks, { createIfMissing: true });
-const CONFIG_TOML = cliConfigFile(HARNESS_SETTINGS.codex.files.config, { createIfMissing: true });
+// §2): paths spelled ONCE in the PURE table's `files`, resolved here. Both
+// are created when ~/.codex exists ('dir-exists' — the rule they always had
+// under the old `true`: the writer never created the directory; a missing
+// ~/.codex means codex has not run here), the same rule as claude's.
+const HOOKS_FILE = cliConfigFile(HARNESS_SETTINGS.codex.files.hooks, { createIfMissing: 'dir-exists' });
+const CONFIG_TOML = cliConfigFile(HARNESS_SETTINGS.codex.files.config, { createIfMissing: 'dir-exists' });
 
 module.exports = {
   id: 'codex',

@@ -505,7 +505,7 @@ class CodexMessageManager {
   // it: there the wrapper's own buffer record is the carrier (peerRecordOf)
   // and a second card here would double-render live. Containment-free: the
   // delivery site posts once per fire (same-body repeats are legitimate).
-  injectPeerCard({ fromName, text, resetCredit = null, kind = null, group = null }) {
+  injectPeerCard({ fromName, text, resetCredit = null, kind = null, group = null, exitRun = null }) {
     const body = String(text || '').trim();
     if (!body) return null;
     this._currentRk = null; // outside any record context — take the s-fallback id, never the last record's key
@@ -520,6 +520,7 @@ class CodexMessageManager {
     // card / the auto-resume arm card — two numbers-and-a-mode, never markup
     const rc = offerOf(resetCredit);
     if (rc) msg.resetCredit = rc;
+    if (exitRun && typeof exitRun === 'object') msg.exitRun = exitRun;   // lane-exit-run-output E3: the run's output block (bounded by the producer)
     const gc = groupCardOf(group);   // lane group-report-card: sender → group, a peer's words
     if (gc) { msg.peerGroup = gc; msg.peerVia = 'peer'; msg.peerFrom = gc.self ? null : (gc.from || msg.peerFrom); }
     this._emit({ op: 'create', message: msg });

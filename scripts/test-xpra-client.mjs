@@ -479,7 +479,7 @@ console.log('§2e lane B — the VIEW hands the header-bar gesture over: the pre
   const docL = [];
   const prevAdd = doc.addEventListener;
   doc.addEventListener = (k, fn, o) => docL.push({ k, fn, o });
-  const fireDoc = (k, ev) => { for (const l of docL.filter((x) => x.k === k && !(x.o && x.o.signal && x.o.signal.aborted))) l.fn({ preventDefault() {}, ...ev }); };
+  const fireDoc = (k, ev) => { for (const l of docL.filter((x) => x.k === k && !(x.o && x.o.signal && x.o.signal.aborted))) l.fn({ preventDefault() {}, type: k, ...ev }); }; // a real event carries its type (the hold reads it since verify r1)
   try {
     const host = new El('div');
     const got = [], mains = [], states = [];
@@ -496,7 +496,7 @@ console.log('§2e lane B — the VIEW hands the header-bar gesture over: the pre
     pane.fire('pointerdown', { clientX: 110, clientY: 91, button: 0, pointerId: 3 });
     ok(pane.captured === true, 'the press is captured by the pane as always');
     wk.feed(['initiate-moveresize', 7, 120, 22, 8, 1, 1]);
-    ok(got.length === 1 && got[0].direction === 8 && got[0].main === true && same(got[0].press, { clientX: 110, clientY: 91 }) && got[0].held === true, 'onMoveResize: direction 8, the press point in VIEWPORT px (X root 120,22 device px at ratio 2 + the pane at 50,80 ⇒ 110,91)', got[0]);
+    ok(got.length === 1 && got[0].direction === 8 && got[0].main === true && same(got[0].press, { clientX: 110, clientY: 91, pointerId: 3 }) && got[0].held === true, 'onMoveResize: direction 8, the press point in VIEWPORT px (X root 120,22 device px at ratio 2 + the pane at 50,80 ⇒ 110,91)', got[0]);
     ok(pane.captured === false && view.wmHeld === true, 'the pane RELEASES its pointer capture — the window manager\'s drag owns the pointer now');
     wk.posted.length = 0;
     pane.fire('pointermove', { clientX: 200, clientY: 150, pointerId: 3 });
@@ -1223,8 +1223,8 @@ console.log('§7 lane D (a) (docs/design-desktop-apps-seamless §3.4 — the own
       wk.feed(['new-window', 4, 0, 0, 900, 600, { title: 'Chrome', 'window-type': ['NORMAL'], decorations: 0 }]);
       view.pane.fire('pointerdown', { clientX: 550, clientY: 98, button: 0, pointerId: 9 });
       wk.feed(['initiate-moveresize', 4, 510, 23, 8, 0, 0]); // Chrome 153: the press was at pane 500,18 — it says 510,23
-      ok(got.length === 1 && same(got[0].press, { clientX: 550, clientY: 98 }), `a move started while OUR press is in flight starts at that press (${JSON.stringify(got[0] && got[0].press)}), never at the app's root point (${JSON.stringify(view.rootToClient(510, 23))}) — Chrome's is +10,+5 off (the window moved 110/59 for a 120/64 drag)`);
-      for (const l of docL.filter((x) => x.k === 'pointerup')) l.fn({ preventDefault() {}, clientX: 600, clientY: 120, button: 0, pointerId: 9 });
+      ok(got.length === 1 && same(got[0].press, { clientX: 550, clientY: 98, pointerId: 9 }), `a move started while OUR press is in flight starts at that press (${JSON.stringify(got[0] && got[0].press)}), never at the app's root point (${JSON.stringify(view.rootToClient(510, 23))}) — Chrome's is +10,+5 off (the window moved 110/59 for a 120/64 drag)`);
+      for (const l of docL.filter((x) => x.k === 'pointerup')) l.fn({ preventDefault() {}, type: 'pointerup', clientX: 600, clientY: 120, button: 0, pointerId: 9 }); // a real event carries its type
       wk.feed(['initiate-moveresize', 4, 300, 40, 10, 0, 0]); // a keyboard move: no press in flight ⇒ the root point
       ok(got.length === 2 && same(got[1].press, view.rootToClient(300, 40)), 'with no press in flight (a keyboard move) the app\'s own root point is used, as before');
       view.dispose();

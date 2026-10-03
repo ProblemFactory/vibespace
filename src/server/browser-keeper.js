@@ -74,6 +74,7 @@ const HM = require('../browser-human.js'); // BROWSE YOURSELF (B-6ae8): the user
 const DSP = require('../browser-display.js'); // lane headless-fallback: headed is a preference, the display is a fact (PURE)
 const HC = require('../hidden-chars.js'); // lane browser-propose: a proposal card's words carry no character that is not drawn (THE one set)
 const KB = require('../browser-kept.js'); // lane browser-resume (§3.9): the conversation's KEPT browser — tabs, D2's restore kind (PURE)
+const BB = require('../browser-builds.js'); // lane browser-admin 2a: which Chrome build a profile runs (the machine's list + the ONE verdict)
 const TBS = require('../browser-tabs.js'); // lane browser-resume C (§3.9, ruling 3): whose tab it is — the agent's own tab verbs, the user's tab row (PURE)
 
 const STORE_FILE = 'browser-profiles.json';
@@ -82,6 +83,11 @@ const TICK_MS = 5000;
 const STOP_GRACE_MS = 3000;
 /** Lane H: the longest a verb waits for the lease seam's listeners (the action-trace recorder arming its tap). */
 const ARM_WAIT_MS = 3000;
+/** verify r2 (B5): a Change build… whose new build closes this soon after the change FALLS BACK to the build it replaced —
+ *  a build that launches and then dies within seconds (measured: one wrapped to die at 3 s was healed three times in its
+ *  own daemon, then browser_unstable — the conversation told only "changed", the choice left on the dead build). Long
+ *  enough for the keeper's tick (5 s) to see the loss; a browser that ran past it closes like any other (the heal). */
+const CHANGE_SETTLE_MS = 30000;
 /** VERIFY r1 L2: what a detach of a conversation's managed ephemeral browser does, said to the agent (and the UI). */
 const EPHEMERAL_DETACH_NOTE = 'this conversation\'s own browser (its managed ephemeral) is stopped now and its record removed — its open pages close; the next browser command starts it again';
 const FILE_MODE = 0o600;
@@ -166,15 +172,22 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // lane browser-resume (§3.9, the owner's ruling 1): THE KEPT STORE (src/server/browser-kept.js, or a getter) — a
   // conversation's own browser's logins directory + its tabs survive the browser's stop; the keeper is its ONE feeder
   // (start / stop / the live tab list / a deliberate close). Absent ⇒ nothing is kept (today's ephemerality).
-  kept = null } = {}) {
+  kept = null,
+  // verify r1 (F8, lane browser-admin): the wall clock of ONE step of THE install slot (default 15 min; injectable for the gate)
+  installTimeoutMs = null } = {}) {
   if (!dataDir) throw new Error('browser-keeper: dataDir is required');
   const storeFile = path.join(dataDir, STORE_FILE);
   // ONE base environment for the probe, the runtime and the socket-root answer
   // (r2): the root a command lands under is computed from exactly what the
   // runtime launches and probes with
   const rtEnv = env() || {};
-  const bf = facts || F.createBrowserFacts({ env: rtEnv });
-  const rt = configured(runtime || F.createBrowserRuntime({ env: rtEnv, log }));
+  // lane browser-admin 2b: the browser CLI VibeSpace drives — the PINNED install first when `browser.cli` asks for it (the
+  // keeper's in-memory answer, `cliPinPath`; never an fs read per call), else PATH; `bfPath` = the PATH binary alone (the
+  // panel's "on PATH" fact)
+  const pinnedCli = () => { try { return cliPinPath(); } catch { return null; } };
+  const bf = facts || F.createBrowserFacts({ env: rtEnv, pinned: pinnedCli });
+  const bfPath = F.createBrowserFacts({ env: rtEnv });
+  const rt = configured(runtime || F.createBrowserRuntime({ env: rtEnv, log, pinned: pinnedCli }));
   /**
    * takeover r3 (finding 2): THE CONFIG IS NAMED, NEVER SEARCHED. Without
    * AGENT_BROWSER_CONFIG the binary searches `~/.agent-browser/config.json`
@@ -195,7 +208,20 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    * said once in the journal.
    */
   function configured(r) {
-    const add = (ns, o) => {
+    // verify r2 (H1): every call also runs THE BROWSER'S OWN CLI (`cliOptOf` — the version its daemon runs), never the
+    // current `browser.cli` when they differ; a caller that names one (`o.cli`) keeps it
+    // (`session info` never restarts a daemon of another version — measured — so a browser whose CLI is gone is still ASKED
+    // with the current one: its liveness / adoption reads keep working; every other call is refused by name)
+    const add = async (ns, o, m) => {
+      const opts = withConfig(ns, o);
+      if (opts.cli) return opts;
+      // verify r3 (Y1): a binary never asked its version is ASKED before the call is judged (cliOptReady) — a same-version
+      // re-install at the same path used to be refused once, "no longer installed"
+      const c = await cliOptReady(browserRecordForCall(ns, opts.extraEnv && typeof opts.extraEnv === 'object' ? opts.extraEnv : {}));
+      if (!c || (c.gone && m === 'info')) return opts;
+      return { ...opts, cli: c };
+    };
+    const withConfig = (ns, o) => {
       const opts = o && typeof o === 'object' ? o : {};
       const ex = opts.extraEnv && typeof opts.extraEnv === 'object' ? opts.extraEnv : {};
       // lane headless-fallback: every call of a browser whose LAUNCH fell back names the planned config (displayed)
@@ -209,9 +235,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     };
     const out = { ...r };
     for (const m of ['info', 'launch', 'cdpUrl', 'closeAll', 'streamStatus', 'streamEnable', 'streamPort']) {
-      if (typeof r[m] === 'function') out[m] = (ns, o) => r[m](ns, add(ns, o));
+      if (typeof r[m] === 'function') out[m] = async (ns, o) => r[m](ns, await add(ns, o, m));
     }
-    if (typeof r.exec === 'function') out.exec = (ns, argv, o) => r.exec(ns, argv, add(ns, o));
+    if (typeof r.exec === 'function') out.exec = async (ns, argv, o) => r.exec(ns, argv, await add(ns, o, 'exec'));
     return out;
   }
   // P4 (§7.3 / D5 (b)): a browser on a PAIRED machine, or somebody else's
@@ -351,10 +377,66 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   let timer = null;
   let loaded = false;
   let dirty = false;
+  let fileHost = null; // lane profile-lock-roll: the hostname the registry file was last saved under (read at load)
 
   function load() {
-    try { reg = B.normalizeRegistry(JSON.parse(fs.readFileSync(storeFile, 'utf8'))); }
+    let rawDoc = null;
+    try { rawDoc = JSON.parse(fs.readFileSync(storeFile, 'utf8')); reg = B.normalizeRegistry(rawDoc); }
     catch (e) { if (e.code !== 'ENOENT') log.warn?.(`[browser] ${STORE_FILE} unreadable (${e.message}) — starting from an empty registry; the old file is left in place`); reg = B.normalizeRegistry(null); }
+    // verify r7 (T1): one token ⇒ one entry — what the load's dedupe dropped is said (once) and in the ledger (each)
+    { const dd = rawDoc && rawDoc.dirHosts ? B.dirHostsDeduped(rawDoc.dirHosts) : []; if (dd.length) { dirty = true; for (const x of dd) lineageLedger('deduped-at-load', { dir: x.key, keptAs: x.keptAs }); log.warn?.(`[browser] the launch-host lineage of ${dd.length === 1 ? dd[0].key : dd.length + ' directories'} dropped at load — the same marker token under another path (kept under ${dd.length === 1 ? dd[0].keptAs : 'the newest'})${dd.length === 1 ? '' : ' — each of: ' + dd.slice(0, 3).map((x) => x.key).join(', ') + (dd.length > 3 ? `, … +${dd.length - 3} more` : '')}`); } }
+    // lane profile-lock-roll (L1): the hostname that WROTE the file (its last save, by whichever pod) — captured BEFORE this
+    // process's first save re-stamps it with ours: the legacy witness of a record from before the per-launch `host`
+    fileHost = reg.host || null;
+    // verify r1 (F2): the witness is WRITTEN where it is read — a record from before the per-launch stamp takes the file's
+    // writer as its lineage NOW (persisted at the next save), not only in this process's memory: reproduced — the boot after
+    // a roll saved the file under THIS pod's name without launching, and the next restart (an Update, a second roll) found a
+    // legacy record with no witness ⇒ the old pod's lock refused by name again (userW's class, one restart later)
+    // verify r7 (T2 ③, userW's EXACT upgrade): a fleet pod's checkout is pulled at the boot AFTER a roll, so the first run of this
+    // code is on the NEW pod against a 2.369.199 file — no `host`, no `dirHosts`, no marker (read on his pod) — and the file's
+    // writer is nobody. The ONE witness .199 left is its own browser record: a kept directory whose lock names the pid THIS keeper
+    // recorded as its own browser there (`rec.browser.pid`) was locked by that browser, so the lock's hostname is this volume's
+    // previous name — bounded to a LEGACY record (no lineage at all) on its own directory (PURE legacyLockWitness). Read BEFORE the
+    // boot's reconcile retires an ephemeral record (the directory then remembers what the record proved).
+    // verify r8 (T2 ⑥ / ①): the fleet's other order — the new pod's boot pull refused ⇒ the .199 keeper boots first there and NULLS
+    // `rec.browser` (its reapOrphan) — leaves the record's `cdpUrl`; the directory's own `DevToolsActivePort` (Chrome's, MEASURED equal
+    // to it on 0.38.1 + Chrome 154, surviving a SIGKILL) is the second witness form; the lock's ctime / the port file's mtime are
+    // handed in so a fact from BEFORE the record's own life (a reused pid) is never its witness. The directory judged is the record's
+    // own (its browser's, its own, else its profile's).
+    { const witnessed = [];
+      for (const rec of Object.values(reg.browsers)) {
+        if (!rec || typeof rec !== 'object' || !isLocalRec(rec) || B.launchHostsOf(rec).length) continue;
+        const pr = reg.profiles.find((x) => x && x.id === rec.profileId) || null;
+        const own = (rec.browser && typeof rec.browser === 'object' && typeof rec.browser.dir === 'string' && rec.browser.dir) || (typeof rec.dir === 'string' && rec.dir) || (pr && typeof pr.dir === 'string' ? pr.dir : '');
+        if (!own) continue;
+        let lockAt = null; try { lockAt = fs.lstatSync(path.join(own, 'SingletonLock')).ctimeMs; } catch { lockAt = null; }
+        let devtools = null; try { const df = path.join(own, 'DevToolsActivePort'); const d = B.parseDevToolsActivePort(fs.readFileSync(df, 'utf8')); devtools = d ? { ...d, at: fs.statSync(df).mtimeMs } : null; } catch { devtools = null; }
+        const w = B.legacyLockWitness({ rec, lock: F.readSingletonLock(own), lockAt, devtools, dir: own, hostname: os.hostname() });
+        if (!w) continue;
+        rec.hosts = [...(fileHost ? [fileHost] : []), w.host].filter((x, i, a) => a.indexOf(x) === i); dirty = true; witnessed.push({ id: rec.profileId, dir: own, host: w.host, pid: rec.browser && rec.browser.pid ? rec.browser.pid : null, form: w.form });
+      }
+      for (const w of witnessed) lineageLedger('legacy-lock-witness', w);
+      if (witnessed.length) log.log?.(`[browser] the launch-host lineage of ${witnessed.length === 1 ? witnessed[0].dir : witnessed.length + ' directories'} taken from the lock its own recorded browser left (${witnessed.length === 1 ? (witnessed[0].form === 'pid' ? `pid ${witnessed[0].pid} on ${witnessed[0].host}` : `its CDP endpoint in DevToolsActivePort, on ${witnessed[0].host}`) : 'a record from before the per-launch stamp'}) — this machine's previous name${witnessed.length === 1 ? '' : ' — each of: ' + witnessed.slice(0, 3).map((x) => `${x.dir} (${x.host})`).join(', ') + (witnessed.length > 3 ? `, … +${witnessed.length - 3} more` : '')}`); }
+    if (fileHost) for (const rec of Object.values(reg.browsers)) if (rec && typeof rec === 'object' && isLocalRec(rec) && !B.launchHostsOf(rec).length) { rec.hosts = [fileHost]; dirty = true; }
+    // verify r4 (S26b): a directory's remembered lineage goes when the directory is GONE (a Forget moved it aside; a sweep removed it).
+    // verify r5 (S36): gone = ENOENT / ENOTDIR ONLY — any other error (EACCES, EIO, ESTALE: a flapping PVC at ONE load) KEEPS it and
+    // is said once (reproduced: one unreadable load pruned the lineage, the next resume was refused as foreign); (S37) a prune is said;
+    // (S42) a key is the directory's IDENTITY — one remembered under another spelling (the fleet's /home/vibe → /home/<name>) is re-keyed
+    // verify r6 (S49): what the load does to MANY directories is said ONCE per kind (200 gone / re-keyed / unreadable at one boot were
+    // 200 journal lines each) — the single-directory wording is unchanged
+    const pruned = [], unreadable = [], rekeyed = [];
+    for (const d of Object.keys(reg.dirHosts || {})) {
+      let gone = false, err = null;
+      try { fs.lstatSync(d); } catch (e) { if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) gone = true; else err = e; }
+      if (gone) { delete reg.dirHosts[d]; dirty = true; pruned.push(d); lineageLedger('pruned-gone', { dir: d }); continue; }
+      if (err) { unreadable.push({ d, code: (err && err.code) || err.message }); lineageLedger('kept-unreadable', { dir: d, code: (err && err.code) || err.message }); continue; }
+      const id = dirKeyOf(d);
+      if (id && id !== d) { reg.dirHosts = B.rekeyDirHosts(reg.dirHosts, d, id); dirty = true; rekeyed.push({ d, id }); lineageLedger('rekeyed-at-load', { from: d, to: id }); }
+    }
+    { const subject = (l) => (l.length === 1 ? l[0] : `${l.length} directories`); const each = (l, n = 3) => (l.length === 1 ? '' : ` — each of: ${l.slice(0, n).join(', ')}${l.length > n ? `, … +${l.length - n} more` : ''}`);
+      if (pruned.length) log.log?.(`[browser] the launch-host lineage of ${subject(pruned)} forgotten — the directory is gone${each(pruned)}`);
+      if (unreadable.length) { const codes = [...new Set(unreadable.map((x) => x.code))].join(', '); log.warn?.(`[browser] the launch-host lineage of ${subject(unreadable.map((x) => x.d))} kept — the directory cannot be read right now (${codes}); judged again at the next load${each(unreadable.map((x) => x.d))}`); }
+      if (rekeyed.length) log.log?.(`[browser] the launch-host lineage of ${subject(rekeyed.map((x) => x.d))} is remembered under its real path ${rekeyed.length === 1 ? rekeyed[0].id : 'now'}${each(rekeyed.map((x) => `${x.d} → ${x.id}`))}`); }
     loaded = true;
     // BROWSE YOURSELF verify r1 (H4): the user's own holder SURVIVES a restart — restored AWAY (no window holds his tab
     // until one re-attaches; the keep runs from the restart when he was driving, from when he left when he was away), so
@@ -367,11 +449,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   /** What of the user's holders goes to disk (never the window's controls or the one-time token). */
   const humansForDisk = () => Object.fromEntries([...humans.values()].map((h) => [h.profileId, { key: h.key, profileId: h.profileId, since: h.since, launched: !!h.launched, ownTab: h.ownTab || null, adopted: Array.isArray(h.adopted) ? h.adopted.slice(-32) : [], state: h.state === 'driving' ? 'driving' : 'away', awaySince: h.awaySince || 0 }]));
-  function ensureLoaded() { if (!loaded) load(); }
+  function ensureLoaded() { if (!loaded) { load(); warmCliVersions(); } }
   function save() {
     reg.humans = humansForDisk(); // BROWSE YOURSELF verify r1 (H4): mirrored at every write (the Map stays the truth)
-    try { fs.mkdirSync(dataDir, { recursive: true }); writeJsonAtomic(storeFile, reg); dirty = false; }
-    catch (e) { log.warn?.(`[browser] could not write ${STORE_FILE}: ${e.message}`); }
+    reg.host = os.hostname(); // lane profile-lock-roll (L1): the file names the machine that wrote it — the next pod's legacy witness
+    try { fs.mkdirSync(dataDir, { recursive: true }); writeJsonAtomic(storeFile, reg); dirty = false; return true; }
+    catch (e) { log.warn?.(`[browser] could not write ${STORE_FILE}: ${e.message}`); return false; } // verify r9 (④): a caller that must know (a Forget's move) asks
   }
   function notify() {
     try { broadcast?.({ type: 'browser-profiles-updated', ...list() }); } catch (e) { log.warn?.(`[browser] broadcast failed: ${e.message}`); }
@@ -424,12 +507,22 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   function browserView(rec) {
     if (!rec) return null;
     const l = live.get(rec.profileId) || null;
-    return { ...rec, cdpUrl: undefined, remoteCdpUrl: undefined, envPairs: undefined, live: l ? { ...l } : null };
+    return { ...rec, cdpUrl: undefined, remoteCdpUrl: undefined, envPairs: undefined, live: l ? { ...l } : null, runningBuild: BB.runningBuildOf(rec.cdpBrowser), // lane browser-admin 2a: the build the browser itself reports
+      cli: rec.cli ? { ...rec.cli, ...(cliFactOf(rec) || {}) } : null }; // verify r2 (H1): the CLI it runs (+ `gone` words when that version left this machine)
+  }
+  /** verify r1 (F5): a browser record for an AGENT — never its launch view (`launchEnv` carries the executable's path) and
+   *  a path choice by kind only; the running build (the browser's own answer) stays. */
+  function agentBrowserView(rec) {
+    const v = browserView(rec);
+    if (!v) return null;
+    const { launchEnv, ...rest } = v; // eslint-disable-line no-unused-vars
+    return { ...rest, cli: cliFactOf(rec), ...(v.browserChoice ? { browserChoice: BB.agentChoiceView(v.browserChoice) } : {}) }; // verify r2 (H1): the CLI by VERSION only
   }
   function leaseView(l) {
     const p = l ? profile(l.profileId) : null;
     const v = { ...l, mediated: !!(l && isMediated(p)) };
     delete v.tabRoots; // lane browser-resume C: a lease's tab roots are the keeper's own bookkeeping — never in a view
+    delete v.rebound; // verify r3 (F4): a rebound note waiting for an answer is bookkeeping too
     // lane H: a managed ephemeral browser's lease is a lease row like any other, SAID to be one
     if (isEph(p)) { v.ephemeral = true; v.child = B.isChildKey(l.browserKey); }
     return v;
@@ -575,6 +668,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // (verify r1: the conversations' rows go through `holders` — the ONE holder-row path lane H's control patches — and
       // his row is appended after them, never a second derivation of theirs)
       profiles: named().map(pview), leases: [...holders(reg.leases), ...B.holderRows({ leases: [], profiles: reg.profiles, browsers: reg.browsers, humans: humanRowsOn() })], browsers, ephemerals: ephemerals(),
+      // lane profile-lock-roll (L3): this machine's name — the panel compares a record's launch `host` with it
+      machine: { host: os.hostname() },
       // P6 (§6.2 / §6.5): is `sharing:"instance"` a value HERE, and the grants
       // (counts only — never a token, never a raw url)
       mediation: { available: mediationOn(), port: mediator && mediationOn() ? mediator.port() : null, grants: mediator && mediationOn() ? mediator.list() : [] },
@@ -679,6 +774,24 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const sess = ex && typeof ex.AGENT_BROWSER_SESSION === 'string' ? ex.AGENT_BROWSER_SESSION : '';
     try { const p = sess ? reg.profiles.find((x) => isEph(x) && B.sessionNameFor(x.owner.id) === sess) : null; return p ? reg.browsers[p.id] || null : null; } catch { return null; }
   }
+  /** verify r2 (H1): the BROWSER a call reaches — whichever daemon it talks to (the keeper's own session, a lease's session
+   *  in the profile's namespace, a mediated lease's namespace `vs-<profileId>-<browserKey>`, an ephemeral's namespace or
+   *  its pairs) runs against ONE Chrome, and that Chrome's daemon decides the CLI version every client of it must be. */
+  function browserRecordForCall(ns, ex) {
+    try {
+      if (ns) {
+        const rest = String(ns).startsWith('vs-') ? String(ns).slice(3) : '';
+        if (!rest) return null;
+        let p = reg.profiles.find((x) => x.id === rest) || null;
+        if (!p) { const i = rest.indexOf('-bk-'); if (i > 0) p = reg.profiles.find((x) => x.id === rest.slice(0, i)) || null; }
+        if (!p) p = reg.profiles.find((x) => isEph(x) && x.owner.id === rest) || null;
+        return p ? reg.browsers[p.id] || null : null;
+      }
+      const sess = ex && typeof ex.AGENT_BROWSER_SESSION === 'string' ? ex.AGENT_BROWSER_SESSION : '';
+      const p = sess ? reg.profiles.find((x) => isEph(x) && B.sessionNameFor(x.owner.id) === sess) : null;
+      return p ? reg.browsers[p.id] || null : null;
+    } catch { return null; }
+  }
   /** An ephemeral browser's keeper file, found by the SESSION its pairs name (`vs-<browserKey>`). */
   function ephemeralConfigFor(pairEnv) {
     const sess = pairEnv && typeof pairEnv.AGENT_BROWSER_SESSION === 'string' ? pairEnv.AGENT_BROWSER_SESSION : '';
@@ -770,10 +883,18 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    * made 0700 under ~/.agent-browser/ (the CLI's own root, so `agent-browser
    * profiles` lists it too); an adopted directory keeps its path.
    */
-  function createProfile(input = {}, { owner = null, dir = null, legacy = false, createdBy = null } = {}) {
+  function createProfile(input = {}, { owner = null, dir = null, legacy = false, createdBy = null, use = null, knownKeys = null, by = 'user', builds = null } = {}) {
     ensureLoaded();
     const v = B.validateProfileInput(input, { existing: named(), control, mediation: mediationOn() });
     if (!v.ok) throw namedError(v.code, v.error, v.why ? { why: v.why } : {});
+    // lane browser-admin (the New profile… dialog): "Who can use it" is chosen AT the create — the rows the route resolved
+    // (a picked live session → its browser key) are judged by THE write's verdict over an empty record, BEFORE anything is
+    // minted: a refusal writes nothing, and the record is born with its list (ONE write, never create-then-PATCH)
+    if (use != null) owner = ownerFromUse(use, { knownKeys, label: v.value.label });
+    // lane browser-admin 2a: the Chrome BUILD the profile runs — the USER's choice only (an agent's route passes `by`),
+    // judged by THE verdict over the machine's own list (`builds` = the route's fresh listing of a paired machine; this
+    // machine's is read here). A new directory was never written: no version ladder at the create.
+    const choice = choiceAtCreate(input.browser, { provider: v.value.provider, host: v.value.host, by, builds, label: v.value.label });
     // P4: the ROW said a paired machine may run it; whether the id names one
     // is this instance's host registry's answer (refused by name, never a
     // silent local fallback)
@@ -789,10 +910,65 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // carried through every later switch (never re-minted per launch)
     if (SW.providerNeedsSeed(fields.provider) && !Number.isInteger(fields.fingerprintSeed)) fields.fingerprintSeed = SW.mintSeed(crypto.randomBytes(4).toString('hex'));
     const rec = B.newProfileRecord({ id, ...fields, dir: d, owner, legacy, now: now(), createdBy });
+    if (choice.kind !== 'default') rec.browser = choice;
     reg.profiles.push(rec);
     commit();
-    log.log?.(`[browser] profile ${id} "${rec.label}" created (${rec.provider}${rec.host ? ' on ' + rec.host : ''}${rec.cdpPort ? ', cdp port ' + rec.cdpPort : ''}${isMediated(rec) ? ', separate tabs (mediated)' : ''}, ${legacy ? 'legacy shared' : 'usable by ' + whoWords(rec)}${rec.createdBy ? ', created by ' + rec.createdBy : ''})${d ? ' at ' + d : ''}`);
+    log.log?.(`[browser] profile ${id} "${rec.label}" created${choice.kind === 'build' ? ' (Chrome ' + choice.version + ')' : choice.kind === 'path' ? ' (chrome at ' + choice.path + ')' : ''} (${rec.provider}${rec.host ? ' on ' + rec.host : ''}${rec.cdpPort ? ', cdp port ' + rec.cdpPort : ''}${isMediated(rec) ? ', separate tabs (mediated)' : ''}, ${legacy ? 'legacy shared' : 'usable by ' + whoWords(rec)}${rec.createdBy ? ', created by ' + rec.createdBy : ''})${d ? ' at ' + d : ''}`);
     return pview(rec);
+  }
+  // ── lane browser-admin 2a: WHICH CHROME BUILD a profile runs ──
+  /** This machine's builds (`~/.agent-browser/browsers`, a readdir + a stat per build — asked on a user act or a
+   *  launch, never per command). */
+  function buildsHere() { return BB.listBuilds({ homeDir }); }
+  /** A machine's builds: this one in-process, a paired machine through the `browser-serve` op's `builds` action (the
+   *  client refuses an agent without the `browser-builds` capability BY NAME — never asked, never a hang). */
+  async function buildsFor(hostId = null) {
+    if (!hostId) return BB.buildsView(buildsHere());
+    try { const r = await acc().call(hostId, 'builds', {}); return r && r.listing ? r.listing : { ok: false, code: 'builds_unreadable', error: `${hostId} answered no build list` }; }
+    catch (e) { return { ok: false, code: e && e.code === 'builds_unsupported' ? 'builds_unsupported' : (e && e.code) || 'host_unavailable', error: String(e && e.message) }; }
+  }
+  /** The verdict at a CREATE: a choice that is not the default is the user's, chromium's, and on that machine's list
+   *  (`builds` for a paired machine comes from the route; this machine's is read now). Throws by name. */
+  function choiceAtCreate(raw, { provider, host = null, by = 'user', builds = null, label = '' } = {}) {
+    const c0 = BB.normalizeBrowserChoice(raw);
+    if (c0 && c0.kind === 'default') return c0;
+    const list = c0 && c0.kind === 'build' ? (host ? builds : buildsHere()) : null;
+    const pf = c0 && c0.kind === 'path' && !host ? BB.fileFact(c0.path) : null;
+    const v = BB.browserChoiceVerdict({ choice: raw, provider, by, builds: list, pathFact: pf, machine: host || 'this computer', label });
+    if (!v.ok) throw namedError(v.code, v.error, v.version ? { version: v.version } : {});
+    return v.choice;
+  }
+  /** The chosen build's executable for a LOCAL chromium launch, judged NOW (a build that vanished since it was chosen is
+   *  refused `browser_build_missing` by name — never a silent fall back to another build); a missing one is MARKED on
+   *  the record (the panel row says it) and filed ONCE as a For-you item (origin browser); a present one clears the mark.
+   *  → `{executablePath}` ({} for the default). Throws by name. */
+  function launchBuildOf(p) {
+    const c = BB.normalizeBrowserChoice(p.browser);
+    if (!c || c.kind === 'default' || String(p.provider || 'chromium') !== 'chromium') { if (p.buildMissing) { delete p.buildMissing; dirty = true; } return {}; }
+    const v = BB.browserChoiceVerdict({ choice: c, provider: 'chromium', by: 'user', builds: c.kind === 'build' ? buildsHere() : null, pathFact: c.kind === 'path' ? BB.fileFact(c.path) : null, label: p.label });
+    if (v.ok) { if (p.buildMissing) { delete p.buildMissing; dirty = true; log.log?.(`[browser] ${p.id} "${p.label}": its chosen Chrome build is back (${c.kind === 'build' ? c.version : c.path})`); } return { executablePath: v.executablePath }; }
+    noteBuildMissing(p, c, v);
+    throw namedError(v.code === 'browser_path_missing' || v.code === 'browser_path_not_executable' ? v.code : 'browser_build_missing', v.error, { version: c.kind === 'build' ? c.version : null });
+  }
+  /** ONE mark + ONE For-you item per (profile, choice) until it is resolved (the build is back, or the user picks another). */
+  function noteBuildMissing(p, c, v) {
+    const what = c.kind === 'build' ? c.version : c.path;
+    const had = p.buildMissing && p.buildMissing.what === what;
+    if (!had) { p.buildMissing = { what, kind: c.kind, code: v.code, at: now(), filed: false }; commit(); }
+    if (p.buildMissing.filed) return;
+    if (!userTodos || typeof userTodos.add !== 'function') { if (!had) log.warn?.(`[browser] ${p.id} "${p.label}": its Chrome build ${what} is missing — ${v.error} (no For-you store is wired, so only this journal says so)`); return; }
+    const n = BB.missingNotice({ label: p.label, choice: c });
+    try { userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', text: n.text, detail: n.detail, sessionName: 'Agent browser' }); p.buildMissing.filed = true; commit(); }
+    catch (e) { log.warn?.(`[browser] ${p.id} "${p.label}": the missing-build notice was not filed (${e && e.message}) — tried again at the next launch`); }
+    log.warn?.(`[browser] ${p.id} "${p.label}": its Chrome build ${what} is missing — ${v.error}`);
+  }
+  /** lane browser-admin: the owner a NEW record is born with from the dialog's `use` (rows already resolved to keys by the
+   *  route) — THE write's verdict over an empty record, so a create says the same refusals a PATCH says. Throws by name. */
+  function ownerFromUse(use, { knownKeys = null, label = '' } = {}) {
+    const known = new Set(Array.isArray(knownKeys) ? knownKeys : []);
+    const uv = B.usePatchVerdict({ profile: { id: 'bp-00000000', label: String(label || ''), owner: { kind: 'instance', id: null } }, use, knownTask: (tid) => taskFacts(tid) !== null, knownKey: (bk) => known.has(bk) });
+    if (!uv.ok) throw namedError(uv.code, uv.error);
+    return uv.owner;
   }
   /** Adopt a directory that already exists (the migration's legacy record).
    *  Idempotent on `dir`. */
@@ -828,6 +1004,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (!rv.ok) throw namedError(rv.code, rv.error);
     const pv = BF.deletePinnedVerdict({ label: p.label, pinnedBy: pinnedBy(id), unpin });
     if (!pv.ok) throw namedError(pv.code, pv.error, { pinnedCount: pv.count, pinnedNames: pv.names });
+    // verify r4 (S26b): the DIRECTORY remembers the lineage its record carried — a retired ephemeral's kept directory outlives it
+    // verify r8 (T2 ③): a record whose start was REFUSED (`failed` at the door: an adopted backup judged a copy, a stranger's directory)
+    // has nothing to remember — its retire never mints into the directory (the launched record's retire remembers as r4 built it)
+    if (p.dir && reg.browsers[id]) { const rr = reg.browsers[id]; if (rr.state !== 'failed') rememberDir(p.dir, launchHostsFor(rr, p.dir), { retire: true }); else lineageLedger('retire-skipped-refused', { dir: dirKeyOf(p.dir), id }); }
     reg.profiles = reg.profiles.filter((x) => x.id !== id);
     delete reg.browsers[id];
     for (const [k, v] of Object.entries(reg.pins)) if (v && v.profileId === id) reg.pins[k] = { profileId: null, origin: 'harness', at: now(), cleared: { id, label: p.label, at: now() } }; // lane S2: the cleared MARK (read by the browser fact)
@@ -1028,7 +1208,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       log.log?.(`[browser] ${browserKey}: its tab in ${p.id} "${p.label}" — tab close ${said(t)}, session close ${said(c)} (${why})`);
       // measured on 0.38.1: the session stays bound to the tab it lost (`tab_gone` on its next command) — marked, so the
       // conversation's NEXT attach binds it a new tab first (persisted: a restart in between keeps the mark)
-      if (t && t.ok) { reg.tabClosed[`${p.id}|${browserKey}`] = now(); commit(); }
+      if (t && t.ok) { markTabLost(p.id, browserKey, 'closed'); commit(); }
     })().catch((e) => log.warn?.(`[browser] ${browserKey}: its tab in ${p.id} was not closed (${why}) — ${e && e.message}`));
   }
   /**
@@ -1266,7 +1446,201 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     guard.delete(rec.profileId); live.delete(rec.profileId);
     dirty = true;
     log.log?.(`[browser] ${rec.profileId} daemon gone (pid ${rec.pid}${v === 'recycled' ? ', now another process' : ''}, seen by ${seenBy}) — recorded stopped`);
+    tabsLost(rec.profileId, `its daemon gone (seen by ${seenBy})`); // lane profile-lock-roll (L2): every lease's tab went with it
     return reapOrphan(rec, seenBy);
+  }
+  // ── LANE PROFILE-LOCK-ROLL (2026-10-01) ──
+  // L1: THE LOCK VERDICT KNOWS A RENAMED MACHINE. userW's pod rolled (a new hostname, the same RWO home); his pinned
+  // profile's SingletonLock named the dead pod and every start answered `profile_locked … names another machine … remove
+  // SingletonLock` until his agent removed it by hand. The witness is the keeper's OWN registry: every launch stamps the
+  // record with this machine's hostname (`host`, the lineage `hosts`); a lock naming a hostname this keeper itself launched on
+  // is `stale-previous-host` — the Singleton symlinks are removed, the launch goes on, the profile says "renamed from <old>"
+  // for a day. A legacy record (no stamp) inherits the hostname the registry FILE was last saved under (`fileHost`), else
+  // nothing — a foreign hostname this keeper never launched on stays refused by name (a volume really shared with another
+  // machine is never guessed).
+  /** The hostnames this keeper's registry recorded at its launches of a record (the legacy witness: the file's writer). */
+  //  verify r4 (S26b): …read in THIS order — the record's own lineage, then the DIRECTORY's (`reg.dirHosts`: the lineage that
+  //  outlives a retired ephemeral record — a rolled pod's boot retires every one, and its kept directory keeps the old pod's
+  //  lock), then the file's writer. Reproduced: one restart after the roll the conversation's own directory was refused as foreign.
+  //  verify r5 (S42): a directory's lineage is keyed by its IDENTITY — the real path (the fleet's home is reached through a symlink,
+  //  /home/vibe → /home/<name>, and the spelling flips once at the personalization; reproduced: remembered under one spelling, read
+  //  under the other = refused as foreign); unresolvable ⇒ the spelling as given. (S32a) the inode is the witness that it is STILL that
+  //  directory — a fresh one made at a forgotten one's path answers none. (S34) what the bound evicts is SAID.
+  const dirKeyOf = (dir) => { const d = typeof dir === 'string' ? dir.replace(/\/+$/, '') : ''; if (!d) return ''; const id = F.dirIdentity(d); return id ? id.replace(/\/+$/, '') || id : d; };
+  const dirInoOf = (dir) => { try { const i = fs.statSync(dir).ino; return Number.isInteger(i) && i > 0 ? i : null; } catch { return null; } };
+  // verify r6 (S43 / S44 / S48 / S54): THE DIRECTORY'S OWN MARKER is the witness — `<dir>/.vibespace-lineage`, a token written ONCE at
+  // the first remember (never rewritten; unwritable ⇒ none, the r5 inode rule stands for that entry). Reproduced on the real keeper:
+  // ext4 hands a removed directory's inode to the next mkdir (20/20 on the fleet's RBD ext4), so the inode alone took a stranger's
+  // old-pod lock over at a forgotten path; a file-level restore (every inode new) orphaned every kept directory's lineage — the
+  // disaster-recovery path refused each as foreign; a tree under two mounts (bindfs) was two identities. A marker survives a restore
+  // or a copy and is absent in a fresh directory; a stranger's carries another token; a path miss is found by the token.
+  const dirTokOf = (dir) => { try { const s = fs.readFileSync(path.join(dir, B.LINEAGE_MARKER), 'utf8').trim(); return B.isLineageToken(s) ? s : null; } catch { return null; } };
+  // verify r7 (T1 / T2 ①): ONE TOKEN, ONE DIRECTORY. The token's BEARER — the directory at an entry's own path, asked now (gone ⇒
+  // null; else its marker + inode) — is what tells a restore from a copy (PURE lineageVerdict): a copy beside its original is refused
+  // the lineage, SAID, and minted its OWN marker at its first remember (`fresh`), so no remember ever deletes the original's entry
+  // (reproduced: r6's "one directory, one entry" let an agent's cp -a steal the original's lineage; the original was refused as
+  // foreign once the copy was deleted). T2 ②: a deleted marker is re-minted at the next remember and the entry's hosts are KEPT
+  // (united); the refusal in between is said with its cause. T2 ⑤: every prune / re-key / eviction / refusal lands in the per-boot
+  // LEDGER (data/browser-lineage-journal.ndjson, a 1 MiB ring — the journal says once per kind, the ledger names every path).
+  const dirBearerOf = (key) => { try { fs.lstatSync(key); } catch (e) { if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) return null; } return { tok: dirTokOf(key), ino: dirInoOf(key) }; };
+  const mintDirTok = (dir, { fresh = false } = {}) => { const have = fresh ? null : dirTokOf(dir); if (have) return have; const tok = crypto.randomBytes(12).toString('hex'); try { fs.writeFileSync(path.join(dir, B.LINEAGE_MARKER), tok + '\n', { mode: 0o600 }); return tok; } catch { return null; } };
+  const LINEAGE_LEDGER = 'browser-lineage-journal.ndjson'; const LEDGER_MAX = 1 << 20; const bootId = `${now().toString(36)}-${process.pid}`;
+  /** The per-boot ledger of what happened to a directory's lineage (one JSON line each, `boot` = this process): a ring of LEDGER_MAX
+   *  bytes — past it the older half goes (whole lines). Never throws, never awaited. */
+  let ledgerTailChecked = false; // verify r8 (T2 ⑤): a tail torn by a crash mid-append is terminated once per boot, before this boot's first line
+  function lineageLedger(kind, fields = {}) {
+    try {
+      fs.mkdirSync(dataDir, { recursive: true });
+      const f = path.join(dataDir, LINEAGE_LEDGER);
+      if (!ledgerTailChecked) {
+        ledgerTailChecked = true;
+        let torn = false; try { const size = fs.statSync(f).size; if (size > 0) { const fd = fs.openSync(f, 'r'); try { const b = Buffer.alloc(1); fs.readSync(fd, b, 0, 1, size - 1); torn = b[0] !== 0x0a; } finally { fs.closeSync(fd); } } } catch { torn = false; }
+        if (torn) fs.appendFileSync(f, '\n' + JSON.stringify({ at: now(), boot: bootId, host: os.hostname(), kind: 'torn-tail-terminated' }) + '\n', { mode: 0o600 });
+      }
+      fs.appendFileSync(f, JSON.stringify({ at: now(), boot: bootId, host: os.hostname(), kind, ...fields }) + '\n', { mode: 0o600 });
+      let size = 0; try { size = fs.statSync(f).size; } catch { size = 0; }
+      if (size > LEDGER_MAX) { const txt = fs.readFileSync(f, 'utf8'); const cut = txt.indexOf('\n', txt.length - (LEDGER_MAX >> 1)); const tail = cut >= 0 ? txt.slice(cut + 1) : ''; const tmp = f + '.tmp'; fs.writeFileSync(tmp, tail, { mode: 0o600 }); fs.renameSync(tmp, f); }
+    } catch { /* a ledger that cannot be written never fails the launch; the journal line stands */ }
+  }
+  const saidLineage = new Set(); // (why|key) said once per boot in the journal; the ledger has every ask
+  /** THE lineage read of a directory: the PURE verdict over the registry with this keeper's fs facts; a refusal is said once per
+   *  boot per (cause, directory) in the journal and every time in the ledger; a find by token is in the ledger. */
+  const lineageOf = (dir) => {
+    const key = dirKeyOf(dir);
+    const v = B.lineageVerdict(reg.dirHosts, key, { ino: dirInoOf(dir), tok: dirTokOf(dir), bearer: dirBearerOf });
+    if (v.via === 'none' && ['copy', 'marker-absent', 'marker-stranger', 'bearer-unknown', 'inode'].includes(v.why)) {
+      const sk = v.why + '|' + key;
+      lineageLedger('lineage-refused', { dir: key, why: v.why, original: v.key || null });
+      if (!saidLineage.has(sk)) {
+        saidLineage.add(sk);
+        const sentence = v.why === 'copy' ? `${key} is a copy of ${v.key} (the same marker, another inode; the original is still there) — not its lineage; the copy gets its own marker at its first launch`
+          : v.why === 'marker-absent' ? `${key} carries no marker (${B.LINEAGE_MARKER} deleted?) while its entry remembers one — its lineage is not answered (a fresh directory at a forgotten path looks the same); re-minted at its next launch under this name`
+            : v.why === 'marker-stranger' ? `${key} carries a marker that is not its entry's and matches no other — a stranger's directory at a remembered path; its lineage is not answered`
+              : v.why === 'inode' ? `${key} is not the directory remembered (an r5-era entry, another inode) — its lineage is not answered`
+                : `${key} presents a token whose bearer could not be judged — its lineage is not answered`;
+        log.warn?.(`[browser] the launch-host lineage of ${sentence}`);
+      }
+    } else if (v.via === 'token') lineageLedger('lineage-by-token', { dir: key, why: v.why, from: v.key });
+    return v;
+  };
+  const launchHostsFor = (prev, dir = null) => { const own = B.launchHostsOf(prev); if (own.length) return own; const byDir = dir ? lineageOf(dir).hosts : []; if (byDir.length) return byDir; return B.launchHostsOf(null, fileHost); };
+  // verify r8 (T2 ③): a RETIRE never mints — a never-launched record's removal (an adopted backup refused as a copy) rewrote the copy's
+  // marker with a fresh one, and the backup then restored as a stranger (plv8-t1 S72 / S72b); a retire's remember on a copy is skipped
+  // and said; a remember on a directory that is GONE (a Forget's rename ran first) writes nothing — the move itself re-keys the entry.
+  function rememberDir(dir, hosts, { retire = false } = {}) {
+    if (!dir) return;
+    let gone = false; try { fs.lstatSync(dir); } catch (e) { if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) gone = true; }
+    if (gone) { lineageLedger('remember-skipped-gone', { dir: dirKeyOf(dir), retire }); return; }
+    const key = dirKeyOf(dir); const v = lineageOf(dir); const before = reg.dirHosts;
+    if (retire && v.fresh) { lineageLedger('retire-skipped-copy', { dir: key, original: v.key || null }); return; }
+    let hs = Array.isArray(hosts) ? hosts : [];
+    // T2 ②: a re-mint at the directory's own path keeps what the entry remembered (the marker was deleted, not the directory)
+    if (v.why === 'marker-absent' && before[key] && Array.isArray(before[key].hosts)) hs = [...before[key].hosts, ...hs].filter((x, i, a) => x && a.indexOf(x) === i);
+    const tok = mintDirTok(dir, { fresh: !!v.fresh });
+    if (v.fresh && tok) lineageLedger('fresh-marker', { dir: key, original: v.key || null, tok });
+    reg.dirHosts = B.rememberDirHosts(before, key, hs, now(), B.DIR_HOSTS_MAX, { ino: dirInoOf(dir), tok });
+    const ev = B.dirHostsEvicted(before, reg.dirHosts);
+    const replaced = ev.filter((k) => tok && before[k] && before[k].tok === tok); // the same token under an older spelling: re-keyed, never "the bound"
+    const bound = ev.filter((k) => !replaced.includes(k));
+    for (const k of replaced) lineageLedger('rekeyed-by-token', { from: k, to: key });
+    if (replaced.length) log.log?.(`[browser] the launch-host lineage of ${replaced.length === 1 ? replaced[0] : replaced.length + ' directories'} is remembered under its new spelling ${key}`);
+    for (const k of bound) lineageLedger('evicted-at-bound', { dir: k, bound: B.DIR_HOSTS_MAX });
+    if (bound.length) log.warn?.(`[browser] the launch-host lineage of ${bound.length} director${bound.length === 1 ? 'y' : 'ies'} forgotten at the ${B.DIR_HOSTS_MAX} bound (the oldest remembered): ${bound.slice(0, 3).join(', ')}${bound.length > 3 ? ', …' : ''}`);
+  }
+  /** Stamp the record with THIS launch's hostname (+ the lineage the previous record carried); the DIRECTORY remembers it too. */
+  function stampLaunchHost(rec, prev, dir = null) { Object.assign(rec, B.withLaunchHost({ hosts: launchHostsFor(prev, dir) }, os.hostname())); if (dir) rememberDir(dir, rec.hosts); }
+  /** verify r8 (T2 ②): THE PRODUCT'S OWN MOVE OF A DIRECTORY CARRIES ITS LINEAGE. A Forget renames `<dir>` → `<dir>.forgotten-<ts>`
+   *  and the next boot pruned the entry at the old path (gone = ENOENT), so a forgotten directory adopted back after a restart had no
+   *  lineage and its old-pod lock was foreign by name (plv8-t1 S75b). The key is asked BEFORE the rename (`lineageKeyOf`, the
+   *  directory's identity while it exists) and moved after it (`moveDirLineage`), said in the ledger; a stranger's `mv` is not ours. */
+  const lineageKeyOf = (dir, { retireOf = null } = {}) => {
+    if (!dir) return '';
+    // the retire-time remember runs HERE, while the directory still exists (a Forget renames before it removes the record): the
+    // record's own lineage — a legacy witness the load stamped on it, never launched since — reaches the entry that will move
+    const rr = retireOf && reg.browsers[retireOf]; if (rr && rr.state !== 'failed') rememberDir(dir, launchHostsFor(rr, dir), { retire: true });
+    return dirKeyOf(dir);
+  };
+  /** verify r9 (T1 ④, S76 / S76b): THE ENTRY IS ON DISK BEFORE THE DIRECTORY MOVES. r8 re-keyed in memory AFTER the rename and left
+   *  the write to the next commit — the orphan Forget never committed at all, so a crash (an OOM kill, a pod roll) before the next
+   *  unrelated save, or a data/ that could not be written at that moment (EACCES / EIO), left the directory at `<dir>.forgotten-<ts>`
+   *  with the disk still naming the old path ⇒ the next boot pruned it (gone = ENOENT) ⇒ the directory adopted back was foreign by
+   *  name (F5 again by a different path; reproduced with the real keeper + browser-trace). The move is now re-keyed AND SAVED here,
+   *  the caller renames only on `ok` (a refused write = a refused Forget, nothing moved, the cause named); a rename that then fails
+   *  is rolled back with the same call (`moveDirLineage(key, dir)`). The window left is the rename syscall itself: an entry naming a
+   *  path that does not exist yet is pruned at the next boot like any gone path — said, never guessed.
+   *  → `{ok, moved, key, error}`: `moved` = an entry was re-keyed (none for a directory without lineage), `key` = the new key. */
+  function moveDirLineage(fromKey, to) {
+    const f = typeof fromKey === 'string' ? fromKey.replace(/\/+$/, '') : ''; if (!f || !to || !reg.dirHosts || !reg.dirHosts[f]) return { ok: true, moved: false, key: null, error: null };
+    const t = dirKeyOf(to); if (!t || t === f) return { ok: true, moved: false, key: null, error: null };
+    const before = reg.dirHosts;
+    reg.dirHosts = B.rekeyDirHosts(reg.dirHosts, f, t); dirty = true;
+    if (!save()) { reg.dirHosts = before; dirty = true; lineageLedger('rekey-refused', { from: f, to: t }); log.warn?.(`[browser] the launch-host lineage of ${f} could not be written under ${t} (${STORE_FILE} unwritable) — the directory is NOT moved`); return { ok: false, moved: false, key: null, error: `${STORE_FILE} could not be written` }; }
+    lineageLedger('rekeyed-by-move', { from: f, to: t });
+    log.log?.(`[browser] the launch-host lineage of ${f} follows its directory to ${t} (written before the move)`);
+    return { ok: true, moved: true, key: t, error: null };
+  }
+  /** The takeover: the stale previous-host lock's Singleton symlinks removed (browser-facts, symlinks only), said in the
+   *  journal, the profile stamped `renamedFrom` (the panel shows it for a day). */
+  function takeOverStaleLock(p, dir, v) {
+    const removed = F.removeSingletonFiles(dir);
+    // verify r1 (F5): the POST-CHECK — a lock still there after the removal (a read-only volume, a directory of another uid:
+    // reproduced with EACCES, the journal said "taken over (nothing left to remove)" and the launch went into the locked
+    // directory) is REFUSED BY NAME with the errno and the one command; never a launch that dies on it (exit 21)
+    const left = F.singletonLeft(dir);
+    if (left.includes('SingletonLock')) {
+      const f = (removed.failed || []).find((x) => x.name === 'SingletonLock');
+      const refusal = B.profileLockedRefusal({ label: p ? p.label : '', dir, verdict: { ...v, kind: 'stale-unremovable', removeError: f ? f.code : 'still present after the unlink' } });
+      log.warn?.(`[browser] ${p ? p.id : '?'}${p && p.label ? ' "' + p.label + '"' : ''}: the lock named this machine's previous name ${v.host} but could NOT be removed (${f ? f.code : 'still present after the unlink'}) — NOT launched: ${refusal.error}`);
+      return { ok: false, removed, refusal };
+    }
+    if (p) p.renamedFrom = { host: v.host, at: now() };
+    log.warn?.(`[browser] ${p ? p.id : '?'}${p && p.label ? ' "' + p.label + '"' : ''}: the lock named this machine's previous name ${v.host} — taken over (${removed.length ? removed.join(', ') + ' removed' : 'nothing left to remove'} from ${dir}; this machine is ${os.hostname()})`);
+    return { ok: true, removed };
+  }
+  // L2: A BOUND TAB OF A PREVIOUS LIFE REBINDS. The binary keeps each session's bound tab (by CDP target id) across a daemon
+  // restart and, pinned, answers `tab_gone` once it is gone (0.38.1's own `tab --help`); every tab of a replaced browser is
+  // gone. `stop()` already marks every lease (`tabClosed`) so its next attach binds a tab first — a browser life the keeper
+  // did NOT end (a daemon found dead: a pod roll, a crash; a boot that could not adopt it; an in-place relaunch) left the
+  // leases unmarked and the first pinned command answered `tab_gone` (userW, W2). The mark is written here for those too,
+  // with WHY (`tabLostWhy`: `life` | `closed`) so the agent's note says which.
+  function markTabLost(profileId, browserKey, why) {
+    const k = `${profileId}|${browserKey}`;
+    reg.tabClosed[k] = now();
+    if (!reg.tabLostWhy || typeof reg.tabLostWhy !== 'object') reg.tabLostWhy = {};
+    reg.tabLostWhy[k] = why === 'closed' ? 'closed' : 'life';
+  }
+  function clearTabLost(profileId, browserKey) {
+    const k = `${profileId}|${browserKey}`;
+    delete reg.tabClosed[k];
+    if (reg.tabLostWhy) delete reg.tabLostWhy[k];
+  }
+  // verify r3 (F4): the rebound note rides the LEASE until an answer carries it — the answer that bound may never be read
+  // (the agent harness's own tool timeout fired while this session's rebind queued behind another's; reproduced: the tab
+  // bound, the mark spent, the next command's answer carried no note — the agent never told its tab was replaced). The
+  // attach that binds takes it at its own return (the normal case: said once, as before); an abandoned one leaves it for
+  // the next. Persisted with the lease (a restart in between still tells); never in a lease VIEW.
+  function keepRebound(profileId, browserKey, rebound) { const l = B.findLease(reg.leases, profileId, browserKey); if (l && rebound) l.rebound = rebound; }
+  function takeRebound(profileId, browserKey, rebound) { const l = B.findLease(reg.leases, profileId, browserKey); const note = rebound || (l && l.rebound) || null; if (l && l.rebound) { delete l.rebound; commit(); } return note; }
+  // verify r1 (F3): the rebind is SERIALIZED per profile — two sessions' first commands after a replaced browser (two agents
+  // resumed together) read the same page list concurrently, both picked the browser's one page and both bound it: ONE tab
+  // for two conversations (one's `open` navigated the other's page). Reproduced on the real keeper; now the second waits
+  // for the first and reads the page list AFTER it — the page is rooted by then, so the second opens its own tab.
+  const rebinding = new Map(); // profileId → the rebind in flight
+  function serialRebind(profileId, fn) {
+    if (rebinding.has(profileId)) log.log?.(`[browser] ${profileId}: a tab bind waits for the one in flight (bounded by the browser CLI's own timeouts, ~30 s at most)`); // verify r2 (F3): the wait is said
+    const prev = rebinding.get(profileId) || Promise.resolve();
+    const run = prev.then(fn, fn);
+    rebinding.set(profileId, run);
+    return run.finally(() => { if (rebinding.get(profileId) === run) rebinding.delete(profileId); });
+  }
+  /** Every lease of a NAMED profile whose browser was replaced without a stop: marked `life` (its next attach rebinds). */
+  function tabsLost(profileId, how) {
+    const p = profile(profileId);
+    if (!p || isEph(p)) return 0;
+    let n = 0;
+    for (const l of reg.leases) if (l.profileId === profileId) { markTabLost(profileId, l.browserKey, 'life'); n++; }
+    if (n) { dirty = true; log.log?.(`[browser] ${profileId} "${p.label}": its browser is gone with ${how} — ${n} lease(s) bind a tab again at their next command`); }
+    return n;
   }
   // ── VERIFY r2 M1 (2026-09-25): A KEEPER THAT STARTS A BROWSER IS THE ONE THAT ENDS IT ──
   // Measured on the real 0.38.1: `kill -9` of a daemon (a crash, an OOM — and stop()'s own SIGKILL after its close
@@ -1357,7 +1731,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // verify r4 #3 (site-reset): every tab of the REPLACED browser is gone — so is every persisted witness naming one (the dead
     // socket sends no targetDestroyed; reproduced on the real 0.38.1: the dead ids stayed on the leases, a ghost-only scope read
     // as attributed and the conversation's `stop` said "nothing of yours" while it had no tab at all)
-    if (replaced) { const n = dropLeaseTabs(rec.profileId); if (n) log.log?.(`[browser] ${rec.profileId}: the persisted tab witness of ${n} lease(s) went with the replaced browser`); }
+    if (replaced) { const n = dropLeaseTabs(rec.profileId); if (n) log.log?.(`[browser] ${rec.profileId}: the persisted tab witness of ${n} lease(s) went with the replaced browser`); tabsLost(rec.profileId, `its browser relaunched in place (seen by ${seenBy})`); } // lane profile-lock-roll (L2)
     log.log?.(`[browser] ${rec.profileId}: its daemon ${rec.pid} ${next ? `relaunched its browser in place — re-captured pid ${next.pid} (${next.dir}${next.devtoolsPort ? ', DevToolsActivePort ' + next.devtoolsPort : ''})` : 'has no browser right now'}${b ? `; the recorded pid ${b.pid} is gone` : ''} (seen by ${seenBy})`);
     return next;
   }
@@ -1471,7 +1845,14 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // r5 MAJOR 1: an UNSTABLE browser is never started again by itself — not by a verb's force either; only a stop ends it
     if (rec.closed && rec.closed.code === 'browser_unstable') { if (noticeUnstable(rec, p)) commit(); return Promise.resolve(null); }
     if (!force && healGated(rec)) return Promise.resolve(null);
+    // verify r2 (B5): a browser whose Chrome build was changed moments ago and is gone again: never healed on that build —
+    // it falls back to the build it replaced (or says it is down), and the conversations told "changed" are told that too
+    if (rec.buildChange && now() - Number(rec.buildChange.at || 0) <= CHANGE_SETTLE_MS) return fallBackFromChange(rec, p, seenBy);
     const pr = (async () => {
+      // verify r2 (H1): the heal is a `get cdp-url` in the SAME daemon — it runs the daemon's own CLI version; that version
+      // gone from this machine ⇒ closed BY NAME (a binary of another version would replace the daemon and its identity),
+      // never counted as a failed relaunch — a restart (Stop, then the next command) runs the current CLI
+      { const c = cliOptOf(rec); if (c && c.gone) { if (setClosed(rec, { code: 'browser_cli_gone', error: closedText(p, c.gone) })) { log.warn?.(`[browser] ${p.id} "${p.label}": its browser closed (daemon ${rec.pid} alive, seen by ${seenBy}) and is NOT started again — ${c.gone}`); commit(); } return null; } }
       // a browser launched with the provider's own flags (cloak's executable + fingerprint) is never relaunched by a bare
       // `get cdp-url` (a launch view without them would relaunch it as plain chromium on that directory): said, not guessed
       if (rec.launchFlags === true || (rec.launchFlags == null && String(p.provider) === 'cloak')) { // (a record from before r4 carries no flag: its provider says)
@@ -1479,11 +1860,16 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         return null;
       }
       const f = F.lockHolderFacts(p.dir);
-      const v = B.profileLockVerdict({ lock: f.lock, holder: f.holder, hostname: os.hostname(), dir: p.dir, minted: mintedDirOf(p, p.dir, null), recorded: null, mark: markOf(p), preMarkAllowed: !rec.mark });
-      if (v.kind === 'own-orphan') {
+      const v = B.profileLockVerdict({ lock: f.lock, holder: f.holder, hostname: os.hostname(), dir: p.dir, minted: mintedDirOf(p, p.dir, null), recorded: null, mark: markOf(p), preMarkAllowed: !rec.mark, launchHosts: launchHostsFor(rec, p.dir) });
+      if (v.kind === 'stale-previous-host') { // lane profile-lock-roll: a previous name's lock never holds a live daemon's directory — removed, the heal goes on
+        const t = takeOverStaleLock(p, p.dir, v);
+        if (!t.ok) { setClosed(rec, t.refusal); commit(); return null; } // verify r1 (F5): still locked ⇒ closed by name, no heal into it
+      } else if (v.kind === 'own-orphan') {
         const e = await endProcess(v.pid, f.holder.starttime);
         log.warn?.(`[browser] ${p.id} "${p.label}": ended its own orphaned browser pid ${v.pid} before healing (${v.why}): ${e}`);
         if (e === 'survived' || e === 'unproven') { setClosed(rec, B.profileLockedRefusal({ label: p.label, dir: p.dir, verdict: { ...v, kind: e === 'survived' ? 'survived' : 'foreign' } })); commit(); return null; }
+        const c = clearEndedOrphanLock(p, p.dir, v.pid); // verify r2 (F4): its lock under a previous name would make the heal's launch hang
+        if (!c.ok) { setClosed(rec, c.refusal); commit(); return null; } // verify r3 (F1): a clear that fails ⇒ closed by name, no heal into it
       } else if (v.kind !== 'free') {
         // r5 LOW 5: a refusal that attempted nothing — no gate armed, `at` kept, said once per holder
         const rf = B.profileLockedRefusal({ label: p.label, dir: p.dir, verdict: v });
@@ -1587,7 +1973,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       }
       for (const d of dirs) {
         const f = F.lockHolderFacts(d);
-        const v = B.profileLockVerdict({ lock: f.lock, holder: f.holder, hostname: os.hostname(), dir: d, minted: true, recorded: null, mark: markOf(p), preMarkAllowed: !rec.mark });
+        const v = B.profileLockVerdict({ lock: f.lock, holder: f.holder, hostname: os.hostname(), dir: d, minted: true, recorded: null, mark: markOf(p), preMarkAllowed: !rec.mark, launchHosts: launchHostsFor(rec, d) });
+        if (v.kind === 'stale-previous-host') continue; // lane profile-lock-roll: nothing of that name can hold it — the next start takes it over
         if (v.kind === 'foreign' && v.pid) {
           // r4 MAJOR 2: the owner's law — a used session is REPORTED, never killed (a start on it is refused by name)
           const k = `${rec.profileId}|${v.pid}`;
@@ -1629,12 +2016,15 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // r4 MAJOR 2: …and a holder on a minted directory is the keeper's own only when it carries THIS record's launch mark (or
     // is the CLI's pre-mark launch) — a Chrome the user opened there is `foreign` (user): refused by name, left running
     // r5 LOW 3: the pre-mark fallback only for a record launched BEFORE the mark (its last record carries none)
-    const v = B.profileLockVerdict({ lock: facts.lock, holder: facts.holder, hostname: os.hostname(), dir: p.dir, minted: mintedDirOf(p, p.dir, recorded), recorded, mark: markOf(p), preMarkAllowed: !(prev && prev.mark) });
+    // lane profile-lock-roll (L1): a lock under a hostname THIS keeper recorded at a launch of this profile is the previous
+    // name of this machine (an RWO home rolled to a new pod) — taken over here; any other foreign hostname stays refused
+    const v = B.profileLockVerdict({ lock: facts.lock, holder: facts.holder, hostname: os.hostname(), dir: p.dir, minted: mintedDirOf(p, p.dir, recorded), recorded, mark: markOf(p), preMarkAllowed: !(prev && prev.mark), launchHosts: launchHostsFor(prev, p.dir) });
     if (v.kind === 'free') return { ok: true, verdict: v };
+    if (v.kind === 'stale-previous-host') { const t = takeOverStaleLock(p, p.dir, v); if (!t.ok) return { ok: false, ...t.refusal }; return { ok: true, verdict: v, tookOver: v.host, removed: t.removed }; } // verify r1 (F5): a lock still there is a refusal, never a launch
     if (v.kind === 'own-orphan') {
       const r = await endProcess(v.pid, facts.holder.starttime);
       log.warn?.(`[browser] ${p.id} "${p.label}": ended its own orphaned browser pid ${v.pid} before launching on ${p.dir} (${v.why}${facts.devtoolsPort ? ', DevToolsActivePort ' + facts.devtoolsPort : ''}): ${r}`);
-      if (r === 'ended' || r === 'gone') return { ok: true, ended: v.pid };
+      if (r === 'ended' || r === 'gone') { const c = clearEndedOrphanLock(p, p.dir, v.pid); if (!c.ok) return { ok: false, ...c.refusal }; return { ok: true, ended: v.pid, ...(c.removed ? { removed: c.removed } : {}) }; } // verify r2 (F4); r3 (F1): a clear that fails is a refusal, never a launch
       return { ok: false, ...B.profileLockedRefusal({ label: p.label, dir: p.dir, verdict: { ...v, kind: r === 'survived' ? 'survived' : 'foreign', why: r === 'unproven' ? 'it changed while being judged' : v.why } }) };
     }
     // OWNER RULING A — the pre-upgrade case: the holder's launch mark names a CONVERSATION's browser key (a managed
@@ -1652,6 +2042,55 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const rf = B.profileLockedRefusal({ label: p.label, dir: p.dir, verdict: v });
     log.warn?.(`[browser] ${p.id} "${p.label}": NOT launched — ${rf.error}`);
     return { ok: false, ...rf };
+  }
+  /** VERIFY r2 (F4): OUR orphan ended under a PREVIOUS name of this machine (renamed under a running browser — hostnamectl, a
+   *  DHCP-derived macOS name — then its daemon died) leaves a lock that still names that machine, and Chromium never clears a
+   *  foreign name's lock (measured on 154: the launch hangs on its own dialog; the agent-browser binary: exit 21) — the
+   *  launch right after the end died behind a generic failure and only the NEXT command took the lock over. The ended
+   *  orphan's stale lock is removed now (our own name's stale lock is left to Chromium, as before). → the names removed, or null. */
+  //  VERIFY r3 (F1 + F2): the ladder's step ③ as ONE PURE verdict (browser-profiles.lockVerdict, phase `ended`) — the lock removed
+  //  is THE ORPHAN'S (its pid; a lock rewritten meanwhile — a relaunch in place, a stranger's — is left for the launch's own
+  //  judgement, never called "this machine's previous name"), and a removal that FAILS (EACCES: a volume gone read-only, a
+  //  directory of another uid) is refused by name with the errno and the one command (r1 F5's shape) — reproduced: "nothing
+  //  removed" and a launch into a lock the real binary refuses (1.4 s, a generic failure). → {ok, removed, refusal?}
+  function clearEndedOrphanLock(p, dir, endedPid = null) {
+    const lk = F.readSingletonLock(dir);
+    const v = B.lockVerdict({ phase: 'ended', lock: lk, hostname: os.hostname(), alive: lk ? F.pidAlive(lk.pid) : false, endedPid });
+    if (v.kind === 'leave') { log.warn?.(`[browser] ${p.id} "${p.label}": after ending its own orphaned browser pid ${endedPid}, ${v.why}`); return { ok: true, removed: null }; }
+    if (v.kind !== 'clear') return { ok: true, removed: null };
+    const removed = F.removeSingletonFiles(dir);
+    const left = F.singletonLeft(dir);
+    if (left.includes('SingletonLock')) {
+      const f = (removed.failed || []).find((x) => x.name === 'SingletonLock');
+      const refusal = B.profileLockedRefusal({ label: p.label, dir, verdict: { kind: 'ended-unremovable', pid: v.pid, host: v.host, removeError: f ? f.code : 'still present after the unlink' } });
+      log.warn?.(`[browser] ${p.id} "${p.label}": ${v.why} but could NOT be removed (${f ? f.code : 'still present after the unlink'}) — NOT launched: ${refusal.error}`);
+      return { ok: false, removed, refusal };
+    }
+    log.warn?.(`[browser] ${p.id} "${p.label}": ${v.why} — ${removed.length ? removed.join(', ') + ' removed' : 'nothing removed'} from ${dir} (this machine is ${os.hostname()})`);
+    return { ok: true, removed };
+  }
+  /** VERIFY r2 (F1): a launch that FAILED — or whose browser died at birth — on a directory a holder took BETWEEN the verdict
+   *  and the launch (the user's own Chrome: exit 21 behind "the browser did not start" / "a crash at startup?") is judged
+   *  AGAIN now; a holder that is not ours is named (`profile_locked`, the sentence the next command would have said), never a
+   *  generic launch failure. A free directory, our own remains (a dead pid, our orphan) and a previous name's lock keep the
+   *  generic sentence. Reproduced with a lock planted after the verdict: launch_failed first, profile_locked only second. */
+  //  VERIFY r3 (F3): …and a PREVIOUS name's lock that reached the launch (it appeared after the verdict — the ④f race under
+  //  the roll's shape; measured on the real 0.38.1: the binary refuses it in 1.4 s, the keeper answered a generic
+  //  `launch_failed … Command failed` with an EMPTY journal and only the NEXT command took it over) is taken over NOW and
+  //  named: the answer says what it was and the one next step. The ladder's step ⑤ is the PURE `afterLaunchVerdict`.
+  function lockRefusalAfterLaunch(p, prev) {
+    if (!p || !p.dir) return null;
+    const facts = F.lockHolderFacts(p.dir);
+    const recorded = prev && prev.browser ? prev.browser : null;
+    const a = B.lockVerdict({ phase: 'after-launch', lock: facts.lock, holder: facts.holder, hostname: os.hostname(), dir: p.dir, minted: mintedDirOf(p, p.dir, recorded), recorded, mark: markOf(p), preMarkAllowed: !(prev && prev.mark), launchHosts: launchHostsFor(prev, p.dir) });
+    if (a.kind === 'refuse') return B.profileLockedRefusal({ label: p.label, dir: p.dir, verdict: a.verdict });
+    if (a.kind === 'take-over') {
+      const t = takeOverStaleLock(p, p.dir, a.verdict);
+      if (!t.ok) return t.refusal; // still locked (EACCES) ⇒ r1 F5's refusal, by name
+      const rf = B.profileLockedRefusal({ label: p.label, dir: p.dir, verdict: { ...a.verdict, kind: 'stale-taken-over' } });
+      return { ...rf, tookOver: a.verdict.host };
+    }
+    return null;
   }
   /**
    * VERIFY r1 H2: a managed ephemeral browser's liveness is its PROCESS, never its record. The record says `ready`
@@ -1719,6 +2158,14 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const prev = reg.browsers[profileId] || null;
       const rec = { profileId, ns, pid: null, starttime: null, socketDir: null, cdpUrl: null, state: 'starting', startedAt: now(), endedAt: null, lastError: null, stoppedBy: null, lastLeaseDroppedAt: null, startedBy: why,
         hostId: null, external: false, forward: null, remoteCdpUrl: null, dir: p.dir || null, ephemeral: true, envPairs: pairs.slice(), starts: ((prev && prev.starts) || 0) + 1, note: null };
+      // verify r3 (F5): what the NAMED start carries onto every new record (r5 LOW 3, lane L1), this row dropped — a REFUSED start
+      // (a stranger's lock, F1's EACCES, an unreadable holder) committed a record with no mark and no lineage; the mark's loss
+      // re-opened the pre-mark adoption (a hand-launched CLI Chrome on the kept directory ended as "our orphan"), the lineage's
+      // loss made the next boot stamp this pod's name alone and the previous name's lock was refused as FOREIGN (userW's class,
+      // one refusal later). Reproduced on a rolled kept directory; both ride the new record now (the mark + this machine's name
+      // are set again at the launch below).
+      if (prev && prev.mark) rec.mark = prev.mark;
+      { const lh = launchHostsFor(prev, p.dir || null); if (lh.length) { rec.hosts = lh; rec.host = prev && prev.host ? prev.host : lh[lh.length - 1]; } } // verify r4 (S26b): a retired record's directory still knows
       reg.browsers[profileId] = rec;
       commit();
       if (reaping.has(profileId)) { try { await reaping.get(profileId); } catch { /* its own log */ } } // r2 M1: a dead daemon's browser is ended first
@@ -1730,6 +2177,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         // r2 M1: a rung-C/D ephemeral launches on a DIRECTORY — its lock is judged first (the keeper's own orphan ended, a stranger's refused by name)
         const lk = await clearProfileLock(p, ns, prev);
         if (!lk.ok) { rec.state = 'failed'; rec.endedAt = now(); rec.lastError = lk.error; commit(); throw namedError(lk.code, lk.error, { holderPid: lk.holderPid }); }
+        stampLaunchHost(rec, prev, p.dir || null); // lane profile-lock-roll (L1): a kept directory on a rolled home carries the same stale lock
         // r4 (MAJOR 2 / LOW 3): the launch carries this conversation's MARK (the keeper's file for it, unless its pairs name
         // their own config — rung D's, marked by browser-env); every later call of this record uses the same file
         rec.mark = p.owner.id;
@@ -1750,13 +2198,19 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         // lane headless-fallback: THE DISPLAY IS A FACT — probed now, here; a window asked of a machine with no desktop
         // session launches headless under the planned config (`configured` names it on this and every later call of the
         // record), and the fact rides the record to every surface and to the agent
-        rec.display = await displays.factFor({ baseFile: env0[VERBS.CONFIG_KEY] || ephemeralConfigFor(env0), prev: prev && prev.display, mode: noDisplayMode() });
+        // lane hooks-create H5: the window PREFERENCE rides too — unset is resolved against the display just probed (no desktop
+        // + Xvfb ⇒ the hidden-window rung), never at the spawn that composed the pairs' config
+        rec.display = await displays.factFor({ baseFile: env0[VERBS.CONFIG_KEY] || ephemeralConfigFor(env0), prev: prev && prev.display, mode: noDisplayMode(), preference: headedSetting() });
         sayDisplay(rec.display, `ephemeral ${profileId} "${p.label}"`);
+        rec.cli = await cliNow(); // verify r2 (H1): the CLI this launch runs — every later call of this browser runs that version
         const r = await rt.launch(null, { idleMs: launchIdle, headed: null, extraEnv: { ...env0, ...rec.display.env } });
         if (!r.ok) {
           const text = (r.stderr || r.error || r.stdout || '').trim().slice(0, 300);
-          rec.state = 'failed'; rec.endedAt = now(); rec.lastError = `the browser did not start: ${text}`;
+          const lr = lockRefusalAfterLaunch(p, prev); // verify r2 (F1): its kept directory taken meanwhile ⇒ said by name
+          rec.state = 'failed'; rec.endedAt = now(); rec.lastError = lr ? lr.error : `the browser did not start: ${text}`;
           commit();
+          // verify r3 (F3): said in the journal on this row too (the named start's sentence; the ephemeral start said nothing)
+          if (lr) { log.warn?.(`[browser] ephemeral ${profileId} "${p.label}": NOT started — ${lr.tookOver ? `a lock of this machine's previous name ${lr.tookOver} reached the launch (taken over now)` : 'the directory was taken while launching'}: ${lr.error}`); throw namedError(lr.code, lr.error, lr.holderPid ? { holderPid: lr.holderPid } : {}); }
           throw namedError(/binary_absent/.test(text) ? 'binary_absent' : 'launch_failed', rec.lastError);
         }
         try { info = await rt.info(null, { extraEnv: env0 }); } catch { info = null; }
@@ -1768,13 +2222,15 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       }
       rec.pid = info.pid; rec.starttime = await launchStart(info.pid); rec.socketDir = info.socketDir;
       if (info.pid && rec.starttime == null && F.startsReadable()) { rec.state = 'failed'; rec.endedAt = now(); rec.lastError = unrecordedLaunch(info.pid); commit(); throw namedError('launch_failed', rec.lastError); }
+      // verify r2 (H1): an ADOPTED daemon runs the CLI it says; a launched one is cross-checked against its own answer
+      if (adopted || !rec.cli || (info.version && info.version !== rec.cli.version)) rec.cli = cliOfDaemon(info) || rec.cli || null;
       captureBrowser(rec, p.dir || null); // r2 M1: the browser it launched (the binary's temp dir on rung N) — ended if its daemon dies
       rec.state = 'ready';
       if (adopted) rec.adoptedAt = now();
       p.lastUsedAt = now(); p.lastBackend = 'chromium';
       commit();
       keptNote('start', p); // lane browser-resume: its kept entry is live now (the tabs it opens are noted as they move)
-      log.log?.(`[browser] ephemeral ${profileId} "${p.label}" ${adopted ? 'ADOPTED (a daemon was already running under its pairs)' : 'started'} (${why}, ${ns}): daemon pid ${rec.pid ?? '?'}${rec.starttime != null ? '' : ' (starttime unreadable — never signalled by pid)'}`);
+      log.log?.(`[browser] ephemeral ${profileId} "${p.label}" ${adopted ? 'ADOPTED (a daemon was already running under its pairs)' : 'started'} (${why}, ${ns}): daemon pid ${rec.pid ?? '?'}${rec.starttime != null ? '' : ' (starttime unreadable — never signalled by pid)'}${rec.cli && rec.cli.version ? ', ' + VERBS.CLI_PACKAGE + ' ' + rec.cli.version : ''}`); // verify r3 (Y1): the CLI this daemon runs, named where the record changes (a relaunch after a daemon's death runs the current one)
       // lane H: a first-class holder — the recorder arms its tap on this
       // browser before the verb that started it runs (bounded), exactly as a
       // named profile's start / attach does
@@ -2427,6 +2883,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     retiring.set(profileId, pr);
     return pr.finally(() => { if (retiring.get(profileId) === pr) retiring.delete(profileId); });
   }
+  /** `browser.headed` as STORED (true | false | null = unset) — the input of the ONE resolution (PURE
+   *  browser-display.resolveHeaded, lane hooks-create H5), made where the display is probed: this keeper's launch fact
+   *  (`displays.factFor({preference})`) for a local browser, the paired machine's own `browser-serve start` for its
+   *  browser (that machine's display decides — this hub's would open a window on a remote desktop that has one). Base
+   *  configs carry the stored value; the planned config every call names carries the resolved one. */
   function headedSetting() { const v = setting('browser.headed', ''); return v === true || v === 'yes' ? true : (v === false || v === 'no' ? false : null); }
   /** lane headless-fallback: one journal line per launch whose display fact changed something (a fallback, a recovery). */
   function sayDisplay(fact, what) { const line = DSP.journalLine(fact, what); if (line) { try { log.warn?.(`[browser] ${line}`); } catch { /* none */ } } }
@@ -2483,6 +2944,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // EVERY call of the keeper's session (`rec.launchEnv`) — as argv they rode `open` only, and the keeper's own
     // `get cdp-url` right after it relaunched the browser without them (measured; without --no-sandbox it then died)
     let providerEnv = {};
+    // lane browser-admin 2a: a chromium profile pinned to one Chrome build — judged NOW (a build gone since it was chosen is
+    // refused by name before any record exists); its executable rides the launch view of EVERY call, as cloak's does
+    const buildEnv = !p.host ? launchBuildOf(p) : {};
+    if (!p.host && p.provider === 'chromium' && buildEnv.executablePath) providerEnv = SW.launchEnvFor('chromium', { executablePath: buildEnv.executablePath });
     if (!p.host && p.provider === 'cloak') {
       const exe = cloakExecutable();
       if (!exe.ok) throw namedError('backend_unavailable', exe.error, { provider: 'cloak', missing: 'cloakbrowser' });
@@ -2502,6 +2967,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // r5 LOW 3: the LAUNCH-MARK lineage rides every new record (a refused start too) — a profile once launched with the
       // mark never falls back to the pre-mark rule, whatever record comes next (set again at the launch below)
       if (prevRec && prevRec.mark) rec.mark = prevRec.mark;
+      // lane profile-lock-roll (L1): the LAUNCH-HOST lineage rides every new record too (a refused start keeps the witness;
+      // this machine's name is added only at the launch below)
+      { const lh = launchHostsFor(prevRec, p.dir || null); if (lh.length) { rec.hosts = lh; rec.host = prevRec && prevRec.host ? prevRec.host : lh[lh.length - 1]; } }
       reg.browsers[profileId] = rec;
       commit();
       const failed = (code, msg) => { rec.state = 'failed'; rec.endedAt = now(); rec.lastError = msg; commit(); return namedError(code, msg); };
@@ -2528,13 +2996,23 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         // hub forwards that port; a start that reports no CDP url is refused
         // (an env with no CDP pair would launch a LOCAL browser instead)
         let r;
-        try { r = await acc().call(p.host, 'start', { profileId, idleMs: 0, headed: headedSetting(), noDisplayMode: noDisplayMode() }); } catch (e) { throw failed(e.code || 'launch_failed', `${p.host}: ${e.message}`); }
+        // lane browser-admin 2a: a pinned build runs only where its machine's agent can list builds (capability
+        // `browser-builds`) — an older agent would ignore the choice and launch its default build, so it is refused by name
+        const remoteChoice = BB.normalizeBrowserChoice(p.browser);
+        if (remoteChoice && remoteChoice.kind !== 'default') {
+          const bl = await buildsFor(p.host);
+          if (!bl || bl.ok === false) throw failed((bl && bl.code) || 'builds_unsupported', `${p.host}: ${(bl && bl.error) || 'its Chrome builds could not be listed'}`);
+        }
+        try { r = await acc().call(p.host, 'start', { profileId, idleMs: 0, headed: headedSetting(), noDisplayMode: noDisplayMode(), ...(remoteChoice && remoteChoice.kind !== 'default' ? { browser: remoteChoice } : {}) }); } catch (e) { throw failed(e.code || 'launch_failed', `${p.host}: ${e.message}`); }
         if (!r.cdpPort) throw failed('launch_failed', `${p.host} started the browser but reported no CDP url — the hub cannot reach it`);
         let fwd;
         try { fwd = await acc().forwardCdp(p.host, r.cdpPort, { remoteUrl: r.cdpUrl }); } catch (e) { throw failed(e.code || 'host_unavailable', `${p.host}: ${e.message}`); }
         rec.pid = r.pid; rec.starttime = r.starttime; rec.socketDir = r.socketDir; rec.dir = r.dir || null; rec.remoteCdpUrl = r.cdpUrl; rec.cdpUrl = fwd.url; rec.forward = { remotePort: r.cdpPort, localPort: fwd.localPort };
         rec.display = r.display && typeof r.display === 'object' ? r.display : null; // lane headless-fallback: the fact THAT machine probed at its launch
         sayDisplay(rec.display, `${profileId} "${p.label}" on ${p.host}`);
+        rec.browserChoice = remoteChoice ? BB.choiceView(remoteChoice) : { kind: 'default' };
+        // lane browser-admin 2a: the build THAT browser runs, from its own /json/version through the forward (the fact)
+        { const pr = await probeCdp(rec.cdpUrl, { timeoutMs: 2500 }); if (pr.ok && pr.browser) rec.cdpBrowser = pr.browser; }
         rec.state = 'ready';
         p.lastUsedAt = now(); p.lastBackend = p.provider;
         commit();
@@ -2550,7 +3028,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       let headed0 = headedSetting();
       // lane headless-fallback: THE DISPLAY IS A FACT — probed now, here (the launch's view carries the plan: HEADED and the
       // planned config every call of this record names); the fact rides the record
-      rec.display = await displays.factFor({ baseFile: machineConfigFile('machine', p.id), headedEnv: headed0, prev: prevRec && prevRec.display, mode: noDisplayMode() });
+      rec.display = await displays.factFor({ baseFile: machineConfigFile('machine', p.id), headedEnv: headed0, prev: prevRec && prevRec.display, mode: noDisplayMode(), preference: headed0 }); // H5: an unset preference resolved against this probe
       if (rec.display.fallback && headed0 !== null) headed0 = rec.display.headed;
       sayDisplay(rec.display, `${profileId} "${p.label}"`);
       const launchEnv = { AGENT_BROWSER_IDLE_TIMEOUT_MS: '0', ...(headed0 === true ? { AGENT_BROWSER_HEADED: '1' } : headed0 === false ? { AGENT_BROWSER_HEADED: '0' } : {}), ...providerEnv };
@@ -2560,13 +3038,19 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       if (reaping.has(profileId)) { try { await reaping.get(profileId); } catch { /* its own log */ } }
       const lk = await clearProfileLock(p, ns, prevRec);
       if (!lk.ok) { const e = failed(lk.code, lk.error); e.holderPid = lk.holderPid; throw e; }
+      stampLaunchHost(rec, prevRec, p.dir || null); // lane profile-lock-roll (L1): THIS machine's name on the record — the witness the next pod reads
       rec.mark = p.id; // r4 (MAJOR 2): the launch carries this profile's MARK (machine-<id>.json); every later keeper call keeps that file
       rec.holdDialogs = true; // lane browser-stuck: …and holds page dialogs (noAutoDialog) from this launch on
-      rec.launchFlags = argvPrefix.length > 0 || Object.keys(providerEnv).length > 0; // r4: a provider's own launch flags (cloak: its env pair) — a heal never relaunches it
+      rec.launchFlags = argvPrefix.length > 0 || (Object.keys(providerEnv).length > 0 && String(p.provider) !== 'chromium'); // r4: a provider's own launch flags (cloak: its env pair) — a heal never relaunches it. lane browser-admin 2a: a chromium build pin is NOT one — the heal's `get cdp-url` carries rec.launchEnv (the executable included), so it relaunches the SAME build
+      rec.browserChoice = p.browser ? BB.choiceView(p.browser) : { kind: 'default' }; // what this launch was asked to run (the running build is `cdpBrowser`, the browser's own answer)
       const stamp0 = F.dirLaunchStamp(p.dir); // r5 MAJOR 1 (iii): the directory before this launch
+      rec.cli = await cliNow(); // verify r2 (H1): the CLI this launch runs — every later call of this browser runs that version
       const r = await rt.launch(ns, { dir: p.dir, idleMs: 0, headed: headed0, extraEnv: { ...vendorEnv, ...providerEnv, ...rec.display.env }, argvPrefix });   // the .197 integration: lane-cloak's provider pair + the display fact's env (last: DISPLAY / XAUTHORITY are the machine's)
       if (!r.ok) {
         const text = (r.stderr || r.error || r.stdout || '').trim().slice(0, 300);
+        // verify r2 (F1): the directory may have been taken between the verdict and this launch — the holder said by name
+        const lr = lockRefusalAfterLaunch(p, prevRec);
+        if (lr) { rec.state = 'failed'; rec.endedAt = now(); rec.lastError = lr.error; commit(); log.warn?.(`[browser] ${profileId} "${p.label}": NOT started — ${lr.tookOver ? `a lock of this machine's previous name ${lr.tookOver} reached the launch (taken over now)` : 'the directory was taken while launching'}: ${lr.error}`); throw namedError(lr.code, lr.error, lr.holderPid ? { holderPid: lr.holderPid } : {}); }
         // a key-bearing launch that fails on licence/concurrency is the THIRD
         // named refusal (§7.4, round 8 #3) — under a cluster default it says
         // the seats are shared fleet-wide and offers the one click out
@@ -2578,6 +3062,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const info = await rt.info(ns, { dir: p.dir });
       rec.pid = info.pid; rec.starttime = await launchStart(info.pid); rec.socketDir = info.socketDir;
       if (info.pid && rec.starttime == null && F.startsReadable()) { rec.state = 'failed'; rec.endedAt = now(); rec.lastError = unrecordedLaunch(info.pid); commit(); throw namedError('launch_failed', rec.lastError); }
+      if (!rec.cli || (info.version && info.version !== rec.cli.version)) rec.cli = cliOfDaemon(info) || rec.cli || null; // verify r2 (H1): the daemon's own answer decides
       captureBrowser(rec, p.dir); // r2 M1: the Chrome it launched on the profile dir — ended if this daemon dies
       const cdp = await rt.cdpUrl(ns, { dir: p.dir, extraEnv: { ...launchEnv, ...vendorEnv } });
       rec.cdpUrl = cdp.ok ? cdp.url : null;
@@ -2593,10 +3078,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // (a machine without /proc, a provider whose browser is not identifiable) is never judged.
       if (!rec.browser) captureBrowser(rec, p.dir);
       if (!rec.browser && launchEvidenced(p.dir, stamp0)) {
+        const lr = lockRefusalAfterLaunch(p, prevRec); // verify r2 (F1): a holder that took the directory meanwhile is named, never "a crash at startup?"
         rec.browserLost = { pid: null, at: now() };
-        setClosed(rec, { code: 'browser_closed', error: closedText(p, 'it died right after it started (a crash at startup?)') }, { retry: true });
+        setClosed(rec, lr || { code: 'browser_closed', error: closedText(p, 'it died right after it started (a crash at startup?)') }, { retry: !lr || !!lr.tookOver }); // verify r3 (F3): a lock taken over now ⇒ the next ask relaunches
         noteHeal(rec, { lastOutcome: 'unidentified' });
-        log.warn?.(`[browser] ${profileId} "${p.label}": started (daemon pid ${rec.pid}) but no browser process holds ${p.dir} — it died at birth: browser_closed (a command retries at once, the tick in ${HEAL_RETRY_MS / 1000} s)`);
+        log.warn?.(lr ? `[browser] ${profileId} "${p.label}": started (daemon pid ${rec.pid}) but ${lr.tookOver ? `a lock of this machine's previous name ${lr.tookOver} reached the launch (taken over now)` : 'the directory is held by somebody else'}: ${lr.error}` : `[browser] ${profileId} "${p.label}": started (daemon pid ${rec.pid}) but no browser process holds ${p.dir} — it died at birth: browser_closed (a command retries at once, the tick in ${HEAL_RETRY_MS / 1000} s)`);
       }
       rec.state = 'ready';
       if (mediator) mediator.repoint(profileId, rec.cdpUrl); // P6: a restarted browser ⇒ live mediated connections close 1012, the SAME url reconnects
@@ -2617,7 +3103,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         }
       }
       commit();
-      log.log?.(`[browser] ${profileId} "${p.label}" started (${why}, ${p.provider}${vendorEnv && Object.keys(vendorEnv).length ? ', key from ' + (key ? key.source : '?') : ''}): daemon pid ${rec.pid ?? '?'}${rec.starttime != null ? '' : ' (starttime unreadable — never signalled by pid)'}${rec.cdpUrl ? ', cdp known' : ', no cdp url'}${p.lastChromiumMajor ? ', chromium ' + p.lastChromiumMajor : ''}`);
+      log.log?.(`[browser] ${profileId} "${p.label}" started (${why}, ${p.provider}${vendorEnv && Object.keys(vendorEnv).length ? ', key from ' + (key ? key.source : '?') : ''}): daemon pid ${rec.pid ?? '?'}${rec.starttime != null ? '' : ' (starttime unreadable — never signalled by pid)'}${rec.cdpUrl ? ', cdp known' : ', no cdp url'}${p.lastChromiumMajor ? ', chromium ' + p.lastChromiumMajor : ''}${rec.cli && rec.cli.version ? ', ' + VERBS.CLI_PACKAGE + ' ' + rec.cli.version : ''}`); // verify r3 (Y1): the CLI this launch runs
       emitLease({ kind: 'browser-ready', profileId, why, local: true });
       return browserView(rec);
     })();
@@ -2774,7 +3260,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // narrowing already follows). Never a switch (it re-opens its own tabs) or an ephemeral record. verify r1 (H3): a
       // MEDIATED lease too — measured on the real 0.38.1 + the real mediator, its session (its own namespace over its scoped
       // url) answered `tab_gone` to every command after a Quit; its next attach binds its new tab THROUGH its grant.
-      if (p && !isEph(p) && why !== 'switch') for (const l of reg.leases) if (l.profileId === profileId) reg.tabClosed[`${profileId}|${l.browserKey}`] = now();
+      if (p && !isEph(p) && why !== 'switch') for (const l of reg.leases) if (l.profileId === profileId) markTabLost(profileId, l.browserKey, 'closed');
       delete reg.leftTabs[profileId]; // verify r2: the tabs conversations left behind went with the browser
       commit();
       if (isEph(p)) keptNote('stop', p, { why }); // lane browser-resume (§3.9): its logins + its tabs are KEPT (D2: `why` decides whether its next start reopens them)
@@ -2875,15 +3361,37 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // a conversation whose tab the keeper CLOSED (the user took the profile from it, closeLeaseSession) is bound to that
     // gone tab until it binds a new one — the keeper binds it here, before its first command runs (never a mediated
     // lease: the proxy scopes its tabs; never an unmarked session: a tab it still has is kept)
+    let rebound = null; // lane profile-lock-roll (L2): what this attach bound, said once in the command's answer
     if (!isMediated(p) && reg.tabClosed[`${p.id}|${browserKey}`]) {
       let bound = false;
+      const why = reg.tabLostWhy && reg.tabLostWhy[`${p.id}|${browserKey}`] === 'life' ? 'life' : 'closed';
+      // verify r1 (F3): one rebind at a time per profile — the page list is read AFTER the previous session's bind landed
+      await serialRebind(p.id, async () => { if (!reg.tabClosed[`${p.id}|${browserKey}`]) { bound = true; return; }
+      // verify r2 (F2): re-asked AFTER the wait — a lease detached while it queued opens no tab (a blank tab nobody rooted was
+      // left in the browser; its mark stays, so its next attach binds)
+      if (!B.findLease(reg.leases, p.id, browserKey)) { log.log?.(`[browser] ${browserKey}: detached while waiting to bind a tab in ${p.id} "${p.label}" — no tab opened`); return; }
       try {
         const o = await leaseCliOpts(p.id, browserKey);
         const pinTab0 = !!(bf.lastVersion() !== undefined && B.floorVerdict(bf.lastVersion()).sharedProfiles);
-        const r = o ? await rt.exec(nsOf(p.id), [...(pinTab0 ? ['--pin-tab'] : []), 'tab', 'new'], o) : null;
-        if (r && r.ok) { bound = true; delete reg.tabClosed[`${p.id}|${browserKey}`]; { const nid = KB.targetIdOf(r.stdout); const lr = nid ? B.findLease(reg.leases, p.id, browserKey) : null; if (lr) lr.tabRoots = TBS.addRoot([], nid); } commit(); log.log?.(`[browser] ${browserKey}: a new tab bound in ${p.id} "${p.label}" (its last one was closed when the user took the profile from it)`); } // lane browser-resume C: the new tab is its only root now
-        else log.warn?.(`[browser] ${browserKey}: no new tab bound in ${p.id} — ${String((r && (r.stderr || r.error)) || 'no CDP url').trim().slice(0, 160)}; its next command may answer tab_gone`);
-      } catch (e) { log.warn?.(`[browser] ${browserKey}: no new tab bound in ${p.id} — ${e && e.message}`); }
+        const pin = pinTab0 ? ['--pin-tab'] : [];
+        // lane profile-lock-roll (L2): the browser's ONE page that nobody roots (a fresh launch's single blank tab) is bound
+        // to — no second blank tab per relaunch; anything else ⇒ a new tab of its own (never another holder's)
+        const pick = o ? TBS.rebindPick({ targets: await tabTargetsOf(o.extraEnv.AGENT_BROWSER_CDP), holders: tabHoldersOf(p.id), key: browserKey }) : null;
+        let r = o && pick ? await rt.exec(nsOf(p.id), [...pin, 'tab', pick.targetId, '--json'], o) : null;
+        let how = r && r.ok ? 'switched' : null;
+        if (!how) { r = o ? await rt.exec(nsOf(p.id), [...pin, 'tab', 'new'], o) : null; how = r && r.ok ? 'new' : null; }
+        if (r && r.ok) {
+          bound = true; clearTabLost(p.id, browserKey);
+          const nid = how === 'switched' ? pick.targetId : KB.targetIdOf(r.stdout);
+          const lr = nid ? B.findLease(reg.leases, p.id, browserKey) : null;
+          if (lr) lr.tabRoots = TBS.addRoot([], nid); // lane browser-resume C: the bound tab is its only root now
+          rebound = { how, targetId: nid || null, url: how === 'switched' ? pick.url : 'about:blank', why, text: TBS.reboundNoteText({ how, url: how === 'switched' ? pick.url : '', why }) };
+          keepRebound(p.id, browserKey, rebound); // verify r3 (F4): kept on the lease until an answer carries it
+          commit();
+          log.log?.(`[browser] ${browserKey}: ${how === 'switched' ? `bound to the browser's only tab ${pick.url}` : 'a new tab bound'} in ${p.id} "${p.label}" (${why === 'life' ? 'its tab went with the replaced browser' : 'its last one was closed when the user took the profile from it'})`);
+        } else log.warn?.(`[browser] ${browserKey}: no tab bound in ${p.id} — ${String((r && (r.stderr || r.error)) || 'no CDP url').trim().slice(0, 160)}; its next command may answer tab_gone`);
+      } catch (e) { log.warn?.(`[browser] ${browserKey}: no tab bound in ${p.id} — ${e && e.message}`); }
+      });
       // verify r3 (#3, "its next command never lands in his tab"): the tab this session is still bound to may be one the USER
       // TOOK (adoptOrphan marked it — it is alive, and his): a failed bind would run this command IN HIS PAGE. While his holder
       // keeps a tab he took, the attach is refused by name (fail closed; the mark stays, the next command binds again). A
@@ -2914,19 +3422,22 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // Stop) binds a NEW tab before its first command — under ITS session in ITS namespace over ITS scoped url (the same
       // env its CLI runs with, so its daemon is not restarted), so the tab is created through the grant and is its own
       if (reg.tabClosed[`${p.id}|${browserKey}`] && g && g.url) {
+        const why = reg.tabLostWhy && reg.tabLostWhy[`${p.id}|${browserKey}`] === 'life' ? 'life' : 'closed';
         try {
           const env = require('../browser-stream.js').pairsToEnv(M.mediatedEnvFor({ browserKey, profileId: p.id, url: g.url, idleMs: idleMs() }));
           const r = await rt.exec(null, [...(pinTab ? ['--pin-tab'] : []), 'tab', 'new'], { extraEnv: env });
-          if (r && r.ok) { delete reg.tabClosed[`${p.id}|${browserKey}`]; commit(); log.log?.(`[browser] ${browserKey}: a new tab bound in ${p.id} "${p.label}" through its mediated grant (its last one went with the stopped browser)`); }
+          if (r && r.ok) { clearTabLost(p.id, browserKey); rebound = { how: 'new', targetId: KB.targetIdOf(r.stdout) || null, url: 'about:blank', why, text: TBS.reboundNoteText({ how: 'new', why }) }; keepRebound(p.id, browserKey, rebound); commit(); log.log?.(`[browser] ${browserKey}: a new tab bound in ${p.id} "${p.label}" through its mediated grant (${why === 'life' ? 'its tab went with the replaced browser' : 'its last one went with the stopped browser'})`); }
           else log.warn?.(`[browser] ${browserKey}: no new tab bound in ${p.id} through its grant — ${String((r && (r.stderr || r.error)) || 'no answer').trim().slice(0, 160)}; its next command may answer tab_gone`);
         } catch (e) { log.warn?.(`[browser] ${browserKey}: no new tab bound in ${p.id} through its grant — ${e && e.message}`); }
       }
-      return { lease: leaseView(d.lease), created: d.created, resumed: d.resumed, others: d.others, profile: pview(p), browser, mediated: true, env: M.mediatedEnvFor({ browserKey, profileId: p.id, url: g.url, idleMs: idleMs() }), cdpUrl: g.url, pinTab, note: M.mediationSentence({ profileLabel: p.label, others: d.others }), ...(added ? { added } : {}) };
+      const noteOut = takeRebound(p.id, browserKey, rebound); // verify r3 (F4): this answer carries the note (its own, or one an abandoned answer left)
+      return { lease: leaseView(d.lease), created: d.created, resumed: d.resumed, others: d.others, profile: pview(p), browser, mediated: true, env: M.mediatedEnvFor({ browserKey, profileId: p.id, url: g.url, idleMs: idleMs() }), cdpUrl: g.url, pinTab, note: M.mediationSentence({ profileLabel: p.label, others: d.others }), ...(added ? { added } : {}), ...(noteOut ? { rebound: noteOut } : {}) };
     }
     // P4: a browser REACHED (external / on a paired machine) is named by the
     // hub-side CDP url, never by a directory — the pair rides the env only
     // (the subshell and the `--` form), `use --print` withholds it (§5.1)
-    return { lease: leaseView(d.lease), created: d.created, resumed: d.resumed, others: d.others, profile: pview(p), browser, mediated: false, env: B.attachedEnvFor({ browserKey, profileId: p.id, cdpUrl: leaseCdp }), cdpUrl: rec ? rec.cdpUrl : null, pinTab, ...(added ? { added } : {}) };
+    const noteOut = takeRebound(p.id, browserKey, rebound); // verify r3 (F4): this answer carries the note (its own, or one an abandoned answer left)
+    return { lease: leaseView(d.lease), created: d.created, resumed: d.resumed, others: d.others, profile: pview(p), browser, mediated: false, env: B.attachedEnvFor({ browserKey, profileId: p.id, cdpUrl: leaseCdp }), cdpUrl: rec ? rec.cdpUrl : null, pinTab, ...(added ? { added } : {}), ...(noteOut ? { rebound: noteOut } : {}) };
   }
   /** VERIFY r2 L8: the paused sentence, said about a DETACH (the refusal's own words name a command). */
   const detachPausedText = (err) => String(err || '').replace('your command did NOT run', 'your detach did NOT run (it would end their takeover and take the browser out from under them)');
@@ -3055,6 +3566,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       { const cr = closedRefusalOf(p.id); if (cr) throw namedError(cr.code, cr.error, cr.holderPid ? { holderPid: cr.holderPid } : {}); }
       const o = await leaseCliOpts(p.id, v.key); // the RAW CDP url of the keeper's one Chrome, the human's own session name
       if (!o) throw namedError('browser_no_cdp', noCdpError(p));
+      if (switching.has(p.id)) { const rr = SW.restartingRefusal(p); throw namedError(rr.code, `"${p.label}" is restarting (its build or backend is being changed) — browse it again in a few seconds, when it is back`); } // verify r2 (H2): a restart that began during the awaits above
       let h = humans.get(p.id);
       if (!h) {
         const pinTab = !!(bf.lastVersion() !== undefined && B.floorVerdict(bf.lastVersion()).sharedProfiles);
@@ -3220,13 +3732,13 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // in this browser, its session still bound to it — forgotten, the tab he takes later could be that page and its return
     // would run IN HIS PAGE (reproduced: 65 detaches, the oldest's return bound nothing). Marked `tabClosed` now instead:
     // its return binds a new tab first (a leftTabs key never holds a lease — attach clears its entry).
-    const ks = Object.keys(m); if (ks.length > 64) for (const x of ks.sort((a, b) => m[a] - m[b]).slice(0, ks.length - 64)) { reg.tabClosed[`${pd.id}|${x}`] = now(); delete m[x]; }
+    const ks = Object.keys(m); if (ks.length > 64) for (const x of ks.sort((a, b) => m[a] - m[b]).slice(0, ks.length - 64)) { markTabLost(pd.id, x, 'closed'); delete m[x]; }
     return true;
   }
   function adoptOrphan(h, targetId) {
     h.adopted = [...new Set([...(Array.isArray(h.adopted) ? h.adopted : []), targetId])].slice(-32);
     const left = Object.keys(reg.leftTabs[h.profileId] || {});
-    for (const bk of left) reg.tabClosed[`${h.profileId}|${bk}`] = now();
+    for (const bk of left) markTabLost(h.profileId, bk, 'closed');
     delete reg.leftTabs[h.profileId];
     commit();
     log.log?.(`[browser] ${h.profileId}: the user took the tab ${targetId} (nobody held the browser — a conversation that ended left it behind); it is his now${left.length ? `; ${left.length} conversation(s) that left this browser bind a new tab if they come back` : ''}`);
@@ -3354,6 +3866,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    */
   function takeover({ browserKey, profileId = null, viewerId, sessionId = null, holderAlive = true, viewerAlive = null } = {}) {
     ensureLoaded();
+    // verify r2 (H2): a browser being RESTARTED (Change build…, a backend switch — between its stop and its new launch) is
+    // never taken over: the restart would launch the new browser, reopen every lease's tab and tell each conversation under
+    // the user's hands (reproduced: the takeover landed after the stop, the tab reopened and the card told while he drove).
+    // Refused by name — he takes over again when it is back (the live view says it); the restart's own gate refuses a
+    // browser he already drives (browser_driven), so between the two nothing moves under his hands
+    if (profileId && switching.has(String(profileId))) { const p = profile(profileId); log.log?.(`[browser] ${browserKey} on ${profileId}: takeover refused — its browser is restarting`); return { ok: false, code: 'browser_restarting', error: `"${p ? p.label : profileId}" is restarting (its build or backend is being changed) — take over again in a few seconds, when it is back` }; }
     // VERIFY S5 (2026-09-26): a takeover of a NAMED profile's browser needs a LEASE of this conversation on it — a live
     // view left open after the user's "Only <other chat>" (or an agent's detach) took the profile from this conversation
     // used to take it over anyway and refuse the holder's agent `browser_busy` "the user drives it from <this chat>";
@@ -3808,7 +4326,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // else the conversation whose agent last acted on it (a browser key; the strip names it from the client's rows)
       const ud = !l.ephemeral && p ? userDrivingOf(l.profileId, l.browserKey) : null;
       const driver = ud ? { browserKey: ud.browserKey, by: 'user' } : (act[l.profileId] ? { browserKey: act[l.profileId].browserKey, by: 'agent' } : null);
-      return { ...l, label: l.label || (p ? p.label : l.profileId), browser: browserView(reg.browsers[l.profileId]), others: reg.leases.filter((x) => x.profileId === l.profileId && x.browserKey !== l.browserKey).length, driver, scope: p ? B.scopeOf(p) : null };
+      return { ...l, label: l.label || (p ? p.label : l.profileId), browser: agentBrowserView(reg.browsers[l.profileId]), others: reg.leases.filter((x) => x.profileId === l.profileId && x.browserKey !== l.browserKey).length, driver, scope: p ? B.scopeOf(p) : null };
     });
     const set = setFor(browserKey);
     // MULTIVIEW §4 (B-89d0): each helper's handle carries ITS OWN browser's state
@@ -4081,10 +4599,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    * caller re-points the session's indirection afterwards (that is the pin
    * path, borrowed). Refused with the reason when the move cannot happen.
    */
-  function adoptScratch({ label, scratchDir, owner = null, createdBy = null } = {}) {
+  function adoptScratch({ label, scratchDir, owner = null, createdBy = null, use = null, knownKeys = null } = {}) {
     ensureLoaded();
     const v = B.validateProfileInput({ label }, { existing: named() });
     if (!v.ok) throw namedError(v.code, v.error);
+    if (use != null) owner = ownerFromUse(use, { knownKeys, label: v.value.label }); // lane browser-admin: judged before the directory moves
     let st = null;
     try { st = fs.statSync(scratchDir); } catch { /* below */ }
     if (!st || !st.isDirectory()) throw namedError('adopt_failed', `this session's browser directory ${scratchDir} does not exist — nothing to adopt (the browser never launched, or it is on the ephemeral rung)`);
@@ -4170,7 +4689,19 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   const installDir = path.join(dataDir, 'browser-tools');
   const cloakCacheDir = path.join(installDir, 'cloak-cache'); // CLOAKBROWSER_CACHE_DIR — VibeSpace's own, never ~/.cloakbrowser
   const stampFile = path.join(installDir, 'cloak-installed.json');
-  const INSTALL_TIMEOUT_MS = 15 * 60 * 1000;
+  const INSTALL_TIMEOUT_MS = Number.isFinite(installTimeoutMs) && installTimeoutMs > 0 ? installTimeoutMs : 15 * 60 * 1000;
+  /** verify r1 (F8): THE slot's bound — every step of either install ends at INSTALL_TIMEOUT_MS: the browser CLI's detached
+   *  npm (it had no wall clock: a stalled registry held the ONE slot, CloakBrowser's install too, for as long as npm lived)
+   *  and a step RE-ATTACHED after a restart (the marker's `stepAt`; the re-attach waited on the pid for ever). In-process the
+   *  npm is identified by its unreaped child handle; a re-attached step is stopped (`endStalledStep`) only when it is provably
+   *  the one the marker names (pid + starttime) — one that cannot be proven is let go: the slot released and said, never a
+   *  kill of a stranger. */
+  const stalledWords = (what) => `${what} ran past ${Math.round(INSTALL_TIMEOUT_MS / 60000) || 1} minutes and was stopped — see ${installState.log}; install again`;
+  function endStalledStep({ pid, starttime = null, group = false } = {}) {
+    if (!Number.isInteger(pid) || pid <= 1 || starttime == null || !F.sameProcess(pid, starttime)) return false;
+    if (group) { try { process.kill(-pid, 'SIGTERM'); return true; } catch { /* not a group leader — the pid below */ } }
+    try { process.kill(pid, 'SIGTERM'); return true; } catch { return false; }
+  }
   const installState = { running: false, startedAt: null, finishedAt: null, exitCode: null, spec: null, pid: null, log: path.join(installDir, 'install.log'), error: null, step: null, refused: [] };
   const proofOf = () => (providers && providers.proof) || B.CLOAK_EGRESS_PROOF;
   const hereTag = () => SW.platformTag(process.platform, process.arch);
@@ -4198,7 +4729,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const v = SW.installVerdict({ proof, proofOk: B.proofVerdict(proof), exe: host ? null : cloakExecutable(), host, running: installState.running, platform: host ? null : hereTag() });
     // the rebuilt dialog: ONE shape for GET /api/browser/install, the switcher view and the Manage Agents row — `npm`
     // (the same probe installCloak makes) and `state.failed` (a finished run with an error / a non-zero exit)
-    return { ...SW.installFacts({ verdict: v, npm: whichOnPath('npm') !== null, state: { ...installState, refused: [...installState.refused] } }), prefix: installDir };
+    // lane browser-admin 2b: the slot is ONE (cloak's and the browser CLI's): the verdict refuses while either runs, and the
+    // cloak row's own state says "installing" only for a cloak install (`otherInstall` names the CLI's)
+    const cliRunning = installState.running && installState.kind === 'cli';
+    return { ...SW.installFacts({ verdict: v, npm: whichOnPath('npm') !== null, state: { ...installState, running: installState.running && !cliRunning, refused: [...installState.refused] } }), prefix: installDir, ...(cliRunning ? { otherInstall: 'cli' } : {}) };
   }
   const sha256Of = (f) => new Promise((resolve, reject) => { const h = crypto.createHash('sha256'); fs.createReadStream(f).on('data', (c) => h.update(c)).on('error', reject).on('end', () => resolve(h.digest('hex'))); });
   /** ONE step of the install as a child, its output appended to the log; resolves `{ok, code, sig, error}`. The pid is
@@ -4212,6 +4746,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       try { child = spawn(cmd, argv, { cwd: installDir, env: childEnv, stdio: ['ignore', fd, fd] }); } catch (e) { try { fs.closeSync(fd); } catch {} resolve({ ok: false, error: `${path.basename(cmd)} could not be started: ${e.message}` }); return; }
       try { fs.closeSync(fd); } catch {}
       Object.assign(installState, { step, pid: child.pid || null });
+      // verify r1 (F3): the CloakBrowser install's running step rides THE marker too (the CLI install's) — a server restart
+      // mid-install re-attaches to it (the slot stays busy, never a second npm / download into the same folder)
+      if (installState.kind === 'cloak') markInstall({ kind: 'cloak', spec: installState.spec, step, pid: child.pid || null, starttime: child.pid ? F.procStart(child.pid) : null, startedAt: installState.startedAt, stepAt: now(), prefix: installDir });
       const timer = setTimeout(() => { try { child.kill('SIGTERM'); } catch {} }, INSTALL_TIMEOUT_MS);
       if (typeof timer.unref === 'function') timer.unref();
       child.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: e.message }); });
@@ -4238,12 +4775,13 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const e0 = {}; for (const [k2, v2] of Object.entries(env() || {})) if (v2 != null) e0[k2] = String(v2);
     if (!e0.PATH) e0.PATH = process.env.PATH || '';
     const pr = proofOf();
-    Object.assign(installState, { running: true, startedAt: now(), finishedAt: null, exitCode: null, spec: v.spec, pid: null, error: null, step: null, refused: [] });
+    Object.assign(installState, { running: true, kind: 'cloak', startedAt: now(), finishedAt: null, exitCode: null, spec: v.spec, pid: null, error: null, step: null, refused: [] });
     const cli0 = installedCli();
     const first = cli0 && cli0.version === v.version ? null : runStep('package', npm, SW.installArgv({ spec: v.spec, prefix: installDir }), e0);
     const pid0 = installState.pid;
     log.log?.(`[browser] installing ${v.spec} + Chromium ${v.chromium || '?'} into ${installDir} (a user act, after the §7.2.1 measurement dated ${pr && pr.date}; log ${installState.log})`);
     const finish = (step, err) => {
+      try { fs.rmSync(installMarker(), { force: true }); } catch { /* none */ } // verify r1 (F3): the marker names a running step only
       Object.assign(installState, { running: false, finishedAt: now(), exitCode: err ? 1 : 0, error: err ? `${step}: ${err}` : null, step: err ? step : 'done', pid: null });
       log[err ? 'warn' : 'log']?.(`[browser] install ${v.spec} ${err ? `failed at ${step} — ${err}` : `finished: ${installedCloakBin()}`}`);
       notify();
@@ -4316,6 +4854,338 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     let logBytes = null; try { logBytes = fs.statSync(installState.log).size; } catch { logBytes = null; } // verify r1 V3: bytes of output = signs of life
     return { running: !!installState.running, step: installState.step || null, percent, logBytes, failed, error: installState.error || null, startedAt: installState.startedAt || null, finishedAt: installState.finishedAt || null };
   }
+  // ── lane browser-admin 2b: THE BROWSER CLI VERSION VIBESPACE DRIVES (`browser.cli`: path | pinned | x.y.z) ──
+  // Installed with THE install slot above (one install at a time, cloak's or this one): `npm install --prefix
+  // <data>/browser-tools/agent-browser-<v> --no-save --ignore-scripts agent-browser@<v>` — the registry only (the package's
+  // postinstall, which fetches a binary from GitHub when the tarball lacks one, never runs). The npm child is DETACHED and
+  // named in a marker file, so a server restart RE-ATTACHES to it (never a second install) and verifies its result. The pin
+  // is the keeper's in-memory answer (`cliPin`), mirrored to `cli-pin.json` for the agent's CLI (data/bin/vibespace-browser
+  // reads it beside itself — a remote machine has none, so PATH answers there).
+  const cliPinFile = () => path.join(dataDir, 'browser-tools', 'cli-pin.json');
+  const installMarker = () => path.join(dataDir, 'browser-tools', 'install-running.json');
+  /** THE marker of a running install (both kinds): the step's pid + starttime, so a restart re-attaches (verify r1 F3). */
+  function markInstall(m) { try { fs.mkdirSync(path.dirname(installMarker()), { recursive: true, mode: 0o700 }); writeJsonAtomic(installMarker(), m); } catch (e) { log.warn?.(`[browser] the install marker was not written (${e && e.message}) — a restart now would not re-attach`); } }
+  const cliPrefix = (v) => path.join(dataDir, 'browser-tools', VERBS.cliInstallDirName(v));
+  /** verify r1 (F2): THE WITNESS of a verified install — `<prefix>/verified.json` {version, path, at, says}, written by
+   *  `finishCli` ONLY after the program itself said the version. Without it a folder is NOT an install: npm extracts the
+   *  package in place (package.json + the 0755 launcher land first, the native binaries fill in over seconds), so a pin
+   *  computed mid-install (the panel sets `browser.cli` right after the POST; a restart mid-install) resolved the launcher
+   *  of a half-written package and the keeper, browser-env and the agent's CLI ran it. */
+  const cliWitnessOf = (prefix) => path.join(prefix, 'verified.json');
+  function cliWitnessRead(prefix) { try { const w = JSON.parse(fs.readFileSync(cliWitnessOf(prefix), 'utf8')); return w && typeof w === 'object' && typeof w.path === 'string' && typeof w.version === 'string' ? w : null; } catch { return null; } }
+  let cliGen = 0, cliMemo = null, cliPinWritten;
+  const isMusl = () => process.platform === 'linux' && (fs.existsSync('/lib/ld-musl-x86_64.so.1') || fs.existsSync('/lib/ld-musl-aarch64.so.1'));
+  /** ONE version's install, read off ITS OWN package.json (never a guessed folder): the native binary the package ships for
+   *  this machine (its launcher's naming, mirrored), else its declared launcher. → `{ok, version, path, prefix}` | `{ok:false, why}`. */
+  function cliFolderOf(version) {
+    let prefix; try { prefix = cliPrefix(String(version)); } catch { return { ok: false, why: 'not a version' }; }
+    const pkgDir = path.join(prefix, 'node_modules', VERBS.CLI_PACKAGE);
+    let pkg = null; try { pkg = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8')); } catch { return { ok: false, why: 'not installed' }; }
+    if (!pkg || pkg.version !== String(version)) return { ok: false, why: `its folder holds ${pkg && pkg.version ? pkg.version : 'another package'}` };
+    const native = VERBS.cliNativeName({ platform: process.platform, arch: process.arch, musl: isMusl() });
+    const nat = native ? path.join(pkgDir, 'bin', native) : null;
+    const rel = SW.binFromPackageJson(pkg, VERBS.CLI_PACKAGE);
+    const launcher = rel ? path.join(pkgDir, rel) : null;
+    const exe = nat && usableExe(nat) ? nat : (launcher && usableExe(launcher) ? launcher : null);
+    return exe ? { ok: true, version: String(version), path: exe, prefix } : { ok: false, why: 'its program cannot be run' };
+  }
+  /** THE INSTALL (what the pin, the facts and the install verdict read): the folder's program AND its witness — a folder
+   *  without one (verify r1 F2: mid-install, a crash, a program that did not say the version) is NOT an install. */
+  function installedCliOf(version) {
+    const f = cliFolderOf(version);
+    if (!f.ok) return f;
+    const w = cliWitnessRead(f.prefix);
+    if (!w || w.version !== String(version) || w.path !== f.path) return { ok: false, why: w ? 'not verified (its folder changed since it was verified)' : 'not verified (an install that did not finish, or whose program did not say the version)' };
+    return f;
+  }
+  /** THE PIN: `{mode: path|pinned|version, version, path|null, installed, why, invalid}` — recomputed when the setting moves or
+   *  an install ends (never per command), mirrored to cli-pin.json on a change. */
+  function cliPin() {
+    let raw = ''; try { const v0 = serverSetting('browser.cli'); raw = v0 == null ? '' : String(v0); } catch { raw = ''; }
+    if (cliMemo && cliMemo.raw === raw && cliMemo.gen === cliGen) {
+      // verify r1 (F4): a pinned install that VANISHED (data/browser-tools wiped, the folder moved) is said at once — the
+      // memo is dropped the moment its program is not a runnable file (one stat per resolve), the pin file removed, PATH
+      // answers and the panel says "not installed"; before, the facts read "installed" off the memo until a restart
+      if (!cliMemo.pin.path || usableExe(cliMemo.pin.path)) return cliMemo.pin;
+      cliGen++;
+    }
+    const ch = VERBS.cliChoiceOf(raw);
+    let pin;
+    if (ch.mode === 'path') pin = { mode: 'path', version: null, path: null, installed: false, why: null, invalid: ch.invalid || null };
+    else { const i = installedCliOf(ch.version); pin = { mode: ch.mode, version: ch.version, path: i.ok ? i.path : null, installed: !!i.ok, why: i.ok ? null : i.why, invalid: null }; }
+    cliMemo = { raw, gen: cliGen, pin };
+    if (cliPinWritten !== (pin.path || null)) {
+      try {
+        if (pin.path) { fs.mkdirSync(path.dirname(cliPinFile()), { recursive: true, mode: 0o700 }); writeJsonAtomic(cliPinFile(), { version: pin.version, path: pin.path }); }
+        else fs.rmSync(cliPinFile(), { force: true });
+        cliPinWritten = pin.path || null;
+        log.log?.(`[browser] the browser CLI VibeSpace drives: ${pin.path ? `the pinned ${VERBS.CLI_PACKAGE} ${pin.version} (${pin.path})` : pin.mode === 'path' ? 'whatever PATH has' : `PATH — the pinned ${pin.version} is ${pin.why}`}`);
+      } catch (e) { log.warn?.(`[browser] the browser CLI pin file could not be written (${e && e.message}) — the agent's CLI keeps using PATH until it is`); }
+    }
+    return pin;
+  }
+  function cliPinPath() { return cliPin().path; }
+  // ── verify r2 (H1, the coordinator's ruling): A RUNNING BROWSER KEEPS THE CLI IT WAS LAUNCHED WITH ──
+  // `rec.cli` = {version, path, id} stamped at its LAUNCH (the binary that launch ran; `id` = that file's identity, so a
+  // binary replaced in place — an `npm i -g` over PATH's — is not mistaken for it) or read off an ADOPTED daemon (its
+  // `session info` version + its /proc exe). Every later call of that browser runs a binary of THAT version (`cliOptOf`,
+  // wired into every runtime call by `configured`), so a `browser.cli` switch never restarts a running browser (the 0.38.x
+  // daemon restarts itself and its Chrome for a client of another version — measured); it applies at the next launch.
+  // That version gone from this machine ⇒ `browser_cli_gone` by name (never a silent fall to PATH).
+  const cliIdOf = (p) => { try { const st = fs.statSync(p); return st.isFile() ? `${st.dev}:${st.ino}:${st.size}:${Math.round(st.mtimeMs)}` : null; } catch { return null; } };
+  const cliVersions = new Map(); // path → {id, version} — `--version` of ONE binary file, asked again only when the file changed
+  function cliVersionAt(p) {
+    const id = cliIdOf(p);
+    if (!id) return Promise.resolve(null);
+    const m = cliVersions.get(p);
+    if (m && m.id === id) return Promise.resolve(m.version);
+    return new Promise((resolve) => {
+      try {
+        require('child_process').execFile(p, ['--version'], { timeout: 8000, encoding: 'utf8', env: F.sanitizeProbeEnv({ ...(env() || {}), PATH: (env() || {}).PATH || process.env.PATH || '' }) }, (er, so, se) => {
+          const got = er ? null : B.parseVersion(String(so || '') + String(se || '')); // verify r1 ⑦: a crashed probe names no version (node's own "v24.12.0" on a stack trace is not the CLI's)
+          const v = got ? got.join('.') : null;
+          if (v) cliVersions.set(p, { id, version: v });
+          resolve(v);
+        });
+      } catch { resolve(null); }
+    });
+  }
+  /** The version a binary said (no fork) — null when it was never asked or the file changed since. */
+  const knownVersionAt = (p) => { const m = p ? cliVersions.get(p) : null; return m && m.id === cliIdOf(p) ? m.version : null; };
+  /** THE CLI A LAUNCH RUNS NOW (the pin, else PATH) — stamped on the record before the launch. null = not knowable here (a
+   *  fake runtime's bare name, a binary that would not say its version): the browser then follows the current CLI. */
+  async function cliNow() {
+    const p = typeof bf.binPath === 'function' ? bf.binPath() : null;
+    if (!p || !String(p).startsWith('/')) return null;
+    const v = await cliVersionAt(p);
+    return v ? { version: v, path: p, id: cliIdOf(p), at: now() } : null;
+  }
+  /** An ADOPTED daemon's CLI (a daemon this keeper did not launch — an escaped command, a restart): the version it SAYS
+   *  (`session info`, launch-free and never a restart) and the program it runs (/proc/<pid>/exe; a deleted file is none). */
+  function cliOfDaemon(info) {
+    const v = info && typeof info.version === 'string' ? (info.version.match(/^(\d+\.\d+\.\d+)$/) || [])[1] || null : null;
+    if (!v) return null;
+    let exe = null; try { exe = Number.isInteger(info.pid) ? fs.readlinkSync(`/proc/${info.pid}/exe`) : null; } catch { exe = null; }
+    if (exe && (/ \(deleted\)$/.test(exe) || !/^agent-browser/.test(path.basename(exe)))) exe = null; // (only the CLI's own program — a wrapper's interpreter is no CLI)
+    if (exe && v) cliVersions.set(exe, { id: cliIdOf(exe), version: v });
+    return { version: v, path: exe, id: exe ? cliIdOf(exe) : null, at: now(), adopted: true };
+  }
+  /** The binary ONE call of `rec`'s browser runs → `{path}` | `{gone: words}` | null (no record / no stamp / not local: the
+   *  current CLI, as before). Same version only: the launch's own file, the current CLI, VibeSpace's verified install of
+   *  that version, PATH's — never a binary of another version. */
+  function cliJudge(rec) {
+    const c = rec && rec.cli;
+    if (!c || !c.version || !isLocalRec(rec)) return null;
+    // the launch's own file while its identity holds — the answer on every call but the rare one (a stat or two, no read)
+    if (c.path && usableExe(c.path) && (!c.id || cliIdOf(c.path) === c.id)) return { path: c.path };
+    const cands = [];
+    const cur = typeof bf.binPath === 'function' ? bf.binPath() : null;
+    if (cur) cands.push({ path: cur, version: knownVersionAt(cur), how: 'current' });
+    try { const i = installedCliOf(c.version); if (i.ok) cands.push({ path: i.path, version: c.version, how: 'installed' }); } catch { /* not a version */ }
+    const onPath = typeof bfPath.binPath === 'function' ? bfPath.binPath() : null;
+    if (onPath && onPath !== cur) cands.push({ path: onPath, version: knownVersionAt(onPath), how: 'path' });
+    const v = VERBS.cliForBrowser({ want: c.version, candidates: cands, current: cur ? knownVersionAt(cur) : null });
+    if (v.ok) return v.path ? { path: v.path } : null;
+    // verify r3 (Y1): a candidate never asked its version (a keeper fresh from a restart; a binary replaced in place — an
+    // `npm i -g` over PATH's, the SAME version put back) is not "gone": the answer is NOT KNOWN YET
+    const unknown = cands.filter((x) => x.version == null && x.path).map((x) => x.path);
+    return unknown.length ? { unknown, gone: v.error } : { gone: v.error };
+  }
+  /** The sync answer (the row, a view): an unproven binary is asked now and this reading says "gone" until it has said its
+   *  version — every DOOR that runs a command or refuses an agent waits for it instead (`cliOptReady`). */
+  function cliOptOf(rec) {
+    const j = cliJudge(rec);
+    if (j && j.unknown) { for (const x of j.unknown) cliVersionAt(x).catch(() => null); return { gone: j.gone }; }
+    return j;
+  }
+  /** verify r3 (Y1): THE DOORS' answer — a candidate of an unproven version is ASKED (`--version`, once per file identity)
+   *  before the browser is judged; asked and silent ⇒ unproven ⇒ refused by name. Reproduced before: the same 0.38.1
+   *  re-installed at the same path ⇒ the next command refused "no longer installed here" with a remedy that loses the tabs. */
+  async function cliOptReady(rec) {
+    const j = cliJudge(rec);
+    if (!(j && j.unknown)) return j;
+    await Promise.all(j.unknown.map((x) => cliVersionAt(x).catch(() => null)));
+    const j2 = cliJudge(rec);
+    return j2 && j2.unknown ? { gone: j2.gone } : j2;
+  }
+  /** The fact of one browser's CLI for an answer that REFUSES on it (the three /resolve forms): the candidates asked first. */
+  async function cliFactReady(profileId) {
+    ensureLoaded();
+    const rec = reg.browsers[profileId];
+    if (!rec) return null;
+    await cliOptReady(rec);
+    return cliFactOf(rec);
+  }
+  /** verify r3 (Y1): the versions the sync readers need, kept warm — a stat per tick, a fork only when a file changed. */
+  function warmCliVersions() {
+    for (const f of [bf, bfPath]) { try { const x = typeof f.binPath === 'function' ? f.binPath() : null; if (x && String(x).startsWith('/')) cliVersionAt(x).catch(() => null); } catch { /* not resolvable */ } }
+  }
+  /** The CLI fact of one browser for a surface: `{version, gone}` (versions only — the agent's CLI finds that version on its
+   *  own machine; `gone` = the words of browser_cli_gone). null = no stamp. */
+  function cliFactOf(rec) {
+    if (!rec || !rec.cli || !rec.cli.version) return null;
+    const o = cliOptOf(rec);
+    return { version: rec.cli.version, ...(o && o.gone ? { gone: o.gone } : {}) };
+  }
+  /** What the panel's Browser CLI row and `vibespace-browser providers` say: the measured version, the choice, the pinned
+   *  install, the one on PATH, the one in use (its drift from the table), the install slot. Two version probes (cached). */
+  async function cliFacts() {
+    const pin = cliPin();
+    const [inUseV, pathV] = await Promise.all([bf.probeVersion(), bfPath.probeVersion()]);
+    const inUsePath = typeof bf.binPath === 'function' ? bf.binPath() : null;
+    const cliRun = installState.kind === 'cli';
+    return {
+      table: VERBS.TABLE_VERSION, record: VERBS.CLI_PIN_RECORD, choice: { mode: pin.mode, version: pin.version, invalid: pin.invalid },
+      pinned: pin.mode === 'path' ? null : { version: pin.version, installed: pin.installed, path: pin.path, why: pin.why },
+      onPath: { version: pathV, path: typeof bfPath.binPath === 'function' ? bfPath.binPath() : null },
+      inUse: { version: inUseV, path: inUsePath, pinned: !!(pin.path && inUsePath === pin.path) },
+      drift: inUseV ? VERBS.versionDrift(inUseV) : null,
+      install: { running: !!(installState.running && cliRun), other: installState.running && !cliRun ? installState.kind || 'cloak' : null, failed: cliRun && !installState.running && (installState.error != null || (installState.exitCode != null && installState.exitCode !== 0)), error: cliRun ? installState.error : null, spec: cliRun ? installState.spec : null },
+      npm: whichOnPath('npm') !== null,
+      installedTable: installedCliOf(VERBS.TABLE_VERSION).ok, // the measured version is here (a PATH choice's one act is then "Use it", no second download)
+      running: runningClis(inUseV), // verify r2 (H1): the running browsers still on another version (they switch when they stop)
+    };
+  }
+  /** verify r2 (H1): the RUNNING browsers of this machine by the CLI they keep — `previous` = on a version other than the one
+   *  a launch runs now (they switch when they stop), `gone` = on a version no longer installed here (refused by name until
+   *  restarted), `versions` = those versions. A browser healed in its own daemon keeps that daemon's version; a new launch
+   *  (a restart, a daemon that died) runs the current one. */
+  function runningClis(inUseV) {
+    let previous = 0, gone = 0; const versions = new Set();
+    for (const rec of Object.values(reg.browsers || {})) {
+      if (!rec || !B.isLiveBrowser(rec) || !isLocalRec(rec) || !rec.cli || !rec.cli.version) continue;
+      const o = cliOptOf(rec);
+      if (o && o.gone) { gone++; versions.add(rec.cli.version); continue; }
+      if (inUseV && rec.cli.version !== inUseV) { previous++; versions.add(rec.cli.version); }
+    }
+    return { previous, gone, versions: [...versions].sort() };
+  }
+  /** INSTALL a browser CLI version (the user's act — the route is cookie-only). One npm child, detached, its pid in the marker. */
+  function installCli({ version = VERBS.TABLE_VERSION } = {}) {
+    const v0 = VERBS.cliInstallVerdict({ version: String(version || ''), running: installState.running, installed: installedCliOf(String(version || '')), npm: whichOnPath('npm') !== null });
+    if (!v0.ok) throw namedError(v0.code, v0.error, v0.path ? { path: v0.path } : {});
+    const npm = whichOnPath('npm');
+    const prefix = cliPrefix(v0.version);
+    fs.mkdirSync(prefix, { recursive: true, mode: 0o700 });
+    try { fs.rmSync(cliWitnessOf(prefix), { force: true }); } catch { /* none */ } // verify r1 (F2): the folder is about to be rewritten — nothing resolves it until it is verified again
+    cliGen++; cliMemo = null;
+    const e0 = {}; for (const [k2, v2] of Object.entries(env() || {})) if (v2 != null) e0[k2] = String(v2);
+    if (!e0.PATH) e0.PATH = process.env.PATH || '';
+    let fd;
+    try { fd = fs.openSync(installState.log, 'a', 0o600); fs.writeSync(fd, `\n[${new Date(now()).toISOString()}] browser CLI: npm install ${v0.spec} (--ignore-scripts) into ${prefix}\n`); }
+    catch (e) { throw namedError('install_unavailable', `the install log could not be opened: ${e.message}`); }
+    const argv = [...SW.installArgv({ spec: v0.spec, prefix }), '--ignore-scripts']; // the registry only: no package script runs
+    let child;
+    try { child = spawn(npm, argv, { cwd: prefix, env: e0, stdio: ['ignore', fd, fd], detached: true }); } catch (e) { try { fs.closeSync(fd); } catch { /* none */ } throw namedError('install_unavailable', `npm could not be started: ${e.message}`); }
+    try { fs.closeSync(fd); } catch { /* none */ }
+    try { child.unref(); } catch { /* none */ }
+    Object.assign(installState, { running: true, kind: 'cli', startedAt: now(), finishedAt: null, exitCode: null, spec: v0.spec, pid: child.pid || null, error: null, step: 'package', refused: [] });
+    const st0 = child.pid ? F.procStart(child.pid) : null;
+    markInstall({ kind: 'cli', spec: v0.spec, version: v0.version, pid: child.pid || null, starttime: st0, startedAt: installState.startedAt, stepAt: now(), prefix });
+    // verify r1 (F8): the npm child's wall clock (cloak's steps always had one) — past it, the npm group is stopped and said
+    let stalled = false;
+    // (in-process the identity is the HANDLE: node has not reaped a child whose exit it has not reported, so its pid is still
+    // that npm — no starttime needed, which a machine without /proc could not read)
+    const deadline = setTimeout(() => {
+      if (child.exitCode != null || child.signalCode != null) return;
+      try { process.kill(-child.pid, 'SIGTERM'); stalled = true; } catch { try { stalled = child.kill('SIGTERM'); } catch { stalled = false; } }
+      if (stalled) log.warn?.(`[browser] browser CLI install ${v0.spec}: npm ran past ${INSTALL_TIMEOUT_MS} ms — stopped`);
+    }, INSTALL_TIMEOUT_MS);
+    if (typeof deadline.unref === 'function') deadline.unref();
+    child.on('error', (e) => { clearTimeout(deadline); finishCli(v0.version, `npm could not run: ${e && e.message}`); });
+    child.on('exit', (code, sig) => { clearTimeout(deadline); finishCli(v0.version, code === 0 && !stalled ? null : stalled ? stalledWords('npm') : `npm exited ${code ?? sig} — see ${installState.log}`); });
+    log.log?.(`[browser] installing ${v0.spec} into ${prefix} (a user act; the registry only, --ignore-scripts; log ${installState.log})`);
+    notify();
+    return { ok: true, started: true, spec: v0.spec, version: v0.version, prefix, log: installState.log, pid: child.pid || null, record: v0.record };
+  }
+  /** The install's END (its exit here, or — after a restart — the re-attached pid gone): verified off the folder (its own
+   *  package.json names the version, its program runs and SAYS the version), the marker removed, the pin re-read. */
+  let cliFinishing = false;
+  async function finishCli(version, err) {
+    if (cliFinishing || !(installState.running && installState.kind === 'cli')) return;
+    cliFinishing = true;
+    let e = err;
+    try {
+      // the registry's tarball ships every native binary 0644 (measured on 0.38.1: only bin/agent-browser.js is 0755) and
+      // the package's own scripts never ran (--ignore-scripts) — make THIS machine's binary executable, exactly what the
+      // package's launcher / postinstall does on its first run, so a command runs it directly
+      if (!e) {
+        try {
+          const native = VERBS.cliNativeName({ platform: process.platform, arch: process.arch, musl: isMusl() });
+          const nat = native ? path.join(cliPrefix(version), 'node_modules', VERBS.CLI_PACKAGE, 'bin', native) : null;
+          if (nat && fs.statSync(nat).isFile() && !usableExe(nat)) fs.chmodSync(nat, 0o755);
+        } catch { /* absent ⇒ the declared launcher answers */ }
+      }
+      if (!e) {
+        const i = cliFolderOf(version); // the folder's own program — its witness is written below, once it said the version
+        if (!i.ok) e = `${VERBS.CLI_PACKAGE} ${version} is not usable after the install (${i.why})`;
+        else {
+          installState.step = 'verify';
+          const out = await new Promise((resolve) => { try { require('child_process').execFile(i.path, ['--version'], { timeout: 15000, encoding: 'utf8', env: F.sanitizeProbeEnv({ ...(env() || {}), PATH: (env() || {}).PATH || process.env.PATH || '' }) }, (er, so, se) => resolve(String(so || '') + String(se || ''))); } catch (x) { resolve(''); } });
+          const got = B.parseVersion(out);
+          if (!got || got.join('.') !== String(version)) e = `the installed program says ${got ? got.join('.') : 'nothing'}, not ${version}`;
+          else writeJsonAtomic(cliWitnessOf(i.prefix), { version: String(version), path: i.path, at: now(), says: got.join('.') }); // verify r1 (F2): THE witness — only now is the folder an install
+        }
+      }
+    } catch (x) { e = String(x && x.message || x); }
+    if (e) { try { fs.rmSync(cliWitnessOf(cliPrefix(version)), { force: true }); } catch { /* none */ } } // a failed install's folder is never resolved
+    try { fs.rmSync(installMarker(), { force: true }); } catch { /* none */ }
+    Object.assign(installState, { running: false, finishedAt: now(), exitCode: e ? 1 : 0, error: e ? `${installState.step || 'package'}: ${e}` : null, step: e ? installState.step : 'done', pid: null });
+    cliGen++; cliMemo = null; try { cliPin(); } catch { /* said */ }
+    cliFinishing = false;
+    log[e ? 'warn' : 'log']?.(`[browser] browser CLI install ${VERBS.CLI_PACKAGE}@${version} ${e ? 'failed — ' + e : 'finished'}`);
+    notify();
+  }
+  /** verify r1 (F3): a CLOAKBROWSER install that was running when VibeSpace went down — its step's process is gone now;
+   *  the previous server's verify (the egress proxy's evidence, the SHA check, the stamp) never ran, so what is on disk is
+   *  judged NOW: a stamp already written ⇒ it had finished; a browser whose SHA-256 is the measured one ⇒ stamped (the
+   *  download had completed); anything else ⇒ failed BY NAME — install again (a finished download is reused, never
+   *  fetched twice; a partial unpack is removed by the next run's own marker). */
+  async function finishCloakAfterRestart(m, { stalled = false, letGo = false } = {}) {
+    let e = null;
+    try {
+      const st = installedStamp();
+      if (!st.ok) {
+        const bin = installedCloakBin();
+        const pr = proofOf(); const want = pr && pr.binary && pr.binary.sha256;
+        if (bin && usableExe(bin) && want) {
+          const got = await sha256Of(bin);
+          if (got === want) writeJsonAtomic(stampFile, { chromium: pr.chromium, version: String(m.spec || '').split('@')[1] || null, sha256: got, path: path.relative(installDir, bin), at: now() });
+          else e = `VibeSpace restarted during the install (step ${m.step || '?'}); the browser on disk has SHA-256 ${got}, not the measured ${want} — it is not used; remove ${path.dirname(bin)} and install again`;
+        } else e = stalled ? `VibeSpace restarted during the install, and its ${stalledWords(`${m.step || 'package'} step`)}` : letGo ? `VibeSpace restarted during the install; its ${m.step || 'package'} step (pid ${m.pid}) ran past its deadline and could not be proven to be it — VibeSpace stopped waiting; install again` : `VibeSpace restarted during the install (step ${m.step || '?'}) — it was not verified; install again (a finished download is reused, not fetched twice)`;
+      }
+    } catch (x) { e = `VibeSpace restarted during the install — ${x && x.message ? x.message : String(x)}; install again`; }
+    try { fs.rmSync(installMarker(), { force: true }); } catch { /* none */ }
+    Object.assign(installState, { running: false, finishedAt: now(), exitCode: e ? 1 : 0, error: e ? `${m.step || 'package'}: ${e}` : null, step: e ? (m.step || 'package') : 'done', pid: null });
+    log[e ? 'warn' : 'log']?.(`[browser] CloakBrowser install ${m.spec} after a restart: ${e || 'verified from what it left — installed'}`);
+    notify();
+  }
+  /** A server restart mid-install RE-ATTACHES (the marker names the running step's pid — the CLI install's npm, or any step
+   *  of the CloakBrowser install, verify r1 F3): still running ⇒ the slot stays busy until it exits; gone ⇒ its result is
+   *  judged now. Never a second install. */
+  function reattachInstall() {
+    let m = null; try { m = JSON.parse(fs.readFileSync(installMarker(), 'utf8')); } catch { return null; }
+    if (!m || !['cli', 'cloak'].includes(m.kind) || !Number.isInteger(m.pid)) { try { fs.rmSync(installMarker(), { force: true }); } catch { /* none */ } return null; }
+    Object.assign(installState, { running: true, kind: m.kind, spec: m.spec || null, startedAt: m.startedAt || now(), finishedAt: null, exitCode: null, pid: m.pid, error: null, step: m.step || 'package', refused: [] });
+    const alive = () => F.pidAlive(m.pid) && (m.starttime == null || F.sameProcess(m.pid, m.starttime));
+    // verify r1 (F8): the re-attached step keeps its wall clock — from the marker's `stepAt` (its step's start), so a step
+    // that stalls before or across a restart ends at the same deadline it had; a step that cannot be proven ours is let go
+    const deadlineAt = (Number(m.stepAt) || Number(m.startedAt) || now()) + INSTALL_TIMEOUT_MS;
+    let stalled = false, letGo = false;
+    const done = () => (m.kind === 'cli' ? finishCli(String(m.version), stalled ? stalledWords('npm') : letGo ? `the install from before the restart (pid ${m.pid}) ran past its deadline and could not be proven to be it — VibeSpace stopped waiting; install again` : null) : finishCloakAfterRestart(m, { stalled, letGo }));
+    if (!alive()) { log.log?.(`[browser] a${m.kind === 'cli' ? ' browser CLI' : ' CloakBrowser'} install (${m.spec}) ended while VibeSpace was down — checking its result`); done(); return 'ended'; }
+    log.log?.(`[browser] re-attached to the running ${m.kind === 'cli' ? 'browser CLI' : 'CloakBrowser'} install ${m.spec} (${m.step || 'package'} pid ${m.pid}) — no second install starts`);
+    const timer = setInterval(() => {
+      if (!alive()) { clearInterval(timer); done(); return; }
+      if (stalled || now() < deadlineAt) return;
+      stalled = endStalledStep({ pid: m.pid, starttime: m.starttime, group: m.kind === 'cli' });
+      log.warn?.(`[browser] the re-attached ${m.kind} install ${m.spec} (pid ${m.pid}) ran past its deadline — ${stalled ? 'stopped' : 'not provably ours: the slot is released'}`);
+      if (!stalled) { letGo = true; clearInterval(timer); done(); }
+    }, 1000);
+    if (typeof timer.unref === 'function') timer.unref();
+    return 'running';
+  }
+  const reattached = reattachInstall();
   /** The directory's own `Last Version` stamp (read-only): the major that
    *  actually wrote it, the primary evidence beside the registry's copy. */
   function readDirMajor(dir) {
@@ -4347,7 +5217,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     };
     // lane-cloak: `sitesOf` = what a cloak browser may open behind the egress proxy (the ready card says when it is none)
     const rows = SW.switcherRows({ profile: p, providerIds: B.providerIds(), rowOf, controlOf: control, capabilityRefusalOf: B.capabilityRefusal, sources: (id) => keysOf().sourceOf(id), seats: reg.seats, majors: reg.majors, dirMajor, now: now(), runningOf, leases, inputs: inputsView({ withHumans: !forAgent }), binaryOf, install, keyRequiredOf: keyRequired, sitesOf: (id) => (id === 'cloak' && !p.host ? cloakRunList() : null), humans: forAgent ? [] : humanRowsOn(p.id) });
-    return { profile: B.publicProfileView(p), chip: chipFor(p), rows, seats: seatStates(), siteHints: reg.siteHints.map((h) => ({ ...h })), blocked: blockedFor({ profileId: p.id }), leases: leasesOn(p.id), switching: switching.has(p.id), live: B.isLiveBrowser(reg.browsers[p.id]), versions: { recorded: p.lastChromiumMajor, dir: dirMajor, majors: { ...reg.majors } }, install };
+    const rec1 = reg.browsers[p.id] || null; // lane browser-admin 2a: the Chrome build line (chromium only) — the choice + the build its browser reports
+    return { build: String(p.provider || 'chromium') === 'chromium' ? { choice: forAgent ? BB.agentChoiceView(p.browser) : BB.choiceView(p.browser), running: rec1 ? BB.runningBuildOf(rec1.cdpBrowser) : null, missing: p.buildMissing ? (forAgent ? BB.agentMissingView(p.buildMissing) : { ...p.buildMissing }) : null, live: B.isLiveBrowser(rec1) } : null, /* verify r1 (F5): an agent's view names a chrome file by kind only */ profile: B.publicProfileView(p), chip: chipFor(p), rows, seats: seatStates(), siteHints: reg.siteHints.map((h) => ({ ...h })), blocked: blockedFor({ profileId: p.id }), leases: leasesOn(p.id), switching: switching.has(p.id), live: B.isLiveBrowser(reg.browsers[p.id]), versions: { recorded: p.lastChromiumMajor, dir: dirMajor, majors: { ...reg.majors } }, install };
   }
   /**
    * THE SWITCH (§7.4's sequence, the gate first and nothing moving until it
@@ -4420,37 +5291,220 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         if (e && typeof e === 'object') { e.restored = restored; e.from = from; e.to = to; throw e; }
         throw namedError('launch_failed', String(e), { restored, from, to });
       }
-      const ns = nsOf(p.id);
-      const pinTab = !!(bf.lastVersion() !== undefined && B.floorVerdict(bf.lastVersion()).sharedProfiles);
-      for (const l of leases) {
-        const url = l.lastUrl || 'about:blank';
-        let targetId = null, ok = false, error = null;
-        try {
-          // naive study 2: the keeper's own re-open reaches the NEW browser over its CDP url under the lease's session —
-          // never the directory (a second Chrome on it dies on SingletonLock); a mediated lease's tab is admitted below
-          const o = await leaseCliOpts(p.id, l.browserKey);
-          if (!o) throw new Error(noCdpError(p));
-          // lane-cloak (the first switch on the REAL binaries, 2026-09-28): the lease's session is PINNED to its tab in the
-          // browser that was just stopped — 0.38.1's pin is sticky per session, so `--pin-tab open <url>` answered
-          // `tab_gone` ("bound tab is gone … Run `tab new <url>`") and every later verb of the lease did too; `tab new` is
-          // the binary's own recovery: it opens the tab in the NEW browser and binds the session to it
-          const r = await rt.exec(ns, [...(pinTab ? ['--pin-tab'] : []), 'tab', 'new', url], o);
-          ok = !!r.ok;
-          const d = r.json && r.json.data && typeof r.json.data === 'object' ? r.json.data : null;
-          targetId = d ? (d.targetId || d.tabId || d.id || null) : null;
-          if (!ok) error = (r.stderr || r.error || '').trim().slice(0, 200) || 'open failed';
-        } catch (e) { error = String(e && e.message); }
-        // the SAME lease object: only targetId is re-minted (§7.4 step 5)
-        l.targetId = targetId ? String(targetId) : null;
-        l.reopenedAt = now();
-        if (mediator && isMediated(p) && l.targetId) mediator.admitTarget(p.id, l.browserKey, l.targetId); // P6: the re-opened tab is the lease's
-        reopened.push({ browserKey: l.browserKey, url, ok, targetId: l.targetId, error });
-      }
+      reopened.push(...await reopenLeaseTabs(p, leases));
       if (v.ladder && Number.isInteger(v.ladder.recordMajor)) p.lastChromiumMajor = Math.max(Number(p.lastChromiumMajor) || 0, v.ladder.recordMajor);
       commit();
       log.log?.(`[browser] ${p.id} "${p.label}" switched ${from} → ${to} by ${by.kind}${browserKey ? ' ' + browserKey : ''}: ${reopened.length} lease tab(s) re-opened${v.seedMinted ? ', seed minted' : ''}${v.ladder && v.ladder.disagreement ? ', version stamps disagreed (' + v.ladder.disagreement.recorded + ' vs ' + v.ladder.disagreement.dir + ', took ' + v.ladder.disagreement.taken + ')' : ''}`);
       return { ok: true, mode: 'switch', from, to, seed: p.fingerprintSeed, seedMinted: v.seedMinted, fingerprint: v.fingerprint, ladder: v.ladder, seats: v.seats, reopened, browser, chip: chipFor(p), profile: B.publicProfileView(p) };
     } finally { switching.delete(p.id); commit(); }
+  }
+  // ── lane browser-admin 2a: CHANGE BUILD… — which Chrome build a profile runs (the user's act; the route is cookie-only) ──
+  const relaunchListeners = new Set();
+  /** The relaunch seam (the handback announcer hangs on it): one event per conversation leased on a browser that a
+   *  Change build… restarts — `{browserKey, profileId, sessionId, label, from, to, outcome, n, verbs, aborted}`, sent once the
+   *  restart's outcome is known (verify r1 F9: `changed` | `restored` | `down`). Never the input
+   *  seam: a restart is not a takeover (the live view's relay must not read it as one). */
+  function onRelaunch(fn) { relaunchListeners.add(fn); return () => relaunchListeners.delete(fn); }
+  /** INTERRUPT ONE HOLDER, before its browser stops (the takeover's rule — never a silent restart under a holder): what it
+   *  has in flight is interrupted NOW (a mediated lease's calls cut by the proxy — `M.interruptPlan` — a running script
+   *  asked to stop) and what was in flight is read off the trace at the instant; the announcer's ONE card + ONE zero-spend
+   *  notice follow with the outcome (`tellRelaunch`). → `{browserKey, n, verbs, ev}`. */
+  function interruptForRelaunch(p, l, { from, to }) {
+    let ab = null;
+    if (mediator && isMediated(p) && typeof mediator.interrupt === 'function') { try { ab = mediator.interrupt({ profileId: p.id, browserKey: l.browserKey }); } catch (e) { log.warn?.(`[browser] ${l.browserKey} on ${p.id}: the relaunch's interrupt failed — ${e && e.message}`); } }
+    let inFlight = [];
+    if (typeof inFlightReader === 'function') { try { inFlight = inFlightReader({ sessionId: l.sessionId || null, browserKey: l.browserKey, profileId: p.id, at: now() }) || []; } catch (e) { inFlight = []; log.warn?.(`[browser] ${l.browserKey}: the in-flight reader failed — ${e && e.message}`); } }
+    const verbs = [...new Set(inFlight.map((x) => x && x.verb).filter(Boolean).map(String))];
+    const ev = { kind: 'relaunch', cause: 'build', browserKey: l.browserKey, profileId: p.id, sessionId: l.sessionId || null, label: p.label, from: BB.buildWords(from), to: BB.buildWords(to), n: inFlight.length, verbs, aborted: ab && Array.isArray(ab.aborted) ? ab.aborted.length : 0 };
+    return { browserKey: l.browserKey, n: inFlight.length, verbs, ev };
+  }
+  /** verify r1 (F9): THEN TELL IT WHAT HAPPENED — after the restart's outcome (`changed` | `restored`: the new build did not
+   *  start, the old one runs again | `down`: neither started); the card + the notice said "restarted on <the new build>,
+   *  your tab reopened" before the stop, true or not. → the told rows (`{browserKey, n, verbs, outcome}`). */
+  function tellRelaunch(pre, outcome) {
+    return pre.map(({ ev, ...row }) => {
+      for (const fn of relaunchListeners) { try { fn({ ...ev, outcome, verbs: [...ev.verbs] }); } catch (e) { log.warn?.(`[browser] a relaunch listener threw — ${e && e.message}`); } }
+      return { ...row, outcome };
+    });
+  }
+  /** Was this profile's directory ever written by a browser (the version ladder's precondition — a fresh directory has
+   *  nothing a build could be older than)? */
+  function dirWritten(p) {
+    if (Number.isInteger(p.lastChromiumMajor)) return true;
+    if (!p.dir || p.host) return false;
+    try { return fs.statSync(path.join(String(p.dir), 'Last Version')).isFile(); } catch { return false; }
+  }
+  /** What Change build… shows: the machine's builds, the profile's choice, the build its browser RUNS (its own answer),
+   *  who would be told. Never a write. */
+  async function buildsView(profileId) {
+    ensureLoaded();
+    const p = profile(profileId);
+    if (!p || isEph(p)) throw namedError('not-found', `no profile ${profileId}`);
+    const rec = reg.browsers[p.id] || null;
+    const listing = await buildsFor(p.host || null);
+    return {
+      profileId: p.id, label: p.label, provider: p.provider, host: p.host || null, choice: BB.choiceView(p.browser), missing: p.buildMissing ? { ...p.buildMissing } : null,
+      listing, live: B.isLiveBrowser(rec), running: rec ? BB.runningBuildOf(rec.cdpBrowser) : null, holders: reg.leases.filter((l) => l.profileId === p.id).length,
+      browsing: !!humans.get(p.id), switching: switching.has(p.id), lastChromiumMajor: Number.isInteger(p.lastChromiumMajor) ? p.lastChromiumMajor : null,
+      driven: (() => { const h = SW.holdOf(reg.leases.filter((l) => l.profileId === p.id), inputsView({ withHumans: false })); return h.hold === 'driven' ? h.driver : null; })(), // verify r1 (F1): who drives it by hand (a takeover) — the dialog says it, the change is refused
+      installCommand: installCommandFor(p.host || null),
+    };
+  }
+  /** lane browser-admin 2c (HELD — the user's own act, by hand): the command that adds a Chrome build on a machine — this
+   *  machine's REAL browser CLI by its path (in a VibeSpace terminal the bare name is the agent's shim), a paired
+   *  machine's by name. The CLI's `install` takes no version: it installs the current Chrome for Testing. */
+  function installCommandFor(hostId = null) {
+    // the USER's command (the panel only — never an agent answer): the real CLI by its path here, by its name there
+    const bare = `${VERBS.REAL_BINARY} install`;
+    if (hostId) return bare;
+    const b = typeof bf.binPath === 'function' ? bf.binPath() : null;
+    return b ? `${/[\s"'$`\\]/.test(b) ? JSON.stringify(b) : b} install` : bare;
+  }
+  /** The New profile… dialog's build section: a machine's builds before any profile exists. */
+  async function machineBuilds(hostId = null) { return { host: hostId || null, listing: await buildsFor(hostId || null), installCommand: installCommandFor(hostId || null) }; }
+  /**
+   * CHANGE BUILD… (lane browser-admin 2a). THE verdict (well-formed · the user's · chromium · on that machine's list /
+   * a runnable file · the §7.4 version ladder when the directory was ever written — a downgrade refused by name, an
+   * unknown one only with `confirmed`), then: a browser that is not running just records the choice (the next launch
+   * runs it); a RUNNING browser restarts — every conversation leased on it is told first (`tellRelaunch`), its agent
+   * commands meanwhile answer `browser_restarting`, the browser stops (`why:'switch'` — a takeover stands, the session
+   * ends "switched"), the choice is written, the browser starts on the new build and every lease's tab reopens at its
+   * last URL. A start that fails puts the old choice back and starts that once (`restored`), answering the refusal.
+   * The user browsing it himself is refused by name (his tab would close under him — the Restart rule); so is a browser
+   * the user DRIVES from a live view (`browser_driven`, verify r1 — the switch's `driving` rule: never under his hands).
+   */
+  async function setBrowserChoice({ profileId, choice, confirmed = false, by = 'user' } = {}) {
+    ensureLoaded();
+    const p = profile(profileId);
+    if (!p || isEph(p)) throw namedError('not-found', `no profile ${profileId}`);
+    if (switching.has(p.id)) { const rr = SW.restartingRefusal(p); throw namedError(rr.code, rr.error); }
+    const refuseBrowsing = () => { if (humans.get(p.id) || browsing.has(p.id)) throw namedError('browsing_yourself', HM.humanRefusalText('browsing_yourself', { label: p.label, act: 'restart' })); }; // verify r2 (H2): his tab being OPENED (Browse yourself in flight) is his too
+    refuseBrowsing();
+    // verify r1 (F1): a browser the user is DRIVING right now (a takeover from a live view) is never restarted under his
+    // hands — the backend switch's own rule (switchVerdict's `driving` ⇒ a proposal, never a stop); here the user's act is
+    // refused BY NAME, the driver named, and asked again after the listing's await (a takeover can land during it)
+    const drivenNow = () => SW.holdOf(reg.leases.filter((l) => l.profileId === p.id), inputsView({ withHumans: false }));
+    const refuseDriven = (h) => { throw namedError('browser_driven', `"${p.label}" is being driven by hand right now (the live view of ${h.driver}) — hand the browser back first, then change its build`, { driver: h.driver }); };
+    { const h = drivenNow(); if (h.hold === 'driven') refuseDriven(h); } // (1) before anything is read
+    const c = BB.normalizeBrowserChoice(choice);
+    if (!c) throw namedError('browser_choice_invalid', 'a browser build is {kind:"default"} | {kind:"build", version} | {kind:"path", path}');
+    if (BB.sameChoice(c, p.browser)) throw namedError('build_noop', `"${p.label}" already runs ${BB.buildWords(c)}`);
+    const builds = c.kind === 'build' ? await buildsFor(p.host || null) : null;
+    const dirMajor = p.host ? null : readDirMajor(p.dir);
+    const v = BB.browserChoiceVerdict({ choice: c, provider: p.provider, by, builds, pathFact: c.kind === 'path' && !p.host ? BB.fileFact(c.path) : null, machine: p.host || 'this computer', label: p.label,
+      recordedMajor: Number.isInteger(p.lastChromiumMajor) ? p.lastChromiumMajor : null, dirMajor, written: dirWritten(p), ladder: true, confirmed: !!confirmed });
+    if (!v.ok) throw namedError(v.code, v.error, { needsConfirm: !!v.needsConfirm, waysOut: v.waysOut || [], version: c.kind === 'build' ? c.version : null, wrote: v.wrote != null ? v.wrote : null });
+    if (switching.has(p.id)) { const rr = SW.restartingRefusal(p); throw namedError(rr.code, rr.error); } // re-asked after the listing's await
+    { const h = drivenNow(); if (h.hold === 'driven') refuseDriven(h); } // (2) re-asked after the listing's await
+    refuseBrowsing(); // verify r2 (H2): …and his own browsing, begun during it
+    const was = p.browser ? { ...p.browser } : null;
+    const from = BB.choiceView(was), to = BB.choiceView(c);
+    const rec0 = reg.browsers[p.id];
+    const wasLive = B.isLiveBrowser(rec0);
+    const leases = reg.leases.filter((l) => l.profileId === p.id);
+    const setChoice = (x) => { if (!x || x.kind === 'default') delete p.browser; else p.browser = { ...x }; delete p.buildMissing; };
+    switching.add(p.id);
+    let told = [];
+    try {
+      if (!wasLive) {
+        setChoice(c); commit();
+        log.log?.(`[browser] ${p.id} "${p.label}": its Chrome build is now ${BB.buildWords(to)} (was ${BB.buildWords(from)}) — not running, the next launch runs it`);
+        return { ok: true, profile: pview(p), from, to, restarted: false, told: [], reopened: [] };
+      }
+      const pre = leases.map((l) => interruptForRelaunch(p, l, { from, to })); // what each holder had in flight is cut NOW, before the stop
+      await stop(p.id, { why: 'switch' });
+      setChoice(c); commit();
+      let browser;
+      try { browser = await start(p.id, { why: `build ${BB.buildWords(from)} → ${BB.buildWords(to)}` }); }
+      catch (e) {
+        setChoice(was); commit();
+        let restored = false;
+        try { await start(p.id, { why: 'build change rolled back' }); restored = true; }
+        catch (e2) { log.warn?.(`[browser] ${p.id} "${p.label}": the build change did not start (${e && e.code}) and the roll back to ${BB.buildWords(from)} did not start either — ${e2 && e2.message}`); }
+        if (restored) await reopenLeaseTabs(p, leases);
+        told = tellRelaunch(pre, restored ? 'restored' : 'down'); // verify r1 (F9): said as it happened
+        log.log?.(`[browser] ${p.id} "${p.label}": the build change ${BB.buildWords(from)} → ${BB.buildWords(to)} did not start (${e && e.code}: ${String(e && e.message).slice(0, 160)}) — put back${restored ? ' and started again' : ' (not started)'}`);
+        if (e && typeof e === 'object') { e.restored = restored; throw e; }
+        throw namedError('launch_failed', String(e), { restored });
+      }
+      const reopened = await reopenLeaseTabs(p, leases);
+      told = tellRelaunch(pre, 'changed'); // verify r1 (F9): said once the new build runs
+      // verify r2 (B5): the change is SETTLING — a loss of this browser inside CHANGE_SETTLE_MS falls back to `was` (the heal
+      // asks first), and every conversation on it is told that second outcome too
+      { const recN = reg.browsers[p.id]; if (recN) recN.buildChange = { at: now(), was: was ? { ...was } : null, from, to, pid: recN.browser ? recN.browser.pid : null }; }
+      commit();
+      log.log?.(`[browser] ${p.id} "${p.label}": Chrome build ${BB.buildWords(from)} → ${BB.buildWords(to)} by the user — restarted, ${told.length} conversation(s) told, ${reopened.filter((r) => r.ok).length}/${reopened.length} tab(s) reopened${browser && browser.runningBuild ? ', running ' + browser.runningBuild : ''}`);
+      return { ok: true, profile: pview(p), from, to, restarted: true, told, reopened, browser };
+    } finally { switching.delete(p.id); commit(); }
+  }
+  /** verify r2 (B5): THE FALL-BACK — the new build closed within CHANGE_SETTLE_MS of the change: under `switching` (an agent
+   *  command answers browser_restarting, a takeover is refused by name — H2), every holder's calls cut, the browser stopped,
+   *  the choice put back to the build it replaced, that build started, the lease tabs reopened ONCE in it, and every
+   *  conversation told the second outcome (`fell-back` — on the old build again | `fell-down` — on neither); the user gets
+   *  ONE For-you notice naming the build. Single-flight with the heal (`healing`). */
+  function fallBackFromChange(rec, p, seenBy) {
+    if (healing.has(p.id)) return healing.get(p.id);
+    const bc = rec.buildChange; rec.buildChange = null; dirty = true;
+    const pr = (async () => {
+      if (switching.has(p.id) || stopping.has(p.id)) return null;
+      switching.add(p.id);
+      let restored = false;
+      try {
+        const leases = reg.leases.filter((l) => l.profileId === p.id);
+        const pre = leases.map((l) => interruptForRelaunch(p, l, { from: bc.from, to: bc.to }));
+        log.warn?.(`[browser] ${p.id} "${p.label}": ${BB.buildWords(bc.to)} closed within ${Math.round((now() - Number(bc.at || 0)) / 1000)} s of the change (seen by ${seenBy}) — falling back to ${BB.buildWords(bc.from)}`);
+        await stop(p.id, { why: 'switch' });
+        if (bc.was && bc.was.kind && bc.was.kind !== 'default') p.browser = { ...bc.was }; else delete p.browser;
+        delete p.buildMissing;
+        commit();
+        try { await start(p.id, { why: `build change rolled back (${BB.buildWords(bc.to)} closed within seconds)` }); restored = true; }
+        catch (e) { log.warn?.(`[browser] ${p.id} "${p.label}": the fall back to ${BB.buildWords(bc.from)} did not start either — ${e && e.message}`); }
+        const reopened = restored ? await reopenLeaseTabs(p, leases) : [];
+        const toldFb = tellRelaunch(pre, restored ? 'fell-back' : 'fell-down');
+        log.log?.(`[browser] ${p.id} "${p.label}": fell back to ${BB.buildWords(bc.from)} — ${restored ? 'started' : 'NOT started'}, ${toldFb.length} conversation(s) told, ${reopened.filter((x) => x.ok).length}/${reopened.length} tab(s) reopened`);
+        if (userTodos && typeof userTodos.add === 'function') {
+          const text = `Agent browser "${p.label}": ${BB.buildWords(bc.to)} closed within seconds of starting — ${restored ? `it is back on ${BB.buildWords(bc.from)}` : `${BB.buildWords(bc.from)} did not start again either; it is not running (the next browser command starts it on ${BB.buildWords(bc.from)})`}`;
+          try { userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', text, detail: `The Chrome build of "${p.label}" was changed from ${BB.buildWords(bc.from)} to ${BB.buildWords(bc.to)}; that build started and then closed, so VibeSpace put the profile back on ${BB.buildWords(bc.from)}${restored ? ' and started it again' : ''}. Change build… in the Agent browser panel tries another one.`, sessionName: 'Agent browser' }); }
+          catch (e) { log.warn?.(`[browser] ${p.id}: the fall back's For-you notice was not filed — ${e && e.message}`); }
+        }
+      } finally { switching.delete(p.id); commit(); }
+      return null;
+    })();
+    healing.set(p.id, pr);
+    return pr.finally(() => { if (healing.get(p.id) === pr) healing.delete(p.id); });
+  }
+  /** §7.4 step 4, shared by the backend switch and Change build… (lane browser-admin 2a): every lease's tab re-opened in
+   *  the NEW browser at its last URL, under the lease's own session over the CDP url (never the directory), the SAME
+   *  lease object kept with only its targetId re-minted. → `[{browserKey, url, ok, targetId, error}]`. */
+  async function reopenLeaseTabs(p, leases) {
+    const ns = nsOf(p.id);
+    const reopened = [];
+    const pinTab = !!(bf.lastVersion() !== undefined && B.floorVerdict(bf.lastVersion()).sharedProfiles);
+    for (const l of leases) {
+      const url = l.lastUrl || 'about:blank';
+      let targetId = null, ok = false, error = null;
+      try {
+        // naive study 2: the keeper's own re-open reaches the NEW browser over its CDP url under the lease's session —
+        // never the directory (a second Chrome on it dies on SingletonLock); a mediated lease's tab is admitted below
+        const o = await leaseCliOpts(p.id, l.browserKey);
+        if (!o) throw new Error(noCdpError(p));
+        // lane-cloak (the first switch on the REAL binaries, 2026-09-28): the lease's session is PINNED to its tab in the
+        // browser that was just stopped — 0.38.1's pin is sticky per session, so `--pin-tab open <url>` answered
+        // `tab_gone` ("bound tab is gone … Run `tab new <url>`") and every later verb of the lease did too; `tab new` is
+        // the binary's own recovery: it opens the tab in the NEW browser and binds the session to it
+        const r = await rt.exec(ns, [...(pinTab ? ['--pin-tab'] : []), 'tab', 'new', url], o);
+        ok = !!r.ok;
+        const d = r.json && r.json.data && typeof r.json.data === 'object' ? r.json.data : null;
+        targetId = d ? (d.targetId || d.tabId || d.id || null) : null;
+        if (!ok) error = (r.stderr || r.error || '').trim().slice(0, 200) || 'open failed';
+      } catch (e) { error = String(e && e.message); }
+      // the SAME lease object: only targetId is re-minted (§7.4 step 5)
+      l.targetId = targetId ? String(targetId) : null;
+      l.reopenedAt = now();
+      if (mediator && isMediated(p) && l.targetId) mediator.admitTarget(p.id, l.browserKey, l.targetId); // P6: the re-opened tab is the lease's
+      reopened.push({ browserKey: l.browserKey, url, ok, targetId: l.targetId, error });
+    }
+    return reopened;
   }
   /** `vibespace-browser blocked` — record the agent's CLAIM (who, which URL,
    *  why, what evidence, which tier it suggests). Bounded; one per
@@ -4790,6 +5844,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       else {
         rec.state = v.state; rec.lastError = v.lastError; rec.endedAt = now(); log.warn?.(`[browser] ${rec.profileId} ${v.state} at boot: ${v.lastError}`);
         if (isEph(p)) keptNote('stop', p, { why: 'restart' }); // lane browser-resume: it died while VibeSpace was down — its last persisted tabs are kept (D2: reopened at its next start)
+        else tabsLost(rec.profileId, 'a boot that could not adopt it (a pod roll, a crash while VibeSpace was down)'); // lane profile-lock-roll (L2)
         if (daemonGone(rec)) reapOrphan(rec, 'boot'); // r2 M1: the daemon died while VibeSpace was down — its browser is ended too
       }
     }
@@ -4814,6 +5869,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // ── the tick: carrier grace, idle, the resource REPORT ──
   async function tick() {
     ensureLoaded();
+    warmCliVersions(); // verify r3 (Y1): the row's sync readers see a replaced binary's version within a tick
     const t = now();
     const r = reconcile({ graceMs: B.LEASE_DROP_GRACE_MS });
     if (r.dropped.length || r.stamped.length) dirty = true;
@@ -4938,7 +5994,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const pairs = pairsOf(e.profileId);
       if (!pairs || !pairs.length) return { ok: false, port: null, code: 'not_managed', error: 'this helper\'s browser has no recorded pairs on this server — it cannot be viewed' };
       const r = await rt.streamPort(null, { extraEnv: S.pairsToEnv(pairs) });
-      return r.ok ? { ok: true, port: r.port, error: null, code: null } : { ok: false, port: null, code: 'stream_unavailable', error: r.error };
+      return r.ok ? { ok: true, port: r.port, error: null, code: null } : { ok: false, port: null, code: r.code === 'browser_cli_gone' ? r.code : 'stream_unavailable', error: r.error };
     }
     if (target.kind === 'ephemeral') {
       // lane H (measured on 0.32.0: `stream status` with no daemon STARTS one under the pairs): a conversation's
@@ -4963,7 +6019,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         if (!info || !info.active) return { ok: false, port: null, code: 'no-browser', state: 'not-started', error: 'this conversation has not opened its browser yet — its next command starts it' };
       }
       const r = await rt.streamPort(null, { extraEnv: S.pairsToEnv(target.envPairs) });
-      return r.ok ? { ok: true, port: r.port, error: null, code: null } : { ok: false, port: null, code: 'stream_unavailable', error: r.error };
+      return r.ok ? { ok: true, port: r.port, error: null, code: null } : { ok: false, port: null, code: r.code === 'browser_cli_gone' ? r.code : 'stream_unavailable', error: r.error };
     }
     const p = profile(target.profileId);
     if (!p) return { ok: false, port: null, code: 'not-found', error: `no profile ${target.profileId}` };
@@ -4995,14 +6051,14 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       sayRetiredSwitch();
       const g = await mediator.grantFor({ profileId: p.id, browserKey: bk, upstream: rec.cdpUrl, paused: () => inputStateFor(bk, p.id).input === 'user' });
       const r = await rt.streamPort(M.mediatedNamespace(p.id, bk), { session: target.sessionName, extraEnv: { AGENT_BROWSER_CDP: g.url, AGENT_BROWSER_IDLE_TIMEOUT_MS: String(idleMs()) } });
-      return r.ok ? { ok: true, port: r.port, error: null, code: null } : { ok: false, port: null, code: 'stream_unavailable', error: r.error };
+      return r.ok ? { ok: true, port: r.port, error: null, code: null } : { ok: false, port: null, code: r.code === 'browser_cli_gone' ? r.code : 'stream_unavailable', error: r.error };
     }
     // naive study 2: the lease's own session over the keeper browser's CDP url — never the directory (on 0.38.1 a
     // `stream status` under the lease's session with the directory STARTS a second Chrome, which dies on SingletonLock)
     const o = await leaseCliOpts(p.id, String(target.sessionName || '').replace(/^vs-/, ''));
     if (!o) return { ok: false, port: null, code: 'browser_no_cdp', error: noCdpError(p) };
     const r = await rt.streamPort(target.ns, { session: target.sessionName, extraEnv: o.extraEnv });
-    return r.ok ? { ok: true, port: r.port, error: null, code: null } : { ok: false, port: null, code: 'stream_unavailable', error: r.error };
+    return r.ok ? { ok: true, port: r.port, error: null, code: null } : { ok: false, port: null, code: r.code === 'browser_cli_gone' ? r.code : 'stream_unavailable', error: r.error };
   }
 
   /** lane J (inc-muhgv0fb-9i4u): the PAGE's own viewport reading for a live
@@ -5189,11 +6245,14 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
 
   const api = {
     list, profile, profileByRef, browserOf, leasesFor, leasesOn, createProfile, adoptDirectory, removeProfile,
-    machineDisplay, noDisplayMode, // lane headless-fallback: this machine's display now (a fresh probe — Settings' read-only line) + the no-display setting
+    buildsFor, buildsView, machineBuilds, setBrowserChoice, onRelaunch, // lane browser-admin 2a: Change build…
+    cliPin, cliFacts, cliFactReady, installCli, _reattached: () => reattached, // lane browser-admin 2b: the browser CLI VibeSpace drives (verify r3: cliFactReady = the doors' fact, the candidates asked first)
+    machineDisplay, noDisplayMode, headedSetting, // lane headless-fallback (+ H5: the stored window preference, for Settings' fact line): this machine's display now (a fresh probe — Settings' read-only line) + the no-display setting
     reshapeStore: (fn) => { ensureLoaded(); const r = fn(reg); commit(); return r; }, // MIGRATIONS ONLY (2026-09-runaway-parks-void): reshape the in-memory registry, then the ONE atomic save
     usageOf: (id) => { const l = live.get(id); return l ? { ...l } : null; }, // 2026-09-25: the Browser panel's memory cell (memBytes + memMetric, over)
     // takeover C3 (design-browser-takeover §5): the managed ephemeral browser + the ceiling's count seam
     ensureEphemeral, retireEphemeral, ephemerals, ephemeralFor, isEphemeral: (id) => isEph(profile(id)), nsOf,
+    restoreRebound: keepRebound, // verify r3 (F4): the route puts a note back when the answer that carried it could not be delivered (the client gone)
     liveHoldingFor, // lane H: the session card / status chip's `browserLive` fact
     factView, factFor, pinnedBy, clearPin, removeVerdict, onChange, creditUserInput, // lane S2: THE browser fact, the delete's refuse-or-warn, the re-publish hook, the input receipt's credit
     holdersFor: (browserKey) => { ensureLoaded(); return holders(B.leasesOf(reg.leases, String(browserKey || ''), { children: true })); }, // lane H: THE holder rows of one conversation (the recorder arms only on a holder)
@@ -5244,6 +6303,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // P6 (§6.2 / §6.5): is `sharing:"instance"` a value here; the proxy (the routes ask it nothing directly)
     mediationOn, isMediated, mediator: () => (mediationOn() ? mediator : null),
     storeFile, STORE_FILE, uid, _reg: () => reg, _facts: bf, _runtime: rt,
+    lineageKeyOf, moveDirLineage, // verify r8 (T2 ②): the product's own move of a directory (a Forget) carries its lineage
+
     // lane browser-resume (§3.9): the relay's tab list of a conversation's own browser, the CDP read at a stop, the store
     profileDirRegistered: (dir) => { ensureLoaded(); return !!dir && named().some((p) => p.dir && !p.host && (B.sameDir(p.dir, dir) || F.sameRealDir(p.dir, dir) !== false)); }, // lane browser-resume: a kept directory a named profile registered in place is never removed by the kept store — verify F1: by REAL identity, unknown ⇒ registered (fail closed)
     noteTabs, captureKeptTabs: (profileId, seenBy) => { const pp = profile(String(profileId || '')); return captureKeptTabs(pp, pp ? reg.browsers[pp.id] : null, seenBy || 'a read'); }, keptStore: () => keptStore(),

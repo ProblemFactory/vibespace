@@ -91,6 +91,7 @@ export const ALLOWED_PATTERNS = [
 export const DATA_PATH_CLASSES = [
   'chan-row-title', 'chan-row-sub',
   'chan-search-head', 'chan-search-text',   // a search hit's conversation title / author / message text
+  'chanmsg-dlv',   // lane group-pending: the line under a group message names a RECIPIENT ("Waiting for beta's next turn") — its words are t()'d, the name is data
   'chanwin-bar', 'chanmsg-head', 'chanmsg-body', 'chan-prop-text', 'chan-prop-link', 'chan-prop-orig', 'chan-prop-honesty-line',
   'chan-prop-edit', 'chan-prop-rejectbox',
   'integ-cb-url', 'integ-mask', 'integ-plain', 'chan-flow-input', 'chan-opt-input', 'chan-af-rule',

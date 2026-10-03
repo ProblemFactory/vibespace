@@ -800,12 +800,15 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
       let n; while ((n = walker.nextNode())) { const s = n.nodeValue.trim(); if (!s || !SYM.test(s)) continue; if (n.parentElement.matches('.rx-chip:not(.rx-add) > .rx-glyph')) { rxFaces++; continue; } bad.push(s + ' @ ' + (n.parentElement.className || n.parentElement.tagName)); }
       for (const el of root.querySelectorAll('.chan-ic')) { ic++; if (el.querySelector('svg')) icSvg++; }
     }
+    // lane reaction-hover: the reaction strip has no "+" any more — adding is the message's hover action bar, whose every
+    // button is an SVG with no text (its name in title + aria-label)
     const rxAddAll = roots.reduce((k, r) => k + r.querySelectorAll('.rx-chip.rx-add').length, 0);
-    const rxAdd = roots.reduce((k, r) => k + [...r.querySelectorAll('.rx-chip.rx-add')].filter((b) => b.querySelector('svg') && !b.textContent.trim()).length, 0);
-    return { roots: roots.length, bad, ic, icSvg, rxFaces, rxAdd, rxAddAll };
+    const barAll = roots.reduce((k, r) => k + r.querySelectorAll('.chanmsg-bar .chanmsg-bar-btn').length, 0);
+    const barSvg = roots.reduce((k, r) => k + [...r.querySelectorAll('.chanmsg-bar .chanmsg-bar-btn')].filter((b) => b.querySelector('svg') && !b.textContent.trim() && b.getAttribute('aria-label') && b.title).length, 0);
+    return { roots: roots.length, bad, ic, icSvg, rxFaces, rxAddAll, barAll, barSvg };
   })()`);
   ok(glyphs.roots >= 3 && glyphs.bad.length === 0, '(c) no text-symbol glyph on the panel, a conversation window or the Outbox — every glyph is an SVG (§17); a reaction chip\'s emoji is the reaction itself (content), never chrome', JSON.stringify(glyphs));
-  ok(glyphs.rxAdd === glyphs.rxAddAll, `(c) …and the reaction strip's own chrome — the "+" chip — is an SVG with no text (${glyphs.rxAdd}/${glyphs.rxAddAll}; ${glyphs.rxFaces} reaction face(s) read as content)`, JSON.stringify(glyphs));
+  ok(glyphs.rxAddAll === 0 && glyphs.barAll > 0 && glyphs.barSvg === glyphs.barAll, `(c) …no "+" chip in any strip, and every button of the messages' hover action bars is an SVG with no text, named (${glyphs.barSvg}/${glyphs.barAll}; ${glyphs.rxFaces} reaction face(s) read as content)`, JSON.stringify(glyphs));
   ok(glyphs.ic > 0 && glyphs.ic === glyphs.icSvg, `(c) every icon slot holds an <svg> (${glyphs.icSvg}/${glyphs.ic})`, JSON.stringify(glyphs));
 
   // (d) one colour per meaning, read off the REAL stylesheet: the five state pills are

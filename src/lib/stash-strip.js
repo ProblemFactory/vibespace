@@ -108,13 +108,14 @@ export function createStashStrip({ sessionId }) {
     const inFlight = !!(summary && summary.inFlight);
     const held = Number(summary && summary.held) || 0;
     const reachable = summary && typeof summary.reachable === 'boolean' ? summary.reachable : true;
-    const key = summary && summary.count ? summaryDigest(summary) + '|' + billed + '|' + inFlight + '|' + held + '|' + reachable + '|' + previewDigest(summary) : '';
+    const armed = !!(summary && summary.armed);
+    const key = summary && summary.count ? summaryDigest(summary) + '|' + billed + '|' + inFlight + '|' + held + '|' + reachable + '|' + armed + '|' + previewDigest(summary) : '';
     if (key === st.key) return;
     st.key = key;
     st.summary = key ? summary : null;
     if (!key) { el.hidden = true; return; }
     drawList(summary);
-    const w = stashSummaryWords(summary, t, { billed, inFlight, held, reachable });
+    const w = stashSummaryWords(summary, t, { billed, inFlight, held, reachable, now: Date.now(), armed });   // `now`: a retrying notice names its next attempt relative to this device's clock
     setText(head, w.head);
     setText(parts, ': ' + w.parts.join(', '));
     setText(goLabel, w.button);

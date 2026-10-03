@@ -765,6 +765,12 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
           threadKey = inTopic ? parent.threadKey : `fthr_${digest(`${convId}|${replyTo}`)}`;
           const root = inTopic ? (parent.root || parent.vendorId) : replyTo;
           if (c && !c.records.some((x) => x.vendorId === vendorMessageId)) c.records.push({ vendorId: vendorMessageId, at, author: { id: FAKE_SELF, name: 'Me' }, text: s, replyTo, threadKey, root });
+        } else if (replyTo && placement === 'quote') {
+          // lane reaction-hover (2026-10-01): a QUOTED reply (the window's Quote, an agent's `reply --to` outside a
+          // thread) is ECHOED too, as the vendor lists it — a message in the chat whose parent is the message it
+          // answers, no thread id (Lark: parent_id without reply_in_thread); a plain message is still not echoed
+          const c = getWorld().get(convId);
+          if (c && !c.records.some((x) => x.vendorId === vendorMessageId)) c.records.push({ vendorId: vendorMessageId, at, author: { id: FAKE_SELF, name: 'Me' }, text: s, replyTo });
         }
         // 2026-09-28: the PLACEMENT the registry handed down rides back as the vendor's word (a `thread+chat` reply is
         // the thread reply above, which a Slack-like vendor also shows in the channel — `alsoInChat`)

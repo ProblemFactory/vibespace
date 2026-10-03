@@ -211,6 +211,32 @@ function wantedOf(cfg, { headedEnv = null } = {}) {
 const NO_DISPLAY_MODES = Object.freeze(['auto', 'headless']);
 function noDisplayModeOf(v) { return v === 'headless' ? 'headless' : 'auto'; }
 
+/** Does a display verdict / fact say this machine has NO desktop session (no live Wayland or X socket)? */
+function noDesktop(d) { return !isObj(d) || d.kind === 'none' || !(Array.isArray(d.available) && d.available.length); }
+/**
+ * THE WINDOW PREFERENCE, RESOLVED (lane hooks-create H5 — the owner's decision 2026-10-01: on a fleet pod every agent
+ * browser was headless Chrome and Google sign-in refused it). `setting` = `browser.headed` as stored ('yes' | 'no' |
+ * true | false | '' | null). An explicit value wins. UNSET, on a machine with NO desktop session where Xvfb is
+ * installed and `browser.noDisplayMode` is auto ⇒ a window is asked for ⇒ the hidden-window rung (the CLI's own
+ * invisible Xvfb, UA Chrome/154); otherwise unset keeps today's meaning (inherit the CLI's own config). Resolved where
+ * the display is PROBED — at a launch, on the machine that launches — never at a spawn (a config composed then would
+ * carry the display of that moment). → `{headed: true | false | null, why: 'setting' | 'no-desktop' | 'inherit'}`.
+ */
+/**
+ * THE SWITCH of H5's rule (the 2.369.200 integration): OFF in 2.369.200 — an UNSET preference keeps .199's meaning
+ * everywhere (inherit; headless on a machine with no desktop, said by the display fact), while an explicit
+ * `browser.headed = yes` still runs the hidden-window rung. Reason: the dialog / navigation-loop watch is not yet verified
+ * on that rung (test-browser-dialog-chrome / -site-reset-chrome were red there); the rule ships ON with lane
+ * browser-windows (one window per holder) in .201, where those suites run on that rung. Callers never pass it; gates do.
+ */
+const NO_DESKTOP_WINDOW_DEFAULT = false;
+function resolveHeaded({ setting = null, display = null, mode = 'auto', noDesktopWindow = NO_DESKTOP_WINDOW_DEFAULT } = {}) {
+  if (setting === true || setting === 'yes') return { headed: true, why: 'setting' };
+  if (setting === false || setting === 'no') return { headed: false, why: 'setting' };
+  if (noDesktopWindow === true && noDisplayModeOf(mode) === 'auto' && isObj(display) && noDesktop(display) && display.xvfb === true) return { headed: true, why: 'no-desktop' };
+  return { headed: null, why: 'inherit' };
+}
+
 /**
  * THE PLAN for one launch. `wanted` = `{headed, args}` (the effective preference and the config's args),
  * `display` = a verdict (or a recorded fact — same fields), `mode` = `browser.noDisplayMode`.
@@ -255,7 +281,7 @@ function applyPlan(cfg, plan) {
  * what the plan did, and — when the previous launch of this record fell back and this one did not — `recovered`
  * (the row says the window is back). Plain JSON (persisted with the registry, broadcast with the digest).
  */
-function displayFact({ display = null, plan = null, wanted = null, prev = null, at = 0, mode = 'auto' } = {}) {
+function displayFact({ display = null, plan = null, wanted = null, prev = null, at = 0, mode = 'auto', byDefault = false } = {}) {
   const d = isObj(display) ? display : displayVerdict({});
   const p = isObj(plan) ? plan : launchPlan({ wanted, display: d, mode });
   const prevFb = isObj(prev) && isObj(prev.fallback) ? prev.fallback.why : null;
@@ -263,7 +289,9 @@ function displayFact({ display = null, plan = null, wanted = null, prev = null, 
     kind: DISPLAY_KINDS.includes(d.kind) ? d.kind : 'none', socket: d.socket || null, name: d.name || null,
     available: Array.isArray(d.available) ? d.available.slice() : [],
     wayland: isObj(d.wayland) ? { ...d.wayland } : null, x11: isObj(d.x11) ? { ...d.x11 } : null,
-    wanted: { headed: !!(isObj(wanted) && wanted.headed === true), ozone: isObj(wanted) ? ozoneOf(wanted.args) : null },
+    // `byDefault` (lane hooks-create H5): the window was asked for by resolveHeaded's no-desktop rule, not by a setting or
+    // the config — every later call re-derives the same plan from this fact (planForFact)
+    wanted: { headed: !!(isObj(wanted) && wanted.headed === true), ozone: isObj(wanted) ? ozoneOf(wanted.args) : null, ...(byDefault === true ? { byDefault: true } : {}) },
     headed: p.headed === true, fallback: isObj(p.fallback) ? { ...p.fallback, ...(Array.isArray(p.fallback.dropped) ? { dropped: p.fallback.dropped.slice() } : {}) } : null,
     env: isObj(p.env) ? { ...p.env } : {},
     recovered: prevFb && !p.fallback && p.headed === true ? prevFb : null,
@@ -275,7 +303,11 @@ function displayFact({ display = null, plan = null, wanted = null, prev = null, 
 /** Does a recorded fact change the config a browser's calls must name? */
 function planApplies(fact) { return isObj(fact) && isObj(fact.fallback); }
 /** The plan a recorded fact makes of a base config (every later call of that browser re-derives the same file). */
-function planForFact(cfg, fact, { headedEnv = null } = {}) { return launchPlan({ wanted: wantedOf(cfg, { headedEnv }), display: fact, mode: isObj(fact) ? fact.mode : 'auto' }); }
+function planForFact(cfg, fact, { headedEnv = null } = {}) {
+  // a launch whose window the no-desktop default asked for (fact.wanted.byDefault): every later call asks the same
+  const h = headedEnv === true || headedEnv === false ? headedEnv : (isObj(fact) && isObj(fact.wanted) && fact.wanted.byDefault === true ? true : null);
+  return launchPlan({ wanted: wantedOf(cfg, { headedEnv: h }), display: fact, mode: isObj(fact) ? fact.mode : 'auto' });
+}
 
 /** The code a surface words: 'hidden-window' | 'headless' | 'substituted' | 'recovered' | null. */
 function factCode(fact) {
@@ -311,6 +343,6 @@ module.exports = {
   DISPLAY_KINDS, X11_DIR, OZONE_PREFIX, DISPLAY_PLATFORMS,
   runtimeDirOf, parseX11Display, displayCandidates, displayVerdict,
   argsList, ozonePlatformsOf, ozoneOf, withoutDisplayOzone, withOzone,
-  NO_DISPLAY_MODES, noDisplayModeOf,
+  NO_DISPLAY_MODES, noDisplayModeOf, noDesktop, resolveHeaded, NO_DESKTOP_WINDOW_DEFAULT,
   wantedOf, launchPlan, applyPlan, displayFact, planApplies, planForFact, factCode, kindName, agentNote, journalLine,
 };

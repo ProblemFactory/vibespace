@@ -1,4 +1,6 @@
 import { attachPopoverClose, escHtml, uiScale } from './utils.js';
+import { dragEndVerdict } from './drag-end.js';
+import { captureOn, setDragShield, attachDragFeed } from './drag-feed.js'; // ONE feed for every drag door (verify r1)
 import { minOf, clampToMin, raiseToMin, keepInside, zoneBox, wholePx, rescaleBox } from './window-min-size.js';
 import { track } from './telemetry-client.js';
 import { t } from './i18n.js';
@@ -18,6 +20,9 @@ function setChipMode(chip, mode) {
   for (const m of CHIP_MODES) chip.classList.toggle('wab-' + m, m === mode);
   chip.dataset.mode = mode;
 }
+
+// The drag shield (`body.wm-dragging`), the pointer capture at a door and THE feed live in src/lib/drag-feed.js — one
+// implementation for the title bar, the resize handle, the tab tear-off and the icon drag (verify r1).
 
 class WindowManager {
   constructor(workspace) {
@@ -266,6 +271,10 @@ class WindowManager {
     // back and says why (the preview used to just not light up, the drop did nothing, nobody said anything)
     let deskRefusal = null, refusedPreview = null, refuseLabel = null, dragFromMax = false, dragFromPrev = null;
     const DRAG_THRESHOLD = 5;
+    // lane-drag-release: the pointer the drag holds (captured by the title bar, else a document feed), the last point it
+    // was seen at (an end without coordinates — blur, the page hidden, the capture lost — drops the window THERE)
+    let feedState = { active: false, pointerId: null, captured: false }, feedEl = null, lastPoint = null;
+    const shieldKey = 'drag:' + win.id; // this drag's hold on the shield (verify r2 #2: a set of holders, never a boolean)
 
     // Shake-to-bypass-snap: vigorously shaking the window for ≥1s during a drag
     // latches "grid snap off" for the REST of that drag — a mouse-only alternative
@@ -332,12 +341,21 @@ class WindowManager {
       shiftDragStart = -1;
       resetShake({ clientX: x, clientY: y });
     };
-    titleBar.addEventListener('mousedown', (e) => {
-      // the split button is a button, never a drag handle (split UX R1)
-      if (e.target.closest('.window-controls') || e.target.closest('.tab-item') || e.target.closest('.window-icon-stack') || e.target.closest('.tab-split-btn') || e.button !== 0) return;
+    // the split button is a button, never a drag handle (split UX R1); nor a tab, the icon stack, the controls — nor the
+    // two chips that act on a click, the mini-inbox badge and the billing chip (2.369.200 integration: the pointerdown door
+    // CAPTURES the pointer, which retargets the click to the title bar — neither chip's click fired)
+    const notADragHandle = (e) => !!(e.target && typeof e.target.closest === 'function' && (e.target.closest('.window-controls') || e.target.closest('.tab-item') || e.target.closest('.window-icon-stack') || e.target.closest('.tab-split-btn') || e.target.closest('.win-inbox-badge') || e.target.closest('.win-auth-badge')));
+    // THE DOOR (lane-drag-release): the press is a POINTER event and the title bar CAPTURES the pointer — the drag is
+    // fed from the title bar from here on whatever the cursor crosses (an iframe, a canvas, another window, the page's
+    // edge). The compat mousedown stays (the window's own focus listener reads it) and is cancelled only to stop the
+    // native selection of the title text.
+    titleBar.addEventListener('pointerdown', (e) => {
+      if (notADragHandle(e) || e.button !== 0 || e.isPrimary === false || mouseDown) return;
       beginAt(e.clientX, e.clientY);
-      e.preventDefault();
+      notePoint(e);
+      startFeed(titleBar, captureOn(titleBar, e));
     });
+    titleBar.addEventListener('mousedown', (e) => { if (!notADragHandle(e) && e.button === 0) e.preventDefault(); });
 
     /** inc-muly2izg-cks3: mark the preview the Stage's rule refuses (`.stage-refuse`) and put the refusal's words beside
      *  the pointer (`.stage-refuse-label`, a status line); `preview` null = no refusal under the pointer. */
@@ -376,6 +394,7 @@ class WindowManager {
       if (!dragging) {
         if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
         dragging = true;
+        setDragShield(true, shieldKey); // lane-drag-release: no window's content takes the pointer while this drag is in flight
         // Save pre-snap size for restore on un-snap
         if (!win._preSnapBounds) {
           win._preSnapBounds = { width: element.style.width, height: element.style.height, left: element.style.left, top: element.style.top };
@@ -587,6 +606,9 @@ class WindowManager {
     let pendingMoveEv = null, moveRaf = 0;
     const onMove = (e) => {
       if (!mouseDown) return;
+      // a move with no button held = a release this page never saw (lane-drag-release: the end door, not a move)
+      if (dragEndVerdict({ type: 'pointermove', buttons: e.buttons, pointerId: e.pointerId }, feedState).end) { endDrag(e, 'released-unseen'); return; }
+      notePoint(e);
       pendingMoveEv = e;
       if (moveRaf) return;
       moveRaf = requestAnimationFrame(() => {
@@ -608,17 +630,25 @@ class WindowManager {
     };
     // SEAMLESS (round 3 lane B): a drag started from a pointer the app's header bar handed over is fed by POINTER
     // events (the pane cancelled its pointerdown, so the browser sends no compatibility mouse events for that press);
-    // they drive the SAME onMove / onUp and are removed with the drag (a per-drag controller, never a per-render one)
+    // they drive the SAME onMove / endDrag and are removed with the drag (a per-drag controller, never a per-render one)
     let pointerFeed = null, cancelBounds = null;
-    const onUp = (e) => {
+    /** THE END DOOR (lane-drag-release): every way a drag ends comes through here ONCE — the pointer's release, its
+     *  cancel, the capture lost, the window's blur, the page hidden, a move with no button held (dragEndVerdict names
+     *  them). The feed is torn down, the shield lifted, the drag's chrome cleared and THE DROP APPLIED — where the
+     *  pointer released, or where it was last seen when the end carries no point. A second call is a no-op. */
+    const endDrag = (e, why = 'release') => {
       // Cancel any queued frame so processMove can't run after the drop
       if (moveRaf) { cancelAnimationFrame(moveRaf); moveRaf = 0; pendingMoveEv = null; }
-      if (pointerFeed) { pointerFeed.abort(); pointerFeed = null; }
+      stopFeed();
       cancelBounds = null;
       if (!mouseDown) return;
       mouseDown = false;
+      setDragShield(false, shieldKey);
       if (!dragging) return;
       dragging = false;
+      win._lastDragEnd = why; // the end's cause (the suites read it)
+      const pointed = e && Number.isFinite(e.clientX) && (why === 'release' || why === 'cancel' || why === 'released-unseen');
+      e = pointed ? e : (lastPoint || { clientX: startX, clientY: startY, altKey: false, shiftKey: false });
       // THE HELD GEOMETRY's witness (verify r2 ⑩): a record received before this instant cannot know where the user
       // dropped the window. Stamped only by a press that DRAGGED (past the threshold): a click-to-focus on the title
       // bar dragged nothing, yet it held another client's move of that window off this page and this page's next
@@ -737,8 +767,29 @@ class WindowManager {
         if (win.onMoved) { try { win.onMoved(); } catch {} } // a MOVE (no resize): a device-pixel-exact surface re-snaps (the xpra view, 2.369.158)
       }, 250);
     };
-    const signal = win._listenerCtl?.signal;
-    document.addEventListener('mousemove', onMove, { signal }); document.addEventListener('mouseup', onUp, { signal });
+    const notePoint = (e) => { if (e && Number.isFinite(e.clientX)) lastPoint = { clientX: e.clientX, clientY: e.clientY, altKey: !!e.altKey, shiftKey: !!e.shiftKey }; };
+    const onEnd = (e) => {
+      const v = dragEndVerdict({ type: e && e.type, buttons: e && e.buttons, pointerId: e && e.pointerId, hidden: typeof document !== 'undefined' && document.hidden === true }, feedState);
+      if (!v.end) return;
+      // THE OWNER GONE (verify r2 #1): the window closed mid-drag — closeWindow aborts its listener controller first, which
+      // took the feed with it and left body.wm-dragging up for good; the drag is CANCELLED, never dropped (no snap, no
+      // merge, no desktop move of a window that is leaving)
+      if (v.why === 'owner-gone') { win._lastDragEnd = 'owner-gone'; win._cancelPointerDrag(); return; }
+      endDrag(e, v.why);
+    };
+    /** THE FEED, on the element that captured the pointer (else the document): move / up / cancel / capture lost, the
+     *  window's blur and the page's visibility — a per-drag controller torn down by the end door, and with the window's
+     *  own listener controller when the window closes mid-drag. */
+    const startFeed = (el, pointerId) => {
+      stopFeed();
+      feedState = { active: true, pointerId: pointerId == null ? null : pointerId, captured: pointerId != null };
+      feedEl = pointerId != null ? el : null;
+      pointerFeed = attachDragFeed({ el: feedEl, pointerId: feedState.pointerId, onMove, onEnd, signal: win._listenerCtl?.signal }); // ONE feed for every drag door (drag-feed.js)
+    };
+    const stopFeed = () => {
+      if (pointerFeed) { pointerFeed.stop(); pointerFeed = null; } // the listeners gone, the capture released
+      feedState = { active: false, pointerId: null, captured: false }; feedEl = null;
+    };
     /** seamless: enter THIS drag from a pointer already down elsewhere (the app's header bar) — `press` = where the
      *  gesture began (the window follows the pointer from there), `at` = where the pointer is now (applied at once). */
     win._beginDragFromPointer = ({ press = null, at = null } = {}) => {
@@ -747,11 +798,8 @@ class WindowManager {
       if (!p0 || !Number.isFinite(p0.clientX) || !Number.isFinite(p0.clientY)) return false;
       cancelBounds = { left: element.style.left, top: element.style.top, width: element.style.width, height: element.style.height, isMaximized: win.isMaximized, prevBounds: win.prevBounds, isSnapped: win._isSnapped };
       beginAt(p0.clientX, p0.clientY);
-      pointerFeed = new AbortController();
-      const fs = { signal: pointerFeed.signal };
-      document.addEventListener('pointermove', onMove, fs);
-      document.addEventListener('pointerup', onUp, fs);
-      document.addEventListener('pointercancel', () => win._cancelPointerDrag?.(), fs);
+      notePoint(p0);
+      startFeed(titleBar, captureOn(titleBar, p0)); // the pane released its capture; a press carrying no pointerId feeds from the document
       if (at && (at.clientX !== p0.clientX || at.clientY !== p0.clientY)) onMove({ clientX: at.clientX, clientY: at.clientY, altKey: !!at.altKey, shiftKey: !!at.shiftKey, timeStamp: performance.now() });
       return true;
     };
@@ -759,8 +807,9 @@ class WindowManager {
     win._cancelPointerDrag = () => {
       if (!mouseDown) return false;
       if (moveRaf) { cancelAnimationFrame(moveRaf); moveRaf = 0; pendingMoveEv = null; }
-      if (pointerFeed) { pointerFeed.abort(); pointerFeed = null; }
+      stopFeed();
       mouseDown = false;
+      setDragShield(false, shieldKey);
       if (dragging) {
         dragging = false;
         clearDragVisuals();
@@ -821,9 +870,12 @@ class WindowManager {
   }
 
   _setupResize(win) {
-    // ONE resize for every start: a handle's mousedown, and (seamless, round 3 lane B) a pointer the app's own window
-    // edge handed over (beginResizeFromPointer — fed by pointer events, the pane cancelled its pointerdown)
-    const startResize = (dir, sX, sY, { pointer = false, at = null } = {}) => {
+    // ONE resize for every start: a handle's pointerdown, and (seamless, round 3 lane B) a pointer the app's own window
+    // edge handed over (beginResizeFromPointer). Fed from the HANDLE that captured the pointer (lane-drag-release —
+    // else the document, the same rules), ended by ONE door: dragEndVerdict names the release, the cancel, the capture
+    // lost, the window's blur, the page hidden, a move with no button held; the shield covers every window's content
+    // meanwhile (a corner dragged inward over the window's OWN iframe used to lose every move: it could grow, not shrink)
+    const startResize = (dir, sX, sY, { pointerId = null, el = null, at = null } = {}) => {
         if (win._resizeOp) return false;
         const sW = win.element.offsetWidth, sH = win.element.offsetHeight, sL = win.element.offsetLeft, sT = win.element.offsetTop;
         const sBounds = { left: win.element.style.left, top: win.element.style.top, width: win.element.style.width, height: win.element.style.height };
@@ -855,24 +907,30 @@ class WindowManager {
           win.element.style.width = newW + 'px'; win.element.style.height = newH + 'px';
           if (win.onResize) win.onResize();
         };
-        // rAF-coalesce: win.onResize() per raw mousemove means an xterm fit()
-        // reflow at pointer rate while resizing a terminal — cap it per frame.
+        // rAF-coalesce: win.onResize() per raw move means an xterm fit() reflow at pointer rate while resizing a
+        // terminal — cap it per frame.
         let pendingEv = null, raf = 0, resized = false;
-        const onMove = (e) => {
+        const queueMove = (e) => {
           pendingEv = e; resized = true; // a press on the handle that never moved is not a resize (verify r3)
           if (raf) return;
           raf = requestAnimationFrame(() => { raf = 0; const ev = pendingEv; pendingEv = null; if (ev) processMove(ev); });
         };
-        const feed = pointer ? new AbortController() : null;
+        const capId = el ? captureOn(el, { pointerId }) : null;
+        const feedState = { active: true, pointerId: capId, captured: capId != null };
+        const shieldKey = 'resize:' + win.id; // this resize's hold on the shield (verify r2 #2)
+        let feed = null; // attached below, once the handlers exist
         const detach = () => {
           win._resizeOp = null;
+          feedState.active = false;
           if (raf) { cancelAnimationFrame(raf); raf = 0; pendingEv = null; }
-          document.removeEventListener('mousemove', onMove);
-          document.removeEventListener('mouseup', onUp);
-          feed?.abort();
+          if (feed) { feed.stop(); feed = null; } // the listeners gone, the capture released
+          setDragShield(false, shieldKey);
         };
-        const onUp = () => {
+        /** THE END DOOR of the resize: once (a second end is a no-op), whatever ended it. */
+        const endResize = (why = 'release') => {
+          if (!win._resizeOp) return;
           if (resized) win._boundsAt = Date.now(); // THE HELD GEOMETRY's witness (verify r2 ⑩): the resize is the user's, newer than any record received before it; a press that moved nothing holds nothing (verify r3)
+          win._lastResizeEnd = why;
           detach();
           // Update gridBounds after resize (if window was grid-tracked, keep tracking with new proportions)
           if (win.gridBounds) this._captureGridBounds(win);
@@ -885,12 +943,19 @@ class WindowManager {
           }
           this._notify();
         };
-        document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
-        if (feed) {
-          document.addEventListener('pointermove', onMove, { signal: feed.signal });
-          document.addEventListener('pointerup', onUp, { signal: feed.signal });
-          document.addEventListener('pointercancel', () => win._resizeOp?.cancel(), { signal: feed.signal });
-        }
+        const onMove = (e) => {
+          if (!feedState.active) return; // detached (a listener a fake document kept past its signal)
+          if (dragEndVerdict({ type: 'pointermove', buttons: e.buttons, pointerId: e.pointerId }, feedState).end) { endResize('released-unseen'); return; }
+          queueMove(e);
+        };
+        const onEnd = (e) => {
+          const v = dragEndVerdict({ type: e && e.type, buttons: e && e.buttons, pointerId: e && e.pointerId, hidden: typeof document !== 'undefined' && document.hidden === true }, feedState);
+          if (!v.end) return;
+          if (v.why === 'owner-gone') { win._lastResizeEnd = 'owner-gone'; if (win._resizeOp) win._resizeOp.cancel(); return; } // the window closed mid-resize (verify r2 #1): back to its size, nothing committed
+          endResize(v.why);
+        };
+        feed = attachDragFeed({ el: capId != null ? el : null, pointerId: capId, onMove, onEnd, signal: win._listenerCtl?.signal }); // ONE feed for every drag door (drag-feed.js)
+        setDragShield(true, shieldKey);
         // X's MOVERESIZE_CANCEL: stop with the window back at its size before the gesture
         win._resizeOp = { cancel: () => { detach(); Object.assign(win.element.style, sBounds); if (win.onResize) win.onResize(); return true; } };
         if (at && (at.clientX !== sX || at.clientY !== sY)) processMove({ clientX: at.clientX, clientY: at.clientY, altKey: !!at.altKey });
@@ -899,12 +964,16 @@ class WindowManager {
     win._beginResizeFromPointer = (dir, { press = null, at = null } = {}) => {
       const p0 = press || at;
       if (!/^(n|s|e|w|ne|nw|se|sw)$/.test(String(dir)) || !p0 || !Number.isFinite(p0.clientX) || !Number.isFinite(p0.clientY)) return false;
-      return startResize(dir, p0.clientX, p0.clientY, { pointer: true, at });
+      const handle = typeof win.element.querySelector === 'function' ? win.element.querySelector('.resize-handle.resize-' + dir) : null;
+      return startResize(dir, p0.clientX, p0.clientY, { pointerId: p0.pointerId == null ? null : p0.pointerId, el: handle, at });
     };
     win.element.querySelectorAll('.resize-handle').forEach(handle => {
-      handle.addEventListener('mousedown', (e) => {
+      // THE DOOR: a pointer press on the handle captures the pointer there (the compat mouse events are cancelled as
+      // before — a handle press never focuses, never selects)
+      handle.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0 || e.isPrimary === false) return;
         e.stopPropagation(); e.preventDefault();
-        startResize(handle.dataset.dir, e.clientX, e.clientY);
+        startResize(handle.dataset.dir, e.clientX, e.clientY, { pointerId: e.pointerId, el: handle });
       });
     });
   }

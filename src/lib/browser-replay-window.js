@@ -20,8 +20,8 @@ import { fetchJson, showToast } from './utils.js';
 import { registerWindowType } from './window-types.js';
 import { UI_ICONS } from './icons.js';
 import { btn } from './channel-chrome.js';
-import { drawOverlay, positionKindText, statusText } from './browser-trace-view.js';
-import { frameUrl, timelineLabel, positionText } from '../browser-trace.js';
+import { drawOverlay, positionKindText, statusText, showFitsPref, fitsToggle, fitRowText, fitRowTitle } from './browser-trace-view.js';
+import { frameUrl, timelineLabel, positionText, foldFits, fitCount, isFitEntry } from '../browser-trace.js'; // lane trace-fits: the page-size fold
 import { replayEmpty, frameState, replayKey, playTick, pickSession, pickIndex, PLAY_STEP_MS, isSessionId } from '../browser-sessions.js';
 import { whenText, sessionRowText, emptyText, replayTitle, retentionText, actionsText, durationText } from './browser-session-words.js';
 
@@ -64,7 +64,9 @@ export function openBrowserReplayWindow(app, opts = {}) {
   const spec = { action: 'openBrowserReplay', ...(tg.browserKey ? { browserKey: tg.browserKey } : {}), ...(tg.conversation ? { conversation: tg.conversation } : {}), ...(tg.profileId ? { profileId: tg.profileId } : {}), ...(session ? { session } : {}), ...(at ? { at } : {}) };
   const winInfo = app.wm.createWindow({ title: replayTitle(nameOf(app, tg)), type: TYPE, syncId: opts.syncId, openSpec: spec, width: 1000, height: 660 });
   const signal = winInfo._listenerCtl?.signal;
-  const st = { tg, sessions: [], traceOn: true, limit: 0, chosen: session, entries: [], entriesTotal: 0, index: 0, which: 'after', playing: false, timer: null, reloadTimer: null, loading: false, error: null, closed: false, pendingAt: at, seq: 0 };
+  // lane trace-fits: `entries` = the session's whole list; `steps` = what the replay steps through (the agent's actions —
+  // a run of page-size changes is a thin tick between them, a step of its own only with the toggle on)
+  const st = { tg, sessions: [], traceOn: true, limit: 0, chosen: session, entries: [], steps: [], entriesTotal: 0, index: 0, which: 'after', playing: false, timer: null, reloadTimer: null, loading: false, error: null, closed: false, pendingAt: at, seq: 0 };
 
   // ── the skeleton (built once; rows keyed by id and patched in place) ──
   const root = el('div', 'brp');
@@ -74,9 +76,14 @@ export function openBrowserReplayWindow(app, opts = {}) {
   const sessList = el('div', 'brp-sessions');
   sessList.setAttribute('role', 'listbox'); sessList.setAttribute('aria-label', t('Sessions'));
   const actHead = el('div', 'brp-head brp-actions-head', t('Actions'));
+  // lane trace-fits: the toggle (shown once the session has page-size changes) — the same per-device preference as the live view's
+  const fitsBar = el('div', 'brp-fits-bar');
+  const fitsTog = fitsToggle({ onChange: () => { renderActions(); show(Math.min(st.index, Math.max(0, st.steps.length - 1))); } });
+  fitsBar.appendChild(fitsTog.el);
+  fitsBar.style.display = 'none';
   const actList = el('div', 'brp-actions');
   actList.setAttribute('role', 'listbox'); actList.setAttribute('aria-label', t('Actions'));
-  side.append(sessHead, sessList, actHead, actList);
+  side.append(sessHead, sessList, actHead, fitsBar, actList);
   const main = el('div', 'brp-main');
   const bar = el('div', 'brp-bar');
   const beforeBtn = btn(t('Before'), () => setWhich('before'), 'brp-which');
@@ -159,40 +166,62 @@ export function openBrowserReplayWindow(app, opts = {}) {
     }
     r.dataset.index = String(i);
     const fs = frameState(e, 'after') === 'frame' ? 'after' : frameState(e, 'before') === 'frame' ? 'before' : null;
-    const sig = JSON.stringify([e.ok === false, fs, !!e.framesRemoved, e.at, timelineLabel(e), String(e.text || '')]);
+    const sig = JSON.stringify([e.ok === false, fs, !!e.framesRemoved, e.at, timelineLabel(e), String(e.text || ''), e.n || 0]);
     if (r.dataset.sig !== sig) {
       r.dataset.sig = sig;
       const thumb = el('span', 'brp-action-thumb');
-      if (fs) { const im = el('img', 'brp-action-img'); im.alt = ''; im.loading = 'lazy'; im.draggable = false; im.src = frameUrl(e.id, fs); thumb.appendChild(im); }
+      if (fs) { const im = el('img', 'brp-action-img'); im.alt = ''; im.loading = 'lazy'; im.draggable = false; im.src = frameUrl(e.id, fs) + (isFitEntry(e) && e.n > 1 ? `?v=${e.n}` : ''); thumb.appendChild(im); }
       else thumb.appendChild(el('span', 'brp-action-noframe', e.framesRemoved ? t('removed') : t('no frame')));
       const text = el('span', 'brp-action-text');
-      text.append(el('span', 'brp-action-time', clock(e.at)), el('span', 'brp-action-label', timelineLabel(e)));
+      text.append(el('span', 'brp-action-time', clock(e.at)), el('span', 'brp-action-label', timelineLabel(e) + (isFitEntry(e) && e.n > 1 ? ` ×${e.n}` : ''))); // a coalesced fit, expanded, says how many it stands for
       r.replaceChildren(thumb, text);
       r.classList.toggle('failed', e.ok === false);
+      r.classList.toggle('fits', isFitEntry(e));
       r.title = String(e.text || '');
     }
     r.classList.toggle('active', i === st.index);
     return r;
   }
+  // lane trace-fits: a run of page-size changes between two steps is a THIN TICK (keyed by its first fit, never a step)
+  const tickRows = new Map();
+  function tickRow(r) {
+    let n = tickRows.get(r.id);
+    if (!n) { n = el('div', 'brp-tick'); n.dataset.fitsId = r.id; tickRows.set(r.id, n); }
+    const sig = JSON.stringify([r.n, r.lastAt, positionText(r.last.position)]);
+    if (n.dataset.sig !== sig) { n.dataset.sig = sig; n.dataset.fits = String(r.n); n.textContent = fitRowText(r); n.title = fitRowTitle(r); }
+    return n;
+  }
   function renderActions() {
     const s = current();
-    const out = s ? st.entries.map(actionRow) : [];
+    const rows = s ? foldFits(st.entries, { expand: showFitsPref() }) : [];
+    st.steps = [];
+    const out = [];
+    for (const r of rows) {
+      if (r.kind === 'fits') { out.push(tickRow(r)); continue; }
+      out.push(actionRow(r.entry, st.steps.length)); st.steps.push(r.entry);
+    }
     const kids = actList.childNodes;
     for (let i = 0; i < out.length; i++) if (kids[i] !== out[i]) actList.insertBefore(out[i], kids[i] || null);
     while (kids.length > out.length) actList.removeChild(kids[kids.length - 1]);
-    const keep = new Set(out.map((r) => r.dataset.traceId));
+    const keep = new Set(out.map((r) => r.dataset.traceId || r.dataset.fitsId));
     for (const k of [...actRows.keys()]) if (!keep.has(k)) actRows.delete(k);
+    for (const k of [...tickRows.keys()]) if (!keep.has(k)) tickRows.delete(k);
+    const nFits = st.entries.reduce((n, e) => n + fitCount(e), 0);
+    fitsBar.style.display = s && nFits ? '' : 'none';
+    fitsTog.sync();
     // the answer carries the NEWEST 1 000 of a session; a cut is said, never a smaller number under a bigger one
+    // (the numbers are STEPS — the folded page-size changes are not counted as actions)
     const cut = s && st.entriesTotal > st.entries.length;
-    actHead.textContent = !s ? t('Actions') : cut ? t('Actions (last {n} of {total})', { n: st.entries.length, total: st.entriesTotal }) : `${t('Actions')} (${st.entries.length})`;
-    actHead.title = cut ? t('The replay carries the last {n} actions of this session; the earlier {m} are on disk but not shown here.', { n: st.entries.length, m: st.entriesTotal - st.entries.length }) : '';
+    const total = st.entriesTotal - (st.entries.length - st.steps.length);
+    actHead.textContent = !s ? t('Actions') : cut ? t('Actions (last {n} of {total})', { n: st.steps.length, total }) : `${t('Actions')} (${st.steps.length})`;
+    actHead.title = cut ? t('The replay carries the last {n} actions of this session; the earlier {m} are on disk but not shown here.', { n: st.steps.length, m: total - st.steps.length }) : '';
   }
   const current = () => st.sessions.find((s) => s.id === st.chosen) || null;
 
   // ── the picture ──
   function setWhich(w) { st.which = w === 'before' ? 'before' : 'after'; renderPicture(); }
   function show(i) {
-    st.index = Math.max(0, Math.min(Math.max(0, st.entries.length - 1), Number(i) || 0));
+    st.index = Math.max(0, Math.min(Math.max(0, st.steps.length - 1), Number(i) || 0));
     for (const r of actList.querySelectorAll('.brp-action')) r.classList.toggle('active', Number(r.dataset.index) === st.index);
     const row = actList.querySelector(`.brp-action[data-index="${st.index}"]`);
     if (row) row.scrollIntoView({ block: 'nearest' });
@@ -207,9 +236,9 @@ export function openBrowserReplayWindow(app, opts = {}) {
   }
   function renderPicture() {
     const s = current();
-    const e = st.entries[st.index] || null;
-    const kind = st.error ? null : replayEmpty({ traceOn: st.traceOn, sessions: st.sessions, session: s, entries: st.entries });
-    const n = st.entries.length;
+    const e = st.steps[st.index] || null;
+    const kind = st.error ? null : replayEmpty({ traceOn: st.traceOn, sessions: st.sessions, session: s, entries: st.steps });
+    const n = st.steps.length;
     beforeBtn.classList.toggle('active', st.which === 'before'); afterBtn.classList.toggle('active', st.which === 'after');
     beforeBtn.setAttribute('aria-pressed', st.which === 'before' ? 'true' : 'false'); afterBtn.setAttribute('aria-pressed', st.which === 'after' ? 'true' : 'false');
     prevBtn.disabled = !n || st.index <= 0; nextBtn.disabled = !n || st.index >= n - 1;
@@ -226,7 +255,7 @@ export function openBrowserReplayWindow(app, opts = {}) {
     const fstate = frameState(e, st.which);
     if (fstate === 'frame') {
       setEmpty(null);
-      const url = frameUrl(e.id, st.which);
+      const url = frameUrl(e.id, st.which) + (isFitEntry(e) && e.n > 1 && st.which === 'after' ? `?v=${e.n}` : ''); // a coalesced fit's after frame is a new file under the run's id
       if (img.dataset.url !== url) { img.dataset.url = url; img.src = url; }
       drawOverlay(pic, img, e, st.which);
     } else if (fstate === 'removed') setEmpty('frames-removed');
@@ -236,10 +265,10 @@ export function openBrowserReplayWindow(app, opts = {}) {
   // ── play (one action a second; the PURE step stops at the last) ──
   function stop() { st.playing = false; if (st.timer) { clearInterval(st.timer); st.timer = null; } }
   function applyKey(key) {
-    const next = replayKey({ index: st.index, playing: st.playing }, key, st.entries.length);
+    const next = replayKey({ index: st.index, playing: st.playing }, key, st.steps.length);
     const wasPlaying = st.playing;
     st.playing = next.playing;
-    if (st.playing && !wasPlaying) { st.timer = setInterval(() => { const r = playTick({ index: st.index, playing: st.playing }, st.entries.length); st.playing = r.playing; show(r.index); if (!r.playing) stop(); }, PLAY_STEP_MS); }
+    if (st.playing && !wasPlaying) { st.timer = setInterval(() => { const r = playTick({ index: st.index, playing: st.playing }, st.steps.length); st.playing = r.playing; show(r.index); if (!r.playing) stop(); }, PLAY_STEP_MS); }
     if (!st.playing && st.timer) { clearInterval(st.timer); st.timer = null; }
     show(next.index);
   }
@@ -278,13 +307,13 @@ export function openBrowserReplayWindow(app, opts = {}) {
     st.sessions = Array.isArray(r.sessions) ? r.sessions : [];
     const pick = pickSession(st.sessions, st.chosen, st.pendingAt);
     if (pick && pick.id !== st.chosen) { st.chosen = pick.id; return load(); } // the list named a session this answer did not carry — ask for its actions
-    const prevId = st.entries[st.index] ? st.entries[st.index].id : null;
+    const prevId = st.steps[st.index] ? st.steps[st.index].id : null;
     st.entries = Array.isArray(r.entries) ? r.entries : [];
     st.entriesTotal = Number.isFinite(Number(r.entriesTotal)) ? Number(r.entriesTotal) : st.entries.length;
     renderSessions(); renderActions();
     let i = 0;
-    if (st.pendingAt) { i = pickIndex(st.entries, st.pendingAt); st.pendingAt = null; }
-    else if (keepIndex && prevId) { const j = st.entries.findIndex((e) => e.id === prevId); i = j >= 0 ? j : 0; }
+    if (st.pendingAt) { i = pickIndex(st.steps, st.pendingAt); st.pendingAt = null; }
+    else if (keepIndex && prevId) { const j = st.steps.findIndex((e) => e.id === prevId); i = j >= 0 ? j : 0; }
     show(i);
     note.textContent = retentionText(st.limit);
     app.wm.setTitle?.(winInfo.id, replayTitle(nameOf(app, st.tg)));
@@ -312,7 +341,7 @@ export function openBrowserReplayWindow(app, opts = {}) {
   winInfo.onClose = () => { st.closed = true; stop(); if (st.reloadTimer) clearTimeout(st.reloadTimer); try { app.ws?.offGlobal?.(onGlobal); } catch { /* optional */ } try { ro && ro.disconnect(); } catch { /* */ } };
   winInfo._browserReplay = {
     target: () => st.tg, select, load, key: applyKey,
-    state: () => ({ sessions: st.sessions.length, chosen: st.chosen, index: st.index, n: st.entries.length, total: st.entriesTotal, which: st.which, playing: st.playing, traceOn: st.traceOn, empty: empty.style.display === 'none' ? null : empty.dataset.kind || null, error: st.error, limit: st.limit }),
+    state: () => ({ sessions: st.sessions.length, chosen: st.chosen, index: st.index, n: st.steps.length, entries: st.entries.length, ticks: actList.querySelectorAll('.brp-tick').length, showFits: showFitsPref(), total: st.entriesTotal, which: st.which, playing: st.playing, traceOn: st.traceOn, empty: empty.style.display === 'none' ? null : empty.dataset.kind || null, error: st.error, limit: st.limit }),
   };
   applyNarrow();
   renderPicture();

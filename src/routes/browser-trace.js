@@ -72,6 +72,9 @@ const HM = require('../browser-human.js'); // BROWSE YOURSELF (B-6ae8): the user
  *  key / entry and never sees a `holder:'user'` row in a listing. */
 const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || ''));
 const AGENT_FORBIDDEN = { error: 'the user\'s own browsing is his — an agent token may not read it', code: 'agent_forbidden' };
+/** verify r1 (F6, lane browser-admin): "Who can use it" is the USER's — an agent's token (an auth-off instance answers every cookie
+ *  route) may not write the list here, exactly as the create / adopt routes refuse it (routes/browser.js USE_IS_USERS). */
+const USE_IS_USERS = 'who may use a profile is the user\'s choice (Agent browser panel → Who can use it) — an agent token may not set it; an agent\'s own `new` makes a profile every conversation can use';
 /** lane browser-resume (§3.9): the housekeeping answer's KEPT browsers — a kept browser's tab titles + urls are the user's
  *  (every conversation's pages); an agent's own token gets the counts only. */
 function keptRowsFor(req, kept) {
@@ -159,7 +162,8 @@ router.get('/api/browser/actions', (req, res) => {
   if (!sessionId && !browserKey) return res.json({ sessionId: null, conversation: conversation || null, browserKey: null, keyFrom: null, traceOn: tr.enabled(), entries: [] });
   try {
     const entries = tr.list({ sessionId: sessionId || null, browserKey, anyOf: true, profileId: sc.profileId, from: Number(req.query.from) || 0, to: req.query.to != null && req.query.to !== '' ? Number(req.query.to) : Infinity, limit: Number(req.query.limit) || 200 }).filter((e) => !(agent && e && e.holder === 'user'));
-    res.json({ sessionId: sessionId || null, conversation: conversation || null, browserKey, keyFrom, traceOn: tr.enabled(), entries });
+    // lane trace-fits: `summary` = the agent's actions (`n`, `failed`) with the live view's page-size changes beside (`fits`)
+    res.json({ sessionId: sessionId || null, conversation: conversation || null, browserKey, keyFrom, traceOn: tr.enabled(), entries, summary: T.traceSummary(entries) });
   } catch (e) { fail(res, e); }
 });
 router.get('/api/browser/sessions', (req, res) => {
@@ -306,6 +310,9 @@ router.get('/api/browser/housekeeping', async (req, res) => {
       r.use = p ? useViewOf(p, live, cache) : null;
       r.createdBy = p ? p.createdBy || null : null;
       r.usedBy = usedByOf(r.id, convs);
+      // lane browser-admin 2a: the profile's Chrome build choice + a vanished build's mark (the row's build line)
+      r.browser = p && p.browser ? require('../browser-builds.js').choiceView(p.browser) : null;
+      r.buildMissing = p && p.buildMissing ? { what: p.buildMissing.what, kind: p.buildMissing.kind, at: p.buildMissing.at } : null;
     }
     h.kept = keptRowsFor(req, h.kept); // lane browser-resume (§3.9)
     res.json({ ...h, conversations: convs.map(({ pinned, lastActive, ...c }) => c) });
@@ -351,6 +358,7 @@ router.patch('/api/browser/profiles/:id', async (req, res) => {
   if (!PROFILE_ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
   if (typeof k.updateProfile !== 'function') return res.status(503).json({ error: 'this keeper cannot edit a profile', code: 'unavailable' });
   const { host, ...patch } = req.body || {};
+  if (patch.use !== undefined && isAgentBearer(req)) return res.status(403).json({ error: USE_IS_USERS, code: 'agent_forbidden' }); // verify r1 (F6)
   try {
     // "Who can use it" (§6.2): shape → base → resolve the picked live sessions (the ONE resolver, routes/browser.js — one
     // refusal and NOTHING is written: a partial list is a list the user never saw) → the keeper validates the rows,

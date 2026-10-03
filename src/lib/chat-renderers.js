@@ -25,6 +25,7 @@ import { isVibespaceNotice, noticeCardView, impersonatesVibespace } from '../not
 import { handbackFacts } from '../browser-takeover.js'; // lane S3: the handback card's title, read back by the module that wrote the words
 import { ownResumable } from '../browser-fact.js'; // lane browser-resume B (§3.9): the newest end card of the conversation's own browser offers Resume when THE fact says it can
 import { handoverFacts } from '../stash-summary.js'; // 2026-09-28: the hand-over card's title + the notices behind its expander, read back by the module that wrote the words
+import { outputPreview } from '../exit-reach.js'; // lane-exit-run-output E3: the command card's first lines of output (stderr first) + "Show output" (PURE, bundled)
 const noticeFacts = (body) => handbackFacts(body) || handoverFacts(body);   // ONE facts hook per producer, tried in order; null = the generic rules
 // PURE builder (CJS pulled into the bundle, like ssh-key-format.js) — the
 // codex multi-agent collab rows (B-7473). Escaper/translator/icons are
@@ -397,6 +398,42 @@ function parseUnifiedDiffLines(text) {
   return diffLines;
 }
 
+/** The command card's OUTPUT BLOCK (lane-exit-run-output E3): `x` = exit-reach cardOutput — bounded by the producer,
+ *  still drawn as text only here. The preview = the first three lines of the stream that carries the answer (stderr
+ *  first); the expander = both stored heads whole, each cut said. A run with no output says so in one dim line. */
+function exitRunBlock(x) {
+  const wrap = document.createElement('div');
+  wrap.className = 'chat-exit-run';
+  const heads = { stdout: String(x.stdout || ''), stderr: String(x.stderr || ''), cut: { stdout: !!(x.cut && x.cut.stdout), stderr: !!(x.cut && x.cut.stderr) } };
+  const pv = outputPreview(heads, 3);
+  if (!pv.stream) {
+    // verify r1 F4: a head that is only blank lines / spaces is not "no output", and its cut is still said (pre-fix a
+    // 100 KB stream of newlines read "no output" with the cut unsaid)
+    const blank = !!(heads.stdout || heads.stderr), anyCut = heads.cut.stdout || heads.cut.stderr;
+    if (!x.spawnError || blank) { const none = document.createElement('div'); none.className = 'chat-exit-none'; none.textContent = (blank ? t('no visible output') : t('no output')) + (anyCut ? ` · ${t('cut at 4 KiB')}` : ''); wrap.appendChild(none); }
+    return wrap;
+  }
+  const pre = document.createElement('pre');
+  pre.className = 'chat-exit-out chat-pre-wrapped';
+  pre.dataset.stream = pv.stream;
+  pre.textContent = pv.lines.join('\n');
+  wrap.appendChild(pre);
+  if (pv.more) {
+    const det = document.createElement('details');
+    det.className = 'chat-exit-out-full';
+    const sum = document.createElement('summary'); sum.textContent = t('Show output'); det.appendChild(sum);
+    for (const stream of ['stdout', 'stderr']) {
+      if (!heads[stream].trim()) continue;
+      const lab = document.createElement('div'); lab.className = 'chat-exit-stream'; lab.textContent = stream; det.appendChild(lab);
+      const full = document.createElement('pre'); full.className = 'chat-exit-out-all chat-pre-wrapped'; full.textContent = heads[stream]; det.appendChild(full);
+      if (heads.cut[stream]) { const c = document.createElement('div'); c.className = 'chat-exit-cut'; c.textContent = t('cut at 4 KiB'); det.appendChild(c); }
+    }
+    wrap.appendChild(det);
+  }
+  return wrap;
+}
+
+
 class ChatRenderers {
   /**
    * @param {Object} opts
@@ -407,7 +444,7 @@ class ChatRenderers {
    * @param {HTMLElement} opts.messageList - Message list DOM element
    * @param {Function} [opts.onPermissionResolve] - Called when a permission is resolved (allow/deny)
    */
-  constructor({ ws, sessionId, app, backend = 'claude', compact, messageList, onPermissionResolve, onFork, getSessionCtx, onSendText, onQueueChipClick, getQueueCaps, isCollabLive, getPublishedFiles, getWorkflowVerdict, getSourceWinId }) {
+  constructor({ ws, sessionId, app, backend = 'claude', compact, messageList, onPermissionResolve, onFork, onMsgMenu, getSessionCtx, onSendText, onQueueChipClick, getQueueCaps, isCollabLive, getPublishedFiles, getWorkflowVerdict, getSourceWinId }) {
     // Is THIS collab card the one the next row would coalesce into, on a turn
     // that is still streaming? Only the VIEW knows (it owns the streaming flag
     // and the message list), and the answer decides live age vs frozen span.
@@ -425,6 +462,7 @@ class ChatRenderers {
     this._messageList = messageList;
     this._onPermissionResolve = onPermissionResolve || (() => {});
     this._onFork = onFork || null;
+    this._onMsgMenu = onMsgMenu || null; // the touch message menu (the … button, lane mobile-select); absent = no button
     this._getSessionCtx = getSessionCtx || null;
     this._getPublishedFiles = getPublishedFiles || null; // toolCallId → published SendUserFile rows (owner ruling 8(c))
     this._getWorkflowVerdict = getWorkflowVerdict || null; // runId → the server's stalled verdict (the view keeps it; absent = none)
@@ -771,7 +809,7 @@ class ChatRenderers {
     el.className = 'chat-msg chat-msg-system chat-vs-notice';
     el._rawMsg = msg;
     const view = noticeCardView(msg.peerFrom, rawText, { facts: noticeFacts });
-    const what = view.title.key ? t(view.title.key, view.title.params || {}) : String(view.title.text || '');
+    const what = view.title.key ? t(view.title.key, Object.fromEntries(Object.entries(view.title.params || {}).map(([k, v]) => [k, v && typeof v === 'object' && v.key ? t(v.key, v.params || {}) : v]))) : String(view.title.text || '');   // a param that is itself a key is translated (the hand-over's "why it waited", lane notify-retry)
     const head = what ? t('VibeSpace · {what}', { what }) : t('VibeSpace');
     // `folded`: the title already says what happened FOR THE USER (a producer's
     // own parser read it), so the words the ASSISTANT was given ("Re-orient
@@ -781,6 +819,11 @@ class ChatRenderers {
         : `<div class="chat-text">${this.renderMarkdown(view.body)}</div>`;
     el.innerHTML = `<div class="chat-vs-notice-head">${UI_ICONS.info || ''}<span class="chat-vs-notice-title">${escHtml(head)}</span></div>${body}`;
     this._appendResetCreditBtn(el, msg); // VibeSpace's usage-limit card offers a stored reset credit (design-reset-credits §5)
+    // lane-exit-run-output E3 (the owner: "执行了指令怎么看不到回复"): the "Machines · <machine>" card carries the run's output
+    // block — the first three lines of stderr (else stdout) in mono under the exit line, and "Show output" opening the
+    // stored heads (4 KiB per stream, a cut SAID). Text a machine wrote: textContent only. The block is part of THIS
+    // card (an expander on the element, never a second card, never re-created on a toggle).
+    if (msg.exitRun && typeof msg.exitRun === 'object') el.appendChild(exitRunBlock(msg.exitRun));
     return el;
   }
 
@@ -2543,6 +2586,7 @@ class ChatRenderers {
     if (msg.role === 'tool') return;
     // Skip assistant messages with no text content
     if (msg.role === 'assistant' && !msg.content?.some(b => b.type === 'text' && b.text?.trim())) return;
+    this.addMsgMoreBtn(el);
     const btn = document.createElement('button');
     btn.className = 'chat-open-editor-btn';
     btn.innerHTML = UI_ICONS.clipboard;
@@ -2556,6 +2600,45 @@ class ChatRenderers {
     el.style.position = 'relative';
     el.appendChild(btn);
     this.addForkBtn(el, msg);
+  }
+
+  /** THE MESSAGE'S … BUTTON (touch only — lane mobile-select). On a phone a long press on the words is the platform's
+   *  SELECTION (utils.js installLongPressContextMenu + PURE press-select.js), so the message menu (copy / open in
+   *  editor / fork from here / details) opens from here: the same messages the desktop hover buttons serve, the
+   *  button FLOATED as the first child of the content so the first lines wrap around it — never drawn over the words
+   *  (the 21×16 hover buttons sat on the text, design-mobile-gaps #5). Every element path calls this through
+   *  addOpenInEditorBtn (create, swap, gap slab), so a re-rendered message keeps it. Compact mode: the content block
+   *  (full width); bubble mode: the first inline-content block of the bubble (verify r1 F2, below). */
+  addMsgMoreBtn(el) {
+    if (!this._onMsgMenu || !this.app?.isTouch || !el?._rawMsg) return;
+    if (el.querySelector('.chat-msg-more')) return;
+    const bubble = el.querySelector(':scope > .chat-bubble');
+    let host = el.querySelector(':scope > .chat-compact-msg > .chat-compact-content') || bubble || el;
+    if (bubble && host === bubble) {
+      // BUBBLE MODE (verify r1 F2): the bubble is a shrink-to-fit flex item, and a block's max-content width counts a
+      // float and a following BLOCK as max(float, block), never their sum — so a float in the bubble put every short
+      // message's words UNDER the button (measured: "hi" 41 → 68 px wide, +28 px tall; "OK." a 38 px bubble with the
+      // … alone on its first row). Inside the first block that holds INLINE content (a paragraph, a heading, bare
+      // text) the float and the words share a line, so the bubble measures them together and the words wrap around
+      // the button exactly as in compact mode. A block-first body (a code block, a list) keeps the bubble as the host:
+      // it is wide anyway, and chat.css clears the float before a code block / table.
+      const text = bubble.querySelector(':scope > .chat-text');
+      const first = text && [...text.childNodes].find((n) => n.nodeType === 1 || (n.nodeType === 3 && n.data.trim()));
+      if (first && first.nodeType === 1 && /^(P|H[1-6])$/.test(first.tagName)) host = first;
+      else if (text) host = text;
+    }
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'chat-msg-more';
+    btn.innerHTML = UI_ICONS.more;
+    btn.title = t('Message actions');
+    btn.setAttribute('aria-label', t('Message actions'));
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const r = btn.getBoundingClientRect();
+      this._onMsgMenu(el._rawMsg, r.left, r.bottom + 2);
+    };
+    host.insertBefore(btn, host.firstChild);
   }
 
   // "Fork from here" — branches a NEW session containing the conversation up to

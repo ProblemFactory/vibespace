@@ -147,7 +147,7 @@ console.log('§4 the REAL WindowManager seams over a fake DOM (the title bar\'s 
   globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 0); globalThis.cancelAnimationFrame = (id) => clearTimeout(id);
   globalThis.ResizeObserver = class { observe() {} disconnect() {} };
   globalThis.MutationObserver = class { observe() {} disconnect() {} };
-  const fireDoc = (k, ev) => { for (const l of [...docL]) if (l.k === k && !(l.o && l.o.signal && l.o.signal.aborted)) l.fn(ev); };
+  const fireDoc = (k, ev) => { for (const l of [...docL]) if (l.k === k && !(l.o && l.o.signal && l.o.signal.aborted)) l.fn({ type: k, ...ev }); }; // the DOM always sets event.type (lane-drag-release)
   const live = (k) => docL.filter((l) => l.k === k && !(l.o && l.o.signal && l.o.signal.aborted)).length;
   const { WindowManager } = await import('../src/lib/window.js');
   const mkEl = (w, h, l, t) => {
@@ -259,7 +259,7 @@ console.log('§5 wiring pins');
   ok(/windowStateAction\(changed, \{ maximized: !!winInfo\.isMaximized, minimized: !!winInfo\.isMinimized \}\)/.test(daw) && /view\.setAppState\(\{ iconified: false \}\)/.test(daw), 'WIRING PIN: the app\'s own maximize / minimize → ours (SET semantics); our restore tells the display (iconified false)');
   const win = read('src/lib/window.js');
   ok(/const beginAt = \(x, y\) => \{/.test(win) && /beginAt\(e\.clientX, e\.clientY\);/.test(win) && /beginAt\(p0\.clientX, p0\.clientY\);/.test(win) && (win.match(/const processMove = \(e\) => \{/g) || []).length === 2, 'ONE drag implementation: the title bar\'s mousedown and beginDragFromPointer share beginAt → the same processMove (window.js still has exactly two processMove — the drag\'s and the resize\'s)');
-  ok(/startResize\(handle\.dataset\.dir, e\.clientX, e\.clientY\);/.test(win) && /return startResize\(dir, p0\.clientX, p0\.clientY, \{ pointer: true, at \}\);/.test(win), 'ONE resize implementation: a handle\'s mousedown and beginResizeFromPointer share startResize');
+  ok(/startResize\(handle\.dataset\.dir, e\.clientX, e\.clientY, \{ pointerId: e\.pointerId, el: handle \}\);/.test(win) && /return startResize\(dir, p0\.clientX, p0\.clientY, \{ pointerId: [\s\S]*?, el: handle, at \}\);/.test(win), 'ONE resize implementation: a handle\'s pointerdown and beginResizeFromPointer share startResize (lane-drag-release: the pointer door)');
   const css = read('public/style.css');
   ok(/\.window\.seamless > \.window-titlebar \{[^}]*height: 0;/.test(css) && /\.window\.seamless\.seamless-revealed > \.window-titlebar \{[^}]*height: var\(--title-height\)/.test(css) && !/\.window\.seamless[^{]*\{[^}]*display: none/.test(css), 'CSS: the bars FOLD to 0 height with a class (never display:none) and come back with .seamless-revealed');
   ok(/\.window\.seamless\.seamless-revealed \.picture-shell > \.desktop-bar \{[^}]*top: calc\(var\(--title-height\) \* var\(--ui-scale, 1\)\)/.test(css), 'CSS: the revealed strip sits under the revealed title bar at its VIEWPORT height (inside the counter-zoomed shell)');

@@ -311,7 +311,11 @@ class SettingsUI {
         if (off) addLine(offLine({ t, rel: off.rel, path: off.path }));
         else if (r) {
           const lw = cc.lastWrite && (cc.lastWrite.receipts || []).some((x) => x.harness === schema.harness && x.key === key && (x.state === 'applied' || x.state === 'unchanged')) ? cc.lastWrite.at : null;
-          addLine(receiptLine(r, { t, where: t('this machine'), lastWriteAt: lw }));
+          const l = receiptLine(r, { t, where: t('this machine'), lastWriteAt: lw });
+          const el = addLine(l);
+          // a file that WILL be created (lane hooks-create): the line says "or press Apply" — this is that button,
+          // human-triggered (the boot registration + the CLI-config plan on demand), never a greyed control
+          if (l.apply) el.appendChild(this._cliApplyButton(el, (cc2) => (cc2.receipts || []).find((x) => x.harness === schema.harness && x.key === key)));
         } else addLine({ tone: 'dim', text: `? ${t('this machine')}: ${t('not checked — reinstall the agent tools')}` });
         if (cc.safe === false) addLine({ tone: 'dim', text: t('This server runs from a temporary directory and never writes the real CLI config.') });
       });
@@ -337,6 +341,33 @@ class SettingsUI {
       box.appendChild(btn);
     }
     info.appendChild(box);
+  }
+
+  /** The "Apply" a missing-file receipt line names (lane hooks-create): POST /api/cli-config/apply, then the line
+   *  re-worded from the FRESH receipt the route answers (and the shared probe re-seeded with it); a failure toasts. */
+  _cliApplyButton(lineEl, pick) {
+    const b = document.createElement('button');
+    b.className = 'settings-link-btn';
+    b.textContent = t('Apply');
+    b.title = t('Create the file now and register VibeSpace in it');
+    b.onclick = async () => {
+      b.disabled = true;
+      const res = await fetchJson('/api/cli-config/apply', { method: 'POST' });
+      if (!res || res.error || res.ok === false) {
+        showToast(t('Could not apply the CLI config — {reason}', { reason: (res && res.error) || t('server unreachable') }), { type: 'error' });
+        b.disabled = false;
+        return;
+      }
+      this._cliConfigPromise = Promise.resolve({ cliConfig: res.cliConfig });
+      const fresh = res.cliConfig ? pick(res.cliConfig) : null;
+      if (fresh && lineEl.isConnected) {
+        const l = receiptLine(fresh, { t, where: t('this machine'), lastWriteAt: res.cliConfig.lastWrite ? res.cliConfig.lastWrite.at : null });
+        lineEl.className = 'settings-cli-receipt ' + (l.tone === 'ok' ? 'ob-ok' : l.tone === 'warn' ? 'ob-warn' : l.tone === 'bad' ? 'ob-bad' : 'settings-cli-dim');
+        lineEl.textContent = l.text;
+      }
+      showToast(t('CLI config applied on this machine'));
+    };
+    return b;
   }
 
   _createControl(path, schema, row) {

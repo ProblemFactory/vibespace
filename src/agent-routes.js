@@ -36,6 +36,7 @@ const { VIBESPACE_NOTICE_HEAD, stashKindOf, withoutNoticeHead } = require('./not
 // name as an inline piece; a NOTIFICATION entry is VibeSpace's own frame (its peer parts judged by their producer,
 // our own tags inside it by design) and is never re-judged here.
 const { toAgentText: agentText } = require('./peer-text.js');
+const { hooksLateStale } = require('./hooks-late.js'); // lane hooks-create: a late-hooks note queued for another process of the conversation is dropped unread (PURE)
 const MSG_STASH_LINE_MAX = 400;
 const MSG_STASH_MAX_ENTRIES = 6;
 const MSG_STASH_MAX_BYTES = 6144;
@@ -55,7 +56,13 @@ const msgPeerRow = (ep, st, lv) => ({
   machine: ep.t.host || null, mode: ep.t.mode || null,
 });
 const msgGroupsAnswer = (groups) => groups.map((g) => ({ id: g.id, name: agentText(g.name, { kind: 'line', max: 200 }), pair: !!g.pair, archived: !!g.archivedAt, unread: g.unread, notify: g.notify, members: g.members.map((m) => ({ name: agentText(m.name || m.member, { kind: 'line', max: 200 }), conversationId: m.member, notify: m.notify, live: m.live })) }));
-const msgReadAnswer = (r) => ({ ok: true, group: { id: r.group.id, name: agentText(r.group.name, { kind: 'line', max: 200 }) }, records: r.records.map((x) => ({ at: x.at, from: agentText((x.author && (x.author.name || x.author.id)) || 'unknown', { kind: 'line', max: 200 }), kind: (x.raw && x.raw.kind) || 'message', text: agentText(x.text, { kind: 'block' }) })) });
+// lane group-pending (2026-10-01): WHERE EACH MESSAGE STANDS with its recipients rides the read answer — `delivery`
+// = the model's ONE rule (PURE channel-groups deliveryOf over the group's markers + the page's departures), the
+// same rows the owner's window words under the message; the CLI prints them as one trailing clause. Names through
+// the belt like every other piece of the answer; a system record carries none (the window draws none either).
+const { deliveryOf: groupDeliveryOf } = require('./channel-groups.js');
+const msgDeliveryRows = (g, x, log) => (((x.raw && x.raw.kind) || 'message') !== 'message' ? null : groupDeliveryOf(g, x, { log }).map((d) => ({ member: d.member, name: agentText(d.name, { kind: 'line', max: 200 }), state: d.state, at: d.at })));
+const msgReadAnswer = (r) => ({ ok: true, group: { id: r.group.id, name: agentText(r.group.name, { kind: 'line', max: 200 }) }, records: r.records.map((x) => ({ at: x.at, from: agentText((x.author && (x.author.name || x.author.id)) || 'unknown', { kind: 'line', max: 200 }), kind: (x.raw && x.raw.kind) || 'message', text: agentText(x.text, { kind: 'block' }), delivery: msgDeliveryRows(r.group, x, r.records) })) });
 // verify r2 (lane peer-census): the SEND and GROUP-OP echoes are doors too — `vibespace-msg` prints `woke N: <name>,
 // <name>`, `added to "<group>": <name>, <name>`, `members: <name>, <name> + the user` as ONE line of names, so a member
 // name the store still held with a dangling opener (a name cut after the rule — cleanName's cut, now re-judged — or a
@@ -126,7 +133,12 @@ function turnIsUserInitiated(s) {
   const m = Number(s && s._machineInputAt) || 0;
   return !(m > u);
 }
-function renderMsgStash(entries, { maxEntries = MSG_STASH_MAX_ENTRIES, maxBytes = MSG_STASH_MAX_BYTES } = {}) {   // the stash HAND-OVER (src/server/stash-handover.js) renders every entry at once under a larger budget
+// `keep` (notify-retry verify r2, reproduced): WHICH END rides when the budget cuts. A drain / a hand-over keeps the
+// NEWEST (the latest event is the actionable one; the rest are held for the next turn). The delivery ladder's retry park
+// keeps the OLDEST: its entries expire 60 min after their first miss, and a frame that kept the newest left the oldest —
+// the ones nearest the bound — parked for the next frame, where the bound dropped them to the stash (the one that
+// waited longest was the one that never rode a retry); the rest follow in the next frame, 30 s on, in time order.
+function renderMsgStash(entries, { maxEntries = MSG_STASH_MAX_ENTRIES, maxBytes = MSG_STASH_MAX_BYTES, keep = 'newest', heading = null } = {}) {   // the stash HAND-OVER (src/server/stash-handover.js) renders every entry at once under a larger budget
   if (!entries || !entries.length) return { text: '', shown: [], rest: [] };
   const line = (e) => {
     const stamp = new Date(Number(e.ts) || Date.now()).toISOString().slice(5, 16) + 'Z';
@@ -155,20 +167,29 @@ function renderMsgStash(entries, { maxEntries = MSG_STASH_MAX_ENTRIES, maxBytes 
   };
   const shown = [], rows = [];
   let bytes = 0;
-  for (let i = entries.length - 1; i >= 0; i--) {          // newest first; the newest always shows
-    const l = line(entries[i]);
-    const b = Buffer.byteLength(l, 'utf-8') + 1;
-    if (shown.length && (shown.length >= maxEntries || bytes + b > maxBytes)) break;
-    shown.unshift(entries[i]); rows.unshift(l); bytes += b;
+  if (keep === 'oldest') {
+    for (let i = 0; i < entries.length; i++) {               // oldest first; the oldest always shows (the park's order)
+      const l = line(entries[i]);
+      const b = Buffer.byteLength(l, 'utf-8') + 1;
+      if (shown.length && (shown.length >= maxEntries || bytes + b > maxBytes)) break;
+      shown.push(entries[i]); rows.push(l); bytes += b;
+    }
+  } else {
+    for (let i = entries.length - 1; i >= 0; i--) {          // newest first; the newest always shows
+      const l = line(entries[i]);
+      const b = Buffer.byteLength(l, 'utf-8') + 1;
+      if (shown.length && (shown.length >= maxEntries || bytes + b > maxBytes)) break;
+      shown.unshift(entries[i]); rows.unshift(l); bytes += b;
+    }
   }
-  const rest = entries.slice(0, entries.length - shown.length);
-  const held = rest.length ? `\n(${rest.length} older message(s) held for your next turn)` : '';
+  const rest = keep === 'oldest' ? entries.slice(shown.length) : entries.slice(0, entries.length - shown.length);
+  const held = rest.length ? (keep === 'oldest' ? `\n(${rest.length} newer message(s) follow in the next message)` : `\n(${rest.length} older message(s) held for your next turn)`) : '';
   const hints = [];
   if (shown.some((e) => !MSG_STASH_BLOCK_SOURCES.has(e.source) && stashKindOf(e) !== 'notification')) hints.push('reply to an agent with vibespace-msg send "<name>" "..." if a response is expected');
   // the naive-user pass (2026-09-28): a reaction digest is not a message — the reply hint only where a channel MESSAGE rides
   if (shown.some((e) => e.source === 'channel' && stashSummary.kindOf(e) !== 'channel-reaction')) hints.push('a channel message is answered with vibespace-channels reply <conversation> "..." (this PROPOSES; the user approves)');
   if (shown.some((e) => e.source === 'window-request')) hints.push('a window request is answered by acting on the window it names — vibespace-window attach <handle> (vibespace-docs window)');
-  return { text: `### Messages that arrived while this conversation was unreachable\n${rows.join('\n')}${held}${hints.length ? `\n(${hints.join('; ')})` : ''}`, shown, rest };
+  return { text: `${heading || '### Messages that arrived while this conversation was unreachable'}\n${rows.join('\n')}${held}${hints.length ? `\n(${hints.join('; ')})` : ''}`, shown, rest };
 }
 // THE DRAINS FIT THE CAP OR WAIT (channel-jump verify r5, 2026-09-27 — reproduced on the REAL routes over the fake-
 // express harness: a claude RESUME's SessionStart with two groups' full context (8.2 KB) and a handed-back hand-over
@@ -185,9 +206,22 @@ const INLINE_TAIL_MARGIN = 64;      // the margin the next-turn group reports ke
 const JOBS_DIGEST_BUDGET = 900;     // job-model renderNotifStash's own default budget (pinned by the gate)
 function roomUnderCap(ahead) { return INLINE_CAP - (Number(ahead) || 0) - INLINE_TAIL_MARGIN; }
 /** The msg-stash section for ONE injection, or '' — and the entries it carries are the ones taken. */
+// THE WAITING SET SPEAKS THROUGH THE POST WHEN THE PROMPT CANNOT CARRY IT (lane notify-retry R3, 2026-10-01): a drain
+// that could not fit the inline cap used to log "wait for the next prompt" — for a conversation nobody types into that
+// is never (the owner's: the hook payload had 0 B left for a 900 B digest). Now, for a LIVE local conversation, the
+// drain ARMS a hand-over the turn end runs through the ladder as its own frame (deliver.armStashHandover →
+// stash-handover's turn-end listener, spendReason 'stash-retry'); the words say so. And a notification the ladder PARKED
+// for retry (deliver.retryEntries) rides this prompt when it fits — free, the retry cancelled (retryTake via 'prompt').
+function armOrWait(deliver, cid, why) {
+  try { return typeof deliver.armStashHandover === 'function' && deliver.armStashHandover(cid, why) === true; } catch { return false; }
+}
+function parkedOf(deliver, cid, jobsOnly) {
+  try { return typeof deliver.retryEntries === 'function' ? deliver.retryEntries(cid).filter((e) => e && !e.ho && e._retry && ((e._retry.producer === 'jobs') === jobsOnly)) : []; } catch { return []; }
+}
 function drainStashUnderCap(deliver, cid, ahead, log = console.log) {
   if (!deliver || !cid || typeof deliver.stashEntries !== 'function') return '';
-  const waiting = deliver.stashEntries(cid).filter((e) => e && typeof e === 'object' && !e.ho);   // a claimed entry is a hand-over's, never this drain's
+  const parked = parkedOf(deliver, cid, false);   // a parked delivery of any producer but the jobs engine (whose own digest carries its)
+  const waiting = [...parked, ...deliver.stashEntries(cid).filter((e) => e && typeof e === 'object' && !e.ho)];   // a claimed entry is a hand-over's, never this drain's
   if (!waiting.length) return '';
   const room = roomUnderCap(ahead);
   const needOf = (p) => Buffer.byteLength(p.text, 'utf-8') + (ahead > 0 ? 2 : 0);
@@ -204,10 +238,13 @@ function drainStashUnderCap(deliver, cid, ahead, log = console.log) {
     need = needOf(pm);
   }
   if (!pm.shown.length || need > room) {
-    log(`[deliver] ${cid}: ${waiting.length} stashed message(s) wait for the next prompt — ${need} B do not fit the ${Math.max(0, room)} B left under the inline cap (${Number(ahead) || 0} B of context ahead of them)`);
+    const armed = armOrWait(deliver, cid, 'inline-cap');
+    log(`[deliver] ${cid}: ${waiting.length} stashed message(s) ${armed ? 'will arrive as a message when this turn ends' : 'wait for the next prompt'} — ${need} B do not fit the ${Math.max(0, room)} B left under the inline cap (${Number(ahead) || 0} B of context ahead of them)`);
     return '';
   }
-  deliver.drainStash(cid, new Set(pm.shown));
+  const shownParked = pm.shown.filter((e) => e._retry);
+  deliver.drainStash(cid, new Set(pm.shown.filter((e) => !e._retry)));
+  if (shownParked.length && typeof deliver.retryTake === 'function') deliver.retryTake(cid, new Set(shownParked), { via: 'prompt' });
   // a stash drain enters the AGENT's context invisibly — emit the same card the live lanes render so the user sees
   // what arrived (2.363.0); the entry's PATH (S3 verify F3), never its name
   for (const e of pm.shown) deliver.emitPeerCard(cid, { fromName: e.fromName || null, text: e.text, kind: stashKindOf(e) });
@@ -216,14 +253,19 @@ function drainStashUnderCap(deliver, cid, ahead, log = console.log) {
 /** The jobs notification digest for ONE injection, or '' — drained only when its whole budget fits. */
 function drainNotifsUnderCap(jm, deliver, cid, ahead, log = console.log) {
   if (!jm || !cid) return '';
-  const waiting = typeof jm.peekNotifs === 'function' ? jm.peekNotifs(cid).filter((n) => n && !n.ho) : [];
+  const stashed = typeof jm.peekNotifs === 'function' ? jm.peekNotifs(cid).filter((n) => n && !n.ho) : [];
+  // the jobs engine's PARKED notifications (the ladder's retry park) ride this digest too, in the store's own shape
+  const parked = deliver ? parkedOf(deliver, cid, true) : [];
+  const parkedItems = parked.map((e) => { const m = e._retry.meta || {}; return { jobId: m.jobId || null, jobName: m.jobName || m.jobId || null, text: (m.ev && m.ev.what) || '', ts: Number(e._retry.firstAt) || Number(e.ts) || 0, urgency: m.urgency || 'low', held: { kind: 'retrying', attempts: (e._retry.attempts || []).length } }; });
+  const waiting = [...stashed, ...parkedItems].sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0));
   if (!waiting.length) return '';
   const room = roomUnderCap(ahead);
   if (room < JOBS_DIGEST_BUDGET + 2) {
-    log(`[jobs] ${cid}: ${waiting.length} stashed notification(s) wait for the next prompt — the ${JOBS_DIGEST_BUDGET} B digest does not fit the ${Math.max(0, room)} B left under the inline cap`);
+    const armed = deliver ? armOrWait(deliver, cid, 'inline-cap') : false;
+    log(`[jobs] ${cid}: ${waiting.length} stashed notification(s) ${armed ? 'will arrive as a message when this turn ends' : 'wait for the next prompt'} — the ${JOBS_DIGEST_BUDGET} B digest does not fit the ${Math.max(0, room)} B left under the inline cap`);
     return '';
   }
-  const drained = jm.drainNotifs(cid, new Set(waiting));
+  const drained = [...(stashed.length ? jm.drainNotifs(cid, new Set(stashed)) : []), ...(parked.length && typeof deliver.retryTake === 'function' ? (deliver.retryTake(cid, new Set(parked), { via: 'prompt' }).length ? parkedItems : []) : [])].sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0));
   if (!drained.length) return '';
   // drained job notifications enter the agent's context invisibly — render the same card the live lane shows (2.363.0)
   try { if (deliver) for (const e of drained) deliver.emitPeerCard(cid, { fromName: 'Background Work · ' + (e.jobName || e.jobId), text: e.text, kind: 'notification' }); } catch { }
@@ -851,6 +893,9 @@ app.get('/api/agent/prompt-context', (req, res) => {
     const noticeTexts = [];
     try {
       const keys = [key, `webui:${id}`];
+      // a late-hooks note queued for ANOTHER process of this conversation is stale here (lane hooks-create): a Terminate +
+      // Resume started with the hooks in place — it never reads "Terminate and Resume it"
+      for (const k of keys) sessionStatus.dropNotices(k, (n) => hooksLateStale(n, id));
       const queue = [];   // [{k, n, text}] in the order they would ride (the record's key first, then the pre-id key)
       // EVERY queued record is a POSITION (channel-jump verify r8): the prefix is consumed BY COUNT, so a record the
       // renderer cannot spell (a kind a newer build wrote before a rollback) stays in the queue as an empty row —
@@ -1972,7 +2017,7 @@ app.post('/api/agent/channels/request', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-const AGENT_DOC_TOPICS = { index: 'index-manual.md', jobs: 'background-work-manual.md', task: 'task-manual.md', status: 'status-manual.md', ask: 'ask-manual.md', msg: 'msg-manual.md', pages: 'pages-manual.md', channels: 'channels-manual.md', browser: 'browser-manual.md', window: 'window-manual.md' };
+const AGENT_DOC_TOPICS = { index: 'index-manual.md', jobs: 'background-work-manual.md', task: 'task-manual.md', status: 'status-manual.md', ask: 'ask-manual.md', msg: 'msg-manual.md', pages: 'pages-manual.md', channels: 'channels-manual.md', browser: 'browser-manual.md', window: 'window-manual.md', exit: 'exit-manual.md', apps: 'apps-manual.md', app: 'apps-manual.md' };
 const serveAgentDoc = (req, res, topic) => {
   // jbt_ (in-job) tokens may read docs too — a watch job's script legitimately
   // wants the manual; job tokens never pass agentSession, so check them first
@@ -2042,15 +2087,17 @@ app.get('/api/agent/design-kit', async (req, res) => {
   const designKit = getDesignKit();
   if (!designKit) return res.json({ ok: false, error: 'design kit not available on this server' });
   const k = await designKit.ensure();
-  res.json({ ok: !!k.ok, version: k.version || null, source: k.source || null, dir: k.dir || null, files: k.files || {}, error: k.error || null });
+  res.json({ ok: !!k.ok, version: k.version || null, source: k.source || null, dir: k.dir || null, files: k.files || {}, error: k.error || null, donor: k.donorVersion || null, code: k.code || null });   // lane design-kit-287: a kit from another CLI version names it (source says the skew)
 });
 app.get('/api/agent/design-kit/file/:name', (req, res) => {
   const a = pageAuth(req, res); if (!a) return;
   const designKit = getDesignKit();
-  const fp = designKit && designKit.fileFor(String(req.params.name));
-  if (!fp) return res.status(404).json({ error: 'no such kit file (or the kit is not ready — vibespace-page kit says why)' });
-  res.type(fp.endsWith('.mjs') ? 'text/javascript' : fp.endsWith('.md') ? 'text/markdown' : 'text/html');
-  res.sendFile(fp);
+  const name = String(req.params.name);
+  // the bytes of a file that is OURS (readKitFile: O_NOFOLLOW + fstat — verify r2; sendFile by path followed whatever sat there)
+  const buf = designKit && designKit.readKitFile(name);
+  if (!buf) return res.status(404).json({ error: 'no such kit file (or the kit is not ready — vibespace-page kit says why)' });
+  res.type(name.endsWith('.mjs') ? 'text/javascript' : name.endsWith('.md') ? 'text/markdown' : 'text/html');
+  res.send(buf);
 });
 app.post('/api/agent/jobs', (req, res) => {
   const a = jobAuth(req, res); if (!a) return;

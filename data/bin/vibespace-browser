@@ -310,6 +310,9 @@ function printKept(r) {
   if (r.restored && r.restored.text) console.error(`note: ${r.restored.text} [browser_restored]`);
   if (r.kept && typeof r.kept === 'object' && r.kept.text) console.error(`note: ${r.kept.text} [browser_kept]`);
   if (r.notKept && typeof r.notKept === 'object' && r.notKept.text) console.error(`note: ${r.notKept.text} [browser_not_kept]`); // verify r2 (D6): a helper's first answer
+  // lane profile-lock-roll (L2): this command's attach found the session's bound tab gone with a replaced browser (or closed)
+  // and bound a tab BEFORE the verb ran — said once, here; the verb's own answer follows
+  if (r.rebound && typeof r.rebound === 'object' && r.rebound.text) console.error(`note: ${r.rebound.text} [tab_rebound]`);
 }
 /** A LOCAL refusal (never a server call): the words, the code, the way out. */
 function refuseLocally(r, exitCode = 1) {
@@ -341,10 +344,28 @@ const HOMES = accountHome();
 /** Where the REAL browser CLI lives: PATH in order, never a shim — neither the
  *  directories VibeSpace puts its shim in (this file's own, ~/.vibespace/bin)
  *  nor any file carrying the shim's marker (another checkout's data/bin). */
-function realBinary() {
+function realBinary({ pinned = true } = {}) {
   const isShim = (p) => { try { const fd = fs.openSync(p, 'r'); try { const b = Buffer.alloc(512); const n = fs.readSync(fd, b, 0, 512, 0); return b.slice(0, n).toString('utf8').includes(V.SHIM_MARKER); } finally { fs.closeSync(fd); } } catch { return false; } };
   const exists = (p) => { try { const st = fs.statSync(p); return st.isFile() && (st.mode & 0o111) !== 0; } catch { return false; } };
-  return V.resolveRealBinary({ PATH: process.env.PATH || '', shimDirs: [__dirname, path.join(HOMES.home, '.vibespace', 'bin'), path.join(os.homedir(), '.vibespace', 'bin')], exists, isShim });
+  return V.resolveRealBinary({ PATH: process.env.PATH || '', shimDirs: [__dirname, path.join(HOMES.home, '.vibespace', 'bin'), path.join(os.homedir(), '.vibespace', 'bin')], exists, isShim, pinned: pinned ? pinnedCli() : null });
+}
+/** verify r2 (H1): VibeSpace's VERIFIED install of one browser CLI version beside this command (data/browser-tools/
+ *  agent-browser-<v>/verified.json — written by the keeper only after that program said its version), its program inside
+ *  the tools directory (the pin file's rule) and runnable. → the path, or null. */
+function installedCliFor(version) {
+  if (typeof V.cliInstallDirName !== 'function' || typeof V.cliPinVerdict !== 'function') return null;
+  const toolsDir = path.resolve(path.join(__dirname, '..', 'browser-tools'));
+  let w = null; try { w = JSON.parse(fs.readFileSync(path.join(toolsDir, V.cliInstallDirName(version), 'verified.json'), 'utf8')); } catch { return null; }
+  if (!w || w.version !== version) return null;
+  const p = V.cliPinVerdict(w, { toolsDir });
+  try { const st = p ? fs.statSync(p) : null; return st && st.isFile() && (st.mode & 0o111) !== 0 ? p : null; } catch { return null; }
+}
+/** lane browser-admin 2b: the browser CLI VibeSpace installed itself (Settings `browser.cli`), named by the keeper's pin
+ *  file BESIDE this command (data/browser-tools/cli-pin.json in a checkout; a remote machine has none ⇒ PATH). */
+function pinnedCli() {
+  if (typeof V.cliPinVerdict !== 'function') return null; // an older verb table
+  const toolsDir = path.join(__dirname, '..', 'browser-tools');
+  try { return V.cliPinVerdict(JSON.parse(fs.readFileSync(path.join(toolsDir, 'cli-pin.json'), 'utf8')), { toolsDir: path.resolve(toolsDir) }); } catch { return null; }
 }
 
 /** r4 (takeover finding 6): the version of the binary THIS command will run,
@@ -556,11 +577,13 @@ async function runPage(c) {
   { const wr = framed.writes.length ? writeRefusal(framed.writes) : null; if (wr) refuseLocally(wr); }
   const runCwd = daemonCwd();
   if (!runCwd.ok) refuseLocally(runCwd);
-  const bin = realBinary();
+  let bin = realBinary();
   if (!bin.ok) refuseLocally(bin);
   // r4 (takeover finding 6): the flag table is a measurement of ONE version. Another build ⇒ every flag is
   // judged under both readings (and said once) — before /resolve, so a refused command starts no browser
-  const drift = V.versionDrift(installedVersion(bin.path));
+  const binVersionRaw = installedVersion(bin.path);
+  const binVersion = (String(binVersionRaw).match(/(\d+\.\d+\.\d+)/) || [])[1] || null;
+  const drift = V.versionDrift(binVersionRaw);
   if (drift) {
     console.error(`note: the browser CLI here is ${drift}; this VibeSpace's flag table was measured on ${V.TABLE_VERSION}, so every flag is judged under both readings until it is re-measured [flag_table_drift]`);
     const d = V.classify(rawArgs, { ours: true, drift, ...(stdinBuf != null ? { stdin: stdinBuf } : {}) });
@@ -591,6 +614,33 @@ async function runPage(c) {
     // B-f7ab verify r2 (LOW): the key minted by this very call is said even when the verb was refused — the next one runs on it
     if (r.minted) console.error(`note: this session had no browser yet — VibeSpace gave it one on this command (${r.minted.origin === 'conversation' ? 'its conversation\'s own, kept from before' : 'new'}); nothing needs restarting [browser_key_minted]`);
     process.exit(1);
+  }
+  // verify r2 (H1, the coordinator's ruling): the browser this command acts on keeps THE CLI IT WAS LAUNCHED WITH — a client
+  // of another version restarts its daemon and its Chrome (the tabs reopen, the active one back on the first; measured on
+  // 0.38.0 ↔ 0.38.1). The answer names that version; this command runs a binary of exactly it, found on this machine
+  // (VibeSpace's verified install of it beside this command, else PATH's), and a `browser.cli` switch applies at its next
+  // launch. None here ⇒ refused by name — never a silent fall to another version.
+  const wantCli = r.browser && r.browser.cli && typeof r.browser.cli.version === 'string' ? r.browser.cli.version : null;
+  if (wantCli && wantCli !== binVersion && typeof V.cliForBrowser === 'function') {
+    const cands = [];
+    const inst = installedCliFor(wantCli);
+    if (inst) cands.push({ path: inst, version: wantCli, how: 'installed' });
+    const onPath = realBinary({ pinned: false });
+    if (onPath.ok && onPath.path !== bin.path) cands.push({ path: onPath.path, version: (String(installedVersion(onPath.path)).match(/(\d+\.\d+\.\d+)/) || [])[1] || null, how: 'path' });
+    const pick = V.cliForBrowser({ want: wantCli, candidates: cands, current: binVersion });
+    if (!pick.ok) refuseLocally({ code: pick.code, error: pick.error, remedy: pick.remedy });
+    if (pick.path) {
+      bin = { ok: true, path: pick.path };
+      const d2 = V.versionDrift(wantCli);
+      if (d2 && d2 !== drift) {
+        console.error(`note: this browser runs on the browser CLI ${d2} (it keeps the version it started with); this VibeSpace's flag table was measured on ${V.TABLE_VERSION}, so every flag is judged under both readings [flag_table_drift]`);
+        const d = V.classify(rawArgs, { ours: true, drift: d2, ...(stdinBuf != null ? { stdin: stdinBuf } : {}) });
+        if (d.kind === 'refused') refuseLocally(d, d.code === 'unknown_verb' ? 2 : 1);
+        cls = d;
+        framed = inFrame(cls);
+        { const wr = framed.writes.length ? writeRefusal(framed.writes) : null; if (wr) refuseLocally(wr); }
+      }
+    }
   }
   // B-f7ab: this session had no browser key (it started before per-session browsers, or while they were off) and the
   // server gave it one on THIS command — said once, so the agent knows nothing needs restarting
@@ -904,7 +954,9 @@ async function runDirect(action, { r, head, profileId, wantsJson, shotPath = nul
   if (a._failed && a.code === 'no_loop' && action !== 'stop') return false; // the loop ended meanwhile: the binary's own verb
   for (const h of head) console.error(h);
   if (a._failed) {
-    if (a.code === 'no_picture') { if (wantsJson) console.log(JSON.stringify({ success: false, data: null, code: 'no_picture', loop: a.loop || null, error: a.error || '' })); else console.log(a.error || 'no picture'); console.error('[no_picture]'); await audit(false); process.exit(1); }
+    // lane fleet-image-2: the answer WITHOUT a picture tells the loop as the answer with one does (below) — on a pod whose
+    // chromium never painted the looping page within 4 s, the agent screenshotting it was never told it loops
+    if (a.code === 'no_picture') { if (wantsJson) console.log(JSON.stringify({ success: false, data: null, code: 'no_picture', loop: a.loop || null, error: a.error || '' })); else console.log(a.error || 'no picture'); console.error('[no_picture]'); if (a.loop && DS && typeof DS.loopText === 'function') console.error(`note: ${DS.loopText(a.loop)} [navigation_loop]`); await audit(false); process.exit(1); }
     if (wantsJson) console.log(JSON.stringify({ success: false, data: null, code: a.code || 'refused', error: a.error || '' }));
     console.error(`${a.error || 'HTTP ' + a._status} [${a.code || 'refused'}]`);
     if (a.remedy) console.error(`  remedy: ${a.remedy}`);
@@ -1003,6 +1055,13 @@ async function runOursPage(cls, { r, head, profileId, wantsJson }) {
       console.log(`  a cloak browser may open here: ${(r.cloakSites || []).length ? r.cloakSites.join(', ') : 'no site yet — the user names them (Settings → Agent browser); everything else is refused'}`);
     }
     if (r.cloak && r.cloak.ok === false) console.log(`cloakserve: ${r.cloak.error}`);
+    // lane browser-admin (chunk 3): the Chrome builds there and the browser CLI version in use — FACTS (the user chooses a
+    // profile's build in the Agent browser panel; this command never sets one)
+    if (r.builds) {
+      if (r.builds.ok === false) console.log(`chrome builds${r.host ? ' on ' + r.host : ''}: cannot be listed (${r.builds.code})`);
+      else console.log(`chrome builds${r.host ? ' on ' + r.host : ' here'}: ${(r.builds.builds || []).length ? r.builds.builds.map((b) => b.version + (b.usable ? '' : ' (not runnable)')).join(', ') : 'none installed'} — a profile's build is the user's choice (Agent browser panel → Change build…)`);
+    }
+    if (r.cli) console.log(`browser driver: ${r.cli.inUse || 'unknown'} in use${r.cli.inUsePinned ? ' (VibeSpace\'s own install)' : ' (from PATH)'}; this tool's flag table was measured on ${r.cli.table}${r.cli.drift ? ' — every flag is judged both ways' : ''}${r.cli.mode !== 'path' && !r.cli.pinnedInstalled ? `; the user chose ${r.cli.chosen}, not installed yet` : ''}`);
     return;
   }
 

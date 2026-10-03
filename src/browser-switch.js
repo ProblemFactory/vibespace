@@ -146,6 +146,9 @@ function launchArgsFor(provider) {
  *  made none). No secret here: the path,
  *  the seed and the proxy's loopback url; the KEY rides `vendorEnvFor`. */
 function launchEnvFor(provider, { seed = null, executablePath = '', proxy = '' } = {}) {
+  // lane browser-admin 2a: a CHROMIUM profile pinned to one Chrome build rides the same env name, alone — the CLI's
+  // own default arguments (no --no-sandbox: a Chrome for Testing build carries its own sandbox helper), the path only
+  if (String(provider == null ? '' : provider) === 'chromium') return executablePath ? { AGENT_BROWSER_EXECUTABLE_PATH: String(executablePath) } : {};
   if (String(provider == null ? '' : provider) !== 'cloak') return {};
   const chrome = ['--no-sandbox'];
   if (Number.isInteger(seed)) chrome.push(`--fingerprint=${seed}`);

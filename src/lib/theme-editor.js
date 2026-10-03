@@ -1,5 +1,6 @@
 import { THEMES, BUILTIN_THEMES } from './themes.js';
 import { showToast, showConfirmDialog, uiScale } from './utils.js';
+import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 
 // All CSS custom properties that themes define
 const CSS_VAR_DEFS = [
@@ -225,13 +226,8 @@ class ThemeEditor {
       panel.style.left = (startLeft + (e.clientX - startX) / uiScale()) + 'px';
       panel.style.top = (startTop + (e.clientY - startY) / uiScale()) + 'px';
     };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    };
-    handle.addEventListener('mousedown', (e) => {
-      if (e.target.tagName === 'BUTTON') return;
-      e.preventDefault();
+    handle.addEventListener('pointerdown', (e) => { // THE DOOR (verify r2 census): captured on the handle, fed by the one feed
+      if (e.target.tagName === 'BUTTON' || e.button !== 0 || e.isPrimary === false) return;
       const rect = panel.getBoundingClientRect();
       startX = e.clientX; startY = e.clientY;
       // rect is viewport px; the fixed panel's style takes layout px (F5)
@@ -240,9 +236,9 @@ class ThemeEditor {
       panel.style.right = 'auto';
       panel.style.left = (rect.left / uiScale()) + 'px';
       panel.style.top = (rect.top / uiScale()) + 'px';
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
+      startPointerDrag(handle, e, { onMove, onEnd: () => {}, shield: 'theme-editor:move' });
     });
+    handle.addEventListener('mousedown', (e) => { if (e.target.tagName !== 'BUTTON' && e.button === 0) e.preventDefault(); }); // the compat press: no selection
   }
 
   _setupResize(handle, panel) {
@@ -253,17 +249,13 @@ class ThemeEditor {
       panel.style.width = w + 'px';
       panel.style.height = h + 'px';
     };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    };
-    handle.addEventListener('mousedown', (e) => {
-      e.preventDefault();
+    handle.addEventListener('pointerdown', (e) => { // THE DOOR (verify r2 census)
+      if (e.button !== 0 || e.isPrimary === false) return;
       startX = e.clientX; startY = e.clientY;
       startW = panel.offsetWidth; startH = panel.offsetHeight;
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
+      startPointerDrag(handle, e, { onMove, onEnd: () => {}, shield: 'theme-editor:size' });
     });
+    handle.addEventListener('mousedown', (e) => { if (e.button === 0) e.preventDefault(); });
   }
 
   _renderBody(body) {

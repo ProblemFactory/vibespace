@@ -102,6 +102,15 @@ fi
 npm install --no-audit --no-fund
 echo "== build"
 npm run build
+# lane cluster-presets P6: put the build's OWN tracked rewrites back, so the
+# checkout is clean BETWEEN updates — an admin's bare `git pull --ff-only` (or
+# the server's boot auto-update) must never find package-lock.json /
+# src/agentd/version.js modified. THE SAME LIST as src/server/auto-update.js
+# BUILD_REWRITTEN_TRACKED and deploy/docker/Dockerfile's seed step
+# (scripts/test-fleet-image-seed.mjs keeps the three equal). Per path, like the
+# pre-pull reset above. The installed tree and the built bundles are unchanged.
+git checkout HEAD -- package-lock.json 2>/dev/null || true
+git checkout HEAD -- src/agentd/version.js 2>/dev/null || true
 echo "== now at $(git rev-parse --short HEAD) (v$(node -p "require('./package.json').version"))"
 if systemctl --user is-enabled vibespace >/dev/null 2>&1; then
   echo "== restarting vibespace.service"

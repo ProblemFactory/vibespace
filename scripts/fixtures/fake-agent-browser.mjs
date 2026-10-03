@@ -21,10 +21,17 @@ const out = (o) => { process.stdout.write(JSON.stringify(o) + '\\n'); };
 const raw = process.argv.slice(2);
 const prefix = { exe: process.env.AGENT_BROWSER_EXECUTABLE_PATH || null, args: process.env.AGENT_BROWSER_ARGS || null, pinTab: raw.includes('--pin-tab') };
 const argv = raw.filter((x) => x !== '--pin-tab');
+// verify r2 (H1): the version THIS client is (FAKE_AB_VERSION — a wrapper standing for another install sets it); the
+// daemon it launches records it, and a client of ANOTHER version restarts that daemon (a new pid) the way the real 0.38.x
+// does ("Daemon version mismatch detected, restarting..." — measured) — except --version and session info, which never do
+const MYV = process.env.FAKE_AB_VERSION || '0.38.1';
+// lane browser-admin 2a: EVERY call's launch view, so a suite can judge that a pinned build rides each one
+fs.appendFileSync(path.join(st, 'calls.log'), JSON.stringify({ ns, session: process.env.AGENT_BROWSER_SESSION || null, verb: argv.slice(0, 2).join(' '), exe: prefix.exe, v: MYV }) + '\\n');
 const [a, b] = argv;
 const cfgOf = () => { const p = process.env.AGENT_BROWSER_CONFIG; if (!p) return null; try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return { unreadable: p }; } };
-if (a === '--version') { console.log('agent-browser 0.38.1'); process.exit(0); }
-if (a === 'session' && b === 'info') { const s = read(); const act = !!(s && alive(s.pid)); out({ success: true, data: { active: act, namespace: ns, pid: act ? s.pid : null, session: process.env.AGENT_BROWSER_SESSION || null, socketDir: path.join(st, ns, 'run'), version: act ? '0.38.1' : null } }); process.exit(0); }
+if (a === '--version') { console.log('agent-browser ' + MYV); process.exit(0); }
+if (a === 'session' && b === 'info') { const s = read(); const act = !!(s && alive(s.pid)); out({ success: true, data: { active: act, namespace: ns, pid: act ? s.pid : null, session: process.env.AGENT_BROWSER_SESSION || null, socketDir: path.join(st, ns, 'run'), version: act ? (s.version || '0.38.1') : null } }); process.exit(0); }
+{ const s = read(); if (s && alive(s.pid) && s.version && s.version !== MYV) { process.stderr.write('⚠ Daemon version mismatch detected, restarting...\\n'); try { process.kill(s.pid, 'SIGKILL'); } catch { } const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref(); fs.appendFileSync(path.join(st, 'restarts.log'), JSON.stringify({ ns, from: s.version, to: MYV, oldPid: s.pid, pid: c.pid }) + '\\n'); fs.appendFileSync(path.join(st, 'launches.log'), JSON.stringify({ ns, ...s, pid: c.pid, version: MYV, restart: true }) + '\\n'); fs.writeFileSync(f, JSON.stringify({ ...s, pid: c.pid, version: MYV })); } }
 const tabNew = a === 'tab' && b === 'new';
 if (a === 'open' || tabNew) {
   const url = tabNew ? argv[2] : b;
@@ -32,7 +39,7 @@ if (a === 'open' || tabNew) {
   if (!(s && alive(s.pid))) {
     if (fs.existsSync(path.join(st, prefix.exe ? 'fail-cloak' : 'fail-plain'))) { process.stderr.write('fake: the browser did not start\\n'); process.exit(1); }
     const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref();
-    s = { pid: c.pid, profile: process.env.AGENT_BROWSER_PROFILE || null, ...prefix, session: process.env.AGENT_BROWSER_SESSION || null, config: cfgOf() };
+    s = { pid: c.pid, profile: process.env.AGENT_BROWSER_PROFILE || null, ...prefix, session: process.env.AGENT_BROWSER_SESSION || null, config: cfgOf(), version: MYV };
     fs.writeFileSync(f, JSON.stringify(s));
     fs.appendFileSync(path.join(st, 'launches.log'), JSON.stringify({ ns, ...s }) + '\\n');
   }
@@ -54,7 +61,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + raw.join(' ')
   const readLog = (name) => { try { return fs.readFileSync(path.join(stateDir, name), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   return {
     bin: path.join(binDir, 'agent-browser'), cloakExe,
-    launches: () => readLog('launches.log'), opens: () => readLog('opens.log'), closes: () => readLog('closes.log'),
+    launches: () => readLog('launches.log'), opens: () => readLog('opens.log'), closes: () => readLog('closes.log'), calls: () => readLog('calls.log'), restarts: () => readLog('restarts.log'),
     /** SIGKILL every daemon the fake started (the suite's exit hook). */
     reap: () => { for (const l of readLog('launches.log')) if (l.pid) { try { process.kill(l.pid, 'SIGKILL'); } catch { /* gone */ } } },
   };

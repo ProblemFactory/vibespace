@@ -42,6 +42,9 @@ import { icon } from './channel-chrome.js';
 // prerequisites / caveats) and `credentialWhyText` words a `whyCode`; the
 // card renders every declared string through t().
 import * as R from '../integration-registry.js';
+// PURE, bundled (lane cluster-presets): the company presets' line — where they
+// come from (the cluster / this release / the environment / none) and how fresh.
+import * as PL from '../preset-layers.js';
 // a3 i18n: a route failure is worded by its CODE, never by the store's sentence.
 import { routeErrorText } from './channel-words.js';
 
@@ -359,8 +362,23 @@ export function openIntegrationsWindow(app, opts = {}) {
   const shell = el('div', 'integ-win');
   const bar = el('div', 'jobs-toolbar');
   bar.appendChild(el('span', 'jobs-summary', t('Your own key wins over the cluster default. Secrets are never shown again after saving — only replaced.')));
+  // THE COMPANY PRESETS LINE (lane cluster-presets, P3): source + freshness,
+  // "none — ask your admin" instead of an empty choice; patched in place on
+  // every `cluster-presets-updated` (the server pushes the recomputed summary).
+  const presetsBox = el('div', 'integ-presets');
+  let lastPresets = null;
+  function drawPresets(summary) {
+    if (summary === undefined) summary = lastPresets; else lastPresets = summary;
+    presetsBox.textContent = '';
+    if (!summary) return;
+    const line = PL.presetsLine(summary, { t, ago });
+    const main = el('div', 'plugin-detail integ-presets-line' + (line.none ? ' integ-presets-none' : ''), line.text);
+    if (summary.dir) main.title = t('Read from {dir} — it updates without a restart.', { dir: summary.dir });
+    presetsBox.appendChild(main);
+    for (const e of line.errors) presetsBox.appendChild(el('div', 'plugin-detail plugin-cfg-warn integ-presets-err', e));
+  }
   const root = el('div', 'jobs-body integ-body');
-  shell.append(bar, root);
+  shell.append(bar, presetsBox, root);
   winInfo.content.appendChild(shell);
 
   let pendingFocus = focus;
@@ -397,6 +415,7 @@ export function openIntegrationsWindow(app, opts = {}) {
       const again = el('button', 'mounts-btn', t('Retry')); again.onclick = render; root.appendChild(again);
       return;
     }
+    drawPresets(r.presets || null);
     if (r.storeError) root.appendChild(el('div', 'plugin-detail plugin-cfg-warn', storeErrorText(r.storeError)));
     for (const v of r.integrations) {
       const card = renderCard(app, v, { refresh: refreshOne, focus: null });
@@ -409,7 +428,13 @@ export function openIntegrationsWindow(app, opts = {}) {
 
   // Live: another client's change re-renders that one card (never a fetch of
   // everything for one row). Removed BY NAME when the window closes.
-  const off = app.ws.onGlobal((msg) => { if (msg && msg.type === 'integrations-updated' && msg.id) refreshOne(msg.id); });
+  const off = app.ws.onGlobal((msg) => {
+    if (msg && msg.type === 'integrations-updated' && msg.id) refreshOne(msg.id);
+    else if (msg && msg.type === 'cluster-presets-updated') drawPresets(msg.presets || null);
+  });
+  // "updated 2 min ago" ages while the window is open (a minute tick, cleared with the window)
+  const ageTick = setInterval(() => { if (lastPresets && lastPresets.updatedAt) drawPresets(); }, 60000);
+  winInfo._listenerCtl?.signal.addEventListener('abort', () => clearInterval(ageTick));
   winInfo._listenerCtl?.signal.addEventListener('abort', () => { try { off?.(); } catch {} });
   return winInfo;
 }

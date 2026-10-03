@@ -22,6 +22,11 @@ import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, freePort, endRootedProcesses } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
+// 2.369.200 integration (lane hooks-create H5 × this suite): with no desktop and Xvfb on the keeper's PATH an UNSET window
+// preference launches the hidden-window rung once H5's switch is on (OFF in 2.369.200, ON in .201 — a headed Chrome); this suite's subject is the dialog / loop watch on the
+// rung it was measured on, so it pins headless — the hidden-window rung's own legs are test-browser-display-chrome's (and
+// the watch on it is HELD: see the 2.369.200 engineering log, integration)
+const HEADLESS_SETTING = (k) => (k === 'browser.noDisplayMode' ? 'headless' : undefined);
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const express = require('express');
@@ -77,7 +82,7 @@ async function world(tag, { Dmod = D, ephemeral = true, second = false } = {}) {
   const kenv = { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD };
   const KEY = { eph: 'bk-00005ea1', ctl: 'bk-00005ec1', shared: 'bk-00005ed1' }[tag] || 'bk-00005ef1';
   const live = new Set([KEY]);
-  const kk = Kk.create({ dataDir: path.join(W, 'data'), homeDir: KH, env: () => kenv, serverSetting: () => undefined, liveKeys: () => live, runtime: Ff.createBrowserRuntime({ env: kenv }), facts: Ff.createBrowserFacts({ env: kenv }), log: { log() { }, warn() { }, error() { } }, install: false, tickMs: 3600e3, conversationFacts: () => ({ turn: 'idle' }) }); // verify r2: a conversation's turn is over once its command returns — the other may drive the shared browser at once (the ruling's one-driver rule, not this suite's subject)
+  const kk = Kk.create({ dataDir: path.join(W, 'data'), homeDir: KH, env: () => kenv, serverSetting: HEADLESS_SETTING, liveKeys: () => live, runtime: Ff.createBrowserRuntime({ env: kenv }), facts: Ff.createBrowserFacts({ env: kenv }), log: { log() { }, warn() { }, error() { } }, install: false, tickMs: 3600e3, conversationFacts: () => ({ turn: 'idle' }) }); // verify r2: a conversation's turn is over once its command returns — the other may drive the shared browser at once (the ruling's one-driver rule, not this suite's subject)
   const Bp = require('../src/browser-profiles.js');
   const prof = ephemeral ? null : kk.createProfile({ label: 'Bank ' + tag }, { owner: { kind: 'instance', id: null } });
   const TOKEN = 'vsst_sreset_' + tag;
@@ -92,7 +97,7 @@ async function world(tag, { Dmod = D, ephemeral = true, second = false } = {}) {
   if (second) { sessions.set('sess-' + tag + '-b', { agentToken: TOKEN_B, _browserKey: KEY_B, _browserVariant: 'D', _browserEnv: null, name: 'Chat ' + tag + ' B', cwd: W }); live.add(KEY_B); }
   const events = [];
   const R = require('../src/routes/browser.js');
-  const mkKeeper = () => Kk.create({ dataDir: path.join(W, 'data'), homeDir: KH, env: () => kenv, serverSetting: () => undefined, liveKeys: () => live, runtime: Ff.createBrowserRuntime({ env: kenv }), facts: Ff.createBrowserFacts({ env: kenv }), log: { log() { }, warn() { }, error() { } }, install: false, tickMs: 3600e3, conversationFacts: () => ({ turn: 'idle' }) });
+  const mkKeeper = () => Kk.create({ dataDir: path.join(W, 'data'), homeDir: KH, env: () => kenv, serverSetting: HEADLESS_SETTING, liveKeys: () => live, runtime: Ff.createBrowserRuntime({ env: kenv }), facts: Ff.createBrowserFacts({ env: kenv }), log: { log() { }, warn() { }, error() { } }, install: false, tickMs: 3600e3, conversationFacts: () => ({ turn: 'idle' }) });
   // verify r4 #2: the PRODUCTION wiring's holdersOf (src/server/mounts-plugins-wiring.js — the lease rows + the user's own row); r3's
   // `() => []` stub made every tab an orphan (no holder named any), so the orphan rule read every loop as nobody's
   const holdersOfK = (k) => (profileId) => { try { const out = (k.list().leases || []).filter((l) => l && l.profileId === profileId && l.browserKey).map((l) => ({ browserKey: l.browserKey, sessionId: l.sessionId || null, ephemeral: !!l.ephemeral })); const h = typeof k.humanOf === 'function' ? k.humanOf(profileId) : null; if (h && h.browserKey) out.push({ browserKey: h.browserKey, sessionId: null, ephemeral: false, human: true, input: h.input === 'user' ? 'user' : 'agent' }); return out; } catch { return []; } };
@@ -360,7 +365,11 @@ try {
     r = await s2.cli(['get', 'url'], { timeoutMs: 40000 });
     const pid11b = (s2.kk.list().browsers[s2.prof.id] || {}).browser?.pid;
     const lease11b = s2.kk.list().leases.find((l) => l.browserKey === s2.KEY);
-    ok(Number.isInteger(pid11b) && pid11b !== pid11 && /tab_gone/.test(r.out + r.err) && !(lease11b && Array.isArray(lease11b.tabs) && lease11b.tabs.length), `⑪ the keeper healed the browser (pid ${pid11} → ${pid11b}; the binary's own tab_gone names \`tab new\`) and the dead ids are GONE from A's lease (before: kept — a ghost-only scope)`, { pid11, pid11b, tabs: lease11b && lease11b.tabs, r: r.code });
+    // 2.369.200 integration: lane profile-lock-roll L2 — the first command after a replaced Chrome REBINDS the lease to a new tab
+    // ([tab_rebound]) instead of the binary's tab_gone; either way no DEAD id survives on A's lease (the rebound tab is new)
+    const idOf11 = (t) => (typeof t === 'string' ? t : t && (t.id || t.targetId));
+    const dead11 = new Set(((lease11 && lease11.tabs) || []).map(idOf11));
+    ok(Number.isInteger(pid11b) && pid11b !== pid11 && (/tab_gone/.test(r.out + r.err) || /\[tab_rebound\]/.test(r.out + r.err)) && !(lease11b && Array.isArray(lease11b.tabs) && lease11b.tabs.some((t) => dead11.has(idOf11(t)))), `⑪ the keeper healed the browser (pid ${pid11} → ${pid11b}; the binary's own tab_gone names \`tab new\`, or profile-lock-roll's [tab_rebound]) and the dead ids are GONE from A's lease (before: kept — a ghost-only scope)`, { pid11, pid11b, tabs: lease11b && lease11b.tabs, r: r.code });
     r = await s2.cli(['tab', 'new', U('/pd/login')], { timeoutMs: 40000 });
     await sleep(3000);
     const f11 = s2.dialogs.factFor({ profileId: s2.prof.id, browserKey: s2.KEY, sessionId: 'sess-shared', ephemeral: false, consume: false });

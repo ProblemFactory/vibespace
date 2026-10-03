@@ -18,6 +18,7 @@ const NOTIFICATION_SENDERS = Object.freeze([
   'Channels · ',          // src/server/channels-engine.js (wakes + Outbox receipts)
   'VibeSpace notices',    // src/server/stash-handover.js FROM_NAME (the user's "Hand over now" — the waiting stash as ONE message)
   'Machines · ',          // src/exit-proxy.js (lane-pairing ⑥: "ran `…` on <machine> — exit 0 · 1.2 s", a display-only card in the calling chat)
+  'VibeSpace apps',       // src/server/apps-engine.js FROM_NAME (Layer 0: the outcome of an app-install proposal, stashed for the proposer's next turn)
 ]);
 
 /** Is this queued row (the wrapper's queue_changed item: {kind, from, …}) a

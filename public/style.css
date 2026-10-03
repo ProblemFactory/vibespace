@@ -93,6 +93,12 @@ html, body {
   height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   font-size: 13px; color: var(--text); background: var(--bg-root); overflow: hidden; user-select: none;
 }
+/* CHROME TEXT IS NEVER SELECTABLE (lane mobile-select M2). The page default above is none and content opts in
+   (the chat list, viewers, For-you texts — scripts/test-press-select.mjs §4 is the census of every opt-in); a menu,
+   popover, toast, chooser or tab chip says none ITSELF, so one built inside a selectable region (a popover given a
+   parent in the chat list) never inherits `text` and a stray selection never lands on its words. Unprefixed like the
+   page rule: a -webkit- none inherited by a field breaks typing on older iOS. */
+[data-popover], .context-menu, #global-toasts, .global-toast, .overlap-switcher, .tab-item, .chat-msg-more { user-select: none; }
 
 /* ── Shared popover base (position set by JS createPopover) ── */
 .status-filter-menu, .overlap-switcher, .groups-popover,
@@ -1033,11 +1039,19 @@ body.customize-mode #toolbar > .toolbar-center { flex-wrap: wrap; row-gap: 4px; 
 @keyframes win-bounce { 0% { transform: scale(1); } 40% { transform: scale(1.015); } 100% { transform: scale(1); } }
 .window.dragging { opacity: 0.85; cursor: grabbing; }
 .window.dragging .window-content { pointer-events: none; }
+/* THE DRAG SHIELD (lane-drag-release, userW's inc-muq7uk0f-e59s): while ANY window is dragged or resized no window's
+   content takes the pointer — an iframe (a Web view, the PDF viewer's own frame), a canvas (the Desktop's noVNC, an
+   xpra pane), a live-view picture swallowed the moves and the release, so the drag stayed armed with its highlight on;
+   the hit test is the workspace's for the whole gesture. window.js sets the class at the drag's threshold / the
+   resize's start and lifts it at the end door. */
+body.wm-dragging .window .window-content { pointer-events: none !important; }
+body.wm-dragging .window iframe, body.wm-dragging .window canvas, body.wm-dragging .window img, body.wm-dragging .window embed, body.wm-dragging .window object { pointer-events: none !important; }
 .window.snap-animating { transition: left 0.2s ease, top 0.2s ease, width 0.2s ease, height 0.2s ease; }
 .window-titlebar {
   height: var(--title-height); background: var(--bg-titlebar);
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 8px 0 10px; cursor: grab; flex-shrink: 0; border-bottom: 1px solid var(--border);
+  touch-action: none; /* lane-drag-release: a touch drag of the title bar is pointermove, never the page's pan (pointercancel) */
 }
 .window-active .window-titlebar { background: var(--bg-titlebar-active); }
 .window-icon-stack {
@@ -1120,7 +1134,7 @@ body.customize-mode #toolbar > .toolbar-center { flex-wrap: wrap; row-gap: 4px; 
 }
 
 /* Resize Handles */
-.resize-handle { position: absolute; z-index: 10; }
+.resize-handle { position: absolute; z-index: 10; touch-action: none; } /* lane-drag-release: a touch resize is pointermove, never a pan */
 .resize-n { top: -3px; left: 8px; right: 8px; height: 6px; cursor: n-resize; }
 .resize-s { bottom: -3px; left: 8px; right: 8px; height: 6px; cursor: s-resize; }
 .resize-e { right: -3px; top: 8px; bottom: 8px; width: 6px; cursor: e-resize; }
@@ -2524,6 +2538,49 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .desktop-install-note { font-size: 12px; color: var(--text-secondary); }
 .desktop-install-note.is-bad { color: var(--red); }
 .desktop-install-actions { display: flex; gap: 8px; justify-content: flex-end; }
+/* Layer 0 apps (docs/design-app-persistence.zh.md §3.1): an app's plan facts above the commands, the "Your installed
+   apps" section of the Desktop apps dialog, the search / .deb / source / helper dialogs. Theme variables only. */
+.desktop-install-facts { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text); }
+.app-plan-facts { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.app-plan-line { overflow-wrap: anywhere; }
+.app-plan-by { font-weight: 600; }
+.app-plan-why { color: var(--text-secondary); }
+.app-plan-mono { font-family: var(--font-mono, monospace); font-size: 11px; }
+.app-plan-fpr { color: var(--accent); }
+.app-plan-warn { color: var(--yellow); }
+.app-plan-replay { color: var(--text-secondary); }
+.app-plan-pkgs summary { cursor: pointer; color: var(--text-secondary); font-size: 11px; }
+.app-plan-pkg-list { font-family: var(--font-mono, monospace); font-size: 11px; max-height: 120px; overflow: auto; overflow-wrap: anywhere; padding: 4px 0; }
+.desktop-launch-apps-note { margin: 0 0 6px; font-size: 11px; color: var(--text-secondary); }
+.app-sec-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.app-sec-updates { flex: 1; font-size: 11px; color: var(--text-secondary); }
+.app-sec-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.app-sec-status { font-size: 12px; color: var(--text-secondary); }
+.app-sec-status:empty { display: none; }
+.app-sec-status.is-bad { color: var(--red); }
+.app-sec-row { display: flex; align-items: center; gap: 6px; padding: 4px 0; font-size: 12px; min-width: 0; border-top: 1px solid var(--border); }
+.app-sec-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-sec-sub { flex: 1; min-width: 0; font-size: 11px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-sec-state { font-size: 11px; color: var(--text-secondary); }
+.app-sec-proposal .app-sec-label { white-space: normal; }
+.app-sec-drift-row .app-sec-label { white-space: normal; color: var(--yellow); }
+.desktop-launch-card-img { width: 20px; height: 20px; object-fit: contain; }
+.app-search-intro { margin: 0 0 8px; font-size: 12px; color: var(--text-secondary); }
+.app-search-form, .app-source-form { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.app-source-form { flex-direction: column; align-items: stretch; }
+.app-search-input { flex: 1; min-width: 0; height: 28px; padding: 0 8px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); font: inherit; font-size: 12px; }
+.app-search-results { display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow: auto; margin-top: 6px; }
+.app-search-result { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 6px 8px; background: transparent; color: var(--text); border: 1px solid transparent; border-radius: var(--radius-sm); text-align: left; cursor: pointer; font: inherit; }
+.app-search-result:hover, .app-search-result:focus-visible { background: var(--bg-hover); border-color: var(--border); }
+.app-search-pkg { font-family: var(--font-mono, monospace); font-size: 12px; font-weight: 600; }
+.app-search-sum { font-size: 11px; color: var(--text-secondary); }
+.ut-action-app { width: auto; padding: 0 8px; font-size: 11px; font-weight: 600; border-radius: var(--radius-sm); } /* a WORDED button on the 24 px .ut-act icon box — its own width (the exit ask's rule) */
+.ut-app-answer .ut-action-app { height: 24px; min-width: 64px; }
+.ut-app-answer .ut-app-install { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+@media (max-width: 768px) {
+  .ut-app-answer .ut-action-app { min-height: 36px; min-width: 72px; }
+  .app-sec-row { flex-wrap: wrap; }
+}
 .desktop-launch-avail-bad { color: var(--red, #e55); }
 .desktop-launch-sec { min-width: 0; }
 .desktop-launch-sec h4, .desktop-launch-col h4 { margin: 2px 0 6px; font-size: 12px; color: var(--text-secondary); font-weight: 600; display: flex; align-items: baseline; gap: 8px; }
@@ -3629,10 +3686,6 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .jobs-access .jobs-clear { margin-left: auto; }
 .jobs-access .jobs-clear:hover { color: var(--red); border-color: var(--red); }
 .chanmsg { position: relative; }
-.chanmsg-more { position: absolute; top: 0; right: 0; font: inherit; font-size: 12px; line-height: 1; padding: 1px 5px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-window); color: var(--text-dim); cursor: pointer; opacity: 0; pointer-events: none; transition: opacity var(--transition); }
-.chanmsg:hover .chanmsg-more, .chanmsg-more:focus-visible { opacity: 1; pointer-events: auto; }
-.chanmsg-more:hover { color: var(--accent); border-color: var(--accent); }
-@media (hover: none) and (pointer: coarse) { .chanmsg-more { display: none; } }
 .rc-dialog .rc-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .rc-dialog .rc-match { font-size: 11px; color: var(--text-dim); overflow-wrap: anywhere; }
 .rc-dialog .rc-list { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow-y: auto; margin: 0 0 10px; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); }
@@ -3982,6 +4035,13 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .integ-chip-none { color: var(--warn-text); background: color-mix(in srgb, var(--yellow, #e5c07b) 15%, transparent); }
 .integ-chip-bad { color: var(--bad-text); background: color-mix(in srgb, var(--red, #e55) 12%, transparent); }
 .integ-why { font-size: 10px; line-height: 1.4; }
+/* lane cluster-presets (P3): the company presets' line under the toolbar — a fact (neutral),
+   amber only when there are none ("ask your admin"); a file that could not be read says so beneath it */
+.integ-presets { padding: 6px 12px 0; display: flex; flex-direction: column; gap: 2px; }
+.integ-presets:empty { display: none; }
+.integ-presets-line { font-size: 11px; line-height: 1.45; color: var(--text-secondary); overflow-wrap: anywhere; }
+.integ-presets-none { color: var(--warn-text); }
+.integ-presets-err { font-size: 10px; line-height: 1.4; color: var(--warn-text); }
 .integ-setup { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--text-secondary) 6%, transparent); border: 1px solid var(--border); }
 .integ-setup-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--text-dim); }
 .integ-cb-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -4837,6 +4897,15 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chanmsg-self .chanmsg-head b { color: var(--attn-text); }
 .chanmsg-syn { font-size: 9px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 999px; padding: 0 5px; flex-shrink: 0; }
 .chanmsg-body { font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+/* lane group-pending (2026-10-01): WHERE A GROUP MESSAGE STANDS with its recipients — one dim line under every
+   message ("Waiting for beta's next turn" / "Read by beta" / "1 waiting · 1 read"), keyed and patched in place;
+   the dot is hollow while anyone still waits, filled once it reached everyone it could (never an emoji) */
+.chanmsg-dlv { display: flex; align-items: center; gap: 5px; font-size: 10.5px; line-height: 1.4; color: var(--text-dim); min-width: 0; }
+.chanmsg-dlv[hidden] { display: none; }
+.chanmsg-dlv-text { overflow-wrap: anywhere; min-width: 0; }
+.chanmsg-dlv-dot { flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%; border: 1px solid currentColor; box-sizing: border-box; }
+.chanmsg-dlv[data-tone="handed"] .chanmsg-dlv-dot { background: currentColor; }
+.chanmsg-dlv[data-tone="none"] { opacity: 0.75; }
 /* §25 THE RENDERED TREE (src/lib/channel-blocks-view.js): paragraphs, links, mention chips,
    folded quoted history / signatures, ticket banners, code, cards, system lines */
 .chanblk { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
@@ -4944,11 +5013,9 @@ a.chanmsg-file:hover .chanmsg-att-dl { color: var(--accent); }
 .chanmsg-thread-chip:hover { border-color: var(--accent); }
 .chanmsg-flash { animation: chanmsg-flash 1.2s ease-out; }
 @keyframes chanmsg-flash { from { background: var(--accent-dim); } to { background: transparent; } }
-/* the strip wraps its chips; the `+` never wraps ALONE onto a line (spec §7.3 g): it sits at the end of the strip's
-   LAST line, out of the wrap (a reserved end gap on every line), so a narrow row wraps chips, never the `+` by itself */
+/* the strip wraps its chips; it exists only when the message HAS reactions (lane reaction-hover: adding one is the
+   message's hover action bar below — the `+` that took a line under every message is gone) */
 .chanmsg-rx { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; position: relative; max-width: 100%; box-sizing: border-box; }
-.chanmsg-rx:has(> .rx-add) { padding-right: 36px; min-height: 24px; width: fit-content; }
-.chanmsg-rx > .rx-add { position: absolute; right: 0; bottom: 0; }
 .rx-chip { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; font: inherit; font-size: 12px; line-height: 1; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text-secondary); cursor: pointer; white-space: nowrap; }
 .rx-chip:hover { border-color: var(--border-active); color: var(--text); }
 .rx-chip:disabled { opacity: .6; cursor: progress; }
@@ -4957,7 +5024,6 @@ a.chanmsg-file:hover .chanmsg-att-dl { color: var(--accent); }
 .rx-img { width: 16px; height: 16px; object-fit: contain; }
 .rx-name { font-size: 11px; max-width: 10em; overflow: hidden; text-overflow: ellipsis; }
 .rx-n { font-variant-numeric: tabular-nums; font-size: 11px; }
-.rx-add { padding: 0 7px; color: var(--text-dim); }
 .rx-who, .rx-picker { background: var(--bg-dialog); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-window); padding: 8px; color: var(--text); font-size: 12px; }
 .rx-who { max-width: 240px; display: flex; flex-direction: column; gap: 2px; }
 .rx-who-head { font-weight: 600; margin-bottom: 2px; }
@@ -4986,10 +5052,9 @@ a.chanmsg-file:hover .chanmsg-att-dl { color: var(--accent); }
 .chanthread-list:focus { outline: none; }
 .chanthread-rule { border-top: 1px solid var(--border); margin: 6px 0; }
 .chanthread-note { font-size: 11px; color: var(--warn-text); padding: 4px 0; }
-.chanthread-pick { position: absolute; top: 2px; right: 4px; width: 22px; height: 22px; opacity: 0; transition: opacity .12s; }
-.chanmsg:hover > .chanthread-pick, .chanmsg:focus-within > .chanthread-pick { opacity: 1; }
-/* naive-user pass: no ↩ where the thread cannot be answered (the foot is the read-only line) — a control that did nothing */
-.chanthread-noreply .chanthread-pick { display: none; }
+/* naive-user pass: no reply action where the thread cannot be answered (the foot is the read-only line) — a control that
+   did nothing; the bar's "thread" button is not even offered there (msgBarActions), this is the belt for a stale bar */
+.chanthread-noreply .chanmsg-bar-btn[data-act="thread"] { display: none; }
 /* naive-user pass: the pane's composer line says WHERE and HOW a reply goes ("Lands inside this thread · Sent at once, as you") —
    on a 360 px phone in ja it was cut to "…あなたとしてす…", the "sent at once" half gone; it wraps instead of cutting */
 .chanthread-composer .chanwin-note-text { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
@@ -4997,7 +5062,28 @@ a.chanmsg-file:hover .chanmsg-att-dl { color: var(--accent); }
 .chanthread-target .icon-btn { width: 18px; height: 18px; }
 .chanthread-foot { flex-shrink: 0; border-top: 1px solid var(--border); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
 /* touch: the chips are 28 px tall with 8 px gaps, a pick 36 px, the pane's Back / ✕ 36 px (the inbox window's rule) */
-@media (hover: none) { .chanthread-pick { opacity: 1; } .rx-chip { height: 28px; } .chanmsg-rx { gap: 8px; } .chanmsg-rx:has(> .rx-add) { padding-right: 42px; min-height: 28px; } .rx-pick { height: 36px; } .chanthread-back, .chanthread-close { width: 36px; height: 36px; } }
+@media (hover: none) { .rx-chip { height: 28px; } .chanmsg-rx { gap: 8px; } .rx-pick { height: 36px; } .chanthread-back, .chanthread-close { width: 36px; height: 36px; } }
+/* THE MESSAGE ACTION BAR (lane reaction-hover, 2026-10-01 — Lark's shape; src/lib/channel-msg-bar.js): ONE small bar per
+   message — add a reaction · reply in thread · quote (an agent group's row: its ⋯) — an OVERLAY at the message's right
+   edge, its middle on the message's first line (the head line of a run's first message, the first text line of a
+   continuation). Never in the flow: absolute, so the row's height and the next row's place are the same shown or hidden.
+   Shown while the pointer rests on the message, while the KEYBOARD is inside the bar (:focus-visible — a mouse click
+   leaves no stuck bar), or while its picker is open (.open). Hidden = transparent and click-through. A touch device
+   never draws it: a long press opens the same actions as a menu. */
+.chanmsg { --chanmsg-line-mid: 11px; }
+.chanmsg-bar { position: absolute; top: var(--chanmsg-line-mid); right: 6px; transform: translateY(-50%); z-index: 2; display: flex; align-items: center; gap: 1px; padding: 2px; background: var(--bg-dialog); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 2px 8px rgba(0,0,0,0.3); opacity: 0; pointer-events: none; transition: opacity var(--transition); }
+.chanmsg:hover > .chanmsg-bar, .chanmsg-bar:has(:focus-visible), .chanmsg-bar.open { opacity: 1; pointer-events: auto; }
+.chanmsg-bar-btn { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 24px; padding: 0; font: inherit; line-height: 1; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); cursor: pointer; }
+.chanmsg-bar-btn:hover { background: var(--bg-hover); color: var(--accent); }
+.chanmsg-bar-btn:focus-visible { outline: none; border-color: var(--accent); color: var(--accent); }
+/* a TOUCH device (the phone, a tablet's finger) — never "no hover" alone: headless Chrome and a pen report hover: none
+   with a fine pointer, and there the bar is still the only door (the product's ⋯ rule since verify r2) */
+@media (hover: none) and (pointer: coarse) { .chanmsg-bar { display: none; } }
+/* the QUOTE a reply answers, at the top of the composer box (the bar's Quote; ✕ takes it back) */
+.chanwin-quote { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 6px 8px 0 10px; font-size: 11px; color: var(--text-secondary); }
+.chanwin-quote-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chanwin-quote .chanwin-quote-x { width: 20px; height: 20px; flex-shrink: 0; }
+@media (hover: none) and (pointer: coarse) { .chanwin-quote .chanwin-quote-x { width: 36px; height: 36px; } }
 .chanwin-outbox { margin-top: 6px; border-top: 1px solid var(--border); padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
 .chanwin-outbox-head { display: flex; align-items: center; gap: 8px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-dim); }
 .chanwin-outbox-head .chan-prop-link { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 400; cursor: pointer; }
@@ -5656,6 +5742,11 @@ label.chan-cap-row { cursor: default; }
 .bprof-usage { font-size: 10px; color: var(--text-dim); white-space: nowrap; }
 .bprof-usage-over { color: var(--warn-text); }
 .bprof-display { font-size: 10px; color: var(--text-dim); white-space: normal; overflow-wrap: anywhere; } /* lane headless-fallback: the launch's display fact under the state */
+.bprof-build { font-size: 10px; color: var(--text-secondary); white-space: normal; overflow-wrap: anywhere; } /* lane browser-admin 2a: the row's Chrome build line */
+.bprof-build.warn { color: var(--warn-text); }
+.bprof-cli { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; padding: 4px 8px; font-size: 11px; color: var(--text-secondary); } /* lane browser-admin 2b: the Browser CLI row */
+.bprof-cli.warn .bprof-cli-text { color: var(--warn-text); }
+.bprof-cli-text { min-width: 0; overflow-wrap: anywhere; }
 .bprof-rec-live { margin-left: 6px; color: var(--red, #e55); }
 .bprof-rec-refused { margin-left: 6px; color: var(--yellow, #e5c07b); font-size: 10px; }
 .bprof-record { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; color: var(--text-secondary); cursor: pointer; }
@@ -5708,6 +5799,28 @@ label.chan-cap-row { cursor: default; }
 .bwho-lose > span:not(.chan-ic), .bwho-refusal > span:not(.chan-ic) { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .bwho-footer { display: flex; justify-content: flex-end; gap: 8px; }
 .bwho-footer .mounts-btn { min-height: 28px; padding: 4px 14px; font-size: 12px; }
+/* lane browser-admin: THE New profile… dialog (src/lib/browser-new-profile.js) — the who dialog's shell + answer rows,
+   a name field, the browser and machine lists (a row that cannot be picked here stays visible, its reason in words) */
+.dialog.bnew-dialog { width: min(560px, calc(92vw / var(--ui-scale, 1))); }
+.bnew-body { max-height: min(70vh, calc(80vh / var(--ui-scale, 1))); overflow-y: auto; }
+.dialog-body label.bnew-field { display: flex; flex-direction: column; gap: 4px; margin: 0; font-size: 12px; color: var(--text); }
+.bnew-field-head, .bnew-section-head { font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: none; }
+.bnew-section { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.dialog-body .bnew-field input.bnew-label, .dialog-body .bnew-field input.bnew-port { width: 100%; box-sizing: border-box; }
+.bnew-port-row { padding-left: 20px; }
+.bnew-keep { font-size: 12px; line-height: 1.4; }
+.dialog-body label.bwho-answer.is-off { cursor: default; border-style: dashed; }
+.dialog-body label.bwho-answer.is-off .bwho-answer-head { color: var(--text-secondary); }
+.bnew-note { overflow-wrap: anywhere; }
+.mounts-btn.bnew-install { align-self: flex-start; margin-top: 4px; min-height: 24px; padding: 2px 10px; font-size: 11px; }
+/* lane browser-admin 2a: Change build… (src/lib/browser-build-dialog.js) and the New profile… dialog's build section */
+.dialog.bbuild-dialog { width: min(520px, calc(92vw / var(--ui-scale, 1))); }
+.bbuild-body { max-height: min(70vh, calc(80vh / var(--ui-scale, 1))); overflow-y: auto; }
+.bbuild-now, .bbuild-change, .bbuild-hint, .bbuild-note { font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+.bbuild-now.chan-warn, .bbuild-change.chan-warn { color: var(--warn-text); }
+.dialog-body .bwho-answer input.bbuild-path { margin-top: 4px; width: 100%; box-sizing: border-box; font-family: var(--font-mono, monospace); font-size: 11px; }
+.dialog-body label.bbuild-confirm { display: flex; flex-direction: row; align-items: center; gap: 6px; margin: 0; font-size: 12px; }
+.dialog-body label.bbuild-confirm input { width: auto; margin: 0; }
 .file-tool-btn.bprof-forget { color: var(--yellow, #e5c07b); border-color: var(--yellow, #e5c07b); } /* lane I: (0,2,0) — the tie with viewers.css's `.file-tool-btn` */
 .file-tool-btn.bprof-forget:disabled { color: var(--text-dim); border-color: var(--border); }
 .file-tool-btn.bprof-delete { color: var(--red, #e55); border-color: var(--red, #e55); }
@@ -5907,6 +6020,24 @@ label.chan-cap-row { cursor: default; }
 .exit-access-refuse { color: var(--red); font-size: 12px; }
 .exit-access-warn { color: var(--yellow); }
 .exit-access-last { color: var(--text-dim); overflow-wrap: anywhere; }
+.exit-access-runs { margin-left: 6px; font-size: 11px; padding: 1px 8px; }
+/* lane-exit-run-output E4: the machine's command list — keyed rows, a row opens its output */
+.exit-runs-body { display: flex; flex-direction: column; gap: 6px; min-width: min(640px, 92vw); max-height: 70vh; overflow: auto; }
+.exit-runs-note, .exit-runs-platform, .exit-runs-empty { margin: 0; }
+.exit-runs-list { display: flex; flex-direction: column; gap: 2px; }
+.exit-runs-row { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 2px 6px; font-size: 12px; }
+.exit-runs-row[data-outcome="spawn_failed"], .exit-runs-row[data-outcome="refused"], .exit-runs-row[data-outcome="timed_out"] { border-left: 2px solid var(--red); }
+.exit-runs-sum { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; cursor: pointer; min-height: 24px; }
+.exit-runs-when { color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.exit-runs-who { color: var(--text-secondary); overflow-wrap: anywhere; }
+.exit-runs-cmd { font-family: var(--font-mono, monospace); font-size: 11px; overflow-wrap: anywhere; flex: 1 1 200px; min-width: 0; }
+.exit-runs-verdict { white-space: nowrap; }
+.exit-runs-row[data-outcome="spawn_failed"] .exit-runs-verdict, .exit-runs-row[data-outcome="refused"] .exit-runs-verdict, .exit-runs-row[data-outcome="timed_out"] .exit-runs-verdict { color: var(--red); }
+.exit-runs-ms { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.exit-runs-out { display: flex; flex-direction: column; gap: 2px; padding: 4px 0 4px 2px; }
+.exit-runs-flags, .exit-runs-stream, .exit-runs-cut, .exit-runs-none { font-size: 10px; color: var(--text-dim); }
+.exit-runs-pre { margin: 0; padding: 5px 8px; font-family: var(--font-mono, monospace); font-size: 11px; line-height: 1.45; color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; user-select: text; }
+@media (max-width: 768px) { .exit-runs-body { min-width: 0; } .exit-runs-sum { min-height: 36px; } }
 .ut-action-exit { width: auto; padding: 0 8px; font-size: 11px; font-weight: 600; border-radius: var(--radius-sm); }
 /* naive-user N-ask: the answer is its own line under the command, at full strength (never inside the hover-dimmed .ut-actions) */
 .ut-exit-answer { display: flex; gap: 6px; margin-top: 4px; clear: none; }
@@ -5931,3 +6062,19 @@ label.chan-cap-row { cursor: default; }
   .exit-access-dialog .pp-chip { min-height: 36px; }
   .exit-access-actions { position: sticky; bottom: 0; background: var(--bg-dialog); padding-top: 6px; }
 }
+/* lane trace-fits (2026-10-01): the live view's own page-size changes fold into ONE dim row (the toggle expands them); the replay keeps a thin tick between steps */
+.browser-live-trace-head { display: flex; align-items: center; gap: 8px; }
+.browser-trace-fits-toggle { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; font-size: 10px; color: var(--text-secondary); cursor: pointer; white-space: nowrap; }
+.browser-trace-fits-toggle input { margin: 0; }
+.browser-live-trace-row.fits { color: var(--text-dim); font-size: 10px; padding: 2px 8px; }
+.browser-live-trace-row.fits .browser-live-trace-thumb { flex-basis: 40px; height: 22px; opacity: 0.6; }
+.browser-live-trace-row.fits .browser-live-trace-thumb .browser-trace-thumb-img { width: 40px; height: 22px; }
+.browser-live-trace-row.fits .browser-live-trace-label { color: var(--text-dim); font-family: inherit; }
+.browser-trace-row.fits { color: var(--text-dim); font-size: 10px; padding: 2px 0 4px; background: transparent; border: none; border-bottom: 1px solid var(--border); text-align: left; cursor: pointer; width: 100%; font: inherit; }
+.browser-trace-row.fits .browser-trace-row-top { font-size: 10px; }
+.browser-trace-row.fits .browser-trace-row-fits { color: var(--text-dim); }
+.browser-trace-thumb.fits { opacity: 0.55; }
+.brp-tick { padding: 1px 10px; font-size: 9px; line-height: 14px; color: var(--text-dim); border-bottom: 1px dashed var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brp-fits-bar { padding: 2px 10px; border-bottom: 1px solid var(--border); font-size: 10px; display: flex; }
+.brp-fits-bar .browser-trace-fits-toggle { margin-left: 0; }
+.bprof-trace-fits { display: block; font-size: 10px; }

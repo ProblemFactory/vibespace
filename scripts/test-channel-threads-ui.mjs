@@ -19,12 +19,30 @@
 //       unchanged; at 360 px a STACKED view covers the list and Back returns with the list's scrollTop unchanged
 //   (c) REPLY IN THREAD: typed + sent in the pane ⇒ the fake receives `inThread` (the reply lands in the thread's
 //       listing), shown in the pane AND in the main list with the `in thread` tag; the main composer's draft untouched
-//   (d) REACT / UNREACT: `+` opens the picker, arrows + Enter pick, the chip appears `.rx-mine` with count 1; a
-//       click removes it; the strip's other chips are the very same DOM nodes (probe stamps)
+//   (d) REACT / UNREACT (lane reaction-hover): no `+` chip anywhere and no empty strip; a REAL hover on a message shows
+//       its action bar, a REAL press on its Add reaction opens THE picker anchored under the button (the bar stays
+//       while it is open), arrows + Enter pick, the chip appears `.rx-mine` with count 1; a click removes it; the
+//       strip's other chips are the very same DOM nodes (probe stamps)
+//   (r) THE BAR IS AN OVERLAY (lane reaction-hover — the owner: "不改变上下布局关系"): a message with no reaction and
+//       one with reactions, each in five states (pointer away / on it / the keyboard in the bar by a REAL Tab / the
+//       bar removed from the DOM / for the bare one a reaction added and taken back) — the row's offsetHeight, the
+//       next row's offsetTop and the list's scrollHeight identical; hidden it takes no press; at the right edge, its
+//       middle on the head line; THE PIXELS: rest vs keyboard and hovered vs hovered-without-bar differ ONLY inside
+//       the bar's box, rest vs hovered only by the row's own hover wash outside it (screenshots r-row-*.png); the
+//       keyboard inside the bar (→ one tab stop moves, Enter opens the picker, Esc gives the keyboard back)
+//   (t) REPLY IN THREAD + QUOTE FROM THE BAR: every row's bar follows the PURE table (no Quote inside a topic); Quote
+//       puts the quote above the composer and the send carries it (the new message shows what it quotes, the stored
+//       record answers it); Reply in thread on a topic reply opens its topic answering THAT reply; the pane's rows
+//       are react · thread (the old ↩ gone), the root's answers the thread itself; on a plain message a NEW thread
+//       (the message its root, "no replies", never "not loaded"), whose first reply makes the message a topic root
+//       (its chip, its bar re-synced without Quote)
 //   (e) ANOTHER CLIENT'S REACTION: two pages on one conversation; page B reacts; page A's chip changes IN PLACE
 //       within 2 s — no row rebuilt (probe stamps), no `/messages` fetch (the broadcast carried the result)
-//   (g) THE PHONE (360 × 740, touch): a long press on a chip opens the who-list; a tap toggles; the `+` never wraps
-//       alone onto a line
+//   (g) THE PHONE (360 × 740, touch): a long press on a chip opens the who-list; a tap toggles; no `+`, no empty strip,
+//       and the hover bar is not drawn (hover: none)
+//   (p) THE PHONE AT 390 px: a LONG PRESS on a message opens its SAME actions as a menu (添加表情回应 · 在话题中回复 ·
+//       引用), the row's geometry identical with the menu open; Add reaction from the menu → the picker → a tap reacts
+//       (the row grows by its strip) → a tap takes it back (the row closes up exactly)
 //   (h) zh + ja at 360 px, DejaVu Sans: the thread chip, the `in thread` tag, the pane bar's words and the pane composer's
 //       line (naive-user ⑥ — it was cut to "…あなたとしてす…"; control: the pre-fix nowrap rule injected cuts it) drawn WHOLE
 //       (the pill rule)
@@ -119,7 +137,7 @@ const api = async (method, p, body) => { const r = await fetch(`http://127.0.0.1
 for (let i = 0; i < 80; i++) { const r = await api('GET', '/api/channels/fake-poll/fake-poll-big/messages?limit=5'); if (r.status === 200 && (r.json.records || []).length) break; await sleep(250); }
 
 const WebSocket = require('ws');
-async function newPage({ lang = 'zh', phone = false, font = false } = {}) {
+async function newPage({ lang = 'zh', phone = false, font = false, width = 360 } = {}) {
   const r = await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' });
   const t = await r.json();
   const ws = new WebSocket(t.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
@@ -137,7 +155,7 @@ async function newPage({ lang = 'zh', phone = false, font = false } = {}) {
     return r2.result.result.value;
   };
   if (phone) {
-    await cdp('Emulation.setDeviceMetricsOverride', { width: 360, height: 740, deviceScaleFactor: 2, mobile: true });
+    await cdp('Emulation.setDeviceMetricsOverride', { width, height: 740, deviceScaleFactor: 2, mobile: true });
     await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
   } else await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
@@ -148,10 +166,17 @@ async function newPage({ lang = 'zh', phone = false, font = false } = {}) {
   let ready = false;
   for (let i = 0; i < 160; i++) { try { if (await evaljs("!!(window.app && window.app.wm && window.app.openChannel) && !document.getElementById('loading-screen')")) { ready = true; break; } } catch {} await sleep(250); }
   const shot = async (file) => { if (!SHOTS) return; try { fs.mkdirSync(SHOTS, { recursive: true }); const r3 = await cdp('Page.captureScreenshot', { format: 'png' }); if (r3.result && r3.result.data) fs.writeFileSync(path.join(SHOTS, file), Buffer.from(r3.result.data, 'base64')); } catch {} };
-  const key = async (k, code, vk) => { for (const type of ['keyDown', 'keyUp']) await cdp('Input.dispatchKeyEvent', { type, key: k, code, windowsVirtualKeyCode: vk }); };
+  // `text` (lane reaction-hover): a key that ACTIVATES a focused button (Enter / Space) needs its char — CDP sends no
+  // keypress without it, and the browser's own activation never happens
+  const key = async (k, code, vk, text) => { await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: k, code, windowsVirtualKeyCode: vk, ...(text ? { text, unmodifiedText: text } : {}) }); await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code, windowsVirtualKeyCode: vk }); };
   const wheel = (x, y, dy) => cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX: 0, deltaY: dy });
   const touch = async (x, y, holdMs) => { await cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] }); await sleep(holdMs); await cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); };
-  return { cdp, evaljs, ready, shot, key, wheel, touch, errors, close: () => { try { ws.close(); } catch {} } };
+  // lane reaction-hover: a REAL pointer (the bar is a :hover overlay — a script's .click() never proves it is reachable)
+  const move = (x, y) => cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none' });
+  const click = async (x, y) => { await move(x, y); for (const type of ['mousePressed', 'mouseReleased']) await cdp('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 }); };
+  // a clip of the page as base64 PNG (deviceScaleFactor 1 on the desktop page: one pixel = one CSS px)
+  const capture = async ({ name = null, x, y, width: w, height: h }) => { const r3 = await cdp('Page.captureScreenshot', { format: 'png', clip: { x, y, width: w, height: h, scale: 1 } }); const d = r3.result && r3.result.data; if (d && SHOTS && name) { try { fs.mkdirSync(SHOTS, { recursive: true }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(d, 'base64')); } catch {} } return d || null; };
+  return { cdp, evaljs, ready, shot, key, wheel, touch, move, click, capture, errors, close: () => { try { ws.close(); } catch {} } };
 }
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
 
@@ -315,60 +340,387 @@ let paneKey = null;
   await p1.evaljs("(() => { const x = window.__w.big.content.querySelector('.chanthread-close'); if (x) x.click(); return 1; })()");
 }
 
-// ── (d) REACT / UNREACT in the main list — the picker by keyboard, the strip patched in place ──
-console.log('(d) react / unreact');
+// ── (d) REACT / UNREACT in the main list — the HOVER BAR's Add reaction by a REAL pointer, the picker by keyboard, the
+//    strip patched in place (lane reaction-hover: the `+` chip under every message is gone; adding is the bar) ──
+console.log('(d) react / unreact (the hover action bar)');
 const RXROW = {};
 {
-  const pick = await p1.evaljs(`(async () => {
+  const prep = await p1.evaljs(`(async () => {
     const w = window.__w.big;
     const l = w.content.querySelector('.chanwin-main .chanwin-list');
     const lr = l.getBoundingClientRect();
-    const rows = [...l.querySelectorAll('.chanmsg[data-vid]')].filter((r) => { const b = r.getBoundingClientRect(); return b.top >= lr.top && b.bottom <= lr.bottom - 60 && r.querySelector('.rx-add'); });
+    // a row in the UPPER half of the list: the picker opens BELOW the bar's button (createPopover) and must fit there
+    const rows = [...l.querySelectorAll('.chanmsg[data-vid]')].filter((r) => { const b = r.getBoundingClientRect(); return b.top >= lr.top + 16 && b.bottom <= lr.top + lr.height * 0.5 && r.querySelector(':scope > .chanmsg-bar [data-act="react"]'); });
     if (!rows.length) return { rows: 0 };
     const row = rows[rows.length - 1];
     const set = await (await fetch('/api/channels/fake-poll/emoji-set')).json();
     // the strip must hold a chip of somebody's before the pick (its node identity is the point): one added through
     // the route (the broadcast patches it in), unless the row has one already
-    if (!row.querySelector('.rx-chip:not(.rx-add)')) {
+    if (!row.querySelector('.rx-chip')) {
       await fetch('/api/channels/fake-poll/fake-poll-big/messages/' + encodeURIComponent(row.dataset.vid) + '/reactions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'bulb' }) });
-      for (let i = 0; i < 40 && !row.querySelector('.rx-chip:not(.rx-add)'); i++) await new Promise((r) => setTimeout(r, 100));
+      for (let i = 0; i < 40 && !row.querySelector('.rx-chip'); i++) await new Promise((r) => setTimeout(r, 100));
     }
-    const have = new Set([...row.querySelectorAll('.rx-chip:not(.rx-add)')].map((c) => c.dataset.key));
+    const have = new Set([...row.querySelectorAll('.rx-chip')].map((c) => c.dataset.key));
     const idx = set.quick.findIndex((k) => !have.has(k));
-    [...row.querySelectorAll('.rx-chip:not(.rx-add)')].forEach((c, i) => { c.dataset.probe = 'p' + i; });
+    [...row.querySelectorAll('.rx-chip')].forEach((c, i) => { c.dataset.probe = 'p' + i; });
     // THE GLYPH IS CONTENT: no chip of the window still says :key: for a key the vocabulary draws
     const glyphs = new Map(set.keys.filter((k) => k.glyph).map((k) => [k.key, k.glyph]));
-    const named = [...w.content.querySelectorAll('.rx-chip:not(.rx-add) > .rx-name')].map((x) => x.parentElement.dataset.key).filter((k) => glyphs.has(k));
-    const drawnGlyphs = w.content.querySelectorAll('.rx-chip:not(.rx-add) > .rx-glyph').length;
-    row.querySelector('.rx-add').click();
+    const named = [...w.content.querySelectorAll('.rx-chip > .rx-name')].map((x) => x.parentElement.dataset.key).filter((k) => glyphs.has(k));
+    const drawnGlyphs = w.content.querySelectorAll('.rx-chip > .rx-glyph').length;
+    const strips = [...w.content.querySelectorAll('.chanmsg-rx')];
+    const body = row.querySelector(':scope > .chanmsg-body') || row;
+    const br = body.getBoundingClientRect();
+    return { rows: rows.length, vid: row.dataset.vid, key: set.quick[idx], idx, probes: row.querySelectorAll('[data-probe]').length, named, drawnGlyphs,
+      plusLeft: w.content.querySelectorAll('.rx-add').length, emptyStrips: strips.filter((x) => !x.querySelector('.rx-chip')).length, strips: strips.length,
+      at: { x: Math.round(br.left + Math.min(40, br.width / 2)), y: Math.round(br.top + Math.min(8, br.height / 2)) } };
+  })()`);
+  Object.assign(RXROW, prep);
+  ok(prep.named && prep.named.length === 0 && prep.drawnGlyphs >= 3, `every chip draws the vocabulary's glyph (${prep.drawnGlyphs} glyph chips; none left as :key: for a key that has one — a strip drawn before the set loaded is re-faced in place)`, J(prep.named));
+  ok(prep.plusLeft === 0 && prep.strips >= 3 && prep.emptyStrips === 0, `NO "+" chip anywhere in the window and no empty strip — a strip exists only under a message WITH reactions (${prep.strips} strips, ${prep.plusLeft} "+")`, J(prep));
+  if (!(prep.rows >= 1 && prep.idx >= 0)) { ok(false, '(d) found no row to react on', J(prep)); process.exit(1); }
+  // the pointer rests on the message's text ⇒ its bar shows; a REAL press on the bar's Add reaction opens the picker
+  await p1.move(prep.at.x, prep.at.y);
+  await sleep(350);   // past the bar's fade (var(--transition))
+  const btn = await p1.evaljs(`(() => {
+    const row = window.__w.big.content.querySelector('.chanwin-main .chanmsg[data-vid="' + CSS.escape(${J(prep.vid)}) + '"]');
+    const b = row.querySelector(':scope > .chanmsg-bar [data-act="react"]');
+    const bar = b.closest('.chanmsg-bar');
+    const r = b.getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), bottom: r.bottom, left: r.left, op: getComputedStyle(bar).opacity, pe: getComputedStyle(bar).pointerEvents,
+      label: b.getAttribute('aria-label'), title: b.title, svg: !!b.querySelector('svg'), text: b.textContent.trim(), acts: bar.dataset.acts, hit: document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === b || b.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)) };
+  })()`);
+  ok(btn.op === '1' && btn.pe === 'auto' && btn.hit && btn.svg && btn.text === '' && btn.label === '添加表情回应' && /^添加表情回应/.test(btn.title), `a REAL hover on the message shows its bar (opacity ${btn.op}, actions "${btn.acts}"); Add reaction is an SVG glyph with no text, named "${btn.label}" (title + aria-label), and the point under it IS the button`, J(btn));
+  await p1.click(btn.x, btn.y);
+  const pick = await p1.evaljs(`(async () => {
     for (let i = 0; i < 40 && !document.querySelector('.rx-picker'); i++) await new Promise((r) => setTimeout(r, 50));
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    return { rows: rows.length, vid: row.dataset.vid, key: set.quick[idx], idx, focused: document.activeElement && document.activeElement.dataset.key, probes: row.querySelectorAll('[data-probe]').length, named, drawnGlyphs };
+    const p = document.querySelector('.rx-picker');
+    const row = window.__w.big.content.querySelector('.chanwin-main .chanmsg[data-vid="' + CSS.escape(${J(prep.vid)}) + '"]');
+    const pr = p ? p.getBoundingClientRect() : null;
+    return { picker: !!p, top: pr ? pr.top : null, left: pr ? pr.left : null, right: pr ? pr.right : null, vw: innerWidth, focused: document.activeElement && document.activeElement.dataset.key, probes: row.querySelectorAll('[data-probe]').length, barOpen: row.querySelector(':scope > .chanmsg-bar').classList.contains('open') };
   })()`);
-  Object.assign(RXROW, pick);
-  ok(pick.named && pick.named.length === 0 && pick.drawnGlyphs >= 3, `every chip draws the vocabulary's glyph (${pick.drawnGlyphs} glyph chips; none left as :key: for a key that has one — a strip drawn before the set loaded is re-faced in place)`, J(pick.named));
-  if (!(pick.rows >= 1 && pick.idx >= 0)) { ok(false, '(d) found no row to react on', J(pick)); process.exit(1); }
-  ok(pick.rows >= 1 && pick.idx >= 0 && pick.focused && pick.probes >= 1, `the + opens the picker with the first quick emoji focused (${pick.focused}); the pick will be the ${pick.idx + 1}th quick key "${pick.key}"`, J(pick));
-  for (let i = 0; i < pick.idx; i++) await p1.key('ArrowRight', 'ArrowRight', 39);
+  // the pointer leaves the message while the picker is open: the bar stays (its picker hangs from it)
+  await p1.move(4, 4);
+  await sleep(350);
+  const held = await p1.evaljs(`(() => { const bar = window.__w.big.content.querySelector('.chanwin-main .chanmsg[data-vid="' + CSS.escape(${J(prep.vid)}) + '"] > .chanmsg-bar'); return { op: getComputedStyle(bar).opacity, picker: !!document.querySelector('.rx-picker') }; })()`);
+  // createPopover anchors at the button's bottom-left and pulls a picker that would leave the viewport back inside it —
+  // the bar sits at the message's RIGHT edge, so the picker either starts at the button or ends at the viewport's edge
+  // with the button above it
+  const under = pick.picker && Math.abs(pick.top - (btn.bottom + 2)) <= 3 && (Math.abs(pick.left - btn.left) <= 3 || (pick.left < btn.left && pick.right >= btn.left + 1 && pick.right <= pick.vw));
+  ok(under && pick.focused && pick.probes >= 1, `the press opens THE picker anchored under the bar's button (its top ${pick.top && Math.round(pick.top)} = the button's bottom ${Math.round(btn.bottom)} + 2; it spans ${pick.left && Math.round(pick.left)}–${pick.right && Math.round(pick.right)} px over the button at ${Math.round(btn.left)} px) with the first quick emoji focused (${pick.focused}); the pick will be the ${prep.idx + 1}th quick key "${prep.key}"`, J({ pick, btn }));
+  ok(pick.barOpen && held.op === '1' && held.picker, 'the bar stays shown while its picker is open, even with the pointer gone (.open)', J(held));
+  for (let i = 0; i < prep.idx; i++) await p1.key('ArrowRight', 'ArrowRight', 39);
   const foc = await p1.evaljs('document.activeElement && document.activeElement.dataset.key || null');
   await p1.key('Enter', 'Enter', 13);
   const d1 = await p1.evaljs(`(async () => {
-    const row = window.__w.big.content.querySelector('.chanwin-main .chanmsg[data-vid="' + CSS.escape(${J(pick.vid)}) + '"]');
+    const row = window.__w.big.content.querySelector('.chanwin-main .chanmsg[data-vid="' + CSS.escape(${J(prep.vid)}) + '"]');
     let chip = null;
-    for (let i = 0; i < 60 && !chip; i++) { chip = row.querySelector('.rx-chip.rx-mine[data-key="' + CSS.escape(${J(pick.key)}) + '"]'); if (!chip) await new Promise((r) => setTimeout(r, 100)); }
+    for (let i = 0; i < 60 && !chip; i++) { chip = row.querySelector('.rx-chip.rx-mine[data-key="' + CSS.escape(${J(prep.key)}) + '"]'); if (!chip) await new Promise((r) => setTimeout(r, 100)); }
     const probes = [...row.querySelectorAll('[data-probe]')].filter((c) => c.isConnected).length;
     return { chip: !!chip, n: chip ? chip.querySelector('.rx-n').textContent : null, pressed: chip ? chip.getAttribute('aria-pressed') : null, probes, picker: !!document.querySelector('.rx-picker') };
   })()`);
-  ok(foc === pick.key && d1.chip && d1.n === '1' && d1.pressed === 'true' && !d1.picker, `arrows + Enter picked "${foc}": the chip appears .rx-mine with count 1 (aria-pressed) and the picker closed`, J(d1));
-  ok(d1.probes === pick.probes, `the strip's other chips are the very same DOM nodes (${d1.probes}/${pick.probes} probes kept)`);
+  ok(foc === prep.key && d1.chip && d1.n === '1' && d1.pressed === 'true' && !d1.picker, `arrows + Enter picked "${foc}": the chip appears .rx-mine with count 1 (aria-pressed) and the picker closed`, J(d1));
+  ok(d1.probes === prep.probes, `the strip's other chips are the very same DOM nodes (${d1.probes}/${prep.probes} probes kept)`);
   const d2 = await p1.evaljs(`(async () => {
-    const row = window.__w.big.content.querySelector('.chanwin-main .chanmsg[data-vid="' + CSS.escape(${J(pick.vid)}) + '"]');
-    row.querySelector('.rx-chip.rx-mine[data-key="' + CSS.escape(${J(pick.key)}) + '"]').click();
+    const row = window.__w.big.content.querySelector('.chanwin-main .chanmsg[data-vid="' + CSS.escape(${J(prep.vid)}) + '"]');
+    row.querySelector('.rx-chip.rx-mine[data-key="' + CSS.escape(${J(prep.key)}) + '"]').click();
     let gone = false;
-    for (let i = 0; i < 60 && !gone; i++) { gone = !row.querySelector('.rx-chip[data-key="' + CSS.escape(${J(pick.key)}) + '"]'); if (!gone) await new Promise((r) => setTimeout(r, 100)); }
+    for (let i = 0; i < 60 && !gone; i++) { gone = !row.querySelector('.rx-chip[data-key="' + CSS.escape(${J(prep.key)}) + '"]'); if (!gone) await new Promise((r) => setTimeout(r, 100)); }
     return { gone, probes: [...row.querySelectorAll('[data-probe]')].filter((c) => c.isConnected).length };
   })()`);
-  ok(d2.gone && d2.probes === pick.probes, `a click on our chip removes the reaction — the chip is gone, the other ${d2.probes} chips kept`, J(d2));
+  ok(d2.gone && d2.probes === prep.probes, `a click on our chip removes the reaction — the chip is gone, the other ${d2.probes} chips kept`, J(d2));
+}
+
+// ── (r) THE BAR NEVER MOVES THE LAYOUT (lane reaction-hover — the owner: "不改变上下布局关系") + THE KEYBOARD ──
+//    Two messages of the big room — one with no reaction, one with reactions — measured in five states: the pointer
+//    away, the pointer on the message (a REAL hover), the keyboard inside the bar (a REAL Tab: focus-visible, the
+//    pointer away), the bar REMOVED from the DOM (the reference), and (the bare one) with a reaction added and taken
+//    back through the route. The row's offsetHeight, the next row's offsetTop and the list's scrollHeight are the same
+//    in every state; the bar sits at the right edge with its middle on the head line; hidden it takes no press.
+//    Then the PIXELS: the rest shot vs the keyboard shot, and the hovered shot vs the same with the bar hidden — every
+//    differing pixel lies inside the bar's box; and the rest vs hovered — outside the bar's box only the row's own
+//    4 % hover wash differs (no glyph moved: a moved text line differs by far more than a wash).
+console.log('(r) the bar is an overlay: geometry in five states, the pixels, the keyboard');
+{
+  await p1.move(4, 4);
+  await p1.evaljs("(() => { for (const p of document.querySelectorAll('.rx-picker, .rx-who, .context-menu')) p.remove(); const l = " + LIST('big') + "; l.scrollTop = l.scrollHeight; return 1; })()");
+  await sleep(500);
+  // the two rows: a HEAD row (a run's first message — its bar centres on the name line) with no reaction, plain (all
+  // three actions), with no focusable of its own (its bar is the next tab stop after the row above); and one WITH chips
+  // candidates from the whole list; each is scrolled to the middle and given the reaction trickle's time (its debounce +
+  // the call) — a row the trickle grows a strip on is not "bare" any more, the next candidate is taken
+  const pickRows = await p1.evaljs(`(async () => {
+    const l = ${LIST('big')};
+    const rows = [...l.querySelectorAll('.chanmsg[data-vid]')];
+    const bareOk = (r) => !r.classList.contains('chanmsg-cont') && r.querySelector(':scope > .chanmsg-head') && !r.querySelector('.chanmsg-rx') && r.querySelector(':scope > .chanmsg-bar')?.dataset.acts === 'react thread quote' && !r.querySelector('a[href], img') && r.nextElementSibling;
+    const richOk = (r) => r.querySelector('.chanmsg-rx .rx-chip') && r.querySelector(':scope > .chanmsg-bar') && r.nextElementSibling;
+    const settle = async (r) => { r.scrollIntoView({ block: 'center' }); await new Promise((x) => setTimeout(x, 2600)); };
+    let a = null, tried = 0;
+    for (const r of rows.filter(bareOk).reverse().slice(0, 6)) { tried++; await settle(r); if (bareOk(r)) { a = r; break; } }
+    const b = rows.filter(richOk).reverse()[0] || null;
+    if (a) a.dataset.geo = 'bare';
+    if (b) b.dataset.geo = 'rich';
+    return { bare: a ? a.dataset.vid : null, rich: b ? b.dataset.vid : null, nBare: rows.filter(bareOk).length, nRich: rows.filter(richOk).length, tried, heads: rows.filter((r) => !r.classList.contains('chanmsg-cont')).length, acts: [...new Set(rows.map((r) => r.querySelector(':scope > .chanmsg-bar')?.dataset.acts || '(none)'))] };
+  })()`);
+  ok(!!pickRows.bare && !!pickRows.rich, `two rows to measure: "${pickRows.bare}" (no reaction, head row, react · thread · quote) and "${pickRows.rich}" (with reactions)`, J(pickRows));
+  const GEO = (tag) => `(() => {
+    const row = document.querySelector('[data-geo="${tag}"]');
+    const next = row.nextElementSibling;
+    const l = row.closest('.chanwin-list');
+    const bar = row.querySelector(':scope > .chanmsg-bar');
+    const head = row.querySelector(':scope > .chanmsg-head');
+    const br = bar ? bar.getBoundingClientRect() : null, rr = row.getBoundingClientRect(), hr = head ? head.getBoundingClientRect() : null;
+    const cs = bar ? getComputedStyle(bar) : null;
+    const hitAt = br ? document.elementFromPoint(br.left + br.width / 2, br.top + br.height / 2) : null;
+    return { h: row.offsetHeight, next: next.offsetTop, sh: l.scrollHeight, top: Math.round(rr.top * 10) / 10,
+      bar: br ? { left: br.left, right: br.right, top: br.top, bottom: br.bottom, mid: (br.top + br.bottom) / 2 } : null,
+      rowRight: rr.right, rowLeft: rr.left, rowTop: rr.top, rowBottom: rr.bottom, headMid: hr ? (hr.top + hr.bottom) / 2 : null,
+      op: cs ? cs.opacity : null, pe: cs ? cs.pointerEvents : null, vis: cs ? cs.visibility : null, disp: cs ? cs.display : null,
+      hitBar: !!(bar && hitAt && bar.contains(hitAt)), strip: !!row.querySelector(':scope > .chanmsg-rx'), active: document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.act || null : null, activeInBar: !!(bar && bar.contains(document.activeElement)) };
+  })()`;
+  const same = (a, b) => a.h === b.h && a.next === b.next && a.sh === b.sh && a.top === b.top;
+  const pointAt = async (tag) => p1.evaljs(`(() => { const b = document.querySelector('[data-geo="${tag}"] > .chanmsg-body').getBoundingClientRect(); return { x: Math.round(b.left + Math.min(30, b.width / 2)), y: Math.round(b.top + Math.min(8, b.height / 2)) }; })()`);
+  // the keyboard: focus the tab stop just BEFORE the row's bar (in document order), then a REAL Tab
+  const tabInto = async (tag) => {
+    await p1.evaljs(`(() => {
+      const row = document.querySelector('[data-geo="${tag}"]');
+      const target = row.querySelector(':scope > .chanmsg-bar .chanmsg-bar-btn');
+      const all = [...document.querySelectorAll('button, a[href], input, textarea, select, [tabindex]')].filter((e) => e.tabIndex >= 0 && !e.disabled && e.getClientRects().length);
+      const i = all.indexOf(target);
+      if (i > 0) all[i - 1].focus({ preventScroll: true });
+      return i;
+    })()`);
+    await p1.key('Tab', 'Tab', 9);
+    await sleep(350);
+  };
+  const MEASURE = async (tag) => {
+    const out = {};
+    await p1.evaljs(`(() => { document.querySelector('[data-geo="${tag}"]').scrollIntoView({ block: 'center' }); return 1; })()`);
+    await p1.move(4, 4); await sleep(600);
+    out.rest = await p1.evaljs(GEO(tag));
+    const at = await pointAt(tag);
+    await p1.move(at.x, at.y); await sleep(350);
+    out.hover = await p1.evaljs(GEO(tag));
+    await p1.move(4, 4); await sleep(350);
+    await tabInto(tag);
+    out.key = await p1.evaljs(GEO(tag));
+    await p1.evaljs("(() => { document.activeElement && document.activeElement.blur(); return 1; })()");
+    await sleep(350);
+    out.gone = await p1.evaljs(`(() => { const row = document.querySelector('[data-geo="${tag}"]'); const bar = row.querySelector(':scope > .chanmsg-bar'); window.__barHeld = bar; bar.remove(); return 1; })()`).then(() => p1.evaljs(GEO(tag)));
+    await p1.evaljs(`(() => { document.querySelector('[data-geo="${tag}"]').appendChild(window.__barHeld); window.__barHeld = null; return 1; })()`);
+    return out;
+  };
+  const g1 = await MEASURE('bare');
+  const g2 = await MEASURE('rich');
+  for (const [tag, g] of [['no reaction', g1], ['with reactions', g2]]) {
+    ok(same(g.rest, g.hover) && same(g.rest, g.key) && same(g.rest, g.gone), `GEOMETRY (${tag}): the row's offsetHeight ${g.rest.h} px, the next row's offsetTop ${g.rest.next} px and the list's scrollHeight ${g.rest.sh} px are identical with the pointer away / on the message / the keyboard in the bar / the bar removed from the DOM`, J({ rest: [g.rest.h, g.rest.next, g.rest.sh, g.rest.top], hover: [g.hover.h, g.hover.next, g.hover.sh, g.hover.top], key: [g.key.h, g.key.next, g.key.sh, g.key.top], gone: [g.gone.h, g.gone.next, g.gone.sh, g.gone.top] }));
+    ok(g.rest.op === '0' && g.rest.pe === 'none' && !g.rest.hitBar && g.hover.op === '1' && g.hover.pe === 'auto' && g.hover.hitBar, `VISIBILITY (${tag}): hidden at rest (opacity ${g.rest.op}, the press at its middle reaches the message, not the bar); shown under the pointer (opacity ${g.hover.op}, the bar takes the press)`, J({ rest: [g.rest.op, g.rest.pe, g.rest.hitBar], hover: [g.hover.op, g.hover.pe, g.hover.hitBar] }));
+    ok(g.key.op === '1' && g.key.activeInBar && g.key.active === 'react', `KEYBOARD (${tag}): a REAL Tab from the stop before it lands on the bar's first button (${g.key.active}) and the bar shows with the pointer away`, J({ op: g.key.op, active: g.key.active }));
+  }
+  const b1 = g1.hover.bar;
+  ok(b1 && b1.right <= g1.hover.rowRight - 1 && b1.right >= g1.hover.rowRight - 12 && b1.left > g1.hover.rowLeft + (g1.hover.rowRight - g1.hover.rowLeft) / 2, `POSITION: the bar sits at the message's RIGHT edge (its right ${b1 && Math.round(b1.right)} px, the row's ${Math.round(g1.hover.rowRight)} px)`, J(b1));
+  ok(b1 && g1.hover.headMid !== null && Math.abs(b1.mid - g1.hover.headMid) <= 1.5, `POSITION: its middle is on the head line (bar ${b1 && b1.mid.toFixed(1)} px, head line ${g1.hover.headMid && g1.hover.headMid.toFixed(1)} px)`, J({ bar: b1, head: g1.hover.headMid }));
+  // WITH AND WITHOUT REACTIONS: the bare row grows a strip for a reaction (that is content) and closes up EXACTLY when
+  // it is taken back — no line was ever reserved; under the pointer the grown row keeps its height too
+  const bareVid = pickRows.bare;
+  const rxUrl = `/api/channels/fake-poll/fake-poll-big/messages/${encodeURIComponent(bareVid)}/reactions`;
+  const addR = await api('POST', rxUrl, { key: 'tea' });
+  const grown = await p1.evaljs(`(async () => { const row = document.querySelector('[data-geo="bare"]'); for (let i = 0; i < 60 && !row.querySelector('.chanmsg-rx'); i++) await new Promise((r) => setTimeout(r, 100)); return 1; })()`).then(() => p1.evaljs(GEO('bare')));
+  const gAt = await pointAt('bare');
+  await p1.move(gAt.x, gAt.y); await sleep(350);
+  const grownHover = await p1.evaljs(GEO('bare'));
+  await p1.move(4, 4); await sleep(200);
+  const delR = await api('DELETE', `${rxUrl}/tea`);
+  const back = await p1.evaljs(`(async () => { const row = document.querySelector('[data-geo="bare"]'); for (let i = 0; i < 60 && row.querySelector('.chanmsg-rx'); i++) await new Promise((r) => setTimeout(r, 100)); return 1; })()`).then(() => p1.evaljs(GEO('bare')));
+  ok(addR.status === 200 && grown.strip && grown.h > g1.rest.h && same(grown, grownHover), `WITH a reaction the row grows by its strip (${g1.rest.h} → ${grown.h} px) and keeps that height under the pointer (${grownHover.h} px, next row ${grown.next} = ${grownHover.next})`, J({ add: addR.status, grown: [grown.h, grown.next], hover: [grownHover.h, grownHover.next] }));
+  ok(delR.status === 200 && !back.strip && back.h === g1.rest.h && back.next === g1.rest.next, `taken back, the row closes up EXACTLY (${grown.h} → ${back.h} px = ${g1.rest.h} px before; next row ${back.next} = ${g1.rest.next}) — no line is reserved for adding one`, J({ del: delR.status, back: [back.h, back.next], before: [g1.rest.h, g1.rest.next] }));
+
+  // ── THE PIXELS: shots of the bare row at rest / keyboard / hovered / hovered with the bar hidden ──
+  await p1.evaljs(`(() => { document.querySelector('[data-geo="bare"]').scrollIntoView({ block: 'center' }); return 1; })()`);
+  await sleep(600);
+  const clipOf = await p1.evaljs(`(() => { const row = document.querySelector('[data-geo="bare"]'); const r = row.getBoundingClientRect(); const lr = row.closest('.chanwin-list').getBoundingClientRect(); const y0 = Math.max(lr.top, r.top - 10), y1 = Math.min(lr.bottom, r.bottom + 10); return { x: Math.round(r.left), y: Math.round(y0), width: Math.round(r.width), height: Math.round(y1 - y0) }; })()`);
+  await p1.move(4, 4); await sleep(350);
+  const shotRest = await p1.capture({ ...clipOf, name: 'r-row-rest.png' });
+  await tabInto('bare');
+  const keyGeo = await p1.evaljs(GEO('bare'));
+  const shotKey = await p1.capture({ ...clipOf, name: 'r-row-keyboard.png' });
+  await p1.evaljs("(() => { document.activeElement && document.activeElement.blur(); return 1; })()");
+  const hAt = await pointAt('bare');
+  await p1.move(hAt.x, hAt.y); await sleep(350);
+  const hoverGeo = await p1.evaljs(GEO('bare'));
+  const shotHover = await p1.capture({ ...clipOf, name: 'r-row-hover.png' });
+  await p1.evaljs("(() => { const s = document.createElement('style'); s.id = '__nobar'; s.textContent = '.chanmsg-bar { visibility: hidden !important; transition: none !important; }'; document.head.appendChild(s); return 1; })()");
+  await sleep(100);
+  const shotHoverNoBar = await p1.capture({ ...clipOf, name: 'r-row-hover-nobar.png' });
+  await p1.evaljs("(() => { document.getElementById('__nobar')?.remove(); return 1; })()");
+  await p1.move(4, 4); await sleep(200);
+  // the comparison in the page (canvas): the bounding box of every differing pixel, the largest channel delta outside a box
+  // RASTER NOISE (measured, run 5 of this lane: ONE pixel 4/255 off at a glyph edge when the bar's compositing layer
+  // came up): a pixel outside the bar's box that differs by ≤ NOISE/255 is antialiasing, at most NOISE_PX of them;
+  // anything the bar could MOVE (a glyph, an edge, a background) differs by far more, over many pixels
+  const NOISE = 8, NOISE_PX = 4;
+  const DIFF = (a, b, box) => `(async () => {
+    const NOISE = ${NOISE};
+    const load = async (d) => { const img = new Image(); img.src = 'data:image/png;base64,' + d; await img.decode(); const c = document.createElement('canvas'); c.width = img.width; c.height = img.height; const x = c.getContext('2d'); x.drawImage(img, 0, 0); return x.getImageData(0, 0, c.width, c.height); };
+    const A = await load(${J(a)}), B = await load(${J(b)});
+    if (A.width !== B.width || A.height !== B.height) return { sizeMismatch: true };
+    const box = ${J(box)};
+    let n = 0, x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1, outside = 0, outsideMax = 0, outsideStrong = 0;
+    for (let y = 0; y < A.height; y++) for (let x = 0; x < A.width; x++) {
+      const i = (y * A.width + x) * 4;
+      const d = Math.max(Math.abs(A.data[i] - B.data[i]), Math.abs(A.data[i + 1] - B.data[i + 1]), Math.abs(A.data[i + 2] - B.data[i + 2]));
+      if (!d) continue;
+      n++; if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y;
+      if (box && !(x >= box.x0 && x <= box.x1 && y >= box.y0 && y <= box.y1)) { outside++; if (d > outsideMax) outsideMax = d; if (d > NOISE) outsideStrong++; }
+    }
+    return { n, box: n ? { x0, y0, x1, y1 } : null, outside, outsideMax, outsideStrong, w: A.width, h: A.height };
+  })()`;
+  // the bar's box in the clip's pixels (+1 px: its shadow's antialiased edge stays inside the bar's own paint box + the shadow)
+  const barBox = (geo, pad) => ({ x0: Math.floor(geo.bar.left - clipOf.x) - pad, y0: Math.floor(geo.bar.top - clipOf.y) - pad, x1: Math.ceil(geo.bar.right - clipOf.x) + pad, y1: Math.ceil(geo.bar.bottom - clipOf.y) + pad });
+  // the shadow (var(--shadow-window): 0 4px 16px in light, 0 8px 32px in dark) paints past the border box — the bar's
+  // OWN paint box is its border box grown by the shadow's offset + blur; measured from the computed shadow
+  const shadowPad = await p1.evaljs(`(() => { const s = getComputedStyle(document.querySelector('[data-geo="bare"] > .chanmsg-bar')).boxShadow; const n = (s.match(/-?\\d+(\\.\\d+)?px/g) || []).map((x) => Math.abs(parseFloat(x))); return Math.ceil((n[1] || 0) + (n[2] || 0)) + 1; })()`);
+  const kBox = barBox(keyGeo, shadowPad), hBox = barBox(hoverGeo, shadowPad);
+  const dKey = await p1.evaljs(DIFF(shotRest, shotKey, kBox));
+  const dBar = await p1.evaljs(DIFF(shotHover, shotHoverNoBar, hBox));
+  const dHover = await p1.evaljs(DIFF(shotRest, shotHover, hBox));
+  ok(shotRest && dKey.n > 50 && dKey.outsideStrong === 0 && dKey.outside <= NOISE_PX, `PIXELS — at rest vs the keyboard in the bar: ${dKey.n} pixels differ, every one but ${dKey.outside} raster-noise pixel(s) (≤ ${dKey.outsideMax}/255) inside the bar's box (bar ${J(kBox)}, shadow pad ${shadowPad} px) — the message itself is pixel-identical`, J(dKey));
+  ok(dBar.n > 50 && dBar.outsideStrong === 0 && dBar.outside <= NOISE_PX, `PIXELS — hovered vs hovered with the bar hidden: ${dBar.n} pixels differ, every one but ${dBar.outside} raster-noise pixel(s) (≤ ${dBar.outsideMax}/255) inside the bar's box (${J(hBox)})`, J(dBar));
+  ok(dHover.n > 0 && dHover.outsideMax <= 16, `PIXELS — at rest vs hovered: outside the bar's box only the row's own hover wash differs (${dHover.outside} pixels, the largest channel delta ${dHover.outsideMax} ≤ 16 — a moved glyph differs by far more)`, J(dHover));
+
+  // ── THE KEYBOARD INSIDE THE BAR: ← → move (one tab stop), Enter = the action, Esc closes the picker and gives the
+  //    keyboard back to the bar's button (the data-popover protocol) ──
+  await tabInto('bare');
+  await p1.key('ArrowRight', 'ArrowRight', 39);
+  const k1 = await p1.evaljs(`(() => { const bar = document.querySelector('[data-geo="bare"] > .chanmsg-bar'); return { act: document.activeElement.dataset.act, tabs: [...bar.querySelectorAll('.chanmsg-bar-btn')].map((b) => b.tabIndex).join(','), op: getComputedStyle(bar).opacity }; })()`);
+  await p1.key('ArrowLeft', 'ArrowLeft', 37);
+  await p1.key('Enter', 'Enter', 13, '\r');
+  const k2 = await p1.evaljs(`(async () => { for (let i = 0; i < 40 && !document.querySelector('.rx-picker'); i++) await new Promise((r) => setTimeout(r, 50)); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); return { picker: !!document.querySelector('.rx-picker'), inPicker: !!(document.activeElement && document.activeElement.closest('.rx-picker')) }; })()`);
+  await p1.key('Escape', 'Escape', 27);
+  await sleep(300);
+  const k3 = await p1.evaljs(`(() => { const bar = document.querySelector('[data-geo="bare"] > .chanmsg-bar'); return { picker: !!document.querySelector('.rx-picker'), act: document.activeElement && document.activeElement.dataset.act, inBar: bar.contains(document.activeElement), op: getComputedStyle(bar).opacity, open: bar.classList.contains('open') }; })()`);
+  ok(k1.act === 'thread' && k1.tabs === '-1,0,-1' && k1.op === '1', `→ moves inside the bar (to "${k1.act}"; ONE tab stop follows it: ${k1.tabs})`, J(k1));
+  ok(k2.picker && k2.inPicker && !k3.picker && k3.inBar && k3.act === 'react' && k3.op === '1' && !k3.open, 'Enter on Add reaction opens the picker with the keyboard in it; Esc closes it and the keyboard is back on the bar\'s Add reaction, the bar still shown', J({ k2, k3 }));
+  await p1.evaljs("(() => { document.activeElement && document.activeElement.blur(); for (const e of document.querySelectorAll('[data-geo]')) delete e.dataset.geo; return 1; })()");
+}
+
+// ── (t) REPLY IN THREAD and QUOTE from the bar (lane reaction-hover — the owner: "把 reply in thread，quote 也都放在鼠标
+//    悬浮按钮里"): a plain message is QUOTED (the composer says so; the send carries the quote; the new message shows
+//    what it quotes); a topic's message offers no Quote; Reply in thread on a reply inside a topic opens that topic
+//    answering it; on a plain message it opens a NEW thread rooted at it, whose first reply makes it a topic ──
+console.log('(t) reply in thread and quote from the bar');
+{
+  await p1.move(4, 4);
+  await p1.evaljs("(() => { const l = " + LIST('big') + "; l.scrollTop = l.scrollHeight; return 1; })()");
+  await sleep(400);
+  const barBtn = (vid, act) => p1.evaljs(`(() => { const row = window.__w.big.content.querySelector('.chanwin-main .chanmsg[data-vid="' + CSS.escape(${J(vid)}) + '"]'); const b = row && row.querySelector(':scope > .chanmsg-bar [data-act="${act}"]'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), label: b.getAttribute('aria-label') }; })()`);
+  // 2.369.200 integration (the heavy run's red, reproduced alone at load ~25): a row scrolled into view gets its reaction strip /
+  // thread chip from a fetch that can land AFTER the measure — a row above grew 34 px between barBtn and the press, and the
+  // press hit a paragraph. The row is measured only once it holds still (its top and height unchanged over two reads).
+  const rowStill = async (vid) => { let last = null; for (let i = 0; i < 40; i++) { const r = await p1.evaljs(`(() => { const row = window.__w.big.content.querySelector('.chanwin-main .chanmsg[data-vid="' + CSS.escape(${J(vid)}) + '"]'); if (!row) return null; const q = row.getBoundingClientRect(); const l = row.closest('.chanwin-list'); return Math.round(q.top) + ':' + Math.round(q.height) + ':' + (l ? l.scrollHeight : 0); })()`); if (r !== null && r === last) return true; last = r; await sleep(200); } return false; };
+  const hoverRow = async (vid) => { await p1.evaljs(`(() => { window.__w.big.content.querySelector('.chanwin-main .chanmsg[data-vid="' + CSS.escape(${J(vid)}) + '"]').scrollIntoView({ block: 'center' }); return 1; })()`); await sleep(200); await rowStill(vid); const at = await p1.evaljs(`(() => { const row = window.__w.big.content.querySelector('.chanwin-main .chanmsg[data-vid="' + CSS.escape(${J(vid)}) + '"]'); const b = (row.querySelector(':scope > .chanmsg-body') || row).getBoundingClientRect(); return { x: Math.round(b.left + Math.min(30, b.width / 2)), y: Math.round(b.top + Math.min(8, b.height / 2)) }; })()`); await p1.move(at.x, at.y); await sleep(350); await rowStill(vid); };
+  const kinds = await p1.evaljs(`(() => {
+    const rows = [...window.__w.big.content.querySelectorAll('.chanwin-main .chanmsg[data-vid]')];
+    const kindOf = (r) => (r._place && r._place.kind) || 'plain';
+    const pick = (f) => rows.filter(f).slice(-3)[0] || null;
+    const plain = rows.filter((r) => kindOf(r) === 'plain' && r.querySelector(':scope > .chanmsg-bar') && r.querySelector(':scope > .chanmsg-body') && (r.querySelector(':scope > .chanmsg-body').textContent || '').trim());
+    const topicReply = pick((r) => kindOf(r) === 'topic-reply' && r.querySelector(':scope > .chanmsg-bar'));
+    const acts = (r) => r ? r.querySelector(':scope > .chanmsg-bar').dataset.acts : null;
+    const census = {};
+    for (const r of rows) { const k = kindOf(r); const a = r.querySelector(':scope > .chanmsg-bar') ? r.querySelector(':scope > .chanmsg-bar').dataset.acts : '(none)'; census[k + ' → ' + a] = (census[k + ' → ' + a] || 0) + 1; }
+    const q = plain[plain.length - 2] || null, p = plain[plain.length - 4] || null;
+    return { census, quoteVid: q ? q.dataset.vid : null, quoteWho: q ? q.querySelector('.chanmsg-head b, b')?.textContent || null : null, threadVid: p ? p.dataset.vid : null, topicReply: topicReply ? topicReply.dataset.vid : null, topicReplyActs: acts(topicReply) };
+  })()`);
+  const bad = Object.keys(kinds.census).filter((k) => (/^topic-/.test(k) && /quote/.test(k.split(' → ')[1])) || (/^(plain|quote) → /.test(k) && k.split(' → ')[1] !== 'react thread quote'));
+  ok(bad.length === 0 && kinds.quoteVid && kinds.threadVid && kinds.topicReply, `every drawn row's bar follows the table — plain / quote: react · thread · quote; inside a topic: no Quote (${Object.entries(kinds.census).map(([k, n]) => k + ' ×' + n).join('; ')})`, J({ bad, kinds }));
+  // QUOTE
+  await hoverRow(kinds.quoteVid);
+  const qb = await barBtn(kinds.quoteVid, 'quote');
+  ok(!!qb && qb.label === '引用', `the plain message's bar names its Quote "${qb && qb.label}"`, J(qb));
+  await p1.click(qb.x, qb.y);
+  await sleep(300);
+  const QTEXT = `quoted reply ${process.pid}`;
+  const q1 = await p1.evaljs(`(() => { const foot = window.__w.big.content.querySelector('.chanwin-main .chanwin-foot'); const line = foot.querySelector('.chanwin-quote'); const ta = foot.querySelector('textarea'); return { line: line ? line.textContent : null, of: line ? line.dataset.quoteOf : null, focused: document.activeElement === ta, draft: ta ? ta.value : null }; })()`);
+  ok(q1.line && q1.of === kinds.quoteVid && /引用回复/.test(q1.line) && q1.focused && q1.draft === 'main draft 42', `Quote puts the quote above the composer ("${q1.line}"), the keyboard in the box, the draft kept`, J(q1));
+  const q2 = await p1.evaljs(`(async () => {
+    const w = window.__w.big;
+    const ta = w.content.querySelector('.chanwin-main .chanwin-foot textarea');
+    ta.value = ${J(QTEXT)}; ta.dispatchEvent(new Event('input', { bubbles: true }));
+    w.content.querySelector('.chanwin-main [data-channel-direct]').click();
+    let row = null;
+    for (let i = 0; i < 200 && !row; i++) { row = [...w.content.querySelectorAll('.chanwin-main .chanwin-list .chanmsg')].find((r) => r.textContent.includes(${J(QTEXT)})) || null; if (!row) await new Promise((r) => setTimeout(r, 100)); }
+    await new Promise((r) => setTimeout(r, 400));
+    const strip = row && row.querySelector('.chanmsg-replyq');
+    return { row: !!row, of: strip ? strip.dataset.replyOf : null, kind: strip ? strip.dataset.placeKind : null, line: !!w.content.querySelector('.chanwin-main .chanwin-quote'), vid: row ? row.dataset.vid : null };
+  })()`);
+  const sent = await api('GET', '/api/channels/fake-poll/fake-poll-big/messages?limit=20');
+  const rec = (sent.json.records || []).find((r) => r.vendorId === q2.vid);
+  ok(q2.row && q2.of === kinds.quoteVid && q2.kind === 'quote' && !q2.line && rec && rec.replyTo === kinds.quoteVid, `the send carried the quote: the new message shows what it quotes (data-place-kind "${q2.kind}", of ${q2.of}), the stored record answers ${rec && rec.replyTo}, and the composer's quote line is gone`, J({ q2, replyTo: rec && rec.replyTo }));
+  await p1.evaljs("(() => { const ta = window.__w.big.content.querySelector('.chanwin-main .chanwin-foot textarea'); if (ta) { ta.value = 'main draft 42'; ta.dispatchEvent(new Event('input', { bubbles: true })); } return 1; })()");
+  // REPLY IN THREAD on a reply INSIDE a topic: no Quote; the pane opens on that topic, answering this reply
+  ok(kinds.topicReplyActs === 'react thread', `a reply inside a topic offers no Quote (its bar: "${kinds.topicReplyActs}")`);
+  await hoverRow(kinds.topicReply);
+  const tb = await barBtn(kinds.topicReply, 'thread');
+  await p1.click(tb.x, tb.y);
+  const t1 = await p1.evaljs(`(async () => {
+    const w = window.__w.big;
+    const pane = w.content.querySelector('.chanthread');
+    for (let i = 0; i < 100 && !(pane && !pane.hidden && pane.querySelector('.chanthread-foot textarea')); i++) await new Promise((r) => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 300));
+    const row = w.content.querySelector('.chanwin-main .chanmsg[data-vid="' + CSS.escape(${J(kinds.topicReply)}) + '"]');
+    const who = row && row._place && row._place.thread ? null : null;
+    const target = pane.querySelector('.chanthread-target');
+    return { open: !pane.hidden, target: target ? target.textContent : null, focused: document.activeElement === pane.querySelector('.chanthread-foot textarea'), inPane: !!pane.querySelector('.chanthread-list .chanmsg[data-vid="' + CSS.escape(${J(kinds.topicReply)}) + '"]') };
+  })()`);
+  ok(tb.label === '在话题中回复' && t1.open && t1.inPane && /^回复 /.test(t1.target || '') && t1.focused, `"${tb.label}" on a topic reply opens its topic in the pane answering THAT reply ("${t1.target}"), the keyboard in the pane's box`, J(t1));
+  // in the pane: a reply's bar picks it; the root's bar answers the thread itself
+  const pr = await p1.evaljs(`(() => { const pane = window.__w.big.content.querySelector('.chanthread'); const rows = [...pane.querySelectorAll('.chanthread-list .chanmsg[data-vid]')]; const root = rows.find((r) => r.classList.contains('chanthread-rootrow')); const reply = rows.filter((r) => !r.classList.contains('chanthread-rootrow')).pop(); const acts = (r) => r && r.querySelector(':scope > .chanmsg-bar') ? r.querySelector(':scope > .chanmsg-bar').dataset.acts : null; return { root: root ? root.dataset.vid : null, reply: reply ? reply.dataset.vid : null, rootActs: acts(root), replyActs: acts(reply), replyLabel: reply ? reply.querySelector(':scope > .chanmsg-bar [data-act="thread"]').getAttribute('aria-label') : null, picks: pane.querySelectorAll('.chanthread-pick').length }; })()`);
+  ok(pr.rootActs === 'react thread' && pr.replyActs === 'react thread' && pr.replyLabel === '在话题中回复这条消息' && pr.picks === 0, `in the pane every row's bar is react · thread (never Quote); a reply's is "${pr.replyLabel}"; the old ↩ button is gone (${pr.picks})`, J(pr));
+  await p1.evaljs(`(() => { const pane = window.__w.big.content.querySelector('.chanthread'); const r = pane.querySelector('.chanthread-list .chanmsg[data-vid="' + CSS.escape(${J(pr.root)}) + '"]'); r.scrollIntoView({ block: 'center' }); return 1; })()`);
+  const rootAt = await p1.evaljs(`(() => { const r = window.__w.big.content.querySelector('.chanthread .chanmsg[data-vid="' + CSS.escape(${J(pr.root)}) + '"] > .chanmsg-body').getBoundingClientRect(); return { x: Math.round(r.left + 20), y: Math.round(r.top + 6) }; })()`);
+  await p1.move(rootAt.x, rootAt.y); await sleep(350);
+  const rb = await p1.evaljs(`(() => { const b = window.__w.big.content.querySelector('.chanthread .chanmsg[data-vid="' + CSS.escape(${J(pr.root)}) + '"] > .chanmsg-bar [data-act="thread"]'); const r = b.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+  await p1.click(rb.x, rb.y);
+  await sleep(250);
+  const t2 = await p1.evaljs(`(() => { const pane = window.__w.big.content.querySelector('.chanthread'); return { target: !!pane.querySelector('.chanthread-target'), focused: document.activeElement === pane.querySelector('.chanthread-foot textarea') }; })()`);
+  ok(!t2.target && t2.focused, 'the ROOT\'s Reply in thread answers the thread itself (the "Replying to" line is gone), the keyboard in the box', J(t2));
+  await p1.evaljs("(() => { const x = window.__w.big.content.querySelector('.chanthread-close'); if (x) x.click(); return 1; })()");
+  // REPLY IN THREAD on a PLAIN message: a NEW thread — the pane shows the message as its root and no replies; the first
+  // reply mints the thread: it lands in the pane, the message becomes a topic root (its chip) and loses its Quote
+  await p1.move(4, 4);
+  await hoverRow(kinds.threadVid);
+  const pb = await barBtn(kinds.threadVid, 'thread');
+  await p1.click(pb.x, pb.y);
+  const n1 = await p1.evaljs(`(async () => {
+    const pane = window.__w.big.content.querySelector('.chanthread');
+    for (let i = 0; i < 100 && !(pane && !pane.hidden && pane.querySelector('.chanthread-list .chanmsg')); i++) await new Promise((r) => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 300));
+    const root = pane.querySelector('.chanthread-list .chanthread-rootrow');
+    return { open: !pane.hidden, root: root ? root.dataset.vid : null, empty: (pane.querySelector('.chanthread-list .chanwin-empty') || {}).textContent || null, notLoaded: /尚未加载/.test(pane.textContent), focused: document.activeElement === pane.querySelector('.chanthread-foot textarea') };
+  })()`);
+  ok(n1.open && n1.root === kinds.threadVid && n1.empty === '还没有回复。' && !n1.notLoaded && n1.focused, `Reply in thread on a plain message opens a NEW thread: the message is its root, "${n1.empty}", never "not loaded"; the keyboard in the box`, J(n1));
+  const NTEXT = `first in a new thread ${process.pid}`;
+  const n2 = await p1.evaljs(`(async () => {
+    const w = window.__w.big;
+    const pane = w.content.querySelector('.chanthread');
+    const ta = pane.querySelector('.chanthread-foot textarea');
+    ta.value = ${J(NTEXT)}; ta.dispatchEvent(new Event('input', { bubbles: true }));
+    pane.querySelector('[data-thread-send]').click();
+    let inPane = null, chip = null;
+    for (let i = 0; i < 200 && !(inPane && chip); i++) {
+      inPane = [...pane.querySelectorAll('.chanthread-list .chanmsg')].find((r) => r.textContent.includes(${J(NTEXT)})) || null;
+      const row = w.content.querySelector('.chanwin-main .chanmsg[data-vid="' + CSS.escape(${J(kinds.threadVid)}) + '"]');
+      chip = row && row.querySelector('.chanmsg-thread-chip');
+      if (!(inPane && chip)) await new Promise((r) => setTimeout(r, 100));
+    }
+    await new Promise((r) => setTimeout(r, 300));
+    const row = w.content.querySelector('.chanwin-main .chanmsg[data-vid="' + CSS.escape(${J(kinds.threadVid)}) + '"]');
+    return { inPane: !!inPane, chip: !!chip, empty: !!pane.querySelector('.chanthread-list .chanwin-empty'), acts: row && row.querySelector(':scope > .chanmsg-bar') ? row.querySelector(':scope > .chanmsg-bar').dataset.acts : null };
+  })()`);
+  ok(n2.inPane && !n2.empty && n2.chip && n2.acts === 'react thread', `the first reply lands in the new thread (the "no replies" line gone); the message became a topic root — its chip grew and its bar re-synced to "${n2.acts}" (no Quote inside a topic)`, J(n2));
+  await p1.shot('t-new-thread.png');
+  await p1.evaljs("(() => { const x = window.__w.big.content.querySelector('.chanthread-close'); if (x) x.click(); return 1; })()");
+  await p1.move(4, 4);
 }
 
 // ── (e) ANOTHER CLIENT'S REACTION arrives in place ──
@@ -457,19 +809,15 @@ console.log('(g) the phone (360 × 740, touch)');
     const t2 = await p3.evaljs(`(async () => { let c = null; for (let i = 0; i < 60; i++) { c = document.querySelector('.chanmsg[data-vid="' + CSS.escape(${J(target.vid)}) + '"] .rx-chip[data-key="' + CSS.escape(${J(target.key)}) + '"]'); if (c && !c.classList.contains('rx-mine')) break; await new Promise((r) => setTimeout(r, 100)); } return c ? { mine: c.classList.contains('rx-mine'), n: c.querySelector('.rx-n').textContent } : null; })()`);
     ok(t2 && !t2.mine && t2.n === target.n, 'a second tap takes it back', J(t2));
   }
-  const alone = await p3.evaljs(`(() => {
-    const out = [];
-    for (const s of window.__w.big.content.querySelectorAll('.chanmsg-rx')) {
-      const add = s.querySelector(':scope > .rx-add'); const chips = [...s.querySelectorAll(':scope > .rx-chip:not(.rx-add)')];
-      if (!add || !chips.length) continue;
-      const a = add.getBoundingClientRect();
-      const mates = chips.filter((c) => Math.abs(c.getBoundingClientRect().top - a.top) < 4).length;
-      const inside = a.right <= s.getBoundingClientRect().right + 1;
-      out.push({ lines: new Set(chips.map((c) => Math.round(c.getBoundingClientRect().top))).size, mates, inside });
-    }
-    return out;
+  // lane reaction-hover: the `+` that sat at the end of every strip (and alone under every message) is gone — a strip
+  // holds chips only, and the hover bar is not drawn on a touch device (its long press is the door — leg (p))
+  const strips = await p3.evaljs(`(() => {
+    const w = window.__w.big;
+    const s = [...w.content.querySelectorAll('.chanmsg-rx')];
+    const bars = [...w.content.querySelectorAll('.chanmsg-bar')];
+    return { strips: s.length, plus: w.content.querySelectorAll('.rx-add').length, empty: s.filter((x) => !x.querySelector('.rx-chip')).length, bars: bars.length, shown: bars.filter((b) => getComputedStyle(b).display !== 'none').length, hoverNone: matchMedia('(hover: none) and (pointer: coarse)').matches };
   })()`);
-  ok(alone.length >= 3 && alone.every((x) => x.mates >= 1 && x.inside), `the + never wraps ALONE: on each of ${alone.length} strips it shares its line with a chip (multi-line strips: ${alone.filter((x) => x.lines > 1).length})`, J(alone.filter((x) => !(x.mates >= 1 && x.inside))));
+  ok(strips.strips >= 3 && strips.plus === 0 && strips.empty === 0 && strips.hoverNone && strips.bars >= 3 && strips.shown === 0, `the phone: ${strips.strips} strips, no "+" and no empty strip; the ${strips.bars} hover bars are not drawn (hover: none)`, J(strips));
   // (b) at 360: the STACKED pane covers the list; Back returns with the list's scrollTop unchanged
   const s = await p3.evaljs(`(async () => {
     const w = window.__w.big;
@@ -566,6 +914,51 @@ console.log('(g) the phone (360 × 740, touch)');
   })()`);
   ok(cut && cut.whole && cut.cutNow && cut.wholeAtBox && cut.wrapped && /すぐに送信/.test(cut.text), `CONTROL (naive-user ⑥): the pane's composer line "${cut && cut.text}" is whole in ja at 360 px, and the pre-fix nowrap rule cuts it${cut && cut.narrowed !== null ? ` (this machine's font draws the line ${cut.lineW} px, narrower than its ${cut.boxW} px box — the rule judged at a ${cut.narrowed} px box: pre-fix cut, product wrapped whole)` : ' (at the natural 360 px box)'}`, J(cut));
   p4.close();
+}
+
+// ── (p) THE PHONE AT 390 px (lane reaction-hover): no hover there, so the bar is not drawn — a LONG PRESS on a message
+//    opens its SAME actions as a menu (the explorer's touch rows); the message's layout is identical before, with the
+//    menu open and after; Add reaction from the menu opens the picker and a tap reacts; taken back, the row closes up ──
+console.log('(p) the phone at 390 px: the long-press menu and the geometry');
+{
+  const p6 = await newPage({ lang: 'zh', phone: true, width: 390 });
+  ok(p6.ready, 'the phone page loaded (390 × 740, touch emulation, zh)');
+  await p6.evaljs(OPEN('fake-poll', 'fake-poll-big', 'big', { min: 10 }));
+  await sleep(1500);
+  const vid = await p6.evaljs(`(async () => {
+    const l = window.__w.big.content.querySelector('.chanwin-main .chanwin-list');
+    const rows = [...l.querySelectorAll('.chanmsg[data-vid]')].filter((r) => r.querySelector(':scope > .chanmsg-bar')?.dataset.acts === 'react thread quote' && !r.querySelector('.chanmsg-rx') && !r.querySelector('a[href], img') && r.nextElementSibling);
+    const row = rows[Math.max(0, rows.length - 3)];
+    if (!row) return null;
+    row.scrollIntoView({ block: 'center' });
+    await new Promise((r) => setTimeout(r, 400));
+    row.dataset.geo = 'phone';
+    return row.dataset.vid;
+  })()`);
+  ok(!!vid, `a message with no reaction to press (${vid})`);
+  const PG = `(() => { const row = document.querySelector('[data-geo="phone"]'); const l = row.closest('.chanwin-list'); const b = row.querySelector(':scope > .chanmsg-body').getBoundingClientRect(); const bar = row.querySelector(':scope > .chanmsg-bar'); return { h: row.offsetHeight, next: row.nextElementSibling.offsetTop, sh: l.scrollHeight, top: Math.round(row.getBoundingClientRect().top), x: Math.round(b.left + Math.min(40, b.width / 2)), y: Math.round(b.top + Math.min(10, b.height / 2)), bar: bar ? getComputedStyle(bar).display : null, strip: !!row.querySelector(':scope > .chanmsg-rx') }; })()`;
+  const same = (a, b) => a.h === b.h && a.next === b.next && a.sh === b.sh && a.top === b.top;
+  const before = await p6.evaljs(PG);
+  await p6.touch(before.x, before.y, 700);
+  await sleep(300);
+  const menu = await p6.evaljs(`(() => { const m = document.querySelector('.context-menu'); return m ? [...m.querySelectorAll('.context-menu-item')].map((x) => { const r = x.getBoundingClientRect(); return { text: x.textContent, x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), h: Math.round(r.height) }; }) : null; })()`);
+  const during = await p6.evaljs(PG);
+  ok(before.bar === 'none' && menu && JSON.stringify(menu.map((m) => m.text)) === JSON.stringify(['添加表情回应', '在话题中回复', '引用']), `no hover bar on the phone (display ${before.bar}); a LONG PRESS on the message opens its actions as a menu: ${menu && menu.map((m) => m.text).join(' · ')}`, J({ bar: before.bar, menu }));
+  ok(same(before, during), `GEOMETRY at 390 px: the row's offsetHeight ${before.h} px, the next row's offsetTop ${before.next} px and the list's scrollHeight ${before.sh} px are the same with the menu open`, J({ before, during }));
+  // Add reaction from the menu: the picker, a tap on its first quick emoji, the chip
+  const add = menu && menu.find((m) => m.text === '添加表情回应');
+  if (add) await p6.touch(add.x, add.y, 60);
+  const pk = await p6.evaljs(`(async () => { for (let i = 0; i < 40 && !document.querySelector('.rx-picker'); i++) await new Promise((r) => setTimeout(r, 50)); await new Promise((r) => setTimeout(r, 300)); const b = document.querySelector('.rx-picker .rx-picker-quick .rx-pick'); if (!b) return null; const r = b.getBoundingClientRect(); return { key: b.dataset.key, x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), menu: !!document.querySelector('.context-menu') }; })()`);
+  ok(!!pk && !pk.menu, `"添加表情回应" in the menu opens THE picker (the menu closed; first quick key ${pk && pk.key})`, J(pk));
+  if (pk) await p6.touch(pk.x, pk.y, 60);
+  const grown = await p6.evaljs(`(async () => { const row = document.querySelector('[data-geo="phone"]'); for (let i = 0; i < 60 && !row.querySelector('.rx-chip.rx-mine'); i++) await new Promise((r) => setTimeout(r, 100)); await new Promise((r) => setTimeout(r, 200)); return 1; })()`).then(() => p6.evaljs(PG));
+  const mine = await p6.evaljs(`(() => { const c = document.querySelector('[data-geo="phone"] .rx-chip.rx-mine'); if (!c) return null; const r = c.getBoundingClientRect(); return { key: c.dataset.key, x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+  ok(!!mine && mine.key === (pk && pk.key) && grown.strip && grown.h > before.h, `a tap on it reacts: the chip "${mine && mine.key}" is ours and the row grew by its strip (${before.h} → ${grown.h} px)`, J({ mine, grown }));
+  if (mine) await p6.touch(mine.x, mine.y, 60);
+  const after = await p6.evaljs(`(async () => { const row = document.querySelector('[data-geo="phone"]'); for (let i = 0; i < 60 && row.querySelector('.chanmsg-rx'); i++) await new Promise((r) => setTimeout(r, 100)); await new Promise((r) => setTimeout(r, 200)); return 1; })()`).then(() => p6.evaljs(PG));
+  ok(!after.strip && after.h === before.h && after.next === before.next, `taken back with a tap, the row closes up EXACTLY (${grown.h} → ${after.h} px = ${before.h} px; next row ${after.next} = ${before.next})`, J({ before, after }));
+  await p6.shot('p-phone-390.png');
+  p6.close();
 }
 
 // ── (f) THE TRICKLE: a 120-row room scrolled end to end in 3 s spends ≤ 20 list calls in the minute ──

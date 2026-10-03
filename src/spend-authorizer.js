@@ -74,6 +74,10 @@ const SPEND_REASONS = Object.freeze({
   // what waits for the agent's next turn, and its "Hand over now" delivers the whole stash at once — ONE ladder call,
   // ONE turn. The producer is src/server/stash-handover.js (POST /api/sessions/:id/stash/hand-over, cookie only).
   'stash-handover': { turn: true, what: 'the user handed a conversation its waiting notices now' },
+  // lane notify-retry (R3, 2026-10-01): the waiting notices that did not fit a prompt's inline context are posted as
+  // their own message the moment that turn ends — the hand-over's own machinery, run by the turn end instead of a click;
+  // declared beside its producer (src/server/stash-handover.js, the auto path)
+  'stash-retry': { turn: true, what: 'the waiting notices that did not fit a prompt, posted when its turn ended' },
 });
 
 // D6's proposal, as shipped defaults. They are SETTINGS (see

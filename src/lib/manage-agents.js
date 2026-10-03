@@ -41,6 +41,8 @@ import { installVerdictWords, installOutcomeWords, installConfirmWords } from '.
 import { dialRowState } from '../dial-facts.js'; // lane-pairing ③: THE one dial state (the machine row, this card, the pairing sheet)
 import { dialStateText, dialHistoryLine } from './dial-address-picker.js';
 import { openExitAccessDialog, exitSummaryText, exitCodeWords } from './exit-access-dialog.js'; // lane-pairing ⑥: "Who can use it" 
+import { openExitRunsDialog } from './exit-runs-dialog.js'; // lane-exit-run-output E4: the machine's command list
+import { platformLabel } from '../exit-shell.js'; // lane-exit-run-output E1: the device's stated platform on its row (its shell follows it)
 
 // Roster order = TYPE, never add-order (2.268.5): pool → subscription → API
 // key, name-sorted within a type. ONE comparator for both rosters (2.369.18 —
@@ -1675,7 +1677,13 @@ export function installManageAgents(App, ctx = {}) {
             if (st.installed) return `<span class="ob-ok">✓ ${label}</span>`;
             if (st.stale) return `<span class="ob-warn">${t('{label}: needs update', { label })}</span>`;
             if (st.parseError) return `<span class="ob-bad">${t('{label}: config unreadable', { label })}</span>`;
-            if (!st.fileExists) return `<span class="ob-warn">${t('{label}: run the CLI once first', { label })}</span>`;
+            // a missing hook file (lane hooks-create): its directory exists ⇒ the next start (or Apply, below) creates it;
+            // no directory ⇒ that CLI has not run here and nothing is written (the retired advice to start the CLI was
+            // false: the CLI does not write settings.json on its own — a chat-only user never had one)
+            if (!st.fileExists) {
+              if (st.creatable && !hs.optedOut) return `<span class="ob-warn">${t('{label}: will be created at the next start — or press Apply', { label })}</span>`;
+              if (st.dirExists === false) return `<span class="ob-ver">${t('{label}: the CLI has not run on this machine', { label })}</span>`;
+            }
             return `<span class="ob-warn">${t('{label}: not installed', { label })}</span>`;
           };
           const allGood = hs.claude?.installed && hs.codex?.installed;
@@ -1692,15 +1700,26 @@ export function installManageAgents(App, ctx = {}) {
               + `<div class="agents-note">${t("Lets sessions in a Task Group automatically receive the group's context (objective, shared files).")}</div>`;
             const actions = document.createElement('div'); actions.className = 'agent-actions';
             const installBtn = document.createElement('button');
-            installBtn.className = 'agent-btn' + (allGood ? '' : ' primary');
-            installBtn.textContent = allGood ? t('Reinstall') : t('Install');
+            // the "Apply" the will-be-created lines name (lane hooks-create): while a hook file or a managed key's file
+            // will be created, the primary button IS that Apply (POST /api/cli-config/apply — the boot registration +
+            // the CLI-config plan, human-triggered); otherwise Install / Reinstall as before
+            const willCreate = (!hs.optedOut && Object.values(hs).some((v) => v && typeof v === 'object' && v.creatable))
+              || ((hs.cliConfig && hs.cliConfig.receipts) || []).some((r) => r.state === 'missing' && (r.missing || r.reason) === 'will-create');
+            installBtn.className = 'agent-btn' + (allGood && !willCreate ? '' : ' primary');
+            installBtn.textContent = willCreate ? t('Apply') : allGood ? t('Reinstall') : t('Install');
             installBtn.onclick = async () => {
               installBtn.disabled = true;
               try {
-                const r = await fetchJson('/api/agent-hooks/install', { method: 'POST' });
-                const errs = Object.entries(r?.results || {}).filter(([, v]) => !v.ok);
-                if (errs.length) showToast(errs.map(([k, v]) => `${k}: ${v.error}`).join('; '), { type: 'error' });
-                else showToast(t('Task Group context hook installed'));
+                if (willCreate) {
+                  const r = await fetchJson('/api/cli-config/apply', { method: 'POST' });
+                  if (!r || r.error || r.ok === false) showToast(t('Could not apply the CLI config — {reason}', { reason: (r && r.error) || t('server unreachable') }), { type: 'error' });
+                  else showToast(t('CLI config applied on this machine'));
+                } else {
+                  const r = await fetchJson('/api/agent-hooks/install', { method: 'POST' });
+                  const errs = Object.entries(r?.results || {}).filter(([, v]) => !v.ok);
+                  if (errs.length) showToast(errs.map(([k, v]) => `${k}: ${v.error}`).join('; '), { type: 'error' });
+                  else showToast(t('Task Group context hook installed'));
+                }
               } catch { showToast(t('Install failed'), { type: 'error' }); }
               refresh();
             };
@@ -1955,7 +1974,9 @@ export function installManageAgents(App, ctx = {}) {
             const l2 = document.createElement('span');
             l2.className = 'agents-machine-sub agents-mach-line2';
             l2.dataset.dialState = drs ? drs.state : '';
-            l2.textContent = [dialWords, exitSummaryText(h.exit)].filter(Boolean).join(' · '); // no `exit` ⇒ nobody / nobody (the ONE reader)
+            // lane-exit-run-output E1: the device's STATED platform (its hello / dial headers) — a Windows machine runs commands under cmd.exe
+            const plat = platformLabel(h.dial && h.dial.lastAccept && h.dial.lastAccept.platform);
+            l2.textContent = [dialWords, plat, exitSummaryText(h.exit)].filter(Boolean).join(' · '); // no `exit` ⇒ nobody / nobody (the ONE reader)
             sum.appendChild(l2);
           }
           det.appendChild(sum);
@@ -1968,6 +1989,11 @@ export function installManageAgents(App, ctx = {}) {
             who.type = 'button'; who.className = 'btn-cancel agents-mach-who'; who.textContent = t('Who can use it…');
             who.onclick = (e) => { e.preventDefault(); openExitAccessDialog(this, { hostId: h.id, name: h.name }); };
             tools.appendChild(who);
+            // lane-exit-run-output E4: the last 50 commands agents ran there, with their output (human-triggered, a fresh GET)
+            const runs = document.createElement('button');
+            runs.type = 'button'; runs.className = 'btn-cancel agents-mach-runs'; runs.textContent = t('Commands…');
+            runs.onclick = (e) => { e.preventDefault(); openExitRunsDialog(this, { hostId: h.id, name: h.name }); };
+            tools.appendChild(runs);
             if (h.deviceId) {
               const hist = document.createElement('button');
               hist.type = 'button'; hist.className = 'btn-cancel agents-mach-hist'; hist.textContent = t('Dial history…');

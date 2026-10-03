@@ -1,6 +1,7 @@
 import { t } from './i18n.js';
 import { metric } from './telemetry-client.js';
 import { pressCloses, pressPhase, tapVerdict } from './outside-press.js';
+import { NATIVE_PRESS_SELECTOR, PRESS_CHROME_SELECTOR, effectiveUserSelect, pointOnText, pressTargetClass, longPressVerdict, selectionCloses, selectStartAllowed, trustedContextMenu } from './press-select.js';
 
 export function formatSize(b) { if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
 
@@ -380,8 +381,11 @@ export function stripCwdHostLabel(cwd) {
 // opts: exclude (elements), ignore(target) → true keeps it open, nested (default
 // true: the chained-popover rule), once (default true: retire after closing;
 // false for a PERSISTENT popup that closes by class), signal (AbortSignal —
-// window-scoped surfaces pass winInfo._listenerCtl.signal).
-export function onOutsidePress(root, close, { exclude = [], ignore = null, nested = true, once = true, signal = null } = {}) {
+// window-scoped surfaces pass winInfo._listenerCtl.signal), selection (default
+// = once: a TRANSIENT surface on a touch device also closes when a text
+// selection starts OUTSIDE it — lane mobile-select M2, PURE selectionCloses in
+// press-select.js; a persistent popup is armed for the app's life and opts out).
+export function onOutsidePress(root, close, { exclude = [], ignore = null, nested = true, once = true, signal = null, selection = once } = {}) {
   const roots = (Array.isArray(root) ? root : [root]).filter(Boolean);
   const ctl = new AbortController();
   const dispose = () => ctl.abort();
@@ -424,7 +428,35 @@ export function onOutsidePress(root, close, { exclude = [], ignore = null, neste
     if (tapVerdict({ dx: e.clientX - p.x, dy: e.clientY - p.y, heldMs: e.timeStamp - p.at })) judge(p.target, e);
   }, o);
   document.addEventListener('pointercancel', (e) => { if (pending && pending.id === e.pointerId) pending = null; }, o);
+  // A SELECTION THAT STARTS OUTSIDE THE SURFACE WINS (lane mobile-select M2). On a phone a long press elsewhere is
+  // never an outside TAP, so a menu stayed open while the platform's selection began beside or under it — the next
+  // move of the finger landed on the menu's words. Touch only (a mouse selection begins with a press that already
+  // closed it); the selection the surface opened with (a word the opening press selected) never closes it.
+  if (selection && isTouchDevice() && typeof document.getSelection === 'function') {
+    const s0 = document.getSelection();
+    const atOpen = s0 ? [s0.anchorNode, s0.anchorOffset, s0.focusNode, s0.focusOffset] : null;
+    document.addEventListener('selectionchange', () => {
+      const sel = document.getSelection();
+      const v = selectionCloses({
+        connected: roots.some((r) => r.isConnected !== false),
+        touch: true,
+        collapsed: !sel || sel.rangeCount === 0 || sel.isCollapsed,
+        textAnchor: !!sel?.anchorNode && sel.anchorNode.nodeType === 3,
+        anchorInRoot: !!sel?.anchorNode && within(roots, sel.anchorNode),
+        sameAsOpen: !!sel && !!atOpen && sel.anchorNode === atOpen[0] && sel.anchorOffset === atOpen[1] && sel.focusNode === atOpen[2] && sel.focusOffset === atOpen[3],
+      });
+      if (v.retire) { dispose(); return; }
+      if (!v.close) return;
+      if (once) dispose();
+      close();
+    }, { signal: ctl.signal });
+  }
   return dispose;
+}
+
+/** A touch device — the very media query app.isTouch reads (app.js), so the door, the closer and the App agree. */
+export function isTouchDevice() {
+  try { return typeof matchMedia === 'function' && matchMedia('(hover: none) and (pointer: coarse)').matches; } catch { return false; }
 }
 
 /** The popover closer every createPopover / showContextMenu / hand-built menu uses: an outside press removes it. A
@@ -599,47 +631,119 @@ export function showContextMenu(x, y, items, className = 'context-menu') {
   return pop;
 }
 
+/** What the DOM says about a press at (x, y) on `target` — the facts PURE pressTargetClass (press-select.js) reads:
+ *  inside a text field / the terminal, on a control, a glyph under the finger, and that glyph's effective
+ *  user-select. Never throws (a fact it cannot read is the conservative one: no glyph ⇒ the menu keeps working). */
+export function pressFacts(target, x, y) {
+  const el = target?.nodeType === 1 ? target : target?.parentElement;
+  if (!el?.closest) return { native: false, chrome: true, overText: false, userSelect: 'none' };
+  if (el.closest(NATIVE_PRESS_SELECTOR)) return { native: true, chrome: false, overText: false, userSelect: 'auto' };
+  if (el.closest(PRESS_CHROME_SELECTOR)) return { native: false, chrome: true, overText: false, userSelect: 'none' };
+  let overText = false, userSelect = 'none';
+  try {
+    let node = null;
+    if (typeof document.caretPositionFromPoint === 'function') node = document.caretPositionFromPoint(x, y)?.offsetNode || null;
+    else if (typeof document.caretRangeFromPoint === 'function') node = document.caretRangeFromPoint(x, y)?.startContainer || null;
+    if (node && node.nodeType === 3 && node.data.trim()) {
+      const r = document.createRange();
+      r.selectNodeContents(node);
+      overText = pointOnText([...r.getClientRects()], x, y);
+      const vals = [];
+      for (let e = node.parentElement; e; e = e.parentElement) {
+        const cs = getComputedStyle(e);
+        vals.push(cs.userSelect || cs.webkitUserSelect);
+      }
+      userSelect = effectiveUserSelect(vals);
+    }
+  } catch { overText = false; }
+  return { native: false, chrome: false, overText, userSelect };
+}
+
+/** The verdict for a touch press at (x, y) — 'menu' | 'selection' | 'native' (PURE longPressVerdict). */
+export function touchPressVerdict(target, x, y) {
+  return longPressVerdict({ device: 'touch', target: pressTargetClass(pressFacts(target, x, y)) });
+}
+
 /**
- * Long-press → contextmenu for touch devices.
+ * Long-press → contextmenu for touch devices — THE ONE DOOR of a touch long press.
  *
  * iOS Safari never fires `contextmenu` on long-press, so every right-click
  * menu (file explorer, group headers, …) is unreachable there. Synthesize a
  * bubbling contextmenu event after a 500ms still press. Android Chrome fires
  * the native event itself — a trusted contextmenu cancels the pending timer
  * so menus don't double-fire.
+ *
+ * A LONG PRESS ON SELECTABLE TEXT IS A SELECTION, NEVER A MENU (lane
+ * mobile-select, src/lib/press-select.js): on selectable text the timer is never
+ * armed (iOS: our timer was the only menu, racing the platform's selection), and
+ * a TRUSTED touch contextmenu there (Android: fired after the platform already
+ * selected the word) is stopped here before any menu handler sees it — without
+ * preventDefault, so the selection handles and the platform's Copy bar appear.
+ * Controls, padding, gutters and pictures keep the menu — and once an app handler
+ * TOOK such a menu press (a menu is open) the platform's own selection is held
+ * off for it (`selectstart` cancelled: measured, Chrome's long press on a
+ * message's role strip still selected the nearest word under our menu); when the
+ * platform's long press comes FIRST (its selectstart before our 500 ms), our
+ * contextmenu is fired right then, so one press is one outcome either way. A
+ * mouse right-click is never judged. A trusted contextmenu arriving after OUR
+ * synthetic one was taken is swallowed (measured: the menu was built twice,
+ * ~180 ms apart); one nobody took passes (the platform's own long-press menu).
+ * Every decision is a PURE table (press-select.js: longPressVerdict,
+ * selectStartAllowed, trustedContextMenu).
  */
 export function installLongPressContextMenu() {
-  let timer = null, sx = 0, sy = 0, fired = false;
+  let timer = null, sx = 0, sy = 0, fired = false, handled = false, touching = false, verdict = null, target = null;
   const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
+  // our contextmenu, at the touch point; `handled` = an app handler took it (cancelled it: a menu opened)
+  const fire = () => {
+    timer = null; fired = true;
+    try { navigator.vibrate?.(10); } catch {}
+    handled = !target.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true, cancelable: true, view: window, clientX: sx, clientY: sy,
+    }));
+  };
   document.addEventListener('touchstart', (e) => {
-    cancel(); fired = false;
+    cancel(); fired = false; handled = false;
+    touching = true; verdict = null; target = null;
     if (e.touches.length !== 1) return;
-    const target = e.target;
-    // Native long-press matters on these (paste menu, text selection, terminal)
-    if (target.closest?.('textarea, input, select, [contenteditable], .xterm')) return;
+    target = e.target;
     const t = e.touches[0];
     sx = t.clientX; sy = t.clientY;
-    timer = setTimeout(() => {
-      timer = null; fired = true;
-      try { navigator.vibrate?.(10); } catch {}
-      target.dispatchEvent(new MouseEvent('contextmenu', {
-        bubbles: true, cancelable: true, view: window, clientX: sx, clientY: sy,
-      }));
-    }, 500);
+    // Native long-press matters on text fields / the terminal (paste menu, text selection) and on selectable
+    // text (the platform's selection) — only a 'menu' verdict arms the timer
+    verdict = touchPressVerdict(target, sx, sy);
+    if (verdict !== 'menu') return;
+    timer = setTimeout(fire, 500);
   }, { passive: true, capture: true });
   document.addEventListener('touchmove', (e) => {
     if (!timer) return;
     const t = e.touches[0];
-    if (Math.abs(t.clientX - sx) > 10 || Math.abs(t.clientY - sy) > 10) cancel();
+    if (Math.abs(t.clientX - sx) > 10 || Math.abs(t.clientY - sy) > 10) { cancel(); verdict = null; } // a scroll, never a long press
   }, { passive: true, capture: true });
   // Non-passive: preventDefault after a fired long-press suppresses the
   // emulated click that would otherwise also activate the pressed element
   document.addEventListener('touchend', (e) => {
     cancel();
-    if (fired) { fired = false; e.preventDefault(); }
+    touching = e.touches?.length > 0;
+    if (!touching) verdict = null;
+    if (fired) { fired = false; handled = false; e.preventDefault(); }
   }, { capture: true });
-  document.addEventListener('touchcancel', () => { cancel(); fired = false; }, { capture: true });
-  document.addEventListener('contextmenu', (e) => { if (e.isTrusted) cancel(); }, { capture: true });
+  document.addEventListener('touchcancel', () => { cancel(); fired = false; handled = false; touching = false; verdict = null; }, { capture: true });
+  // the platform's long press reached a MENU press first: our menu now (one press, one outcome) — and its selection
+  // only if no app handler took the menu
+  document.addEventListener('selectstart', (e) => {
+    if (!touching || verdict !== 'menu') return;
+    if (!fired && target) { cancel(); fire(); }
+    if (!selectStartAllowed({ touching, verdict, handled })) e.preventDefault();
+  }, { capture: true });
+  document.addEventListener('contextmenu', (e) => {
+    if (!e.isTrusted) return;
+    cancel();
+    const touch = touching || e.pointerType === 'touch';
+    const act = trustedContextMenu({ touch, fired, handled, verdict: touch && !fired ? touchPressVerdict(e.target, e.clientX, e.clientY) : 'menu' });
+    if (act === 'swallow') { e.preventDefault(); e.stopImmediatePropagation(); }   // our menu is already open
+    else if (act === 'stop') e.stopImmediatePropagation();                          // the selection wins (never cancelled)
+  }, { capture: true });
 }
 
 /**

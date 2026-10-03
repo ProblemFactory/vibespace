@@ -325,6 +325,33 @@ function renderOwnerNotify(job, ev, { contextHead = 300 } = {}) {
   return clip(out, 1000);
 }
 
+/** THE TAIL SAYS WHY THEY WAITED (lane notify-retry, R4 — the old fixed sentence claimed the conversation had been
+ *  closed, and the owner read it on the hand-over card of one that never was). From the entries' own `held` kinds;
+ *  an entry without one (an older store) reads as not-running, which is what the old sentence assumed. */
+const NOTIF_TAIL = Object.freeze({
+  'not-running': 'These arrived while this conversation was not running.',
+  'not-reachable': 'The agent did not accept these when they arrived (busy or unreachable) — delivered now.',
+  'retrying': 'These were waiting for a retry — delivered now.',
+  'rate-floor': 'These were paced by the 30 s per-conversation floor.',
+  'spend-cap': 'These were held by the spending ceiling for turns nobody typed.',
+  'wrapper-no-steer': 'These were held because this process predates mid-turn notifications.',
+  'off': 'These were held while auto-notify was off.',
+});
+// THE DETAIL RIDES THE TAIL (notify-retry verify r2): a not-reachable entry says WHICH way it got here — the server stopped
+// while it was on the wire (a repeat is possible), the park's cap, the hour of retries — the one sentence read "did not
+// accept these" for thirty notices the agent may already have seen
+const NOTIF_TAIL_DETAIL = Object.freeze({
+  maybeDelivered: 'The server stopped while some were being sent — one or more may have reached you already (a repeat, not news).',
+  evicted: 'More arrived than the retry park holds, so some fell to the stash.',
+  expired: 'The hour of retries passed without the agent accepting some of them.',
+});
+function notifTailSentence(items) {
+  const list = Array.isArray(items) ? items : [];
+  const kinds = [...new Set(list.map((n) => (n && n.held && n.held.kind) || 'not-running'))];
+  const base = kinds.length === 1 && NOTIF_TAIL[kinds[0]] ? NOTIF_TAIL[kinds[0]] : 'These were held until now (' + kinds.join(', ') + ').';
+  const details = Object.keys(NOTIF_TAIL_DETAIL).filter((k) => list.some((n) => n && n.held && n.held[k] === true)).map((k) => NOTIF_TAIL_DETAIL[k]);
+  return [base, ...details].join(' ');
+}
 // Render a drained offline-notification stash for context injection at
 // resume/next-turn. Oldest first, newest guaranteed: when over budget the
 // MIDDLE is dropped, because the latest event is the actionable one and the
@@ -336,7 +363,7 @@ function renderNotifStash(items, { budget = 900, spillPath = null } = {}) {
   // spillPath (2.346.0, owner ask): when the engine wrote the untruncated
   // history to a file, every truncated form points at it — the agent Reads
   // the file instead of losing the elided middle
-  const tail = '</vibespace-jobs-missed-while-away>\nThese completed while this conversation was closed. vibespace-job poll <id> for full detail.'
+  const tail = '</vibespace-jobs-missed-while-away>\n' + notifTailSentence(items) + ' vibespace-job poll <id> for full detail.'
     + (spillPath ? ` Full untruncated history: ${spillPath}` : '');
   let keep = items.slice();
   let dropped = 0;
@@ -470,14 +497,21 @@ function lastLineOf(text, max = 200) {
 //    every notification and the product read as a broken notifier) ──────────
 // 'wrapper-no-steer' (B-d963): the session's running wrapper predates the
 // notification steer, so the ladder held it rather than queue a billed turn.
-const HELD_KINDS = ['spend-cap', 'rate-floor', 'not-reachable', 'off', 'wrapper-no-steer'];
+// lane notify-retry (2026-10-01): 'not-running' = the conversation had no live inbox (a dead pid, a socket nobody
+// serves — the stash at once, "arrived while this conversation was not running"); 'not-reachable' is RESERVED for
+// an agent that was alive and did not accept the message (the retry park exhausted, or a remote daemon miss);
+// 'retrying' = parked in the ladder's retry park (the fact's kind, never a stash entry's).
+const HELD_KINDS = ['spend-cap', 'rate-floor', 'not-reachable', 'not-running', 'retrying', 'off', 'wrapper-no-steer'];
 /** PURE. Type a stash reason from the ladder's own answer + the engine's text. */
 function heldKind(r, reason) {
   if (r && r.refused === 'spend') return 'spend-cap';
   if (r && r.refused === 'wrapper-no-steer') return 'wrapper-no-steer';
+  if (r && r.parked === true) return 'retrying';
+  if (r && r.notRunning === true) return 'not-running';
   const s = String((r && r.reason) || reason || '');
   if (/^rate floor/.test(s)) return 'rate-floor';
   if (/auto-notify off/.test(s)) return 'off';
+  if (/no live inbox|not running/.test(s)) return 'not-running';
   return 'not-reachable';
 }
 /** PURE. The digest every surface renders the held count from — STRUCTURE,
@@ -506,7 +540,7 @@ module.exports = {
   isTerminal, isOwner, canView, canControl, canEdit, visibleJobs,
   validateFilter, filterMatches,
   ONE_SHOT_TERMINAL, ATTENTION_FAILED, ACK_LANES, isOneShot, isTerminalOneShot, terminalAt, ackState, attentionOf, agentReadAcks, archiveVerdict, lastLineOf,
-  HELD_KINDS, heldKind, heldDigest,
+  HELD_KINDS, heldKind, heldDigest, NOTIF_TAIL, notifTailSentence,
   vetSpec, VENDOR_PATTERNS,
   parseCron, nextFire, validateSchedule, AGENT_MIN_EVERY_MS,
   SUPERVISE, onServiceExit, resolveName,

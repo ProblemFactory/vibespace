@@ -57,9 +57,17 @@ publish`, reply with the link and a line on what you drafted. Do not use
 the `Artifact` tool, `artifact-capabilities` or anything pointing at
 claude.ai — those paths are not available here.
 
-If `kit` reports the kit is not ready, relay the reason to the user (e.g.
-the CLI binary was not found, or the skill layout changed in a newer CLI
-and VibeSpace needs an update).
+Claude Code 2.1.287 and later no longer ship this kit (their own `/design`
+works through claude.ai). VibeSpace then takes the kit from an older Claude
+Code version installed on this machine (a native install or an npm-installed
+package), or from a kit it stored earlier, and
+`kit` says which (`… from CLI 2.1.281 — this CLI 2.1.287 carries no design
+kit`). Mention that version to the user only if they ask what the canvas runs.
+
+If `kit` reports the kit is not ready, relay the reason to the user verbatim:
+it names the CLI version and what was looked at (e.g. the CLI binary was not
+found, no installed version ships the kit — with the two ways out — or the
+skill layout changed in a newer CLI and VibeSpace needs an update).
 
 ## list
 

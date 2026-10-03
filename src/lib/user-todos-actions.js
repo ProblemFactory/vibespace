@@ -20,6 +20,7 @@
 import { t } from './i18n.js';
 import { fetchJson, showToast } from './utils.js';
 import { replyButtonState, liveDotState, LIVE_DOT_WHY, restoreDetails } from './user-todos-layout.js'; // PURE: the reply verdict + the running dot (design-user-inbox-reply D1.5/D1.7); restoreDetails = the whole detail this client already saw survives a snapshot that previews it
+import { showInstallDialog } from './desktop-app-launcher.js'; // Layer 0 apps: THE install dialog an agent's install proposal opens (the same component as "Install xpra on {machine}…")
 import { openResetCreditDialog } from './reset-credit-dialog.js'; // THE one reset-credit confirm dialog (design-reset-credits p2): the ask-mode item's button
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): THE confirm dialog + request path; a cleared item's words
 
@@ -170,6 +171,19 @@ export function inboxModel(app) {
         : code === 'proposal_unavailable' ? t('Nothing can be approved here — the card says why') : (r && r.error) || t('server unreachable');
       showToast(w, { type: 'error' });
       return false;
+    }
+    if (rec && rec.action && rec.action.type === 'app-install') {
+      // Layer 0 apps (docs/design-app-persistence.zh.md §3.1): an agent's install proposal — Install… opens THE install
+      // dialog on it (its fresh plan; the run is the user's press there), Not now declines it. A refusal is said by name.
+      const id = String(rec.action.id || '');
+      if (answer === 'reject') {
+        const r = await fetchJson(`/api/apps/proposals/${encodeURIComponent(id)}/reject`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        if (r && r.ok) { showToast(t('Declined — the agent is told on its next turn')); return true; }
+        showToast(r && r.code === 'proposal_state' ? t('That proposal was already decided') : (r && r.error) || t('server unreachable'), { type: 'error' });
+        return false;
+      }
+      showInstallDialog({ hostId: rec.action.host || 'local', label: rec.action.host && rec.action.host !== 'local' ? rec.action.host : null }, { what: 'app', proposalId: id });
+      return true;
     }
     if (!rec || !rec.action || rec.action.type !== 'reset-credit') return false;
     openResetCreditDialog(app, { accountKey: rec.action.accountKey, sessionId: rec.action.sessionId || null, todoId: rec.id });

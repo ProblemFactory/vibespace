@@ -17,11 +17,12 @@ import { t, tc } from './i18n.js';
  *  freshnessText pattern) so the width census can word them in every language
  *  from one process; the literals stay `t('…')` for the extractor. */
 const tDevice = t;
+const tcDevice = tc;
 import * as chanCaps from '../channel-caps.js';
 // 2026-09-28: the reply placement's refusal words live beside its verdict (PURE, bundled)
 import * as P from '../channel-policy.js';
 import * as F from '../channel-filter.js';
-import { wakeCount } from './channel-groups-view.js';
+import { wakeCount, DELIVERY_STATES } from './channel-groups-view.js';
 
 // THE VALIDATOR'S REFUSALS IN WORDS (hotfix 2026-09-26 — the owner's toast
 // "请求被拒绝: mode 'filtered' needs a filterId"): an assignment / filter /
@@ -367,6 +368,46 @@ export function wakeEchoText(r) {
   if (w.refused) parts.push(t('{n} wake(s) refused by the spend guard (not billed — they get it next turn)', { n: w.refused }));
   if (w.later) parts.push(t('{n} will read it on their next turn', { n: w.later }));
   return parts.join(' · ');
+}
+
+// ── lane group-pending (2026-10-01): WHERE A MESSAGE STANDS WITH ITS RECIPIENTS, in words ──
+// The owner: a message to a next-turn member was drawn exactly like a delivered one. The STATE comes from the ONE
+// rule (PURE channel-groups `deliveryOf`: waiting | handed | muted | left per recipient); these two word it under
+// the message. `t` injected like the tag words, so a suite words every language from one process.
+
+/** The hand-over clock as the message head draws its time: the device's local HH:MM (24 h — channel-window's `stamp`). */
+const hhmmLocal = (ms) => { const d = new Date(Number(ms) || 0); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+/** One recipient's sentence (the pair line, and each line of a group line's title). A handed row with its hand-over
+ *  clock (`at` = the engine's `reportedAt`) says WHEN; a legacy row without one says "Read by beta" alone. */
+export function deliveryRowText(row, { t = tDevice, time = hhmmLocal } = {}) {
+  if (!row) return '';
+  const name = String(row.name || '');
+  switch (row.state) {
+    case 'waiting': return t('Waiting for {name}\'s next turn', { name });
+    case 'handed': return Number.isFinite(row.at) ? t('Read by {name} · {time}', { name, time: time(row.at) }) : t('Read by {name}', { name });
+    case 'muted': return t('{name} is muted and will not read it', { name });
+    case 'left': return t('{name} left', { name });
+    default: return '';
+  }
+}
+/** The line under a message: `{text, tone, title}` or null when nobody is a recipient. ONE recipient ⇒ its
+ *  sentence; several ⇒ the counts ("1 waiting · 1 read"), every sentence in the title. `tone`: `waiting` while
+ *  anyone still waits (a hollow dot), `handed` when it reached everyone it could (a filled dot), `none` when only
+ *  muted / departed members are left (nobody will read it). */
+export function deliveryLineText(rows, { t = tDevice, tc = tcDevice, time = hhmmLocal } = {}) {
+  const list = Array.isArray(rows) ? rows.filter((r) => r && DELIVERY_STATES.includes(r.state)) : [];
+  if (!list.length) return null;
+  const n = (state) => list.filter((r) => r.state === state).length;
+  const tone = n('waiting') ? 'waiting' : n('handed') ? 'handed' : 'none';
+  if (list.length === 1) { const s = deliveryRowText(list[0], { t, time }); return { text: s, tone, title: s }; }
+  // the counts are contextual keys (`delivery::…`): "{n} waiting" is also the stash strip's "{n} 条在等" — same
+  // spelling, another meaning (§16: tc, never a re-add)
+  const parts = [];
+  if (n('waiting')) parts.push(tc('delivery', '{n} waiting', { n: n('waiting') }));
+  if (n('handed')) parts.push(tc('delivery', '{n} read', { n: n('handed') }));
+  if (n('muted')) parts.push(tc('delivery', '{n} muted', { n: n('muted') }));
+  if (n('left')) parts.push(tc('delivery', '{n} left', { n: n('left') }));
+  return { text: parts.join(' · '), tone, title: list.map((r) => deliveryRowText(r, { t, time })).join('\n') };
 }
 
 // ── R3 (2026-09-26, design §23): THE FIRST SCREEN'S TAG and A PICTURE'S REFUSAL ──

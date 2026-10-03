@@ -58,22 +58,8 @@ try { require('./src/opslog').setupOpslog(require('./package.json').version); } 
 // it — past the 10 s boot window many scratch suites wait: five went red).
 const throwawayRoot = [os.tmpdir(), '/tmp'].some((t) => (path.resolve(__dirname) + path.sep).startsWith(path.resolve(t) + path.sep));
 if (throwawayRoot && !process.env.NO_AUTO_UPDATE) console.log('[auto-update] skipped: throwaway/temp server root');
-if (!process.env.NO_AUTO_UPDATE && !throwawayRoot) {
-  try {
-    const repoDir = __dirname;
-    // Ensure Homebrew/nvm paths are in PATH for child processes (macOS non-login shells)
-    const nodeDir = path.dirname(process.execPath);
-    const envPath = [nodeDir, process.env.PATH].filter(Boolean).join(path.delimiter);
-    const spawnEnv = { ...process.env, PATH: envPath };
-    const result = execFileSync('git', ['-C', repoDir, 'pull', '--ff-only'], { encoding: 'utf-8', timeout: 15000, stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-    if (result && !result.includes('Already up to date')) {
-      console.log('[auto-update] git pull:', result);
-      execFileSync('npm', ['install', '--no-audit', '--no-fund'], { cwd: repoDir, encoding: 'utf-8', timeout: 60000, stdio: 'inherit', env: spawnEnv });
-      execFileSync('npm', ['run', 'build'], { cwd: repoDir, encoding: 'utf-8', timeout: 30000, stdio: 'inherit', env: spawnEnv });
-      console.log('[auto-update] rebuilt successfully');
-    }
-  } catch (e) { console.log('[auto-update] skipped:', e.message?.split('\n')[0]); }
-}
+// the pull / install / build + the reset of the tracked files a build rewrites (the checkout stays clean): src/server/auto-update.js
+if (!process.env.NO_AUTO_UPDATE && !throwawayRoot) require('./src/server/auto-update.js').autoUpdate({ repoDir: __dirname });
 
 const PORT = process.env.PORT || 3456;
 const CLAUDE_CMD_RAW = process.env.CLAUDE_CMD || 'claude';
@@ -422,7 +408,7 @@ const {
   maybeRepinLockedModel, maybeStopOnFallback, modelsMatch, onMemberReadingFresh, onMemberLoginSuccess, autoCliReady, lastMemberReadAt, projectionRereadFor, // …+ the new-member wake (2026-09-08) + its LOGIN half, handed to the account routes (2026-09-29: read there since 2026-09-08, never passed — dead until now)
   apiDerivedWindow, establishedWindows, repairIdentityAnchors, // B-855a: the two identity witnesses handed to setupUsage — the panel probe may only write the account it proves — + c2's STANDING identity repair (boot + POST /api/usage/repair-identity)
   poolChooserForModel, poolReadCache, probeUsageForAccountKey, readRawUsageCache, spendGuard, // the ONE raw usage-cache read (overage lives there — design §1.4) + THE SPEND CEILING (§4.4c): ONE authorizer in front of every turn nobody typed, per credential slot, persisted ⇒ src/server/spend-guard.js
-  noteSessionProduced, noteTurnEnd, noteWallSignal, noteStreamRecord, recordIsLate, beforeAutoResumeFire, fireIdentityFor, memberLoginState, probeUsageViaSession, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane, // …+ the SERVED-MODEL pair + its FALLBACK PREDICATE (r3-r2: the parse's target-less lock latch asks it, so a classifier substitute never becomes the lock target that defines placement) + the REROUTE THIS RECORD ANNOUNCES (r4: placed BEFORE the served capture at both feeds — the incident's first announcement rides the very record the substitute answered) + the per-turn LANE settle (2026-09-13 r3): both stdout feeds destructure them from the `engine:` literals below, and neither was exported here — the whole round-1 fix was a TypeError in production
+  noteSessionProduced, noteTurnEnd: noteTurnEndEngine, noteWallSignal, noteStreamRecord, recordIsLate, beforeAutoResumeFire, fireIdentityFor, memberLoginState, probeUsageViaSession, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane, // …+ the SERVED-MODEL pair + its FALLBACK PREDICATE (r3-r2: the parse's target-less lock latch asks it, so a classifier substitute never becomes the lock target that defines placement) + the REROUTE THIS RECORD ANNOUNCES (r4: placed BEFORE the served capture at both feeds — the incident's first announcement rides the very record the substitute answered) + the per-turn LANE settle (2026-09-13 r3): both stdout feeds destructure them from the `engine:` literals below, and neither was exported here — the whole round-1 fix was a TypeError in production
   sessionModelFor, sweepUsageAnchors, usageCacheKeyFor, resetCreditOffer, resetCreditPreview, consumeResetCreditFor, claimColdRestarts, // the stored reset credits the auto-resume arm card offers (design-reset-credits §5) + the manual use's preview/POST (p2)
   usageIdentityAccountIds, usageIdentityGroups, usageIdentityGroupsCached,
   writeUsageCacheForKey, clearSealedOrders, pushSealedOrders,
@@ -440,6 +426,9 @@ const {
   adapterRegistry, readUserState: () => { try { return persistenceRouter.readUserState(); } catch { return {}; } }, getUserTodos: () => { try { return userTodos; } catch { return null; } }, // lazy: the inbox a refused spend is reported in is created further down (TDZ otherwise)
   getSessionMetaStore: () => { try { return { readSessionMeta, writeSessionMeta }; } catch { return null; } }, // lazy too (session-stdout is built below): the ONE use is persisting the classifier-reroute stamp so a RESTORED conversation still knows the CLI answers with a model we did not ask for (r3)
 });
+// noteTurnEnd ALSO wakes the delivery ladder's retry park (lane notify-retry, 2026-10-01): a parked notification is posted the
+// moment the conversation's turn ends (claude `result` / codex `task_complete` / ACP) — the stdout consumers keep the ONE name
+const noteTurnEnd = (s, m) => { noteTurnEndEngine(s, m); try { deliver.noteTurnEnd(s); } catch (e) { console.warn('[deliver] turn-end hook failed:', e && e.message); } };
 // ── Effective-size computation (min cols/rows across clients + PTY resize + broadcast) ──
 // Only clients that have sent a REAL `resize` (terminal fit) drive the PTY
 // size. Two classes of entries must NOT shrink it:
@@ -503,7 +492,7 @@ const { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta,
   CLAUDE_STREAM_TYPES, _seenStreamTypes, activeSessions,
   engine: { _vsuPending, armWorkflowUsageWatcher, kickPoolEval, markLimitBanner, // EVERY name the registered consumers destructure from `engine` must be here — test-fable-cap-pool-storm §10 derives that set from their own `const {…} = engine;` and fails THIS literal (r3: two were missing and every claude chat record became raw output)
     maybePoolAutoSwitch, maybeRepinLockedModel, maybeStopOnFallback, notePoolAuthFailure,
-    modelsMatch, noteSessionProduced, noteTurnEnd, noteTurnStopped, noteWallSignal, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, usageEstimator, noteStreamRecord, recordIsLate, noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane },
+    modelsMatch, noteSessionProduced, noteTurnEnd, noteTurnStopped, noteWallSignal, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, usageEstimator, noteStreamRecord, recordIsLate, noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane },   // noteTurnEnd = the hooked wrapper above (the park)
   checkClaudeGoalStatus,
   broadcastToSession,
   broadcastActiveSessions: (...a) => broadcastActiveSessions(...a),
@@ -536,12 +525,13 @@ const { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
   getDialBridge: () => { try { return dialBridge; } catch { return null; } },
 });
 // ── Agent-tool generators + hook registration (src/server/agent-tool-generators.js) ──
+const hooksLate = require('./src/server/hooks-late.js').create({ activeSessions, getSessionStatus: () => sessionStatus, getUserTodos: () => userTodos, sessionStatusKey: (...a) => sessionStatusKey(...a), harnesses: require('./src/harnesses'), log: (...a) => console.log(...a), warn: (...a) => console.warn(...a) }); // lane hooks-create: a hook file CREATED by the registration ('dir-exists') is told to the conversations that predate it (one free note each + ONE For-you line); held until ready() after the boot restore; owns POST /api/cli-config/apply
 const {
   AGENT_BIN_DIR, EDITOR_DIR, EDITOR_CMD, STATUS_CMD, USAGE_STATUSLINE_CMD, HOOK_CMD,
   createEditorHelper, createStatusHelper, createHookHelper, userStatuslineCmd,
   ensureAgentHooks, stripAgentHookEntries, removeAgentHooks, hookRegistrationSafe,
   agentHooksStatus, HOOK_OPTOUT_FILE,
-} = require('./src/server/agent-tool-generators.js').create({ rootDir: __dirname, port: PORT });
+} = require('./src/server/agent-tool-generators.js').create({ rootDir: __dirname, port: PORT, onHookFileCreated: (ev) => hooksLate.noteCreated(ev) });
 // ── Harness settings (src/server/harness-config-sync.js; docs/design-harness-settings.zh.md) ──
 // THE typed accessors over the descriptor-declared tables (harnessSetting /
 // harnessDeclares / harnessSpawnSettings — threaded to ws-create and the pool
@@ -1290,7 +1280,7 @@ const deliver = require('./src/server/conversation-deliver.js').create({
     }
     return false;
   },
-  log: (...a) => console.log(...a),
+  log: (...a) => console.log(...a), renderBatch: require('./src/agent-routes.js').renderMsgStash,   // renderBatch (notify-retry verify r1): several parked notices go out as ONE frame in the hand-over's shape
 });
 const jobsWiring = require('./src/server/jobs-wiring.js').create({
   app, dataDir: path.join(__dirname, 'data'), deliver,
@@ -1327,6 +1317,7 @@ app.post('/api/agent-hooks/install', (req, res) => {
   const results = ensureAgentHooks({ auto: false }); // explicit → clears any opt-out
   res.json({ success: true, results, status: agentHooksStatus() });
 });
+hooksLate.registerApplyRoute(app, { ensureAgentHooks, agentHooksStatus, integrationEnabled, harnessConfig, hookRegistrationSafe }); // POST /api/cli-config/apply — the missing-file chip's "Apply" (human-triggered): the boot registration + CLI-config plan on demand (lane hooks-create)
 app.post('/api/agent-hooks/uninstall', (req, res) => {
   removeAgentHooks();
   res.json({ success: true, status: agentHooksStatus() });
@@ -1814,6 +1805,7 @@ const desktopKeeper = require('./src/server/desktop-app-keeper.js').create({
   remoteHosts: () => { try { return hosts.list().filter((h) => (h.transport === 'dial' ? h.online : h.dialLive)).map((h) => h.id); } catch { return []; } }, // boot: every dialed-in machine is asked what it runs
 });
 const desktopAccess = require('./src/server/desktop-access.js').create({ hosts, local: () => desktopKeeper.machine, env: () => require('./src/ws-handler').agentEnv(), log: console }); // lane C1 (design-desktop-apps-seamless §3.5): the ONE transport to an app's machine — device #0 in-process against the keeper's OWN machine half, a paired device / an ssh host (its daemon installed over ssh) through the `desktop-serve` agentd op, a handle that cannot run the op refused host_needs_daemon
+const appsWiring = require('./src/server/apps-wiring.js').install({ app, access: desktopAccess, userTodos, deliver, activeSessions: () => activeSessions, sessionStatusKey, broadcast: (m) => bcastAll(m), dataDir: path.join(__dirname, 'data'), log: console, throwawayRoot }); // Layer 0 apps (docs/design-app-persistence.zh.md §3.1): the user's door + an agent's proposals over the machine's ONE package slot; the rebuilt machine's replay runs after listen
 // P9 window targets (design-agent-browser-v2 §4.9 / §6.6): ONE wiring — the RFB bridge's input policy IS the engine's lease verdict, the routes (user + agent) and the shared handback announcer ride the same engine (src/server/window-live-wiring.js)
 const { desktopStream, windowEngine, boot: bootWindowLeases, shutdown: shutdownWindowLeases } = require('./src/server/window-live-wiring.js').install({
   app, auth, vnc, keeper: desktopKeeper, DESKTOP_SINGLETON_ID, dataDir: path.join(__dirname, 'data'), env: () => require('./src/ws-handler').agentEnv(), activeSessions: () => activeSessions, serverSetting: (k) => serverSetting(k), broadcast: (m) => bcastAll(m), browserHandback,
@@ -1948,7 +1940,7 @@ server.listen(PORT, HOST, () => {
   // no systemd — the entrypoint respawn loop restarts us when update.sh kills
   // this pid; dtach sessions live in the same PID namespace and survive).
   try { fs.writeFileSync(path.join(__dirname, 'data', 'server.pid'), String(process.pid)); } catch {}
-  setTimeout(() => jobsWiring.initAfterListen(), 1500); // Background Work engine: adopt-first, never blocks boot
+  setTimeout(() => jobsWiring.initAfterListen(), 1500); setTimeout(() => appsWiring.afterListen(), 2500); // Background Work engine: adopt-first, never blocks boot; Layer 0 apps: a rebuilt machine's apps put back (the replay marker hit = nothing)
   console.log(`  dtach: ${DTACH_CMD}, node: ${NODE_CMD}, env: ${ENV_CMD}, claude: ${CLAUDE_CMD}, codex: ${CODEX_CMD}`);
   if (process.platform === 'linux') console.log(`  X display: ${X_ENV.DISPLAY || '(none)'}${X_ENV.XAUTHORITY ? ' (xauth: ' + X_ENV.XAUTHORITY + ')' : ''} — clipboard image paste ${X_ENV.probed ? 'ready' : 'UNAVAILABLE (no working X display found)'}`);
 
@@ -1991,7 +1983,7 @@ server.listen(PORT, HOST, () => {
   // …and STANDING (final verifier): a weekly window that moved between boots must not wait for the next boot — hourly, idempotent, quiet unless it changed something, the panel memory re-read only then
   setInterval(() => { try { const rep = repairIdentityAnchors('hourly'); if (rep && rep.changed) usage.reloadRateLimitCache?.(); } catch (e) { console.warn('[usage] hourly identity repair failed:', e.message); } }, 3600e3).unref();
   migrateLegacyHomeProjects();
-  restoreSessions(); bootBrowserKeeper(); bootWindowLeases(); // agent browser P1 (§3.5) + P9b window leases (the same rule: after the live-session set is final): leases reconciled + browsers adopted only AFTER the live-key set is final (async, logged, never blocks the boot — mounts-plugins-wiring)
+  restoreSessions(); bootBrowserKeeper(); bootWindowLeases(); hooksLate.ready(); // hooksLate.ready() (lane hooks-create): the live-session set is final — a hook file the boot registration created is told to the sessions just restored. agent browser P1 (§3.5) + P9b window leases (the same rule: after the live-session set is final): leases reconciled + browsers adopted only AFTER the live-key set is final (async, logged, never blocks the boot — mounts-plugins-wiring)
   try { fdGauge.bootLine({ sessions: [...activeSessions.values()].filter((x) => x.socketPath).length }); fdGauge.start(); } catch (e) { console.warn('[fd] gauge failed to start:', e.message); } // lane-dead-bridge: the limit node REALLY runs at + the estimate; refuses nothing
   setTimeout(() => { try { bridgeWatch.bootSweep(); bridgeWatch.start(); } catch (e) { console.warn('[bridge] boot sweep failed:', e.message); } }, 1500); // AFTER the restore's attaches connected: end a dead server's orphaned attach clients, then watch (lane-dead-bridge)
   // Plan C boot reconciliation: a per-session pool link whose session did not
@@ -2066,8 +2058,8 @@ function shutdown() {
   shuttingDown = true;
   // verify r2: a hand-over in flight settles FIRST (its frame may be in the CLI's inbox while its drain is not on disk — exiting here re-delivered it at the next boot); ≤ 5 s
   // verify r3: the door shuts BEFORE the wait — a press during it started a hand-over nobody waited for
-  let n = 0; try { stashView.close(); n = stashView.inFlightCount(); } catch { }
-  if (n > 0) { console.log(`  Shutting down: waiting for ${n} stash hand-over(s) in flight…`); stashView.settle(5000).then((k) => { if (k < 0) console.warn(`[stash] ${-k} hand-over(s) did not settle before the deadline — stamped, released at the next boot`); }).catch(() => { }).finally(shutdownNow); return; }
+  let n = 0, m = 0; try { stashView.close(); n = stashView.inFlightCount(); } catch { } try { deliver.closeRetries(); m = deliver.retryInFlightCount(); } catch { }   // notify-retry verify r1: the park's retry posts in flight settle too
+  if (n > 0 || m > 0) { require('./src/server/exit-settle.js').settleInFlight({ stashView, deliver, n, m }).finally(shutdownNow); return; }
   shutdownNow();
 }
 function shutdownNow() {

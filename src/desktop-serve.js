@@ -216,6 +216,7 @@ const M = require('./desktop-apps');
 const O = require('./office-open'); // §7.9: the LibreOffice rows as a machine serves them, the open-with verdict, the argv
 const LIMITS = require('./keeper-limits');
 const displayFacts = require('./desktop-display');
+const AS = require('./app-serve'); // Layer 0 apps (docs/design-app-persistence.zh.md §3.1): the app-* ops + the catalog rows of the apps the user installed
 
 const STORE_FILE = 'desktop-apps.json';
 const LOG_DIR = 'desktop-apps';
@@ -275,7 +276,7 @@ const namedError = (code, msg) => { const e = new Error(msg); e.code = code; ret
 /** The closed op set — a caller cannot invent one (an unknown op on an old
  *  daemon HANGS: src/agentd/client.js asks only a daemon whose hello-ack names
  *  `desktop-serve`; an unknown op here is refused by name). */
-const DESKTOP_SERVE_OPS = Object.freeze(['facts', 'launch', 'stop', 'status', 'list', 'windows', 'fit', 'keep-alive', 'relaunch']);
+const DESKTOP_SERVE_OPS = Object.freeze(['facts', 'launch', 'stop', 'status', 'list', 'windows', 'fit', 'keep-alive', 'relaunch', ...AS.APP_OPS]);
 /** The hub settings a machine's decisions read (the op carries them as `settings`; in-process they are the hub's own reader). */
 const SETTING_KEYS = Object.freeze(['desktop.backendPrefs', 'desktop.appScale', 'desktop.idleTimeoutMin']);
 const settingsReader = (obj) => (key) => (obj && typeof obj === 'object' && SETTING_KEYS.includes(key) ? obj[key] : undefined);
@@ -297,12 +298,21 @@ const settingsReader = (obj) => (key) => (obj && typeof obj === 'object' && SETT
  *   log, now, tickMs, guardSampleMs, geometry, hostId
  *   fitSlowBeltMs  — the settled belt's cadence (default FIT_SLOW_BELT_MS; the suite shrinks it)
  *   hooks          — the hub's policy (see the header); absent on a daemon
+ *   apps           — the apps machine half (src/app-serve.js; default: created here over `appsHome` + dataDir as
+ *                    the package slot's state dir) — its catalog rows join the registry (`app.<entry>`)
+ *   appsHome       — the user's home on this machine (default: the base env's HOME, else os.homedir())
  */
 function install({ dataDir, env, serverSetting = () => undefined, singleton = null,
-  display = displayFacts, limits = LIMITS, registryRows = M.DEFAULT_REGISTRY, backends = M.DISPLAY_BACKENDS, log = console, now = Date.now, tickMs = TICK_MS, guardSampleMs = null, geometry = DEFAULT_GEOMETRY, hostId = null, fitSlowBeltMs = FIT_SLOW_BELT_MS, hooks = {} } = {}) {
+  display = displayFacts, limits = LIMITS, registryRows = M.DEFAULT_REGISTRY, backends = M.DISPLAY_BACKENDS, log = console, now = Date.now, tickMs = TICK_MS, guardSampleMs = null, geometry = DEFAULT_GEOMETRY, hostId = null, fitSlowBeltMs = FIT_SLOW_BELT_MS, hooks = {}, apps = null, appsHome = null } = {}) {
   if (!dataDir) throw new Error('desktop-serve: dataDir is required');
   if (env && typeof env === 'object') { const e0 = env; env = () => e0; }
   if (typeof env !== 'function') throw new Error('desktop-serve: env must be a function returning the sanitised base env');
+  // Layer 0 apps: the machine half lives beside the keeper (the same state dir = the same package slot as xpra's install)
+  if (!apps) {
+    let home = appsHome;
+    if (!home) { try { home = (env() || {}).HOME || null; } catch { home = null; } }
+    apps = AS.create({ home: home || os.homedir(), stateDir: dataDir, env, log, now, binOnPath: display.binOnPath ? (n, o) => display.binOnPath(n, o) : null, installState: display.installState ? (d) => display.installState(d) : null });
+  }
   display.assertLocal(hostId, 'keeper');
   const storeFile = path.join(dataDir, STORE_FILE);
   const logRoot = path.join(dataDir, LOG_DIR);
@@ -389,12 +399,18 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   function registry(hostFacts) {
     const bins = (hostFacts && hostFacts.bins) || {};
     const binOf = (name) => (bins[name] !== undefined ? bins[name] : display.binOnPath(name, { env: env() }));
+    // the apps the user installed (Layer 0): one row per .desktop file root recorded for an entry — `app.<entry>`;
+    // absent ⇒ greyed with its code (the hub's apps engine words it: restoring… after a rebuild, or why not)
+    const appRows = (apps && typeof apps.catalogRows === 'function' ? apps.catalogRows() : []).filter((r) => !registryRows.some((x) => x.id === r.id)).map((row) => {
+      const p = row.exec.includes('/') ? (fs.existsSync(row.exec) ? row.exec : null) : binOf(row.exec);
+      return { ...row, args: [...row.args], available: !!p, path: p, reason: p ? null : `${row.label} is not installed on this machine (yet)`, reasonCode: p ? null : 'app-missing' };
+    });
     return registryRows.map((row) => {
       if (row.browser) return browserRegistryRow(row, binOf);
       if (row.office) return { ...O.officeRowFor(row, officeFactsOf(hostFacts, binOf)), args: [...(row.args || [])] }; // §7.9: presence = the binary AND the module's library
       const p = row.exec.includes('/') ? (fs.existsSync(row.exec) ? row.exec : null) : binOf(row.exec);
       return { ...row, args: [...row.args], available: !!p, path: p, reason: p ? null : `${row.exec} not on PATH` };
-    });
+    }).concat(appRows);
   }
   /** §7.9: the machine's LibreOffice facts — hostFacts carries them (desktop-display officeFacts); a facts object from an
    *  older display module (a suite's stand-in) is read from its bins alone: the binary known, the modules not. */
@@ -495,6 +511,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   async function list(opts = {}) {
     const serverSetting0 = opts.settings ? settingsReader(opts.settings) : serverSetting;
     const f = await facts();
+    try { await apps.refreshCatalog(); } catch (e) { log.warn?.(`[apps] the catalog could not be read (${e.message}) — its last rows are served`); }
     const resolved = resolve(f, undefined, serverSetting0);
     return { apps: listApps(), registry: registry(f), availability: { backend: resolved.backend, via: resolved.via, recipe: resolved.recipe, stream: resolved.stream, fallbackWhy: resolved.fallbackWhy, ladder: resolved.ladder, prefs: instancePrefs(serverSetting0), xpra: f.xpra, bins: f.bins }, cap: { used: liveRecords().length, cap: limits.CONCURRENT_CAP }, idleTimeoutMin: idleTimeoutMin(serverSetting0) };
   }
@@ -535,6 +552,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   async function launch(body, opts = {}) {
     const serverSetting = opts.settings ? settingsReader(opts.settings) : serverSetting0; // an op's settings shadow the hub's reader
     const f = await facts();
+    try { await apps.refreshCatalog(); } catch { /* the last rows */ }
     const reg = registry(f);
     const v = M.validateLaunchRequest(body || {}, reg);
     if (!v.ok) throw namedError(v.code || 'bad-request', v.error);
@@ -1383,7 +1401,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   const isStopping = (id) => stopping.has(id);
 
   load();
-  return { launch, relaunch, startDeferred, stop, reshapeStore, keepAlive, noteInput, noteDesktopSize, setWatchProbe, fitApp, get, list, listApps, liveRecords, streamTarget, x11EnvFor, windows, xpraWww, instancePrefs, facts, installFacts, installState, registry, adoptAll, start, shutdown, tick, sessionPids,
+  return { launch, relaunch, startDeferred, stop, reshapeStore, keepAlive, noteInput, noteDesktopSize, setWatchProbe, fitApp, get, list, listApps, liveRecords, streamTarget, x11EnvFor, windows, xpraWww, instancePrefs, facts, installFacts, installState, registry, adoptAll, start, shutdown, tick, sessionPids, apps,
     machineView, commit, markDirty, latestSample, isStopping, backends,
     storeFile, logRoot, STORE_FILE, LOG_DIR, SESSION_ENV, _store: () => store };
 }
@@ -1406,11 +1424,15 @@ const idOf = (p) => (typeof p.id === 'string' && /^da-[\w-]{1,64}$/.test(p.id) ?
  *   fit        {id, w?, h?}                           → {ok, fit} (w×h = a client asked the display that size)
  *   keep-alive {id}                                   → {ok, app}
  *   relaunch   {id, body, settings?}                  → {ok, app, replaced}
+ *   app-status / app-plan / app-install / app-remove / app-refresh / app-adopt-drift — Layer 0 apps (src/app-serve.js
+ *              runAppOp: the plan as the user, the RECORD after the package slot ran; the hub asks a daemon only when
+ *              its hello-ack names `app-install`)
  */
 async function runDesktopServeOp(ds, action, params = {}) {
   const op = String(action || '');
   if (!DESKTOP_SERVE_OPS.includes(op)) return bad(`unknown desktop-serve op ${JSON.stringify(op)} — one of ${DESKTOP_SERVE_OPS.join(', ')}`);
   if (!ds || typeof ds.launch !== 'function') return { ok: false, code: 'host_unavailable', error: 'the desktop-serve machine keeper is not installed on this machine' };
+  if (AS.APP_OPS.includes(op)) return AS.runAppOp(ds.apps, op, params); // Layer 0 apps: the machine half's own table (src/app-serve.js)
   const p = params && typeof params === 'object' ? params : {};
   const settings = p.settings && typeof p.settings === 'object' ? p.settings : null;
   const needId = () => { const id = idOf(p); if (!id) return null; return id; };

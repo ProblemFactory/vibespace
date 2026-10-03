@@ -8,9 +8,10 @@
 // refreshed by the `browser-profiles-updated` broadcast — the multi-client
 // law) and the picker itself. No pure model is imported here: the client only
 // lists what the server's digest says and asks the server to decide.
-import { escHtml, fetchJson, showContextMenu, showInputDialog, showToast } from './utils.js';
+import { escHtml, fetchJson, showContextMenu, showToast } from './utils.js';
 import { t } from './i18n.js';
 import { browserFactWords } from '../browser-fact.js'; // lane S2: THE browser fact — the pin, the browser in use, why they differ
+import { openNewProfileDialog } from './browser-new-profile.js'; // lane browser-admin: the picker's adopt rows open THE New profile… dialog
 
 /** The label of a pin's ORIGIN, the same five words Session Properties uses
  *  for model/effort (the two-site vocabulary, test-browser-pin ①). */
@@ -23,14 +24,12 @@ export function pinOriginLabel(origin) {
     default: return t('harness default — the agent’s own config decides');
   }
 }
-/** "New persistent profile from this session's current browser" has TWO honest
- *  spellings (§3.2.5): under the per-session-directory rung (C) the login is
- *  KEPT (the directory is moved); on every other rung there is no directory to
- *  adopt, so the item says it creates an EMPTY profile and reopens the browser. */
-export function adoptLabel(browserVariant) {
-  return browserVariant === 'C'
-    ? t('New persistent profile from this session’s browser…')
-    : t('New empty persistent profile (reopens the browser)…');
+/** The picker's "New persistent profile…" row. verify r2 (H3): the row claims NOTHING about keep vs empty — the rung alone
+ *  cannot say it (rung D keeps its directory too since lane browser-resume, and the row said "New empty persistent profile
+ *  (reopens the browser)…" over a browser whose logins the dialog then kept); the SERVER's plan (GET /api/browser/adopt)
+ *  decides, and the dialog says which in plain words. `browserVariant` is kept for callers. */
+export function adoptLabel(browserVariant) { // eslint-disable-line no-unused-vars
+  return t('New persistent profile from this conversation…');
 }
 /** Does the picker exist for this session row? Live, local, keyed, and the
  *  client holds a digest (the feature is on and the server answered). */
@@ -109,14 +108,20 @@ export function installBrowserProfilePicker(App) {
     if (r.repoint && r.repoint.ok === false) showToast(r.repoint.why, { type: 'warn', duration: 9000 });
     return r;
   };
-  App.prototype.adoptBrowserProfile = async function (s) {
-    if (!s?.webuiId) return null;
-    const label = await showInputDialog({ title: adoptLabel(s.browserVariant), label: t('Profile label'), placeholder: t('e.g. Work account') });
-    if (!label) return null;
-    const r = await fetchJson('/api/browser/adopt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: s.webuiId, label }) });
-    if (!r || r.error) { showToast(r?.error || t('server unreachable'), { type: 'error' }); return null; }
-    showToast(`${r.profile.label}: ${r.note}`, { duration: 12000 });
-    return r;
+  /** lane browser-admin: the picker's "New persistent profile…" rows open THE New profile… dialog (the Agent browser
+   *  panel's), the conversation's name prefilled — its POST goes to the adopt route (the conversation's own browser,
+   *  and on rung C its logins, become the profile; the conversation is pinned to it). Resolves with the dialog's answer. */
+  App.prototype.adoptBrowserProfile = function (s) {
+    if (!s?.webuiId) return Promise.resolve(null);
+    const name = String(s.webuiName || s.name || '').trim().slice(0, 60);
+    // verify r1 (F7): the SERVER says whether this conversation's browser is kept (its logins become the profile, as it is)
+    // or a new empty one is made — the dialog draws that form (rung D keeps too; the rung alone guessed "empty" and drew a
+    // browser / machine / build the keep then dropped). An unanswered ask falls back to the rung; the POST refuses by name.
+    // a dialog closed without a create resolves null (never a hanging await)
+    return fetchJson('/api/browser/adopt?sessionId=' + encodeURIComponent(s.webuiId)).then((plan) => new Promise((resolve) => {
+      const fromSession = plan && !plan.error && typeof plan.keep === 'boolean' ? { ...s, adoptKeeps: plan.keep } : s;
+      openNewProfileDialog(this, { label: name, fromSession, onCreated: (p, r) => resolve(r || null), onDismissed: () => resolve(null) });
+    }));
   };
   /** The picker: a context menu at the pointer (the card's right-click) or an
    *  anchor (Session Properties / the live-view title). */

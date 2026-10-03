@@ -4,7 +4,7 @@
 // read-only line. The rule and the fact are PURE src/browser-display.js (the keeper records the fact of each LAUNCH on its
 // browser record — `display`, broadcast with the digest); the agent's own sentence is the server's (English, never here).
 import { t } from './i18n.js';
-import { factCode, kindName } from '../browser-display.js';
+import { factCode, kindName, NO_DESKTOP_WINDOW_DEFAULT } from '../browser-display.js';
 
 /** The fact of a profile's CURRENT browser from the profile digest (`browsers[id].display`), or null. */
 export function displayFactOf(digest, profileId) {
@@ -32,7 +32,10 @@ export function machineDisplayText(answer) {
   let main;
   if (d.kind === 'wayland') main = t('This machine has a Wayland desktop session ({name}) — a browser that asks for a window shows one', { name: String(d.name || '') });
   else if (d.kind === 'x11') main = t('This machine has an X11 display ({name}) — a browser that asks for a window shows one', { name: String(d.name || '') });
-  else if (d.xvfb === true && answer.mode !== 'headless') main = t('This machine has no desktop session now — a browser that asks for a window runs in a hidden window (the live view can still take over)');
+  // lane hooks-create H5: an UNSET preference asks for that window here (no desktop + Xvfb + auto) — said as the rule's result
+  else if (NO_DESKTOP_WINDOW_DEFAULT && d.xvfb === true && answer.mode !== 'headless' && (answer.preference === null || answer.preference === undefined)) main = /* H5's line — said only while its switch is on (OFF in 2.369.200) */ t("This machine has no desktop session now — with the window setting unset, an agent's browser runs in a hidden window (the live view can still take over)");
+  else if (d.xvfb === true && answer.mode !== 'headless' && answer.preference !== false) main = t('This machine has no desktop session now — a browser that asks for a window runs in a hidden window (the live view can still take over)');
+  else if (answer.preference === false) main = t("This machine has no desktop session now — the window setting says Headless, so an agent's browser runs headless");
   else main = t('This machine has no desktop session now — a browser that asks for a window runs headless (the live view can still take over)');
   return xv ? `${main} · ${xv}` : main;
 }

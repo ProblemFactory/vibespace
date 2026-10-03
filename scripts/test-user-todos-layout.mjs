@@ -255,7 +255,7 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
   const req = createRequire(import.meta.url);
   const O = req(path.join(ROOT, 'src/inbox-origin.js'));
   const L = await import(path.join(ROOT, 'src/lib/user-todos-layout.js'));
-  const SET = ['spend', 'login', 'pool', 'jobs', 'channels', 'browser', 'machines', 'agent']; // lane-pairing ⑥: machines = an exit's "ask me each time" (src/exit-proxy.js)
+  const SET = ['spend', 'login', 'pool', 'jobs', 'channels', 'browser', 'machines', 'apps', 'agent']; // lane-pairing ⑥: machines = an exit's "ask me each time" (src/exit-proxy.js); Layer 0: apps = an agent's install proposal (src/server/apps-engine.js)
   eq(O.INBOX_ORIGINS, SET, 'the closed set = exactly the producers that file, in display order (mounts has no producer — the browser-switch proposal in mounts-plugins-wiring.js is the BROWSER\'s; r2: no system — nothing has ever filed with by:system)');
   ok(Object.isFrozen(O.INBOX_ORIGINS) && Object.isFrozen(O.ORIGIN_LABELS), 'the set and its words are frozen');
   eq(Object.keys(O.ORIGIN_LABELS), SET, 'one label per origin, no extra');
@@ -264,12 +264,12 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
   for (const none of [null, undefined, '']) {
     let msg = '';
     try { O.normalizeOrigin(none); } catch (e) { msg = e.message; }
-    ok(msg === 'origin required (one of spend/login/pool/jobs/channels/browser/machines/agent)', `normalizeOrigin(${JSON.stringify(none)}) THROWS "origin required" naming the set (r2: fail closed, never a default)`, msg);
+    ok(msg === 'origin required (one of spend/login/pool/jobs/channels/browser/machines/apps/agent)', `normalizeOrigin(${JSON.stringify(none)}) THROWS "origin required" naming the set (r2: fail closed, never a default)`, msg);
   }
   for (const bad of ['mounts', 'system', 'SPEND', ' spend', 5, {}, ['spend']]) {
     let msg = '';
     try { O.normalizeOrigin(bad); } catch (e) { msg = e.message; }
-    ok(msg === 'origin must be one of spend/login/pool/jobs/channels/browser/machines/agent', `normalizeOrigin(${JSON.stringify(bad)}) THROWS naming the set`);
+    ok(msg === 'origin must be one of spend/login/pool/jobs/channels/browser/machines/apps/agent', `normalizeOrigin(${JSON.stringify(bad)}) THROWS naming the set`);
   }
   ok(JSON.stringify(L.INBOX_ORIGINS) === JSON.stringify(O.INBOX_ORIGINS) && JSON.stringify(L.ORIGIN_LABELS) === JSON.stringify(O.ORIGIN_LABELS), 'the layout re-exports THE set (one spelling)');
   const laySrc = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-layout.js'), 'utf8');
@@ -353,13 +353,13 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
       for (const none of [undefined, null, '']) {
         msg = '';
         try { m.add('accounts', { text: 'an undeclared producer', kind: 'notice', sessionName: 'Manage Agents', origin: none }); } catch (e) { msg = e.message; }
-        ok(msg === 'origin required (one of spend/login/pool/jobs/channels/browser/machines/agent)' && m.snapshot().open.length === n0 && casts.length === c0, `r2 FAIL CLOSED: a filing naming no origin (${JSON.stringify(none)}) THROWS "origin required" and files nothing, broadcasts nothing (it used to land under Agents silently)`, msg);
+        ok(msg === 'origin required (one of spend/login/pool/jobs/channels/browser/machines/apps/agent)' && m.snapshot().open.length === n0 && casts.length === c0, `r2 FAIL CLOSED: a filing naming no origin (${JSON.stringify(none)}) THROWS "origin required" and files nothing, broadcasts nothing (it used to land under Agents silently)`, msg);
       }
       eq(m.add('claude:x', { text: 'an ask', origin: 'agent' }).origin, 'agent', "the agent route's shape declares 'agent' explicitly");
       msg = '';
       const n1 = m.snapshot().open.length;
       try { m.add('claude:x', { text: 'typo', origin: 'mounts' }); } catch (e) { msg = e.message; }
-      ok(/origin must be one of spend\/login\/pool\/jobs\/channels\/browser\/machines\/agent$/.test(msg) && m.snapshot().open.length === n1, 'a value outside the set THROWS by name and files nothing');
+      ok(/origin must be one of spend\/login\/pool\/jobs\/channels\/browser\/machines\/apps\/agent$/.test(msg) && m.snapshot().open.length === n1, 'a value outside the set THROWS by name and files nothing');
       const re = m.add('accounts', { text: 'spend warning', kind: 'notice', origin: 'login', urgency: 'high' });
       eq([re.id === a.id, re.origin, re.urgency], [true, 'spend', 'high'], 'a re-file of the same item KEEPS its declared origin (other fields still merge)');
       // a LEGACY item on disk (no origin) re-filed by a declaring producer takes the declaration
@@ -404,6 +404,8 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
     'src/agent-routes.js': 'agent',
     'src/server/helper-asks.js': 'agent', // lane S1: a helper's permission ask left unanswered for 60 s
     'src/exit-proxy.js': 'machines', // lane-pairing ⑥: "Allow <conversation> to run a command on <machine>?" (Allow / Deny, 60 s)
+    'src/server/hooks-late.js': 'agent', // lane hooks-create: "N running Claude Code conversations started before VibeSpace registered its hooks — Terminate and Resume them"
+    'src/server/apps-engine.js': 'apps', // Layer 0 apps: an agent's install PROPOSAL (Install / Not now) + the failed-restore notice
   };
   // r2: no exemptions — every origin of the closed set has a producer (the
   // `system` row was dropped: nothing has ever filed with by:'system')
@@ -505,7 +507,7 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
   console.log('     sites: ' + C.sites.map((x) => `${x.rel.replace(/^src\//, '')}:${x.line}=${x.origin}`).join(' · '));
   ok(C.sites.length >= 12, `the census scope is non-vacuous (${C.sites.length} sites; 12 when this shipped)`);
   ok(C.problems.length === 0, 'every site declares a literal origin of the closed set, the one its file produces; every origin has a producer; every PRODUCERS row files', C.problems);
-  eq(C.sites.length, 19, 'the widened match finds exactly the 19 declared sites (every classList.add(a, b) excluded, no other two-argument add in the tree; lane H verify r5 added the browser keeper\'s keeps-closing notice; lane S1 the helper-ask item; R4 (B-6acc) the channels engine\'s composed-message approval pointer; lane R5 verify r6 the channels engine\'s unsaved-sign-in item; lane-pairing ⑥ the exit ask; lane-pool-pin r2 the pool engine\'s removed-member hold notice — the owner\'s 全B; lane browser-propose the agent\'s proposal)');
+  eq(C.sites.length, 24, 'the widened match finds exactly the 24 declared sites (every classList.add(a, b) excluded, no other two-argument add in the tree; lane H verify r5 added the browser keeper\'s keeps-closing notice; lane S1 the helper-ask item; R4 (B-6acc) the channels engine\'s composed-message approval pointer; lane R5 verify r6 the channels engine\'s unsaved-sign-in item; lane-pairing ⑥ the exit ask; lane-pool-pin r2 the pool engine\'s removed-member hold notice — the owner\'s 全B; lane browser-propose the agent\'s proposal; lane hooks-create the late-hooks line; lane browser-admin the browser keeper\'s vanished-Chrome-build notice; lane browser-admin verify r2 (B5) its fall-back notice when a new Chrome build closed within seconds; Layer 0 apps the agent\'s install proposal + the failed-restore notice)');
   eq(C.sites.filter((x) => x.rel === 'src/server/channels-engine.js').length, 7, 'channels-engine files from seven sites — all seven declared (R4: + composePointerSync, origin channels; R5 verify r6: the unsaved-sign-in item)');
   console.log('   negative controls (the census must be able to go red)');
   const drop = { ...files, 'src/server/spend-guard.js': files['src/server/spend-guard.js'].split("origin: 'spend', ").join('') };

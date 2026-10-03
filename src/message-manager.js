@@ -300,7 +300,7 @@ class MessageManager {
   // record never crosses stdout, and its body-less result.origin is skipped).
   // No containment dedup: the delivery site posts once per fire (same-body
   // repeats are legitimate — the 2.362.2 review lesson).
-  injectPeerCard({ fromName, text, msgId = null, resetCredit = null, kind = null, group = null }) {
+  injectPeerCard({ fromName, text, msgId = null, resetCredit = null, kind = null, group = null, exitRun = null }) {
     const body = String(text || '').trim();
     if (!body) return null;
     // A harness-delivered message carries the CLI's msg_id (the turn-start
@@ -320,6 +320,9 @@ class MessageManager {
     // card / the auto-resume arm card — two numbers-and-a-mode, never markup
     const rc = offerOf(resetCredit);
     if (rc) msg.resetCredit = rc;
+    // lane-exit-run-output E3: a command's exit line + output heads (exit-reach cardOutput, bounded by the producer) ride
+    // the "Machines · <machine>" card so the renderer draws the first lines + "Show output" — never a second card
+    if (exitRun && typeof exitRun === 'object') msg.exitRun = exitRun;
     // a GROUP message (lane group-report-card): a wake's card names the sender → the group — a peer's words, always
     const gc = groupCardOf(group);
     if (gc) { msg.peerGroup = gc; msg.peerVia = 'peer'; msg.peerFrom = gc.self ? null : (gc.from || msg.peerFrom); }

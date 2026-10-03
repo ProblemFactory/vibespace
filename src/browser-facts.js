@@ -42,19 +42,36 @@ function isShimFile(p) {
   try { const fd = fs.openSync(p, 'r'); try { const b = Buffer.alloc(512); const n = fs.readSync(fd, b, 0, 512, 0); return b.slice(0, n).toString('utf8').includes(VERBS.SHIM_MARKER); } finally { fs.closeSync(fd); } } catch { return false; }
 }
 function isExecFile(p) { try { const st = fs.statSync(p); return st.isFile() && (st.mode & 0o111) !== 0; } catch { return false; } }
-function binaryResolver(cmd, env, { ttlMs = VERSION_TTL_MS, now = () => Date.now() } = {}) {
+function binaryResolver(cmd, env, { ttlMs = VERSION_TTL_MS, now = () => Date.now(), pinned = null } = {}) {
   if (cmd !== VERBS.REAL_BINARY) return () => cmd; // an explicit path / a fake — as given
   let memo = null;
   return () => {
     const PATH = String((env && env.PATH) || '');
+    // lane browser-admin 2b: the PINNED rung (resolveRealBinary's first) — the keeper's in-memory answer for the
+    // `browser.cli` setting (never an fs read per call); a change of the pin is a new memo at once
+    let pin = null; try { pin = typeof pinned === 'function' ? pinned() || null : null; } catch { pin = null; }
     const t = now();
-    if (memo && memo.PATH === PATH && t - memo.at < ttlMs) return memo.bin;
-    const r = VERBS.resolveRealBinary({ PATH, shimDirs: SHIM_DIRS(), exists: isExecFile, isShim: isShimFile });
-    memo = { PATH, at: t, bin: r.ok ? r.path : null };
+    if (memo && memo.PATH === PATH && memo.pin === pin && t - memo.at < ttlMs) return memo.bin;
+    const r = VERBS.resolveRealBinary({ PATH, shimDirs: SHIM_DIRS(), exists: isExecFile, isShim: isShimFile, pinned: pin });
+    memo = { PATH, pin, at: t, bin: r.ok ? r.path : null };
     return memo.bin;
   };
 }
 
+/** lane browser-admin 2b: the keeper's PIN FILE (`<data>/browser-tools/cli-pin.json`) read by the modules that are not the
+ *  keeper (browser-env's floor probe) — file based, like the bindings; re-read at most every 5 s. → a path or null. */
+function cliPinReader(dataDir, { now = () => Date.now(), everyMs = 5000 } = {}) {
+  const toolsDir = path.join(String(dataDir || ''), 'browser-tools');
+  let memo = null;
+  return () => {
+    const t = now();
+    if (memo && t - memo.at < everyMs) return memo.pin;
+    let pin = null;
+    try { pin = VERBS.cliPinVerdict(JSON.parse(require('fs').readFileSync(path.join(toolsDir, 'cli-pin.json'), 'utf8')), { toolsDir }); } catch { pin = null; }
+    memo = { at: t, pin };
+    return pin;
+  };
+}
 /** 10 minutes. Long enough that no burst of session creates pays for a second
  *  fork; short enough that `npm i -g agent-browser@latest` is picked up within
  *  a coffee break rather than at the next server restart. */
@@ -79,24 +96,27 @@ function sanitizeProbeEnv(src) {
   return env;
 }
 
-function createBrowserFacts({ cmd = 'agent-browser', execFileImpl = execFile, now = () => Date.now(), ttlMs = VERSION_TTL_MS, env = process.env } = {}) {
+function createBrowserFacts({ cmd = 'agent-browser', execFileImpl = execFile, now = () => Date.now(), ttlMs = VERSION_TTL_MS, env = process.env, pinned = null } = {}) {
   let cached = null;          // { version: string|null, at: number, raw: string }
   let inFlight = null;
   const probeEnv = sanitizeProbeEnv(env);
-  const binOf = execFileImpl === execFile ? binaryResolver(cmd, env, { ttlMs, now }) : () => cmd;
+  const binOf = execFileImpl === execFile ? binaryResolver(cmd, env, { ttlMs, now, pinned }) : () => cmd;
+  let cachedBin = null; // lane browser-admin 2b: the version answer belongs to ONE binary — a pin change re-asks at once
 
   /** The installed version, or null when the binary is absent/unrunnable.
    *  NEVER throws: a probe that throws on a machine without the tool would turn
    *  "this user does not browse" into a spawn failure. */
   function probeVersion() {
     const t = now();
-    if (cached && t - cached.at < ttlMs) return Promise.resolve(cached.version);
+    let binNow = null; try { binNow = binOf(); } catch { binNow = null; }
+    if (cached && t - cached.at < ttlMs && cachedBin === binNow) return Promise.resolve(cached.version);
     if (inFlight) return inFlight;
     inFlight = new Promise((resolve) => {
       let done = false;
       const finish = (version, raw) => {
         if (done) return; done = true;
         cached = { version, at: now(), raw: String(raw || '').slice(0, 200) };
+        cachedBin = binNow;
         inFlight = null;
         resolve(version);
       };
@@ -110,7 +130,10 @@ function createBrowserFacts({ cmd = 'agent-browser', execFileImpl = execFile, no
           // same answer as 'absent', because one of them deserves a sentence.
           if (err && (err.code === 'ENOENT' || err.code === 127)) return finish(null, err.message);
           const txt = String(stdout || '') + String(stderr || '');
-          const v = B.parseVersion(txt);
+          // verify r1 ⑦ (lane browser-windows): a binary that CRASHED on `--version` is not a version — node's own
+          // "Node.js v24.12.0" on the stack trace read as the CLI's version (24.12.0), and every running browser was then
+          // refused `browser_cli_gone` naming a CLI that does not exist. A non-zero exit says nothing ('' = would not say).
+          const v = err ? null : B.parseVersion(txt);
           // `''` = it ran and would not say. Deliberately NOT `null`, which
           // means "there is no binary" — see floorVerdict.
           finish(v ? v.join('.') : '', txt);
@@ -132,7 +155,10 @@ function createBrowserFacts({ cmd = 'agent-browser', execFileImpl = execFile, no
   function lastRaw() { return cached ? cached.raw : ''; }
   function _reset() { cached = null; inFlight = null; }
 
-  return { probeVersion, floor, lastVersion, lastRaw, _reset, VERSION_TTL_MS: ttlMs };
+  /** lane browser-admin: WHERE the real CLI this probe asks lives (the resolver's answer, never the shim); null = absent.
+   *  The "add a Chrome build" sentence names it — in an agent's shell the bare name is the shim. */
+  function binPath() { try { return binOf() || null; } catch { return null; } }
+  return { probeVersion, floor, lastVersion, lastRaw, _reset, binPath, VERSION_TTL_MS: ttlMs };
 }
 
 // ═══ P1 — WHICH BROWSERS ARE RUNNING, AND THE CLI THAT DRIVES ONE (§3.5) ═══
@@ -285,6 +311,28 @@ function readSingletonLock(dir) {
   if (!dir) return null;
   try { const t = fs.readlinkSync(path.join(String(dir), 'SingletonLock')); const m = /^(.*)-(\d+)$/.exec(t); return m ? { host: m[1], pid: Number(m[2]) } : null; } catch { return null; }
 }
+/** Chromium's three singleton files, as it writes them: SYMLINKS (`SingletonLock` → `<host>-<pid>`, `SingletonSocket` → a
+ *  socket path, `SingletonCookie` → a cookie). The keeper's takeover of a stale previous-host lock (lane profile-lock-roll,
+ *  browser-profiles.profileLockVerdict `stale-previous-host`) removes exactly these — each only while it IS a symlink (a
+ *  regular file of that name is somebody else's and is left). → the names removed. Never throws. */
+const SINGLETON_FILES = ['SingletonLock', 'SingletonSocket', 'SingletonCookie'];
+function removeSingletonFiles(dir) {
+  const removed = [];
+  removed.failed = []; // verify r1 (F5): what could NOT be removed, with its errno — the takeover refuses by name on it
+  if (!dir) return removed;
+  for (const name of SINGLETON_FILES) {
+    const p = path.join(String(dir), name);
+    try { if (!fs.lstatSync(p).isSymbolicLink()) continue; } catch { continue; }
+    try { fs.unlinkSync(p); removed.push(name); } catch (e) { if (!e || e.code !== 'ENOENT') removed.failed.push({ name, code: (e && e.code) || 'error' }); }
+  }
+  return removed;
+}
+/** The Singleton names still present in `dir` (a symlink or a file) — the takeover's post-check (verify r1 F5): a lock still
+ *  there after the removal (a read-only volume, a directory of another uid) means the launch would die on it (exit 21). */
+function singletonLeft(dir) {
+  if (!dir) return [];
+  return SINGLETON_FILES.filter((n) => { try { fs.lstatSync(path.join(String(dir), n)); return true; } catch { return false; } });
+}
 /** `<dir>/DevToolsActivePort`'s port, or null (a Chrome up on that directory writes it). */
 function readDevToolsPort(dir) {
   if (!dir) return null;
@@ -423,12 +471,16 @@ function runDir(inject = null) {
  *   closeAll(ns)           `close --all`          — the CLI's own stop
  * `execFileImpl` is injectable; the fast gate drives a FAKE binary on PATH.
  */
-function createBrowserRuntime({ cmd = 'agent-browser', execFileImpl = execFile, env = process.env, log = null, daemonCwd = null } = {}) {
+function createBrowserRuntime({ cmd = 'agent-browser', execFileImpl = execFile, env = process.env, log = null, daemonCwd = null, pinned = null } = {}) {
   const base = sanitizeProbeEnv(env);
-  const binOf = execFileImpl === execFile ? binaryResolver(cmd, env) : () => cmd;
-  const run = (args, extra, { timeout = 15000 } = {}) => new Promise((resolve) => {
+  const binOf = execFileImpl === execFile ? binaryResolver(cmd, env, { pinned }) : () => cmd;
+  // verify r2 (H1): `cli` = THE BROWSER'S OWN CLI for this call (the keeper's `{path}` — the binary of the version its
+  // daemon runs, never the current `browser.cli` when they differ: a client of another version restarts the daemon and
+  // its Chrome), or `{gone}` = that version is no longer installed ⇒ refused by name, never a silent fall to PATH
+  const run = (args, extra, { timeout = 15000, cli = null } = {}) => new Promise((resolve) => {
     const e = { ...base, ...extra, AGENT_BROWSER_JSON: '1' };
-    const bin = binOf();
+    if (cli && typeof cli.gone === 'string') { resolve({ ok: false, code: 'browser_cli_gone', stdout: '', stderr: '', json: null, error: `browser_cli_gone: ${cli.gone}` }); return; }
+    const bin = cli && typeof cli.path === 'string' && cli.path ? cli.path : binOf();
     if (!bin) { resolve({ ok: false, code: 'ENOENT', stdout: '', stderr: '', json: null, error: 'binary_absent: the browser CLI is not installed on this machine (only the VibeSpace shim is on PATH, or nothing)' }); return; }
     // lane L r5 F1 (b): EVERY call runs in the private directory (any call may START the daemon — `open`,
     // `stream status` … — and the daemon keeps the cwd it was started in); a checkout directory is refused
@@ -454,13 +506,13 @@ function createBrowserRuntime({ cmd = 'agent-browser', execFileImpl = execFile, 
   // (scripts/fixtures/browser-stream/session-0.32.0.json).
   const streamEnvOf = (ns, { dir = null, session = null, extraEnv = null } = {}) => (ns ? { ...nsEnv(ns, dir, session), ...(extraEnv || {}) } : { ...(extraEnv || {}) });
   return {
-    async streamStatus(ns, opts = {}) { return run(['stream', 'status', '--json'], streamEnvOf(ns, opts), { timeout: opts.timeout || 60000 }); },
-    async streamEnable(ns, opts = {}) { return run(['stream', 'enable', '--json'], streamEnvOf(ns, opts), { timeout: opts.timeout || 60000 }); },
+    async streamStatus(ns, opts = {}) { return run(['stream', 'status', '--json'], streamEnvOf(ns, opts), { timeout: opts.timeout || 60000, cli: opts.cli || null }); },
+    async streamEnable(ns, opts = {}) { return run(['stream', 'enable', '--json'], streamEnvOf(ns, opts), { timeout: opts.timeout || 60000, cli: opts.cli || null }); },
     /** takeover C3: with `ns` null and `extraEnv` = a MANAGED EPHEMERAL
      *  browser's spawn pairs, the question is asked under exactly those (the
      *  socket dir / config the session's own commands see) — never a guess. */
-    async info(ns, { dir = null, extraEnv = null } = {}) {
-      const r = await run(['session', 'info', '--json'], streamEnvOf(ns, { dir, extraEnv }));
+    async info(ns, { dir = null, extraEnv = null, cli = null } = {}) {
+      const r = await run(['session', 'info', '--json'], streamEnvOf(ns, { dir, extraEnv }), { cli });
       const d = r.json && r.json.data && typeof r.json.data === 'object' ? r.json.data : null;
       return { ok: r.ok && !!d, active: !!(d && d.active), pid: d && Number.isInteger(d.pid) ? d.pid : null, socketDir: d && d.socketDir ? String(d.socketDir) : null, version: d && d.version ? String(d.version) : null, raw: r };
     },
@@ -469,29 +521,31 @@ function createBrowserRuntime({ cmd = 'agent-browser', execFileImpl = execFile, 
      *  other (never argv, never a log line); `argvPrefix` = the provider's
      *  launch flags before `open` (`-p <name>` / `--executable-path` +
      *  `--args --fingerprint=<seed>`, src/browser-switch.js launchArgsFor). */
-    async launch(ns, { dir, idleMs = 0, headed = null, url = 'about:blank', timeout = 60000, extraEnv = null, argvPrefix = null } = {}) {
+    async launch(ns, { dir, idleMs = 0, headed = null, url = 'about:blank', timeout = 60000, extraEnv = null, argvPrefix = null, cli = null } = {}) {
       const extra = { ...(ns ? nsEnv(ns, dir) : {}), ...(extraEnv || {}), AGENT_BROWSER_IDLE_TIMEOUT_MS: String(Math.max(0, Number(idleMs) || 0)) };
       if (headed === true) extra.AGENT_BROWSER_HEADED = '1';
       if (headed === false) extra.AGENT_BROWSER_HEADED = '0';
-      return run([...(Array.isArray(argvPrefix) ? argvPrefix.map(String) : []), 'open', url], extra, { timeout });
+      return run([...(Array.isArray(argvPrefix) ? argvPrefix.map(String) : []), 'open', url], extra, { timeout, cli });
     },
-    async cdpUrl(ns, { dir = null, extraEnv = null } = {}) {
-      const r = await run(['get', 'cdp-url'], { ...nsEnv(ns, dir), ...(extraEnv || {}) });
+    async cdpUrl(ns, { dir = null, extraEnv = null, cli = null } = {}) {
+      const r = await run(['get', 'cdp-url'], { ...nsEnv(ns, dir), ...(extraEnv || {}) }, { cli });
       const d = r.json && r.json.data;
       const url = typeof d === 'string' ? d : (d && typeof d === 'object' ? (d.url || d.cdpUrl || d.value || null) : null) || (r.ok ? r.stdout.trim().split('\n').pop() : null);
       return { ok: r.ok && !!url && /^(ws|http)s?:\/\//.test(String(url)), url: url ? String(url) : null, raw: r };
     },
-    async closeAll(ns, { dir = null, timeout = 20000, extraEnv = null } = {}) { return run(['close', '--all'], streamEnvOf(ns, { dir, extraEnv }), { timeout }); },
+    async closeAll(ns, { dir = null, timeout = 20000, extraEnv = null, cli = null } = {}) { return run(['close', '--all'], streamEnvOf(ns, { dir, extraEnv }), { timeout, cli }); },
     /** P3 (§4.3): ONE upstream command under a lease's session (`confirm <id>` /
      *  `deny <id>`) — the profile's namespace + the lease's own session name,
      *  or the ephemeral browser's spawn pairs (`extraEnv`, no namespace of ours). */
-    async exec(ns, argv, { dir = null, session = null, extraEnv = null, timeout = 15000 } = {}) { return run(Array.isArray(argv) ? argv : [String(argv)], streamEnvOf(ns, { dir, session, extraEnv }), { timeout }); },
+    async exec(ns, argv, { dir = null, session = null, extraEnv = null, timeout = 15000, cli = null } = {}) { return run(Array.isArray(argv) ? argv : [String(argv)], streamEnvOf(ns, { dir, session, extraEnv }), { timeout, cli }); },
     /** The stream port for ONE session inside a namespace (or, with `ns` null
      *  and `extraEnv`, for an ephemeral browser): status → enable if disabled
      *  → status again. Never throws: `{ok, port, error}`. */
     async streamPort(ns, opts = {}) {
       const S = require('./browser-stream.js');
-      const first = S.parseStreamStatus((await this.streamStatus(ns, opts)).json);
+      const st0 = await this.streamStatus(ns, opts);
+      if (st0 && st0.code === 'browser_cli_gone') return { ok: false, port: null, code: st0.code, error: st0.error }; // verify r2 (H1): said by name
+      const first = S.parseStreamStatus(st0.json);
       let plan = S.streamPlan(first);
       if (plan.step === 'enable') {
         const en = S.parseStreamStatus((await this.streamEnable(ns, opts)).json);
@@ -543,11 +597,12 @@ async function probeDisplay({ env = process.env, x11Dir = undefined, connectMs =
   return D.displayVerdict({ env, runtimeDir, entries, x11Dir: xdir, xvfb });
 }
 
-module.exports = { createBrowserFacts, binaryResolver, sanitizeProbeEnv, VERSION_TTL_MS, createBrowserRuntime, pidAlive, procStart, sameProcess, treeUsage,
+module.exports = { cliPinReader, createBrowserFacts, binaryResolver, sanitizeProbeEnv, VERSION_TTL_MS, createBrowserRuntime, pidAlive, procStart, sameProcess, treeUsage,
   // lane headless-fallback: the display this machine has now (probed at every launch where the browser runs)
   probeDisplay,
   // lane H verify r2 (M1): the browser a daemon launched, and who holds a profile directory's lock
   procCmdline, procEnvOf, procPpid, isBrowserDaemon, readSingletonLock, readDevToolsPort, lockHolderFacts, browserOfDaemon,
+  SINGLETON_FILES, removeSingletonFiles, singletonLeft, // lane profile-lock-roll: the takeover of a stale previous-host lock (symlinks only) + its post-check (verify r1 F5)
   // lane H verify r3: argv[0] of either cmdline form; does this machine read starttimes (LOW 3)
   argv0Of, startsReadable,
   // lane browser-resume verify F1: the one directory identity (realpath) every registration / deletion guard asks

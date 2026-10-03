@@ -82,6 +82,10 @@ const { hiddenCharsOf } = require('./helper-ask.js');
 const JOB_VERBS = Object.freeze(['list', 'show', 'poll', 'answers', 'logs', 'progress', 'ask', 'docs', 'stop', 'rm', 'notify', 'notify-cron', 'announce', 'subscribe', 'unsubscribe']);
 /** vibespace-page's pre-approved verbs (r2): `publish` is held AND an ask rule. */
 const PAGE_VERBS = Object.freeze(['list', 'kit']);
+/** vibespace-app's pre-approved verbs (Layer 0 apps, docs/design-app-persistence.zh.md §3.1): nothing here EXECUTES —
+ *  `install` / `remove` only PROPOSE (one For-you item; the user installs); `add` (a user-level installer run as the
+ *  user) is held. */
+const APP_VERBS = Object.freeze(['search', 'list', 'plan', 'install', 'remove', 'status', 'wait', 'docs', 'help']);
 
 /** tool → the verbs pre-approved (null = every verb), the verbs held and why,
  *  and (`ask`) the held verbs the spawn ALSO names as ask rules — an ask rule
@@ -99,6 +103,10 @@ const AGENT_TOOL_RULES = Object.freeze([
     tool: 'vibespace-page', verbs: PAGE_VERBS, why: 'lists the pages it published and prepares the design kit; publishing asks every time',
     held: Object.freeze({ publish: 'puts a page under the user\'s name on this instance (--public = a link anyone can open) — it asks every time (owner 2026-09-25)' }),
     ask: Object.freeze(['publish']),
+  }),
+  Object.freeze({
+    tool: 'vibespace-app', verbs: APP_VERBS, why: 'searches, plans and PROPOSES app installs — nothing executes; the user installs in For you (through VibeSpace\'s own package slot)',
+    held: Object.freeze({ add: 'runs a user-level installer (uv / npm / an AppImage) as you, outside the approval the user gives in For you' }),
   }),
   Object.freeze({
     tool: 'vibespace-job', verbs: JOB_VERBS, why: 'Background Work bookkeeping',
@@ -682,7 +690,7 @@ function describeAgentCommand(command) {
 }
 
 module.exports = {
-  AGENT_TOOL_RULES, HELD_TOOLS, JOB_VERBS, PAGE_VERBS, CODEX_NOTE, SCOPE_CLOSE_ALL, WITHHELD_ASK, WITHHELD_HELD, SAFE_ENV,
+  AGENT_TOOL_RULES, HELD_TOOLS, JOB_VERBS, PAGE_VERBS, APP_VERBS, CODEX_NOTE, SCOPE_CLOSE_ALL, WITHHELD_ASK, WITHHELD_HELD, SAFE_ENV,
   claudeAllowRules, claudeAskRules, ASK_RULE_MODES, spawnPermissionMode, claudeAskRulesFor, parseRule, ruleMatchesCommand, coveredByAgentToolRules,
   widenSuggestions, alwaysAllowFor, rulesText, splitShell, describeAgentCommand, agentCommandText,
   // verify r6: the inert-tail census (F4), every update in words (F5), the ONE offer + the server's own answer (F6/F7)

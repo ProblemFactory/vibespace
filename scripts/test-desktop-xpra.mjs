@@ -300,11 +300,14 @@ try {
 
     // ── §5 the clipboard, both branches, at the X level ──
     console.log('§5 the clipboard both ways through the relay, read/written on the display with xclip');
-    if (!XCLIP) skip('the clipboard at the X level', 'xclip not on PATH');
+    // lane fleet-image-2 (the fleet e2e: on a machine without xclip the idle-clock row below went red — its token was
+    // sent only inside the xclip branch): the token goes through the relay on every machine; only the X-level reads
+    // and writes need xclip, and they skip by name without it
+    cl.setPaste('from-the-suite');
+    cl.send(P.clipboardToken('from-the-suite'));
+    if (!XCLIP) skip('the clipboard at the X level (`xclip -o` reads the token on the display, `xclip -i` comes back as one)', 'xclip not on PATH');
     else {
       const xenv = xenvOf(A);
-      cl.setPaste('from-the-suite');
-      cl.send(P.clipboardToken('from-the-suite'));
       const xsel = await until(() => { try { const s = execFileSync(XCLIP, ['-o', '-selection', 'clipboard'], { env: xenv, encoding: 'utf8', timeout: 4000 }); return s === 'from-the-suite' ? s : null; } catch { return null; } }, 10000, 400);
       check('browser → app: a clipboard-token through the relay is what `xclip -o -selection clipboard` reads on the app\'s display', xsel === 'from-the-suite', { got: xsel, requests: cl.events.filter((e) => e.type === 'clipboard-request').length });
       const holder = spawn('sh', ['-c', `printf 'from-the-app' | ${XCLIP} -i -selection clipboard`], { env: xenv, stdio: 'ignore', detached: true }); xclipKids.push(holder);

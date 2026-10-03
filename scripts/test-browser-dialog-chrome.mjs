@@ -22,6 +22,11 @@ import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, freePort, endRootedProcesses } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
+// 2.369.200 integration (lane hooks-create H5 × this suite): with no desktop and Xvfb on the keeper's PATH an UNSET window
+// preference launches the hidden-window rung once H5's switch is on (OFF in 2.369.200, ON in .201 — a headed Chrome); this suite's subject is the dialog / loop watch on the
+// rung it was measured on, so it pins headless — the hidden-window rung's own legs are test-browser-display-chrome's (and
+// the watch on it is HELD: see the 2.369.200 engineering log, integration)
+const HEADLESS_SETTING = (k) => (k === 'browser.noDisplayMode' ? 'headless' : undefined);
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const express = require('express');
@@ -65,7 +70,7 @@ async function world(tag, { Kmod = Kk, ephemeral = false, second = false } = {})
   const kenv = { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD };
   const KEY = tag === 'ctl' ? 'bk-0000c7a1' : tag === 'eph' ? 'bk-0000e7a1' : 'bk-0000d7a1';
   const live = new Set([KEY]);
-  const kk = Kmod.create({ dataDir: path.join(W, 'data'), homeDir: KH, env: () => kenv, serverSetting: () => undefined, liveKeys: () => live, runtime: Ff.createBrowserRuntime({ env: kenv }), facts: Ff.createBrowserFacts({ env: kenv }), log: { log() { }, warn() { }, error() { } }, install: false, tickMs: 3600e3, ...(second ? { driveHoldMs: 1500 } : {}) }); // verify r2 #3: one driver at a time (owner ruling A) — the claim lapses after 1.5 s quiet here, 90 s in the product
+  const kk = Kmod.create({ dataDir: path.join(W, 'data'), homeDir: KH, env: () => kenv, serverSetting: HEADLESS_SETTING, liveKeys: () => live, runtime: Ff.createBrowserRuntime({ env: kenv }), facts: Ff.createBrowserFacts({ env: kenv }), log: { log() { }, warn() { }, error() { } }, install: false, tickMs: 3600e3, ...(second ? { driveHoldMs: 1500 } : {}) }); // verify r2 #3: one driver at a time (owner ruling A) — the claim lapses after 1.5 s quiet here, 90 s in the product
   const Bp = require('../src/browser-profiles.js');
   const prof = ephemeral ? null : kk.createProfile({ label: 'Mail ' + tag }, { owner: { kind: 'instance', id: null } });
   const TOKEN = 'vsst_bstuck_' + tag;

@@ -2,6 +2,7 @@ import { formatSize, attachPopoverClose, createPopover, createModalShell, showCo
 import { installExplorerUploads } from './file-explorer-uploads.js';
 import { installExplorerOps } from './file-explorer-ops.js';
 import { setupDirAutocomplete } from './autocomplete.js';
+import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 import { getFileIcon, hasDedicatedViewer, getCategory } from './file-types.js';
 import { FILE_ICONS, UI_ICONS } from './icons.js';
 import { FileViewer } from './file-viewer.js';
@@ -735,18 +736,19 @@ class FileExplorer {
       // Resize handle on every column (name column adjusts flex min-width)
       const handle = document.createElement('div');
       handle.className = 'file-col-resize-handle';
-      handle.addEventListener('mousedown', (e) => {
-        e.preventDefault();
+      handle.addEventListener('pointerdown', (e) => { // THE DOOR (verify r2 census): captured on the handle, fed by the one feed
+        if (e.button !== 0 || e.isPrimary === false) return;
         e.stopPropagation();
-        this._startColumnResize(col, el, e);
+        this._startColumnResize(col, el, e, handle);
       });
+      handle.addEventListener('mousedown', (e) => { if (e.button === 0) { e.preventDefault(); e.stopPropagation(); } }); // the compat press: no selection, no sort
       el.appendChild(handle);
 
       this.sortHeader.appendChild(el);
     }
   }
 
-  _startColumnResize(col, headerEl, startEvent) {
+  _startColumnResize(col, headerEl, startEvent, handle = null) {
     const startX = startEvent.clientX;
     const startWidth = headerEl.offsetWidth; // layout px — gBCR is viewport px and compounded ×zoomⁿ into localStorage (F4)
     let currentWidth = startWidth;
@@ -766,8 +768,6 @@ class FileExplorer {
     };
 
     const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
       if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
       this._columnWidths[col.key] = Math.round(currentWidth);
       this._saveColumnWidths();
@@ -778,8 +778,7 @@ class FileExplorer {
       }
     };
 
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    startPointerDrag(handle || headerEl, startEvent, { onMove, onEnd: onUp });
   }
 
   // Full teardown (audit 2.81.0 — FileExplorer previously had NO dispose: the

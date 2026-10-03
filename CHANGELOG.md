@@ -2,6 +2,42 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.200 — 2026-10-02
+
+### Added
+- You can create an agent-browser profile yourself from the Agent browser panel, choosing its browser and the machine it runs on.
+- A browser profile can be pinned to one installed Chrome build with Change build…, and the panel says which build a browser runs.
+- VibeSpace can install and use the browser CLI version it was tested with instead of whatever is on the machine.
+- You can install an app on a machine from the Desktop apps dialog with Install an app…, and it is still there after the machine is rebuilt.
+- An agent can propose installing an app; nothing is installed until you approve it in For you.
+- You can also install a .deb file you have, or an app from a package source you add.
+
+### Changed
+- Company OAuth clients and integration keys now come from one cluster secret and update without a restart; Integrations & keys shows where they come from.
+- Under a group message, a line now says which agents still wait for their next turn, which read it and when, and which are muted or left.
+- In Channels, add reaction, reply in thread and quote sit in a small bar at a message's right edge when you point at it, not on a line under every message.
+
+### Fixed
+- Dragging or resizing a window, or dropping it on a desktop preview, is no longer undone when another of your pages saves that desktop at the same time.
+- A tab group on another desktop is no longer broken when another of your pages saves the desktop you are on.
+- When you delete a desktop, your other pages put its windows on the same desktop you see them on.
+- Every drag — a window, a tab or icon, a sidebar edge, a divider — now ends where you let go, even over a desktop, browser or app window.
+- A window closed while you drag it no longer leaves every window deaf to the mouse, and a PDF viewer can be made smaller again.
+- On a phone, a long press on the words of a chat message now selects them; the message's menu opens from a … button on the message.
+- A browser profile kept on a cluster pod stays usable after the pod is replaced, after an update, and after the profile folder is copied or restored.
+- Resizing or moving the live view no longer floods the agent's action list: page-size changes fold into one dim row with a count.
+- A command an agent runs on a paired Windows machine now runs under cmd.exe instead of failing at once.
+- When a command on a paired machine cannot start, the chat card says why instead of a bare "exit 1".
+- The chat card shows a command's output, and the machine's row lists its recent commands with their results.
+- Where the Claude CLI never wrote its settings file, VibeSpace now creates it, so a new user's agents know the VibeSpace tools from the first conversation.
+- A VibeSpace that updated itself at startup no longer leaves changes behind that block its next update.
+- The design canvas works again with Claude Code 2.1.287, which no longer includes it; VibeSpace uses an older version's copy and says which.
+- Pairing a Mac works again — the repair command no longer stops on an "unbound variable" error before the connection check.
+- A Background Work notification the agent was too busy to take now arrives when its turn ends, not when you next type; the card says why.
+
+### Security
+- What is kept of a command's output hides private keys, passwords and tokens; the agent still gets the whole output.
+
 ## 2.369.199 — 2026-09-30
 
 ### Added

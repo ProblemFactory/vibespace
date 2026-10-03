@@ -59,7 +59,7 @@ Object.defineProperty(globalThis, 'navigator', { value: { language: 'en', userAg
 globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 0); globalThis.cancelAnimationFrame = (id) => clearTimeout(id);
 globalThis.ResizeObserver = class { observe() {} disconnect() {} };
 globalThis.MutationObserver = class { observe() {} disconnect() {} };
-const fireDoc = (k, ev) => { for (const fn of [...(docListeners[k] || [])]) fn(ev); };
+const fireDoc = (k, ev) => { for (const fn of [...(docListeners[k] || [])]) fn({ type: k, ...ev }); }; // the DOM always sets event.type (lane-drag-release's end door reads it)
 
 const MS = await import('../src/lib/window-min-size.js');
 
@@ -95,10 +95,12 @@ const mkWm = (WM) => {
 };
 const drag = async (wm, win, dir, dx, dy) => {
   const h = win.element.handles.find((x) => x.dataset.dir === dir);
-  h._l.mousedown({ clientX: 500, clientY: 500, stopPropagation() {}, preventDefault() {} });
-  fireDoc('mousemove', { clientX: 500 + dx, clientY: 500 + dy, altKey: false });
+  // the handle's door is a POINTER press since lane-drag-release (the drag fed from the handle that captured the pointer —
+  // this fake has no capture, so the feed is the document's pointermove / pointerup, the same end rules)
+  h._l.pointerdown({ clientX: 500, clientY: 500, button: 0, stopPropagation() {}, preventDefault() {} });
+  fireDoc('pointermove', { clientX: 500 + dx, clientY: 500 + dy, altKey: false, buttons: 1 });
   await sleep(5);
-  fireDoc('mouseup', {});
+  fireDoc('pointerup', {});
   const s = win.element.style;
   return { left: parseFloat(s.left), top: parseFloat(s.top), width: parseFloat(s.width), height: parseFloat(s.height) };
 };

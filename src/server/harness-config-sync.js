@@ -41,7 +41,7 @@ function configPlanSpecs(harnessList, { valueOf = () => undefined, hooksOnly = f
     if (!h.settings) continue;
     const files = {};
     for (const [id, spec] of Object.entries(h.configFiles || {})) {
-      files[id] = { createIfMissing: !!spec.createIfMissing };
+      files[id] = { createIfMissing: spec.createIfMissing };   // the descriptor's create rule as declared (false | 'dir-exists')
       if (h.inject && h.inject.hookFile === spec && Array.isArray(h.inject.hookEvents)) files[id].hooks = { events: h.inject.hookEvents };
     }
     const values = {};
@@ -114,6 +114,7 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
     let r;
     try { r = applyConfigPlan(plan, { home }); } catch (e) { warn(`[cli-config] failed (${reason}): ${e.message}`); return { error: e.message }; }
     lastWrite = { at: Date.now(), reason, receipts: r.receipts, files: r.files };
+    for (const f of r.files || []) if (f.created) log(`[cli-config] created ~/${f.rel} (the CLI had never written one) (${reason})`);
     for (const x of r.receipts) {
       if (x.state === 'applied') log(`[cli-config] ${x.harness}.${x.key}: ${x.path} = ${JSON.stringify(x.want)} written to ~/${x.rel} (${reason})`);
       else if (x.state !== 'unchanged') warn(`[cli-config] ${x.harness}.${x.key}: not applied to ~/${x.rel} — ${x.state}${x.reason ? ': ' + x.reason : ''}`);

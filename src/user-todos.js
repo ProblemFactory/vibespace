@@ -83,7 +83,7 @@ function normalizeAction(x) {
 // never carries an action, never merges into one). exit-proxy's asks: one item per ask (each is a different command;
 // a reopened item answered the NEXT ask under the user's pointer). helper-ask is NOT here on purpose: a helper's
 // parallel asks of one text SHARE one item by design (helper-asks.js re-points it — test-helper-ask ⑩)
-const ACTION_IDENTITY = Object.freeze({ 'exit-run-ask': 'askId', 'browser-proposal': 'id' }); // lane browser-propose: one item per proposal (each is a different switch)
+const ACTION_IDENTITY = Object.freeze({ 'exit-run-ask': 'askId', 'browser-proposal': 'id', 'app-install': 'id' }); // lane browser-propose: one item per proposal (each is a different switch); Layer 0 apps (verify-r1 F2): one item per app proposal — another proposal of the same words never re-points this one's Install
 const URGENCIES = ['low', 'normal', 'high', 'urgent'];
 const KINDS = ['action', 'notice']; // 2.369.118: action = needs the user (default); notice = for their information (own section, grey count)
 const STATUSES = ['open', 'done', 'dismissed'];

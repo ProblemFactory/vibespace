@@ -1,0 +1,53 @@
+Reading package lists...
+Building dependency tree...
+Reading state information...
+Solving dependencies...
+The following additional packages will be installed:
+  gimp-data gir1.2-babl-0.1 gir1.2-gegl-0.4 gir1.2-gexiv2-0.10 gir1.2-gimp-3.0
+  graphviz libamd3 libbabl-0.1-0 libcamd3 libccolamd3 libcdt6 libcfitsio10t64
+  libcgraph8 libcholmod5 libcolamd3 libgegl-0.4-0t64 libgegl-common
+  libgimp-3.0-0 libgvc7 libgvplugin-gd8 libgvplugin-pango8 libgvpr2 libmng2
+  libmypaint-1.5-1 libmypaint-common libpathplan4 libsuitesparseconfig7
+  libumfpack6 libxdot4
+Suggested packages:
+  gimp-data-extras gimp-help-en | gimp-help gsfonts graphviz-doc
+The following NEW packages will be installed:
+  gimp gimp-data gir1.2-babl-0.1 gir1.2-gegl-0.4 gir1.2-gexiv2-0.10
+  gir1.2-gimp-3.0 graphviz libamd3 libbabl-0.1-0 libcamd3 libccolamd3 libcdt6
+  libcfitsio10t64 libcgraph8 libcholmod5 libcolamd3 libgegl-0.4-0t64
+  libgegl-common libgimp-3.0-0 libgvc7 libgvplugin-gd8 libgvplugin-pango8
+  libgvpr2 libmng2 libmypaint-1.5-1 libmypaint-common libpathplan4
+  libsuitesparseconfig7 libumfpack6 libxdot4
+0 upgraded, 30 newly installed, 0 to remove and 7 not upgraded.
+Need to get 28.9 MB of archives.
+After this operation, 148 MB of additional disk space will be used.
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/g/gimp/gimp-data_3.2.2-1ubuntu0.26.04.1_all.deb' gimp-data_3.2.2-1ubuntu0.26.04.1_all.deb 13911614 MD5Sum:a9017aa60875dd93050942bce23f0fb9
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/b/babl/libbabl-0.1-0_0.1.124-1_amd64.deb' libbabl-0.1-0_1%3a0.1.124-1_amd64.deb 515068 MD5Sum:eea7b78f9a1e13079182f48d19fec2c2
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/b/babl/gir1.2-babl-0.1_0.1.124-1_amd64.deb' gir1.2-babl-0.1_1%3a0.1.124-1_amd64.deb 5640 MD5Sum:eff5d71dfda2fd14c837a0e0c4c359d0
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/g/gegl/libgegl-common_0.4.70-1_all.deb' libgegl-common_1%3a0.4.70-1_all.deb 1004460 MD5Sum:1f0de131eef3607eb6a8144ec6ed0d82
+'http://us.archive.ubuntu.com/ubuntu/pool/main/s/suitesparse/libsuitesparseconfig7_7.12.2%2bdfsg-1ubuntu1_amd64.deb' libsuitesparseconfig7_1%3a7.12.2+dfsg-1ubuntu1_amd64.deb 22214 MD5Sum:9583fb8331b11fccbb6d201fdc6c3715
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/s/suitesparse/libamd3_7.12.2%2bdfsg-1ubuntu1_amd64.deb' libamd3_1%3a7.12.2+dfsg-1ubuntu1_amd64.deb 35836 MD5Sum:f9154ec0c2cb19258f44efb3231334fd
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/s/suitesparse/libcamd3_7.12.2%2bdfsg-1ubuntu1_amd64.deb' libcamd3_1%3a7.12.2+dfsg-1ubuntu1_amd64.deb 32260 MD5Sum:d4ef3701bb7bac3f92eb2cf41e8c9894
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/s/suitesparse/libccolamd3_7.12.2%2bdfsg-1ubuntu1_amd64.deb' libccolamd3_1%3a7.12.2+dfsg-1ubuntu1_amd64.deb 34462 MD5Sum:e0f193bb7a99f16810d3aecc864e7f0f
+'http://us.archive.ubuntu.com/ubuntu/pool/main/s/suitesparse/libcolamd3_7.12.2%2bdfsg-1ubuntu1_amd64.deb' libcolamd3_1%3a7.12.2+dfsg-1ubuntu1_amd64.deb 27416 MD5Sum:30165d68df5f2821232817e3736c7174
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/s/suitesparse/libcholmod5_7.12.2%2bdfsg-1ubuntu1_amd64.deb' libcholmod5_1%3a7.12.2+dfsg-1ubuntu1_amd64.deb 716600 MD5Sum:0ad013834f3e122a163a78f30db0bb7e
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/s/suitesparse/libumfpack6_7.12.2%2bdfsg-1ubuntu1_amd64.deb' libumfpack6_1%3a7.12.2+dfsg-1ubuntu1_amd64.deb 297984 MD5Sum:2b8f5d9a3eefbf64a63b6efb72edbae6
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/g/gegl/libgegl-0.4-0t64_0.4.70-1_amd64.deb' libgegl-0.4-0t64_1%3a0.4.70-1_amd64.deb 1952780 MD5Sum:8113da305126a5adc29d860b9c6e4284
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/g/gegl/gir1.2-gegl-0.4_0.4.70-1_amd64.deb' gir1.2-gegl-0.4_1%3a0.4.70-1_amd64.deb 23030 MD5Sum:aef3964b5900a102a5f79688b3c0e034
+'http://us.archive.ubuntu.com/ubuntu/pool/main/g/gexiv2/gir1.2-gexiv2-0.10_0.14.6-2_amd64.deb' gir1.2-gexiv2-0.10_0.14.6-2_amd64.deb 8806 MD5Sum:e6460777e76dc00d8912ecbf92875fad
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/g/gimp/libgimp-3.0-0_3.2.2-1ubuntu0.26.04.1_amd64.deb' libgimp-3.0-0_3.2.2-1ubuntu0.26.04.1_amd64.deb 1170278 MD5Sum:d06c7cc85f76054b3003de9ef6ff3eca
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/g/gimp/gir1.2-gimp-3.0_3.2.2-1ubuntu0.26.04.1_amd64.deb' gir1.2-gimp-3.0_3.2.2-1ubuntu0.26.04.1_amd64.deb 101578 MD5Sum:1a0c1a0388fbef4191e8fd885c1f4c28
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/g/graphviz/libcdt6_14.1.2-1ubuntu1_amd64.deb' libcdt6_14.1.2-1ubuntu1_amd64.deb 20146 MD5Sum:1a1f1b3d1a7976621c2385fc480d9ef8
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/g/graphviz/libcgraph8_14.1.2-1ubuntu1_amd64.deb' libcgraph8_14.1.2-1ubuntu1_amd64.deb 55328 MD5Sum:44da20dd3480561a236b65119e3b4e4d
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/g/graphviz/libpathplan4_14.1.2-1ubuntu1_amd64.deb' libpathplan4_14.1.2-1ubuntu1_amd64.deb 26296 MD5Sum:5b5e1eb77aa7873b7b1403079d3951fb
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/g/graphviz/libxdot4_14.1.2-1ubuntu1_amd64.deb' libxdot4_14.1.2-1ubuntu1_amd64.deb 23496 MD5Sum:5f9c1f3919ae953b7af8c598a7b8643f
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/g/graphviz/libgvc7_14.1.2-1ubuntu1_amd64.deb' libgvc7_14.1.2-1ubuntu1_amd64.deb 397214 MD5Sum:74a1c05c18622e2c4579812c97db0399
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/g/graphviz/libgvpr2_14.1.2-1ubuntu1_amd64.deb' libgvpr2_14.1.2-1ubuntu1_amd64.deb 127396 MD5Sum:eaada4434134b4b9f13816b2f451f36b
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/g/graphviz/libgvplugin-gd8_14.1.2-1ubuntu1_amd64.deb' libgvplugin-gd8_14.1.2-1ubuntu1_amd64.deb 26448 MD5Sum:483cf73d529dd3222e097004b9f5cfbc
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/g/graphviz/libgvplugin-pango8_14.1.2-1ubuntu1_amd64.deb' libgvplugin-pango8_14.1.2-1ubuntu1_amd64.deb 24626 MD5Sum:e2ad61e84dce618ae8a7039d832b2d81
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/g/graphviz/graphviz_14.1.2-1ubuntu1_amd64.deb' graphviz_14.1.2-1ubuntu1_amd64.deb 58550 MD5Sum:81e443dc768cbe69f5a65fe2ad789600
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/c/cfitsio/libcfitsio10t64_4.6.3-1_amd64.deb' libcfitsio10t64_4.6.3-1_amd64.deb 549294 MD5Sum:643e488f25368236f88ef6c31e381854
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/libm/libmng/libmng2_2.0.3%2bdfsg-5_amd64.deb' libmng2_2.0.3+dfsg-5_amd64.deb 193938 MD5Sum:75add0c552779915af209c813c63303d
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/libm/libmypaint/libmypaint-common_1.6.0-4build1_all.deb' libmypaint-common_1.6.0-4build1_all.deb 155746 MD5Sum:d5f19483878d4842b77c92b5c35433dd
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/libm/libmypaint/libmypaint-1.5-1_1.6.0-4build1_amd64.deb' libmypaint-1.5-1_1.6.0-4build1_amd64.deb 53622 MD5Sum:a824db206b96d418eb2b95071b48b950
+'http://us.archive.ubuntu.com/ubuntu/pool/universe/g/gimp/gimp_3.2.2-1ubuntu0.26.04.1_amd64.deb' gimp_3.2.2-1ubuntu0.26.04.1_amd64.deb 7349448 MD5Sum:31b34150837051468f65d52bdf0b4a11

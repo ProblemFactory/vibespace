@@ -42,6 +42,11 @@
  * with everything else a turn carries. Every group name, member name and
  * message text is agent-controlled, so every one leaves here frame-inert.
  *
+ * WHERE A RECORD STANDS (`deliveryOf`, lane group-pending 2026-10-01): one row
+ * per recipient — waiting / handed / muted / left — read off the member's
+ * marker, its notify mode and the log's departures; the window's line under
+ * every message and the CLI's trailing clause are both this one rule.
+ *
  * Every transition returns `{group, event}` (a NEW object; the input is never
  * mutated) or `{ok:false, code, error}` with `code` from the closed
  * `ERROR_CODES`.
@@ -55,6 +60,8 @@ const piece = (s, max = Infinity) => toAgentText(s, { kind: 'line', max });
 
 const NOTIFY_MODES = Object.freeze(['next-turn', 'mention', 'always', 'mute']);
 const DEFAULT_NOTIFY = 'next-turn';
+/** WHERE A RECORD STANDS WITH A RECIPIENT (`deliveryOf`, lane group-pending): the closed set. */
+const DELIVERY_STATES = Object.freeze(['waiting', 'handed', 'muted', 'left']);
 /** The owner as an ACTOR (`by`, `createdBy`, a message author id). Never a member row. */
 const OWNER = 'user';
 /** The adapter id the group LOG is filed under in the channel store. */
@@ -174,6 +181,7 @@ function validateGroup(g) {
     if (!(m.invitedBy === null || m.invitedBy === OWNER || isCid(m.invitedBy))) return err('bad-request', `member ${m.member}: invitedBy`);
     if (!NOTIFY_MODES.includes(m.notify)) return err('bad-notify', `member ${m.member}: notify must be one of ${NOTIFY_MODES.join('|')}`);
     if (!(m.reportedUpTo === null || m.reportedUpTo === undefined || Number.isFinite(m.reportedUpTo))) return err('bad-request', `member ${m.member}: reportedUpTo`);
+    if (!(m.reportedAt === null || m.reportedAt === undefined || Number.isFinite(m.reportedAt))) return err('bad-request', `member ${m.member}: reportedAt`);
   }
   if (g.pair !== null && g.pair !== undefined) {
     if (!Array.isArray(g.pair) || g.pair.length !== 2 || g.pair[0] >= g.pair[1]) return err('bad-request', 'pair is two sorted, distinct conversation ids');
@@ -619,10 +627,92 @@ function buildReport(group, m, recs, invite, rest, budget, lead, form, log) {
   return { text, upTo: recs[recs.length - 1].at, count: recs.length, shown, clipped, context: !!invite, fits: true, lines: shownLines };
 }
 
+/**
+ * WHERE A RECORD STANDS WITH EACH RECIPIENT (lane group-pending, the owner
+ * 2026-10-01: a message to a next-turn member was drawn exactly like a
+ * delivered one — "你这个最新回复应该还没有实际发出去"). A VIEW of facts the engine
+ * already keeps: the record's `at`, each member's marker `reportedUpTo`, its
+ * notify mode, the log's leave / kick records. Nothing here is a new fact.
+ *
+ * One row per RECIPIENT = every member but the author that was a member AT
+ * the record's instant (`joinedAt <= rec.at`: reportFor's floor is
+ * `joinedAt - 1`, so a record at the join IS in that member's first report);
+ * the owner (the observer) is never a row. `DELIVERY_STATES`:
+ *   handed  — the marker >= rec.at: the report that carried this record was
+ *             handed out at that member's turn start, or the wake that carried
+ *             it went out (the engine stamps the marker in both cases and keeps
+ *             no receipt — the two are not told apart). THE PIN: reportFor
+ *             reads `r.at > marker`, so a marker EQUAL to the record's instant
+ *             means the record was in that report ⇒ handed. `at` = the
+ *             hand-over CLOCK (`reportedAt`, stamped beside the marker when it
+ *             moves — the marker itself holds a RECORD instant); null on a
+ *             row stamped before the clock existed.
+ *   waiting — the marker < rec.at and the member is not muted: it rides that
+ *             member's next report (or a wake, if one comes).
+ *   muted   — notify `mute` and not handed: it will never read it in a report
+ *             (a `read` on purpose is not tracked).
+ *   left    — not a member now (or a member again only after the record), and
+ *             the log holds its leave / kick AFTER the record with no invite of
+ *             it in between: it was there when the record landed and is gone.
+ *             `at` = the leave's instant. A departed member the log does not
+ *             witness is no row (nothing proves it was a member then).
+ * `log` = the group's records the caller holds (the window's pages, the CLI
+ * read's page); every name leaves through the belt (`cleanName`).
+ * @returns [{member, name, state, at}] — the members in the group's order, the departed after
+ */
+function deliveryOf(group, rec, { log = [] } = {}) {
+  const at = rec && Number(rec.at);
+  if (!group || !Array.isArray(group.members) || !Number.isFinite(at)) return [];
+  const author = (rec.author && rec.author.id) || null;
+  const recs = Array.isArray(log) ? log : [];
+  const nameOf = (m, cid) => (m && m.name ? cleanName(m.name) : '') || nameFromLog(recs, cid) || String(cid).slice(0, 8);
+  const out = [];
+  const seen = new Set();
+  for (const m of group.members) {
+    if (!m || !m.member || m.member === author) continue;
+    if (!(m.member !== OWNER && m.joinedAt <= at)) continue;
+    seen.add(m.member);
+    const handed = Number.isFinite(m.reportedUpTo) && m.reportedUpTo >= at;
+    const state = handed ? 'handed' : m.notify === 'mute' ? 'muted' : 'waiting';
+    // a handed row's `at` = the hand-over CLOCK (`reportedAt`, stamped beside the marker when it moves); a legacy row
+    // stamped before the clock existed answers null — the words then say "Read by beta" without a time
+    out.push({ member: m.member, name: nameOf(m, m.member), state, at: handed && Number.isFinite(m.reportedAt) ? m.reportedAt : null });
+  }
+  const departed = departuresAfter(recs, at, author);
+  for (const d of departed) {
+    if (seen.has(d.member) || d.member === OWNER) continue;
+    seen.add(d.member);
+    out.push({ member: d.member, name: nameFromLog(recs, d.member) || String(d.member).slice(0, 8), state: 'left', at: d.at });
+  }
+  return out;
+}
+/** The members the log shows LEAVING after `at` (their earliest leave / kick past it), each only when no invite of
+ *  it lies between `at` and that leave — a member that joined after the record and then left was never a recipient. */
+function departuresAfter(recs, at, author) {
+  const byMember = new Map();
+  for (const r of recs) {
+    const k = r && r.raw && r.raw.kind;
+    if ((k !== 'leave' && k !== 'kick') || !r.raw.member || r.raw.member === author || !(Number(r.at) > at)) continue;
+    const prev = byMember.get(r.raw.member);
+    if (!prev || Number(r.at) < prev) byMember.set(r.raw.member, Number(r.at));
+  }
+  const out = [];
+  for (const [member, leftAt] of byMember) {
+    const joinedBetween = recs.some((r) => r && r.raw && r.raw.kind === 'invite' && r.raw.member === member && Number(r.at) > at && Number(r.at) < leftAt);
+    if (!joinedBetween) out.push({ member, at: leftAt });
+  }
+  return out.sort((a, b) => a.at - b.at);
+}
+/** A departed member's name: what it signed its own lines with (through the belt), else nothing. */
+function nameFromLog(recs, cid) {
+  for (const r of recs) if (r && r.author && r.author.id === cid && r.author.name) return cleanName(r.author.name);
+  return '';
+}
+
 module.exports = {
-  NOTIFY_MODES, DEFAULT_NOTIFY, OWNER, GROUP_ADAPTER_ID, ERROR_CODES, NAME_MAX, CONTEXT_MAX, MEMBER_MAX, REPORT_BUDGET, LINE_MAX,
+  NOTIFY_MODES, DEFAULT_NOTIFY, DELIVERY_STATES, OWNER, GROUP_ADAPTER_ID, ERROR_CODES, NAME_MAX, CONTEXT_MAX, MEMBER_MAX, REPORT_BUDGET, LINE_MAX,
   WAKE_CONFIRM_ABOVE, WAKE_FLOOR_MS, SENDER_WAKES, SENDER_WINDOW_MS, PACE_SKEW_MS,
   newGroupId, pairKey, cleanName, cleanText, isCid, isGroupId, memberOf, validateGroup, makeGroup,
-  addMember, removeMember, setNotify, rename, archive, mentionsIn, wakeVerdict, wakesPlanned, consentVerdict, reportFor,
+  addMember, removeMember, setNotify, rename, archive, mentionsIn, wakeVerdict, wakesPlanned, consentVerdict, reportFor, deliveryOf,
   emptyPace, prunePace, paceFuture, paceVerdict, paceGrant, paceRefund,
 };

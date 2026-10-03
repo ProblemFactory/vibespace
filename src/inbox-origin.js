@@ -19,6 +19,9 @@
  *              closing: the heal budget's ONE notice, lane H verify r5)
  *   machines — src/exit-proxy.js (lane-pairing ⑥: an exit's "ask me each time" — Allow / Deny a command an
  *              agent wants to run ON a paired machine, 60 s)
+ *   apps     — src/server/apps-engine.js (Layer 0 of docs/design-app-persistence.zh.md: an agent's PROPOSAL to install /
+ *              remove an app or add a package source — Install opens the install dialog, Not now declines — and the
+ *              one notice when apps could not be put back after a rebuilt machine)
  *   agent    — src/agent-routes.js (`vibespace-ask`, an agent's own item)
  *              + src/server/helper-asks.js (a helper's permission ask left
  *              unanswered for 60 s — lane S1)
@@ -37,7 +40,7 @@
  * legacy rung, `originOf` in src/lib/user-todos-layout.js — no migration.
  */
 
-const INBOX_ORIGINS = Object.freeze(['spend', 'login', 'pool', 'jobs', 'channels', 'browser', 'machines', 'agent']);
+const INBOX_ORIGINS = Object.freeze(['spend', 'login', 'pool', 'jobs', 'channels', 'browser', 'machines', 'apps', 'agent']);
 
 // The group / chip words — English t() keys (the panel words them per device;
 // i18nKey is the extraction marker scripts/i18n-extract.mjs reads).
@@ -50,6 +53,7 @@ const ORIGIN_LABELS = Object.freeze({
   channels: i18nKey('Channels'),
   browser: i18nKey('Agent browser'), // the agent-browser face's name (2.369.168 faces rename — the bare word is retired)
   machines: i18nKey('Machines'), // lane-pairing ⑥: "Allow <conversation> to run a command on <machine>?" (src/exit-proxy.js)
+  apps: i18nKey('Apps'), // Layer 0 apps: "<conversation> wants to install <app>?" — Install / Not now (src/server/apps-engine.js)
   agent: i18nKey('Agents'),
 });
 

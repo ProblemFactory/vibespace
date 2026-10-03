@@ -479,6 +479,8 @@ class ChatView {
       messageList: this._messageList,
       onPermissionResolve: () => { this._hideTyping(); this._updateRuns(); },
       onFork: (uuid, msg) => this._forkFromMessage(uuid, msg),
+      // the touch message menu from each message's … button (lane mobile-select — a long press on the words selects)
+      onMsgMenu: (msg, x, y) => this._showMsgMenu(msg, x, y),
       // A 'queued' chip on a bubble is a second entry point for the same op as
       // the strip's Steer button — one path, one ws message. The renderer asks
       // the VIEW what the queue allows (harness row ∧ running wrapper), so
@@ -555,12 +557,16 @@ class ChatView {
       const msgEl = e.target.closest('.chat-msg');
       if (!msgEl || !msgEl.dataset.msgId) return;
       const onStrip = e.clientX - msgEl.getBoundingClientRect().left <= 18;
-      // TOUCH (design-mobile-gaps #5): a long-press anywhere on the message
-      // (installLongPressContextMenu synthesizes this event) opens ONE menu —
-      // copy / open in editor / fork from here / details — because the
-      // per-message hover buttons are hidden ≤768px (21×16 px, they sat on
-      // the text) and a 4 px strip is no long-press target. A mouse keeps the
-      // native menu off the strip (copy text…) exactly as before.
+      // TOUCH (design-mobile-gaps #5): a long-press on the message's CHROME —
+      // its gutter, a toggle (Input / Output / Thinking), a picture — opens ONE
+      // menu: copy / open in editor / fork from here / details (the per-message
+      // hover buttons are hidden ≤768px — 21×16 px, they sat on the text — and a
+      // 4 px strip is no long-press target). A long press on the WORDS never
+      // arrives here: it is the platform's selection (lane mobile-select — the
+      // door, utils.js installLongPressContextMenu, never synthesizes it and
+      // stops the trusted one), and the same menu opens from each message's …
+      // button (chat-renderers addMsgMoreBtn). A mouse keeps the native menu off
+      // the strip (copy text…) exactly as before.
       if (!onStrip && !this.app?.isTouch) return;
       const id = isNaN(+msgEl.dataset.msgId) ? msgEl.dataset.msgId : +msgEl.dataset.msgId;
       const msg = this._messages.find(m => m.id === id || String(m.id) === String(msgEl.dataset.msgId));
@@ -2045,7 +2051,10 @@ class ChatView {
     const text = this._renderers.extractMsgText(msg);
     const items = [];
     if (text.trim()) {
-      items.push({ label: t('Copy text'), action: () => { copyText(text); showToast(t('Copied')); } });
+      // the fast path (lane mobile-select M3): the WHOLE message, and the toast names what landed on the clipboard
+      // (the terminal's Copy screen precedent) — a partial selection is the platform's own long press
+      const lines = text.replace(/\n+$/, '').split('\n').length;
+      items.push({ label: t('Copy text'), action: () => { copyText(text).then(() => showToast(lines === 1 ? t('Copied the whole message (1 line)') : t('Copied the whole message ({n} lines)', { n: lines }))); } });
       if (msg.role !== 'tool') items.push({ label: t('Open in editor'), action: () => this._renderers.openInTempEditor(text) });
     }
     const backend = this.winInfo?.backend || this.winInfo?.titleMeta?.backend || 'claude';

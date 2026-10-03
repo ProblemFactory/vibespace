@@ -146,9 +146,12 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   function loadIndex(scope) {
     if (indexes.has(scope)) return indexes.get(scope);
     const out = [];
+    // lane trace-fits: the index stays APPEND-ONLY — a coalesced fit is appended again under the run's id, and the later
+    // line SUPERSEDES the earlier at load (the sweep's rewrite compacts the file; no tombstone, the id is the key)
+    const pos = new Map();
     try {
       const text = fs.readFileSync(path.join(scopeDir(scope), INDEX_FILE), 'utf8');
-      for (const line of text.split('\n')) { if (!line.trim()) continue; try { const e = JSON.parse(line); if (e && T.isEntryId(e.id)) { out.push(e); byId.set(e.id, { scope, entry: e }); } } catch { /* a torn line is skipped */ } }
+      for (const line of text.split('\n')) { if (!line.trim()) continue; try { const e = JSON.parse(line); if (e && T.isEntryId(e.id)) { if (pos.has(e.id)) out[pos.get(e.id)] = e; else { pos.set(e.id, out.length); out.push(e); } byId.set(e.id, { scope, entry: e }); } } catch { /* a torn line is skipped */ } }
     } catch { /* no index yet */ }
     indexes.set(scope, out);
     return out;
@@ -158,12 +161,23 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     try { names = fs.readdirSync(traceRoot).filter((n) => SCOPE_RE.test(n)); } catch { names = []; }
     return names;
   }
+  function appendLine(scope, entry) {
+    try { fs.mkdirSync(scopeDir(scope), { recursive: true, mode: 0o700 }); fs.appendFileSync(path.join(scopeDir(scope), INDEX_FILE), JSON.stringify(entry) + '\n', { mode: FILE_MODE }); }
+    catch (e) { log.warn?.(`[browser-trace] index append failed (${scope}): ${e && e.message}`); }
+  }
   function appendIndex(scope, entry) {
     const list = loadIndex(scope);
     list.push(entry);
     byId.set(entry.id, { scope, entry });
-    try { fs.mkdirSync(scopeDir(scope), { recursive: true, mode: 0o700 }); fs.appendFileSync(path.join(scopeDir(scope), INDEX_FILE), JSON.stringify(entry) + '\n', { mode: FILE_MODE }); }
-    catch (e) { log.warn?.(`[browser-trace] index append failed (${scope}): ${e && e.message}`); }
+    appendLine(scope, entry);
+  }
+  /** lane trace-fits: a coalesced fit REPLACES its run in memory and is appended under the run's id (folded at load). */
+  function replaceIndex(scope, entry) {
+    const list = loadIndex(scope);
+    const i = list.findIndex((e) => e.id === entry.id);
+    if (i >= 0) list[i] = entry; else list.push(entry);
+    byId.set(entry.id, { scope, entry });
+    appendLine(scope, entry);
   }
   function rewriteIndex(scope, entries) {
     indexes.set(scope, entries);
@@ -196,7 +210,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
       for (const m of loadMarkers(sc)) { if (m.phase === 'start') pending.set(m.id, m); else pending.delete(m.id); }
       if (!pending.size) continue;
       const counts = new Map(); let last = new Map();
-      for (const e of loadIndex(sc)) if (pending.has(e.browserSession)) { counts.set(e.browserSession, (counts.get(e.browserSession) || 0) + 1); last.set(e.browserSession, Math.max(last.get(e.browserSession) || 0, Number(e.at) || 0)); }
+      for (const e of loadIndex(sc)) if (pending.has(e.browserSession)) { if (!T.isFitEntry(e)) counts.set(e.browserSession, (counts.get(e.browserSession) || 0) + 1); last.set(e.browserSession, Math.max(last.get(e.browserSession) || 0, Number(e.lastAt) || Number(e.at) || 0)); } // a session counts the agent's actions; a fit only moves its last instant
       for (const m of pending.values()) {
         const k = BS.sessionKey(m.browserKey, sc);
         const prev = openSessions.get(k);
@@ -262,7 +276,9 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   function tapState(key, { sessionId, profileId, browserKey, target }) {
     // `ops` = every command / result record of an agent OPERATION (traced or not — `eval` is an observation to the trace,
     // an operation to a takeover), bounded: PURE browser-interrupt.inFlightAt reads it at the takeover instant
-    return { key, sessionId, profileId: profileId || null, browserKey: browserKey || null, target, untap: null, pending: new Map(), frames: [], lastUrl: '', ended: false, timers: new Set(), entries: 0, ops: [] };
+    // lane trace-fits: `lastCmd` = the last TRACED command on this tap (what a fit must not be separated from its run by),
+    // `lastFit` = the fit row written last (the run a fit may fold into), `lastFitCmdId` = the command that wrote it
+    return { key, sessionId, profileId: profileId || null, browserKey: browserKey || null, target, untap: null, pending: new Map(), frames: [], lastUrl: '', ended: false, timers: new Set(), entries: 0, ops: [], lastCmd: null, lastFit: null, lastFitCmdId: null };
   }
   /** lane J: the page size a frame shows — the picture's own size + the relay's page reading (src/browser-stream.js). */
   function pageOf(msg, relay) {
@@ -288,7 +304,10 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
       if (!T.isTracedCommand(msg)) return;
       if (tp.pending.size >= T.PENDING_CAP) { const oldest = tp.pending.keys().next().value; finalizeNow(tp, tp.pending.get(oldest), 'too many actions in flight'); }
       const before = tp.frames.length ? tp.frames[tp.frames.length - 1] : null;
-      tp.pending.set(msg.id, { id: msg.id, command: msg, at: now(), before, kind: T.classifyAction(msg.action), resultAt: 0, result: null, since: [], afterDone: false, after: null, afterSame: false, box: null, boxWhy: null, boxDone: false, url: tp.lastUrl });
+      // lane trace-fits: the traced command BEFORE this one (a fit folds into its run only when that is the run's own last fit)
+      const prevCmd = tp.lastCmd;
+      tp.lastCmd = { id: msg.id, action: String(msg.action || '').toLowerCase(), at: now() };
+      tp.pending.set(msg.id, { id: msg.id, command: msg, at: now(), before, kind: T.classifyAction(msg.action), resultAt: 0, result: null, since: [], afterDone: false, after: null, afterSame: false, box: null, boxWhy: null, boxDone: false, url: tp.lastUrl, prevCmd });
       return;
     }
     if (msg.type === 'result') {
@@ -335,23 +354,51 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     const scope = tp.profileId || T.EPHEMERAL_SCOPE;
     const dir = scopeDir(scope);
     try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); } catch (e) { log.warn?.(`[browser-trace] cannot create ${dir}: ${e && e.message}`); return; }
-    const writeFrame = (rec, which) => {
+    const writeFrame = (rec, which, entryId = id) => {
       if (!rec || !rec.data) return null;
-      const file = `${id}-${which}.jpg`;
+      const file = `${entryId}-${which}.jpg`;
       try { const buf = Buffer.from(rec.data, 'base64'); fs.writeFileSync(path.join(dir, file), buf, { mode: FILE_MODE }); return { file, bytes: buf.length, ...rec.meta, at: rec.at }; }
       catch (e) { log.warn?.(`[browser-trace] frame write failed: ${e && e.message}`); return null; }
     };
-    const before = writeFrame(p.before, 'before');
-    const after = p.afterSame && p.after === p.before ? (before ? { ...before, file: before.file } : null) : writeFrame(p.after, 'after');
     const position = T.positionOf({ kind: p.kind, params: p.command.params, box: p.box, boxWhy: p.boxWhy });
     const bs = sessionForTap(tp); // 2026-09-27: the browser session this action belongs to (an action with none opens one)
+    const isFit = String(p.command.action || '').toLowerCase() === T.FIT_ACTION;
+    const said = (entry, replaced) => {
+      if (!tp.childKey) { try { bridge?.broadcastTo?.(tp.sessionId, tp.profileId, { type: 'trace', entry, ...(replaced ? { replaced: true } : {}) }); } catch { /* optional */ } } // a sub-agent's browser has no live view of its own
+      bc({ type: 'browser-trace-appended', sessionId: tp.sessionId, profileId: tp.profileId, browserKey: tp.browserKey, entry: { id: entry.id, at: entry.at, action: entry.action, kind: entry.kind, text: entry.text, ok: entry.ok, scope, browserSession: entry.browserSession, ...(isFit ? { n: entry.n, lastAt: entry.lastAt } : {}), ...(replaced ? { replaced: true } : {}) } });
+    };
+    // lane trace-fits (F1, the owner 2026-10-01): a re-fit of the live view landing within FIT_COALESCE_MS of this tap's
+    // last fit, with no other traced action between, REPLACES that run — the run keeps its id, its first instant and its
+    // first before frame, takes this fit's geometry and after frame (a NEW file: a client may hold the old one cached
+    // under the same URL), counts it; the superseded after frame is unlinked NOW, never left for the sweep
+    const run = isFit ? tp.lastFit : null;
+    const between = p.prevCmd && !(run && p.prevCmd.id === tp.lastFitCmdId) ? p.prevCmd : null;
+    const v = isFit ? T.fitCoalesceVerdict(run, { action: T.FIT_ACTION, at: p.at, browserKey: tp.browserKey, scope }, { now: p.at, between }) : null;
+    if (v && v.coalesce) {
+      const rid = run.id;
+      const n = T.fitCount(run) + 1;
+      const after = p.after && p.after.data ? writeFrame(p.after, `after-${n}`, rid) : null;
+      const fresh = T.entryFor({ id: rid, at: p.at, sessionId: tp.sessionId, browserKey: tp.browserKey, profileId: tp.profileId, browserSession: run.browserSession || (bs ? bs.id : null), command: p.command, result: p.result, position, before: null, after, afterSame: false, url: tp.lastUrl || p.url || null, holder: tp.human ? 'user' : null });
+      const entry = T.coalesceFits(run, fresh);
+      const keepFile = entry.after && entry.after.file;
+      const oldAfter = run.after && run.after.file && !(run.before && run.before.file === run.after.file) ? run.after.file : null;
+      if (oldAfter && oldAfter !== keepFile) { try { fs.unlinkSync(path.join(dir, oldAfter)); } catch { /* gone already */ } }
+      if (bs) bs.lastAt = Math.max(bs.lastAt || 0, entry.lastAt);
+      try { fs.writeFileSync(path.join(dir, `${rid}.json`), JSON.stringify(entry), { mode: FILE_MODE }); } catch (e) { log.warn?.(`[browser-trace] entry write failed: ${e && e.message}`); }
+      replaceIndex(scope, entry);
+      tp.lastFit = entry; tp.lastFitCmdId = p.id;
+      said(entry, true);
+      return;
+    }
+    const before = writeFrame(p.before, 'before');
+    const after = p.afterSame && p.after === p.before ? (before ? { ...before, file: before.file } : null) : writeFrame(p.after, 'after');
     const entry = T.entryFor({ id, at: p.at, sessionId: tp.sessionId, browserKey: tp.browserKey, profileId: tp.profileId, browserSession: bs ? bs.id : null, command: p.command, result: p.result, position, before, after, afterSame: p.afterSame, url: tp.lastUrl || p.url || null, holder: tp.human ? 'user' : null });
-    if (bs) { bs.count++; bs.lastAt = Math.max(bs.lastAt || 0, entry.at); }
+    if (bs) { if (!isFit) bs.count++; bs.lastAt = Math.max(bs.lastAt || 0, entry.at); } // a session counts the agent's actions; a fit rides beside
     try { fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(entry), { mode: FILE_MODE }); } catch (e) { log.warn?.(`[browser-trace] entry write failed: ${e && e.message}`); }
     appendIndex(scope, entry);
     tp.entries++;
-    if (!tp.childKey) { try { bridge?.broadcastTo?.(tp.sessionId, tp.profileId, { type: 'trace', entry }); } catch { /* optional */ } } // a sub-agent's browser has no live view of its own
-    bc({ type: 'browser-trace-appended', sessionId: tp.sessionId, profileId: tp.profileId, browserKey: tp.browserKey, entry: { id: entry.id, at: entry.at, action: entry.action, kind: entry.kind, text: entry.text, ok: entry.ok, scope, browserSession: entry.browserSession } });
+    tp.lastFit = isFit ? entry : null; tp.lastFitCmdId = isFit ? p.id : null;
+    said(entry, false);
   }
 
   // ── arming ──
@@ -681,7 +728,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     const ss = BS.pairSessions({ markers: loadMarkers(sc), entries, now: now() });
     const byS = new Map(ss.map((x) => [x.id, { id: x.id, startAt: x.startAt, open: x.open, entries: [] }]));
     const loose = { id: null, startAt: 0, open: false, entries: [] };
-    for (const e of entries) { const sid = BS.sessionOfEntry(e, ss); (byS.get(sid) || loose).entries.push({ id: e.id, at: e.at, frameBytes: T.entryFrameBytes(e), listBytes: T.entryListBytes(e) }); }
+    for (const e of entries) { const sid = BS.sessionOfEntry(e, ss); (byS.get(sid) || loose).entries.push({ id: e.id, at: e.at, frameBytes: T.entryFrameBytes(e), listBytes: T.entryListBytes(e), fit: T.isFitEntry(e) }); } // lane trace-fits: the plan drops page-size frames first
     return { key: sc, sessions: [...byS.values(), ...(loose.entries.length ? [loose] : [])] };
   }
   function sweep() {
@@ -718,11 +765,13 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     bc({ type: 'browser-housekeeping-updated', sweep: lastSweep });
     return { ...lastSweep, plan, recordings: recRemoved };
   }
-  /** What one scope holds now against its limit (the panel's `{used} of {size}`). */
+  /** What one scope holds now against its limit (the panel's `{used} of {size}`). lane trace-fits: `used` = the agent
+   *  actions' bytes, `fitBytes` = the live view's re-fits' (frames + lists) beside it, `total` = both (the limit's measure). */
   function usageOf(sc) {
-    let frames = 0, lists = 0;
-    for (const e of loadIndex(sc)) { frames += T.entryFrameBytes(e); lists += T.entryListBytes(e); }
-    return { used: frames + lists, frameBytes: frames, listBytes: lists, limit: bytesLimit() };
+    let frames = 0, lists = 0, fit = 0;
+    for (const e of loadIndex(sc)) { const f = T.entryFrameBytes(e), l = T.entryListBytes(e); frames += f; lists += l; if (T.isFitEntry(e)) fit += f + l; }
+    const total = frames + lists;
+    return { used: total - fit, fitBytes: fit, total, frameBytes: frames, listBytes: lists, limit: bytesLimit() };
   }
 
   // ── sizes (a child process, cached) ──
@@ -753,7 +802,15 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     saveForgotten();
     return row;
   }
-  /** `forget` a registry profile: verdict → RENAME the directory beside itself → ledger row → the record goes. */
+  /** verify r9 (T1 ④): the lineage entry follows a Forget BEFORE the rename — re-keyed and SAVED by the keeper; a refused write is a
+   *  refused Forget (`forget_failed`, nothing moved, the cause named). → the keeper's `{ok, moved, key}` (no keeper / no lineage ⇒ a no-op). */
+  function moveLineageFirst(lineageKey, to, what) {
+    if (!lineageKey || !keeper || typeof keeper.moveDirLineage !== 'function') return { ok: true, moved: false, key: null };
+    let mv = null; try { mv = keeper.moveDirLineage(lineageKey, to); } catch (e) { mv = { ok: false, moved: false, key: null, error: e && e.message }; }
+    if (!mv || mv.ok === false) throw namedError('forget_failed', `the lineage of ${what} could not be written under its new name (${(mv && mv.error) || 'unknown'}) — nothing was moved`);
+    return mv;
+  }
+  /** `forget` a registry profile: verdict → the lineage WRITTEN under the new name → RENAME the directory beside itself → ledger row → the record goes. */
   async function forgetProfile(id, { unpin = false } = {}) {
     if (!keeper) throw namedError('unavailable', 'no keeper');
     const p = keeper.profile(id);
@@ -766,7 +823,11 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     const bytes = sizeCache.get(p.dir) ? sizeCache.get(p.dir).bytes : null;
     let to = null;
     let exists = false; try { exists = fs.statSync(p.dir).isDirectory(); } catch { exists = false; }
-    if (exists) { to = T.forgottenDirName(p.dir, now()); try { fs.renameSync(p.dir, to); } catch (e) { throw namedError('forget_failed', `could not move ${p.dir} aside (${e.message}) — nothing was removed`); } }
+    // verify r8 (T2 ②): the lineage key is asked while the directory still exists; the entry follows the rename (never pruned at the next boot)
+    // verify r9 (T1 ④): the entry is re-keyed AND WRITTEN BEFORE the rename — a refused write refuses the Forget (nothing moved), a
+    // failed rename rolls the key back (S76 / S76b: a crash or an unwritable data/ after the rename left the disk naming the old path)
+    const lineageKey = exists && typeof keeper.lineageKeyOf === 'function' ? keeper.lineageKeyOf(p.dir, { retireOf: id }) : '';
+    if (exists) { to = T.forgottenDirName(p.dir, now()); const mv = moveLineageFirst(lineageKey, to, `profile ${id}`); try { fs.renameSync(p.dir, to); } catch (e) { if (mv.moved) { try { keeper.moveDirLineage(mv.key, p.dir); } catch { /* said by the keeper */ } } throw namedError('forget_failed', `could not move ${p.dir} aside (${e.message}) — nothing was removed`); } }
     const row = fileForgotten({ profileId: id, label: p.label, dir: p.dir, to, bytes, why: exists ? 'forgotten by the user (directory moved aside, never deleted by itself)' : 'forgotten by the user (its directory was already gone)' });
     const r = keeper.removeProfile(id, { unpin });
     log.log?.(`[browser-trace] profile ${id} "${p.label}" forgotten: ${p.dir} → ${to || '(no directory)'} (ledger ${row.id})`);
@@ -781,7 +842,9 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     if (!real.startsWith(fs.realpathSync(abBase) + '/')) throw namedError('not_ours', `${dir} resolves outside ${abBase}`);
     if (keeper && keeper._reg().profiles.some((p) => p.dir === dir || p.dir === real)) throw namedError('leased', `${dir} is a registered profile — forget it from its row`);
     const to = T.forgottenDirName(dir, now());
-    try { fs.renameSync(dir, to); } catch (e) { throw namedError('forget_failed', `could not move ${dir} aside (${e.message}) — nothing was removed`); }
+    const lineageKey = keeper && typeof keeper.lineageKeyOf === 'function' ? keeper.lineageKeyOf(dir) : ''; // verify r8 (T2 ②): asked while it exists
+    const mv = moveLineageFirst(lineageKey, to, `orphan ${dir}`); // verify r9 (T1 ④): written BEFORE the rename (the orphan path never committed at all)
+    try { fs.renameSync(dir, to); } catch (e) { if (mv.moved) { try { keeper.moveDirLineage(mv.key, dir); } catch { /* said by the keeper */ } } throw namedError('forget_failed', `could not move ${dir} aside (${e.message}) — nothing was removed`); }
     const row = fileForgotten({ profileId: null, label: path.basename(dir), dir, to, bytes: sizeCache.get(dir) ? sizeCache.get(dir).bytes : null, why: 'orphan forgotten by the user (directory moved aside, never deleted by itself)' });
     log.log?.(`[browser-trace] orphan ${dir} forgotten → ${to} (ledger ${row.id})`);
     bc({ type: 'browser-housekeeping-updated', forgotten: row });
@@ -847,6 +910,9 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
       r.usage = keeper && typeof keeper.usageOf === 'function' ? keeper.usageOf(r.id) : null; // 2026-09-25: the live resource row (report only — memBytes + memMetric, `over`)
       r.human = keeper && typeof keeper.humanOf === 'function' ? keeper.humanOf(r.id) : null; // BROWSE YOURSELF (B-6ae8): the user browsing it himself (the row's state line)
       r.display = keeper && typeof keeper.browserOf === 'function' ? ((keeper.browserOf(r.id) || {}).display || null) : null; // lane headless-fallback: its launch's display fact (headless instead of a window, and why)
+      // lane profile-lock-roll (L3): the machine its browser last started on, and the takeover of a previous name's lock (a day)
+      r.launchHost = keeper && typeof keeper.browserOf === 'function' ? ((keeper.browserOf(r.id) || {}).host || null) : null;
+      r.renamedFrom = keeper && typeof keeper.profile === 'function' ? require('../browser-profiles.js').renamedFromFact(keeper.profile(r.id), now()) : null;
     }
     const eph = { scope: T.EPHEMERAL_SCOPE, trace: { ...T.scopeDigest(loadIndex(T.EPHEMERAL_SCOPE)), ...usageOf(T.EPHEMERAL_SCOPE) } };
     const o = await orphans();

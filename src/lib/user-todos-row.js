@@ -94,6 +94,12 @@ const proposalAskHtml = (i, t, detail) => (i && i.action && i.action.type === 'b
   ? `<div class="ut-proposal-plan">${escHtml(detail || '')}</div>`
     + (i.action.id ? `<div class="ut-exit-answer ut-proposal-answer"><button type="button" class="ut-act ut-action-proposal ut-proposal-approve" data-answer="approve" title="${escHtml(t('Runs exactly what this card says'))}">${escHtml(t('Approve'))}</button><button type="button" class="ut-act ut-action-proposal ut-proposal-reject" data-answer="reject">${escHtml(t('Reject'))}</button></div>` : '') : '');
 
+/** Layer 0 apps (docs/design-app-persistence.zh.md §3.1): an agent's install PROPOSAL, answered where it appears — Install…
+ *  opens THE install dialog on the proposal (its fresh plan: every command, the packages, the sizes — nothing runs before
+ *  the press there), Not now declines it (the agent is told on its next turn); open items only. */
+const appAskHtml = (i, t) => (i && i.action && i.action.type === 'app-install' && i.action.id
+  ? `<div class="ut-exit-answer ut-app-answer"><button type="button" class="ut-act ut-action-app ut-app-install" data-answer="install" title="${escHtml(t('Shows the plan first — nothing runs until you confirm'))}">${escHtml(t('Install…'))}</button><button type="button" class="ut-act ut-action-app ut-app-reject" data-answer="reject">${escHtml(t('Not now'))}</button></div>` : '');
+
 /** The static parts of a row for `entry` + the signature patchRow compares.
  *  The LIVE half (enabled / tooltip of the reply controls) is NOT in here —
  *  applyLive owns it, so a turn flip never rebuilds a row. */
@@ -134,7 +140,7 @@ function partsOf(entry, ctx) {
     meta = (notice ? `<span class="ut-sess">${escHtml(ctx.nameFor(i.sessionKey, [i]))}</span> · ` : '')
       + escHtml(agoText(i.createdAt, t)) + (exp ? ' · ' + escHtml(exp) : '');
   }
-  const body = `<div class="ut-text">${escHtml(words)}</div>${!resolved ? exitAskHtml(i, t) + proposalAskHtml(i, t, detail) : ''}${detailFold}${opts}<div class="ut-meta">${meta}</div>`;
+  const body = `<div class="ut-text">${escHtml(words)}</div>${!resolved ? exitAskHtml(i, t) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) : ''}${detailFold}${opts}<div class="ut-meta">${meta}</div>`;
   // ⤢ = THE For-you window ON this item (design-user-inbox-reply §9: long text at full width, reply / done there)
   const view = `<button class="ut-act ut-view" title="${escHtml(t('Open in the For-you window'))}" aria-label="${escHtml(t('Open in the For-you window'))}">⤢</button>`;
   const actions = resolved

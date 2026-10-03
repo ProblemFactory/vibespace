@@ -533,7 +533,7 @@ function rig2({ dir = null, deferPost = false, backend = 'claude', streaming = f
   ok(!rq.ok && rq.code === 'unreachable' && Q.deliver.claimedCount(Q.CID) === 0 && !Q.deliver.stashEntries(Q.CID)[0].ho && Q.diskMsg().length === 1 && !Q.diskMsg()[0].ho && Q.releases.length === 1 && Q.deliver.drainStash(Q.CID).length === 1,
     'killed and the post FAILED: the claim is released (memory + disk), the hold given back, the entry waits for the conversation\'s next resume', rq);
   const pm = read('src/peer-messaging.js'), ac = read('src/agentd/client.js');
-  ok(/function postToPeer\(peer, text, \{ timeoutMs = 5000 \}/.test(pm) && /op: 'peer-post', cid, text, timeoutMs: 15000/.test(ac) && /deviceBounded \? hosts\.deviceBounded\(hid, 6000\)/.test(read('src/server/conversation-deliver.js')),
+  ok(/function postToPeer\(peer, text, \{ timeoutMs = POST_TIMEOUT_MS \}/.test(pm) && /const POST_TIMEOUT_MS = 5000;/.test(pm) && /const POST_BOUND_MS = POST_TIMEOUT_MS \+ WRITE_GRACE_MS \+ FLUSH_GRACE_MS;/.test(pm) && /op: 'peer-post', cid, text, timeoutMs: 15000/.test(ac) && /deviceBounded \? hosts\.deviceBounded\(hid, 6000\)/.test(read('src/server/conversation-deliver.js')),
     'PIN: every rung the hand-over can await is bounded (a claim can never be stranded by a post that never answers)');
 }
 {
@@ -1067,7 +1067,7 @@ function tailSweep(routesMod, Ps = [3000, 3600]) {
     const left = H.deliver.stashEntries(H.cid);
     const stale = left.slice(); H.deliver.drainStash(H.cid); H.deliver.stashFor(H.cid, same());
     ok(e.length === 3 && e[0] !== e[1] && one.length === 1 && one[0] === e[1] && left[0] === e[0] && left[1] === e[2] && H.deliver.drainStash(H.cid, new Set(stale)).length === 0 && H.deliver.stashCount(H.cid) === 1
-      && !/await|\.then\(/.test(AR.drainStashUnderCap.toString()) && /drainStash\(cid, new Set\(pm\.shown\)\)/.test(AR.drainStashUnderCap.toString()),
+      && !/await|\.then\(/.test(AR.drainStashUnderCap.toString()) && /drainStash\(cid, new Set\(pm\.shown\.filter\(\(e\) => !e\._retry\)\)\)/.test(AR.drainStashUnderCap.toString()),   // lane notify-retry: the take skips the PARKED views (those leave through retryTake, same tick)
       'identity: three identical-byte entries are three objects, a Set take of one leaves the other two (by reference), a stale peek takes nothing new; the helper is synchronous between its peek and its take');
   } finally { H.done(); }
   // THE ORDER: the tools intro (the agent\'s contract for the vibespace-* verbs) rides FIRST — a full stash never pushes it out
@@ -1599,17 +1599,17 @@ console.log('⑤ negative controls (patched scratch copies)');
 {
   const MUT = mutantCopies('stash-strip', REPO);
   const src = read('src/server/stash-handover.js');
-  const anchor1 = "      const sum = S.summarize({ msg: [...both.msg, ...groups], jobs: both.jobs });\n";
+  const anchor1 = "      const sum = S.summarize({ msg: [...both.retry, ...both.msg, ...groups], jobs: both.jobs });\n";
   if (!src.includes(anchor1)) throw new Error('mutation anchor missing: hide');
-  const Hide = MUT.load('src/server/stash-handover.js', src.replace(anchor1, "      const sum = null && S.summarize({ msg: [...both.msg, ...groups], jobs: both.jobs });\n"), 'hide');
+  const Hide = MUT.load('src/server/stash-handover.js', src.replace(anchor1, "      const sum = null && S.summarize({ msg: [...both.retry, ...both.msg, ...groups], jobs: both.jobs });\n"), 'hide');
   const R = rig({ handoverModule: Hide });
   R.deliver.stashFor(R.CID, { source: 'channel-receipt', kind: 'notification', fromName: 'Channels · Outbox', text: 'sent' });
   const strip = SS.createStashStrip({ sessionId: 'w1' });
   strip.set(R.view.summaryFor(R.s), { turn: 'idle' });
   ok(strip.el.hidden === true, 'CONTROL a hand-over module that hides the fact: a notice waits and the strip NEVER appears (② and ④ can go red)');
-  const anchor2 = "    const { msg, jobs } = entriesOf(cid);\n";
+  const anchor2 = "    const { msg: stashed, jobs, retry } = entriesOf(cid);\n";
   if (!src.includes(anchor2)) throw new Error('mutation anchor missing: take-first');
-  const Take = MUT.load('src/server/stash-handover.js', src.replace(anchor2, "    const { msg, jobs } = entriesOf(cid);\n    d.drainStash(cid); { const jm0 = jobsReady(); if (jm0) jm0.drainNotifs(cid); }\n"), 'take-first');
+  const Take = MUT.load('src/server/stash-handover.js', src.replace(anchor2, "    const { msg: stashed, jobs, retry } = entriesOf(cid);\n    d.drainStash(cid); { const jm0 = jobsReady(); if (jm0) jm0.drainNotifs(cid); }\n"), 'take-first');
   const R2 = rig({ refuse: 'day-cap', handoverModule: Take });
   R2.deliver.stashFor(R2.CID, { source: 'agent', kind: 'peer', fromName: 'Ada', text: 'hi' });
   const r2 = await R2.view.handOver('w1');
@@ -1625,7 +1625,7 @@ console.log('⑤ negative controls (patched scratch copies)');
   await Promise.all([q1, q2]);
   ok(R3.posts.length === 2 && R3.ledger.length === 2, 'CONTROL the in-flight guard removed: two concurrent clicks are TWO posts and TWO ledger rows (②b can go red)', { posts: R3.posts.length, ledger: R3.ledger });
   // the claim removed: the injection race delivers twice
-  const anchor4 = "    if (pm.shown.length && typeof d.claimStash === 'function') releases.push(d.claimStash(cid, pm.shown, id));\n";
+  const anchor4 = "    if (shownStashed.length && typeof d.claimStash === 'function') releases.push(d.claimStash(cid, shownStashed, id));\n";
   if (!src.includes(anchor4)) throw new Error('mutation anchor missing: no-claim');
   const NoClaim = MUT.load('src/server/stash-handover.js', src.replace(anchor4, ''), 'no-claim');
   const R4 = rig({ deferPost: true, handoverModule: NoClaim });
@@ -1844,13 +1844,13 @@ console.log('⑥ wiring pins');
   const cd = read('src/server/conversation-deliver.js'), jb = read('src/jobs.js');
   ok((cd.match(/stashChanged\(cid\)/g) || []).length >= 3 && /stashEntries,/.test(cd) && (jb.match(/this\.d\.onStash\?\.\(cid\)/g) || []).length === 3 && /peekNotifs\(cid\)/.test(jb), 'the ladder\'s stash and the jobs stash each say every write, every drain and every restore');
   const sh = read('src/server/stash-handover.js');
-  ok(/claimStash, claimedCount, restoreStash, registerFrameRestorer, restoreFrame, releasedAtBoot, flush,/.test(cd) && /claimNotifs\(cid, entries, id = null\) \{/.test(jb) && /releases\.push\(d\.claimStash\(cid, pm\.shown, id\)\)/.test(sh) && /releases\.push\(jm\.claimNotifs\(cid, jobs, id\)\)/.test(sh),
-    'verify: both stores expose the claim door and the hand-over claims through both, BY ID (released in its finally)');
+  ok(/claimStash, claimedCount, restoreStash, registerFrameRestorer, restoreFrame, releasedAtBoot, flush,/.test(cd) && /claimNotifs\(cid, entries, id = null\) \{/.test(jb) && /releases\.push\(d\.claimStash\(cid, shownStashed, id\)\)/.test(sh) && /releases\.push\(d\.claimRetry\(cid, shownParked, id\)\)/.test(sh) && /releases\.push\(jm\.claimNotifs\(cid, jobs, id\)\)/.test(sh),
+    'verify: every store exposes the claim door and the hand-over claims through each, BY ID (released in its finally) — the ladder\'s stash, its retry park (lane notify-retry) and the jobs stash');
   // the .195 merge: the claim's write is judged (a failed one is logged by name — withdraw's checklist ⑧) and a by-id
   // drain also emits withdraw's `drained` with what it TOOK; both still write through at once
   ok(/for \(const e of mine\) e\.ho = tag;\n(?:\s*\/\/[^\n]*\n)*\s*if \(mine\.length && !writeStashNow\(\)\) log\(/.test(cd) && /for \(const n of mine\) n\.ho = tag;\n    if \(mine\.length\) this\._saveNotifs\(\);/.test(jb) && /if \(took\.length\) \{ writeStashNow\(\); stashChanged\(cid\); emitStash\('drained', cid, took\); \}/.test(cd) && /delete stash\[cid\]; writeStashNow\(\); stashChanged\(cid\);/.test(cd) && /\} else this\.pendingNotifs\.delete\(cid\);\n    this\._saveNotifs\(\);/.test(jb),
     'verify r2: the claim is the entry\'s own `ho` stamp written to disk at once in BOTH stores, and every drain persists at once (the ladder\'s store and the jobs store)');
-  ok(/deliver\.registerFrameRestorer\(\(cid, text, meta\) => stashView\.restoreHandedOver\(cid, text, meta\)\)/.test(sv) && /stashView\.settle\(5000\)/.test(sv) && /function shutdown\(\)[\s\S]{0,700}stashView\.inFlightCount\(\)/.test(sv) && /renderNotifStash: require\('\.\/src\/job-model\.js'\)\.renderNotifStash, dataDir: path\.join\(__dirname, 'data'\) \}\); stashView\.register\(app\);/.test(sv),
+  ok(/deliver\.registerFrameRestorer\(\(cid, text, meta\) => stashView\.restoreHandedOver\(cid, text, meta\)\)/.test(sv) && /stashView\.settle\(maxMs\)/.test(read('src/server/exit-settle.js')) && /settleInFlight\(\{ stashView, deliver, n, m \}\)\.finally\(shutdownNow\)/.test(sv) && /function shutdown\(\)[\s\S]{0,700}stashView\.inFlightCount\(\)/.test(sv) && /renderNotifStash: require\('\.\/src\/job-model\.js'\)\.renderNotifStash, dataDir: path\.join\(__dirname, 'data'\) \}\); stashView\.register\(app\);/.test(sv),
     'verify r2: server.js registers the hand-over restorer on the ladder (r4: with the echo\'s kind) and the shutdown waits for a hand-over in flight before it exits; r4: the view gets the data dir (the delivered memory on disk)');
   ok(/function shutdown\(\)[\s\S]{0,700}stashView\.close\(\); n = stashView\.inFlightCount\(\)/.test(sv) && /text: vibespaceNoticeText\(frame\) \}\);/.test(sh) && /if \(typeof rec\.text === 'string'\) return echoed\.trim\(\) === rec\.text\.trim\(\);/.test(sh) && /if \(!sameFrame\(rec, echoed\)\) \{/.test(sh),   // the lane-redact merge: the exact-text rule lives in sameFrame (a cleared record keeps its frame's digest)
     'verify r3: the shutdown shuts the door BEFORE it counts and waits; the delivered record keeps the exact frame text and the restore requires it');

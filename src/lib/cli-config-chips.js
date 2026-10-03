@@ -5,7 +5,8 @@
 // cannot drift, and so scripts/test-harness-settings.mjs can drive every
 // state without a browser. A receipt is the server's fresh read (D2: never a
 // persisted "applied at"); `lastWrite` is the in-memory local write receipt.
-//   receiptLine(r, { t, where, lastWriteAt, now }) → { tone: 'ok'|'warn'|'bad'|'dim', text }
+//   receiptLine(r, { t, where, lastWriteAt, now }) → { tone: 'ok'|'warn'|'bad'|'dim', text, apply? }
+//   (`apply: true` = a LOCAL file that will be created: the surface draws a working Apply button beside the line)
 //   tone maps to the existing .ob-ok / .ob-warn / .ob-bad classes (theme vars).
 const fmt = (v) => (v === null || v === undefined ? '—' : typeof v === 'string' ? JSON.stringify(v) : String(v));
 function ago(ms, t) {
@@ -29,8 +30,18 @@ export function receiptLine(r, { t, where, lastWriteAt = null, now = Date.now(),
     }
     case 'differs':
       return { tone: 'warn', text: `⚠ ${where}: ${target} ${t('is {current} (wanted {want})', { current: fmt(r.current), want: fmt(r.want) })} — ${remote ? t('written at the next tool install or session start on that machine') : t('written again at the next start or setting change')}` };
-    case 'missing':
-      return { tone: 'warn', text: `? ${where}: ${file} ${t('not found — start the CLI once to create it')}` };
+    case 'missing': {
+      // WHY it is missing (lane hooks-create — the receipt's `missing`, or its `reason` off a remote helper's CFG line):
+      // 'will-create' = its directory exists (the CLI has run) and the next registration creates it — locally the
+      // surface draws an Apply button beside the line (`apply: true`), so the words name it; 'no-dir' = the CLI has
+      // not run on that machine and nothing is created; anything else (an older helper said nothing) = not found.
+      const kind = r.missing || r.reason;
+      if (kind === 'will-create') return remote
+        ? { tone: 'warn', text: `? ${where}: ${file} ${t('will be created at the next tool install or session start on that machine')}` }
+        : { tone: 'warn', text: `? ${where}: ${file} ${t('will be created at the next start — or press Apply')}`, apply: true };
+      if (kind === 'no-dir') return { tone: 'dim', text: `? ${where}: ${t('{dir} not found — the CLI has not run on this machine, so nothing is written', { dir: file.replace(/\/[^/]*$/, '') || file })}` };
+      return { tone: 'warn', text: `? ${where}: ${file} ${t('not found')}` };
+    }
     case 'unreadable':
     case 'refused':
       return { tone: 'bad', text: `⚠ ${where}: ${file} ${t('is not valid after a hand edit — not touched')}${r.reason ? ` (${r.reason})` : ''}` };

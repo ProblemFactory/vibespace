@@ -339,6 +339,15 @@
 .chat-vs-notice .chat-vs-notice-head { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--accent); font-weight: 600; margin-bottom: 4px; }
 .chat-vs-notice .chat-vs-notice-title { min-width: 0; overflow-wrap: anywhere; }
 .chat-vs-notice .chat-text { font-size: 13px; }
+/* lane-exit-run-output E3: the command card's output block — the first lines in mono, the stored heads behind "Show output" */
+.chat-exit-run { margin-top: 4px; display: flex; flex-direction: column; gap: 4px; }
+.chat-exit-out, .chat-exit-out-all { margin: 0; padding: 5px 8px; font-family: var(--font-mono, monospace); font-size: 11px; line-height: 1.45; color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.chat-exit-out { max-height: 160px; overflow: auto; } /* verify r1 F4: three lines of 1 365 bytes wrap to ~100 rows on a phone — the preview never grows the card past this */
+.chat-exit-out[data-stream="stderr"] { border-left: 2px solid var(--red); }
+.chat-exit-out-all { max-height: 320px; overflow: auto; }
+.chat-exit-out-full > summary { cursor: pointer; font-size: 11px; color: var(--text-secondary); }
+.chat-exit-stream { font-size: 10px; color: var(--text-dim); margin-top: 4px; }
+.chat-exit-cut, .chat-exit-none { font-size: 10px; color: var(--text-dim); }
 .chat-browser-session .chat-vs-notice-head { margin-bottom: 0; }
 .chat-browser-session .chat-vs-notice-head svg { flex: 0 0 auto; }
 .chat-browser-session-note { font-size: 11px; margin-top: 4px; }
@@ -1048,14 +1057,37 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 .chat-open-editor-btn:hover { opacity: 1 !important; color: var(--accent); border-color: var(--accent); }
 /* Fork-from-here button sits just left of the open-in-editor button */
 .chat-fork-btn { right: 26px; }
+/* THE MESSAGE'S … BUTTON (touch only — created when app.isTouch; lane mobile-select). A long press on the words is
+   the platform's selection, so the message menu opens from here. FLOATED as the content's first child: the first
+   lines wrap around it, it is never drawn over the words. 36 px wide (a finger), 28 px tall (two lines of text). */
+.chat-msg-more {
+  float: right; width: 36px; height: 28px; margin: -2px -4px 2px 6px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: none; border-radius: var(--radius-sm); color: var(--text-dim);
+  cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+.chat-msg-more svg { width: 16px; height: 16px; }
+.chat-msg-more:active { background: var(--bg-hover); color: var(--text); }
+/* A code block or a table beside the button (verify r1 F1): each is its own formatting context (overflow-x: auto), so
+   beside a float it is NARROWED by the float's width for its WHOLE height and the code toolbar (absolute, top-right)
+   is painted over the button — measured: a code-first message's … was "Wrap" under the finger, its pre 38 px narrower
+   to its last line. They start BELOW the button instead (at most 28 px down; a paragraph still wraps around it). */
+.chat-msg:has(.chat-msg-more) :is(.chat-pre-wrap, .chat-table-wrap) { clear: right; }
+/* The hover buttons (open in editor / fork — absolute at the top-right, opacity 0 until :hover) on a TOUCH client
+   (verify r1 F3): they were hidden ≤ 768 px only, so on a touch TABLET (1024 px, measured at UI scale 100 and 125) an
+   INVISIBLE one sat over the … button and a tap on … opened the editor. The … button serves every touch client —
+   the very media query app.isTouch reads (and the door installs on). */
+@media (hover: none) and (pointer: coarse) { .chat-msg > .chat-open-editor-btn, .chat-msg > .chat-fork-btn { display: none; } }
 /* ── Chat Compact Mode ── */
 .chat-compact .chat-message-list { padding: 8px 12px; gap: 2px; }
 .chat-compact .chat-msg { display: block; }
 .chat-compact .chat-msg-user { justify-content: flex-start; }
 .chat-compact-msg { display: flex; gap: 0; align-items: flex-start; }
+/* the role label is the message's HEADER — chrome, never selected (lane mobile-select: a long press on it opens the
+   message menu, a long press on the words selects them) */
 .chat-role {
   flex-shrink: 0; font-size: 11px; font-weight: 700; padding: 2px 0;
-  min-width: 48px; text-align: right; margin-right: 8px; margin-top: 1px;
+  min-width: 48px; text-align: right; margin-right: 8px; margin-top: 1px; user-select: none;
 }
 .chat-role .backend-icon { vertical-align: middle; }
 .chat-role-backend-icon { width: 14px; height: 14px; }

@@ -64,7 +64,16 @@ const REPLIES = {
   'POST /api/agent/msg/send': (b) => (b.wake
     ? { posted: true, group: { id: 'g-0000abcd', name: 'api', pair: false }, pairCreated: false, woke: ['beta', 'gamma'], refused: [], nextTurn: [] }
     : { posted: true, group: { id: 'g-0000ffff', name: 'alpha & beta', pair: true }, pairCreated: true, woke: [], refused: [], nextTurn: ['beta'] }),
-  'GET /api/agent/msg/read': () => ({ ok: true, group: { id: 'g-0000abcd', name: 'api' }, records: [{ at: 7, from: 'alpha', kind: 'message', text: 'hello' }] }),
+  // lane group-pending: `delivery` = where each message stands (one row per recipient); an older server sends none
+  'GET /api/agent/msg/read': () => ({ ok: true, group: { id: 'g-0000abcd', name: 'api' }, records: [
+    { at: 7, from: 'alpha', kind: 'message', text: 'hello', delivery: [{ member: 'cid-b', name: 'beta', state: 'waiting', at: null }] },
+    { at: 8, from: 'beta', kind: 'message', text: 'hi', delivery: [{ member: 'cid-a', name: 'alpha', state: 'handed', at: Date.UTC(2026, 9, 1, 12, 41) }, { member: 'cid-c', name: 'gamma', state: 'waiting', at: null }, { member: 'cid-d', name: 'delta', state: 'muted', at: null }, { member: 'cid-e', name: 'eps', state: 'left', at: 9 }] },
+    { at: 12, from: 'alpha', kind: 'message', text: 'legacy read', delivery: [{ member: 'cid-b', name: 'beta', state: 'handed', at: null }] },
+    { at: 13, from: 'alpha', kind: 'message', text: 'clocked read', delivery: [{ member: 'cid-b', name: 'beta', state: 'handed', at: Date.UTC(2026, 9, 1, 12, 41) }] },
+    { at: 9, from: 'eps', kind: 'leave', text: 'eps left', delivery: null },
+    { at: 10, from: 'alpha', kind: 'message', text: 'old server' },
+    { at: 11, from: 'alpha', kind: 'message', text: 'nobody', delivery: [] },
+  ] }),
   'GET /api/agent/msg/groups': () => ({ groups: [{ id: 'g-0000abcd', name: 'api', pair: false, archived: false, unread: 3, notify: 'mention', members: [{ name: 'alpha', notify: 'next-turn', live: true }] }] }),
   'GET /api/agent/msg/peers': () => ({ peers: [{ name: 'beta', conversationId: 'cid-b', level: 'messageable', state: 'working' }] }),
 };
@@ -127,6 +136,16 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   r = await run(['read', 'api', '--before', '1700000000000', '--limit', '20']);
   ok(last().path === '/api/agent/msg/read' && same(last().query, { group: 'api', before: '1700000000000', limit: '20' }), 'read <group> --before <ts> --limit n ⇒ the query', JSON.stringify(last().query));
   ok(/older: vibespace-msg read g-0000abcd --before 7/.test(r.out), 'read prints the next --before pointer');
+  // lane group-pending: the trailing clause = the server's `delivery` rows (the ONE rule, worded here — never a second one)
+  {
+    const lines = r.out.split('\n');
+    ok(lines.some((l) => l === "- [7] alpha: hello — waiting for beta's next turn"), 'read: a message waiting for its one recipient ends " — waiting for beta\'s next turn"', JSON.stringify(lines));
+    ok(lines.some((l) => l === '- [8] beta: hi — waiting: gamma · read: alpha 12:41Z · muted: delta · left: eps'), 'read: a group message lists its recipients by state (waiting · read · muted · left), a read one with its hand-over clock', JSON.stringify(lines));
+    ok(lines.some((l) => l === '- [12] alpha: legacy read — read by beta') && lines.some((l) => l === '- [13] alpha: clocked read — read by beta 12:41Z'), 'read: a handed row says WHEN (UTC HH:MMZ, like the CLI\'s other instants); a legacy row without the clock says no time', JSON.stringify(lines));
+    ok(lines.some((l) => l === '- [9] (leave) eps left') && lines.some((l) => l === '- [10] alpha: old server') && lines.some((l) => l === '- [11] alpha: nobody'), 'read: a system record, an older server\'s record (no rows) and a message with no recipient carry NO clause', JSON.stringify(lines));
+    const usage = await run([]);
+    ok(/each message ends with where it\n\s+stands: "waiting for <name>'s next turn"/.test(usage.out), 'the usage says a read line ends with where the message stands');
+  }
 
   r = await run(['send', 'beta', 'the schema is in /tmp/s.sql']);
   ok(same(last().body, { to: 'beta', text: 'the schema is in /tmp/s.sql', wake: false }), 'send <agent> "…" ⇒ {to, text, wake:false}', JSON.stringify(last().body));
@@ -276,6 +295,13 @@ console.log('§2 the routes over the REAL engine + store + ladder');
   ok(r.status === 200 && r.body.groups.some((g) => g.id === pairId) && r.body.groups.some((g) => g.id === laneId), 'jbt_ `group list` = the owner conversation\'s groups');
   r = await call('GET', '/api/agent/msg/read', { token: 'jbt_owned', query: { group: pairId } });
   ok(r.status === 200 && r.body.records.some((x) => x.text === 'batch finished' && x.from === 'alpha'), 'jbt_ `read` returns the log; the job\'s post is signed by its OWNER', JSON.stringify(r.body.records));
+  // lane group-pending: the read answer carries where each message stands, from the REAL engine's markers
+  const batch = r.body.records.find((x) => x.text === 'batch finished');
+  ok(batch && JSON.stringify(batch.delivery) === JSON.stringify([{ member: C, name: 'gamma', state: 'waiting', at: null }]) && r.body.records.filter((x) => x.kind !== 'message').every((x) => x.delivery === null), 'read: a message to a next-turn member carries `delivery` [gamma: waiting]; a system record carries none', JSON.stringify(batch && batch.delivery));
+  await eng.commitReports(C, eng.reportsForTurn(C).marks);   // gamma's next turn handed the report out
+  r = await call('GET', '/api/agent/msg/read', { token: 'jbt_owned', query: { group: pairId } });
+  const handedRow = r.body.records.find((x) => x.text === 'batch finished').delivery[0];
+  ok(handedRow.state === 'handed' && Number.isFinite(handedRow.at) && handedRow.at > batch.at, '…and after gamma\'s turn start the same message reads `handed` WITH the hand-over clock (the engine stamped `reportedAt` beside the marker)', JSON.stringify(handedRow));
   r = await call('GET', '/api/agent/msg/peers', { token: 'jbt_owned' });
   ok(r.status === 200 && Array.isArray(r.body.peers) && !r.body.peers.some((p) => p.conversationId === A), 'jbt_ `list` answers (the owner itself not listed as a peer)', JSON.stringify(r.body));
   r = await call('POST', '/api/agent/msg/send', { token: 'jbt_nobody', body: { to: 'gamma', text: 'x' } });

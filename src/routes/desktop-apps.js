@@ -140,6 +140,10 @@ const router = express.Router();
 
 let ctx = null;
 function setup(deps) { ctx = deps; }
+/** Layer 0 apps: the hub's apps engine words an installed app's greyed row (restoring… after a rebuild) — set by
+ *  src/server/apps-wiring.js; absent ⇒ the machine's own words. */
+let appsEngine = null;
+function setApps(engine) { appsEngine = engine || null; }
 
 const LOCAL = new Set(['', 'local']);
 const HOST_RE = /^[A-Za-z0-9._-]{1,80}$/;
@@ -172,7 +176,7 @@ const ID_RE = /^[A-Za-z0-9._-]{1,80}$/;
 
 router.get('/api/desktop/apps', async (req, res) => {
   const host = hostParam(req, res); if (!host) return;
-  try { res.json(host === 'local' ? await ctx.keeper.list() : await ctx.keeper.list({ host })); } catch (e) { fail(res, e); }
+  try { const r = host === 'local' ? await ctx.keeper.list() : await ctx.keeper.list({ host }); res.json(appsEngine ? appsEngine.decorate(host, r) : r); } catch (e) { fail(res, e); }
 });
 router.post('/api/desktop/apps', async (req, res) => {
   const host = hostParam(req, res); if (!host) return;
@@ -485,4 +489,4 @@ router.post('/api/vnc/start', async (req, res) => {
   try { res.json(await ctx.vnc.ensureRunning()); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-module.exports = { router, setup };
+module.exports = { router, setup, setApps };

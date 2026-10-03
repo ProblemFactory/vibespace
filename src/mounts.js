@@ -37,6 +37,8 @@ const { spawn, execFile, execFileSync } = require('child_process');
 // is created on ENOENT ONLY — the inline `_key()` used to mint a fresh key on
 // ANY read failure and silently orphan every stored ciphertext.
 const { secretBox, describeJsonError } = require('./secret-box');
+const { parseDriveClients } = require('./preset-layers.js');                 // lane cluster-presets: ONE parser for the file and the env
+const clusterPresets = require('./server/cluster-presets.js');              // the presets DIRECTORY's reader (the file rung, live)
 
 const SHARE_PREFIX = 'vibespace-share:v1:';
 const CEPHMOUNT_PREFIX = 'vibespace-cephmount:v1:';
@@ -2279,22 +2281,28 @@ class MountManager {
   // client credentials) and prints the token JSON, which we capture. No
   // Google secrets to configure, no terminal.
 
-  /** Instance-preset Google OAuth clients (admin-injected env, never persisted):
+  /** Instance-preset Google OAuth clients (admin-provided, never persisted).
+   *  lane cluster-presets (B-53fe): FIRST the presets DIRECTORY's
+   *  `gdrive-clients.json` (ONE cluster Secret every pod mounts, the release's
+   *  `override/` merged over it per key, re-read live when the kubelet swaps
+   *  `..data` — src/server/cluster-presets.js); the env is the FALLBACK rung
+   *  for an instance whose directory says nothing about Google clients:
    *  VIBESPACE_GDRIVE_CLIENTS = JSON [{key, label, clientId, clientSecret}, …]
    *  Legacy single pair VIBESPACE_GDRIVE_CLIENT_ID/SECRET = preset key 'default'.
    *  A mount stores only the preset KEY (clientPreset); id/secret resolve at
-   *  authorize/mount time, so rotating the env rotates every mount. */
+   *  authorize/mount time, so rotating the presets rotates every mount (a
+   *  live rclone mount picks a rotated secret up at its next (re)mount). */
   static drivePresets() {
-    const out = [];
+    const fromFile = clusterPresets.sharedPresets().entries('gdrive');
+    if (fromFile) return fromFile;
+    return MountManager._envDrivePresets();
+  }
+  /** The env rung: the rule the env has always been read with (src/preset-layers.js parseDriveClients). */
+  static _envDrivePresets() {
+    let out = [];
     try {
       const raw = process.env.VIBESPACE_GDRIVE_CLIENTS;
-      if (raw) {
-        for (const c of JSON.parse(raw)) {
-          if (c && c.key && c.clientId && c.clientSecret) {
-            out.push({ key: String(c.key), label: String(c.label || c.key), clientId: String(c.clientId), clientSecret: String(c.clientSecret) });
-          }
-        }
-      }
+      if (raw) out = parseDriveClients(JSON.parse(raw));
     } catch (e) { console.error('[mounts] VIBESPACE_GDRIVE_CLIENTS unparseable:', describeJsonError(e)); } // never `e.message`: V8 quotes the bytes around the error (a client secret's tail)
     if (process.env.VIBESPACE_GDRIVE_CLIENT_ID && process.env.VIBESPACE_GDRIVE_CLIENT_SECRET
         && !out.some((c) => c.key === 'default')) {

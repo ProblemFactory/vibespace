@@ -631,6 +631,9 @@ const ENV_ALLOW = new Map([
   ['scripts/test-agentd-session.mjs', 'the second-holder leg boots a real daemon under the name and asserts neither the daemon nor any child sees it'],
   ['scripts/test-channels-accounts.mjs', 'the account-model Lark leg hands two keyed tenants to the store\'s env HANDLE (never process.env) and asserts `cluster:<k>` resolves by key'],
   ['scripts/test-migrations.mjs', 'the credential-key stamp\'s token-evidence leg hands ONE keyed Lark tenant to the store\'s env HANDLE (never process.env) so a Lark token — which names no client — is stamped with the row\'s pick'],
+  ['scripts/test-integrations-store.mjs', 'lane cluster-presets: hands the store an env HANDLE (never process.env) carrying a DIFFERENT key, to prove the presets directory wins where it speaks and the env is the fallback'],
+  ['scripts/test-helm-render.mjs', 'lane cluster-presets: asserts the volume form renders NO preset env (the names are the assertion\'s subject)'],
+  ['scripts/test-cluster-presets.mjs', 'verify r1 THE LAYER TABLE: the env cells hand the REAL store an env HANDLE (never process.env) to prove the env rung serves only when the directory is silent'],
   ['deploy/helm/vibespace-user/values.yaml', 'the admin-facing values block'],
   ['deploy/helm/vibespace-user/templates/main.yaml', 'renders the Secret into the env'],
   ['deploy/README.md', 'documents the two forms'],
@@ -661,6 +664,48 @@ if (tracked.length) {
   const aliased = path.join(tmpDir, 'alias.js'); fs.writeFileSync(aliased, 'const env = process.env; const s = env.VIBESPACE_INTEGRATION_LARK_APPSECRET;\n');
   const ctl = envNameCensus([...tracked, bracket, destr, aliased], (f) => (f.startsWith('/') ? fs.readFileSync(f, 'utf-8') : readRepo(f)));
   ok(ctl.offenders.length === 3 && ctl.offenders.includes(bracket) && ctl.offenders.includes(destr) && ctl.offenders.includes(aliased), 'CONTROL: the bracket form, the destructuring form and the aliased-env form are each RED');
+}
+
+// (a″) THE FILE RUNG HAS ONE READER TOO (lane cluster-presets, B-53fe): the
+// presets DIRECTORY (VIBESPACE_PRESETS_DIR / the default /etc/vibespace/presets,
+// the gdrive-clients.json file name) is read by src/server/cluster-presets.js
+// alone — the store and MountManager ask its instance, never the directory.
+// Comment lines are stripped (the consumers' essays name the file); a code
+// spelling anywhere else is RED, with a planted offender as the control.
+const FILE_RE = /VIBESPACE_PRESETS_DIR|['"`]\/etc\/vibespace\/presets|['"`]gdrive-clients\.json['"`]/;
+const FILE_ALLOW = new Map([
+  ['src/server/cluster-presets.js', 'THE reader of the presets directory'],
+  ['deploy/helm/vibespace-user/templates/main.yaml', 'renders the projected volume + VIBESPACE_PRESETS_DIR'],
+  ['scripts/test-cluster-presets.mjs', 'the reader\'s own suite'],
+  ['scripts/test-mounts-oauth.mjs', 'clears VIBESPACE_PRESETS_DIR so the lazily-made shared reader has no directory'],
+  ['scripts/test-integrations-store.mjs', 'writes a scratch presets directory in the kubelet\'s shape for the store + wiring legs'],
+  ['scripts/test-helm-render.mjs', 'asserts the chart renders VIBESPACE_PRESETS_DIR + the item paths'],
+  ['deploy/docker/entrypoint.sh', 'verify r1 ④ THE OLD-APP GATE: reads the env NAME only (set + no src/server/cluster-presets.js in the checkout ⇒ one WARNING per spawn) — never the directory'],
+  ['scripts/test-fleet-image-seed.mjs', 'runs the entrypoint\'s presets_reader_check with VIBESPACE_PRESETS_DIR set / unset'],
+  ['scripts/test-integration-registry.mjs', 'this census'],
+]);
+function fileRungCensus(files, read) {
+  const hits = [];
+  for (const f of files) {
+    if (isDoc(f) || /\.md$/.test(f) || /\.yaml$/.test(f) && f !== 'deploy/helm/vibespace-user/templates/main.yaml') continue;
+    let s2; try { s2 = read(f); } catch { continue; }
+    if (FILE_RE.test(s2.replace(/^\s*(\*|\/\/|#).*$/gm, ''))) hits.push(f);
+  }
+  return { hits, offenders: hits.filter((f) => !FILE_ALLOW.has(f)) };
+}
+if (tracked.length) {
+  const c = fileRungCensus(tracked, readRepo);
+  console.log(`  … presets-directory census hits: ${c.hits.join(', ')}`);
+  ok(c.hits.includes('src/server/cluster-presets.js'), 'the file-rung census SEES the reader');
+  ok(!c.offenders.length, `nothing outside the reader names the presets directory or its file in code (offenders: ${c.offenders.join(', ') || 'none'})`);
+  for (const [f] of FILE_ALLOW) if (!c.hits.includes(f) && fs.existsSync(path.join(REPO, f))) ok(false, `FILE-RUNG ALLOWLIST DEAD ENTRY: ${f} no longer names it — remove the row`);
+  const dir = path.join(ROOT, 'census'); fs.mkdirSync(dir, { recursive: true });
+  const readAny = (f) => (f.startsWith('/') ? fs.readFileSync(f, 'utf-8') : readRepo(f));
+  const direct = path.join(dir, 'direct-read.js'); fs.writeFileSync(direct, "const list = JSON.parse(require('fs').readFileSync('/etc/vibespace/presets/gdrive-clients.json', 'utf-8'));\n");
+  const viaEnv = path.join(dir, 'via-env.js'); fs.writeFileSync(viaEnv, 'const d = process.env.VIBESPACE_PRESETS_DIR;\n');
+  const noted = path.join(dir, 'noted.js'); fs.writeFileSync(noted, "// reads the presets directory's `gdrive-clients.json` through the shared reader\nconst x = 1;\n");
+  const fc = fileRungCensus([...tracked, direct, viaEnv, noted], readAny);
+  ok(fc.offenders.includes(direct) && fc.offenders.includes(viaEnv) && !fc.offenders.includes(noted) && fc.offenders.length === 2, 'CONTROLS: a direct read of the default path and an env read of VIBESPACE_PRESETS_DIR are RED; a comment naming the file is not');
 }
 
 // (a′) THE NAME MAY NOT BE BUILT OUTSIDE THE RESOLVER EITHER (r3, the round-2

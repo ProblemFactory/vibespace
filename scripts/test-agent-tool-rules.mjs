@@ -76,7 +76,9 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 console.log('① the rule table');
 const RULES = R.claudeAllowRules();
 const PAGE_VERBS = R.PAGE_VERBS || []; // (a pre-r2 module has none — the leg then says so instead of crashing)
-ok(RULES.length === 8 + R.JOB_VERBS.length + PAGE_VERBS.length && PAGE_VERBS.length === 2, `one rule per whole tool (8) + one per listed job verb (${R.JOB_VERBS.length}) + one per listed page verb (${PAGE_VERBS.length}) = ${RULES.length}`);
+const APP_VERBS = R.APP_VERBS || []; // Layer 0 apps: vibespace-app's verbs (a pre-lane module has none)
+ok(RULES.length === 8 + R.JOB_VERBS.length + PAGE_VERBS.length + APP_VERBS.length && PAGE_VERBS.length === 2, `one rule per whole tool (8) + one per listed job verb (${R.JOB_VERBS.length}) + one per listed page verb (${PAGE_VERBS.length}) + one per listed app verb (${APP_VERBS.length}) = ${RULES.length}`);
+ok(APP_VERBS.length === 9 && !APP_VERBS.includes('add') && R.AGENT_TOOL_RULES.find((x) => x.tool === 'vibespace-app').held.add && RULES.includes('Bash(vibespace-app install:*)') && !RULES.some((r) => /vibespace-app add/.test(r)), 'Layer 0 apps: vibespace-app is VERB-LISTED — search / list / plan / install / remove / status / wait / docs / help pre-approved (none executes: install / remove only PROPOSE), `add` HELD (it runs a user-level installer)');
 ok(RULES.every((r) => { const p = R.parseRule(r); return p && p.toolName === 'Bash' && p.type === 'prefix' && p.prefix.trim() && p.content.endsWith(':*') && !p.content.slice(0, -2).includes(':*') && r === `Bash(${p.content})`; }), 'every rule is a Bash PREFIX rule in the spelling 2.1.281 validates (`:*` only at the end, never an empty prefix)');
 ok(['vibespace-browser', 'vibespace-status', 'vibespace-task', 'vibespace-ask', 'vibespace-job poll'].every((t) => RULES.includes(`Bash(${t}:*)`)), 'the study\'s tools are named: browser / status / task / ask / job poll');
 ok(!RULES.some((r) => /vibespace-job (run|start|access)\b/.test(r)) && !RULES.includes('Bash(vibespace-job:*)'), 'vibespace-job is NEVER allowed whole — run / start / access are held');

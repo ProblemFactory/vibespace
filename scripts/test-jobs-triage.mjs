@@ -343,7 +343,7 @@ console.log('§9 typed held notifications + the held digest on the wire');
   J._notifyRate.clear();
   J._notifyOwner(job, { what: 'failed exit=1 error (3m)' });
   await new Promise((r) => setTimeout(r, 50));
-  ok((J.pendingNotifs.get(cid) || []).some((n) => n.held && n.held.kind === 'not-reachable'), 'an unreachable inbox is held as not-reachable');
+  ok((J.pendingNotifs.get(cid) || []).some((n) => n.held && n.held.kind === 'not-running'), 'a conversation with no live inbox is held as not-running (lane notify-retry: the old `not-reachable` printed "closed" for a running one)');
   const g3 = await callH('GET', '/api/jobs');
   ok(g3.body.held && g3.body.held.total === 3 && g3.body.held.byConversation[cid].count === 3, 'GET /api/jobs carries the same digest');
   // draining CLEARS the chip: the digest empties on the next broadcast

@@ -94,7 +94,7 @@ const DELIVERED_FILE = 'stash-handover.json';
 const HANDOVER_TAG_RE = /\(hand-over (ho-[a-z0-9]+-[a-z0-9]+)\)/;
 const STATUS = Object.freeze({ agent_forbidden: 403, no_session: 404, no_conversation: 409, nothing_waiting: 409, in_flight: 409, held_for_next_turn: 409, spend_refused: 429, unreachable: 409, unavailable: 503, restarting: 503 });
 
-function create({ activeSessions, getDeliver = () => null, getJobs = () => null, getGroups = () => null, broadcastSessions = () => {}, renderMsgStash, renderNotifStash, log = console, debounceMs = 300, now = () => Date.now(), dataDir = null } = {}) {
+function create({ activeSessions, getDeliver = () => null, getJobs = () => null, getGroups = () => null, broadcastSessions = () => {}, renderMsgStash, renderNotifStash, log = console, debounceMs = 300, now = () => Date.now(), schedule = (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; }, dataDir = null } = {}) {
   const cidOf = (s) => (s && (s.backendSessionId || s.claudeSessionId)) || null;
   const jobsReady = () => { try { const jm = getJobs(); return jm && typeof jm.peekNotifs === 'function' ? jm : null; } catch { return null; } };
   let seq = 0;
@@ -106,7 +106,10 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     const msg = cid && d && typeof d.stashEntries === 'function' ? d.stashEntries(cid) : [];
     const jm = jobsReady();
     const jobs = cid && jm ? jm.peekNotifs(cid) : [];
-    return { msg, jobs };
+    // THE PARKED ONES (lane notify-retry): the ladder's retry park, in the stash's shape (`_retry` = the original) —
+    // the fact counts them as `retrying`, a hand-over carries them (and takes them out of the park)
+    const retry = cid && d && typeof d.retryEntries === 'function' ? d.retryEntries(cid).filter((e) => e && !e.ho) : [];
+    return { msg, jobs, retry };
   }
   /** Would handing over NOW open a billed turn? Free only where the harness's lane FOLDS a notification into the
    *  turn already running (codex steer); a claude inbox queues it and runs it as its own turn (charged, deferred). */
@@ -144,10 +147,34 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     try {
       const both = entriesOf(cid);
       const groups = groupEntriesOf(s);
-      const sum = S.summarize({ msg: [...both.msg, ...groups], jobs: both.jobs });
-      return sum ? { ...sum, billed: billedFor(s), inFlight: inflight.has(cid), held: heldOf(both.msg), reachable: reachableFor(s) && (both.msg.length + both.jobs.length) > 0 } : null;
+      const sum = S.summarize({ msg: [...both.retry, ...both.msg, ...groups], jobs: both.jobs });
+      const d = getDeliver();
+      return sum ? { ...sum, billed: billedFor(s), inFlight: inflight.has(cid), held: heldOf([...both.retry, ...both.msg]), reachable: reachableFor(s) && (both.msg.length + both.jobs.length + both.retry.length) > 0, ...(d && typeof d.handoverArmed === 'function' && d.handoverArmed(cid) ? { armed: true } : {}) } : null;
     } catch (e) { log.warn?.(`[stash] summary failed: ${(e && e.message) || e}`); return null; }
   }
+
+  // THE ARMED HAND-OVER RUNS AT THE TURN END (R3): the ladder says a turn ended; if the injection armed a hand-over for
+  // this conversation (its notices did not fit the prompt), it runs now as ONE message under 'stash-retry' — unless a
+  // post landed within the ladder's floor, in which case it waits the floor out and re-checks (idle, live, something
+  // still waiting; a turn running again re-arms for its own end). Refusals are logged; the stash is untouched.
+  function widOf(cid) { try { for (const [wid, x] of activeSessions) if (cidOf(x) === cid) return wid; } catch { } return null; }
+  async function runArmed(cid, why, deferred = false) {
+    const d = getDeliver();
+    const wid = widOf(cid);
+    const s = wid != null ? activeSessions.get(wid) : null;
+    if (!d || !s) return;
+    const floor = Number(d.RETRY_FLOOR_MS) || 30 * 1000;
+    const since = typeof d.sincePost === 'function' ? d.sincePost(cid) : Infinity;
+    if (since < floor) { schedule(() => { runArmed(cid, why, true).catch(() => { }); }, floor - since); return; }   // the floor: never two posts inside it
+    if (deferred) {
+      if (!summaryFor(s)) return;                                     // drained meanwhile (a prompt, a click)
+      if (s._isStreaming) { if (typeof d.armStashHandover === 'function') d.armStashHandover(cid, why); return; }   // a turn runs again: its own end runs this
+    }
+    const r = await handOver(wid, { auto: true });
+    if (r && r.ok) log.log?.(`[stash] ${cid}: ${r.delivered} waiting notice(s) posted as a message after the turn ended (hand-over ${r.id}, lane ${r.lane || '?'}${r.held ? `, ${r.held} more held` : ''})`);
+    else log.log?.(`[stash] ${cid}: the armed hand-over after the turn end was not made — ${(r && r.code) || 'unknown'}: ${(r && r.error) || ''} (the notices keep waiting; the next prompt re-arms it)`);
+  }
+  { const d0 = getDeliver(); if (d0 && typeof d0.onTurnEnd === 'function') d0.onTurnEnd(async (cid) => { const a = typeof d0.takeArmedHandover === 'function' ? d0.takeArmedHandover(cid) : null; if (a) await runArmed(cid, a.why); }); }
 
   let timer = null;
   /** A store changed: re-publish the session list once per burst. */
@@ -250,7 +277,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
   }
   if (forget()) persistDelivered();
   /** Hand the whole stash over now — ONE message through the ladder, reason `stash-handover`. */
-  async function handOver(webuiId) {
+  async function handOver(webuiId, { auto = false } = {}) {
     const s = activeSessions && activeSessions.get(String(webuiId));
     if (!s) return { ok: false, code: 'no_session', error: 'no such live session' };
     const cid = cidOf(s);
@@ -262,16 +289,21 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     const rec = { id, at: now(), p: null };
     inflight.set(cid, rec);
     changed();   // the fact says `inFlight` to every client
-    rec.p = handOverNow(s, cid, id);
+    rec.p = handOverNow(s, cid, id, { auto });
     try { return await rec.p; } finally { if (inflight.get(cid) === rec) inflight.delete(cid); changed(); }
   }
-  async function handOverNow(s, cid, id) {
+  async function handOverNow(s, cid, id, { auto = false } = {}) {
     const d = getDeliver();
     if (!d || typeof d.deliverToConversation !== 'function') return { ok: false, code: 'unavailable', error: 'the delivery ladder is not wired on this instance' };
     const jm = jobsReady();
-    const { msg, jobs } = entriesOf(cid);
+    const { msg: stashed, jobs, retry } = entriesOf(cid);
+    const msg = [...retry, ...stashed];   // a parked notification rides the same frame — the oldest wait first
     if (!msg.length && !jobs.length) return { ok: false, code: 'nothing_waiting', error: 'nothing is waiting for this conversation' };
     const pm = msg.length ? renderMsgStash(msg, { maxEntries: HANDOVER_MAX_ENTRIES, maxBytes: HANDOVER_MAX_BYTES }) : { text: '', shown: [], rest: [] };
+    const shownParked = pm.shown.filter((e) => e && e._retry);
+    const shownStashed = pm.shown.filter((e) => e && !e._retry);
+    // WHY THEY WAITED (R4): the held kinds of everything this frame carries, ONE sentence on the card's head
+    const why = S.heldWhyOf([...pm.shown.map((e) => S.heldKeyOf(e && e.held)), ...jobs.map((n) => S.heldKeyOf(n && n.held))].filter(Boolean));   // verify r2: a may-have-landed entry names a possible repeat
     // >2 job results: the untruncated history goes to the read file too (the injection's rule) — an elided middle points at it
     let spillPath = null;
     if (jobs.length > 2 && jm && typeof jm.spillNotifs === 'function') { try { spillPath = jm.spillNotifs(cid, jobs) || null; } catch { spillPath = null; } }
@@ -283,16 +315,21 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     // THE CLAIM: what this hand-over is about to deliver is spoken for — the injection's full drain leaves it; the
     // stamp is on disk in both stores before the post leaves (verify r2)
     const releases = [];
-    if (pm.shown.length && typeof d.claimStash === 'function') releases.push(d.claimStash(cid, pm.shown, id));
+    if (shownStashed.length && typeof d.claimStash === 'function') releases.push(d.claimStash(cid, shownStashed, id));
+    if (shownParked.length && typeof d.claimRetry === 'function') releases.push(d.claimRetry(cid, shownParked, id));   // the park's timer skips a claimed entry
     if (jobsText && jm && typeof jm.claimNotifs === 'function') releases.push(jm.claimNotifs(cid, jobs, id));
     try {
       let r = null;
-      const frame = `The user handed over the ${n} notice(s) that were waiting for your next turn (hand-over ${id}):\n\n${text}`;
+      // R3 (lane notify-retry): the AUTO hand-over runs at a turn end for what that prompt's context could not carry —
+      // its own declared reason, spelled literally beside the user's (the spend census reads the literal)
+      const frame = auto
+        ? `VibeSpace delivers the ${n} notice(s) that did not fit your previous prompt's context (hand-over ${id}):\n\n${text}`
+        : `The user handed over the ${n} notice(s) that were waiting for your next turn (hand-over ${id}):\n\n${text}`;
+      const cardText = S.handoverCardText(n, text, { why });   // 2026-09-28: the card carries the notices behind an expander (handoverFacts), not the count alone; R4: its head says why they waited
       try {
-        r = await d.deliverToConversation(cid, frame, {
-          kind: 'notification', spendReason: 'stash-handover', fromName: FROM_NAME,
-          cardText: S.handoverCardText(n, text),   // 2026-09-28: the card carries the notices behind an expander (handoverFacts), not the count alone
-        });
+        r = auto
+          ? await d.deliverToConversation(cid, frame, { kind: 'notification', spendReason: 'stash-retry', fromName: FROM_NAME, cardText })
+          : await d.deliverToConversation(cid, frame, { kind: 'notification', spendReason: 'stash-handover', fromName: FROM_NAME, cardText });
       } catch (e) { r = { ok: false, reason: (e && e.message) || String(e) }; }
       if (!r || !r.ok) {
         if (r && r.refused === 'spend') return { ok: false, code: 'spend_refused', id, error: r.reason || 'the spend ceiling refused this turn', why: r.why || null, retryAfter: r.retryAfter || 0, identity: r.identity || null, cap: r.cap == null ? null : r.cap };
@@ -300,7 +337,11 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
         return { ok: false, code: 'unreachable', id, error: (r && r.reason) || 'the agent could not be reached — the notices keep waiting for its next turn' };
       }
       // DELIVERED: take exactly what went out; what arrived meanwhile keeps waiting
-      const tookMsg = pm.shown.length ? d.drainStash(cid, new Set(pm.shown)) : [];
+      const tookStashed = shownStashed.length ? d.drainStash(cid, new Set(shownStashed)) : [];
+      // a parked entry leaves the park (its hold given back — this hand-over billed its own turn) and is remembered as
+      // a plain entry: a frame that comes back restores it as a WAITING notice, never as one still being retried
+      const tookParked = shownParked.length && typeof d.retryTake === 'function' ? d.retryTake(cid, new Set(shownParked), { via: 'hand-over', lane: r.lane || null }).map((e) => ({ source: 'agent', kind: e.kind, fromName: e.fromName || null, text: e.text, ts: e.firstAt, held: { kind: 'not-reachable', attempts: (e.attempts || []).length } })) : [];
+      const tookMsg = [...tookParked, ...tookStashed];
       const tookJobs = jobsText && jm ? jm.drainNotifs(cid, new Set(jobs)) : [];
       // the exact frame the ladder wrote (headed as a notification) — the wrapper echoes it verbatim, and equality is
       // what makes a frame OURS (verify r3: a tag alone is a string a peer can write)

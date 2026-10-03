@@ -1,7 +1,7 @@
 'use strict';
 /**
  * TABS — WHOSE TAB IS THIS, AND WHO MAY SWITCH TO IT OR CLOSE IT (lane browser-resume chunk C, the owner's ruling 3 of
- * 2026-09-30: "目前浏览器似乎没有完善的关闭标签页能力"). PURE: imports nothing; CJS so the keeper, the routes, the live-view
+ * 2026-09-30: "目前浏览器似乎没有完善的关闭标签页能力"). PURE: imports only peer-text (THE belt — verify r1 F8); CJS so the keeper, the routes, the live-view
  * bridge and the bundle share ONE spelling of every rule and every sentence. docs/design-agent-browser-v2.zh.md §3.9.
  *
  * MEASURED on the real agent-browser 0.38.1 + Chrome 154 (lane browser-resume C, 2026-09-30):
@@ -56,6 +56,7 @@ const MAX_ROOTS = 32;
 const MAX_USER_ACTS = 16;
 const TITLE_CHIP = 24;
 
+const PT = require('./peer-text.js'); // verify r1 (F8): the ONE belt on a page's url before it reaches the agent
 const str = (v) => (v == null ? '' : String(v));
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 function fill(s, p) { return String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m)); }
@@ -330,9 +331,46 @@ function agentTabLines(view) {
   return lines;
 }
 
+// ── LANE PROFILE-LOCK-ROLL (2026-10-01) L2: A BOUND TAB OF A PREVIOUS LIFE REBINDS ──
+// Measured on 0.38.1 (its own `tab --help`): "each session remembers its active tab (bound by CDP target id) and returns to
+// it after a daemon restart; with --pin-tab, commands fail with tab_gone instead of falling back". Every tab of a REPLACED
+// browser is gone (lane H verify r2), so the first pinned command after a browser life the keeper did not end by a
+// `stop()` — a daemon found dead (a pod roll, a crash), a boot that could not adopt it, an in-place relaunch — answered
+// `tab_gone` (userW, W2) and the agent had to `tab new` by hand. The keeper marks every lease of the replaced browser
+// (`tabClosed`, the mark a stop already leaves) and its next attach binds a tab BEFORE the command runs:
+/**
+ * WHICH tab a session whose bound tab is gone is rebound to, from the browser's live page list: the ONE page tab that
+ * exists and that no holder roots (a fresh launch's single `about:blank`; a restored browser's only page) — bound to
+ * (`tab <targetId>`: no second blank tab per relaunch); anything else (several pages, the only page another holder's,
+ * nothing readable) ⇒ null ⇒ a NEW tab of its own (never another holder's). PURE.
+ *   targets = Target.getTargets' infos · holders = tabHoldersOf's rows (the user's holder first) · key = the session's
+ */
+function rebindPick({ targets = null, holders = [], key = '' } = {}) {
+  if (!Array.isArray(targets)) return null;
+  const pages = pageTargets(targets);
+  if (pages.length !== 1) return null;
+  const only = pages[0];
+  const owners = tabOwners({ targets, holders: (Array.isArray(holders) ? holders : []).filter((h) => isObj(h) && str(h.key) !== str(key)) });
+  if (owners.get(only.targetId) && owners.get(only.targetId) !== 'orphan') return null;
+  const raw = targets.find((x) => isObj(x) && idKey(x.targetId) === only.targetId) || {}; // pageTargets keeps no url — the note names the page
+  return { targetId: only.targetId, url: str(raw.url) || 'about:blank' };
+}
+/** The ONE sentence the agent reads after a rebind (its command's answer, once): why its tab is gone, where it is bound now.
+ *  `how` = `switched` (bound to the browser's only page) | `new` (a new tab of its own); `why` = `life` (the browser was
+ *  restarted) | `closed` (the tab was closed). */
+const REBOUND_URL_MAX = 200;
+function reboundNoteText({ how = 'new', url = '', why = 'life' } = {}) {
+  const gone = why === 'closed' ? 'your tab was closed' : 'your tab from the previous run is gone (the browser was restarted)';
+  // verify r1 (F8): the url is the PAGE's (a data: url keeps every character — a frame tag, a bidi override) and this note
+  // is printed to the agent: THE belt (peer-text), as browser-kept's keptUrl and browser-stuck's loadingText — never a raw slice
+  const u = PT.toAgentText(str(url), { kind: 'line', max: REBOUND_URL_MAX }).trim();
+  return how === 'switched' ? `${gone} — bound to ${u || 'about:blank'}; re-read the page before continuing` : `${gone} — a new tab was opened and bound for you${u && u !== 'about:blank' ? ' (' + u + ')' : ''}; open your page again`;
+}
+
 module.exports = {
   TARGET_ID_RE, TAB_ID_RE, AGENT_TAB_ACTS, USER_TAB_ACTS, OWNER_WORDS, TAB_REFUSALS, MAX_ROOTS, MAX_USER_ACTS,
   pageTargets, cleanRoots, addRoot, tabOwners, ownSetOf, ownerWord,
+  rebindPick, reboundNoteText, // lane profile-lock-roll L2: the rebind after a replaced browser
   parseTabArgv, resolveTabRef, newTabUrlVerdict, tabRow, agentTabView, agentTabVerdict,
   userTabVerdict, hostOf, chipTitle, tabRowModel,
   ownerMarkText, ownerTipText, tabRefusalText, userActsSentence, noteUserActIn, agentTabLines,

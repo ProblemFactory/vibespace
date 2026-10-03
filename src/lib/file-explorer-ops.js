@@ -79,6 +79,9 @@ export function installExplorerOps(FileExplorer) {
         items.push(...this.app.officeMenuItems(q.cached, { host, file: fullPath }));
         if (!q.cached) officeAsk = { promise: q.promise, host, file: fullPath };
       }
+      // Layer 0 apps (owner D4): a .deb the user has — its plan on the machine that holds it (THE install dialog; the
+      // file is copied into that machine's package cache with its sha256, so it comes back after a rebuild)
+      if (/\.deb$/i.test(dataset.name) && this.app.openDebInstall) items.push({ label: t('Install this package…'), action: () => this.app.openDebInstall({ host: this._host || null, path: fullPath }) });
     }
     if (isArchive && !isDir) {
       items.push({ sep: true });

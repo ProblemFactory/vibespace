@@ -38,6 +38,8 @@ import { reconcileKeyed } from './user-todos-row.js';
 import { track } from './telemetry-client.js';
 import * as R from '../integration-registry.js';
 import { switcherModel, switchOutcomeWords, installOutcomeWords, dismissOutcomeWords, viewErrorWords, chipWords, choicesOf, backendFactOf } from './browser-switcher-model.js';
+import { openBuildDialog } from './browser-build-dialog.js'; // lane browser-admin 2a: the build row's Change build…
+import { cardBuildLine } from './browser-build-model.js';
 import { displayFactOf, displayFactText } from './browser-display-words.js'; // lane headless-fallback: the browser runs headless (no desktop session) — said under the now line
 
 const json = (method, body) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
@@ -198,6 +200,9 @@ export function openBrowserSwitcher(app, { profileId, sessionId = null, preselec
       if (m.claims.length) entries.push({ key: 'claims', kind: 'claims', claims: m.claims });
       entries.push({ kind: 'now', ...m.now });
       { const dt = displayFactText(displayFactOf(app._browserProfiles, profileId)); if (dt) entries.push({ key: 'display', kind: 'display', text: dt }); } // one sentence (the default create/patch)
+      // lane browser-admin 2a: THE CHROME BUILD row — which build this profile runs (and what its browser reports), with its
+      // ONE act, Change build… (a chromium profile only; CloakBrowser runs its own measured build)
+      { const b = st.view.build ? cardBuildLine({ provider: 'chromium', ...st.view.build }, t) : null; if (b) entries.push({ key: 'build', kind: 'empty', text: b.text, action: { kind: 'build', label: t('Change build…') } }); }
       if (m.notice) entries.push({ kind: 'notice', ...m.notice });
       for (const tg of m.targets) {
         entries.push({ kind: 'target', ...tg });
@@ -225,6 +230,7 @@ export function openBrowserSwitcher(app, { profileId, sessionId = null, preselec
     if (a.kind === 'integration') { close(); app.openIntegration?.(a.integrationId || e.integrationId); return; }
     if (a.kind === 'settings') { close(); app._settingsUI?.open({ search: 'CloakBrowser' }); return; }
     if (a.kind === 'profiles') { close(); app.openBrowserProfiles?.(); return; }
+    if (a.kind === 'build') { close(); openBuildDialog(app, profileId, { label: st.view?.profile?.label || '' }); return; } // lane browser-admin 2a
     // BROWSE YOURSELF (B-6ae8): open the profile's browser for the user (his own window — the dialog closes first), or close
     // his browsing so the switch can go ahead (the dialog stays: the broadcast re-draws the card as a switch)
     if (a.kind === 'browse-yourself') { close(); app.browseYourself?.(a.profileId || profileId, { label: st.view?.profile?.label || '' }); return; }

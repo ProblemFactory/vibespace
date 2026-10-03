@@ -368,6 +368,12 @@ const NOTICE_RENDERERS = Object.freeze({
   // lane browser-propose (2026-09-30): an approved switch told for FREE — only when the ladder's stash could not take the
   // words (the proposal runner's one carrier otherwise); the words are browser-switch.approvedText's
   'browser-proposal': (n) => '<system-reminder>\n' + String((n && n.text) || '').slice(0, 1200) + '\n</system-reminder>',
+  // lane hooks-create (2026-10-01): the registration that CREATED the hook file reached a session that started without
+  // it — ONE free next-turn note (src/hooks-late.js); agent-routes drops it unread in any OTHER process (a resume)
+  'hooks-late': (n) => require('./hooks-late').renderHooksLateNotice(n),
+  // lane browser-admin 2a: the user's Change build… restarted a browser this conversation uses — the relaunch's own words
+  // (browser-interrupt.relaunchText: what was interrupted, its tab reopened), free, at the agent's next turn
+  'browser-relaunch': (n) => '<system-reminder>\n' + require('./browser-interrupt').relaunchText({ label: n && n.label, from: n && n.from, to: n && n.to, n: n && n.n, verbs: n && n.verbs, outcome: n && n.outcome }) + '\n</system-reminder>',
 });
 
 module.exports = { SessionStatusManager, SESSION_STATES: STATES, SESSION_URGENCIES: URGENCIES, NOTICE_KINDS: Object.keys(NOTICE_RENDERERS) };

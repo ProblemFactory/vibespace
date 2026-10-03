@@ -486,6 +486,8 @@ const SETTINGS_SCHEMA = {
       { value: 'no', label: t('Headless') },
     ],
     label: t('Show the agent browser window'),
+    // lane hooks-create H5 (the owner's decision 2026-10-01) — its rule (UNSET + no desktop + Xvfb ⇒ the hidden-window rung)
+    // is OFF in 2.369.200 (browser-display NO_DESKTOP_WINDOW_DEFAULT): these words say .199's meaning until it ships in .201
     description: t('Whether an agent\'s browser draws a real window on this machine\'s desktop. Unset (default): whatever your own ~/.agent-browser/config.json says. A visible window per session is one framebuffer per session and, on the installed CLI, is also exempt from the idle timeout above.'),
     category: t('Agent browser'), liveApply: true,
     // lane headless-fallback (2026-09-28): a PREFERENCE — the row also shows the FACT (this machine's display now, read-only):
@@ -558,6 +560,16 @@ const SETTINGS_SCHEMA = {
   // program when it was installed some other way. Empty = the one Manage
   // agents installed (lane-cloak: the pinned, measured build — never a PATH
   // guess: the `cloakbrowser` command is the vendor's management CLI).
+  // lane browser-admin 2b: THE BROWSER CLI VibeSpace drives — the one on PATH (as before), or the version its flag table was
+  // measured on, installed by VibeSpace into its data folder (the Agent browser panel's Install the measured version…), or a
+  // version you name (installed the same way; its flags are judged both ways — the table was measured on another). Read by
+  // the browser keeper (src/server/browser-keeper.js cliPin) on every resolve of the CLI.
+  'browser.cli': {
+    type: 'string', default: 'path',
+    label: t('Browser CLI version'),
+    description: t('Which agent-browser VibeSpace drives: "path" = the one on this computer\'s PATH; "pinned" = the version VibeSpace was tested with, installed by VibeSpace (Agent browser panel → Install the measured version…); or a version number such as 0.39.2, installed the same way.'),
+    category: t('Agent browser'), liveApply: true,
+  },
   'browser.cloak.executablePath': {
     type: 'string', default: '',
     label: t('CloakBrowser program file'),

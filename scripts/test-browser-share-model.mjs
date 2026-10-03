@@ -31,7 +31,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFile, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
@@ -1376,7 +1376,1352 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   const CC = fs.readFileSync(path.join(libDir, 'channel-chrome.js'), 'utf8');
   ok(/s\.className = 'chan-note-text';/.test(CC) && /querySelector\(':scope > \.chan-note-text'\)/.test(CC), 'noteLine() names its text span and noteText() writes only there');
 }
-for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 22 })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+// ═══ ④ LANE PROFILE-LOCK-ROLL (2026-10-01): THE LOCK VERDICT KNOWS A RENAMED MACHINE ═══════════════════
+// userW's pod rolled (a new hostname, the same RWO home); his pinned profile's SingletonLock named the dead pod and every
+// start answered `profile_locked … names another machine … remove SingletonLock` until his agent removed it by hand (W1).
+// The witness is the keeper's OWN registry: every launch stamps the record with the machine's hostname; a lock naming a
+// hostname this keeper itself launched on is `stale-previous-host` — removed, launched; a foreign hostname it never launched
+// on stays refused by name with the two hostnames and the one command. A legacy record inherits the registry FILE's writer.
+console.log('— ④ lane profile-lock-roll: a lock under this machine\'s PREVIOUS name is taken over; a stranger\'s stays refused by name');
+{
+  const HOST = os.hostname();
+  const deadPid = await new Promise((resolve) => { const c = spawn('true', [], { stdio: 'ignore' }); c.on('exit', () => resolve(c.pid)); });
+  await sleep(50);
+  // (a) PURE — the verdict table: ours / previous-host / foreign-unknown / live holder, and the refusal's words
+  const D = '/h/.agent-browser/vs-bp-00000001';
+  const V = (x) => B.profileLockVerdict({ lock: { host: HOST, pid: 77 }, hostname: HOST, dir: D, minted: true, recorded: null, mark: 'bp-00000001', holder: { pid: 77, alive: true, cmdline: `chrome\0--user-data-dir=${D}\0--vibespace-keeper=bp-00000001`, dirs: [D], starttime: 5, parentIsDaemon: false, parentPid: 1 }, ...x });
+  // verify r1 (F1): the roll's lock names a pid that is GONE (the old pod died with it) — the hostname rule's rows say so;
+  // the lane's first table left the baseline's LIVE holder under them and so encoded the takeover of a live holder
+  const DEAD = { pid: 77, alive: false };
+  const rows = [
+    [V({}).kind, 'own-orphan', 'ours (this hostname, this record\'s mark, no daemon above it)'],
+    [V({ lock: { host: 'pod-old', pid: 77 }, holder: DEAD, launchHosts: ['pod-old'] }).kind, 'stale-previous-host', 'previous-host: the lock names a hostname this keeper launched on (its pid gone — the roll)'],
+    [V({ lock: { host: 'pod-old', pid: 77 }, holder: DEAD, launchHosts: ['pod-older', 'pod-old', HOST] }).kind, 'stale-previous-host', 'previous-host: anywhere in the lineage'],
+    [V({ lock: { host: 'stranger', pid: 77 }, holder: DEAD, launchHosts: ['pod-old'] }).kind, 'foreign', 'foreign-unknown: a hostname never launched on'],
+    [V({ lock: { host: 'stranger', pid: 77 }, holder: DEAD }).kind, 'foreign', 'foreign-unknown: no lineage at all (the pre-lane default)'],
+    [V({ lock: { host: 'stranger', pid: 77 }, holder: DEAD, launchHosts: [''] }).kind, 'foreign', 'foreign-unknown: an empty lineage entry is no witness'],
+    [V({ lock: { host: HOST, pid: 77 }, launchHosts: ['pod-old'], holder: { pid: 77, alive: true, cmdline: `chrome\0--user-data-dir=${D}\0--vibespace-keeper=bp-00000001`, dirs: [D], starttime: 5, parentIsDaemon: true, parentPid: 70, daemonPid: 70 } }).kind, 'foreign', 'live holder: our hostname, a live daemon above it (the lineage changes nothing on our own name)'],
+    [V({ lock: null, launchHosts: ['pod-old'] }).kind, 'free', 'no lock'],
+    // verify r1 (F1): a lock under a PREVIOUS name whose pid is ALIVE on this machine and names the directory (the machine
+    // was renamed under a running browser) — judged by the holder's own facts, never taken over
+    [V({ lock: { host: 'pod-old', pid: 77 }, launchHosts: ['pod-old'] }).kind, 'own-orphan', 'live holder under a previous name: our orphan (ended), never stale-previous-host'],
+    [V({ lock: { host: 'pod-old', pid: 77 }, launchHosts: ['pod-old'], holder: { pid: 77, alive: true, cmdline: `chrome\0--user-data-dir=${D}\0--vibespace-keeper=bp-00000001`, dirs: [D], starttime: 5, parentIsDaemon: true, parentPid: 70, daemonPid: 70 } }).kind, 'foreign', 'live holder under a previous name with a live daemon above it: refused by name'],
+    [V({ lock: { host: 'pod-old', pid: 77 }, launchHosts: ['pod-old'], preMarkAllowed: false, holder: { pid: 77, alive: true, cmdline: `chrome\0--user-data-dir=${D}`, dirs: [D], starttime: 5, parentIsDaemon: false, parentPid: 1 } }).kind, 'foreign', 'the USER\'s own Chrome on our directory under a previous name: refused by name'],
+    [V({ lock: { host: 'pod-old', pid: 77 }, launchHosts: ['pod-old'], holder: { pid: 77, alive: true, cmdline: null } }).kind, 'foreign', 'alive but unreadable under a previous name: refused, never guessed'],
+    [V({ lock: { host: 'pod-old', pid: 77 }, launchHosts: ['pod-old'], holder: { pid: 77, alive: true, cmdline: 'sleep\u0000600', dirs: [], starttime: 5, parentIsDaemon: false, parentPid: 1 } }).kind, 'stale-previous-host', 'a recycled pid alive here that does NOT name the directory: still the roll'],
+  ];
+  const badRows = rows.filter((r) => r[0] !== r[1]);
+  ok(!badRows.length, `④a PURE profileLockVerdict: ${rows.length} rows (${rows.map((r) => r[2].split(':')[0]).join(' · ')})`, badRows);
+  const prev = V({ lock: { host: 'pod-old', pid: 77 }, holder: DEAD, launchHosts: ['pod-old'] });
+  ok(prev.host === 'pod-old' && /previous name, pod-old/.test(prev.why) && /taken over/.test(prev.why) && /SingletonLock/.test(prev.why), '④a the previous-host verdict names the old hostname and says "taken over"', prev.why);
+  const unk = V({ lock: { host: 'stranger', pid: 77 }, holder: DEAD, launchHosts: ['pod-old'] });
+  const rf = B.profileLockedRefusal({ label: 'Roll', dir: D, verdict: unk });
+  ok(rf.code === 'profile_locked' && /stranger/.test(rf.error) && rf.error.includes(HOST) && /rm -f '\/h\/\.agent-browser\/vs-bp-00000001\/SingletonLock'/.test(rf.error) && !/held by another browser process/.test(rf.error) && !/it may be your own browser/.test(rf.error) && !CMDLINE_RE.test(rf.error), '④a the foreign-unknown refusal names BOTH hostnames and the ONE command (never "held by a browser process", never "your own browser")', rf.error);
+  ok(B.launchHostsOf({ hosts: ['a', 'b'], host: 'b' }).join() === 'a,b' && B.launchHostsOf({ host: 'c' }).join() === 'c' && B.launchHostsOf({}, 'file-host').join() === 'file-host' && B.launchHostsOf(null, null).length === 0 && B.launchHostsOf({ hosts: ['a'] }, 'file-host').join() === 'a', '④a launchHostsOf: the lineage, the last host, the FILE writer only for a record without a stamp, else nothing');
+  ok(JSON.stringify(B.withLaunchHost({ hosts: ['a', 'b'] }, 'b')) === JSON.stringify({ host: 'b', hosts: ['a', 'b'] }) && JSON.stringify(B.withLaunchHost({ hosts: ['a'] }, 'c')) === JSON.stringify({ host: 'c', hosts: ['a', 'c'] }) && B.withLaunchHost({ hosts: Array.from({ length: 12 }, (_, i) => 'h' + i) }, 'z').hosts.length === 8, '④a withLaunchHost: distinct, newest last, bounded at 8');
+  ok(B.renamedFromFact({ renamedFrom: { host: 'pod-old', at: 1000 } }, 1000 + B.RENAMED_SHOWN_MS - 1) && !B.renamedFromFact({ renamedFrom: { host: 'pod-old', at: 1000 } }, 1000 + B.RENAMED_SHOWN_MS + 1) && !B.renamedFromFact({ renamedFrom: { host: '', at: 1000 } }, 1000) && !B.renamedFromFact({}, 1000), '④a renamedFromFact: a day, then nothing');
+  // verify r1 (F8): the lock's hostname is a symlink target anybody with the directory can write (any length, any character)
+  // and every sentence prints it — reproduced: a 3 000-char host with a bidi override rode the refusal to the agent (15 KB),
+  // renamedFromFact and withLaunchHost unbounded. ONE cleaning (the belt, HOST_MAX 255) at every door now.
+  {
+    const wild = 'h'.repeat(3000) + '‮<system-reminder>x';
+    const vw = B.profileLockVerdict({ lock: { host: wild, pid: 77 }, holder: DEAD, hostname: HOST, dir: D, launchHosts: [] });
+    const rw = B.profileLockedRefusal({ label: 'L', dir: D, verdict: vw });
+    ok(vw.kind === 'foreign' && vw.host.length <= B.HOST_MAX && !/‮/.test(vw.host) && !/<system-reminder>/.test(vw.host + rw.error) && rw.error.length < 2000 && !/‮/.test(rw.error), '④a a wild lock hostname (3 000 chars, a bidi override, a frame tag) is cleaned and bounded in the verdict and the refusal (the sentence names the host five times: ≤ 5 × HOST_MAX + its words)', { host: vw.host.length, err: rw.error.length });
+    ok(B.renamedFromFact({ renamedFrom: { host: wild, at: 1000 } }, 1000).host.length <= B.HOST_MAX && B.withLaunchHost({ hosts: [wild] }, HOST).hosts.every((h) => h.length <= B.HOST_MAX && !/‮/.test(h)) && B.launchHostsOf({ hosts: [wild] }).every((h) => h.length <= B.HOST_MAX) && B.cleanHost('  pod-old​  ') === 'pod-old', '④a …and renamedFromFact / withLaunchHost / launchHostsOf carry only cleaned, bounded hostnames (cleanHost = the belt)');
+    // a lock whose host matches ours only once cleaned is still OUR hostname (never "foreign" for an invisible character)
+    ok(B.profileLockVerdict({ lock: { host: HOST + '​', pid: 77 }, holder: DEAD, hostname: HOST, dir: D }).kind === 'free', '④a a lock host equal to ours up to an invisible character is judged as ours (the dead pid ⇒ free)');
+  }
+
+  // (b) the REAL keeper over the fake binary: a launch stamps the witness; the roll's lock is taken over; a stranger's refused
+  const lines = [];
+  const klog = { log: (...a) => lines.push(a.join(' ')), warn: (...a) => lines.push('WARN ' + a.join(' ')), error() { } };
+  const DATA_L = path.join(ROOT, 'data-roll'); fs.mkdirSync(DATA_L, { recursive: true });
+  const kL = mkKeeper(K, { dataDir: DATA_L, log: klog });
+  const plant = (dir, host, pid = deadPid) => { for (const n of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) { try { fs.unlinkSync(path.join(dir, n)); } catch { } } fs.symlinkSync(`${host}-${pid}`, path.join(dir, 'SingletonLock')); fs.symlinkSync(path.join(ROOT, 'gone-socket-dir', 'SingletonSocket'), path.join(dir, 'SingletonSocket')); fs.symlinkSync('0123456789abcdef', path.join(dir, 'SingletonCookie')); };
+  const singletons = (dir) => ['SingletonLock', 'SingletonSocket', 'SingletonCookie'].filter((n) => { try { fs.lstatSync(path.join(dir, n)); return true; } catch { return false; } });
+  try {
+    const roll = kL.createProfile({ label: 'Roll' });
+    const L0 = logOf('launches.log').length;
+    await kL.attach({ profileId: roll.id, browserKey: KA, sessionId: 'sess-1' });
+    let rec = kL._reg().browsers[roll.id];
+    ok(rec && rec.state === 'ready' && rec.host === HOST && Array.isArray(rec.hosts) && rec.hosts.join() === HOST && logOf('launches.log').length === L0 + 1, '④b a launch stamps the record with THIS machine\'s hostname (the witness the next pod reads)', { host: rec && rec.host, hosts: rec && rec.hosts });
+    const onDisk = JSON.parse(fs.readFileSync(path.join(DATA_L, 'browser-profiles.json'), 'utf8'));
+    ok(onDisk.host === HOST && onDisk.browsers[roll.id].host === HOST, '④b …and the registry file names its writer (the legacy witness of a record written before the stamp)', { host: onDisk.host });
+    await kL.stop(roll.id, { why: 'user' });
+    // THE ROLL: the registry says the last launch was on pod-old (as the file the old pod wrote would), the lock names pod-old
+    rec = kL._reg().browsers[roll.id]; rec.host = 'pod-old'; rec.hosts = ['pod-old'];
+    plant(roll.dir, 'pod-old');
+    const L1 = logOf('launches.log').length;
+    const n0 = lines.length;
+    const a2 = await kL.attach({ profileId: roll.id, browserKey: KA, sessionId: 'sess-1' });
+    rec = kL._reg().browsers[roll.id];
+    const said = lines.slice(n0).find((l) => /taken over/.test(l)) || '';
+    ok(a2 && a2.browser && a2.browser.state === 'ready' && logOf('launches.log').length === L1 + 1 && singletons(roll.dir).length === 0, '④b THE ROLL: a lock naming a hostname this keeper launched on is taken over — the three Singleton symlinks removed, the browser launched, never profile_locked', { state: a2 && a2.browser && a2.browser.state, left: singletons(roll.dir) });
+    ok(/previous name pod-old/.test(said) && /SingletonLock, SingletonSocket, SingletonCookie removed/.test(said) && said.includes(HOST), '④b …said in the journal: the old name, what was removed, this machine\'s name', said);
+    ok(rec.host === HOST && rec.hosts.join() === 'pod-old,' + HOST, '④b …the record carries the lineage (pod-old, then this machine)', rec.hosts);
+    const pr = kL.profile(roll.id);
+    ok(pr.renamedFrom && pr.renamedFrom.host === 'pod-old' && B.renamedFromFact(pr, clock) && B.renamedFromFact(pr, clock).host === 'pod-old' && kL.list().profiles.find((x) => x.id === roll.id).renamedFrom.host === 'pod-old' && kL.list().machine && kL.list().machine.host === HOST, '④b …the profile says "renamed from pod-old" (the digest carries it, the machine\'s own name beside it)', pr.renamedFrom);
+    await kL.stop(roll.id, { why: 'user' });
+    // THE STRANGER: a hostname this keeper never launched on — refused by name, nothing removed, nothing launched
+    plant(roll.dir, 'stranger');
+    const L2 = logOf('launches.log').length;
+    const e = await threw(() => kL.attach({ profileId: roll.id, browserKey: KA, sessionId: 'sess-1' }));
+    ok(e && e.code === 'profile_locked' && /stranger/.test(e.message) && e.message.includes(HOST) && /rm -f '/.test(e.message) && e.message.includes(roll.dir) && !/held by another browser process/.test(e.message) && logOf('launches.log').length === L2 && singletons(roll.dir).length === 3, '④b THE STRANGER: a lock naming a hostname this keeper never launched on is refused by name — both hostnames and the one command; nothing removed, nothing launched', e && e.message);
+    for (const n of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) { try { fs.unlinkSync(path.join(roll.dir, n)); } catch { } }
+    // verify r1 (F1) THE LIVE HOLDER UNDER A PREVIOUS NAME: a process alive on THIS machine names the directory (the machine
+    // was renamed under it); its lock names the old name + its live pid. Reproduced: the lock was unlinked under the live
+    // holder and a second browser launched on the directory (the real Chrome refuses any existing lock itself — exit 21 —
+    // so only this takeover could land two). Now: judged by the holder's own facts — here our orphan (the mark, no daemon
+    // above it): ENDED, nothing taken over, the launch goes on; a user's Chrome would be refused by name (the PURE row).
+    {
+      rec = kL._reg().browsers[roll.id]; rec.host = 'pod-old'; rec.hosts = ['pod-old'];
+      const hp = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)', '--', `--user-data-dir=${roll.dir}`, `--vibespace-keeper=${roll.id}`], { stdio: 'ignore' });
+      spawned.add(hp.pid);
+      await sleep(200);
+      plant(roll.dir, 'pod-old', hp.pid);
+      const L3 = logOf('launches.log').length, n3 = lines.length;
+      const e3 = await threw(() => kL.attach({ profileId: roll.id, browserKey: KA, sessionId: 'sess-1' }));
+      const holderAlive = (() => { try { process.kill(hp.pid, 0); return true; } catch { return false; } })();
+      const said3 = lines.slice(n3);
+      ok(!e3 && !holderAlive && !said3.some((l) => /taken over/.test(l)) && said3.some((l) => /ended its own orphaned browser pid \d+ before launching/.test(l)) && logOf('launches.log').length === L3 + 1, '④b THE LIVE HOLDER UNDER A PREVIOUS NAME: a process alive here naming the directory is judged by its own facts — our orphan is ENDED (never "taken over" under it), then the launch goes on', { e: e3 && e3.message, holderAlive, said: said3.filter((l) => /taken over|ended|NOT launched/.test(l)) });
+      try { process.kill(hp.pid, 'SIGKILL'); } catch { }
+      await kL.stop(roll.id, { why: 'user' });
+      for (const n of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) { try { fs.unlinkSync(path.join(roll.dir, n)); } catch { } }
+    }
+    // verify r1 (F5) THE LOCK THAT CANNOT BE REMOVED: the directory is not writable (a volume re-attached read-only after a
+    // roll, a directory of another uid after a username migration). Reproduced: the journal said "taken over (nothing left
+    // to remove)" and the launch went into the directory still locked (the real Chrome dies on it: exit 21 behind a generic
+    // "could not start"). Now: the post-check refuses by name — the errno and the one command — nothing launched.
+    const readOnly = async (kk, prof, tag) => {
+      rec = kk._reg().browsers[prof.id]; rec.host = 'pod-old'; rec.hosts = ['pod-old']; rec.state = 'stopped';
+      plant(prof.dir, 'pod-old');
+      fs.chmodSync(prof.dir, 0o500);
+      const Lr = logOf('launches.log').length, nr = lines.length;
+      const er = await threw(() => kk.attach({ profileId: prof.id, browserKey: KA, sessionId: 'sess-1' }));
+      const r = { err: er && er.code, msg: er && er.message, launched: logOf('launches.log').length - Lr, left: singletons(prof.dir).length, said: lines.slice(nr).filter((l) => /could NOT be removed|taken over/.test(l)) };
+      fs.chmodSync(prof.dir, 0o700);
+      for (const n of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) { try { fs.unlinkSync(path.join(prof.dir, n)); } catch { } }
+      try { await kk.stop(prof.id, { why: 'user' }); } catch { /* none */ }
+      return r;
+    };
+    if (process.getuid && process.getuid() === 0) ok(true, '④b (read-only directory leg SKIPPED: root ignores directory modes)');
+    else {
+      const ro = await readOnly(kL, roll, 'product');
+      ok(ro.err === 'profile_locked' && /could not remove the lock \(EACCES\)/.test(ro.msg) && new RegExp(`rm -f '${roll.dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/SingletonLock'`).test(ro.msg) && ro.launched === 0 && ro.left === 3 && ro.said.some((l) => /could NOT be removed \(EACCES\)/.test(l)) && !ro.said.some((l) => /taken over/.test(l)), '④b THE LOCK THAT CANNOT BE REMOVED: a takeover whose unlink fails is refused by name (the errno, the one command), nothing launched, the journal never says "taken over"', ro);
+    }
+    // (c) THE LEGACY WITNESS: a registry file written by the old pod (its `host` stamp) holding a record from before the
+    // per-launch stamp — the lock naming that pod is taken over; the same file without the stamp refuses by name
+    for (const [tag, fileHost, expectOk] of [['stamped', 'pod-old', true], ['unstamped', null, false]]) {
+      const DATA_X = path.join(ROOT, 'data-legacy-' + tag); fs.mkdirSync(DATA_X, { recursive: true });
+      const id = tag === 'stamped' ? 'bp-00000a11' : 'bp-00000a12';
+      const dir = path.join(HOME, '.agent-browser', B.profileDirName(id)); fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+      const legacy = { version: 1, ...(fileHost ? { host: fileHost } : {}), profiles: [B.newProfileRecord({ id, label: 'Legacy ' + tag, dir, now: 1 })], leases: [], browsers: { [id]: { profileId: id, ns: 'vs-' + id, pid: null, starttime: null, cdpUrl: null, state: 'stopped', startedAt: 1, endedAt: 2, lastError: null, mark: id } } };
+      fs.writeFileSync(path.join(DATA_X, 'browser-profiles.json'), JSON.stringify(legacy));
+      plant(dir, 'pod-old');
+      const kX = mkKeeper(K, { dataDir: DATA_X, log: klog });
+      const Lx = logOf('launches.log').length;
+      const ex = await threw(() => kX.attach({ profileId: id, browserKey: KA, sessionId: 'sess-1' }));
+      if (expectOk) ok(!ex && logOf('launches.log').length === Lx + 1 && singletons(dir).length === 0 && kX._reg().browsers[id].hosts.join() === 'pod-old,' + HOST, '④c LEGACY + the file\'s writer: a record from before the stamp inherits the hostname the registry file was saved under — the old pod\'s lock is taken over', ex && ex.message);
+      else ok(ex && ex.code === 'profile_locked' && /pod-old/.test(ex.message) && logOf('launches.log').length === Lx && singletons(dir).length === 3, '④c LEGACY without a witness: a file with no writer stamp admits nothing — refused by name, the lock left in place (never guessed)', ex && ex.message);
+      try { for (const p of kX.list().profiles) await kX.stop(p.id).catch(() => { }); } catch { /* none */ }
+      kX.shutdown();
+    }
+    // verify r1 (F2) THE SECOND BOOT: the file's writer is persisted onto the legacy record at load, so a boot that saves
+    // WITHOUT a launch (every boot does: the dead browser is marked stopped) does not lose the witness for the next
+    // restart. Reproduced: boot → the file re-stamped under THIS name, the record still unstamped → a second keeper refused
+    // the old pod's lock by name (userW's class, one Update later).
+    const secondBoot = async (Kmod, tag) => {
+      const DATA_X = path.join(ROOT, 'data-legacy2-' + tag); fs.mkdirSync(DATA_X, { recursive: true });
+      const id = tag === 'product' ? 'bp-00000a21' : 'bp-00000a22';
+      const dir = path.join(HOME, '.agent-browser', B.profileDirName(id)); fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+      const legacy = { version: 1, host: 'pod-old', profiles: [B.newProfileRecord({ id, label: 'Legacy2 ' + tag, dir, now: 1 })], leases: [], browsers: { [id]: { profileId: id, ns: 'vs-' + id, pid: null, starttime: null, cdpUrl: null, state: 'stopped', startedAt: 1, endedAt: 2, lastError: null, mark: id } } };
+      fs.writeFileSync(path.join(DATA_X, 'browser-profiles.json'), JSON.stringify(legacy));
+      plant(dir, 'pod-old');
+      const k1 = mkKeeper(Kmod, { dataDir: DATA_X, log: klog });
+      await k1.boot(); k1.createProfile({ label: 'Other' }); // a boot, a save, no launch
+      const onDisk = JSON.parse(fs.readFileSync(path.join(DATA_X, 'browser-profiles.json'), 'utf8'));
+      k1.shutdown();
+      const k2 = mkKeeper(Kmod, { dataDir: DATA_X, log: klog });
+      const Lx = logOf('launches.log').length;
+      const ex = await threw(() => k2.attach({ profileId: id, browserKey: KA, sessionId: 'sess-1' }));
+      const r = { fileHost: onDisk.host, hosts: onDisk.browsers[id].hosts, err: ex && ex.code, launched: logOf('launches.log').length - Lx, left: singletons(dir).length };
+      try { for (const p of k2.list().profiles) await k2.stop(p.id).catch(() => { }); } catch { /* none */ }
+      k2.shutdown();
+      return r;
+    };
+    const sb = await secondBoot(K, 'product');
+    ok(sb.fileHost === HOST && Array.isArray(sb.hosts) && sb.hosts.join() === 'pod-old' && !sb.err && sb.launched === 1 && sb.left === 0, '④c THE SECOND BOOT: a boot that saved without a launch re-stamps the file under this name but the legacy record now CARRIES the old pod as its lineage — the next restart still takes the old pod\'s lock over', sb);
+    // (d) CONTROLS — a patched copy per rule
+    const bsrc = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8');
+    const noLineage = bsrc.replace("if (ours.includes(lockHost)) return { step: 'hostname', kind: 'stale-previous-host'", "if (false) return { step: 'hostname', kind: 'stale-previous-host'");
+    ok(noLineage !== bsrc, '④d control setup: the lineage rule is where the control cuts');
+    const Bpre = M.load('src/browser-profiles.js', noLineage, 'no-lineage');
+    ok(Bpre.profileLockVerdict({ lock: { host: 'pod-old', pid: 77 }, hostname: HOST, dir: D, launchHosts: ['pod-old'] }).kind === 'foreign', '④d CONTROL: a verdict without the lineage rule reads the previous-host lock as foreign — the ④a row catches it (the pre-lane shape: userW\'s profile_locked)');
+    // verify r1 (F1): a copy whose hostname rule ignores a holder alive here — the lane's first shape
+    const noLive = bsrc.replace('const liveHere = !!(holder && holder.alive && holder.cmdline != null && (holder.dirs || []).some((d) => sameDir(d, dir)));', 'const liveHere = false; /* CONTROL */');
+    ok(noLive !== bsrc, '④d control setup: the live-holder precondition is where the control cuts');
+    const Bnl = M.load('src/browser-profiles.js', noLive, 'no-live-here');
+    ok(Bnl.profileLockVerdict({ lock: { host: 'pod-old', pid: 77 }, hostname: HOST, dir: D, minted: true, mark: 'bp-00000001', launchHosts: ['pod-old'], holder: { pid: 77, alive: true, cmdline: `chrome\0--user-data-dir=${D}\0--vibespace-keeper=bp-00000001`, dirs: [D], starttime: 5, parentIsDaemon: false, parentPid: 1 } }).kind === 'stale-previous-host', '④d CONTROL: a verdict that does not ask whether the lock\'s pid is alive here takes a LIVE holder\'s lock over — the ④a live-holder rows catch it');
+    const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+    const noStamp = ksrc.replace(/stampLaunchHost\(rec, prevRec, p\.dir \|\| null\); \/\/ lane profile-lock-roll \(L1\)[^\n]*/, '/* CONTROL: no stamp */'); // (r4: the directory rides the stamp)
+    const noRemove = ksrc.replace('const removed = F.removeSingletonFiles(dir);', 'const removed = []; /* CONTROL: nothing removed */');
+    ok(noStamp !== ksrc && noRemove !== ksrc, '④d control setup: the stamp and the removal are where the controls cut');
+    // verify r1 (F2): a copy that keeps the file's writer only in memory — the lane's first shape
+    const noLoadStamp = ksrc.replace(/if \(fileHost\) for \(const rec of Object\.values\(reg\.browsers\)\)[^\n]*/, '/* CONTROL: the legacy witness stays in memory */');
+    ok(noLoadStamp !== ksrc, '④d control setup: the load-time stamp is where the control cuts');
+    const sbc = await secondBoot(M.load('src/server/browser-keeper.js', noLoadStamp, 'no-load-stamp'), 'control');
+    ok(sbc.fileHost === HOST && !sbc.hosts && sbc.err === 'profile_locked' && sbc.launched === 0 && sbc.left === 3, '④d CONTROL: a keeper that never persists the file\'s writer onto the legacy record loses the witness at the first save — the second boot refuses the old pod\'s lock by name (the ④c second-boot leg catches it)', sbc);
+    const DATA_N = path.join(ROOT, 'data-nostamp'); fs.mkdirSync(DATA_N, { recursive: true });
+    const kN = mkKeeper(M.load('src/server/browser-keeper.js', noStamp, 'no-stamp'), { dataDir: DATA_N, log: klog });
+    const pN = kN.createProfile({ label: 'NoStamp' });
+    await kN.attach({ profileId: pN.id, browserKey: KA, sessionId: 'sess-1' });
+    const recN = kN._reg().browsers[pN.id];
+    ok(recN && recN.state === 'ready' && !recN.host && !recN.hosts, '④d CONTROL: a keeper that does not stamp the launch host leaves no witness on the record — the ④b stamp leg catches it (the next pod would refuse its own lock)', { host: recN && recN.host });
+    await kN.stop(pN.id, { why: 'user' }); kN.shutdown();
+    const DATA_R = path.join(ROOT, 'data-noremove'); fs.mkdirSync(DATA_R, { recursive: true });
+    const kR = mkKeeper(M.load('src/server/browser-keeper.js', noRemove, 'no-remove'), { dataDir: DATA_R, log: klog });
+    const pR = kR.createProfile({ label: 'NoRemove' });
+    await kR.attach({ profileId: pR.id, browserKey: KA, sessionId: 'sess-1' });
+    await kR.stop(pR.id, { why: 'user' });
+    const recR = kR._reg().browsers[pR.id]; recR.host = 'pod-old'; recR.hosts = ['pod-old'];
+    plant(pR.dir, 'pod-old');
+    const eR = await threw(() => kR.attach({ profileId: pR.id, browserKey: KA, sessionId: 'sess-1' }));
+    // verify r1 (F5): a takeover that removes nothing is now REFUSED by the post-check (the lock still there) — the ④b
+    // "removed" leg catches the missing removal, the ④b read-only leg catches a missing post-check (the control below)
+    ok(eR && eR.code === 'profile_locked' && /could not remove the lock/.test(eR.message) && singletons(pR.dir).length === 3, '④d CONTROL: a takeover that removes nothing leaves the three symlinks and is REFUSED by the post-check — never a launch into the locked directory (the ④b "removed" leg catches the removal)', eR && eR.message);
+    for (const n of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) { try { fs.unlinkSync(path.join(pR.dir, n)); } catch { } }
+    kR.shutdown();
+    if (!(process.getuid && process.getuid() === 0)) {
+      const noPost = ksrc.replace('const left = F.singletonLeft(dir);', 'const left = []; /* CONTROL: no post-check */');
+      ok(noPost !== ksrc, '④d control setup: the post-check is where the control cuts');
+      const DATA_P = path.join(ROOT, 'data-nopost'); fs.mkdirSync(DATA_P, { recursive: true });
+      const kP = mkKeeper(M.load('src/server/browser-keeper.js', noPost, 'no-post-check'), { dataDir: DATA_P, log: klog });
+      const pP = kP.createProfile({ label: 'NoPost' });
+      await kP.attach({ profileId: pP.id, browserKey: KA, sessionId: 'sess-1' });
+      await kP.stop(pP.id, { why: 'user' });
+      const rp = await readOnly(kP, pP, 'control');
+      // (the fake binary writes its own SingletonLock.fake into the read-only directory and dies on it — `launch_failed` — where
+      // the real Chrome dies on the lock itself: exit 21; either way the copy went ON to a launch instead of refusing)
+      // (verify r3: the post-launch judgement (F3) now catches that launch and names the lock — the copy's own tell is the
+      // journal's "nothing left to remove" and the ABSENCE of the F5 refusal before the launch)
+      ok(!/could not remove the lock/.test(rp.msg || '') && rp.left === 3 && rp.said.some((l) => /taken over \(nothing left to remove/.test(l)) && !rp.said.some((l) => /could NOT be removed/.test(l)), '④d CONTROL: a takeover without the post-check says "taken over (nothing left to remove)" and goes on to a launch into the directory still locked (it dies there) — the ④b read-only leg catches it', rp);
+      kP.shutdown();
+    }
+  } catch (err) { ok(false, '④ the profile-lock-roll legs threw', err && (err.stack || err.message)); }
+  finally { try { for (const p of kL.list().profiles) await kL.stop(p.id).catch(() => { }); } catch { /* none */ } kL.shutdown(); }
+}
+// ═══ ④e VERIFY r2 (T1): THE LOCK VERDICT AS ONE CLOSED TABLE ═════════════════════════════════════════════════════
+// pid {alive here / dead / unreadable} × the lock's hostname {ours / a previous name (witness) / foreign / empty} × the live
+// pid's command line {our mark on THIS dir / a Chrome on ANOTHER dir / a Chrome with no mark on this dir (a human's) / NOT a
+// Chrome at all (pid reuse: pid_max 4 194 304 wraps about daily on the dev box) / unreadable} × the record {local / ephemeral}
+// — every cell pinned; a paired machine's profile is never judged here (browser-serve starts it where it runs). "Alive here"
+// alone never makes a live holder: the command line's DIRECTORY must agree (a reused pid under a previous name is still the
+// roll; measured on Chrome 154: a previous-host lock makes Chromium HANG on a dialog whether its pid is dead or reused — the
+// takeover is the only way up; a same-host lock at a reused non-Chrome pid Chromium clears itself in 0.1 s).
+console.log('— ④e verify r2 T1: the lock verdict as ONE closed table (pid × hostname × command line × record), the keeper on the key cells, a control per rule');
+{
+  const HOST = os.hostname(), PREV = 'pod-old', FOREIGN = 'stranger', D = '/h/.agent-browser/vs-bp-00000001', MARK = 'bp-00000001', EPH = 'bk-0000c001';
+  const alive = (cmdline, dirs, extra = {}) => ({ pid: 77, alive: true, cmdline, dirs, starttime: 5, parentIsDaemon: false, parentPid: 1, ...extra });
+  const CMD = {
+    'mark/this-dir': (mark) => alive(`chrome\0--user-data-dir=${D}\0--vibespace-keeper=${mark}`, [D]),
+    'chrome/other-dir': () => alive('chrome\0--user-data-dir=/h/other', ['/h/other']),
+    'human/this-dir': () => alive(`chrome\0--user-data-dir=${D}`, [D]),
+    'not-a-chrome(reuse)': () => alive('sleep\u0000600', []),
+  };
+  const HOSTS = { ours: HOST, previous: PREV, foreign: FOREIGN, empty: '' };
+  const base = (rec) => ({ hostname: HOST, dir: D, minted: true, recorded: null, mark: rec === 'ephemeral' ? EPH : MARK, preMarkAllowed: false, launchHosts: [PREV] });
+  const V = (rec, x) => B.profileLockVerdict({ ...base(rec), ...x });
+  const name = (v) => v.kind === 'own-orphan' ? 'take-over' : v.kind === 'free' ? 'launch' : v.kind === 'foreign' && /cannot be read/.test(v.why || '') ? 'unreadable-refused' : v.kind === 'foreign' ? `refused${v.user ? '(user)' : ''}` : v.kind;
+  const EXP = {
+    none: 'launch',
+    'dead|ours': 'launch', 'dead|previous': 'stale-previous-host', 'dead|foreign': 'refused', 'dead|empty': 'launch',
+    'unreadable|ours': 'unreadable-refused', 'unreadable|previous': 'unreadable-refused', 'unreadable|foreign': 'unreadable-refused', 'unreadable|empty': 'unreadable-refused',
+    'alive|ours|mark/this-dir': 'take-over', 'alive|ours|chrome/other-dir': 'launch', 'alive|ours|human/this-dir': 'refused(user)', 'alive|ours|not-a-chrome(reuse)': 'launch',
+    'alive|previous|mark/this-dir': 'take-over', 'alive|previous|chrome/other-dir': 'stale-previous-host', 'alive|previous|human/this-dir': 'refused(user)', 'alive|previous|not-a-chrome(reuse)': 'stale-previous-host',
+    'alive|foreign|mark/this-dir': 'take-over', 'alive|foreign|chrome/other-dir': 'refused', 'alive|foreign|human/this-dir': 'refused(user)', 'alive|foreign|not-a-chrome(reuse)': 'refused',
+    'alive|empty|mark/this-dir': 'take-over', 'alive|empty|chrome/other-dir': 'launch', 'alive|empty|human/this-dir': 'refused(user)', 'alive|empty|not-a-chrome(reuse)': 'launch',
+  };
+  const table = (Bm) => { // every cell of both records → the mismatches
+    const Vm = (rec, x) => Bm.profileLockVerdict({ ...base(rec), ...x });
+    const bad = []; let n = 0;
+    for (const rec of ['local', 'ephemeral']) {
+      const mark = rec === 'ephemeral' ? EPH : MARK;
+      const row = (key, v) => { n++; const got = name(v); if (got !== EXP[key]) bad.push(`${rec} ${key}: ${got} (expected ${EXP[key]})`); };
+      row('none', Vm(rec, { lock: null }));
+      for (const [hn, h] of Object.entries(HOSTS)) {
+        row(`dead|${hn}`, Vm(rec, { lock: { host: h, pid: 77 }, holder: { pid: 77, alive: false } }));
+        row(`unreadable|${hn}`, Vm(rec, { lock: { host: h, pid: 77 }, holder: { pid: 77, alive: true, cmdline: null } }));
+        for (const cn of Object.keys(CMD)) row(`alive|${hn}|${cn}`, Vm(rec, { lock: { host: h, pid: 77 }, holder: CMD[cn](mark) }));
+      }
+    }
+    // the live-holder column's variants, every hostname: a daemon above it, another record's mark, the recorded identity, a reused recorded pid, the pre-mark launch
+    for (const [hn, h] of Object.entries(HOSTS)) {
+      const L = { host: h, pid: 77 };
+      const vv = [
+        [Vm('local', { lock: L, holder: alive(`chrome\0--user-data-dir=${D}\0--vibespace-keeper=${MARK}`, [D], { parentIsDaemon: true, daemonPid: 70 }) }).kind, 'foreign', 'our mark under a live daemon'],
+        [Vm('local', { lock: L, holder: alive(`chrome\0--user-data-dir=${D}\0--vibespace-keeper=bp-00000009`, [D]) }).kind, 'foreign', 'another record\'s mark'],
+        [Vm('local', { lock: L, holder: alive(`chrome\0--user-data-dir=${D}`, [D]), recorded: { pid: 77, starttime: 5 } }).kind, 'own-orphan', 'the recorded browser (pid AND starttime)'],
+        [Vm('local', { lock: L, holder: alive(`chrome\0--user-data-dir=${D}`, [D]), recorded: { pid: 77, starttime: 6 } }).kind, 'foreign', 'the recorded pid at another starttime (reused)'],
+        [Vm('local', { lock: L, holder: alive(`chrome\0--user-data-dir=${D}\0--remote-debugging-port=0`, [D]), preMarkAllowed: true }).kind, 'own-orphan', 'the pre-mark CLI launch, a record from before the mark'],
+      ];
+      for (const [got, want, what] of vv) { n++; if (got !== want) bad.push(`${hn} ${what}: ${got} (expected ${want})`); }
+    }
+    return { n, bad };
+  };
+  const t = table(B);
+  ok(!t.bad.length, `④e THE CLOSED TABLE: ${t.n} cells (2 records × (1 + 4 hosts × 6) + 4 hosts × 5 variants), every one as the rule says`, t.bad);
+  // the KEEPER on the key cells with REAL processes (lockHolderFacts reads /proc): a live sleep at the lock's pid = pid reuse
+  const procs = []; const liveP = (args) => { const c = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)', '--', ...args], { stdio: 'ignore' }); procs.push(c); return c; };
+  const isAlive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const plantE = (dir, host, pid) => { for (const n of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) { try { fs.unlinkSync(path.join(dir, n)); } catch { } } fs.symlinkSync(`${host}-${pid}`, path.join(dir, 'SingletonLock')); fs.symlinkSync(path.join(ROOT, 'gone-socket-dir', 'SingletonSocket'), path.join(dir, 'SingletonSocket')); fs.symlinkSync('0123456789abcdef', path.join(dir, 'SingletonCookie')); };
+  const singletonsE = (dir) => ['SingletonLock', 'SingletonSocket', 'SingletonCookie'].filter((n) => { try { fs.lstatSync(path.join(dir, n)); return true; } catch { return false; } });
+  const DATA_E = path.join(ROOT, 'data-table'); fs.mkdirSync(DATA_E, { recursive: true });
+  const linesE = []; const klogE = { log: (...a) => linesE.push(a.join(' ')), warn: (...a) => linesE.push('WARN ' + a.join(' ')), error() { } };
+  const kE = mkKeeper(K, { dataDir: DATA_E, log: klogE });
+  const mkProf = async (label) => { const p = kE.createProfile({ label }); await kE.attach({ profileId: p.id, browserKey: KA, sessionId: 'sess-1' }); await kE.stop(p.id, { why: 'user' }); const r = kE._reg().browsers[p.id]; r.host = PREV; r.hosts = [PREV]; return p; };
+  const leg = async (label, host, args, { err = null, launched = 1, left = 0, mark = null, ended = false } = {}) => {
+    const p = await mkProf(label); const pr = liveP(args.map((a) => a.replace('<dir>', p.dir).replace('<mark>', p.id))); await sleep(120); plantE(p.dir, host, pr.pid);
+    const L0 = logOf('launches.log').length, l0 = linesE.length;
+    const e = await threw(() => kE.attach({ profileId: p.id, browserKey: KB, sessionId: 'sess-2' })); await sleep(150);
+    const got = { err: e ? e.code : null, launched: logOf('launches.log').length - L0, left: singletonsE(p.dir).length, holderAlive: isAlive(pr.pid), said: linesE.slice(l0).filter((x) => /taken over|NOT launched|ended its own/.test(x)).map((x) => x.slice(0, 120)) };
+    ok(got.err === err && got.launched === launched && got.left === left && got.holderAlive === !ended, `④e keeper: ${label} ⇒ ${got.err || 'launched'} (${got.launched} launch, ${got.left} singleton(s) left, the process ${got.holderAlive ? 'alive' : 'gone'})`, got);
+    try { await kE.stop(p.id, { why: 'user' }); } catch { /* none */ }
+  };
+  await leg('pid REUSE under the previous name (a live sleep at the lock pid) — still the roll', PREV, ['--not-a-browser']);
+  await leg('pid REUSE under OUR name — free, the stale lock left for Chromium (it clears a same-host one itself)', HOST, ['--not-a-browser'], { left: 3 });
+  await leg('a Chrome on ANOTHER directory under the previous name — the roll', PREV, ['--user-data-dir=/h/elsewhere']);
+  await leg('a HUMAN\'s Chrome on this directory under the previous name — refused by name, left running', PREV, ['--user-data-dir=<dir>'], { err: 'profile_locked', launched: 0, left: 3 });
+  // verify r2 (F4): reproduced here — the ended orphan's lock stayed under the previous name (3 left) and the launch went into it
+  await leg('OUR mark on this directory under the previous name — ours, ended, its stale lock removed, launched (never a takeover)', PREV, ['--user-data-dir=<dir>', '--vibespace-keeper=<mark>'], { ended: true });
+  ok(linesE.some((l) => /the ended orphan's lock named this machine's previous name pod-old/.test(l) && /SingletonLock, SingletonSocket, SingletonCookie removed/.test(l)), '④e …said in the journal: the ended orphan\'s previous-name lock removed (the three names)');
+  { // the recorded pid at ANOTHER starttime (a reused pid of the recorded browser), no mark ⇒ refused, left running
+    const p = await mkProf('recorded pid reused'); const pr = liveP([`--user-data-dir=${p.dir}`]); await sleep(120); plantE(p.dir, HOST, pr.pid);
+    kE._reg().browsers[p.id].browser = { pid: pr.pid, starttime: 1, dir: p.dir }; const L0 = logOf('launches.log').length;
+    const e = await threw(() => kE.attach({ profileId: p.id, browserKey: KB, sessionId: 'sess-2' }));
+    ok(e && e.code === 'profile_locked' && logOf('launches.log').length === L0 && isAlive(pr.pid), '④e keeper: the RECORDED pid at another starttime (reused), no mark ⇒ refused by name, left running', e && e.message);
+    try { await kE.stop(p.id, { why: 'user' }); } catch { /* none */ }
+  }
+  try { for (const p of kE.list().profiles) await kE.stop(p.id).catch(() => { }); } catch { /* none */ } kE.shutdown();
+  // CONTROLS — a patched copy per rule of the hostname branch (the lineage rule and the whole precondition have theirs in ④d)
+  const bsrcE = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8');
+  const aliveAlone = bsrcE.replace('const liveHere = !!(holder && holder.alive && holder.cmdline != null && (holder.dirs || []).some((d) => sameDir(d, dir)));', 'const liveHere = !!(holder && holder.alive); /* CONTROL: alive here alone */');
+  const unreadableAsDead = bsrcE.replace("if (holder && holder.alive && holder.cmdline == null) return { step: 'hostname', kind: 'foreign', pid, host: lockHost, why: `the lock (${lockPath}) was written on ${lockHost} and names pid ${pid}, which is alive on this machine but whose command line cannot be read", "if (false) return { step: 'hostname', kind: 'foreign', pid, host: lockHost, why: `the lock (${lockPath}) was written on ${lockHost} and names pid ${pid}, which is alive on this machine but whose command line cannot be read");
+  ok(aliveAlone !== bsrcE && unreadableAsDead !== bsrcE, '④e control setup: the directory test and the unreadable rule are where the controls cut');
+  const tA = table(M.load('src/browser-profiles.js', aliveAlone, 'alive-alone'));
+  ok(tA.bad.some((x) => /previous\|not-a-chrome\(reuse\): launch/.test(x)) && tA.bad.some((x) => /previous\|chrome\/other-dir: launch/.test(x)), '④e CONTROL: a verdict for which "alive here" alone is a live holder hands a reused pid under the previous name to Chromium as free — the launch hangs on its dialog (measured) — the table catches it', tA.bad.slice(0, 4));
+  // verify r2 (F4) CONTROL: a keeper that ends its orphan under a previous name and launches into the lock it left
+  {
+    const ksrcE = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+    const noClear = ksrcE.replace('function clearEndedOrphanLock(p, dir, endedPid = null) {\n    const lk = F.readSingletonLock(dir);', 'function clearEndedOrphanLock(p, dir, endedPid = null) {\n    const lk = null; /* CONTROL: the ended orphan\'s lock is left */');
+    ok(noClear !== ksrcE, '④e control setup: the ended orphan\'s lock removal is where the control cuts');
+    const DATA_C = path.join(ROOT, 'data-table-ctl'); fs.mkdirSync(DATA_C, { recursive: true });
+    const kC = mkKeeper(M.load('src/server/browser-keeper.js', noClear, 'no-ended-orphan-lock-clear'), { dataDir: DATA_C, log: klogE });
+    const pC = kC.createProfile({ label: 'Ctl' }); await kC.attach({ profileId: pC.id, browserKey: KA, sessionId: 'sess-1' }); await kC.stop(pC.id, { why: 'user' });
+    const rC = kC._reg().browsers[pC.id]; rC.host = PREV; rC.hosts = [PREV];
+    const prC = liveP([`--user-data-dir=${pC.dir}`, `--vibespace-keeper=${pC.id}`]); await sleep(120); plantE(pC.dir, PREV, prC.pid);
+    const eC = await threw(() => kC.attach({ profileId: pC.id, browserKey: KB, sessionId: 'sess-2' })); await sleep(150);
+    ok(!eC && !isAlive(prC.pid) && singletonsE(pC.dir).length === 3, '④e CONTROL: a keeper that leaves the ended orphan\'s previous-name lock launches into a directory Chromium will refuse (the three names still there) — the ④e "ours, ended" leg catches it', { err: eC && eC.code, left: singletonsE(pC.dir).length });
+    try { await kC.stop(pC.id, { why: 'user' }); } catch { /* none */ } kC.shutdown();
+  }
+  const tU = table(M.load('src/browser-profiles.js', unreadableAsDead, 'unreadable-as-dead'));
+  ok(tU.bad.some((x) => /unreadable\|previous: stale-previous-host/.test(x)), '④e CONTROL: a verdict that treats an unreadable live pid under the previous name as gone takes its lock over (a holder it could not read) — the table catches it', tU.bad.slice(0, 4));
+  for (const pr of procs) { try { pr.kill('SIGKILL'); } catch { } }
+}
+// ═══ ④f VERIFY r2 (F1): A DIRECTORY TAKEN BETWEEN THE VERDICT AND THE LAUNCH IS NAMED ════════════════════════════
+// Reproduced: the verdict read a free directory, the user's own Chrome took it before the launch ran, the binary refused
+// (exit 21 on its SingletonLock) and the keeper answered a generic `launch_failed: the browser did not start` (the
+// died-at-birth path: `browser_closed … a crash at startup?`); only the NEXT command said `profile_locked` by name. Now the
+// failed launch judges the lock again and names the holder at the first answer; the holder is left running.
+console.log('— ④f verify r2 F1: a holder that takes the directory between the verdict and the launch is named at the FIRST answer');
+{
+  const lines = [];
+  const klog = { log: (...a) => lines.push(a.join(' ')), warn: (...a) => lines.push('WARN ' + a.join(' ')), error() { } };
+  const DATA_F = path.join(ROOT, 'data-race'); fs.mkdirSync(DATA_F, { recursive: true });
+  const procs = [];
+  const singletonsF = (dir) => ['SingletonLock', 'SingletonSocket', 'SingletonCookie'].filter((n) => { try { fs.lstatSync(path.join(dir, n)); return true; } catch { return false; } });
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  // the user's own browser on the directory: a live process whose command line names it (no mark of ours) + the three
+  // symlinks under THIS hostname + the fake binary's own lock (so its launch refuses like Chrome's exit 21)
+  const takeDir = async (dir) => { const c = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)', '--', `--user-data-dir=${dir}`], { stdio: 'ignore' }); procs.push(c); await sleep(120); for (const n of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) { try { fs.unlinkSync(path.join(dir, n)); } catch { } } fs.symlinkSync(`${os.hostname()}-${c.pid}`, path.join(dir, 'SingletonLock')); fs.symlinkSync(path.join(ROOT, 'gone-socket-dir', 'SingletonSocket'), path.join(dir, 'SingletonSocket')); fs.symlinkSync('0123456789abcdef', path.join(dir, 'SingletonCookie')); fs.writeFileSync(path.join(dir, 'SingletonLock.fake'), String(c.pid)); return c; };
+  // the race: the runtime's launch is reached AFTER the verdict — the directory is taken right there, then the real launch runs
+  const racing = (rt) => new Proxy(rt, { get(t, k) { if (k !== 'launch') return t[k]; return async (ns, o) => { if (o && o.dir && !fs.existsSync(path.join(o.dir, 'SingletonLock.fake'))) await takeDir(o.dir); return t.launch(ns, o); }; } });
+  const run = async (Kmod, tag) => {
+    const dd = path.join(DATA_F, tag); fs.mkdirSync(dd, { recursive: true });
+    const kk = mkKeeper(Kmod, { dataDir: dd, runtime: racing(F.createBrowserRuntime({ env })), log: klog });
+    const p = kk.createProfile({ label: 'Race ' + tag });
+    const R0 = logOf('refused.log').length, L0 = logOf('launches.log').length;
+    const e1 = await threw(() => kk.attach({ profileId: p.id, browserKey: KA, sessionId: 'sess-1' }));
+    const e2 = await threw(() => kk.attach({ profileId: p.id, browserKey: KA, sessionId: 'sess-1' }));
+    const holder = Number(fs.readFileSync(path.join(p.dir, 'SingletonLock.fake'), 'utf8'));
+    const r = { e1: e1 && { code: e1.code, message: e1.message }, e2: e2 && { code: e2.code, message: e2.message }, refused: logOf('refused.log').length - R0, launched: logOf('launches.log').length - L0, left: singletonsF(p.dir).length, holderAlive: alive(holder) };
+    kk.shutdown();
+    return r;
+  };
+  const r = await run(K, 'product');
+  ok(r.refused >= 1 && r.launched === 0 && r.e1 && r.e1.code === 'profile_locked' && /your own browser/.test(r.e1.message) && !/the browser did not start|crash at startup/.test(r.e1.message), '④f THE RACE: the binary refused the launch on the lock planted after the verdict (exit 21) and the FIRST answer names the holder — profile_locked, "it may be your own browser", never "did not start"', r);
+  ok(r.e2 && r.e2.code === 'profile_locked' && r.left === 3 && r.holderAlive, '④f …the next command says the same; the holder is left running, its lock untouched', r);
+  ok(lines.some((l) => /taken while launching/.test(l) && /profile_locked|your own browser/.test(l)), '④f …said in the journal: the directory was taken while launching', lines.filter((l) => /Race product/.test(l)).slice(-2));
+  // CONTROL: a keeper that never judges the lock again after a failed launch — the reproduced shape
+  const ksrcF = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  const noRejudge = ksrcF.replace('function lockRefusalAfterLaunch(p, prev) {\n    if (!p || !p.dir) return null;', 'function lockRefusalAfterLaunch(p, prev) {\n    if (p) return null; /* CONTROL: no second judgement */');
+  ok(noRejudge !== ksrcF, '④f control setup: the second judgement is where the control cuts');
+  const c = await run(M.load('src/server/browser-keeper.js', noRejudge, 'no-rejudge-after-launch'), 'control');
+  ok(c.e1 && c.e1.code === 'launch_failed' && c.e2 && c.e2.code === 'profile_locked', '④f CONTROL: without the second judgement the first answer is a generic launch_failed and only the next command names the holder — the ④f race leg catches it', c);
+  for (const pr of procs) { try { pr.kill('SIGKILL'); } catch { } }
+}
+// ═══ ④g VERIFY r3: THE ONE ORDERED VERDICT, THE CENSUS OF SAID THINGS, AND THE FOUR FINDINGS ═══════════════════════
+// T1: the ladder is ONE PURE function (`lockVerdict`, five steps in ONE order: a live holder's own facts → the hostname rule →
+// the ended orphan's clear → the launch → the post-launch judgement); the order is pinned on the PURE answers (`step`), on the
+// keeper's source (the call positions) and by a CONTROL that swaps two steps (the clear before the end: the ④e shape goes red).
+// Every sentence the lane adds is in a grep-derived CENSUS — one wording per event, its sites counted. The findings, each
+// reproduced first (plv3-attacks.mjs / plv3-real.mjs under the lane notes): F1 a clear that FAILS (EACCES) said and refused
+// by name (it launched into the lock: "nothing removed"); F2 the clear keyed on the ORPHAN'S pid (a lock rewritten meanwhile was
+// removed and called "this machine's previous name"); F3 a previous name's lock that reached the launch is taken over now and
+// named (the real binary refused it in 1.4 s, the answer was a generic launch_failed with an empty journal); F4 the rebound note
+// rides the lease until an answer is DELIVERED (a client gone before the write left the agent untold, the mark spent).
+console.log('— ④g verify r3: the ONE ordered lock verdict (+ the swap control), the census of said things, F1–F4 with controls, the ephemeral row');
+{
+  const KS = require('../src/server/browser-kept.js');
+  const HOSTg = os.hostname(), PREV = 'pod-old', STRANGER = 'stranger';
+  const Dg = '/h/.agent-browser/vs-bp-00000001';
+  // ── T1 (a) the PURE order: the ladder's steps, in order, and every answer names its step ──
+  ok(JSON.stringify(B.LOCK_LADDER.map((s) => s.step)) === JSON.stringify(['live-holder', 'hostname', 'ended-orphan', 'launch', 'post-launch']) && B.LOCK_LADDER.every((s) => s.phase && s.what), '④g T1 LOCK_LADDER: five steps in ONE order — live-holder, hostname, ended-orphan, launch, post-launch', B.LOCK_LADDER.map((s) => s.step));
+  const liveUnderPrev = B.lockVerdict({ lock: { host: PREV, pid: 77 }, holder: { pid: 77, alive: true, cmdline: `chrome\0--user-data-dir=${Dg}\0--vibespace-keeper=bp-00000001`, dirs: [Dg], starttime: 5 }, hostname: HOSTg, dir: Dg, minted: true, mark: 'bp-00000001', preMarkAllowed: false, launchHosts: [PREV] });
+  const deadUnderPrev = B.lockVerdict({ lock: { host: PREV, pid: 77 }, holder: { pid: 77, alive: false }, hostname: HOSTg, dir: Dg, launchHosts: [PREV] });
+  const noLock = B.lockVerdict({ lock: null, hostname: HOSTg, dir: Dg });
+  ok(liveUnderPrev.step === 'live-holder' && liveUnderPrev.kind === 'own-orphan' && deadUnderPrev.step === 'hostname' && deadUnderPrev.kind === 'stale-previous-host' && noLock.step === 'live-holder' && noLock.kind === 'free', '④g T1 the `before` phase: a LIVE holder under a previous name is decided by its own facts (step live-holder, never the hostname rule); a dead one by the hostname rule; no lock = step live-holder', [liveUnderPrev.step, deadUnderPrev.step, noLock.step]);
+  const endedOk = B.lockVerdict({ phase: 'ended', lock: { host: PREV, pid: 77 }, hostname: HOSTg, alive: false, endedPid: 77 });
+  const endedOther = B.lockVerdict({ phase: 'ended', lock: { host: STRANGER, pid: 78 }, hostname: HOSTg, alive: false, endedPid: 77 });
+  const endedAlive = B.lockVerdict({ phase: 'ended', lock: { host: PREV, pid: 77 }, hostname: HOSTg, alive: true, endedPid: 77 });
+  const endedOurs = B.lockVerdict({ phase: 'ended', lock: { host: HOSTg, pid: 77 }, hostname: HOSTg, alive: false, endedPid: 77 });
+  const endedNone = B.lockVerdict({ phase: 'ended', lock: null, hostname: HOSTg, endedPid: 77 });
+  ok(endedOk.step === 'ended-orphan' && endedOk.kind === 'clear' && endedOther.kind === 'leave' && /not the orphan ended \(pid 77\)/.test(endedOther.why) && endedAlive.kind === 'leave' && endedOurs.kind === 'none' && endedNone.kind === 'none', '④g T1 the `ended` phase: THAT lock (the orphan\'s pid, a previous name, dead) ⇒ clear; another pid / alive ⇒ leave (judged again at the launch); ours / none ⇒ nothing', [endedOk.kind, endedOther.kind, endedAlive.kind, endedOurs.kind, endedNone.kind]);
+  const afterForeign = B.lockVerdict({ phase: 'after-launch', lock: { host: STRANGER, pid: 77 }, holder: { pid: 77, alive: false }, hostname: HOSTg, dir: Dg, launchHosts: [PREV] });
+  const afterPrev = B.lockVerdict({ phase: 'after-launch', lock: { host: PREV, pid: 77 }, holder: { pid: 77, alive: false }, hostname: HOSTg, dir: Dg, launchHosts: [PREV] });
+  const afterOurs = B.lockVerdict({ phase: 'after-launch', lock: { host: HOSTg, pid: 77 }, holder: { pid: 77, alive: false }, hostname: HOSTg, dir: Dg, launchHosts: [PREV] });
+  ok(afterForeign.step === 'post-launch' && afterForeign.kind === 'refuse' && afterPrev.kind === 'take-over' && afterOurs.kind === 'none', '④g T1 the `after-launch` phase: a foreign holder ⇒ refuse (named); a previous name\'s lock that reached the launch ⇒ take-over (named); our own dead-pid lock ⇒ none (the launch\'s own cause stands)', [afterForeign.kind, afterPrev.kind, afterOurs.kind]);
+  // ── T1 (b) the keeper's source walks the ladder in that order (positions, grep-derived) ──
+  const ksrcG = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  const at = (re, from = 0) => { const i = ksrcG.slice(from).search(re); return i < 0 ? -1 : i + from; };
+  const cpl = at(/async function clearProfileLock\(/), endAt = at(/const r = await endProcess\(v\.pid, facts\.holder\.starttime\);/, cpl), clrAt = at(/clearEndedOrphanLock\(p, p\.dir, v\.pid\)/, endAt);
+  const startAt = at(/const lk = await clearProfileLock\(p, ns, prevRec\);/), launchAt = at(/const r = await rt\.launch\(ns, \{ dir: p\.dir/, startAt), postAt = at(/lockRefusalAfterLaunch\(p, prevRec\)/, launchAt);
+  const healAt = at(/function healBrowser\(/), hEnd = at(/const e = await endProcess\(v\.pid, f\.holder\.starttime\);/, healAt), hClr = at(/clearEndedOrphanLock\(p, p\.dir, v\.pid\)/, hEnd), hFail = at(/if \(!c\.ok\) \{ setClosed\(rec, c\.refusal\); commit\(\); return null; \}/, hClr);
+  ok(cpl > 0 && endAt > cpl && clrAt > endAt && startAt > 0 && launchAt > startAt && postAt > launchAt && healAt > 0 && hEnd > healAt && hClr > hEnd && hFail > hClr, '④g T1 the keeper walks the ladder in order at the start (verdict → end → clear → launch → post-launch) and at the heal (verdict → end → clear → a failed clear closes by name)', { cpl, endAt, clrAt, startAt, launchAt, postAt, healAt, hEnd, hClr, hFail });
+  const ephStart = at(/const lk = await clearProfileLock\(p, ns, prev\);/), ephLaunch = at(/const r = await rt\.launch\(null, \{ idleMs: launchIdle/, ephStart), ephPost = at(/lockRefusalAfterLaunch\(p, prev\)/, ephLaunch);
+  ok(ephStart > 0 && ephLaunch > ephStart && ephPost > ephLaunch, '④g T1 …and the ephemeral start walks the same order (verdict → launch → post-launch)', { ephStart, ephLaunch, ephPost });
+  // ── the CENSUS OF SAID THINGS: one wording per event, its sites counted (grep-derived over the four files) ──
+  const srcOf = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+  const count = (f, needle) => srcOf(f).split(needle).length - 1;
+  const SAID = [
+    ['the takeover', 'src/server/browser-keeper.js', 'previous name ${v.host} — taken over (', 1],
+    ['the takeover that could not remove', 'src/server/browser-keeper.js', 'previous name ${v.host} but could NOT be removed', 1],
+    ['the ended orphan\'s lock removed', 'src/server/browser-keeper.js', '${v.why} — ${removed.length ? removed.join', 1],
+    ['the ended orphan\'s lock that could not be removed (r3 F1)', 'src/server/browser-keeper.js', '${v.why} but could NOT be removed', 1],
+    ['a lock that is no longer the orphan\'s (r3 F2)', 'src/server/browser-keeper.js', 'after ending its own orphaned browser pid ${endedPid}, ${v.why}', 1],
+    ['the orphan ended before a launch', 'src/server/browser-keeper.js', 'ended its own orphaned browser pid ${v.pid} before launching', 1],
+    ['the orphan ended before a heal', 'src/server/browser-keeper.js', 'ended its own orphaned browser pid ${v.pid} before healing', 1],
+    ['the directory taken while launching (r2 F1; the named + the ephemeral start)', 'src/server/browser-keeper.js', 'the directory was taken while launching', 2],
+    ['a previous name\'s lock reached the launch (r3 F3; the named start, its birth death, the ephemeral start)', 'src/server/browser-keeper.js', 'reached the launch (taken over now)', 3],
+    ['the directory held at a birth death', 'src/server/browser-keeper.js', 'the directory is held by somebody else', 1],
+    ['the queued wait (r2 F3)', 'src/server/browser-keeper.js', 'a tab bind waits for the one in flight', 1],
+    ['detached while queued (r2 F2)', 'src/server/browser-keeper.js', 'detached while waiting to bind a tab', 1],
+    ['the rebind: the only tab', 'src/server/browser-keeper.js', "bound to the browser's only tab", 1],
+    ['the rebind: a new tab (plain + mediated)', 'src/server/browser-keeper.js', 'a new tab bound', 2],
+    ['PURE: the ended orphan\'s lock (the clear\'s why)', 'src/browser-profiles.js', "the ended orphan's lock named this machine's previous name ${host}", 1],
+    ['PURE: not the orphan ended', 'src/browser-profiles.js', 'not the orphan ended (pid ${endedPid})', 1],
+    ['PURE: a lock at a pid alive here is not the ended orphan\'s (r4 census: printed through the leave line, uncounted)', 'src/browser-profiles.js', "that pid is alive here — not the ended orphan's lock", 1],
+    ['PURE: a previous-name lock at an unreadable live pid (r4 census: printed through the refusal, uncounted — pre-r3)', 'src/browser-profiles.js', 'whose command line cannot be read (another user\'s process?) — not provably free', 1],
+    ['r5 (S37): a directory\'s lineage forgotten — the directory is gone', 'src/server/browser-keeper.js', 'forgotten — the directory is gone', 1],
+    ['r5 (S36): a directory\'s lineage KEPT through a read error (a flapping PVC)', 'src/server/browser-keeper.js', 'kept — the directory cannot be read right now', 1],
+    ['r5 (S34): the bound\'s evictions said', 'src/server/browser-keeper.js', 'forgotten at the ${B.DIR_HOSTS_MAX} bound (the oldest remembered)', 1],
+    ['r5 (S42b): a lineage re-keyed to the directory\'s real path', 'src/server/browser-keeper.js', 'is remembered under its real path', 1],
+    ['PURE: the previous-host verdict', 'src/browser-profiles.js', "names this machine's previous name, ${lockHost}", 1],
+    ['PURE refusal: another machine\'s name', 'src/browser-profiles.js', "is locked under another machine's name", 1],
+    ['PURE refusal: could not remove (the takeover + the ended orphan\'s)', 'src/browser-profiles.js', 'and VibeSpace could not remove the lock', 2],
+    ['PURE refusal: still locked, its own browser ended (r3 F1)', 'src/browser-profiles.js', 'is still locked under this machine', 1],
+    ['PURE refusal: taken over now (r3 F3)', 'src/browser-profiles.js', 'VibeSpace took the lock over now; run the command again', 1],
+    ['the agent\'s note (the restart)', 'src/browser-tabs.js', 'your tab from the previous run is gone', 1],
+    ['the agent\'s note (a new tab)', 'src/browser-tabs.js', 'a new tab was opened and bound for', 1],
+    ['the route puts an undelivered note back (r3 F4; `use` + `resolve`, the two routes that attach)', 'src/routes/browser.js', 'k.restoreRebound(', 2],
+    ['zh: renamed from', 'src/lib/i18n-zh.js', '"renamed from {host}"', 1],
+    ['ja: renamed from', 'src/lib/i18n-ja.js', '"renamed from {host}"', 1],
+  ];
+  const offs = SAID.map(([name, f, needle, n]) => ({ name, got: count(f, needle), n })).filter((x) => x.got !== x.n);
+  ok(!offs.length, `④g THE CENSUS OF SAID THINGS: ${SAID.length} sentences, each ONE wording at its counted sites (grep-derived)`, offs);
+  // ── the keeper legs: helpers ──
+  const linesG = []; const klogG = { log: (...a) => linesG.push(a.join(' ')), warn: (...a) => linesG.push('WARN ' + a.join(' ')), error() { } };
+  const procsG = [];
+  const isAliveG = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const deadPidG = () => new Promise((r) => { const c = spawn('true', [], { stdio: 'ignore' }); c.on('exit', () => r(c.pid)); });
+  const plantG = (dir, host, pid) => { for (const n of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) { try { fs.unlinkSync(path.join(dir, n)); } catch { } } fs.symlinkSync(`${host}-${pid}`, path.join(dir, 'SingletonLock')); fs.symlinkSync(path.join(ROOT, 'gone', 'SingletonSocket'), path.join(dir, 'SingletonSocket')); fs.symlinkSync('0123456789abcdef', path.join(dir, 'SingletonCookie')); };
+  const singletonsG = (dir) => ['SingletonLock', 'SingletonSocket', 'SingletonCookie'].filter((n) => { try { fs.lstatSync(path.join(dir, n)); return true; } catch { return false; } });
+  const unplant = (dir) => { for (const n of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) { try { fs.unlinkSync(path.join(dir, n)); } catch { } } };
+  /** our marked orphan (a live process naming the directory with our mark); on SIGTERM it runs `onTerm` (a writer between the end and the clear) then exits */
+  const relink = (dir, target) => `const fs=require('fs');const p=${JSON.stringify(dir)}+'/SingletonLock';try{fs.unlinkSync(p)}catch(e){};fs.symlinkSync(${JSON.stringify(target)},p);`;
+  const holderG = (dir, mark, onTerm = '') => { const c = spawn(process.execPath, ['-e', `process.on('SIGTERM', () => { try { ${onTerm} } catch (e) { } process.exit(0); }); setTimeout(() => {}, 600000);`, '--', `--user-data-dir=${dir}`, `--vibespace-keeper=${mark}`], { stdio: 'ignore' }); procsG.push(c); return c; };
+  const mkProfG = async (kk, label) => { const p = kk.createProfile({ label }); await kk.attach({ profileId: p.id, browserKey: KA, sessionId: 'sess-1' }); await kk.stop(p.id, { why: 'user' }); const r = kk._reg().browsers[p.id]; r.host = PREV; r.hosts = [PREV]; return p; };
+  const saidG = (from, re) => linesG.slice(from).filter((l) => re.test(l));
+  const isRoot = !!(process.getuid && process.getuid() === 0);
+  // ── F1: a clear that FAILS (EACCES) is refused by name — the start site (the heal site: the wiring pin above) ──
+  const runF1 = async (Kmod, tag) => {
+    const dd = path.join(ROOT, 'data-g-f1-' + tag); fs.mkdirSync(dd, { recursive: true });
+    const kk = mkKeeper(Kmod, { dataDir: dd, log: klogG });
+    const p = await mkProfG(kk, 'F1 ' + tag); const h = holderG(p.dir, p.id); await sleep(120); plantG(p.dir, PREV, h.pid); fs.chmodSync(p.dir, 0o500);
+    const L0 = logOf('launches.log').length, l0 = linesG.length;
+    const e = await threw(() => kk.attach({ profileId: p.id, browserKey: KB, sessionId: 'sess-2' }));
+    const r = { err: e ? e.code : null, msg: e ? e.message : '', launched: logOf('launches.log').length - L0, left: singletonsG(p.dir).length, ended: !isAliveG(h.pid), said: saidG(l0, /could NOT be removed|nothing removed/).map((x) => x.slice(0, 160)) };
+    fs.chmodSync(p.dir, 0o700); unplant(p.dir); try { await kk.stop(p.id, { why: 'user' }); } catch { } kk.shutdown();
+    return r;
+  };
+  if (isRoot) ok(true, '④g F1 (read-only directory leg SKIPPED: root ignores directory modes)');
+  else {
+    const r = await runF1(K, 'product');
+    ok(r.err === 'profile_locked' && /could not remove the lock \(EACCES\)/.test(r.msg) && /its own browser, ended now/.test(r.msg) && /rm -f '/.test(r.msg) && r.launched === 0 && r.left === 3 && r.ended && r.said.some((x) => /could NOT be removed \(EACCES\)/.test(x)), '④g F1 our orphan ended under a previous name, its lock could NOT be removed (EACCES) ⇒ profile_locked naming the errno and the one command, no launch, said in the journal', r);
+    const noPost = ksrcG.replace("    if (left.includes('SingletonLock')) {\n      const f = (removed.failed || []).find((x) => x.name === 'SingletonLock');\n      const refusal = B.profileLockedRefusal({ label: p.label, dir, verdict: { kind: 'ended-unremovable'", "    if (false && left.includes('SingletonLock')) { /* CONTROL: no post-check after the ended orphan's clear */\n      const f = (removed.failed || []).find((x) => x.name === 'SingletonLock');\n      const refusal = B.profileLockedRefusal({ label: p.label, dir, verdict: { kind: 'ended-unremovable'");
+    ok(noPost !== ksrcG, '④g F1 control setup: the post-check is where the control cuts');
+    const c = await runF1(M.load('src/server/browser-keeper.js', noPost, 'no-postcheck-ended-clear'), 'control');
+    // (the fake binary dies on the read-only directory — its own SingletonLock.fake — and the post-launch judgement (F3) then names
+    // the lock; the copy's own tell: the clear said "nothing removed", never refused by its own name before the launch)
+    ok(c.said.some((x) => /the ended orphan's lock .*nothing removed/.test(x)) && !c.said.some((x) => /the ended orphan's lock .*could NOT be removed/.test(x)) && !/its own browser, ended now/.test(c.msg) && c.left === 3, '④g F1 CONTROL: a keeper that does not post-check the ended orphan\'s clear says "nothing removed" and goes on to the launch (the reproduced shape) — the F1 leg catches it', c);
+  }
+  // ── F2: the clear is keyed on the ORPHAN'S pid — a lock rewritten between the end and the clear is left, never called ours ──
+  const runF2 = async (Bmod, tag) => {
+    const dd = path.join(ROOT, 'data-g-f2-' + tag); fs.mkdirSync(dd, { recursive: true });
+    const Kx = tag === 'product' ? K : M.load('src/server/browser-keeper.js', ksrcG.replace("require('../browser-profiles.js')", `require(${JSON.stringify(Bmod.__file)})`), 'keeper-over-' + tag);
+    const kk = mkKeeper(Kx, { dataDir: dd, log: klogG });
+    const p = await mkProfG(kk, 'F2 ' + tag); const dead = await deadPidG(); const h = holderG(p.dir, p.id, relink(p.dir, `${STRANGER}-${dead}`)); await sleep(120); plantG(p.dir, PREV, h.pid);
+    const l0 = linesG.length;
+    const e = await threw(() => kk.attach({ profileId: p.id, browserKey: KB, sessionId: 'sess-2' }));
+    const r = { err: e ? e.code : null, left: singletonsG(p.dir).length, lock: (() => { try { return fs.readlinkSync(path.join(p.dir, 'SingletonLock')); } catch { return null; } })(), leftSaid: saidG(l0, /not the orphan ended/).length, lied: saidG(l0, /previous name stranger/).length };
+    unplant(p.dir); try { await kk.stop(p.id, { why: 'user' }); } catch { } kk.shutdown();
+    return r;
+  };
+  const r2 = await runF2(B, 'product');
+  ok(r2.left === 3 && r2.lock === `${STRANGER}-${r2.lock ? r2.lock.split('-').pop() : ''}` && r2.leftSaid === 1 && r2.lied === 0, '④g F2 a lock rewritten to a STRANGER\'s between the end and the clear is LEFT (not the orphan\'s pid), said so, never called "this machine\'s previous name"', r2);
+  {
+    const bsrcG = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8');
+    const noIdentity = bsrcG.replace('  if (endedPid != null && Number(lock.pid) !== Number(endedPid)) return', '  if (false && endedPid != null && Number(lock.pid) !== Number(endedPid)) return /* CONTROL: the clear is not keyed on the orphan\'s pid */');
+    ok(noIdentity !== bsrcG, '④g F2 control setup: the pid identity is where the control cuts');
+    const fB = M.write('src/browser-profiles.js', noIdentity, 'no-ended-pid-identity', { esm: false }); const Bc = require(fB); Bc.__file = fB;
+    const c2 = Bc.__file ? await runF2(Bc, 'control') : null;
+    ok(c2 && c2.left === 0 && c2.lied === 1, '④g F2 CONTROL: a verdict not keyed on the orphan\'s pid removes the stranger\'s lock and calls it "this machine\'s previous name" — the F2 leg catches it', c2 || 'no control copy');
+  }
+  // ── F3: a previous name's lock that reached the launch (the ④f race under the roll's shape) is taken over NOW and named ──
+  const runF3 = async (Bmod, tag) => {
+    const dd = path.join(ROOT, 'data-g-f3-' + tag); fs.mkdirSync(dd, { recursive: true });
+    const real = F.createBrowserRuntime({ env }); let once = false; // armed AFTER the setup launch (the lineage is stamped by then)
+    const rt = new Proxy(real, { get(t, k2) { if (k2 !== 'launch') return t[k2]; return async (ns, o) => { if (once && o && o.dir) { once = false; plantG(o.dir, PREV, await deadPidG()); return { ok: false, stderr: 'Command failed: agent-browser open about:blank', stdout: '', error: null }; } return t.launch(ns, o); }; } });
+    const Kx = tag === 'product' ? K : M.load('src/server/browser-keeper.js', ksrcG.replace("require('../browser-profiles.js')", `require(${JSON.stringify(Bmod.__file)})`), 'keeper-over-' + tag);
+    const kk = mkKeeper(Kx, { dataDir: dd, runtime: rt, log: klogG });
+    const p = await mkProfG(kk, 'F3 ' + tag); const l0 = linesG.length; once = true;
+    const e1 = await threw(() => kk.attach({ profileId: p.id, browserKey: KB, sessionId: 'sess-2' }));
+    const left1 = singletonsG(p.dir).length;
+    const e2 = await threw(() => kk.attach({ profileId: p.id, browserKey: KB, sessionId: 'sess-2' }));
+    const r = { e1: e1 ? `${e1.code}: ${e1.message}` : 'launched', left1, e2: e2 ? e2.code : null, renamed: !!(kk._reg().profiles.find((x) => x.id === p.id) || {}).renamedFrom, said: saidG(l0, /reached the launch \(taken over now\)/).length };
+    try { await kk.stop(p.id, { why: 'user' }); } catch { } kk.shutdown();
+    return r;
+  };
+  const r3 = await runF3(B, 'product');
+  ok(/^profile_locked: /.test(r3.e1) && /previous name \(pod-old/.test(r3.e1) && /took the lock over now; run the command again/.test(r3.e1) && r3.left1 === 0 && r3.e2 === null && r3.renamed && r3.said === 1, '④g F3 the FIRST answer after a failed launch on a previous name\'s lock names it, takes it over (the lock gone, "renamed from"), says it once in the journal; the next command launches', r3);
+  {
+    const bsrcG = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8');
+    const noTakeover = bsrcG.replace("  if (v.kind === 'stale-previous-host') return { step: 'post-launch', kind: 'take-over', verdict: v };", "  /* CONTROL: a previous name's lock after a failed launch is nobody's business */");
+    ok(noTakeover !== bsrcG, '④g F3 control setup: the post-launch takeover is where the control cuts');
+    const fB = M.write('src/browser-profiles.js', noTakeover, 'no-post-launch-takeover', { esm: false }); const Bc = require(fB); Bc.__file = fB;
+    const c3 = Bc.__file ? await runF3(Bc, 'control') : null;
+    ok(c3 && /^launch_failed: /.test(c3.e1) && c3.left1 === 3 && c3.e2 === null && c3.said === 0, '④g F3 CONTROL: without the post-launch takeover the first answer is a generic launch_failed, the lock stays for the next command, the journal says nothing (the reproduced shape) — the F3 leg catches it', c3 || 'no control copy');
+  }
+  // ── T1 (c) the SWAP control: the clear BEFORE the end — the ④e shape (a live orphan under a previous name) leaves its lock ──
+  {
+    const swapped = ksrcG
+      .replace("    if (v.kind === 'own-orphan') {\n      const r = await endProcess(v.pid, facts.holder.starttime);", "    if (v.kind === 'own-orphan') {\n      const c0 = clearEndedOrphanLock(p, p.dir, v.pid); /* CONTROL: the clear swapped before the end */\n      const r = await endProcess(v.pid, facts.holder.starttime);")
+      .replace("      if (r === 'ended' || r === 'gone') { const c = clearEndedOrphanLock(p, p.dir, v.pid); if (!c.ok) return { ok: false, ...c.refusal };", "      if (r === 'ended' || r === 'gone') { const c = c0; if (!c.ok) return { ok: false, ...c.refusal };");
+    ok(swapped !== ksrcG && swapped.includes('const c = c0;'), '④g T1 swap-control setup: the clear and the end are where the control swaps');
+    const dd = path.join(ROOT, 'data-g-swap'); fs.mkdirSync(dd, { recursive: true });
+    const kk = mkKeeper(M.load('src/server/browser-keeper.js', swapped, 'clear-before-end'), { dataDir: dd, log: klogG });
+    const p = await mkProfG(kk, 'Swap'); const h = holderG(p.dir, p.id); await sleep(120); plantG(p.dir, PREV, h.pid);
+    const e = await threw(() => kk.attach({ profileId: p.id, browserKey: KB, sessionId: 'sess-2' }));
+    ok(!e && !isAliveG(h.pid) && singletonsG(p.dir).length === 3, '④g T1 SWAP CONTROL: a keeper that clears BEFORE it ends sees the orphan alive, clears nothing, and launches into the previous-name lock (3 symlinks left: the ④e shape) — the order is load-bearing', { e: e && e.message, left: singletonsG(p.dir).length });
+    unplant(p.dir); try { await kk.stop(p.id, { why: 'user' }); } catch { } kk.shutdown();
+  }
+  // ── F4: the rebound note is SAID in an answer that is DELIVERED — the real route, a client gone before the write: in
+  // test-browser-kept ⑭f (its fake agent-browser keeps tabs and strips --pin-tab; this suite's fake binds no tab) ──
+  // ── the EPHEMERAL ROW: a kept directory on a rolled home runs the same ladder (every cell the named row has) ──
+  if (!isRoot) {
+    const DATA_E = path.join(ROOT, 'data-g-eph'); fs.mkdirSync(DATA_E, { recursive: true });
+    const settings = { 'browser.idleTimeoutMs': 600000 }; const quiet = { log() { }, warn() { }, error() { } };
+    const beE = BE.create({ dataDir: DATA_E, homeDir: HOME, serverSetting: (x) => settings[x], log: quiet, socketDirBase: path.join(ROOT, 'sock-g'), env: { XDG_RUNTIME_DIR: XDG } });
+    let kE = null; const keptE = KS.create({ dataDir: DATA_E, keeper: () => kE, liveKeys: () => live, serverSetting: (x) => settings[x], log: quiet, sweepEveryMs: 0 });
+    kE = mkKeeper(K, { dataDir: DATA_E, kept: keptE, serverSetting: (x) => settings[x], log: klogG });
+    const envE = beE.envFor({ browserKey: KG, cwd: HOME });
+    const ensure = (kk = kE) => kk.ensureEphemeral({ browserKey: KG, sessionId: 'sess-7', envPairs: envE.pairs, sessionName: 'Eph', variant: envE.variant });
+    const r0 = await ensure(); const eph = kE.ephemeralFor(KG); const dir = eph && eph.dir;
+    ok(r0.browser.state === 'ready' && dir && fs.existsSync(dir), '④g ephemeral: the conversation\'s browser runs on its KEPT directory', { dir });
+    const stopE = async () => { try { await kE.stop(eph.profileId, { why: 'user' }); } catch { } };
+    const lineage = () => { const r = kE._reg().browsers[eph.profileId]; r.host = PREV; r.hosts = [PREV]; };
+    await stopE(); lineage(); plantG(dir, PREV, await deadPidG()); { const l0 = linesG.length; const e = await threw(() => ensure());
+      ok(!e && singletonsG(dir).length === 0 && saidG(l0, /previous name pod-old — taken over/).length === 1, '④g ephemeral (a): the roll\'s lock is taken over, said once', { e: e && e.message, left: singletonsG(dir).length }); }
+    await stopE(); plantG(dir, STRANGER, await deadPidG()); { const e = await threw(() => ensure());
+      ok(e && e.code === 'profile_locked' && /stranger/.test(e.message) && singletonsG(dir).length === 3, '④g ephemeral (b): a foreign name stays refused by name', e && `${e.code}: ${e.message.slice(0, 160)}`); unplant(dir); }
+    { const h = holderG(dir, KG); await sleep(120); plantG(dir, PREV, h.pid); const l0 = linesG.length; const e = await threw(() => ensure());
+      ok(!e && !isAliveG(h.pid) && singletonsG(dir).length === 0 && saidG(l0, /the ended orphan's lock named this machine's previous name pod-old/).length === 1, '④g ephemeral (c): our orphan (the conversation\'s mark) ended, its previous-name lock removed, said once, launched', { e: e && e.message, left: singletonsG(dir).length }); }
+    { await stopE(); const h = holderG(dir, KG); await sleep(120); plantG(dir, PREV, h.pid); fs.chmodSync(dir, 0o500); const L0 = logOf('launches.log').length;
+      const e = await threw(() => ensure()); fs.chmodSync(dir, 0o700);
+      ok(e && e.code === 'profile_locked' && /EACCES/.test(e.message) && logOf('launches.log').length === L0 && singletonsG(dir).length === 3, '④g ephemeral (d): a clear that fails (EACCES) is refused by name with the errno (r3 F1 on this row)', e ? `${e.code}: ${e.message.slice(0, 160)}` : 'launched'); unplant(dir); }
+    // F5 (verify r3): a REFUSED start on this row kept neither the lineage nor the mark on its new record — after a restart the
+    // previous name was gone (its lock refused as FOREIGN) and the pre-mark adoption re-opened (a hand-launched CLI Chrome on the
+    // kept directory would be ended as "our orphan"). (d) above was a refusal: the record must still carry both.
+    { const r = kE._reg().browsers[eph.profileId];
+      ok(r && r.state === 'failed' && Array.isArray(r.hosts) && r.hosts.includes(PREV) && r.mark === KG, '④g F5 ephemeral: a REFUSED start\'s record still carries the launch-host lineage (pod-old) and the conversation\'s mark', { state: r && r.state, hosts: r && r.hosts, mark: r && r.mark });
+      // a hand-launched CLI Chrome (--remote-debugging-port=0, no mark) on the kept directory after that refusal: refused by name, never ended
+      const hu = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)', '--', `--user-data-dir=${dir}`, '--remote-debugging-port=0'], { stdio: 'ignore' }); procsG.push(hu); await sleep(120); plantG(dir, HOSTg, hu.pid);
+      const e = await threw(() => ensure());
+      ok(e && e.code === 'profile_locked' && /your own browser/.test(e.message) && isAliveG(hu.pid) && singletonsG(dir).length === 3, '④g F5 ephemeral: …so a pre-mark CLI launch on the directory after the refusal is still refused by name and left running (the mark kept)', e ? `${e.code}: ${e.message.slice(0, 160)}` : `launched; holder alive ${isAliveG(hu.pid)}`);
+      try { hu.kill('SIGKILL'); } catch { } unplant(dir);
+      const noCarry = ksrcG.replace("      if (prev && prev.mark) rec.mark = prev.mark;\n      { const lh = launchHostsFor(prev, p.dir || null); if (lh.length) { rec.hosts = lh; rec.host = prev && prev.host ? prev.host : lh[lh.length - 1]; } } // verify r4 (S26b): a retired record's directory still knows\n      reg.browsers[profileId] = rec;", "      /* CONTROL: a refused ephemeral start carries nothing */\n      reg.browsers[profileId] = rec;");
+      ok(noCarry !== ksrcG, '④g F5 control setup: the carry onto the new record is where the control cuts');
+      const DATA_C5 = path.join(ROOT, 'data-g-eph-ctl'); fs.mkdirSync(DATA_C5, { recursive: true });
+      const beC = BE.create({ dataDir: DATA_C5, homeDir: HOME, serverSetting: (x) => settings[x], log: quiet, socketDirBase: path.join(ROOT, 'sock-g-ctl'), env: { XDG_RUNTIME_DIR: XDG } }); const envC = beC.envFor({ browserKey: KG, cwd: HOME });
+      let kC = null; const keptC = KS.create({ dataDir: DATA_C5, keeper: () => kC, liveKeys: () => live, serverSetting: (x) => settings[x], log: quiet, sweepEveryMs: 0 });
+      kC = mkKeeper(M.load('src/server/browser-keeper.js', noCarry, 'eph-refusal-carries-nothing'), { dataDir: DATA_C5, kept: keptC, serverSetting: (x) => settings[x], log: klogG });
+      await kC.ensureEphemeral({ browserKey: KG, sessionId: 'sess-7', envPairs: envC.pairs, sessionName: 'Eph', variant: envC.variant }); const eC = kC.ephemeralFor(KG);
+      await kC.stop(eC.profileId, { why: 'user' }); const rC = kC._reg().browsers[eC.profileId]; rC.host = PREV; rC.hosts = [PREV]; plantG(eC.dir, STRANGER, await deadPidG());
+      const eRef = await threw(() => kC.ensureEphemeral({ browserKey: KG, sessionId: 'sess-7', envPairs: envC.pairs, sessionName: 'Eph', variant: envC.variant }));
+      const rAfter = kC._reg().browsers[eC.profileId];
+      ok(eRef && eRef.code === 'profile_locked' && rAfter && !rAfter.hosts && !rAfter.mark, '④g F5 CONTROL: a keeper whose refused ephemeral start carries nothing leaves a record with no lineage and no mark (the reproduced shape: the next boot stamps this pod alone, the previous name is foreign) — the F5 leg catches it', { hosts: rAfter && rAfter.hosts, mark: rAfter && rAfter.mark });
+      unplant(eC.dir); kC.shutdown(); }
+    { const real = F.createBrowserRuntime({ env }); let once = true;
+      const rt = new Proxy(real, { get(t, k2) { if (k2 !== 'launch') return t[k2]; return async (ns, o) => { if (once) { once = false; plantG(dir, PREV, await deadPidG()); return { ok: false, stderr: 'Command failed: agent-browser open about:blank', stdout: '', error: null }; } return t.launch(ns, o); }; } });
+      kE.shutdown(); // the debounced save lands on disk before a second keeper reads the same data dir
+      let kE2 = null; const keptE2 = KS.create({ dataDir: DATA_E, keeper: () => kE2, liveKeys: () => live, serverSetting: (x) => settings[x], log: quiet, sweepEveryMs: 0 });
+      kE2 = mkKeeper(K, { dataDir: DATA_E, kept: keptE2, serverSetting: (x) => settings[x], runtime: rt, log: klogG }); const l0 = linesG.length;
+      const e1 = await threw(() => ensure(kE2)); const e2 = await threw(() => ensure(kE2));
+      ok(e1 && e1.code === 'profile_locked' && /took the lock over now/.test(e1.message) && saidG(l0, /ephemeral .*reached the launch \(taken over now\)/).length === 1 && !e2, '④g ephemeral (e): a previous name\'s lock that reached the launch is taken over and named on this row too (said in the journal); the next command launches', { e1: e1 && e1.message.slice(0, 160), e2: e2 && e2.message });
+      try { await kE2.stop(kE2.ephemeralFor(KG).profileId, { why: 'user' }); } catch { } kE2.shutdown(); }
+  } else ok(true, '④g ephemeral row SKIPPED under root (directory modes)');
+  for (const pr of procsG) { try { pr.kill('SIGKILL'); } catch { } }
+}
+// ═══ ④h VERIFY r4 (T1): THE THIRD JUDGEMENT — USERW'S SCENARIOS AGAINST A HAND-WRITTEN TRUTH ════════════════════════════
+// Every row = one thing userW's pod did (the 10-01 roll: W1 the previous-name lock refused twice then hand-fixed; the 17:22Z boot
+// refusal of vs-bp-0f70bba2 at a pid REUSED across the roll; the ephemeral D-Payments on its kept directory) or one of r1–r3's
+// findings, run through the REAL keeper and compared with what userW SEES: the answer code + sentence, the journal, the panel row's
+// state / renamed-from, whether a browser launched, the symlinks left, the holder alive. A disagreement is a finding. The W2 rows
+// (the bound tab of a previous life) are test-browser-kept ⑭g (its fake keeps tabs). Three patched-KEEPER controls: a keeper that
+// forgets a retired record's lineage (S26b: userW's class one restart after the roll — the r4 finding), one that reads none of the
+// directory's lineage, one whose post-launch judgement drops the holder's facts (S8: a live holder taken over).
+console.log('— ④h verify r4: the third judgement — userW\'s scenarios through the real keeper vs a hand-written truth; three keeper controls');
+{
+  const KS = require('../src/server/browser-kept.js');
+  const PREV = 'pod-old', STRANGER = 'stranger'; const HOSTh = os.hostname();
+  const isRoot = !!(process.getuid && process.getuid() === 0);
+  const procsH = [];
+  const aliveH = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const deadPidH = () => new Promise((r) => { const c = spawn('true', [], { stdio: 'ignore' }); c.on('exit', () => r(c.pid)); });
+  const plantH = (dir, host, pid) => { for (const n of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) { try { fs.unlinkSync(path.join(dir, n)); } catch { } } fs.symlinkSync(`${host}-${pid}`, path.join(dir, 'SingletonLock')); fs.symlinkSync(path.join(ROOT, 'gone', 'SingletonSocket'), path.join(dir, 'SingletonSocket')); fs.symlinkSync('0123456789abcdef', path.join(dir, 'SingletonCookie')); };
+  const singletonsH = (dir) => ['SingletonLock', 'SingletonSocket', 'SingletonCookie'].filter((n) => { try { fs.lstatSync(path.join(dir, n)); return true; } catch { return false; } });
+  const unplantH = (dir) => { for (const n of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) { try { fs.unlinkSync(path.join(dir, n)); } catch { } } };
+  const relinkH = (dir, target) => `const fs=require('fs');const p=${JSON.stringify(dir)}+'/SingletonLock';try{fs.unlinkSync(p)}catch(e){};fs.symlinkSync(${JSON.stringify(target)},p);`;
+  const holderH = (dir, mark, onTerm = '') => { const c = spawn(process.execPath, ['-e', `process.on('SIGTERM', () => { try { ${onTerm} } catch (e) { } process.exit(0); }); setTimeout(() => {}, 600000);`, '--', `--user-data-dir=${dir}`, ...(mark ? [`--vibespace-keeper=${mark}`] : [])], { stdio: 'ignore' }); procsH.push(c); return c; };
+  const sleeperH = () => { const c = spawn('sleep', ['600'], { stdio: 'ignore' }); procsH.push(c); return c; };
+  const linesH = []; const klogH = { log: (...a) => linesH.push(a.join(' ')), warn: (...a) => linesH.push('WARN ' + a.join(' ')), error() { } };
+  const sleepH = (ms) => new Promise((r) => setTimeout(r, ms));
+  const rowH = (kk, id) => { const d = kk.list(); const b = d.browsers[id] || null; const p = (d.profiles || []).find((x) => x.id === id) || null; return { state: b ? b.state : null, renamedFrom: p && p.renamedFrom ? p.renamedFrom.host : null }; };
+  const TABLE = []; // {id, who, agree, diffs}
+  const judge = (id, who, truth, got) => {
+    const diffs = [];
+    for (const [k2, want] of Object.entries(truth)) {
+      const g = got[k2]; let pass2;
+      if (want instanceof RegExp) pass2 = typeof g === 'string' && want.test(g);
+      else if (Array.isArray(want) && want[0] === 'not') pass2 = !(typeof g === 'string' && want[1].test(g));
+      else pass2 = JSON.stringify(g) === JSON.stringify(want);
+      if (!pass2) diffs.push(`${k2}: truth ${String(want).slice(0, 90)} | product ${JSON.stringify(g === undefined ? null : g).slice(0, 200)}`);
+    }
+    TABLE.push({ id, who, agree: !diffs.length, diffs });
+    return !diffs.length;
+  };
+  const actH = async (kk, p, fn, more = () => ({})) => { const l0 = linesH.length, L0 = logOf('launches.log').length; const e = await threw(fn); const r = rowH(kk, p.id); return { err: e ? e.code : null, msg: e ? e.message : '', journal: linesH.slice(l0).join('\n'), launched: logOf('launches.log').length - L0, left: singletonsH(p.dir).length, state: r.state, renamedFrom: r.renamedFrom, ...more(e) }; };
+  const mkProfH = async (kk, label) => { const p = kk.createProfile({ label }); await kk.attach({ profileId: p.id, browserKey: KA, sessionId: 'sess-1' }); await kk.stop(p.id, { why: 'user' }); const r = kk._reg().browsers[p.id]; r.host = PREV; r.hosts = [PREV]; return p; };
+  const noLineageH = (kk, p) => { const r = kk._reg().browsers[p.id]; r.host = null; r.hosts = []; };
+  const attachH = (kk, p) => () => kk.attach({ profileId: p.id, browserKey: KB, sessionId: 'sess-2' });
+  const stopH = async (kk, p) => { try { await kk.stop(p.id, { why: 'user' }); } catch { } };
+  const armedRuntime = () => { const cfg = { armed: 0, stderr: 'Command failed: agent-browser open about:blank', during: null }; const real = F.createBrowserRuntime({ env }); const rt = new Proxy(real, { get(t, k2) { if (k2 !== 'launch') return t[k2]; return async (ns, o) => { if (cfg.armed > 0) { cfg.armed--; if (cfg.during) await cfg.during(o); return { ok: false, stderr: cfg.stderr, stdout: '', error: null }; } return t.launch(ns, o); }; } }); return { rt, cfg }; };
+  const DH = path.join(ROOT, 'data-h'); fs.mkdirSync(DH, { recursive: true });
+  // ── the named row (jarvis-work) ──
+  const k = mkKeeper(K, { dataDir: DH, log: klogH });
+  { const p = await mkProfH(k, 'S1'); plantH(p.dir, PREV, await deadPidH());
+    judge('S1', 'W1 the roll: a previous-name lock at a dead pid, the lineage knows the name ⇒ taken over', { err: null, launched: 1, left: 0, state: 'ready', renamedFrom: PREV, journal: /previous name pod-old — taken over \(SingletonLock, SingletonSocket, SingletonCookie removed/ }, await actH(k, p, attachH(k, p))); await stopH(k, p); }
+  { const p = await mkProfH(k, 'S2'); noLineageH(k, p); const d = await deadPidH(); plantH(p.dir, PREV, d);
+    judge('S2', 'W1 pre-lane shape (no lineage anywhere) ⇒ refused by name: the two hostnames and the one command', { err: 'profile_locked', msg: new RegExp(`locked under another machine's name \\(pod-old, pid ${d} there\\).*this machine is ${HOSTh}.*rm -f '${p.dir}/SingletonLock'`), launched: 0, left: 3, state: 'failed', renamedFrom: null, journal: /NOT launched — .*another machine's name \(pod-old/ }, await actH(k, p, attachH(k, p)));
+    judge('S3', 'W1 the second command 12 s later: the same refusal, the lock untouched', { err: 'profile_locked', msg: /another machine's name \(pod-old/, launched: 0, left: 3 }, await actH(k, p, attachH(k, p)));
+    unplantH(p.dir);
+    judge('S4', 'W1 the hand-fix (all three removed) ⇒ launched, nothing said about a lock', { err: null, launched: 1, left: 0, state: 'ready', renamedFrom: null, journal: ['not', /previous name|taken over|NOT launched/] }, await actH(k, p, attachH(k, p))); await stopH(k, p);
+    plantH(p.dir, PREV, await deadPidH()); fs.unlinkSync(path.join(p.dir, 'SingletonLock'));
+    judge('S5', 'W1 a partial hand-fix (SingletonLock alone) ⇒ launched (no lock = free), the two others left to Chromium', { err: null, launched: 1, left: 2, state: 'ready' }, await actH(k, p, attachH(k, p))); unplantH(p.dir); await stopH(k, p); }
+  { const p = await mkProfH(k, 'S6'); const sp = sleeperH(); await sleepH(60); plantH(p.dir, PREV, sp.pid);
+    judge('S6', '17:22Z: a previous-name lock at a REUSED pid (alive, not a Chrome on the dir), the lineage knows the name ⇒ taken over, the process left alone', { err: null, launched: 1, left: 0, state: 'ready', renamedFrom: PREV, holderAlive: true, journal: /previous name pod-old — taken over/ }, await actH(k, p, attachH(k, p), () => ({ holderAlive: aliveH(sp.pid) }))); await stopH(k, p);
+    const p7 = await mkProfH(k, 'S7'); noLineageH(k, p7); const sp2 = sleeperH(); await sleepH(60); plantH(p7.dir, PREV, sp2.pid);
+    judge('S7', '17:22Z shape without a lineage ⇒ refused by name, the reused process left alone', { err: 'profile_locked', msg: /another machine's name \(pod-old.*rm -f '/, launched: 0, left: 3, state: 'failed', holderAlive: true }, await actH(k, p7, attachH(k, p7), () => ({ holderAlive: aliveH(sp2.pid) }))); unplantH(p7.dir); }
+  { const p = await mkProfH(k, 'S9'); const h = holderH(p.dir, p.id); await sleepH(120); plantH(p.dir, PREV, h.pid);
+    judge('S9', 'r1 F1: our own live orphan under the previous name ⇒ ended by its own facts, its lock cleared, launched', { err: null, launched: 1, left: 0, state: 'ready', holderAlive: false, renamedFrom: null, journal: /ended its own orphaned browser pid \d+ before launching[\s\S]*the ended orphan's lock named this machine's previous name pod-old — SingletonLock, SingletonSocket, SingletonCookie removed/ }, await actH(k, p, attachH(k, p), () => ({ holderAlive: aliveH(h.pid) }))); await stopH(k, p); }
+  { const p = await mkProfH(k, 'S10'); const h = holderH(p.dir, null); await sleepH(120); plantH(p.dir, PREV, h.pid);
+    judge('S10', 'r1 F1: a user\'s live Chrome under the previous name ⇒ "it may be your own browser", left running', { err: 'profile_locked', msg: /open in a browser VibeSpace did not start \(pid \d+\) — it may be your own browser/, launched: 0, left: 3, state: 'failed', holderAlive: true }, await actH(k, p, attachH(k, p), () => ({ holderAlive: aliveH(h.pid) }))); try { h.kill('SIGKILL'); } catch { } unplantH(p.dir); }
+  { const p = await mkProfH(k, 'S11'); const h = holderH(p.dir, 'bp-deadbeef'); await sleepH(120); plantH(p.dir, PREV, h.pid);
+    judge('S11', 'another record\'s live browser under the previous name ⇒ refused naming its mark, left running', { err: 'profile_locked', msg: /another VibeSpace browser holds it \(its launch mark names bp-deadbeef/, launched: 0, left: 3, holderAlive: true }, await actH(k, p, attachH(k, p), () => ({ holderAlive: aliveH(h.pid) }))); try { h.kill('SIGKILL'); } catch { } unplantH(p.dir); }
+  if (!isRoot) {
+    { const p = await mkProfH(k, 'S12'); plantH(p.dir, PREV, await deadPidH()); fs.chmodSync(p.dir, 0o500);
+      judge('S12', 'r1 F5: the takeover cannot remove the lock (EACCES) ⇒ refused with the errno + the one command, no launch', { err: 'profile_locked', msg: /locked under this machine's previous name \(pod-old, pid \d+ there\) and VibeSpace could not remove the lock \(EACCES\) — remove it yourself: rm -f '/, launched: 0, left: 3, state: 'failed', journal: /could NOT be removed \(EACCES\) — NOT launched/ }, await actH(k, p, attachH(k, p))); fs.chmodSync(p.dir, 0o700); unplantH(p.dir); }
+    { const p = await mkProfH(k, 'S13'); const h = holderH(p.dir, p.id); await sleepH(120); plantH(p.dir, PREV, h.pid); fs.chmodSync(p.dir, 0o500);
+      judge('S13', 'r3 F1: our orphan ended, its previous-name lock cannot be removed (EACCES) ⇒ refused by name, no launch', { err: 'profile_locked', msg: /still locked under this machine's previous name \(pod-old, pid \d+ there — its own browser, ended now\) and VibeSpace could not remove the lock \(EACCES\)/, launched: 0, left: 3, holderAlive: false, journal: /but could NOT be removed \(EACCES\) — NOT launched/ }, await actH(k, p, attachH(k, p), () => ({ holderAlive: aliveH(h.pid) }))); fs.chmodSync(p.dir, 0o700); unplantH(p.dir); }
+  }
+  { const p = await mkProfH(k, 'S14'); const d = await deadPidH(); const h = holderH(p.dir, p.id, relinkH(p.dir, `${STRANGER}-${d}`)); await sleepH(120); plantH(p.dir, PREV, h.pid);
+    judge('S14', 'r3 F2: a lock rewritten to a stranger\'s between the end and the clear ⇒ left, said, never called "previous name stranger"', { holderAlive: false, left: 3, lock: `${STRANGER}-${d}`, journal: /not the orphan ended \(pid \d+\) — left alone/, lied: ['not', /previous name stranger/] }, await actH(k, p, attachH(k, p), () => ({ holderAlive: aliveH(h.pid), lock: (() => { try { return fs.readlinkSync(path.join(p.dir, 'SingletonLock')); } catch { return null; } })(), lied: linesH.slice(-12).join('\n') }))); unplantH(p.dir); await stopH(k, p); }
+  { const p = await mkProfH(k, 'S28'); const lv = sleeperH(); await sleepH(60); const h = holderH(p.dir, p.id, relinkH(p.dir, `${PREV}-${lv.pid}`)); await sleepH(120); plantH(p.dir, PREV, h.pid);
+    judge('S28', 'T2 ②: the lock rewritten to pod-old at a LIVE pid between the end and the clear ⇒ left ("that pid is alive here"), never cleared on the orphan\'s word', { holderAlive: false, left: 3, lock: `${PREV}-${lv.pid}`, journal: /that pid is alive here — not the ended orphan's lock/ }, await actH(k, p, attachH(k, p), () => ({ holderAlive: aliveH(h.pid), lock: (() => { try { return fs.readlinkSync(path.join(p.dir, 'SingletonLock')); } catch { return null; } })() }))); unplantH(p.dir); await stopH(k, p); }
+  // ── what reaches the launch (a stub launch that fails) — each on its own keeper ──
+  const runS15 = async (Kmod, tag) => { const { rt, cfg } = armedRuntime(); const kk = mkKeeper(Kmod, { dataDir: path.join(DH, 's15-' + tag), runtime: rt, log: klogH }); const p = await mkProfH(kk, 'S15 ' + tag); cfg.armed = 1; cfg.during = async (o) => { plantH(o.dir, PREV, await deadPidH()); }; const got = await actH(kk, p, attachH(kk, p)); const next = await actH(kk, p, attachH(kk, p)); await stopH(kk, p); kk.shutdown(); return { ...got, nextErr: next.err, nextLaunched: next.launched }; };
+  judge('S15', 'r3 F3: a previous-name lock reached the launch ⇒ the FIRST answer names it + takes it over; the next command launches', { err: 'profile_locked', msg: /was locked under this machine's previous name \(pod-old, pid \d+ there\) when the browser was launched and the launch failed on it — VibeSpace took the lock over now; run the command again/, launched: 0, left: 0, renamedFrom: PREV, journal: /NOT started — a lock of this machine's previous name pod-old reached the launch \(taken over now\)/, nextErr: null, nextLaunched: 1 }, await runS15(K, 'product'));
+  { const { rt, cfg } = armedRuntime(); const kk = mkKeeper(K, { dataDir: path.join(DH, 's16'), runtime: rt, log: klogH }); const p = await mkProfH(kk, 'S16'); let hp = null; cfg.armed = 1; cfg.stderr = 'Chrome exited early (exit code: 21)'; cfg.during = async (o) => { hp = holderH(o.dir, null); await sleepH(120); plantH(o.dir, HOSTh, hp.pid); };
+    judge('S16', 'r2 F1: a user\'s Chrome took the directory while launching ⇒ "your own browser" at the FIRST answer, left running', { err: 'profile_locked', msg: /it may be your own browser/, launched: 0, left: 3, holderAlive: true, journal: /NOT started — the directory was taken while launching/ }, await actH(kk, p, attachH(kk, p), () => ({ holderAlive: !!(hp && aliveH(hp.pid)) }))); try { hp.kill('SIGKILL'); } catch { } unplantH(p.dir); kk.shutdown(); }
+  { const { rt, cfg } = armedRuntime(); const kk = mkKeeper(K, { dataDir: path.join(DH, 's17'), runtime: rt, log: klogH }); const p = await mkProfH(kk, 'S17'); cfg.armed = 1; cfg.stderr = 'Xvfb: cannot open display :99'; cfg.during = async (o) => { plantH(o.dir, HOSTh, await deadPidH()); };
+    judge('S17', 'r3 B1: our dead-pid lock under our own name + a launch failed on the display ⇒ launch_failed naming the display', { err: 'launch_failed', msg: /the browser did not start: Xvfb: cannot open display :99/, launched: 0, journal: ['not', /NOT started — /] }, await actH(kk, p, attachH(kk, p))); unplantH(p.dir); kk.shutdown(); }
+  { const { rt, cfg } = armedRuntime(); const kk = mkKeeper(K, { dataDir: path.join(DH, 's18'), runtime: rt, log: klogH }); const p = await mkProfH(kk, 'S18'); cfg.armed = 1; cfg.during = async (o) => { plantH(o.dir, STRANGER, await deadPidH()); };
+    judge('S18', 'a foreign lock reached the launch ⇒ refused by name at the first answer, the lock kept', { err: 'profile_locked', msg: /locked under another machine's name \(stranger, pid \d+ there\)/, launched: 0, left: 3, renamedFrom: null, journal: /NOT started — the directory was taken while launching/ }, await actH(kk, p, attachH(kk, p))); unplantH(p.dir); kk.shutdown(); }
+  // S8 (T2 ①): a LIVE marked browser of ours under the previous name is there when the launch fails ⇒ its own facts first (step ① before ⑤): never a takeover
+  const runS8 = async (Kmod, tag) => { const { rt, cfg } = armedRuntime(); const kk = mkKeeper(Kmod, { dataDir: path.join(DH, 's8-' + tag), runtime: rt, log: klogH }); const p = await mkProfH(kk, 'S8 ' + tag); let hp = null; cfg.armed = 1; cfg.during = async (o) => { hp = holderH(o.dir, p.id); await sleepH(120); plantH(o.dir, PREV, hp.pid); }; const got = await actH(kk, p, attachH(kk, p), () => ({ holderAlive: !!(hp && aliveH(hp.pid)) })); const next = await actH(kk, p, attachH(kk, p), () => ({ holderAlive: !!(hp && aliveH(hp.pid)) })); try { hp.kill('SIGKILL'); } catch { } unplantH(p.dir); await stopH(kk, p); kk.shutdown(); return { ...got, nextErr: next.err, nextLaunched: next.launched, nextHolderAlive: next.holderAlive, nextJournal: next.journal }; };
+  judge('S8', 'T2 ①: our LIVE marked browser under the previous name at a failed launch ⇒ no takeover (judged by its own facts first), the holder left, the lock kept; the next command ends it and launches', { err: 'launch_failed', msg: /the browser did not start/, launched: 0, left: 3, holderAlive: true, renamedFrom: null, journal: ['not', /taken over/], nextErr: null, nextLaunched: 1, nextHolderAlive: false, nextJournal: /ended its own orphaned browser pid \d+ before launching[\s\S]*ended orphan's lock named this machine's previous name pod-old/ }, await runS8(K, 'product'));
+  // ── the EPHEMERAL row (D-Payments on its kept directory) + THE r4 FINDING (S26b) ──
+  const runEph = async (Kmod, tag) => {
+    const DATA_H = path.join(ROOT, 'data-h-eph-' + tag); fs.mkdirSync(DATA_H, { recursive: true });
+    const settings = { 'browser.idleTimeoutMs': 600000 }; const quiet = { log() { }, warn() { }, error() { } };
+    const beH = BE.create({ dataDir: DATA_H, homeDir: HOME, serverSetting: (x) => settings[x], log: quiet, socketDirBase: path.join(ROOT, 'sock-h-' + tag), env: { XDG_RUNTIME_DIR: XDG } });
+    const envH = beH.envFor({ browserKey: KG, cwd: HOME }); const liveH = new Set([KG]);
+    const mk = () => { let kp = null; const kept = KS.create({ dataDir: DATA_H, keeper: () => kp, liveKeys: () => liveH, serverSetting: (x) => settings[x], log: quiet, sweepEveryMs: 0 }); kp = mkKeeper(Kmod, { dataDir: DATA_H, kept, serverSetting: (x) => settings[x], liveKeys: () => liveH, log: klogH }); kp.__kept = kept; return kp; };
+    const ensure = (kk) => () => kk.ensureEphemeral({ browserKey: KG, sessionId: 'sess-7', envPairs: envH.pairs, sessionName: 'D-Payments', variant: envH.variant });
+    const regFile = path.join(DATA_H, 'browser-profiles.json'); const out = {};
+    let kk = mk(); await ensure(kk)(); const eph = kk.ephemeralFor(KG); const dir = eph.dir; const pid = eph.profileId;
+    const stopE = async (k2) => { const e2 = k2.ephemeralFor(KG); try { if (e2) await k2.stop(e2.profileId, { why: 'user' }); } catch { } };
+    const actE = async (k2, fn, more = () => ({})) => { const l0 = linesH.length, L0 = logOf('launches.log').length; const e = await threw(fn); return { err: e ? e.code : null, msg: e ? e.message : '', journal: linesH.slice(l0).join('\n'), launched: logOf('launches.log').length - L0, left: singletonsH(dir).length, ...more(e) }; };
+    await stopE(kk); { const r = kk._reg().browsers[pid]; r.host = PREV; r.hosts = [PREV]; } plantH(dir, PREV, await deadPidH());
+    out.S24 = await actE(kk, ensure(kk), () => ({ recDir: kk.ephemeralFor(KG).dir === dir }));
+    await stopE(kk); plantH(dir, STRANGER, await deadPidH()); out.S25 = await actE(kk, ensure(kk)); unplantH(dir);
+    kk.shutdown(); await sleepH(300);
+    // the registry as the OLD pod left it, in the shape of a file from BEFORE r4 (no dirHosts — userW's today): host = the old pod,
+    // the record's lineage = the old pod; the old pod's lock in the kept directory
+    { const j = JSON.parse(fs.readFileSync(regFile, 'utf8')); j.host = PREV; delete j.dirHosts; const rec = j.browsers[pid]; if (rec) { rec.host = PREV; rec.hosts = [PREV]; } fs.writeFileSync(regFile, JSON.stringify(j)); }
+    plantH(dir, PREV, await deadPidH());
+    liveH.clear(); let k2 = mk(); const lb = linesH.length; await k2.boot(); const bootSaid = linesH.slice(lb).join('\n'); const recGone = !k2._reg().browsers[pid] && !k2._reg().profiles.some((x) => x.id === pid);
+    liveH.add(KG); out.S26a = await actE(k2, ensure(k2), () => ({ recGone, bootSaid })); await stopE(k2); k2.shutdown(); await sleepH(300);
+    // S26b = userW's own path: the roll, then ⚙ → Update BEFORE the conversation is resumed (no launch in between): the file as the OLD
+    // pod left it (no dirHosts — a file from before r4), the roll's boot retires the record, the Update's boot saves under THIS pod
+    { const j = JSON.parse(fs.readFileSync(regFile, 'utf8')); j.host = PREV; delete j.dirHosts; for (const rec of Object.values(j.browsers)) { rec.host = PREV; rec.hosts = [PREV]; } fs.writeFileSync(regFile, JSON.stringify(j)); }
+    liveH.clear(); const k3 = mk(); await k3.boot(); k3.shutdown(); await sleepH(300); // the roll's boot: nothing live ⇒ the record retired; the file saved under THIS pod
+    const k3b = mk(); await k3b.boot(); k3b.shutdown(); await sleepH(300); // the Update's boot: nothing to retire, the file's writer is THIS pod
+    plantH(dir, PREV, await deadPidH()); liveH.add(KG); const k4 = mk(); await k4.boot();
+    out.S26b = await actE(k4, ensure(k4)); unplantH(dir); await stopE(k4);
+    { await ensure(k4)(); await stopE(k4); plantH(dir, PREV, await deadPidH()); const f = await threw(() => k4.__kept.forget(KG)); const movedAside = !fs.existsSync(dir); fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); /* (the fake binary writes its lock file into the directory a real Chrome creates) */ out.S27 = await actE(k4, ensure(k4), () => ({ forgot: f ? f.code : 'ok', movedAside })); await stopE(k4); }
+    k4.shutdown(); return out;
+  };
+  if (!isRoot) {
+    const e = await runEph(K, 'product');
+    judge('S24', 'D-Payments after the roll (its record kept its lineage) ⇒ taken over, launched on the kept directory', { err: null, launched: 1, recDir: true, left: 0, journal: /previous name pod-old — taken over/ }, e.S24);
+    judge('S25', 'D-Payments: a foreign name on its kept directory ⇒ refused by name, nothing launched', { err: 'profile_locked', msg: /another machine's name \(stranger/, launched: 0, left: 3 }, e.S25);
+    judge('S26a', 'r4 ④ the RETIRED record, first life after the roll: boot retires the ephemeral record (nothing live); a resume is still taken over (the file\'s writer = the old pod)', { recGone: true, bootSaid: /no live session carries bk-0000c007 — stopping it and removing the record/, err: null, launched: 1, left: 0, journal: /previous name pod-old — taken over/ }, e.S26a);
+    judge('S26b', 'r4 ④ THE FINDING: one restart later (an Update while the conversation was not running) the kept directory\'s previous-name lock is STILL taken over — the lineage outlives the record (the directory remembers)', { err: null, launched: 1, left: 0, journal: /previous name pod-old — taken over/ }, e.S26b);
+    judge('S27', 'Forget after the roll: the kept directory moved aside with its lock ⇒ the next start is on a fresh directory, nothing about a lock', { forgot: 'ok', movedAside: true, err: null, launched: 1, left: 0, journal: ['not', /previous name|another machine|NOT launched/] }, e.S27);
+  }
+  const dis = TABLE.filter((r) => !r.agree);
+  ok(TABLE.length >= 20 && !dis.length, `④h THE THIRD JUDGEMENT: ${TABLE.length} scenarios through the real keeper, every one as userW's truth says`, dis.map((r) => `${r.id}: ${r.diffs.join(' / ')}`));
+  // ── the three patched-KEEPER controls ──
+  const ksrcH = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  if (!isRoot) {
+    const noRemember = ksrcH.replace("    if (p.dir && reg.browsers[id]) { const rr = reg.browsers[id]; if (rr.state !== 'failed') rememberDir(p.dir, launchHostsFor(rr, p.dir), { retire: true }); else lineageLedger('retire-skipped-refused', { dir: dirKeyOf(p.dir), id }); }", "    /* CONTROL: a retired record's lineage is nobody's memory */"); // (r5: re-anchored to the remember door)
+    ok(noRemember !== ksrcH, '④h control setup: the retire-time remember is where the control cuts');
+    const c1 = await runEph(M.load('src/server/browser-keeper.js', noRemember, 'no-dir-lineage-at-retire'), 'ctl1');
+    ok(c1.S26a.err === null && c1.S26b.err === 'profile_locked' && /another machine's name \(pod-old/.test(c1.S26b.msg) && c1.S26b.launched === 0 && c1.S26b.left === 3, '④h CONTROL 1: a keeper that forgets a retired record\'s lineage takes the lock over in the first life (the file\'s writer) and REFUSES the conversation\'s own kept directory one restart later as FOREIGN — the reproduced shape (userW\'s class on the ephemeral row); S26b catches it', { a: c1.S26a.err, b: c1.S26b.err, msg: c1.S26b.msg.slice(0, 160) });
+    const noRead = ksrcH.replace("const byDir = dir ? lineageOf(dir).hosts : []; if (byDir.length) return byDir;", "const byDir = []; /* CONTROL: the directory's lineage is never read */ if (byDir.length) return byDir;"); // (r5: re-anchored to the identity-keyed read; r6: the read carries the marker; r7: the read is the ONE lineage verdict)
+    ok(noRead !== ksrcH, '④h control setup: the directory read is where the control cuts');
+    const c2 = await runEph(M.load('src/server/browser-keeper.js', noRead, 'no-dir-lineage-read'), 'ctl2');
+    ok(c2.S26a.err === null && c2.S26b.err === 'profile_locked' && c2.S26b.left === 3, '④h CONTROL 2: a keeper that never reads the directory\'s lineage — the same refusal one restart later; S26b catches it', { a: c2.S26a.err, b: c2.S26b.err });
+  }
+  { const holderless = ksrcH.replace("const a = B.lockVerdict({ phase: 'after-launch', lock: facts.lock, holder: facts.holder,", "const a = B.lockVerdict({ phase: 'after-launch', lock: facts.lock, holder: null, /* CONTROL: the post-launch judgement drops the holder's facts */");
+    ok(holderless !== ksrcH, '④h control setup: the post-launch judgement\'s holder facts are where the control cuts');
+    const c3 = await runS8(M.load('src/server/browser-keeper.js', holderless, 'post-launch-holderless'), 'ctl3');
+    ok(c3.err === 'profile_locked' && /took the lock over now/.test(c3.msg) && c3.left === 0 && c3.holderAlive === true, '④h CONTROL 3: a post-launch judgement without the holder\'s facts takes a LIVE holder\'s lock over (step ⑤ before step ①: the lock gone under a running browser — two Chromes next) — S8 catches it', { err: c3.err, left: c3.left, alive: c3.holderAlive, msg: c3.msg.slice(0, 140) }); }
+  for (const pr of procsH) { try { pr.kill('SIGKILL'); } catch { } }
+  k.shutdown();
+}
+// ═══ ④i VERIFY r5 (T1/T2): THE FOURTH JUDGEMENT — THE DIRECTORY LINEAGE UNDER ATTACK, AGAINST A HAND-WRITTEN TRUTH ═══════════
+// r4 made a DIRECTORY remember its launch hosts (the lineage outlives a retired record). r5 attacked that memory, each row through
+// the REAL keeper: a PVC that flaps (an EACCES at ONE load pruned the lineage — the next resume was refused as foreign), ONE
+// directory under TWO spellings (the fleet's home is reached through a symlink, /home/vibe → /home/<name>, proven read-only on
+// userW's and userZ's pods — remembered under one, read under the other = orphaned), a FRESH directory made at a forgotten one's
+// path (it inherited the lineage in-process, not after a reload — the inode is the witness now), a COPIED directory, the bound
+// reached (silent; 200 kept directories at one roll's boot evicted 72 lineages at 128 — 512 now, the evictions said), a >bound file
+// kept by insertion order (by `at` now). Three patched-keeper controls: prune on ANY stat error, the spelling as given, no inode witness.
+// r6 (the fifth judgement) attacked the inode witness itself: ext4 hands a removed directory's inode to the next mkdir (the fleet's RBD
+// filesystem, measured 20/20) so a stranger's old-pod lock at a forgotten path was taken over; a file-level restore (every inode new)
+// orphaned every kept directory's lineage — the disaster-recovery path refused each as foreign; a tree under two mounts was two
+// identities; 200 gone / re-keyed / unreadable directories at one boot were 200 lines each. THE DIRECTORY'S OWN MARKER is the
+// witness now (S43p / S43 / S44 / S48 / S54), the load says once per kind (S49a–c); two more controls: a keeper that never reads the
+// marker, the PURE rule without it.
+console.log('— ④i verify r5: the fourth judgement — the directory lineage: a flapping PVC, two spellings, a forgotten path, a copy, the bound; three keeper controls');
+{
+  const KSt = require('../src/server/browser-kept.js');
+  const PREV = 'pod-old'; const isRoot = !!(process.getuid && process.getuid() === 0);
+  const linesI = []; const klogI = { log: (...a) => linesI.push(a.join(' ')), warn: (...a) => linesI.push('WARN ' + a.join(' ')), error() { } };
+  const sleepI = (ms) => new Promise((r) => setTimeout(r, ms));
+  const deadPidI = () => new Promise((r) => { const c = spawn('true', [], { stdio: 'ignore' }); c.on('exit', () => r(c.pid)); });
+  const plantI = (dir, host, pid) => { for (const n of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) { try { fs.unlinkSync(path.join(dir, n)); } catch { } } fs.symlinkSync(`${host}-${pid}`, path.join(dir, 'SingletonLock')); fs.symlinkSync(path.join(ROOT, 'gone', 'SingletonSocket'), path.join(dir, 'SingletonSocket')); fs.symlinkSync('0123456789abcdef', path.join(dir, 'SingletonCookie')); };
+  const unplantI = (dir) => { for (const n of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) { try { fs.unlinkSync(path.join(dir, n)); } catch { } } };
+  const singletonsI = (dir) => ['SingletonLock', 'SingletonSocket', 'SingletonCookie'].filter((n) => { try { fs.lstatSync(path.join(dir, n)); return true; } catch { return false; } });
+  const TABLE = [];
+  const judge = (id, who, truth, got) => {
+    const diffs = [];
+    for (const [k2, want] of Object.entries(truth)) {
+      const g = got[k2]; let pass2;
+      if (want instanceof RegExp) pass2 = typeof g === 'string' && want.test(g);
+      else if (Array.isArray(want) && want[0] === 'not') pass2 = !(typeof g === 'string' && want[1].test(g));
+      else pass2 = JSON.stringify(g) === JSON.stringify(want);
+      if (!pass2) diffs.push(`${k2}: truth ${String(want).slice(0, 90)} | product ${JSON.stringify(g === undefined ? null : g).slice(0, 200)}`);
+    }
+    TABLE.push({ id, who, agree: !diffs.length, diffs });
+    return !diffs.length;
+  };
+  const rowI = (kk, id) => { const d = kk.list(); const b = d.browsers[id] || null; const p = (d.profiles || []).find((x) => x.id === id) || null; return { state: b ? b.state : null, renamedFrom: p && p.renamedFrom ? p.renamedFrom.host : null }; };
+  const actI = async (kk, p, fn, more = () => ({})) => { const l0 = linesI.length, L0 = logOf('launches.log').length; const e = await threw(fn); const r = rowI(kk, p.id); return { err: e ? e.code : null, msg: e ? e.message : '', journal: linesI.slice(l0).join('\n'), launched: logOf('launches.log').length - L0, left: singletonsI(p.dir).length, state: r.state, renamedFrom: r.renamedFrom, ...more(e) }; };
+  const attachI = (kk, p) => () => kk.attach({ profileId: p.id, browserKey: KB, sessionId: 'sess-2' });
+  const stopI = async (kk, p) => { try { await kk.stop(p.id, { why: 'user' }); } catch { } };
+  /** a directory of ours under `parent`: adopted, launched once, stopped, its record's lineage [pod-old], its record REMOVED through the real door ⇒ the directory remembers */
+  const retiredDirI = async (kk, parent, name) => { const dir = path.join(parent, name); fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); const p = kk.adoptDirectory({ label: name, dir }).profile; await kk.attach({ profileId: p.id, browserKey: KA, sessionId: 'sess-1' }); await stopI(kk, p); const r = kk._reg().browsers[p.id]; r.host = PREV; r.hosts = [PREV]; for (const l of kk._reg().leases.filter((l) => l.profileId === p.id)) { try { kk.detach({ profileId: p.id, browserKey: l.browserKey, by: 'user' }); } catch { } } kk.removeProfile(p.id); return dir; };
+  const dhI = (kk, dir, ino = null) => B.dirHostsOf(kk._reg().dirHosts, dir, { ino });
+  const IROOT = path.join(ROOT, 'i-dirs'); fs.mkdirSync(IROOT, { recursive: true });
+  // ── the named rows: a forgotten path, a copy, a flapping PVC, a gone directory ──
+  const runNamed = async (Kmod, tag) => {
+    const out = {}; const DI = path.join(ROOT, 'data-i-' + tag); fs.mkdirSync(DI, { recursive: true }); const parent = path.join(IROOT, tag); fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
+    { let kk = mkKeeper(Kmod, { dataDir: DI, log: klogI }); const dir = await retiredDirI(kk, parent, 's32'); fs.renameSync(dir, dir + '.aside'); fs.mkdirSync(dir, { mode: 0o700 }); plantI(dir, PREV, await deadPidI()); const p2 = kk.adoptDirectory({ label: 's32-again', dir }).profile;
+      out.S32a = await actI(kk, p2, attachI(kk, p2)); unplantI(dir); await stopI(kk, p2);
+      const src = await retiredDirI(kk, parent, 's38'); const copy = src + '-copy'; fs.cpSync(src, copy, { recursive: true }); kk.shutdown(); await sleepI(150);
+      { const rf = path.join(DI, 'browser-profiles.json'); const j = JSON.parse(fs.readFileSync(rf, 'utf8')); j.dirHosts = { ...(j.dirHosts || {}), [copy]: { ...(j.dirHosts[src] || { hosts: [PREV], at: 1 }) } }; fs.writeFileSync(rf, JSON.stringify(j)); }
+      kk = mkKeeper(Kmod, { dataDir: DI, log: klogI }); await kk.boot(); unplantI(copy); plantI(copy, PREV, await deadPidI()); const p3 = kk.adoptDirectory({ label: 's38-copy', dir: copy }).profile;
+      out.S38b = await actI(kk, p3, attachI(kk, p3), () => ({ inoDiffers: fs.statSync(copy).ino !== fs.statSync(src).ino })); unplantI(copy); await stopI(kk, p3); kk.shutdown(); await sleepI(150); }
+    if (!isRoot) {
+      let kk = mkKeeper(Kmod, { dataDir: DI, log: klogI }); const dir = await retiredDirI(kk, parent, 's36'); const had = dhI(kk, dir); kk.shutdown(); await sleepI(150);
+      fs.chmodSync(parent, 0o000); kk = mkKeeper(Kmod, { dataDir: DI, log: klogI }); const l0 = linesI.length; await kk.boot(); const said = linesI.slice(l0).join('\n'); fs.chmodSync(parent, 0o700);
+      const kept = dhI(kk, dir); plantI(dir, PREV, await deadPidI()); const p2 = kk.adoptDirectory({ label: 's36-again', dir }).profile;
+      out.S36 = { had, kept, said, ...(await actI(kk, p2, attachI(kk, p2))) }; unplantI(dir); await stopI(kk, p2); kk.shutdown(); await sleepI(150);
+    }
+    { let kk = mkKeeper(Kmod, { dataDir: DI, log: klogI }); const dir = await retiredDirI(kk, parent, 's37'); kk.shutdown(); await sleepI(150); fs.rmSync(dir, { recursive: true, force: true });
+      kk = mkKeeper(Kmod, { dataDir: DI, log: klogI }); const l0 = linesI.length; await kk.boot(); out.S37 = { pruned: dhI(kk, dir).length === 0, said: linesI.slice(l0).join('\n') }; kk.shutdown(); await sleepI(150); }
+    return out;
+  };
+  // ── the bound ──
+  const runBound = async (Kmod, tag) => {
+    const out = {}; const N = B.DIR_HOSTS_MAX; let t = 1_700_000_000_000; const DI = path.join(ROOT, 'data-i-bound-' + tag); fs.mkdirSync(DI, { recursive: true });
+    const kk = mkKeeper(Kmod, { dataDir: DI, log: klogI, now: () => (t += 1000) }); const parent = path.join(IROOT, 'bound-' + tag); fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
+    const liveDir = path.join(parent, 'live'); fs.mkdirSync(liveDir, { mode: 0o700 }); const live = kk.adoptDirectory({ label: 'live', dir: liveDir }).profile; await kk.attach({ profileId: live.id, browserKey: KB, sessionId: 'sess-2' }); // launched: stamped ⇒ the OLDEST `at`
+    const first = dhI(kk, liveDir); const dirs = []; let said = '';
+    for (let i = 0; i < N; i++) { const d = path.join(parent, 'd' + i); fs.mkdirSync(d, { mode: 0o700 }); const p = kk.adoptDirectory({ label: 'd' + i, dir: d }).profile; kk._reg().browsers[p.id] = { profileId: p.id, state: 'stopped', hosts: [PREV], host: PREV, pid: null }; dirs.push(d); const l0 = linesI.length; kk.removeProfile(p.id); if (i === N - 1) said = linesI.slice(l0).join('\n'); }
+    const keys = Object.keys(kk._reg().dirHosts);
+    out.S34 = { firstHadIt: first.length > 0, size: keys.length, liveEvicted: !keys.includes(liveDir), dir0Kept: keys.includes(dirs[0]), said, liveStillLaunches: (await threw(() => kk.attach({ profileId: live.id, browserKey: KA, sessionId: 'sess-1' }))) ? 'threw' : null };
+    await stopI(kk, live); kk.shutdown(); await sleepI(150);
+    { const DI2 = path.join(ROOT, 'data-i-bound2-' + tag); fs.mkdirSync(DI2, { recursive: true }); const m = {}; const bd = path.join(IROOT, 'bdirs-' + tag); for (let i = 0; i < N + 2; i++) { const d = path.join(bd, 'd' + i); fs.mkdirSync(d, { recursive: true }); m[d] = { hosts: [PREV], at: i < 2 ? 9_000_000_000_000 : 1_000_000_000 + i }; } // the two FIRST-inserted are the NEWEST
+      fs.writeFileSync(path.join(DI2, 'browser-profiles.json'), JSON.stringify({ host: PREV, profiles: [], browsers: {}, dirHosts: m })); const k2 = mkKeeper(Kmod, { dataDir: DI2, log: klogI }); await k2.boot(); const ks2 = Object.keys(k2._reg().dirHosts);
+      out.S35 = { size: ks2.length, newestKept: ks2.includes(path.join(bd, 'd0')) && ks2.includes(path.join(bd, 'd1')), oldestDropped: !ks2.includes(path.join(bd, 'd2')) && !ks2.includes(path.join(bd, 'd3')) }; k2.shutdown(); await sleepI(150); }
+    return out;
+  };
+  // ── two spellings of one directory (the ephemeral row on its kept directory; the home reached through a symlink, then renamed) ──
+  const runSpell = async (Kmod, tag) => {
+    const out = {}; const settings = { 'browser.idleTimeoutMs': 600000 }; const quiet = { log() { }, warn() { }, error() { } };
+    const realHome = path.join(ROOT, 'i-home-real-' + tag), linkHome = path.join(ROOT, 'i-home-link-' + tag); fs.mkdirSync(path.join(realHome, '.agent-browser'), { recursive: true, mode: 0o700 }); fs.symlinkSync(realHome, linkHome);
+    fs.writeFileSync(path.join(realHome, '.agent-browser', 'config.json'), JSON.stringify({ args: '--no-sandbox' }));
+    const DATA1 = path.join(linkHome, 'vibespace', 'data'), DATA2 = path.join(realHome, 'vibespace', 'data'); fs.mkdirSync(DATA2, { recursive: true });
+    const liveS = new Set([KG]);
+    const mkE = (DATA, homeDir) => { const beI = BE.create({ dataDir: DATA, homeDir, serverSetting: (x) => settings[x], log: quiet, socketDirBase: path.join(ROOT, 'sock-i-' + tag), env: { XDG_RUNTIME_DIR: XDG } }); let kp = null; const kept = KSt.create({ dataDir: DATA, keeper: () => kp, liveKeys: () => liveS, serverSetting: (x) => settings[x], log: quiet, sweepEveryMs: 0 }); kp = mkKeeper(Kmod, { dataDir: DATA, homeDir, kept, serverSetting: (x) => settings[x], liveKeys: () => liveS, log: klogI }); kp.__be = beI; return kp; };
+    const ensureOf = (kk) => { const e = kk.__be.envFor({ browserKey: KG, cwd: HOME }); return () => kk.ensureEphemeral({ browserKey: KG, sessionId: 'sess-7', envPairs: e.pairs, sessionName: 'D-Payments', variant: e.variant }); };
+    const actE = async (kk, dir, fn, more = () => ({})) => { const l0 = linesI.length, L0 = logOf('launches.log').length; const e = await threw(fn); return { err: e ? e.code : null, msg: e ? e.message : '', journal: linesI.slice(l0).join('\n'), launched: logOf('launches.log').length - L0, left: singletonsI(dir).length, ...more(e) }; };
+    const stopE = async (kk) => { const e2 = kk.ephemeralFor(KG); try { if (e2) await kk.stop(e2.profileId, { why: 'user' }); } catch { } };
+    let kk = mkE(DATA1, linkHome); await ensureOf(kk)(); const dir1 = kk.ephemeralFor(KG).dir; await stopE(kk); kk.shutdown(); await sleepI(150);
+    const rf = path.join(DATA2, 'browser-profiles.json'); const asOld = () => { const j = JSON.parse(fs.readFileSync(rf, 'utf8')); j.host = PREV; delete j.dirHosts; for (const rec of Object.values(j.browsers)) { rec.host = PREV; rec.hosts = [PREV]; } fs.writeFileSync(rf, JSON.stringify(j)); };
+    asOld(); liveS.clear(); kk = mkE(DATA1, linkHome); await kk.boot(); const rememberedUnder = Object.keys(kk._reg().dirHosts); kk.shutdown(); await sleepI(150); // the roll's boot, still the old spelling: the record retired, the directory remembers
+    { const k3 = mkE(DATA2, realHome); await k3.boot(); k3.shutdown(); await sleepI(150); } // the personalization: the first boot under the new spelling (an Update — the file's writer is this pod)
+    const dir2 = path.join(DATA2, 'browser-profiles', KG); const real2 = fs.realpathSync(dir2); plantI(dir2, PREV, await deadPidI()); liveS.add(KG); kk = mkE(DATA2, realHome); await kk.boot();
+    out.S42 = await actE(kk, dir2, ensureOf(kk), () => ({ sameInode: fs.statSync(dir1).ino === fs.statSync(dir2).ino, rememberedUnder: rememberedUnder.map((x) => x.startsWith(linkHome + '/') ? 'LINK' : (x.startsWith(fs.realpathSync(realHome) + '/') ? 'REAL' : x)).join() }));
+    unplantI(dir2); await stopE(kk); kk.shutdown(); await sleepI(150);
+    { const j = JSON.parse(fs.readFileSync(rf, 'utf8')); j.host = PREV; const linkKey = path.join(DATA1, 'browser-profiles', KG); j.dirHosts = { [linkKey]: { hosts: [PREV], at: 5 } }; j.profiles = j.profiles.filter((p) => !p.ephemeral); for (const id of Object.keys(j.browsers)) delete j.browsers[id]; j.leases = []; fs.writeFileSync(rf, JSON.stringify(j));
+      liveS.clear(); const k5 = mkE(DATA2, realHome); const l0 = linesI.length; await k5.boot(); const said = linesI.slice(l0).join('\n'); const keys = Object.keys(k5._reg().dirHosts); k5.shutdown(); await sleepI(150);
+      { const k6 = mkE(DATA2, realHome); await k6.boot(); k6.shutdown(); await sleepI(150); }
+      plantI(dir2, PREV, await deadPidI()); liveS.add(KG); const k7 = mkE(DATA2, realHome); await k7.boot();
+      out.S42b = { rekeyed: keys.length === 1 && keys[0] === real2 && !keys.includes(linkKey), said, ...(await actE(k7, dir2, ensureOf(k7))) }; unplantI(dir2); await stopE(k7); k7.shutdown(); await sleepI(150); }
+    return out;
+  };
+
+  // ── r6: THE IDENTITY WITNESS attacked (the fifth judgement): a file-level restore, inode reuse, two mounts, a directory moved aside, the said lines ──
+  const runR6 = async (Kmod, tag) => {
+    const out = {}; const DI = path.join(ROOT, 'data-r6-' + tag); fs.mkdirSync(DI, { recursive: true }); const parent = path.join(IROOT, 'r6-' + tag); fs.mkdirSync(parent, { recursive: true, mode: 0o700 }); const MK = B.LINEAGE_MARKER;
+    // S44 a file-level RESTORE: the data tree AND the directories copied file by file (every inode new, the same paths); the new pod works (a save under its name); the kept directory resumes carrying the pre-restore pod's lock
+    { let kk = mkKeeper(Kmod, { dataDir: DI, log: klogI }); const dir = await retiredDirI(kk, parent, 's44'); const tok = (kk._reg().dirHosts[dir] || {}).tok; kk.shutdown(); await sleepI(150);
+      const ino1 = fs.statSync(dir).ino; for (const D of [DI, parent]) { fs.cpSync(D, D + '.restored', { recursive: true }); fs.rmSync(D, { recursive: true, force: true }); fs.renameSync(D + '.restored', D); } const ino2 = fs.statSync(dir).ino;
+      kk = mkKeeper(Kmod, { dataDir: DI, log: klogI }); await kk.boot(); { const p = kk.createProfile({ label: 'other-' + tag }); kk.removeProfile(p.id); } const fileHost = JSON.parse(fs.readFileSync(path.join(DI, 'browser-profiles.json'), 'utf8')).host;
+      plantI(dir, PREV, await deadPidI()); const p2 = kk.adoptDirectory({ label: 's44-again', dir }).profile;
+      out.S44 = { tok: B.isLineageToken(tok), markerKept: fs.existsSync(path.join(dir, MK)), inoChanged: ino1 !== ino2, fileHostIsThis: fileHost === os.hostname(), ...(await actI(kk, p2, attachI(kk, p2))) }; unplantI(dir); await stopI(kk, p2); kk.shutdown(); await sleepI(150); }
+    // S43 the keeper leg runs where the scratch filesystem REUSES a removed directory's inode (ext4 — the fleet's; measured 20/20); tmpfs never does, the PURE row S43p carries the rule
+    { const probe = path.join(parent, 'probe'); fs.mkdirSync(probe, { recursive: true }); const a = fs.statSync(probe).ino; fs.rmSync(probe, { recursive: true, force: true }); fs.mkdirSync(probe); const reuses = fs.statSync(probe).ino === a; fs.rmSync(probe, { recursive: true, force: true });
+      if (reuses) { const kk = mkKeeper(Kmod, { dataDir: path.join(DI, 'd43'), log: klogI }); const dir = await retiredDirI(kk, parent, 's43'); const i1 = fs.statSync(dir).ino; fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir, { mode: 0o700 }); const i2 = fs.statSync(dir).ino; plantI(dir, PREV, await deadPidI()); const p2 = kk.adoptDirectory({ label: 's43-again', dir }).profile; out.S43 = { sameIno: i1 === i2, ...(await actI(kk, p2, attachI(kk, p2))) }; unplantI(dir); await stopI(kk, p2); kk.shutdown(); await sleepI(150); }
+      else { out.S43 = null; if (Kmod === K) console.log('  (④i S43 keeper leg: the scratch filesystem does not reuse inodes — the PURE row S43p carries the rule)'); } }
+    // S48 one tree under TWO MOUNTS (bindfs: one inode, two devices, two real paths — the owner's own box): remembered under one spelling, read under the other (SKIPPED without a user bindfs)
+    { const src = path.join(parent, 'mnt-src'), dst = path.join(parent, 'mnt-dst'); fs.mkdirSync(src, { recursive: true, mode: 0o700 }); fs.mkdirSync(dst, { recursive: true, mode: 0o700 }); let mounted = false; try { execFileSync('bindfs', ['--no-allow-other', src, dst], { stdio: 'ignore', timeout: 10000 }); mounted = fs.statSync(dst).dev !== fs.statSync(src).dev; } catch { mounted = false; }
+      if (mounted) { try { const DS = path.join(src, 'data'), DD = path.join(dst, 'data'); fs.mkdirSync(DS, { recursive: true }); const kS = mkKeeper(Kmod, { dataDir: DS, log: klogI }); const dirS = await retiredDirI(kS, src, 'p1'); kS.shutdown(); await sleepI(150); const dirD = path.join(dst, 'p1'); const kD = mkKeeper(Kmod, { dataDir: DD, log: klogI }); await kD.boot(); { const p = kD.createProfile({ label: 'other2-' + tag }); kD.removeProfile(p.id); } plantI(dirD, PREV, await deadPidI()); const p2 = kD.adoptDirectory({ label: 'p1-again', dir: dirD }).profile; out.S48 = { sameIno: fs.statSync(dirS).ino === fs.statSync(dirD).ino, ...(await actI(kD, p2, attachI(kD, p2))) }; unplantI(dirD); await stopI(kD, p2); kD.shutdown(); await sleepI(150); } finally { try { execFileSync('fusermount', ['-u', dst], { stdio: 'ignore', timeout: 10000 }); } catch { } } }
+      else { out.S48 = null; if (Kmod === K) console.log('  (④i S48 bindfs leg: no user bindfs mount here — the PURE row S43p carries the by-token rule)'); } }
+    // S54 a directory moved aside (Forget) and adopted again at its NEW path: found by its token ⇒ taken over, ONE entry re-keyed to the new spelling
+    { const kk = mkKeeper(Kmod, { dataDir: path.join(DI, 'd54'), log: klogI }); const dir = await retiredDirI(kk, parent, 's54'); const aside = dir + '.aside'; fs.renameSync(dir, aside); plantI(aside, PREV, await deadPidI()); const p2 = kk.adoptDirectory({ label: 's54-aside', dir: aside }).profile; const got = await actI(kk, p2, attachI(kk, p2)); const keys = Object.keys(kk._reg().dirHosts); out.S54 = { ...got, oneEntry: keys.length === 1 && keys[0] === aside }; unplantI(aside); await stopI(kk, p2); kk.shutdown(); await sleepI(150); }
+    // S49 what the load does to MANY directories is said ONCE per kind (40 gone / 40 r4-era keys / 40 unreadable)
+    { const mkFile = (D, map) => { fs.mkdirSync(D, { recursive: true }); fs.writeFileSync(path.join(D, 'browser-profiles.json'), JSON.stringify({ host: PREV, profiles: [], browsers: {}, leases: [], dirHosts: map })); };
+      { const D = path.join(DI, 'd49a'); const m = {}; for (let i = 0; i < 40; i++) m[path.join(parent, 'gone', 'g' + i)] = { hosts: [PREV], at: 1 + i }; mkFile(D, m); const kk = mkKeeper(Kmod, { dataDir: D, log: klogI }); const l0 = linesI.length; await kk.boot(); const said = linesI.slice(l0); out.S49a = { left: Object.keys(kk._reg().dirHosts).length, lines: said.filter((l) => /forgotten — the directory is gone/.test(l)).length, counted: said.some((l) => /40 directories forgotten — the directory is gone — each of: /.test(l)) }; kk.shutdown(); await sleepI(150); }
+      { const D = path.join(DI, 'd49b'); const realH = path.join(parent, 'h-real'), linkH = path.join(parent, 'h-link'); fs.mkdirSync(realH, { recursive: true }); fs.symlinkSync(realH, linkH); const m = {}; for (let i = 0; i < 40; i++) { fs.mkdirSync(path.join(realH, 'd' + i), { recursive: true }); m[path.join(linkH, 'd' + i)] = { hosts: [PREV], at: 1 + i }; } mkFile(D, m); const kk = mkKeeper(Kmod, { dataDir: D, log: klogI }); const l0 = linesI.length; await kk.boot(); const said = linesI.slice(l0); const rp = fs.realpathSync(realH); out.S49b = { rekeyed: Object.keys(kk._reg().dirHosts).filter((x) => x.startsWith(rp + '/')).length, lines: said.filter((l) => /is remembered under its real path/.test(l)).length }; kk.shutdown(); await sleepI(150); }
+      if (!isRoot) { const D = path.join(DI, 'd49c'); const pp = path.join(parent, 'unread'); const m = {}; for (let i = 0; i < 40; i++) { fs.mkdirSync(path.join(pp, 'd' + i), { recursive: true }); m[path.join(pp, 'd' + i)] = { hosts: [PREV], at: 1 + i }; } mkFile(D, m); fs.chmodSync(pp, 0o000); const kk = mkKeeper(Kmod, { dataDir: D, log: klogI }); const l0 = linesI.length; await kk.boot(); const said = linesI.slice(l0); fs.chmodSync(pp, 0o700); out.S49c = { kept: Object.keys(kk._reg().dirHosts).length, lines: said.filter((l) => /40 directories kept — the directory cannot be read right now \(EACCES\); judged again at the next load — each of: /.test(l)).length }; kk.shutdown(); await sleepI(150); } }
+    return out;
+  };
+  /** PURE: the marker decides (an entry with `tok`), the inode only for an r5-era entry, a path miss found by the token, one entry per token. */
+  const pureRows = (Bx) => { const d = path.join(IROOT, 'pure-d'); const T = 'feedfacefeedfacefeedface'; const m = { [d]: { hosts: [PREV], at: 1, ino: 5, tok: T } }; return { reuse: Bx.dirHostsOf(m, d, { ino: 5, tok: null }), restore: Bx.dirHostsOf(m, d, { ino: 6, tok: T }), stranger: Bx.dirHostsOf(m, d, { ino: 5, tok: 'deadbeefdeadbeefdeadbeef' }), moved: Bx.dirHostsOf(m, d + '.aside', { ino: 5, tok: T, bearer: () => null }), r5era: Bx.dirHostsOf({ [d]: { hosts: [PREV], at: 1, ino: 5 } }, d, { ino: 5, tok: null }), r5eraOther: Bx.dirHostsOf({ [d]: { hosts: [PREV], at: 1, ino: 5 } }, d, { ino: 6 }), oneEntry: Object.keys(Bx.rememberDirHosts(m, d + '.aside', [PREV], 2, 512, { tok: T })) }; };
+  const e = await runNamed(K, 'product'); const bnd = await runBound(K, 'product'); const sp = await runSpell(K, 'product');
+  judge('S32a', 'a FRESH directory at a forgotten one\'s path (no reload between): the inode witness says it is not that directory ⇒ refused by name', { err: 'profile_locked', msg: /another machine's name \(pod-old/, launched: 0, left: 3 }, e.S32a);
+  judge('S38b', 'the directory COPIED (another inode) BESIDE its original, a duplicate entry hand-written at the copy\'s path: r7 — one token ⇒ one entry (the duplicate dropped at load), the token\'s bearer (the original) is still there with another inode ⇒ a COPY, not a restore ⇒ its lineage refused and SAID, the old-pod lock inside it refused by name (r6 took it over as "a restore\'s shape" and its remember stole the original\'s entry — ④j S56b)', { inoDiffers: true, err: 'profile_locked', launched: 0, left: 3, journal: /is a copy of/ }, e.S38b);
+  if (e.S36) judge('S36', 'EACCES on the directory at ONE load (a flapping PVC) ⇒ the lineage KEPT (gone = ENOENT only), said once; the next resume taken over', { had: [PREV], kept: [PREV], said: /kept — the directory cannot be read right now \(EACCES\); judged again at the next load/, err: null, launched: 1, left: 0, renamedFrom: PREV }, e.S36);
+  judge('S37', 'the directory gone at load (ENOENT) ⇒ pruned AND said', { pruned: true, said: /forgotten — the directory is gone/ }, e.S37);
+  judge('S34', `the bound reached (${B.DIR_HOSTS_MAX + 1} directories): the OLDEST remembered is evicted (the live one's — its own record still knows), the eviction SAID with its path; the first retired one still remembered`, { firstHadIt: true, size: B.DIR_HOSTS_MAX, liveEvicted: true, dir0Kept: true, liveStillLaunches: null, said: new RegExp(`forgotten at the ${B.DIR_HOSTS_MAX} bound \\(the oldest remembered\\): `) }, bnd.S34);
+  judge('S35', `a ${B.DIR_HOSTS_MAX + 2}-entry file at load: the bound keeps the ${B.DIR_HOSTS_MAX} NEWEST by at, never the last by insertion order`, { size: B.DIR_HOSTS_MAX, newestKept: true, oldestDropped: true }, bnd.S35);
+  judge('S42', 'ONE directory, two spellings (launched through the symlinked home, read under the real one after the personalization): remembered under its IDENTITY ⇒ taken over', { sameInode: true, rememberedUnder: 'REAL', err: null, launched: 1, left: 0, journal: /previous name pod-old — taken over/ }, sp.S42);
+  judge('S42b', 'an r4-era file keyed by the symlink spelling: re-keyed at load to the real path (said), persisted ⇒ the resume one Update later taken over', { rekeyed: true, said: /is remembered under its real path/, err: null, launched: 1, left: 0 }, sp.S42b);
+
+  const r6 = await runR6(K, 'product'); const pr = pureRows(B);
+  judge('S43p', 'PURE: the witness is the directory\'s MARKER — an entry with a token: the directory with none and the SAME inode (ext4 reuse) ⇒ none; the same token with ANOTHER inode (a restore) ⇒ answered; a stranger\'s token ⇒ none; the token under another path (moved / a mount) ⇒ answered; an r5-era entry keeps the inode rule; a remember under a new spelling leaves ONE entry', { reuse: [], restore: [PREV], stranger: [], moved: [PREV], r5era: [PREV], r5eraOther: [], oneEntry: [path.join(IROOT, 'pure-d') + '.aside'] }, pr);
+  if (r6.S43) { judge('S43', 'KEEPER on a filesystem whose probe reused an inode: a forgotten directory removed, a stranger\'s (same old pod) put at its path ⇒ refused by name (the marker is absent; whether THIS mkdir reused the inode is printed, never pinned — the PURE row pins the rule)', { err: 'profile_locked', launched: 0, left: 3 }, r6.S43); console.log(`  (④i S43 keeper leg ran: the stranger's directory got ${r6.S43.sameIno ? 'the SAME' : 'another'} inode)`); }
+  judge('S44', 'a file-level RESTORE (every inode new, the same paths; the new pod has saved under its own name): the conversation\'s own kept directory with the pre-restore pod\'s lock ⇒ taken over — the marker survives the copy, the inode is not asked', { tok: true, markerKept: true, inoChanged: true, fileHostIsThis: true, err: null, launched: 1, left: 0, journal: /previous name pod-old — taken over/ }, r6.S44);
+  if (r6.S48) judge('S48', 'one tree under two MOUNTS (bindfs: one inode, two real paths): remembered under one spelling, read under the other ⇒ found by the token ⇒ taken over', { sameIno: true, err: null, launched: 1, left: 0 }, r6.S48);
+  judge('S54', 'a directory moved aside (Forget) and adopted again at its NEW path: found by its token ⇒ its lineage ⇒ taken over; ONE entry, re-keyed to the new spelling', { err: null, launched: 1, left: 0, oneEntry: true }, r6.S54);
+  judge('S49a', '40 directories gone at one load: every lineage pruned, said ONCE (the count and the first paths), never a line each', { left: 0, lines: 1, counted: true }, r6.S49a);
+  judge('S49b', '40 r4-era keys at one load: every one re-keyed, said ONCE', { rekeyed: 40, lines: 1 }, r6.S49b);
+  if (r6.S49c) judge('S49c', '40 directories unreadable at one load: every lineage kept, said ONCE with the code census', { kept: 40, lines: 1 }, r6.S49c);
+  const dis = TABLE.filter((r) => !r.agree);
+  ok(TABLE.length >= 13 && !dis.length, `④i THE FOURTH + FIFTH JUDGEMENT: ${TABLE.length} scenarios through the real keeper (and the PURE rule), every one as the truth says`, dis.map((r) => `${r.id}: ${r.diffs.join(' / ')}`));
+  // ── the three patched-KEEPER controls ──
+  const ksrcI = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  if (!isRoot) {
+    const anyErr = ksrcI.replace("try { fs.lstatSync(d); } catch (e) { if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) gone = true; else err = e; }", "try { fs.lstatSync(d); } catch (e) { gone = true; /* CONTROL: any error prunes */ }");
+    ok(anyErr !== ksrcI, '④i control setup: the prune\'s error classification is where the control cuts');
+    const c4 = await runNamed(M.load('src/server/browser-keeper.js', anyErr, 'prune-on-any-error'), 'ctl4');
+    ok(c4.S36 && c4.S36.kept.length === 0 && c4.S36.err === 'profile_locked' && c4.S36.left === 3 && c4.S36.launched === 0, '④i CONTROL 4: a keeper that prunes on ANY stat error loses the lineage at one unreadable load and refuses the directory as FOREIGN at the next resume — S36 catches it', c4.S36 && { kept: c4.S36.kept, err: c4.S36.err, left: c4.S36.left });
+  }
+  { const literal = ksrcI.replace("const id = F.dirIdentity(d); return id ? id.replace(/\\/+$/, '') || id : d; };", "return d; /* CONTROL: the spelling as given */ };");
+    ok(literal !== ksrcI, '④i control setup: the identity key is where the control cuts');
+    const c5k = await runSpell(M.load('src/server/browser-keeper.js', literal, 'literal-dir-key'), 'ctl5k');
+    ok(c5k.S42.rememberedUnder === 'LINK' && c5k.S42.err === null && c5k.S42b.rekeyed === false, '④i CONTROL 5 (r6, the key alone): a keeper that keys by the spelling as given still remembers under the symlink spelling and never re-keys (S42 / S42b see the structure) — but the TOKEN finds the lineage the key missed, so the verdict holds', { under: c5k.S42.rememberedUnder, err: c5k.S42.err, rekeyed: c5k.S42b.rekeyed });
+    const literalNoTok = literal.replace("const dirTokOf = (dir) => { try {", "const dirTokOf = (dir) => { return null; /* CONTROL: no marker read */ try {");
+    ok(literalNoTok !== literal, '④i control setup: the marker read is where the second cut is');
+    const c5 = await runSpell(M.load('src/server/browser-keeper.js', literalNoTok, 'literal-dir-key-no-marker'), 'ctl5');
+    ok(c5.S42.rememberedUnder === 'LINK' && c5.S42.err === 'profile_locked' && c5.S42.left === 3 && c5.S42b.err === 'profile_locked', '④i CONTROL 5: a keeper that keys the lineage by the spelling as given AND reads no marker orphans it at the personalization (remembered under the symlink spelling, read under the real one — refused as foreign; the r4-era file never re-keyed) — S42 / S42b catch it', { under: c5.S42.rememberedUnder, err: c5.S42.err, left: c5.S42.left, b: c5.S42b.err }); }
+  { const noIno = ksrcI.replace("const dirInoOf = (dir) => { try {", "const dirInoOf = (dir) => { return null; /* CONTROL: no inode witness */ try {").replace("const mintDirTok = (dir, { fresh = false } = {}) => { const have = fresh ? null : dirTokOf(dir); if (have) return have;", "const mintDirTok = (dir, { fresh = false } = {}) => { return null; /* CONTROL: no marker minted */ const have = fresh ? null : dirTokOf(dir); if (have) return have;");
+    ok(noIno !== ksrcI && noIno.includes('no marker minted'), '④i control setup: the inode witness and the marker mint are where the control cuts');
+    const c6 = await runNamed(M.load('src/server/browser-keeper.js', noIno, 'no-inode-witness'), 'ctl6');
+    ok(c6.S32a.err === null && c6.S32a.launched === 1 && c6.S38b.err === null && c6.S38b.launched === 1, '④i CONTROL 6: a keeper with NEITHER witness (no inode, no marker — the r4 keeper) hands a forgotten directory\'s lineage to a fresh directory at its path (S32a catches it; a copy is taken over there as here)', { a: c6.S32a.err, b: c6.S38b.err }); }
+
+  // ── r6: two more controls — a keeper that never reads the marker, the PURE rule without it ──
+  { const noTok = ksrcI.replace("const dirTokOf = (dir) => { try {", "const dirTokOf = (dir) => { return null; /* CONTROL: the marker is never read */ try {");
+    ok(noTok !== ksrcI, '④i control setup: the marker read is where the control cuts');
+    const c7 = await runR6(M.load('src/server/browser-keeper.js', noTok, 'no-marker-read'), 'ctl7');
+    ok(c7.S44.err === 'profile_locked' && c7.S44.left === 3 && c7.S44.launched === 0 && c7.S54.err === 'profile_locked' && c7.S54.launched === 0, '④i CONTROL 7: a keeper that never reads the directory\'s marker (the inode alone — r5\'s rule) refuses the RESTORED directory and the MOVED one as foreign — S44 / S54 catch it', { a: c7.S44.err, b: c7.S54.err }); }
+  { const psrc = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8'); const noMarker = psrc.replace("if (asked && isLineageToken(e.tok)) {\n      if (e.tok === t) return", "if (false) { /* CONTROL: the marker is not asked */\n      if (e.tok === t) return").replace("const k = Object.keys(m).find((x) => x !== d && m[x] && m[x].tok === t);", "const k = null; /* CONTROL: no search by token */");
+    ok(noMarker !== psrc && noMarker.includes('no search by token'), '④i control setup: the marker rule and the search by token are where the control cuts (the r5 rule: the inode alone)');
+    const c8 = pureRows(M.load('src/browser-profiles.js', noMarker, 'no-marker-rule'));
+    ok(c8.reuse.length === 1 && c8.stranger.length === 1 && c8.restore.length === 0, '④i CONTROL 8: the PURE rule without the marker hands a forgotten directory\'s lineage to a fresh directory with a REUSED inode and to a stranger\'s, and orphans a RESTORED one — S43p catches it', { reuse: c8.reuse, stranger: c8.stranger, restore: c8.restore }); }
+
+  // ═══ ④j VERIFY r7 (T1/T2): THE MARKER'S TRUST MODEL — ONE TOKEN, ONE DIRECTORY; THE MARKER NEVER OUTRANKS A LIVE HOLDER ═══════
+  // r6 found a path miss by the token anywhere and its remember deleted every other entry with that token: an agent's cp -a of a
+  // profile directory (the marker rides along) was honoured beside its original, STOLE its entry, and once the copy was deleted the
+  // original's own old-pod lock was refused as foreign (S56 / S56b / S56c / S56d; a stranger's copy of OUR marker the same, S61).
+  // The RULE: the token's BEARER (the directory at the entry's own path, asked now) tells a restore from a copy — gone / another
+  // token ⇒ moved (honoured), the same token + the same inode ⇒ a mount (honoured, S62), the same token + another inode ⇒ a COPY
+  // (refused, said, its own marker at its first launch). UserW's EXACT upgrade (S59a): a fleet pod's checkout is pulled at the boot
+  // AFTER a roll, so .200 first runs on the NEW pod against the .199 file (no host / dirHosts / marker — read on his pod); the one
+  // witness .199 left is the record's own `browser.pid` in the lock ⇒ PURE legacyLockWitness at load. A deleted marker (S58a–c):
+  // re-minted at the next remember with the hosts KEPT; the refusal between is said. The storm's names (S60): a per-boot LEDGER.
+  console.log('— ④j verify r7: the marker table (PURE, 13 lineage rows × 6 locks) + the keeper legs: a copy beside its original, a stranger\'s copy of our marker, a live holder on the original, a deleted marker ×3, userW\'s .199 → roll ×2, two mounts, the ledger; five controls');
+  {
+    const TABLE7 = [];
+    const judge7 = (id, who, truth, got) => { const diffs = []; for (const [k2, want] of Object.entries(truth)) { const g = got[k2]; let pass2; if (want instanceof RegExp) pass2 = typeof g === 'string' && want.test(g); else pass2 = JSON.stringify(g) === JSON.stringify(want); if (!pass2) diffs.push(`${k2}: truth ${String(want).slice(0, 90)} | product ${JSON.stringify(g === undefined ? null : g).slice(0, 200)}`); } TABLE7.push({ id, who, agree: !diffs.length, diffs }); return !diffs.length; };
+    const MK = B.LINEAGE_MARKER; const tokOf7 = (dir) => { try { return fs.readFileSync(path.join(dir, MK), 'utf8').trim(); } catch { return null; } };
+    const entry7 = (kk, dir) => (kk._reg().dirHosts || {})[dir] || null;
+    const inoOf7 = (d) => { try { return fs.statSync(d).ino; } catch { return null; } };
+    const bearer7 = (k) => { try { fs.lstatSync(k); } catch (e) { if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) return null; } return { tok: tokOf7(k), ino: inoOf7(k) }; };
+    const dh7 = (kk, dir) => B.dirHostsOf(kk._reg().dirHosts, dir, { ino: inoOf7(dir), tok: tokOf7(dir), bearer: bearer7 });
+    // ── T1 PURE: THE MARKER TABLE. Rows = what the directory presents vs what the registry holds; columns = the lock in it. The law,
+    //    hand-written: the LINEAGE is `lineageVerdict` (path | token | none); the LOCK verdict is the ladder's — ① a LIVE holder naming
+    //    THIS directory is judged by its own facts whatever the marker says (no mark of ours ⇒ foreign by name, never ended); ② nothing
+    //    live here: no lock ⇒ free, ours under this name ⇒ free (stale), a previous name ⇒ taken over iff the LINEAGE names it, a
+    //    foreign name ⇒ foreign; a live holder of ANOTHER directory under a previous name (the copy's lock, the original's browser)
+    //    ⇒ step ② by the lineage too, never own-orphan. ──
+    const pureTable = (Bx) => {
+      const d = path.join(IROOT, 'j-d'), other = path.join(IROOT, 'j-other'), elsewhere = path.join(IROOT, 'j-elsewhere'); const T = 'feedfacefeedfacefeedface', S = 'deadbeefdeadbeefdeadbeef';
+      const baseMap = () => ({ [d]: { hosts: [PREV], at: 1, ino: 5, tok: T }, [path.join(IROOT, 'j-moved-from')]: { hosts: ['pod-moved'], at: 2, ino: 7, tok: S } });
+      const rows = {
+        'M1 absent (the entry remembers one)': { dir: d, opts: { ino: 5, tok: null }, bearers: {} },
+        'M2 present, matches the entry at this path': { dir: d, opts: { ino: 5, tok: T }, bearers: {} },
+        'M3 matches an entry at ANOTHER path whose bearer is gone (moved / restored elsewhere)': { dir: other, opts: { ino: 9, tok: S }, bearers: {} },
+        'M4 matches NO entry': { dir: other, opts: { ino: 9, tok: 'abcdefabcdefabcdefabcdef' }, bearers: {} },
+        'M5 unreadable (read as none, the entry remembers one)': { dir: d, opts: { ino: 5, tok: null }, bearers: {} },
+        'M6 garbage': { dir: d, opts: { ino: 5, tok: 'not a token!' }, bearers: {} },
+        "M7 a stranger's copy of OUR marker into THEIR dir (ours still bears it, another inode)": { dir: other, opts: { ino: 9, tok: T }, bearers: { [d]: { tok: T, ino: 5 } } },
+        'M8 our marker + a different inode at the SAME path (a file-level restore)': { dir: d, opts: { ino: 6, tok: T }, bearers: {} },
+        'M9 our marker + the same inode (a live directory)': { dir: d, opts: { ino: 5, tok: T }, bearers: {} },
+        'M10 two directories, one token (the copy beside its original, judged for the COPY)': { dir: other, opts: { ino: 9, tok: T }, bearers: { [d]: { tok: T, ino: 5 } } },
+        'M10b one tree under two mounts (the same token, the SAME inode under another path)': { dir: other, opts: { ino: 5, tok: T }, bearers: { [d]: { tok: T, ino: 5 } } },
+        'M11 the bearer not answered for (a reader that asks about the token without it)': { dir: other, opts: { ino: 9, tok: T }, bearers: null },
+        'M12 an r5-era entry (no token): the inode rule — the same inode': { dir: d, map: { [d]: { hosts: [PREV], at: 1, ino: 5 } }, opts: { ino: 5, tok: null }, bearers: {} },
+        'M12b an r5-era entry: another inode': { dir: d, map: { [d]: { hosts: [PREV], at: 1, ino: 5 } }, opts: { ino: 6, tok: null }, bearers: {} },
+      };
+      const out = {};
+      for (const [name, r] of Object.entries(rows)) {
+        const m = r.map || baseMap(); const bearers = r.bearers; const opts = { ...r.opts, ...(bearers === null ? {} : { bearer: (k) => (k in bearers ? bearers[k] : null) }) };
+        const v = Bx.lineageVerdict(m, r.dir, opts);
+        const dead = { pid: 999, alive: false }; const liveHere = { pid: 777, alive: true, cmdline: `chrome\0--user-data-dir=${r.dir}`, dirs: [r.dir], starttime: 1 }; const liveElsewhere = { ...liveHere, cmdline: `chrome\0--user-data-dir=${elsewhere}`, dirs: [elsewhere] };
+        const lock = (lk, holder) => { const x = Bx.profileLockVerdict({ lock: lk, holder, hostname: 'this', dir: r.dir, minted: true, recorded: null, mark: 'bp-x', preMarkAllowed: false, launchHosts: v.hosts }); return `${x.kind}@${x.step}`; };
+        out[name] = { lineage: `${v.via}/${v.why}${v.fresh ? '/fresh' : ''}`, hosts: v.hosts, L1none: lock(null, null), L2ours: lock({ host: 'this', pid: 999 }, dead), L3previous: lock({ host: PREV, pid: 999 }, dead), L4foreign: lock({ host: 'elsewhere-host', pid: 999 }, dead), L5live: lock({ host: 'this', pid: 777 }, liveHere), L6liveOther: lock({ host: PREV, pid: 777 }, liveElsewhere) };
+      }
+      return out;
+    };
+    const lawCols = (hosts) => ({ L1none: 'free@live-holder', L2ours: 'free@live-holder', L3previous: hosts.includes(PREV) ? 'stale-previous-host@hostname' : 'foreign@hostname', L4foreign: 'foreign@hostname', L5live: 'foreign@live-holder', L6liveOther: hosts.includes(PREV) ? 'stale-previous-host@hostname' : 'foreign@hostname' });
+    const truthRows = {
+      'M1 absent (the entry remembers one)': ['none/marker-absent', []], 'M2 present, matches the entry at this path': ['path/path', [PREV]], 'M3 matches an entry at ANOTHER path whose bearer is gone (moved / restored elsewhere)': ['token/moved', ['pod-moved']], 'M4 matches NO entry': ['none/no-entry', []],
+      'M5 unreadable (read as none, the entry remembers one)': ['none/marker-absent', []], 'M6 garbage': ['none/marker-absent', []], "M7 a stranger's copy of OUR marker into THEIR dir (ours still bears it, another inode)": ['none/copy/fresh', []],
+      'M8 our marker + a different inode at the SAME path (a file-level restore)': ['path/path', [PREV]], 'M9 our marker + the same inode (a live directory)': ['path/path', [PREV]], 'M10 two directories, one token (the copy beside its original, judged for the COPY)': ['none/copy/fresh', []],
+      'M10b one tree under two mounts (the same token, the SAME inode under another path)': ['token/mount', [PREV]], 'M11 the bearer not answered for (a reader that asks about the token without it)': ['none/bearer-unknown', []],
+      'M12 an r5-era entry (no token): the inode rule — the same inode': ['path/r5era', [PREV]], 'M12b an r5-era entry: another inode': ['none/inode', []],
+    };
+    const pt = pureTable(B); let cells = 0;
+    for (const [name, [lineage, hosts]] of Object.entries(truthRows)) { const truth = { lineage, hosts, ...lawCols(hosts) }; cells += Object.keys(truth).length; judge7('T1 ' + name, 'the marker table row', truth, pt[name] || {}); }
+    ok(Object.keys(truthRows).length === 14 && cells === 14 * 8, `④j T1 THE MARKER TABLE: ${Object.keys(truthRows).length} lineage rows × (the lineage, its hosts, 6 lock columns) = ${cells} pinned cells; a token is honoured for AT MOST ONE directory (M7 / M10 refused, M10b a mount), the live holder (L5) rules before any marker`);
+    // ── the keeper legs ──
+    const KS7 = KSt; const settings7 = { 'browser.idleTimeoutMs': 600000 }; const quiet7 = { log() { }, warn() { }, error() { } };
+    const OSM = require('os'); const realHostname = OSM.hostname;
+    const readReg7 = (D) => JSON.parse(fs.readFileSync(path.join(D, 'browser-profiles.json'), 'utf8')); const writeReg7 = (D, j) => fs.writeFileSync(path.join(D, 'browser-profiles.json'), JSON.stringify(j));
+    const runR7 = async (Kmod, tag, only = null) => {
+      const want = (id) => !only || only.includes(id);
+      const out = {}; const DI = path.join(ROOT, 'data-r7-' + tag); fs.mkdirSync(DI, { recursive: true }); const parent = path.join(IROOT, 'r7-' + tag); fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
+      const mkE7 = (DATA, homeDir, liveS) => { const beI = BE.create({ dataDir: DATA, homeDir, serverSetting: (x) => settings7[x], log: quiet7, socketDirBase: path.join(ROOT, 'sock-j-' + tag), env: { XDG_RUNTIME_DIR: XDG } }); let kp = null; const kept = KS7.create({ dataDir: DATA, keeper: () => kp, liveKeys: () => liveS, serverSetting: (x) => settings7[x], log: quiet7, sweepEveryMs: 0 }); kp = mkKeeper(Kmod, { dataDir: DATA, homeDir, kept, now: Date.now, /* verify r8: the legacy witness judges a KERNEL fact (the lock's ctime, the port file's mtime) against the record's own startedAt — these keepers run on the real clock, as the fleet does */ serverSetting: (x) => settings7[x], liveKeys: () => liveS, log: klogI }); kp.__be = beI; return kp; };
+      const ensureOf7 = (kk) => { const e = kk.__be.envFor({ browserKey: KG, cwd: HOME }); return () => kk.ensureEphemeral({ browserKey: KG, sessionId: 'sess-7', envPairs: e.pairs, sessionName: 'D-Payments', variant: e.variant }); };
+      const actE7 = async (kk, dir, fn) => { const l0 = linesI.length, L0 = logOf('launches.log').length; const e = await threw(fn); return { err: e ? e.code : null, launched: logOf('launches.log').length - L0, left: singletonsI(dir).length, journal: linesI.slice(l0).join('\n') }; };
+      const stopE7 = async (kk) => { const e2 = kk.ephemeralFor(KG); try { if (e2) await kk.stop(e2.profileId, { why: 'user' }); } catch { } };
+      // S56 / S56d / S56b / S56c — a copy beside its original
+      if (want('S56')) { let kk = mkKeeper(Kmod, { dataDir: path.join(DI, 'd56'), log: klogI }); const O = await retiredDirI(kk, parent, 's56-orig'); const T = (entry7(kk, O) || {}).tok; const C = path.join(parent, 's56-copy'); fs.cpSync(O, C, { recursive: true });
+        out.S56c = { tokMinted: B.isLineageToken(T), copyCarriesIt: tokOf7(C) === T, origAnswered: dh7(kk, O), copyAnswered: dh7(kk, C) };
+        plantI(C, PREV, await deadPidI()); const pC = kk.adoptDirectory({ label: 's56-copy', dir: C }).profile;
+        out.S56 = await actI(kk, pC, attachI(kk, pC), () => ({ origEntryKept: !!entry7(kk, O), copyTokSame: tokOf7(C) === T, origTokSame: tokOf7(O) === T }));
+        unplantI(C); out.S56d = await actI(kk, pC, attachI(kk, pC), () => { const eC = entry7(kk, C), eO2 = entry7(kk, O); return { copyTokDiffers: B.isLineageToken(tokOf7(C)) && tokOf7(C) !== T, copyEntryOwnTok: !!(eC && eC.tok === tokOf7(C)), origEntryKept: !!(eO2 && eO2.tok === T), origTokSame: tokOf7(O) === T }; });
+        await stopI(kk, pC); for (const l of kk._reg().leases.filter((l) => l.profileId === pC.id)) { try { kk.detach({ profileId: pC.id, browserKey: l.browserKey, by: 'user' }); } catch { } } try { kk.removeProfile(pC.id); } catch { } kk.shutdown(); await sleepI(150);
+        fs.rmSync(C, { recursive: true, force: true }); kk = mkKeeper(Kmod, { dataDir: path.join(DI, 'd56'), log: klogI }); await kk.boot(); plantI(O, PREV, await deadPidI()); const pO = kk.adoptDirectory({ label: 's56-orig-again', dir: O }).profile;
+        out.S56b = await actI(kk, pO, attachI(kk, pO), () => ({ entryThere: !!entry7(kk, O) })); unplantI(O); await stopI(kk, pO); kk.shutdown(); await sleepI(150); }
+      // S57 — a LIVE holder on the original while the copy (its lock copied) is judged
+      if (want('S57')) { const kk = mkKeeper(Kmod, { dataDir: path.join(DI, 'd57'), log: klogI }); const O = await retiredDirI(kk, parent, 's57-orig'); const T = (entry7(kk, O) || {}).tok;
+        const holder = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)', '--', `--user-data-dir=${O}`, '--vibespace-keeper=bp-stranger'], { stdio: 'ignore' }); await sleepI(300);
+        plantI(O, PREV, holder.pid); const C = path.join(parent, 's57-copy'); fs.cpSync(O, C, { recursive: true }); const pC = kk.adoptDirectory({ label: 's57-copy', dir: C }).profile;
+        const aliveP = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+        out.S57 = await actI(kk, pC, attachI(kk, pC), () => ({ holderAlive: aliveP(holder.pid), origLeft: singletonsI(O).length, origEntryKept: !!entry7(kk, O), copyTokSame: tokOf7(C) === T }));
+        const pO = kk.adoptDirectory({ label: 's57-orig', dir: O }).profile; out.S57b = await actI(kk, pO, attachI(kk, pO), () => ({ holderAlive: aliveP(holder.pid) }));
+        try { holder.kill('SIGKILL'); } catch { } unplantI(O); unplantI(C); await stopI(kk, pC); await stopI(kk, pO); kk.shutdown(); await sleepI(150); }
+      // S58a–c — the marker deleted
+      if (want('S58')) { const D7 = path.join(DI, 'd58'); let kk = mkKeeper(Kmod, { dataDir: D7, log: klogI }); const D = await retiredDirI(kk, parent, 's58'); const T1 = (entry7(kk, D) || {}).tok; fs.unlinkSync(path.join(D, MK));
+        plantI(D, os.hostname(), await deadPidI()); let p = kk.adoptDirectory({ label: 's58-same-pod', dir: D }).profile; out.S58a = await actI(kk, p, attachI(kk, p), () => { const e = entry7(kk, D); return { remintedOnDisk: B.isLineageToken(tokOf7(D)) && tokOf7(D) !== T1, entryUpdated: !!(e && e.tok === tokOf7(D)), hostsKept: !!(e && e.hosts.includes(PREV)) }; });
+        unplantI(D); await stopI(kk, p); for (const l of kk._reg().leases.filter((l) => l.profileId === p.id)) { try { kk.detach({ profileId: p.id, browserKey: l.browserKey, by: 'user' }); } catch { } } kk.removeProfile(p.id); kk.shutdown(); await sleepI(150);
+        fs.unlinkSync(path.join(D, MK)); { const j = readReg7(D7); j.host = PREV; writeReg7(D7, j); } kk = mkKeeper(Kmod, { dataDir: D7, log: klogI }); await kk.boot(); plantI(D, PREV, await deadPidI()); p = kk.adoptDirectory({ label: 's58-first-roll', dir: D }).profile;
+        out.S58b = await actI(kk, p, attachI(kk, p), () => ({ entryUpdated: (entry7(kk, D) || {}).tok === tokOf7(D) })); unplantI(D); await stopI(kk, p); for (const l of kk._reg().leases.filter((l) => l.profileId === p.id)) { try { kk.detach({ profileId: p.id, browserKey: l.browserKey, by: 'user' }); } catch { } } kk.removeProfile(p.id); kk.shutdown(); await sleepI(150);
+        fs.unlinkSync(path.join(D, MK)); { const j = readReg7(D7); j.host = PREV; writeReg7(D7, j); } { const k0 = mkKeeper(Kmod, { dataDir: D7, log: klogI }); await k0.boot(); k0.shutdown(); await sleepI(150); }
+        kk = mkKeeper(Kmod, { dataDir: D7, log: klogI }); const l0 = linesI.length; await kk.boot(); plantI(D, PREV, await deadPidI()); p = kk.adoptDirectory({ label: 's58-update-then-roll', dir: D }).profile;
+        out.S58c = await actI(kk, p, attachI(kk, p), () => ({ saidCause: linesI.slice(l0).join('\n') })); unplantI(D); await stopI(kk, p); kk.shutdown(); await sleepI(150); }
+      // S59a / S59b — userW's exact upgrade, both orders
+      if (want('S59')) { const DATA = path.join(DI, 'd59'); fs.mkdirSync(DATA, { recursive: true }); const liveS = new Set([KG]); let kk = mkE7(DATA, HOME, liveS); const J = path.join(parent, 's59-jarvis'); fs.mkdirSync(J, { recursive: true, mode: 0o700 });
+        const pJ = kk.adoptDirectory({ label: 'jarvis-work', dir: J }).profile; await kk.attach({ profileId: pJ.id, browserKey: KA, sessionId: 'sess-1' }); await ensureOf7(kk)(); const E = kk.ephemeralFor(KG).dir; kk.shutdown(); await sleepI(150);
+        for (const l of logOf('launches.log')) { try { process.kill(l.pid, 'SIGKILL'); } catch { } } const chromeJ = await deadPidI(), chromeE = await deadPidI(), daemonJ = await deadPidI(), daemonE = await deadPidI(); // the roll: every process of the old pod is dead
+        const toV199 = () => { const j = readReg7(DATA); delete j.host; delete j.dirHosts; for (const [id, rec] of Object.entries(j.browsers)) { delete rec.host; delete rec.hosts; rec.state = 'ready'; rec.endedAt = null; rec.pid = id === pJ.id ? daemonJ : daemonE; rec.starttime = 1; rec.browser = { pid: id === pJ.id ? chromeJ : chromeE, starttime: 1, dir: id === pJ.id ? J : E, devtoolsPort: 1 }; } writeReg7(DATA, j); for (const d of [J, E]) { try { fs.unlinkSync(path.join(d, MK)); } catch { } } plantI(J, PREV, chromeJ); plantI(E, PREV, chromeE); };
+        toV199(); const v199 = readReg7(DATA); const shape = { noHost: !('host' in v199), noDirHosts: !('dirHosts' in v199), recordsLegacy: Object.values(v199.browsers).every((r) => !r.host && !r.hosts && r.browser && r.browser.pid), noMarker: !fs.existsSync(path.join(J, MK)) && !fs.existsSync(path.join(E, MK)) };
+        liveS.clear(); kk = mkE7(DATA, HOME, liveS); await kk.boot(); const pJ2 = kk.list().profiles.find((x) => x.id === pJ.id); out.S59a = { ...shape, ...(await actI(kk, pJ2, () => kk.attach({ profileId: pJ2.id, browserKey: KB, sessionId: 'sess-2' }))) }; liveS.add(KG); out.S59aEph = await actE7(kk, E, ensureOf7(kk));
+        unplantI(J); unplantI(E); await stopI(kk, pJ2); await stopE7(kk); kk.shutdown(); await sleepI(150);
+        toV199(); OSM.hostname = () => PREV; try { const live0 = new Set([KG]); const k0 = mkE7(DATA, HOME, live0); await k0.boot(); k0.shutdown(); await sleepI(150); } finally { OSM.hostname = realHostname; } // the Update on the OLD pod first: a boot + save under pod-old
+        const fileHostAfterUpdate = readReg7(DATA).host; liveS.clear(); kk = mkE7(DATA, HOME, liveS); await kk.boot(); const pJ3 = kk.list().profiles.find((x) => x.id === pJ.id); out.S59b = { fileHostAfterUpdate, ...(await actI(kk, pJ3, () => kk.attach({ profileId: pJ3.id, browserKey: KB, sessionId: 'sess-2' }))) }; liveS.add(KG); out.S59bEph = await actE7(kk, E, ensureOf7(kk));
+        unplantI(J); unplantI(E); await stopI(kk, pJ3); await stopE7(kk); kk.shutdown(); await sleepI(150); }
+      // S61 — a stranger's directory carrying a copy of OUR marker
+      if (want('S61')) { const kk = mkKeeper(Kmod, { dataDir: path.join(DI, 'd61'), log: klogI }); const O = await retiredDirI(kk, parent, 's61-orig'); const T = (entry7(kk, O) || {}).tok; const X = path.join(parent, 's61-theirs'); fs.mkdirSync(X, { mode: 0o700 }); fs.copyFileSync(path.join(O, MK), path.join(X, MK)); plantI(X, PREV, await deadPidI());
+        const pX = kk.adoptDirectory({ label: 's61-theirs', dir: X }).profile; out.S61 = await actI(kk, pX, attachI(kk, pX), () => ({ origEntryKept: !!entry7(kk, O), theirTokSame: tokOf7(X) === T, origAnswered: dh7(kk, O) })); unplantI(X); await stopI(kk, pX); kk.shutdown(); await sleepI(150); }
+      // S62 — two mounts of one tree (bindfs; skipped without one)
+      if (want('S62')) { const src = path.join(parent, 's62-src'), dst = path.join(parent, 's62-dst'); fs.mkdirSync(src, { recursive: true, mode: 0o700 }); fs.mkdirSync(dst, { recursive: true, mode: 0o700 }); let mounted = false; try { execFileSync('bindfs', ['--no-allow-other', src, dst], { stdio: 'ignore', timeout: 10000 }); mounted = fs.statSync(dst).dev !== fs.statSync(src).dev; } catch { mounted = false; }
+        if (mounted) { try { const DS = path.join(src, 'data'), DD = path.join(dst, 'data'); fs.mkdirSync(DS, { recursive: true }); const kS = mkKeeper(Kmod, { dataDir: DS, log: klogI }); const dirS = await retiredDirI(kS, src, 'p1'); kS.shutdown(); await sleepI(150); const dirD = path.join(dst, 'p1'); const kD = mkKeeper(Kmod, { dataDir: DD, log: klogI }); await kD.boot(); { const p = kD.createProfile({ label: 'other-j-' + tag }); kD.removeProfile(p.id); } plantI(dirD, PREV, await deadPidI()); const p2 = kD.adoptDirectory({ label: 'p1-again', dir: dirD }).profile; out.S62 = { sameIno: fs.statSync(dirS).ino === fs.statSync(dirD).ino, ...(await actI(kD, p2, attachI(kD, p2))) }; unplantI(dirD); await stopI(kD, p2); kD.shutdown(); await sleepI(150); } finally { try { execFileSync('fusermount', ['-u', dst], { stdio: 'ignore', timeout: 10000 }); } catch { } } }
+        else { out.S62 = null; if (Kmod === K) console.log('  (④j S62 bindfs leg: no user bindfs mount here — the PURE row M10b carries the rule)'); } }
+      // S60 — the storm's names in the ledger
+      if (want('S60')) { const D = path.join(DI, 'd60'); fs.mkdirSync(D, { recursive: true }); const m = {}; const gone = []; for (let i = 0; i < 40; i++) { const d = path.join(parent, 's60-gone', 'g' + i); gone.push(d); m[d] = { hosts: [PREV], at: 1 + i, tok: 'feedface' + String(i).padStart(16, '0') }; } writeReg7(D, { host: PREV, profiles: [], browsers: {}, leases: [], dirHosts: m });
+        const kk = mkKeeper(Kmod, { dataDir: D, log: klogI }); const l0 = linesI.length; await kk.boot(); const said = linesI.slice(l0).join('\n'); kk.shutdown(); await sleepI(150); let ledgerNamed = -1; try { const txt = fs.readFileSync(path.join(D, 'browser-lineage-journal.ndjson'), 'utf8'); ledgerNamed = gone.filter((d) => txt.includes(d)).length; } catch { ledgerNamed = -1; }
+        out.S60 = { journalLines: said.split('\n').filter((l) => /forgotten — the directory is gone/.test(l)).length, journalNamed: gone.filter((d) => said.includes(d)).length, ledgerNamedAll: ledgerNamed === 40 }; }
+      return out;
+    };
+    const r7 = await runR7(K, 'product');
+    judge7('S56c', 'two directories present, one token (the original and its cp -a copy): the token is honoured for AT MOST ONE — the original (its registry path); the copy answers none', { tokMinted: true, copyCarriesIt: true, origAnswered: [PREV], copyAnswered: [] }, r7.S56c);
+    judge7('S56', 'the copy (the original still present, another inode) adopted with the old pod\'s lock copied inside it: the token is NOT its lineage (said "a copy of <orig>"), the original\'s entry KEPT, the copied marker untouched by a judgement; the lock then judged by the remaining witnesses (this file\'s writer = this host ⇒ foreign by name)', { origEntryKept: true, copyTokSame: true, origTokSame: true, err: 'profile_locked', launched: 0, left: 3, journal: /is a copy of .* — not its lineage/ }, r7.S56);
+    judge7('S56d', 'the copy with NO lock inside (a stopped profile copied): launched; at its first remember it is minted its OWN marker and its OWN entry; the original\'s entry and marker untouched (r6: the copy\'s remember deleted the original\'s entry)', { err: null, launched: 1, copyTokDiffers: true, copyEntryOwnTok: true, origEntryKept: true, origTokSame: true }, r7.S56d);
+    judge7('S56b', 'the copy deleted (pruned at load): the ORIGINAL with the old pod\'s lock resumes — its lineage was never stolen ⇒ taken over (r6: refused as foreign — userW\'s class by a copy)', { entryThere: true, err: null, launched: 1, left: 0, renamedFrom: PREV }, r7.S56b);
+    judge7('S57', 'the copy judged while a LIVE holder sits on the original (the lock under a previous name whose pid is alive here, copied with the directory): the holder is never signalled, the original\'s files untouched, its entry kept; the copy refused the token\'s lineage (said) and refused by name', { holderAlive: true, origLeft: 3, origEntryKept: true, copyTokSame: true, err: 'profile_locked', launched: 0, journal: /is a copy of/ }, r7.S57);
+    judge7('S57b', 'the original under its live holder: ladder step ① — another VibeSpace browser\'s mark ⇒ refused by name, never ended; the marker is never asked', { holderAlive: true, err: 'profile_locked', msg: /another VibeSpace browser|did not start/, launched: 0, left: 3 }, r7.S57b);
+    judge7('S58a', 'the marker deleted, resumed on the SAME pod (the lock under this name): launched; the marker RE-MINTED as a new token, the entry UPDATED to it and its hosts KEPT (r6 dropped pod-old at the re-mint)', { err: null, launched: 1, remintedOnDisk: true, entryUpdated: true, hostsKept: true }, r7.S58a);
+    judge7('S58b', 'the marker deleted, the FIRST roll (the file last written by pod-old): the marker lineage is not answered but the file\'s writer still names pod-old ⇒ taken over; re-minted, the entry updated', { err: null, launched: 1, left: 0, renamedFrom: PREV, entryUpdated: true }, r7.S58b);
+    judge7('S58c', 'the marker deleted, an Update saved under this pod, then the resume with the old pod\'s lock: no marker while the entry remembers one = a stranger\'s fresh directory at a forgotten path (S43) ⇒ refused by name — AND the cause SAID (HELD: the one window the marker cannot close)', { err: 'profile_locked', launched: 0, left: 3, saidCause: /carries no marker \(\.vibespace-lineage deleted\?\) while its entry remembers one/ }, r7.S58c);
+    judge7('S59a', 'userW\'s EXACT upgrade: .199 (no host / dirHosts / marker; records with browser {pid, dir}) → the roll (the boot\'s git pull brings .200) → the first .200 boot on the NEW pod: the named profile\'s kept directory carries the old pod\'s lock naming the pid this keeper RECORDED as its own browser there ⇒ taken over (renamed from pod-old) — r6: profile_locked, his incident once more on the upgrade itself', { noHost: true, noDirHosts: true, recordsLegacy: true, noMarker: true, err: null, launched: 1, left: 0, renamedFrom: PREV }, r7.S59a);
+    judge7('S59a-eph', 'userW: the same roll, the conversation\'s OWN kept directory (its record retired at the boot — the directory remembers what the record proved, the marker minted then) ⇒ taken over', { err: null, launched: 1, left: 0 }, r7.S59aEph);
+    judge7('S59b', 'userW: the Update on the OLD pod first (a boot + save under pod-old), then the roll: the file\'s writer names pod-old ⇒ taken over (the r1 path)', { fileHostAfterUpdate: PREV, err: null, launched: 1, left: 0, renamedFrom: PREV }, r7.S59b);
+    judge7('S59b-eph', 'userW: the same, the conversation\'s own directory', { err: null, launched: 1, left: 0 }, r7.S59bEph);
+    judge7('S61', 'a stranger\'s directory carrying a COPY of OUR marker (ours still bears it, another inode): the token is not theirs (said), our entry kept and still answered; their lock judged by the remaining witnesses (foreign by name)', { origEntryKept: true, theirTokSame: true, origAnswered: [PREV], err: 'profile_locked', launched: 0, left: 3, journal: /is a copy of/ }, r7.S61);
+    if (r7.S62) judge7('S62', 'one tree under two mounts (bindfs: one inode, two devices): the same token under another path AND the same inode ⇒ ONE directory ⇒ honoured ⇒ taken over', { sameIno: true, err: null, launched: 1, left: 0 }, r7.S62);
+    judge7('S60', '40 lineages pruned at one load: the journal says it ONCE (r6) — and every pruned path is NAMED in the per-boot ledger (data/browser-lineage-journal.ndjson)', { journalLines: 1, journalNamed: 3, ledgerNamedAll: true }, r7.S60);
+    const dis7 = TABLE7.filter((r) => !r.agree);
+    ok(TABLE7.length >= 28 && !dis7.length, `④j THE SIXTH JUDGEMENT: ${TABLE7.length} rows (the marker table + ${TABLE7.length - 14} scenarios through the real keeper), every one as the truth says`, dis7.map((r) => `${r.id}: ${r.diffs.join(' / ')}`));
+    // ── the controls: a keeper whose bearer is always "gone" (r6's token search), the PURE rule without the copy verdict, a keeper
+    //    without the legacy witness, a keeper without the ledger, a keeper that never mints a fresh marker ──
+    { const noBearer = ksrcI.replace("tok: dirTokOf(dir), bearer: dirBearerOf });", "tok: dirTokOf(dir), bearer: () => null /* CONTROL: the bearer is always gone — r6's search by token */ });");
+      ok(noBearer !== ksrcI, '④j control setup: the bearer probe is where the control cuts');
+      const c9 = await runR7(M.load('src/server/browser-keeper.js', noBearer, 'no-bearer'), 'ctl9', ['S56']);
+      ok(c9.S56.err === null && c9.S56.launched === 1 && c9.S56d.origEntryKept === false && c9.S56b.err === 'profile_locked', '④j CONTROL 9: a keeper whose token search never asks the bearer honours the copy beside its original (its old-pod lock taken over), STEALS the original\'s entry at the copy\'s remember and refuses the original as foreign once the copy is gone — S56 / S56d / S56b catch it', { copy: c9.S56.err, kept: c9.S56d.origEntryKept, b: c9.S56b.err }); }
+    { const psrc7 = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8'); const noCopy = psrc7.replace("return none('copy', k);", "return { hosts: hostsOf(m[k]), via: 'token', key: k, why: 'moved', fresh: false }; /* CONTROL: a copy is a move */");
+      ok(noCopy !== psrc7, '④j control setup: the copy verdict is where the control cuts');
+      const c10 = pureTable(M.load('src/browser-profiles.js', noCopy, 'no-copy-verdict'));
+      ok(c10["M7 a stranger's copy of OUR marker into THEIR dir (ours still bears it, another inode)"].L3previous === 'stale-previous-host@hostname' && c10['M10 two directories, one token (the copy beside its original, judged for the COPY)'].hosts.length === 1, '④j CONTROL 10: the PURE rule without the copy verdict hands the lineage to a stranger\'s copy of our marker and to the copy beside the original — the table\'s M7 / M10 rows catch it'); }
+    { const noWitness = ksrcI.replace("const w = B.legacyLockWitness({ rec, lock: F.readSingletonLock(own), lockAt, devtools, dir: own, hostname: os.hostname() });", "const w = null; /* CONTROL: no legacy witness */");
+      ok(noWitness !== ksrcI, '④j control setup: the legacy witness is where the control cuts');
+      const c11 = await runR7(M.load('src/server/browser-keeper.js', noWitness, 'no-legacy-witness'), 'ctl11', ['S59']);
+      ok(c11.S59a.err === 'profile_locked' && c11.S59a.left === 3 && c11.S59aEph.err === 'profile_locked' && c11.S59b.err === null, '④j CONTROL 11: a keeper without the legacy lock witness refuses userW\'s named AND ephemeral kept directories on the upgrade-is-the-roll path (the Update-first order still works by the file\'s writer) — S59a / S59a-eph catch it', { a: c11.S59a.err, e: c11.S59aEph.err, b: c11.S59b.err }); }
+    { const noLedger = ksrcI.replace("fs.appendFileSync(f, JSON.stringify({ at: now(), boot: bootId,", "if (false) fs.appendFileSync(f, JSON.stringify({ at: now(), boot: bootId, /* CONTROL: no ledger */");
+      ok(noLedger !== ksrcI, '④j control setup: the ledger write is where the control cuts');
+      const c12 = await runR7(M.load('src/server/browser-keeper.js', noLedger, 'no-ledger'), 'ctl12', ['S60']);
+      ok(c12.S60.journalLines === 1 && c12.S60.ledgerNamedAll === false, '④j CONTROL 12: a keeper without the ledger says the storm once and names three — the other 37 pruned paths are nowhere — S60 catches it', c12.S60); }
+    { const noFresh = ksrcI.replace("const tok = mintDirTok(dir, { fresh: !!v.fresh });", "const tok = mintDirTok(dir); /* CONTROL: never a fresh marker */");
+      ok(noFresh !== ksrcI, '④j control setup: the fresh mint is where the control cuts');
+      const c13 = await runR7(M.load('src/server/browser-keeper.js', noFresh, 'no-fresh-mint'), 'ctl13', ['S56']);
+      ok(c13.S56d.copyTokDiffers === false && c13.S56d.origEntryKept === false, '④j CONTROL 13: a keeper that keeps the copied marker at the copy\'s first remember lets "one token, one entry" delete the original\'s entry — S56d catches it', { differs: c13.S56d.copyTokDiffers, kept: c13.S56d.origEntryKept }); }
+  }
+  // ═══ ④k VERIFY r8 (T1/T2): THE FLEET'S OTHER ORDER, THE WITNESS'S CLOCK, A RETIRE NEVER MINTS, THE LEDGER'S TAIL, A FORGET ═══════
+  // CARRIES ITS LINEAGE — and THE SEEDED WALK. r7's legacy witness read the .199 record's `browser.pid`; the fleet's boot pull can be
+  // REFUSED (userW's package-lock.json is dirty against .199 — read on his pod — and every bump touches it), so the .199 keeper boots
+  // FIRST on the new pod and its reapOrphan NULLS `browser` (its reconcile removes every ephemeral record) before .200 runs — userW's
+  // class once more, reproduced with the real .199 keeper (plv8-t1 S70). What survives: the record's `cdpUrl` and the directory's own
+  // `DevToolsActivePort` (MEASURED on 0.38.1 + Chrome 154: the same endpoint, both past a SIGKILL) ⇒ the second witness form. A lock
+  // that predates the record's own start (a reused pid) is not its browser's (S71: the kernel's ctime against startedAt, 5 s slack).
+  // A refused start's retire minted a fresh marker INTO an adopted backup (S72) and the backup restored as a stranger (S72b). The
+  // ledger's torn tail was glued to the next line (S74a). A Forget renamed the directory and the next boot pruned its lineage (S75b).
+  console.log('— ④k verify r8: the fleet\'s other order (the .199 boot first), the witness\'s clock, a retire never mints, the ledger\'s tail, a Forget carries its lineage; the seeded walk; five controls');
+  {
+    const TABLE8 = [];
+    const judge8 = (id, who, truth, got) => { const diffs = []; for (const [k2, want] of Object.entries(truth)) { const g = got[k2]; let pass2; if (want instanceof RegExp) pass2 = typeof g === 'string' && want.test(g); else pass2 = JSON.stringify(g) === JSON.stringify(want); if (!pass2) diffs.push(`${k2}: truth ${String(want).slice(0, 90)} | product ${JSON.stringify(g === undefined ? null : g).slice(0, 200)}`); } TABLE8.push({ id, who, agree: !diffs.length, diffs }); if (diffs.length) console.log(`    DISAGREE ${id} — ${diffs.join(' / ')}`); return !diffs.length; };
+    const MK8 = B.LINEAGE_MARKER; const tokOf8 = (dir) => { try { return fs.readFileSync(path.join(dir, MK8), 'utf8').trim(); } catch { return null; } };
+    const entry8 = (kk, dir) => (kk._reg().dirHosts || {})[dir] || null;
+    const ledger8 = (D) => { try { return fs.readFileSync(path.join(D, 'browser-lineage-journal.ndjson'), 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return { kind: 'UNPARSABLE' }; } }); } catch { return []; } }; // verify r9
+    const readReg8 = (D) => JSON.parse(fs.readFileSync(path.join(D, 'browser-profiles.json'), 'utf8')); const writeReg8 = (D, j) => fs.writeFileSync(path.join(D, 'browser-profiles.json'), JSON.stringify(j));
+    const settings8 = { 'browser.idleTimeoutMs': 600000 }; const quiet8 = { log() { }, warn() { }, error() { } };
+    const BT = require('../src/server/browser-trace.js');
+    const runR8 = async (Kmod, tag, only = null, BTmod = BT) => {
+      const want = (id) => !only || only.includes(id);
+      const out = {}; const DI = path.join(ROOT, 'data-r8-' + tag); fs.mkdirSync(DI, { recursive: true }); const parent = path.join(IROOT, 'r8-' + tag); fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
+      const mkE8 = (DATA, liveS) => { let kp = null; const kept = KSt.create({ dataDir: DATA, keeper: () => kp, liveKeys: () => liveS, serverSetting: (x) => settings8[x], log: quiet8, sweepEveryMs: 0 }); kp = mkKeeper(Kmod, { dataDir: DATA, homeDir: HOME, kept, now: Date.now, serverSetting: (x) => settings8[x], liveKeys: () => liveS, log: klogI }); return kp; }; // the real clock: the witness judges a KERNEL fact against startedAt
+      const killLaunches = () => { for (const l of logOf('launches.log')) { try { process.kill(l.pid, 'SIGKILL'); } catch { } } };
+      // S70 / S70x — the .199 keeper's boot on the NEW pod ran first: what it leaves (plv8-t1 S70 with the real .199 keeper, read off its file)
+      if (want('S70')) { const DATA = path.join(DI, 'd70'); fs.mkdirSync(DATA, { recursive: true }); const liveS = new Set(); let kk = mkE8(DATA, liveS); const J = path.join(parent, 's70-jarvis'); fs.mkdirSync(J, { recursive: true, mode: 0o700 });
+        const pJ = kk.adoptDirectory({ label: 'jarvis-work', dir: J }).profile; await kk.attach({ profileId: pJ.id, browserKey: KA, sessionId: 'sess-1' }); kk.shutdown(); await sleepI(150); killLaunches();
+        const chromeJ = await deadPidI(), daemonJ = await deadPidI(); const cdp0 = readReg8(DATA).browsers[pJ.id].cdpUrl; // the LAUNCHED record's endpoint (a control's refused second start carries none)
+        const toAfter199 = ({ devtools = true, guid = null } = {}) => { const j = readReg8(DATA); delete j.host; delete j.dirHosts; const rec = j.browsers[pJ.id]; delete rec.host; delete rec.hosts; rec.state = 'stopped'; rec.endedAt = Date.now(); rec.pid = daemonJ; rec.starttime = 1; rec.browser = null; rec.cdpUrl = cdp0; rec.lastError = 'the browser daemon exited while VibeSpace was down'; writeReg8(DATA, j); try { fs.unlinkSync(path.join(J, MK8)); } catch { } plantI(J, PREV, chromeJ); const u = new URL(rec.cdpUrl); try { fs.unlinkSync(path.join(J, 'DevToolsActivePort')); } catch { } if (devtools) fs.writeFileSync(path.join(J, 'DevToolsActivePort'), `${u.port}\n${guid || u.pathname}\n`); return rec.cdpUrl; };
+        const cdp = toAfter199(); kk = mkE8(DATA, liveS); const l0 = linesI.length; await kk.boot(); const said = linesI.slice(l0).join('\n'); const pJ2 = kk.list().profiles.find((x) => x.id === pJ.id);
+        out.S70 = { cdpKept: /^ws:\/\/127\.0\.0\.1:\d+\/devtools\/browser\//.test(String(cdp)), witnessedByDevtools: /its CDP endpoint in DevToolsActivePort/.test(said), ...(await actI(kk, pJ2, attachI(kk, pJ2))) };
+        unplantI(J); await stopI(kk, pJ2); kk.shutdown(); await sleepI(150); killLaunches();
+        toAfter199({ guid: '/devtools/browser/00000000-another-launch' }); kk = mkE8(DATA, liveS); await kk.boot(); const pJ3 = kk.list().profiles.find((x) => x.id === pJ.id); out.S70x = await actI(kk, pJ3, attachI(kk, pJ3)); unplantI(J); await stopI(kk, pJ3); kk.shutdown(); await sleepI(150); killLaunches(); }
+      // S71 — the lock predates the record's own start (pid reuse): the ctime bound
+      if (want('S71')) { const DATA = path.join(DI, 'd71'); fs.mkdirSync(DATA, { recursive: true }); const liveS = new Set(); let kk = mkE8(DATA, liveS); const J = path.join(parent, 's71-j'); fs.mkdirSync(J, { recursive: true, mode: 0o700 });
+        const pJ = kk.adoptDirectory({ label: 'j', dir: J }).profile; await kk.attach({ profileId: pJ.id, browserKey: KA, sessionId: 'sess-1' }); kk.shutdown(); await sleepI(150); killLaunches();
+        const chrome = await deadPidI(); plantI(J, PREV, chrome); try { fs.unlinkSync(path.join(J, MK8)); } catch { } const lockAt = fs.lstatSync(path.join(J, 'SingletonLock')).ctimeMs;
+        { const j = readReg8(DATA); delete j.host; delete j.dirHosts; const rec = j.browsers[pJ.id]; delete rec.host; delete rec.hosts; rec.state = 'ready'; rec.endedAt = null; rec.startedAt = Math.round(lockAt) + 10000; rec.browser = { pid: chrome, starttime: 1, dir: J, devtoolsPort: 1 }; writeReg8(DATA, j); }
+        kk = mkE8(DATA, liveS); const l0 = linesI.length; await kk.boot(); const said = linesI.slice(l0).join('\n'); const pJ2 = kk.list().profiles.find((x) => x.id === pJ.id);
+        out.S71 = { witnessed: /taken from the lock its own recorded browser left/.test(said), ...(await actI(kk, pJ2, attachI(kk, pJ2))) }; unplantI(J); await stopI(kk, pJ2); kk.shutdown(); await sleepI(150); killLaunches(); }
+      // S72 / S72b — an adopted backup refused as a copy, its record removed; then the restore from it
+      if (want('S72')) { let kk = mkKeeper(Kmod, { dataDir: path.join(DI, 'd72'), log: klogI }); const O = await retiredDirI(kk, parent, 's72-orig'); const T = (entry8(kk, O) || {}).tok; const C = path.join(parent, 's72-backup'); fs.cpSync(O, C, { recursive: true }); plantI(C, PREV, await deadPidI());
+        const pC = kk.adoptDirectory({ label: 's72-backup', dir: C }).profile; const r1 = await actI(kk, pC, attachI(kk, pC)); const tokAtRefusal = tokOf8(C); try { kk.removeProfile(pC.id); } catch { }
+        out.S72 = { ...r1, tokKeptAtRefusal: tokAtRefusal === T, tokKeptAtRemove: tokOf8(C) === T, noEntryForBackup: !entry8(kk, C) }; kk.shutdown(); await sleepI(150);
+        fs.rmSync(O, { recursive: true, force: true }); fs.renameSync(C, O); unplantI(O); plantI(O, PREV, await deadPidI()); kk = mkKeeper(Kmod, { dataDir: path.join(DI, 'd72'), log: klogI }); await kk.boot(); const pO = kk.adoptDirectory({ label: 's72-restored', dir: O }).profile;
+        out.S72b = await actI(kk, pO, attachI(kk, pO)); unplantI(O); await stopI(kk, pO); kk.shutdown(); await sleepI(150); killLaunches(); }
+      // S74a — the ledger's tail torn by a crash mid-append
+      if (want('S74')) { const DATA = path.join(DI, 'd74'); fs.mkdirSync(DATA, { recursive: true }); const LF = path.join(DATA, 'browser-lineage-journal.ndjson'); fs.writeFileSync(LF, JSON.stringify({ at: 1, boot: 'x', kind: 'pruned-gone', dir: '/a' }) + '\n' + '{"at":2,"boot":"x","kind":"pruned-go');
+        const m = {}; for (let i = 0; i < 3; i++) m[path.join(parent, 's74-gone', 'g' + i)] = { hosts: [PREV], at: 1 + i, tok: 'feedface' + String(i).padStart(16, '0') }; writeReg8(DATA, { host: PREV, profiles: [], browsers: {}, leases: [], dirHosts: m });
+        const kk = mkKeeper(Kmod, { dataDir: DATA, log: klogI }); await kk.boot(); kk.shutdown(); await sleepI(100);
+        const ls = fs.readFileSync(LF, 'utf8').split('\n').filter(Boolean); const bad = ls.filter((l) => { try { JSON.parse(l); return false; } catch { return true; } });
+        out.S74a = { unparsable: bad.length, glued: bad.some((l) => l.includes('}{') || (l.match(/"kind"/g) || []).length > 1), terminated: ls.some((l) => l.includes('"torn-tail-terminated"')) }; }
+      // S75b — a Forget (the real browser-trace module renames the directory aside), a restart, the forgotten directory adopted back, the roll's lock inside it
+      if (want('S75')) { const DATA = path.join(DI, 'd75'); fs.mkdirSync(DATA, { recursive: true }); const AB8 = path.join(HOME, '.agent-browser'); fs.mkdirSync(AB8, { recursive: true, mode: 0o700 }); const FD = path.join(AB8, 'vs-s75b-' + tag); fs.mkdirSync(FD, { recursive: true, mode: 0o700 });
+        let kb = mkKeeper(Kmod, { dataDir: DATA, log: klogI }); const pF = kb.adoptDirectory({ label: 'to-forget', dir: FD }).profile; await kb.attach({ profileId: pF.id, browserKey: KA, sessionId: 'sess-1' }); await stopI(kb, pF); { const r = kb._reg().browsers[pF.id]; r.host = PREV; r.hosts = [PREV]; } for (const l of kb._reg().leases.filter((l) => l.profileId === pF.id)) { try { kb.detach({ profileId: pF.id, browserKey: l.browserKey, by: 'user' }); } catch { } }
+        const TF = (entry8(kb, FD) || {}).tok; const bt = BTmod.create({ dataDir: DATA, homeDir: HOME, keeper: kb, log: quiet8, sweepEveryMs: 0 }); const fr = await bt.forgetProfile(pF.id); const TO = fr.to; kb.shutdown(); await sleepI(150); killLaunches();
+        kb = mkKeeper(Kmod, { dataDir: DATA, log: klogI }); const l0 = linesI.length; await kb.boot(); const bootSaid = linesI.slice(l0).join('\n'); const entryFollowed = !!(kb._reg().dirHosts[TO] && kb._reg().dirHosts[TO].tok === TF && kb._reg().dirHosts[TO].hosts.includes(PREV));
+        plantI(TO, PREV, await deadPidI()); const pA = kb.adoptDirectory({ label: 'adopted-back', dir: TO }).profile; out.S75b = { entryFollowed, bootPruned: /forgotten — the directory is gone/.test(bootSaid), ...(await actI(kb, pA, attachI(kb, pA))) }; unplantI(TO); await stopI(kb, pA); kb.shutdown(); await sleepI(150); killLaunches(); }
+      // S74b / S74c — verify r9 (⑤): the tail torn INSIDE a multi-byte UTF-8 sequence / INSIDE an escaped string — terminated once, exactly one unparsable line, this boot's lines parse
+      if (want('S74')) { for (const [tg, torn] of [['b', Buffer.concat([Buffer.from('{"at":2,"boot":"x","kind":"pruned-gone","dir":"/a/日本'), Buffer.from([0xe8, 0xaa])])], ['c', Buffer.from('{"at":2,"boot":"x","kind":"pruned-gone","dir":"/a\\')]]) {
+          const DATA = path.join(DI, 'd74' + tg); fs.mkdirSync(DATA, { recursive: true }); const LF = path.join(DATA, 'browser-lineage-journal.ndjson'); fs.writeFileSync(LF, Buffer.concat([Buffer.from(JSON.stringify({ at: 1, boot: 'x', kind: 'pruned-gone', dir: '/a' }) + '\n'), torn]));
+          const m = {}; for (let i = 0; i < 2; i++) m[path.join(parent, 's74' + tg + '-gone', 'g' + i)] = { hosts: [PREV], at: 1 + i, tok: 'feedface' + String(i).padStart(16, '0') }; writeReg8(DATA, { host: PREV, profiles: [], browsers: {}, leases: [], dirHosts: m });
+          const kk = mkKeeper(Kmod, { dataDir: DATA, log: klogI }); await kk.boot(); kk.shutdown(); await sleepI(100);
+          const raw = fs.readFileSync(LF); const kinds = raw.toString('utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l).kind; } catch { return 'UNPARSABLE'; } });
+          out['S74' + tg] = { unparsable: kinds.filter((x) => x === 'UNPARSABLE').length, terminated: kinds.includes('torn-tail-terminated'), thisBootParses: kinds.filter((x) => x === 'pruned-gone').length === 3, tailNewline: raw[raw.length - 1] === 0x0a }; } }
+      // S76 — verify r9 (④): forgetOrphan (the real browser-trace) then a CRASH before any other save (the keeper dropped without shutdown — its timer is unref'd); the next boot; adopted back with the roll's lock inside
+      if (want('S76')) { const DATA = path.join(DI, 'd76'); fs.mkdirSync(DATA, { recursive: true }); const AB9 = path.join(HOME, '.agent-browser'); fs.mkdirSync(AB9, { recursive: true, mode: 0o700 }); const OD = path.join(AB9, 'vs-s76-' + tag); fs.mkdirSync(OD, { recursive: true, mode: 0o700 });
+        let kk = mkKeeper(Kmod, { dataDir: DATA, log: klogI }); const pO = kk.adoptDirectory({ label: 'orphan-to-be', dir: OD }).profile; await kk.attach({ profileId: pO.id, browserKey: KA, sessionId: 'sess-1' }); await stopI(kk, pO); { const r = kk._reg().browsers[pO.id]; r.host = PREV; r.hosts = [PREV]; } for (const l of kk._reg().leases.filter((l) => l.profileId === pO.id)) { try { kk.detach({ profileId: pO.id, browserKey: l.browserKey, by: 'user' }); } catch { } } kk.removeProfile(pO.id); const T6 = (entry8(kk, OD) || {}).tok; kk.shutdown(); await sleepI(150); killLaunches();
+        kk = mkKeeper(Kmod, { dataDir: DATA, log: klogI }); await kk.boot(); const bt = BTmod.create({ dataDir: DATA, homeDir: HOME, keeper: kk, log: quiet8, sweepEveryMs: 0 }); const fr = bt.forgetOrphan(OD); const TO = fr.to; const disk = readReg8(DATA).dirHosts || {}; const diskNamesNew = !!(disk[TO] && disk[TO].tok === T6);
+        kk = mkKeeper(Kmod, { dataDir: DATA, log: klogI }); const l0 = linesI.length; await kk.boot(); const said = linesI.slice(l0).join('\n');
+        const entryFollowed = !!(kk._reg().dirHosts[TO] && kk._reg().dirHosts[TO].tok === T6 && kk._reg().dirHosts[TO].hosts.includes(PREV));
+        plantI(TO, PREV, await deadPidI()); const pA = kk.adoptDirectory({ label: 'adopted-back', dir: TO }).profile; out.S76 = { diskNamesNew, entryFollowed, bootPruned: /forgotten — the directory is gone/.test(said), ...(await actI(kk, pA, attachI(kk, pA))) }; unplantI(TO); await stopI(kk, pA); kk.shutdown(); await sleepI(150); killLaunches(); }
+      // S76b — verify r9 (④): forgetProfile while data/ cannot be written (EACCES = the EIO class): refused, nothing moved; once writable the same Forget moves it WITH its lineage on disk; a crash; adopted back
+      if (want('S76') && !isRoot) { const DATA = path.join(DI, 'd76b'); fs.mkdirSync(DATA, { recursive: true }); const AB9 = path.join(HOME, '.agent-browser'); fs.mkdirSync(AB9, { recursive: true, mode: 0o700 }); const FD = path.join(AB9, 'vs-s76b-' + tag); fs.mkdirSync(FD, { recursive: true, mode: 0o700 });
+        let kk = mkKeeper(Kmod, { dataDir: DATA, log: klogI }); const pF = kk.adoptDirectory({ label: 'to-forget', dir: FD }).profile; await kk.attach({ profileId: pF.id, browserKey: KA, sessionId: 'sess-1' }); await stopI(kk, pF); { const r = kk._reg().browsers[pF.id]; r.host = PREV; r.hosts = [PREV]; } for (const l of kk._reg().leases.filter((l) => l.profileId === pF.id)) { try { kk.detach({ profileId: pF.id, browserKey: l.browserKey, by: 'user' }); } catch { } }
+        kk.shutdown(); await sleepI(150); killLaunches(); kk = mkKeeper(Kmod, { dataDir: DATA, log: klogI }); await kk.boot(); const T6 = tokOf8(FD); const bt = BTmod.create({ dataDir: DATA, homeDir: HOME, keeper: kk, log: quiet8, sweepEveryMs: 0 });
+        fs.chmodSync(DATA, 0o500); let ferr = null; try { await bt.forgetProfile(pF.id); } catch (e) { ferr = e; } fs.chmodSync(DATA, 0o700); const disk1 = readReg8(DATA).dirHosts || {}; const stillThere = fs.existsSync(FD) && !!kk.list().profiles.find((x) => x.id === pF.id);
+        let fr = null, ferr2 = null; try { fr = await bt.forgetProfile(pF.id); } catch (e) { ferr2 = e; } const TO = fr ? fr.to : null; const disk2 = readReg8(DATA).dirHosts || {};
+        kk = mkKeeper(Kmod, { dataDir: DATA, log: klogI }); const l0 = linesI.length; await kk.boot(); const said = linesI.slice(l0).join('\n');
+        let r = { err: 'no-move' }; if (TO) { plantI(TO, PREV, await deadPidI()); const pA = kk.adoptDirectory({ label: 'adopted-back', dir: TO }).profile; r = await actI(kk, pA, attachI(kk, pA)); unplantI(TO); await stopI(kk, pA); }
+        out.S76b = { refusedCode: ferr ? ferr.code : null, stillThere, diskNamesOldAfterRefusal: !!(disk1[FD] && disk1[FD].tok === T6), thenMoved: !!TO && !ferr2, diskNamesNew: !!(TO && disk2[TO] && disk2[TO].tok === T6), bootPruned: /forgotten — the directory is gone/.test(said), ...r }; kk.shutdown(); await sleepI(150); killLaunches(); }
+      // S77 / S77b / S77c — verify r9 (③): the legacy witness vs a cp -a copy beside / a file-level restore IN PLACE (cp -a semantics: the lock's ctime = now, the port file's mtime from the launch)
+      if (want('S77')) { const DATA = path.join(DI, 'd77'); fs.mkdirSync(DATA, { recursive: true }); const liveS = new Set(); let kk = mkE8(DATA, liveS); const D7 = path.join(parent, 's77-D'); fs.mkdirSync(D7, { recursive: true, mode: 0o700 });
+        const pD = kk.adoptDirectory({ label: 'D', dir: D7 }).profile; await kk.attach({ profileId: pD.id, browserKey: KA, sessionId: 'sess-1' }); kk.shutdown(); await sleepI(150); killLaunches();
+        const chrome = await deadPidI(); const j = readReg8(DATA); const rec = j.browsers[pD.id]; const cdp = rec.cdpUrl; delete j.host; delete j.dirHosts; delete rec.host; delete rec.hosts; rec.state = 'stopped'; rec.browser = null; rec.endedAt = Date.now(); writeReg8(DATA, j);
+        try { fs.unlinkSync(path.join(D7, MK8)); } catch { } { const ep = B.cdpEndpointOf(cdp); fs.writeFileSync(path.join(D7, 'DevToolsActivePort'), `${ep.port}\n${ep.path}\n`); } plantI(D7, PREV, chrome);
+        const C7 = path.join(parent, 's77-C'); fs.cpSync(D7, C7, { recursive: true, verbatimSymlinks: true }); const tmp = D7 + '.restore'; fs.cpSync(D7, tmp, { recursive: true, verbatimSymlinks: true, preserveTimestamps: true }); fs.rmSync(D7, { recursive: true, force: true }); fs.renameSync(tmp, D7);
+        kk = mkE8(DATA, liveS); await kk.boot(); const w = ledger8(DATA).filter((x) => x.kind === 'legacy-lock-witness'); const pD2 = kk.list().profiles.find((x) => x.id === pD.id);
+        out.S77 = { witnessed: w.length, form: w.length ? w[0].form : null, ownPathOnly: w.every((x) => x.dir === D7) };
+        out.S77b = await actI(kk, pD2, attachI(kk, pD2)); unplantI(D7); await stopI(kk, pD2);
+        const pC = kk.adoptDirectory({ label: 'C', dir: C7 }).profile; out.S77c = await actI(kk, pC, attachI(kk, pC)); unplantI(C7); await stopI(kk, pC); kk.shutdown(); await sleepI(150); killLaunches(); }
+      return out;
+    };
+    // ── verify r9 (②): the second witness form on the PURE table — a stale port file (older than the record's own life) is never this record's, a mismatched endpoint never, the pid form unmoved by either ──
+    { const rec9 = { startedAt: 1000000, cdpUrl: 'ws://127.0.0.1:43181/devtools/browser/d4253a72-1cd9-4fb2-9b0e-8bfdbd0a3853', browser: null, hosts: null, host: null, dir: '/p/d' }; const lock9 = { host: PREV, pid: 4242 }; const ep9 = { port: 43181, path: '/devtools/browser/d4253a72-1cd9-4fb2-9b0e-8bfdbd0a3853' };
+      const W = (o) => B.legacyLockWitness({ rec: rec9, lock: lock9, lockAt: 1000500, dir: '/p/d', hostname: 'pod-new', ...o });
+      const rows9 = [
+        ['a port file of this endpoint written 1 s after the start', W({ devtools: { ...ep9, at: 1001000 } }), { host: PREV, form: 'devtools' }],
+        ['a port file of this endpoint written 2 s BEFORE the start (inside the 5 s slack)', W({ devtools: { ...ep9, at: 998000 } }), { host: PREV, form: 'devtools' }],
+        ['a port file of this endpoint from an EARLIER launch (6 s before the start): stale, not this record\'s', W({ devtools: { ...ep9, at: 994000 } }), null],
+        ['a port file naming another port', W({ devtools: { ...ep9, port: 43182, at: 1001000 } }), null],
+        ['a port file naming another browser GUID', W({ devtools: { ...ep9, path: '/devtools/browser/00000000-0000-4000-8000-000000000000', at: 1001000 } }), null],
+        ['a port file with no clock (not judged by it): the endpoint decides', W({ devtools: { ...ep9, at: null } }), { host: PREV, form: 'devtools' }],
+        ['the pid form beside a STALE port file: the lock\'s own pid + ctime decide', W({ rec: { ...rec9, browser: { pid: 4242, dir: '/p/d' } }, devtools: { ...ep9, at: 994000 } }), { host: PREV, form: 'pid' }],
+        ['the lock itself from before the record\'s life: neither form', W({ lockAt: 990000, devtools: { ...ep9, at: 1001000 } }), null],
+        ['no port file, browser nulled (the .199 boot): no witness', W({ devtools: null }), null],
+      ];
+      const badRows9 = rows9.filter(([, got, want]) => JSON.stringify(got) !== JSON.stringify(want));
+      ok(!badRows9.length, `④k verify r9 (②): the port-file witness on the PURE table — ${rows9.length} rows: a stale port file (older than the record's own life) is never its witness, a mismatched endpoint never, the pid form unmoved by a stale port file${badRows9.length ? ' — ' + badRows9.map(([n, g, w]) => n + ': ' + JSON.stringify(g) + ' vs ' + JSON.stringify(w)).join(' || ') : ''}`);
+      ok(B.parseDevToolsActivePort('43181\n/devtools/browser/d4253a72-1cd9-4fb2-9b0e-8bfdbd0a3853\n') !== null && B.parseDevToolsActivePort('43181\n/devtools/page/abc\n') === null && B.parseDevToolsActivePort('99999\n/devtools/browser/d4253a72-1cd9-4fb2-9b0e-8bfdbd0a3853\n') === null && B.cdpEndpointOf('ws://10.0.0.1:43181/devtools/browser/d4253a72-1cd9-4fb2-9b0e-8bfdbd0a3853') === null && B.cdpEndpointOf('ws://127.0.0.1:43181/devtools/browser/d4253a72-1cd9-4fb2-9b0e-8bfdbd0a3853').port === 43181, '④k verify r9 (②): the port file is read only in Chrome\'s own shape (a port + /devtools/browser/<GUID>), the endpoint only off a loopback url'); }
+    const r8 = await runR8(K, 'product');
+    judge8('S70', 'the fleet\'s other order — the new pod booted .199 FIRST (its reapOrphan nulled `browser`, its boot kept `cdpUrl`; Chrome left DevToolsActivePort = that endpoint) — then .200: the named profile\'s kept directory is taken over by the second witness form (said: its CDP endpoint in DevToolsActivePort)', { cdpKept: true, witnessedByDevtools: true, err: null, launched: 1, left: 0, renamedFrom: PREV }, r8.S70);
+    judge8('S70x', 'the same shape, the port file naming ANOTHER launch\'s endpoint (not this record\'s): no witness ⇒ refused by name with the one command (never a takeover without a witness)', { err: 'profile_locked', launched: 0, left: 3, msg: /rm -f '.*SingletonLock'/ }, r8.S70x);
+    judge8('S71', 'a legacy record whose recorded browser pid equals the lock\'s, the lock written 10 s BEFORE the record\'s own start (a reused pid): not that browser\'s lock ⇒ no witness ⇒ refused by name (r7: pid equality alone took it over)', { witnessed: false, err: 'profile_locked', launched: 0, left: 3 }, r8.S71);
+    judge8('S72', 'a backup copy adopted (refused as a copy, never launched) and its record removed: a judgement and a retire of a refused record write NOTHING into the copy — the marker stays the original\'s, no entry for the backup (r7: the retire minted a fresh marker into it)', { err: 'profile_locked', launched: 0, tokKeptAtRefusal: true, tokKeptAtRemove: true, noEntryForBackup: true }, r8.S72);
+    judge8('S72b', 'the restore: the original deleted, the backup moved into its place — its marker is still the original\'s ⇒ the lineage answers at its own path ⇒ taken over', { err: null, launched: 1, left: 0, renamedFrom: PREV }, r8.S72b);
+    judge8('S74a', 'a ledger whose last line was torn by a crash: the next boot terminates the tail before its first line — exactly the torn line fails to parse, alone (r7: appendFileSync glued the next record onto it)', { unparsable: 1, glued: false, terminated: true }, r8.S74a);
+    judge8('S75b', 'a Forget moved the directory aside (<dir>.forgotten-<ts>), a restart, the forgotten directory adopted back, the roll\'s lock inside it: the product\'s own move carries the lineage (the entry follows the rename with the record\'s hosts, nothing pruned at the boot) ⇒ taken over (r7: pruned at the next boot — gone = ENOENT — and refused as foreign)', { entryFollowed: true, bootPruned: false, err: null, launched: 1, left: 0, renamedFrom: PREV }, r8.S75b);
+    judge8('S74b', 'the tail torn INSIDE a multi-byte UTF-8 sequence (verify r9 ⑤): terminated once; exactly the torn line fails to parse, this boot\'s lines parse, the file ends in a newline', { unparsable: 1, terminated: true, thisBootParses: true, tailNewline: true }, r8.S74b);
+    judge8('S74c', 'the tail torn INSIDE an escaped JSON string (verify r9 ⑤): the same', { unparsable: 1, terminated: true, thisBootParses: true, tailNewline: true }, r8.S74c);
+    judge8('S76', 'verify r9 (④): forgetOrphan (the real browser-trace) then a crash before any other save — the entry was ON DISK under the forgotten path before the rename, the next boot prunes nothing, the directory adopted back is taken over (r8: re-keyed in memory only, never committed on the orphan path — pruned at the next boot, refused as foreign)', { diskNamesNew: true, entryFollowed: true, bootPruned: false, err: null, launched: 1, left: 0, renamedFrom: PREV }, r8.S76);
+    if (!isRoot) judge8('S76b', 'verify r9 (④): a Forget while data/ cannot be written (EACCES, the EIO class) is REFUSED forget_failed with nothing moved (the directory and its record stay, the disk still names it); once writable the same Forget moves it WITH its lineage; a crash; adopted back ⇒ taken over (r8: moved, the disk named the old path)', { refusedCode: 'forget_failed', stillThere: true, diskNamesOldAfterRefusal: true, thenMoved: true, diskNamesNew: true, bootPruned: false, err: null, launched: 1, left: 0, renamedFrom: PREV }, r8.S76b);
+    judge8('S77', 'verify r9 (③): the legacy witness reads ONLY the record\'s own path — one ledger line, the original, the devtools form; a cp -a copy beside carrying the same lock + port file is never witnessed', { witnessed: 1, form: 'devtools', ownPathOnly: true }, r8.S77);
+    judge8('S77b', 'verify r9 (③): a file-level restore IN PLACE (cp -a semantics — the lock\'s ctime = now, the port file\'s mtime from the launch) is the directory the record names and its lock is the dead pod\'s ⇒ taken over', { err: null, launched: 1, left: 0, renamedFrom: PREV }, r8.S77b);
+    judge8('S77c', 'verify r9 (③): the copy beside carries the same files but no record and no marker ⇒ refused by name with the one command (a copy never inherits)', { err: 'profile_locked', launched: 0, left: 3, msg: /rm -f '.*SingletonLock'/ }, r8.S77c);
+    // ── T1 THE SEEDED WALK through the real keeper: ≤ 6 random events per seed, the invariants after every step, the PURE table as the oracle at every door ──
+    const walk8 = async (Kmod, seeds) => {
+      const EV = ['launchD', 'launchC', 'copyAppears', 'originalDeleted', 'roll', 'updateOnOldPod', 'fileLevelRestore', 'markerDeleted', 'journalFails', 'load', 'forget', 'liveHolder', 'crash']; // verify r9: a crash = the keeper dropped without shutdown (nothing in its memory saved)
+      const OSM8 = require('os'); const realH = OSM8.hostname; const rngOf = (seed) => { let s = seed >>> 0 || 1; return () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; }; };
+      const exists = (d) => { try { fs.lstatSync(d); return true; } catch { return false; } }; const bearer = (key) => { try { fs.lstatSync(key); } catch (e) { if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) return null; } let ino = null; try { ino = fs.statSync(key).ino; } catch { ino = null; } return { tok: tokOf8(key), ino }; };
+      const aliveP = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+      const vio = []; let steps = 0, launchesN = 0, refusalsN = 0;
+      for (let seed = 1; seed <= seeds; seed++) {
+        const r = rngOf(seed * 7919); const BASE = path.join(IROOT, 'walk8', 'w' + seed); fs.rmSync(BASE, { recursive: true, force: true }); const DATA = path.join(ROOT, 'data-walk8', 'w' + seed); fs.rmSync(DATA, { recursive: true, force: true }); fs.mkdirSync(DATA, { recursive: true });
+        const D = path.join(BASE, 'D'), C = path.join(BASE, 'C'); const made = new Set([D]); const deleted = new Set(); let holder = null; let forgottenTo = null;
+        let kk = mkKeeper(Kmod, { dataDir: DATA, log: klogI }); fs.mkdirSync(D, { recursive: true, mode: 0o700 });
+        { const p = kk.adoptDirectory({ label: 'D', dir: D }).profile; await kk.attach({ profileId: p.id, browserKey: KA, sessionId: 'sess-1' }); await stopI(kk, p); const rec = kk._reg().browsers[p.id]; rec.host = PREV; rec.hosts = [PREV]; for (const l of kk._reg().leases.filter((l) => l.profileId === p.id)) { try { kk.detach({ profileId: p.id, browserKey: l.browserKey, by: 'user' }); } catch { } } kk.removeProfile(p.id); }
+        const dirOf = (n) => (n === 'D' ? (forgottenTo && !exists(D) ? forgottenTo : D) : C);
+        const bad = (step, ev, what, extra) => vio.push(`seed ${seed} step ${step} after ${ev}: ${what}` + (extra !== undefined ? ' ' + JSON.stringify(extra).slice(0, 300) : ''));
+        const launchOn = async (n) => { const dir = dirOf(n); if (!exists(dir)) return { skipped: 'absent' };
+          const lk = F.readSingletonLock(dir); let key = dir; try { key = fs.realpathSync(dir); } catch { } const have = kk._reg().profiles.find((p) => p.dir === dir); const prev = have ? kk._reg().browsers[have.id] : null; const own = prev ? B.launchHostsOf(prev) : [];
+          const lv = own.length ? { hosts: own, why: 'record' } : B.lineageVerdict(kk._reg().dirHosts, key, { ino: (bearer(key) || {}).ino, tok: tokOf8(dir), bearer }); const hostsExp = lv.hosts.length ? lv.hosts : B.launchHostsOf(null, kk._reg().host || null);
+          const liveOnDir = holder && aliveP(holder.pid) && lk && lk.pid === holder.pid; const expect = liveOnDir ? 'refused' : (!lk ? 'launch' : lk.host === os.hostname() ? 'launch' : hostsExp.includes(lk.host) ? 'launch' : 'refused');
+          const p = have || kk.adoptDirectory({ label: n, dir }).profile; const e = await threw(() => kk.attach({ profileId: p.id, browserKey: KB, sessionId: 'sess-2' }));
+          if (!e) { launchesN++; await stopI(kk, p); for (const l of kk._reg().leases.filter((l) => l.profileId === p.id)) { try { kk.detach({ profileId: p.id, browserKey: l.browserKey, by: 'user' }); } catch { } } } else refusalsN++;
+          return { dir, err: e ? e.code : null, msg: e ? e.message : '', expect, lineage: lv.why, lock: lk }; };
+        for (let step = 1; step <= 6; step++) {
+          const ev = EV[Math.floor(r() * EV.length)]; steps++; let res = null;
+          try {
+            switch (ev) {
+              case 'launchD': res = await launchOn('D'); break;
+              case 'launchC': res = await launchOn('C'); break;
+              case 'copyAppears': if (exists(D) && !exists(C)) { fs.cpSync(D, C, { recursive: true }); made.add(C); } break;
+              case 'originalDeleted': if (exists(D) && !(holder && aliveP(holder.pid))) { fs.rmSync(D, { recursive: true, force: true }); deleted.add(D); } break;
+              case 'roll': { for (const l of logOf('launches.log')) { try { process.kill(l.pid, 'SIGKILL'); } catch { } } for (const d of [dirOf('D'), C]) if (exists(d) && !(holder && aliveP(holder.pid) && d === D)) plantI(d, PREV, await deadPidI()); break; }
+              case 'updateOnOldPod': { kk.shutdown(); OSM8.hostname = () => PREV; try { const k0 = mkKeeper(Kmod, { dataDir: DATA, log: klogI }); await k0.boot(); k0.shutdown(); } finally { OSM8.hostname = realH; } kk = mkKeeper(Kmod, { dataDir: DATA, log: klogI }); await kk.boot(); break; }
+              case 'fileLevelRestore': { const d = dirOf('D'); if (exists(d) && !(holder && aliveP(holder.pid))) { const tmp = d + '.restore'; fs.cpSync(d, tmp, { recursive: true }); fs.rmSync(d, { recursive: true, force: true }); fs.renameSync(tmp, d); } break; }
+              case 'markerDeleted': { try { fs.unlinkSync(path.join(dirOf('D'), MK8)); } catch { } break; }
+              case 'journalFails': { const f = path.join(DATA, 'browser-lineage-journal.ndjson'); try { fs.writeFileSync(f, '', { flag: 'a' }); fs.chmodSync(f, 0o444); } catch { } res = await launchOn('D'); try { fs.chmodSync(f, 0o600); } catch { } break; }
+              case 'load': { kk.shutdown(); kk = mkKeeper(Kmod, { dataDir: DATA, log: klogI }); await kk.boot(); break; } // verify r9 (⑥): shutdown is synchronous — no sleep stood for anything
+              case 'forget': { const d = dirOf('D'); if (exists(d) && !forgottenTo && !(holder && aliveP(holder.pid))) { const key = kk.lineageKeyOf(d); const to = d + '.forgotten-' + Date.now(); const mv = kk.moveDirLineage(key, to); if (!mv.ok) bad(step, ev, 'the move refused on a writable data/', mv); else { fs.renameSync(d, to); forgottenTo = to; made.add(to); } const pr = kk._reg().profiles.find((p) => p.dir === d); if (pr) { try { kk.removeProfile(pr.id); } catch { } } } break; } // verify r9 (④): the product's order — the lineage WRITTEN, then the rename
+              case 'crash': { kk = mkKeeper(Kmod, { dataDir: DATA, log: klogI }); await kk.boot(); break; }
+              case 'liveHolder': { const d = dirOf('D'); if (exists(d) && !holder) { holder = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)', '--', `--user-data-dir=${d}`, '--vibespace-keeper=bp-stranger'], { stdio: 'ignore' }); await new Promise((r) => holder.once('spawn', r)); plantI(d, os.hostname(), holder.pid); } break; } // verify r9 (⑥): its cmdline is readable once it has exec'd (the spawn event), never after a guessed 250 ms
+            }
+          } catch (e) { bad(step, ev, 'the keeper THREW out of an event', { message: e && e.message }); continue; }
+          const dh = kk._reg().dirHosts || {}; const byTok = {}; for (const [k3, e] of Object.entries(dh)) if (e && e.tok) (byTok[e.tok] = byTok[e.tok] || []).push(k3);
+          for (const [t, ks] of Object.entries(byTok)) if (ks.length > 1) bad(step, ev, 'I1 one token ⇒ one entry', { tok: t, keys: ks });
+          if (holder && !aliveP(holder.pid)) bad(step, ev, 'I2 the live holder was signalled');
+          if (res && res.err === 'profile_locked' && !/rm -f '.*SingletonLock'|close it there|stop it from the Browser panel/.test(res.msg)) bad(step, ev, 'I3 a refusal without its cause and the one command', { msg: res.msg.slice(0, 200) });
+          if (exists(D) && exists(C) && tokOf8(D) && tokOf8(D) === tokOf8(C) && dh[C] && dh[D] && dh[C].tok === dh[D].tok) bad(step, ev, 'I4 a copy inherited the original\'s entry');
+          if (res && res.expect && res.err !== 'launch_failed') { const got = res.err ? 'refused' : 'launch'; if (got !== res.expect) bad(step, ev, `I5 the oracle disagrees with the door (${res.lineage}; expected ${res.expect}, product ${got})`, { dir: res.dir, lock: res.lock, err: res.err }); }
+          for (const d of made) if (!deleted.has(d) && !exists(d) && d !== D) bad(step, ev, 'I6 a path disappeared', { d });
+          if (!exists(D) && !deleted.has(D) && !forgottenTo) bad(step, ev, 'I6 the original directory vanished');
+          let ledger = []; try { ledger = fs.readFileSync(path.join(DATA, 'browser-lineage-journal.ndjson'), 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return { kind: 'UNPARSABLE', raw: l }; } }); } catch { ledger = []; }
+          for (const l of ledger) { if (l.kind === 'UNPARSABLE') { bad(step, ev, 'I7 an unparsable ledger line', l); continue; } for (const f of ['dir', 'from', 'to', 'original', 'keptAs']) if (f in l && l[f] !== null && !(typeof l[f] === 'string' && l[f].startsWith('/'))) bad(step, ev, 'I7 a ledger field that is not an absolute path', { line: l }); }
+        }
+        try { if (holder) holder.kill('SIGKILL'); } catch { } kk.shutdown(); for (const l of logOf('launches.log')) { try { process.kill(l.pid, 'SIGKILL'); } catch { } } OSM8.hostname = realH;
+      }
+      return { steps, launchesN, refusalsN, vio };
+    };
+    const WALK_SEEDS = Number(process.env.WALK_SEEDS || 10);
+    const tw0 = Date.now(); const w = await walk8(K, WALK_SEEDS); const walkMs = Date.now() - tw0; // verify r9 (⑥): the walk's cost is printed (the fast tier's budget)
+    ok(w.vio.length === 0 && w.steps === WALK_SEEDS * 6, `④k T1 THE SEEDED WALK: ${WALK_SEEDS} seeds × 6 random events (launch / a copy / the original deleted / a roll / an Update on the old pod / a file-level restore / the marker deleted / a journal write that fails / a load / a Forget / a live holder / a crash) through the REAL keeper in ${walkMs} ms = ${w.steps} steps, ${w.launchesN} launches, ${w.refusalsN} refusals — one token one entry, a live holder never signalled, every refusal names its cause and the one command, a copy never inherits, the PURE table agrees with the door at every launch, no path deleted, the ledger names absolute paths${w.vio.length ? ' — VIOLATIONS: ' + w.vio.slice(0, 5).join(' | ') : ''}`);
+    const dis8 = TABLE8.filter((x) => !x.agree);
+    ok(!dis8.length && TABLE8.length === (isRoot ? 13 : 14), `④k THE SEVENTH JUDGEMENT (+ verify r9's seven): ${TABLE8.length} scenarios through the real keeper (the .199 boot first ×2, the witness's clock, the backup ×2, the ledger's tail ×3, a Forget ×3, the witness's own path ×3), every one as the truth says${dis8.length ? ' — ' + dis8.map((x) => x.id + ': ' + x.diffs.join(' / ')).join(' || ') : ''}`);
+    // ── the controls: each r8 part cut in a patched copy (never src/), the scenario that catches it ──
+    const ksrc8 = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8'); const tsrc8 = fs.readFileSync(path.join(REPO, 'src/server/browser-trace.js'), 'utf8');
+    { const cut = "let devtools = null; try { const df = path.join(own, 'DevToolsActivePort'); const d = B.parseDevToolsActivePort(fs.readFileSync(df, 'utf8')); devtools = d ? { ...d, at: fs.statSync(df).mtimeMs } : null; } catch { devtools = null; }"; const noDev = ksrc8.replace(cut, 'let devtools = null; /* CONTROL: the port file never read */');
+      ok(noDev !== ksrc8, '④k control setup: the port-file witness is where the control cuts');
+      const c14 = await runR8(M.load('src/server/browser-keeper.js', noDev, 'no-devtools-witness'), 'ctl14', ['S70']);
+      ok(c14.S70.err === 'profile_locked' && c14.S70.left === 3 && c14.S70x.err === 'profile_locked', '④k CONTROL 14: a keeper that never reads the directory\'s DevToolsActivePort refuses userW\'s named profile on the .199-boot-first order (the r7 keeper: its pid witness is nulled by that boot) — S70 catches it', { a: c14.S70.err, x: c14.S70x.err }); }
+    { const cut = "let lockAt = null; try { lockAt = fs.lstatSync(path.join(own, 'SingletonLock')).ctimeMs; } catch { lockAt = null; }"; const noAt = ksrc8.replace(cut, 'let lockAt = null; /* CONTROL: the lock\'s ctime never handed in */');
+      ok(noAt !== ksrc8, '④k control setup: the lock\'s ctime is where the control cuts');
+      const c15 = await runR8(M.load('src/server/browser-keeper.js', noAt, 'no-lock-ctime'), 'ctl15', ['S71']);
+      ok(c15.S71.witnessed === true && c15.S71.err === null && c15.S71.left === 0, '④k CONTROL 15: a keeper that never hands the lock\'s ctime in takes over a lock that predates the record\'s own start (pid equality alone — r7) — S71 catches it', { w: c15.S71.witnessed, e: c15.S71.err }); }
+    { const cut = "if (rr.state !== 'failed') rememberDir(p.dir, launchHostsFor(rr, p.dir), { retire: true });"; const always = ksrc8.replace(cut, "if (true) rememberDir(p.dir, launchHostsFor(rr, p.dir)); /* CONTROL: a retire remembers a refused record and may mint */");
+      ok(always !== ksrc8, '④k control setup: the retire rule is where the control cuts');
+      const c16 = await runR8(M.load('src/server/browser-keeper.js', always, 'retire-mints'), 'ctl16', ['S72']);
+      ok(c16.S72.tokKeptAtRemove === false && c16.S72b.err === 'profile_locked', '④k CONTROL 16: a keeper whose retire remembers a refused record mints a fresh marker INTO the adopted backup, and the restore from it is refused as foreign (r7) — S72 / S72b catch it', { kept: c16.S72.tokKeptAtRemove, r: c16.S72b.err }); }
+    { const cut = 'if (!ledgerTailChecked) {'; const noTail = ksrc8.replace(cut, 'if (false) { /* CONTROL: a torn tail never terminated */');
+      ok(noTail !== ksrc8, '④k control setup: the tail check is where the control cuts');
+      const c17 = await runR8(M.load('src/server/browser-keeper.js', noTail, 'no-tail-termination'), 'ctl17', ['S74']);
+      ok(c17.S74a.glued === true && c17.S74a.terminated === false, '④k CONTROL 17: a keeper that never terminates a torn tail glues this boot\'s first line onto it (two records, one unparsable line — r7) — S74a catches it', c17.S74a); }
+    { const cut = 'let mv = null; try { mv = keeper.moveDirLineage(lineageKey, to); } catch (e) { mv = { ok: false, moved: false, key: null, error: e && e.message }; }'; const noMove = tsrc8.replace(cut, 'let mv = { ok: true, moved: false, key: null }; /* CONTROL: the lineage never follows a Forget */');
+      ok(noMove !== tsrc8, '④k control setup: the Forget\'s re-key is where the control cuts');
+      const c18 = await runR8(K, 'ctl18', ['S75'], M.load('src/server/browser-trace.js', noMove, 'no-forget-rekey'));
+      ok(c18.S75b.entryFollowed === false && c18.S75b.err === 'profile_locked', '④k CONTROL 18: a Forget whose rename never re-keys the lineage leaves the entry at the old path (pruned at the next boot) and the adopted-back directory\'s old-pod lock is foreign by name (r7) — S75b catches it', { f: c18.S75b.entryFollowed, e: c18.S75b.err }); }
+    { const cut = 'if (!save()) { reg.dirHosts = before;'; const noSave = ksrc8.replace(cut, 'if (false && !save()) { reg.dirHosts = before; /* CONTROL: the move re-keys in memory only (r8) */');
+      ok(noSave !== ksrc8, '④k control setup: the move\'s save is where the control cuts');
+      const c19 = await runR8(M.load('src/server/browser-keeper.js', noSave, 'move-never-saves'), 'ctl19', ['S76']);
+      ok(c19.S76.diskNamesNew === false && c19.S76.bootPruned === true && c19.S76.err === 'profile_locked' && (isRoot || (c19.S76b.refusedCode === null && c19.S76b.stillThere === false)), '④k CONTROL 19 (verify r9): a keeper whose move re-keys in memory only (r8) loses the lineage at a crash after a Forget — pruned at the next boot, the adopted-back directory refused by name — and an unwritable data/ refuses nothing (moved, the disk names the old path): S76 / S76b catch it', { d: c19.S76.diskNamesNew, p: c19.S76.bootPruned, e: c19.S76.err, b: isRoot ? null : [c19.S76b.refusedCode, c19.S76b.stillThere] }); }
+    // ── verify r9 (⑤): the ledger has NO product reader — a torn line can abort nothing (the keeper appends and rotates whole lines; the only parsers are suites) ──
+    { let names = []; try { names = execFileSync('git', ['-C', REPO, 'grep', '-l', 'browser-lineage-journal', '--', 'src', 'data/bin', 'server.js'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean); } catch (e) { names = ['(git grep failed: ' + (e && e.message) + ')']; }
+      const ledgerParse = /JSON\.parse\([^;\n]*(LINEAGE_LEDGER|lineage-journal)/.test(ksrc8);
+      ok(names.length === 1 && names[0] === 'src/server/browser-keeper.js' && !ledgerParse, `④k verify r9 (⑤): the lineage ledger is named by exactly ONE product file (the keeper: append + whole-line rotation) and parsed by none — ${names.join(', ')}`); }
+  }
+}
+for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 44 })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
 
 try { for (const p of k.list().profiles) await k.stop(p.id).catch(() => { }); } catch { /* none */ }
 k.shutdown();

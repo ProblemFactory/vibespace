@@ -78,6 +78,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     // op) → the caller stashes on a miss. Shared with agent-to-agent
     // messaging via src/server/conversation-deliver.js.
     deliverToConversation: (cid, text, opts) => deliver.deliverToConversation(cid, text, opts),
+    onRetry: (fn) => deliver.onRetry(fn),   // lane notify-retry: the park's parked / attempt / delivered / fell, booked by the engine
     // "Clear content…" (verify r3): the ladder's own stash is a derived copy of a job's words too
     redactStash: (match, scope) => (deliver && typeof deliver.redactStash === 'function' ? deliver.redactStash(match, scope) : 0),
     // TRIAGE ARCHIVE policy (design §13 rule 5): the two settings rows, read

@@ -312,7 +312,9 @@ console.log('— lane-pairing ③: a real daemon vs the REAL dial gate — wrong
   await waitFor(() => !DP.agentdDials.has('devB'), 10000);
   const oldBundle = path.join(tmp, 'agentd-nocap.js');
   const bsrc = fs.readFileSync(bundle, 'utf8');
-  const patched = bsrc.replace(/, "dial-status"\]/, ']');
+  // 2.369.200 integration: dial-status is no longer the LAST capability (exit-run-output added run-shell, custom-app
+  // app-install after it) — the control drops it wherever it stands in the list
+  const patched = bsrc.replace(/, "dial-status"(?=[,\]])/, '');
   fs.writeFileSync(oldBundle, patched);
   check('(the patched bundle drops the capability)', patched !== bsrc);
   const dOld = spawn(process.execPath, [oldBundle], { detached: true, stdio: 'ignore', env: { ...process.env, VIBESPACE_AGENTD_ROOT: rootB, VIBESPACE_DEVICE_ROOT: rootB } });

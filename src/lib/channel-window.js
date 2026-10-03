@@ -84,9 +84,9 @@ import { showReauthAccountDialog } from './channel-account-dialogs.js';
 import * as chanCaps from '../channel-caps.js';
 // g3 (design §22): the composer's mode by conversation kind, the @-autocomplete,
 // the wake preview, and the group dialogs + words.
-import { composerMode, isGroupConv, mentionQuery, mentionCandidates, insertMention, wakePreview, OWNER, GROUP_ADAPTER_ID } from './channel-groups-view.js';
+import { composerMode, isGroupConv, mentionQuery, mentionCandidates, insertMention, wakePreview, deliveryOf, OWNER, GROUP_ADAPTER_ID } from './channel-groups-view.js';
 import { showGroupDetail, showGroupMembersDialog, renameGroup, archiveGroup } from './channel-group-dialogs.js';
-import { groupErrorText, wakeEchoText } from './channel-words.js';
+import { groupErrorText, wakeEchoText, deliveryLineText } from './channel-words.js';
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): a group message's menu + the cleared sentence
 import { touchedByRow } from './channel-touch-view.js'; // §26 (B-099e): "Drafted by <agent>" — the reverse link to the chat
 // lane channel-rich (D2): a mail's formatted body in the ONE sandboxed frame (the surface's only srcdoc lives there)
@@ -95,6 +95,13 @@ import { createMailFrames } from './channel-mail-frame.js';
 // a thread opens as a side pane (desktop) / a pushed view (phone) — never inline (spec §4.1)
 import { quoteLine, threadChip, threadChipText, inThreadTag, createThreadPane } from './channel-thread-pane.js';
 import { renderReactionStrip, patchReactionStrip, toggleReaction, loadEmojiSet, openReactionPicker, refaceStrips } from './reaction-picker.js';
+// lane reaction-hover (2026-10-01): ONE hover action bar per message — add a reaction · reply in thread · quote (an agent
+// group's row: its ⋯) — an overlay at the message's right edge, never a line in the flow; the phone's long press = the
+// same actions as a menu. PURE rules + the DOM half.
+import { msgBarActions, barKey } from './msg-bar-model.js';
+import { renderMsgBar, syncMsgBar, holdBarOpen, msgActionMenu } from './channel-msg-bar.js';
+import * as P from '../channel-policy.js';
+import { firstLine } from '../channel-thread.js';
 
 const ICON = svgIcon16('<path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/>');
 
@@ -361,9 +368,17 @@ function renderRecord(rec, { cont = false, base = null, folds = null, mail = nul
   for (const id of placedAttachments(blocks)) if (atts.some((a) => a.id === id)) placed.add(id);
   const rest = renderAttachments(rec, base, { skip: placed });
   if (rest) row.appendChild(rest);
-  // W3 (lane channel-threads): the REACTION STRIP — chips keyed by key, the `+` only where `react` is offered
+  // W3 (lane channel-threads): the REACTION STRIP — chips keyed by key, only where the message HAS reactions
   if (ctx) { const strip = renderReactionStrip(rec, ctx.strip(rec)); if (strip) row.appendChild(strip); }
   row._place = rec.place || null;
+  // lane reaction-hover: THE ACTION BAR — an overlay at the right edge (CSS), last in the row so the keyboard reaches it
+  // after the message's own controls; `_acts` = the row's actions NOW (a re-sync after the offers change, the phone's
+  // long-press menu)
+  if (ctx && ctx.bar) {
+    row._acts = () => ctx.bar(rec, ctx, row);
+    const bar = renderMsgBar(row._acts());
+    if (bar) row.appendChild(bar);
+  }
   return row;
 }
 /** A day separator: a centred pill on a hairline. */
@@ -452,6 +467,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     const c = r.conversation;
     lastConv = c;
     lastAdapter = r.adapter || null;
+    syncBars();   // lane reaction-hover: the drawn bars follow the offers (keyed — a no-op while nothing changed)
     // The MANAGER owns titles (`wm.setTitle` updates the bar, the taskbar
     // and a tab label). `winInfo.setTitle?.(…)` was a permanent no-op (r3):
     // the winInfo literal has no such member, so every channel window read
@@ -574,11 +590,15 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
         const text = ta.value.trim();
         if (!text) return;
         sendBtn.disabled = true;
-        const r2 = await fetchJson(`/api/channels/${encodeURIComponent(adapterId)}/${encodeURIComponent(convId)}/${direct ? 'send' : 'propose'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, expectWakes: wakes }) });
+        // lane reaction-hover: a QUOTE picked from a message's action bar rides as the reply's placement (the engine's
+        // PURE verdict re-judges it — a refusal is worded by its code and keeps both the words and the quote)
+        const q = quoteTarget;
+        const r2 = await fetchJson(`/api/channels/${encodeURIComponent(adapterId)}/${encodeURIComponent(convId)}/${direct ? 'send' : 'propose'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, expectWakes: wakes, ...(q ? { replyTo: q.vid, placement: 'quote' } : {}) }) });
         sendBtn.disabled = false;
         if (!r2 || r2.error) { showToast(routeErrorText(r2), { type: 'error' }); return; }
         ta.value = '';
         heldDraft = '';
+        if (q && quoteTarget === q) { quoteTarget = null; drawQuote(); }
         const st = r2.proposal && r2.proposal.state;
         // the policy's reasons are an ENUM — worded through the card's own `reasonLabel` (a3 i18n)
         if (st === 'failed') showToast(t('The channel refused the send: {error}', { error: (r2.proposal && r2.proposal.reason) || '' }), { type: 'error' });
@@ -590,6 +610,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       comp.append(ta, row);
       foot.textContent = '';
       foot.appendChild(comp);
+      drawQuote();   // a quote picked before this rebuild (a re-authorization, a policy change) comes back with the box
     } else {
       // NO composer element at all — the P0 exit condition.
       foot.textContent = '';
@@ -701,33 +722,104 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
   const rowsFor = (vid) => { const sel = `.chanmsg[data-vid="${CSS.escape(String(vid))}"]`; return [...list.querySelectorAll(sel), ...(pane ? pane.rows().querySelectorAll(sel) : [])]; };
   /** A folded list the route / a broadcast answered → every drawn row's strip patched IN PLACE by key. */
   const applyReactions = (vid, reactions) => { for (const row of rowsFor(vid)) patchReactionStrip(row, { vendorId: vid, reactions }, reactions || [], stripCtx({ vendorId: vid })); };
-  /** The strip's context for one record: `+` only where `react` is offered; a system line never has a strip. */
+  /** The strip's context for one record (its chips toggle; adding a reaction is the row's action bar). */
   const stripCtx = (rec) => ({
-    canAdd: !!(lastConv && lastConv.offers && lastConv.offers.react && lastConv.offers.react.offered) && !isSysRow(rec),
-    // owner ruling (2026-09-28): while this account's sign-in cannot READ reactions, the `+` says why, by name
-    readNote: (lastConv && lastConv.offers && lastConv.offers.readReactions && !lastConv.offers.readReactions.offered && lastConv.offers.readReactions.why === 'reactions-scope-not-granted') ? rxReadText(accountOf()) : '',
     adapterBase,
     onToggle: (chip, key) => { const x = chip._rx || {}; toggleReaction({ base, vid: rec.vendorId, key, mine: !!x.mine, chip, onList: (l) => applyReactions(rec.vendorId, l) }); },
-    onAdd: (anchor) => {
-      loadEmojiSet(adapterBase).then((set) => openReactionPicker(anchor, {
+  });
+  // ── lane reaction-hover (2026-10-01): THE ROW'S ACTION BAR — which actions (PURE `msgBarActions` over the offers the
+  //    window last drew), their words, and what each does (the SAME handlers the old `+` / the pane's ↩ had) ──
+  /** owner ruling (2026-09-28): while this account's sign-in cannot READ reactions, Add reaction says why, by name. */
+  const rxAddNote = () => ((lastConv && lastConv.offers && lastConv.offers.readReactions && !lastConv.offers.readReactions.offered && lastConv.offers.readReactions.why === 'reactions-scope-not-granted') ? rxReadText(accountOf()) : '');
+  const composerNow = () => composerMode({ conv: lastConv }).mode;
+  /** ADD A REACTION: the adapter's vocabulary in the picker, anchored to the bar's button (or the head line the
+   *  phone's menu names); the pick toggles through the route like a chip (a reaction never opens a turn — §64). */
+  function pickReaction(rec, anchor) {
+    loadEmojiSet(adapterBase).then((set) => {
+      const pop = openReactionPicker(anchor, {
         set, adapterBase, replaces: null,
         onPick: (key) => {
           const row = rowsFor(rec.vendorId)[0];
           const had = row ? row.querySelector(`.rx-chip[data-key="${CSS.escape(key)}"]`) : null;
           toggleReaction({ base, vid: rec.vendorId, key, mine: !!(had && had._rx && had._rx.mine), chip: had || null, onList: (l) => applyReactions(rec.vendorId, l) });
         },
-      })).catch((r) => showToast(routeErrorText(r), { type: 'error' }));
-    },
-  });
+      });
+      holdBarOpen(anchor, pop);
+    }).catch((r) => showToast(routeErrorText(r), { type: 'error' }));
+  }
+  /** REPLY IN THREAD from the list: a message inside a topic opens that topic (a reply in it is answered as itself);
+   *  any other message opens a NEW thread rooted at it (the vendor mints the thread with the first reply). */
+  function replyInThread(rec, anchor, row) {
+    const pl = (row && row._place) || rec.place || null;
+    const th = pl && typeof pl.kind === 'string' && pl.kind.startsWith('topic-') ? pl.thread : null;
+    if (th && th.key) openThread(th, anchor, { target: th.isRoot ? null : rec, focus: true });
+    else openThread({ key: rec.vendorId, root: rec.vendorId, count: 0, fresh: true, rootRec: rec }, anchor, { target: null, focus: true });
+  }
+  /** QUOTE: the composer answers this message as a quoted reply (the line above the box says so; ✕ takes it back). */
+  let quoteTarget = null;
+  function quoteMessage(rec) {
+    quoteTarget = { vid: rec.vendorId, who: (rec.author && (rec.author.name || rec.author.id)) || '', text: firstLine(rec.text || '', 80) };
+    drawQuote();
+    const ta = foot.querySelector('.chanwin-composer textarea');
+    if (ta) ta.focus({ preventScroll: true });
+  }
+  /** The quote line at the top of the composer box — drawn from `quoteTarget`, re-drawn after a footer rebuild. */
+  function drawQuote() {
+    const comp = foot.querySelector('.chanwin-composer');
+    let line = comp ? comp.querySelector(':scope > .chanwin-quote') : null;
+    if (!comp || !quoteTarget) { if (line) line.remove(); return; }
+    if (!line) { line = el('div', 'chanwin-quote'); comp.insertBefore(line, comp.firstChild); }
+    line.textContent = '';
+    line.dataset.quoteOf = quoteTarget.vid;
+    line.appendChild(icon('quote', 11));
+    // the card's own words (PURE `placementText` — the approval card and the Outbox say the same)
+    line.appendChild(el('span', 'chanwin-quote-text', P.placementText('quote', { t, quote: { author: quoteTarget.who, text: quoteTarget.text } })));
+    const x = document.createElement('button');
+    x.type = 'button'; x.className = 'icon-btn chanwin-quote-x';
+    x.appendChild(icon('close', 10));
+    x.title = t('Remove the quote'); x.setAttribute('aria-label', t('Remove the quote'));
+    x.onclick = () => { quoteTarget = null; drawQuote(); const ta = foot.querySelector('.chanwin-composer textarea'); if (ta) ta.focus({ preventScroll: true }); };
+    line.appendChild(x);
+  }
+  /** One action's words and deed. `c` = the row's context (`inPane`, `rootVid`). */
+  function actionOf(id, rec, c, row) {
+    if (id === 'react') { const note = rxAddNote(); return { id, label: t('Add reaction'), title: note ? `${t('Add reaction')} — ${note}` : t('Add reaction'), run: (anchor) => pickReaction(rec, anchor) }; }
+    if (id === 'thread') {
+      if (c && c.inPane) {
+        const isRoot = rec.vendorId === c.rootVid;
+        return { id, label: isRoot ? t('Reply in thread') : t('Reply to this message in the thread'), run: () => { if (pane) pane.pick(isRoot ? null : rec); } };
+      }
+      return { id, label: t('Reply in thread'), run: (anchor) => replyInThread(rec, anchor, row) };
+    }
+    if (id === 'quote') return { id, label: t('Quote'), run: () => quoteMessage(rec) };
+    return null;
+  }
+  /** THE ROW'S ACTIONS NOW (the bar, its re-sync, the long-press menu). */
+  function barActs(rec, c = {}, row = null) {
+    const place = (row && row._place) || rec.place || null;
+    return msgBarActions({ sys: isSysRow(rec), inPane: !!(c && c.inPane), place, conv: lastConv, composer: composerNow() })
+      .map((id) => actionOf(id, rec, c, row)).filter(Boolean);
+  }
+  /** The conversation's offers changed (a re-authorization, a disconnect, the composer's mode): every drawn bar is
+   *  re-synced IN PLACE — keyed, never a rebuilt row; nothing happens while the key is unchanged. */
+  let drawnBarKey = null;
+  function syncBars() {
+    const k = barKey({ conv: lastConv, composer: composerNow(), note: rxAddNote() });
+    if (k === drawnBarKey) return;
+    drawnBarKey = k;
+    const rows = [...list.querySelectorAll('.chanmsg[data-vid]'), ...(pane ? pane.rows().querySelectorAll('.chanmsg[data-vid]') : [])];
+    for (const row of rows) if (row._acts) syncMsgBar(row, row._acts());
+  }
   /** THE ROW CONTEXT every renderRecord of this window gets (the list's; the pane passes `inPane` + its root). */
   const rowCtx = {
     strip: (rec) => stripCtx(rec),
+    bar: (rec, c, row) => barActs(rec, c, row),
     onJump: (vid, place) => jumpTo(vid, place),
     onOpenThread: (th, from) => openThread(th, from),
   };
   /** THE PANE (one per window, created on first open; never persisted in the layout). */
   let pane = null;
-  function openThread(th, from = null) {
+  function openThread(th, from = null, opts = {}) {
     if (!th) return;
     if (!pane) {
       pane = createThreadPane(split, {
@@ -738,7 +830,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
         onClose: () => {},
       });
     }
-    pane.open(th, { from });
+    pane.open(th, { from, ...opts });
   }
   /** THE JUMP (W1): the parent on screen ⇒ scroll it into view and flash it; not drawn ⇒ page up (≤ JUMP_PAGES_MAX
    *  pages — the rule-19 belt still bounds the vendor side), then flash; older than everything loaded ⇒ said. */
@@ -814,15 +906,36 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       // and was just answered INTO a new topic (`reply_in_thread` — the vendor mints the thread on it): the broadcast
       // names the topic's root, so its row becomes a topic root in place and grows its chip (never a rebuilt row)
       const root = !matched && st && st.root ? list.querySelector(`.chanmsg[data-vid="${CSS.escape(String(st.root))}"]`) : null;
-      if (root && !(root._place && root._place.thread)) {
-        const pl = { ...(root._place || { quote: null }), kind: 'topic-root', thread: { key: tk, count: st.count, lastAt: st.lastAt, isRoot: true, kind: 'vendor', root: String(st.root), walked: true } };
-        root._place = pl;
-        const head = root.querySelector(':scope > .chanmsg-head');
-        const chip = threadChip(pl, { onOpen: (th) => openThread(th, chip) });
-        if (head && chip) head.appendChild(chip);
-      }
+      if (root && !(root._place && root._place.thread)) becomeTopicRoot(root, { key: tk, count: st.count, lastAt: st.lastAt, isRoot: true, kind: 'vendor', root: String(st.root), walked: true });
     }
     if (pane) pane.applyThreads(map);
+  }
+  /** A drawn row that headed no topic becomes a TOPIC ROOT in place: its place, its chip grown, its bar re-synced (a
+   *  topic's message is no longer quoted from the list — lane reaction-hover). Never a rebuilt row. */
+  function becomeTopicRoot(row, thread) {
+    const pl = { ...(row._place || { quote: null }), kind: 'topic-root', thread };
+    row._place = pl;
+    const head = row.querySelector(':scope > .chanmsg-head');
+    const chip = threadChip(pl, { onOpen: (th) => openThread(th, chip) });
+    if (head && chip) head.appendChild(chip);
+    if (row._acts) syncMsgBar(row, row._acts());
+  }
+  /** lane reaction-hover: THE RE-READ PAGE carries each drawn row's PLACE — a channel that lists a thread's replies
+   *  with the conversation sends no `threads` broadcast (no walk ran), so a message the window's Reply in thread just
+   *  made a topic root learns it here: its chip grown (or re-spelled), its bar re-synced; a drawn topic root's count
+   *  follows too. In place, by vendor id. */
+  function applyPagePlaces(records) {
+    for (const x of records || []) {
+      const th = x && x.vendorId && drawn.has(x.vendorId) && x.place && x.place.kind === 'topic-root' ? x.place.thread : null;
+      if (!th || !th.key) continue;
+      const row = list.querySelector(`.chanmsg[data-vid="${CSS.escape(String(x.vendorId))}"]`);
+      if (!row) continue;
+      if (!(row._place && row._place.thread)) { becomeTopicRoot(row, th); continue; }
+      if (row._place.thread.key !== th.key || row._place.thread.count === th.count) continue;
+      row._place.thread = { ...row._place.thread, count: th.count, lastAt: th.lastAt };
+      const words = row.querySelector(`.chanmsg-thread-chip[data-thread-key="${CSS.escape(th.key)}"] .chanmsg-thread-words`);
+      if (words) words.textContent = threadChipText(row._place.thread);
+    }
   }
   /** Past the local log's start: nothing older here AND the vendor said so. */
   let historyExhausted = false;
@@ -935,6 +1048,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     // lane channel-threads (attack 16): the re-read page carries each drawn row's FOLDED reactions — a window that
     // missed a `patches` broadcast (a dropped socket, a reconnect) reconciles its strips here, by key, in place
     for (const x of r.records || []) if (x && x.vendorId && drawn.has(x.vendorId)) applyReactions(x.vendorId, Array.isArray(x.reactions) ? x.reactions : []);
+    applyPagePlaces(r.records);
     const fresh = (r.records || []).filter((x) => x && x.vendorId && !drawn.has(x.vendorId));
     if (!fresh.length) return;
     const seam = tailSeam();
@@ -1061,6 +1175,20 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
   // with the focus in a nested scroller that can still scroll up (round 6: a focused code block — Chrome focuses an
   // overflow:auto element — ArrowUp / PageUp there scroll the block and POSTed /older)
   list.addEventListener('keydown', (e) => { if (isUpKey(e.key) && !isTypingTarget({ tagName: e.target && e.target.tagName, type: e.target && e.target.type, editable: !!(e.target && e.target.isContentEditable) }) && !(innerScrollTop(e.target) > 0)) { noteInput(); pageUp('key'); } });
+  // lane reaction-hover: THE PHONE'S DOOR to a message's actions (no hover there — the bar is not drawn): a long press
+  // (the product's contextmenu synthesis) — and a right click on a desktop — opens the row's SAME actions as a menu, the
+  // explorer's touch rows. A link, a picture or a text selection keeps the browser's own menu (open / save / copy); a
+  // reaction chip's long press is its who-list (the chip stops the event first).
+  split.addEventListener('contextmenu', (ev) => {
+    const row = ev.target && ev.target.closest ? ev.target.closest('.chanmsg[data-vid]') : null;
+    if (!row || !row._acts || ev.target.closest('a[href], img, textarea, input, .chanmsg-bar')) return;
+    const sel = window.getSelection ? window.getSelection() : null;
+    if (sel && !sel.isCollapsed && sel.anchorNode && row.contains(sel.anchorNode)) return;
+    const acts = row._acts();
+    if (!acts.length) return;
+    ev.preventDefault(); ev.stopPropagation();
+    msgActionMenu(ev.clientX, ev.clientY, acts, row.querySelector(':scope > .chanmsg-head') || row);
+  }, { signal: winInfo._listenerCtl?.signal });
   list.addEventListener('pointerdown', (e) => {
     const r = list.getBoundingClientRect();
     if (isGutterPress({ clientX: e.clientX, left: r.left, clientWidth: list.clientWidth })) { gutterDrag = true; noteInput(); }
@@ -1222,17 +1350,50 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
     }
     // a CLEARED message ("Clear content…"): its place, time and author stay; its words read the cleared sentence, dimmed
     row.appendChild(el('div', 'chanmsg-body' + (isCleared(rec) ? ' rc-cleared' : ''), isCleared(rec) ? clearedText() : (rec.text || '')));
+    // WHERE IT STANDS (lane group-pending, the owner 2026-10-01): "Waiting for beta's next turn" / "Read by beta" under
+    // every message, the owner's own included — a KEYED line (the row's vendorId) patched in place by drawDelivery
+    const dlv = el('div', 'chanmsg-dlv');
+    const dot = el('span', 'chanmsg-dlv-dot');
+    dot.setAttribute('aria-hidden', 'true');
+    dlv.append(dot, el('span', 'chanmsg-dlv-text', ''));
+    row.appendChild(dlv);
+    drawDelivery(row, rec);
     if (isCleared(rec)) row.classList.add('chanmsg-cleared');
     else {
-      // the message's ⋯ (verify r2: the verb had no visible door) — shown on hover / focus, the same menu
-      // as a right-click; on touch a long-press is the door (the ⋯ would sit on every message)
-      const more = el('button', 'chanmsg-more', '⋯');
-      more.type = 'button';
-      more.title = t('More actions');
-      more.setAttribute('aria-label', t('More actions'));
-      row.appendChild(more);
+      // the message's ⋯ (verify r2: the verb had no visible door) — the message's hover action bar (lane reaction-hover:
+      // the SVG glyph in the one bar every message wears, never a text "⋯"), the same menu as a right-click; on touch a
+      // long-press is the door (the bar is not drawn there). Its click is the list's delegated `.chanmsg-more` handler.
+      const bar = renderMsgBar(msgBarActions({ group: true }).map((id) => ({ id, label: t('More actions'), cls: 'chanmsg-more' })));
+      if (bar) row.appendChild(bar);
     }
     return row;
+  }
+  /** THE LINE UNDER A MESSAGE, patched in place (lane group-pending): the model's ONE rule (`deliveryOf` over the
+   *  group's markers, notify modes and the drawn log's departures) worded by `deliveryLineText`; the line's
+   *  signature is what it prints (every recipient's state + name) — an unchanged verdict touches nothing, so a
+   *  broadcast never re-creates the node under the pointer. `tone` drives the dot: hollow while anyone waits,
+   *  filled once it reached everyone it could. */
+  function drawDelivery(row, rec, log = null) {
+    const line = row.querySelector(':scope > .chanmsg-dlv');
+    if (!line) return;
+    const rows = group ? deliveryOf(group, rec, { log: log || [...drawn.values()] }) : [];
+    const words = deliveryLineText(rows);
+    const sig = words ? JSON.stringify([words.tone, rows.map((r) => [r.member, r.state, r.name, r.at])]) : '';
+    if (line.dataset.sig === sig) return;
+    line.dataset.sig = sig;
+    if (!words) { line.hidden = true; line.removeAttribute('data-tone'); line.title = ''; line.querySelector('.chanmsg-dlv-text').textContent = ''; return; }
+    line.hidden = false;
+    line.dataset.tone = words.tone;
+    line.title = words.title;
+    line.querySelector('.chanmsg-dlv-text').textContent = words.text;
+  }
+  /** Every drawn message's line re-judged (a broadcast moved a marker, a member's mode, or landed a departure). */
+  function redrawDelivery() {
+    const log = [...drawn.values()];
+    for (const row of list.querySelectorAll('.chanmsg[data-vid]:not(.chanmsg-sys)')) {
+      const rec = drawn.get(row.dataset.vid);
+      if (rec) drawDelivery(row, rec, log);
+    }
   }
   /** The records a clear replaced (the broadcast's `cleared`): each drawn row is re-drawn IN PLACE —
    *  same slot, same continuation state — never appended, never a list rebuild. */
@@ -1502,9 +1663,11 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
     if (!group) { if (g) group = g; return; }
     const wasArchived = !!group.archivedAt;
     if (g) { group = g; drawBar(); }
-    if (Array.isArray(msg.messages)) place(msg.messages.filter((m) => m && m.convId === groupId));
+    const landed = Array.isArray(msg.messages) ? place(msg.messages.filter((m) => m && m.convId === groupId)) : 0;
     if (Array.isArray(msg.cleared)) patchCleared(msg.cleared);
     if (g && !!g.archivedAt !== wasArchived) drawFoot();
+    // the markers / modes (in `g`) or a departure (a landed record) may have moved a line under an earlier message
+    if (g || landed) redrawDelivery();
   };
   app.ws.onGlobal(onBroadcast);
   winInfo._listenerCtl?.signal.addEventListener('abort', () => { try { app.ws.offGlobal(onBroadcast); } catch {} });

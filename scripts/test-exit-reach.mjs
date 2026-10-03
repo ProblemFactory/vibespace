@@ -178,6 +178,10 @@ const POISON = /SECRET-NAME|SECRET-GROUP|claude:SECRET/;
   eq(card, 'ran `ping -c1 10.0.0.5` on Macbook — exit 0 · 1.2 s', 'the card');
   eq(E.cardText({ outcome: 'ran', cmd: 'sleep 99', timedOut: true }, { machine: 'Macbook' }), 'ran `sleep 99` on Macbook — timed out after 30 s', 'the timeout card names the ONE number (30 s)');
   for (const [o, re] of [['denied', /you denied it/], ['expired', /no answer in 60 s/], ['not_granted', /may not run commands there/], ['offline', /Macbook is offline/], ['run_failed', /link was lost/]]) ok(re.test(E.cardText({ outcome: o, cmd: 'x' }, { machine: 'Macbook' })), `the ${o} card`);
+  // lane-exit-run-output: THE CARD TABLE gains the child that never started — why, by interpreter (the owner read "exit 1 · 0.0 s")
+  for (const [sf, interp, want] of [[{ code: 'ENOENT', message: 'spawn sh ENOENT' }, 'sh', 'could not start `hostname` on WINDOWS-PC — sh: not found on that machine'], [{ code: 'ENOENT', message: 'x' }, 'cmd.exe', 'could not start `hostname` on WINDOWS-PC — cmd.exe: not found on that machine'], [{ code: 'EACCES', message: 'x' }, 'sh', 'could not start `hostname` on WINDOWS-PC — sh: permission denied on that machine'], [{ code: 'ESHELLLINE', message: 'cmd.exe runs one line — the command has 2 lines; join them with & or && (or run them one at a time)' }, 'cmd.exe', 'could not start `hostname` on WINDOWS-PC — cmd.exe runs one line — the command has 2 lines; join them with & or && (or run them one at a time)'], [{ code: 'EBADF', message: 'spawn sh EBADF' }, 'sh', 'could not start `hostname` on WINDOWS-PC — EBADF: spawn sh EBADF']]) eq(E.cardText({ outcome: 'spawn_failed', cmd: 'hostname', spawnError: sf, interpreter: interp }, { machine: 'WINDOWS-PC' }), want, `the spawn_failed card: ${sf.code} under ${interp}`);
+  eq(E.cardText({ outcome: 'spawn_failed', cmd: 'hostname', spawnError: null }, { machine: 'M' }), 'could not start `hostname` on M — spawn failed: the command could not be started', '…a spawn failure without a code still says it could not start (never "exit 1")');
+  ok(/could not start `hostname` on "WINDOWS-PC" — sh: not found on that machine \(ENOENT\); nothing ran\./.test(E.refusalText('spawn_failed', { machine: 'WINDOWS-PC', cmd: 'hostname', spawnError: { code: 'ENOENT', message: 'm' }, interpreter: 'sh' })), 'the agent\'s spawn_failed sentence (platform unknown: no machine line, no blame)');
   ok(/\(access was removed while it ran\)/.test(E.cardText({ outcome: 'ran', cmd: 'x', code: 0, ms: 1, revokedDuringRun: true }, { machine: 'M' })), 'a revoke during the run is said on the card (attack 6)');
   eq(E.EXIT_RUN_TIMEOUT_MS, 30000, 'EXIT_RUN_TIMEOUT_MS = 30 000 (the daemon\'s cap)');
 }
@@ -764,7 +768,9 @@ console.log('verify-r1: the audit\'s whole command · a numeric code · a named 
   ok(/process\.exit\(r\.timedOut \? 124 : \(Number\.isInteger\(r\.code\) \? r\.code : \(r\.code == null \? 0 : 1\)\)\)/.test(cli), 'WIRING: vibespace-exit exits by a number, never a string code');
   // WIRING: the daemon names a cut and never answers a string code
   const dsrc = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
-  ok(/code: err \? \(Number\.isInteger\(err\.code\) \? err\.code : 1\) : 0/.test(dsrc) && /truncated: overflow \|\| so\.length > 1024 \* 1024 \|\| se\.length > 65536/.test(dsrc), 'WIRING: the daemon\'s cmd-result: a numeric code + `truncated` (test-agentd-dial proves it on a real daemon)');
+  // lane-exit-run-output: the code is still a number, and a child that never started is NAMED first (`spawnError`, the
+  // shell's own 127 / 126 as the number an older hub reads) — test-exit-run proves both on a real daemon
+  ok(/code: sf \? XS\.spawnExitCode\(sf\) : err \? \(Number\.isInteger\(err\.code\) \? err\.code : 1\) : 0/.test(dsrc) && /truncated: overflow \|\| so\.length > 1024 \* 1024 \|\| se\.length > 65536/.test(dsrc) && /const sf = XS\.spawnFailure\(err\);/.test(dsrc), 'WIRING: the daemon\'s cmd-result: a numeric code (a spawn failure\'s 127 / 126 first) + `truncated` (test-agentd-dial + test-exit-run prove it on a real daemon)');
 }
 
 // ── CONTROLS ──
@@ -786,6 +792,9 @@ console.log('controls (patched copies)');
   ok(Ex.askState({ askedAt: 0, now: 60000 }) === 'pending', 'CONTROL (e): askState never expiring turns the 60 000 ms cell red');
   const G = patch("case 'ask_denied': return `the user did not allow \\`${head(cmd)}\\` on ${M}`;", "case 'ask_denied': return `the user did not allow ${arguments[1].sessionName} \\`${head(cmd)}\\` on ${M}`;", 'leakname');
   ok(POISON.test(G.refusalText('ask_denied', { machine: 'M', cmd: 'x', sessionName: 'SECRET-NAME' })), 'CONTROL (g): refusalText interpolating the session name is caught by the words census');
+  // (l) lane-exit-run-output: the card table without its spawn_failed row — the child that never started reads as a grant refusal
+  const L = patch("  if (r.outcome === 'spawn_failed') return `could not start \\`${c}\\` on ${machine} — ${XS.spawnFailureText(spawnErrorOf(r.spawnError), { interpreter: r.interpreter || XS.POSIX_SHELL })}`;\n", '', 'nospawncard');
+  ok(/may not run commands there/.test(L.cardText({ outcome: 'spawn_failed', cmd: 'hostname', spawnError: { code: 'ENOENT', message: 'm' }, interpreter: 'sh' }, { machine: 'M' })), 'CONTROL (l): without the spawn_failed row the card says "may not run commands there" for a child that never started — the spawn_failed card legs go red');
   // (h) the audit cut back to 120 chars (the pre-verify shape) ⇒ the whole-command leg goes red
   {
     const msrcH = fs.readFileSync(path.join(REPO, 'src/exit-proxy.js'), 'utf8');
@@ -860,7 +869,7 @@ console.log('controls (patched copies)');
   wk.mgr.rejudgeAll('task-groups');
   ok(wk.mgr.listAsks().length === 1, 'CONTROL (k): a re-judge without its ask loop leaves B\'s ask waiting after B left G — the rejudgeAll ask leg goes red');
   wk.mgr.answerAsk(wk.mgr.listAsks()[0].askId, { answer: 'deny', by: 'user' }); await pk;
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 10, label: 'mutant-copy: ' })) ok(r.pass, r.name, r.detail);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 11, label: 'mutant-copy: ' })) ok(r.pass, r.name, r.detail);
 }
 
 console.log('verify-r4 F2: `use` refuses a conversation that runs on ANOTHER machine — the url names the VibeSpace machine\'s loopback');

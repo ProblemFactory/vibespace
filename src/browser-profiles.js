@@ -1400,6 +1400,19 @@ function normalizeRegistry(doc) {
     // (verify r3: a detach and a helper's handle too — a child key rides with its suffix)
     leftTabs: Object.fromEntries(Object.entries(obj(d.leftTabs)).filter(([k, v]) => isProfileId(k) && v && typeof v === 'object' && !Array.isArray(v)).map(([k, v]) => [k, Object.fromEntries(Object.entries(v).filter(([bk, at]) => /^bk-[0-9a-f]{8}(\.\d{1,4})?$/.test(bk) && Number.isFinite(Number(at))).slice(-64).map(([bk, at]) => [bk, Number(at)]))]).filter(([, v]) => Object.keys(v).length)),
     tabClosed: Object.fromEntries(Object.entries(obj(d.tabClosed)).filter(([k, v]) => /^bp-[0-9a-f]{8}\|bk-[0-9a-f]{8}(\.\d{1,4})?$/.test(k) && Number.isFinite(Number(v))).map(([k, v]) => [k, Number(v)])),
+    // lane profile-lock-roll (L2): WHY a tabClosed mark stands — `life` (the browser was replaced: a daemon found gone, a
+    // boot that could not adopt it, an in-place relaunch) or `closed` (the tab itself was closed: a narrowing, a stop) —
+    // the rebind's note says which; an entry without a mark is dropped
+    tabLostWhy: Object.fromEntries(Object.entries(obj(d.tabLostWhy)).filter(([k, v]) => /^bp-[0-9a-f]{8}\|bk-[0-9a-f]{8}(\.\d{1,4})?$/.test(k) && (v === 'life' || v === 'closed')).map(([k, v]) => [k, v])),
+    // lane profile-lock-roll (L1): the hostname of the machine that WROTE this file (stamped at every save) — the legacy
+    // witness for a record from before the per-launch `host`: a lock naming it is a lock this registry's own keeper left
+    host: typeof d.host === 'string' && d.host.trim() ? d.host.trim() : null,
+    // verify r4 (S26b): the launch hosts per DIRECTORY — the lineage that outlives a retired record (bounded; the keeper prunes
+    // directories that are gone at load)
+    //  verify r5 (S35): the bound keeps the NEWEST by `at` (never the last by insertion order); (S32a) the inode witness rides along
+    //  verify r7 (T1): ONE TOKEN, ONE ENTRY — a file carrying one token under two paths (a hand-copied entry, an older writer) keeps the
+    //  NEWEST by `at` (a tie: the first listed); the keeper says what the load dropped (`dirHostsDeduped`)
+    dirHosts: dedupeDirHostsByToken(Object.fromEntries(Object.entries(obj(d.dirHosts)).filter(([k, v]) => typeof k === 'string' && k.startsWith('/') && v && typeof v === 'object' && Array.isArray(v.hosts)).map(([k, v]) => [k.replace(/\/+$/, ''), { hosts: v.hosts.map(cleanHost).filter(Boolean).slice(-8), at: Number(v.at) || 0, ...(Number.isInteger(v.ino) && v.ino > 0 ? { ino: v.ino } : {}), ...(isLineageToken(v.tok) ? { tok: v.tok } : {}) }]).filter(([, v]) => v.hosts.length).sort((a, b) => a[1].at - b[1].at).slice(-DIR_HOSTS_MAX))),
     // MULTIVIEW D4: each conversation's EXPLICIT per-conversation browser cap
     // (browserKey → {cap, at}) — conversation-level like `pins`, so a resume
     // keeps it; the session meta carries a copy (`browserCap`)
@@ -1714,6 +1727,11 @@ function agentProfileView(p, facts = {}, extra = {}) {
   // BROWSE YOURSELF verify r1 (H1): `lastUsedAt` moves when the USER browses it (and when another conversation does — the
   // identity class) and `recordMine` is his own switch: neither is an agent's to read (the CLI prints neither)
   delete rest.lastUsedAt; delete rest.recordMine; delete ex.lastUsedAt; delete ex.recordMine;
+  // verify r1 (F5, lane browser-admin): a build's PATH never reaches an agent — a chrome file the user named is a fact by
+  // KIND only (versions cross, paths do not); a vanished one is named by kind too (the rule browser-builds.agentChoiceView
+  // spells; kept inline here so this file stays import-free)
+  if (rest.browser && rest.browser.kind === 'path') rest.browser = { kind: 'path' };
+  if (rest.buildMissing && rest.buildMissing.kind === 'path') rest.buildMissing = { ...rest.buildMissing, what: null };
   return { ...rest, ...ex, scope: scopeOf(p), use: agentUseOf(p, facts) };
 }
 /**
@@ -2448,13 +2466,46 @@ function launchedByCli(cmdline) {
  *   lock   = {host, pid} off the symlink `<host>-<pid>` · holder = the facts of that pid (browser-facts.lockHolderFacts)
  *   minted = the caller's fact that `dir` is a directory the keeper minted · recorded = the record's `browser` {pid, starttime}
  *   mark   = the value this record's launches carry (a named profile's id / an ephemeral's browser key)
+ *   launchHosts = the hostnames THIS keeper's registry recorded at ITS launches on this directory (lane profile-lock-roll)
+ * LANE PROFILE-LOCK-ROLL (2026-10-01, userW's pod roll): a fleet pod's home is an RWO volume — one pod mounts it at a
+ * time — so the lock a pod leaves behind when it dies names a hostname that no longer exists, and Chromium (which judges
+ * the lock by hostname) refuses the directory for ever: "profile_locked … names another machine … remove SingletonLock",
+ * which his agent did by hand. The RWO fact is NOT assumed; the WITNESS is: a lock whose hostname is not ours but IS a
+ * hostname this keeper itself recorded at a launch of this profile ⇒ `stale-previous-host` (the keeper removes the
+ * Singleton files and launches). A foreign hostname this keeper never launched on stays `foreign`, refused by name — a
+ * volume really shared with another machine is never guessed — with the two hostnames and the one command in the sentence.
  */
-function profileLockVerdict({ lock = null, holder = null, hostname = '', dir = '', minted = false, recorded = null, mark = null, preMarkAllowed = true } = {}) {
+function profileLockVerdict(facts = {}) {
+  // verify r3 (T1): every verdict names the ladder STEP that decided it — `hostname` (nothing of this machine holds the
+  // directory; the lineage rule) or `live-holder` (a holder's own facts, or no lock at all)
+  const v = profileLockVerdictCore(facts);
+  return v.step ? v : { step: 'live-holder', ...v };
+}
+function profileLockVerdictCore({ lock = null, holder = null, hostname = '', dir = '', minted = false, recorded = null, mark = null, preMarkAllowed = true, launchHosts = [] } = {}) {
   if (!lock || !Number.isInteger(lock.pid) || lock.pid <= 0) return { kind: 'free', pid: null, why: 'no lock' };
   const pid = lock.pid;
   // r4 LOW 6: the remedy that EXISTS — a lock written on another hostname is also what a renamed machine (a pod restarted
   // under a new name, a persistent home) leaves behind, and no browser on "that machine" will ever close it
-  if (lock.host && hostname && lock.host !== hostname) return { kind: 'foreign', pid, host: lock.host, why: `the lock (${dir ? dir.replace(/\/+$/, '') + '/' : ''}SingletonLock) names another machine, ${lock.host} — if a browser on that machine uses this directory, close it there; if this machine was renamed (a pod restarted under a new name), remove ${dir ? dir.replace(/\/+$/, '') + '/' : ''}SingletonLock` };
+  // verify r1 (F1): the HOSTNAME rule decides only when the lock's pid is NOT a live process of THIS machine naming this
+  // directory. A machine renamed under a running browser (hostnamectl, a DHCP-derived macOS name, a container rename)
+  // leaves a lock whose name is ours-of-yesterday and whose pid is a browser alive HERE; unlinking it would put a second
+  // Chrome on the directory — Chrome's own fence refuses ANY existing lock (measured on 154: exit 21 even under a foreign
+  // name), so only our takeover can land two. Alive and naming the directory ⇒ the holder rules below judge it under
+  // whatever name (our orphan is ended, the user's browser refused by name); alive but unreadable ⇒ refused, never guessed.
+  // verify r1 (F8): the lock's hostname is a symlink target anybody with the directory can write (4 095 bytes, any character)
+  // and every sentence below prints it to the agent / the journal / the panel — ONE cleaning (the belt, HOST_MAX) first
+  const lockHost = cleanHost(lock.host);
+  if (lockHost && hostname && lockHost !== hostname) {
+    const liveHere = !!(holder && holder.alive && holder.cmdline != null && (holder.dirs || []).some((d) => sameDir(d, dir)));
+    if (!liveHere) {
+      const lockPath = `${dir ? dir.replace(/\/+$/, '') + '/' : ''}SingletonLock`;
+      const ours = (Array.isArray(launchHosts) ? launchHosts : []).map(cleanHost).filter(Boolean);
+      // verify r3 (T1): `step: 'hostname'` — the ladder's second step decided (the first, a live holder's own facts, found none)
+      if (holder && holder.alive && holder.cmdline == null) return { step: 'hostname', kind: 'foreign', pid, host: lockHost, why: `the lock (${lockPath}) was written on ${lockHost} and names pid ${pid}, which is alive on this machine but whose command line cannot be read (another user's process?) — not provably free; if nothing of yours holds the directory, remove the lock yourself: rm -f '${lockPath}'` };
+      if (ours.includes(lockHost)) return { step: 'hostname', kind: 'stale-previous-host', pid, host: lockHost, why: `the lock (${lockPath}) names this machine's previous name, ${lockHost} — a launch this keeper recorded there; no browser of that name can hold this directory now: taken over` };
+      return { step: 'hostname', kind: 'foreign', pid, host: lockHost, why: `the lock (${lockPath}) was written on ${lockHost} and this machine is ${hostname}; no launch of this profile was ever recorded on ${lockHost}, so VibeSpace does not remove it — if a browser on ${lockHost} still uses this directory, close it there; if ${lockHost} was this machine's previous name, remove the lock yourself: rm -f '${lockPath}'` };
+    }
+  }
   if (!holder || !holder.alive) return { kind: 'free', pid, why: 'a stale lock — its process is gone (Chrome clears it)' };
   if (holder.cmdline == null) return { kind: 'foreign', pid, why: 'its command line cannot be read (another user\'s process?)' };
   if (!(holder.dirs || []).some((d) => sameDir(d, dir))) return { kind: 'free', pid, why: 'the process at that pid does not name this directory (a recycled pid — Chrome clears the stale lock)' };
@@ -2481,10 +2532,271 @@ function profileLockedRefusal({ label = '', dir = '', verdict = {} } = {}) {
   const who = `"${label || 'this profile'}"`;
   const error = v.kind === 'survived'
     ? `${who}'s profile directory ${dir} is still held by its own orphaned browser (pid ${v.pid}), which survived SIGKILL — the browser cannot start on it; tell the user`
+    // verify r1 (F5): the takeover of a previous name's lock could not remove it (a read-only volume, a directory of another
+    // uid) — refused by name with the errno and the one command, never a launch that dies on the lock it left
+    : v.kind === 'stale-unremovable'
+      ? `${who}'s profile directory ${dir} is locked under this machine's previous name (${v.host}, pid ${v.pid} there) and VibeSpace could not remove the lock (${v.removeError || 'still present'}) — remove it yourself: rm -f '${String(dir).replace(/\/+$/, '')}/SingletonLock' — then run the command again`
+    // verify r3 (F1): the ended orphan's own lock under a previous name could not be removed — the same shape, its own cause
+    : v.kind === 'ended-unremovable'
+      ? `${who}'s profile directory ${dir} is still locked under this machine's previous name (${v.host}, pid ${v.pid} there — its own browser, ended now) and VibeSpace could not remove the lock (${v.removeError || 'still present'}) — remove it yourself: rm -f '${String(dir).replace(/\/+$/, '')}/SingletonLock' — then run the command again`
+    // verify r3 (F3): a previous name's lock reached the launch (it appeared after the verdict) and the launch failed on it —
+    // taken over NOW, named, the one next step said (never a generic "the browser did not start")
+    : v.kind === 'stale-taken-over'
+      ? `${who}'s profile directory ${dir} was locked under this machine's previous name (${v.host}, pid ${v.pid} there) when the browser was launched and the launch failed on it — VibeSpace took the lock over now; run the command again`
+    // lane profile-lock-roll: a lock written under ANOTHER hostname is not known to be held by anybody — the sentence names the
+    // two hostnames and the one command (the verdict's `why`), never "held by a browser process"
+    : v.host
+      ? `${who}'s profile directory ${dir} is locked under another machine's name (${v.host}, pid ${v.pid} there): ${v.why || 'not provably this machine\'s'}. VibeSpace never removes a lock of a machine it did not launch on; then run the command again`
     : v.user
       ? `${who}'s profile directory ${dir} is open in a browser VibeSpace did not start (pid ${v.pid}) — it may be your own browser — close it first, then run the command again (VibeSpace never ends a browser it did not start; an agent: ask the user, it may be theirs)`
       : `${who}'s profile directory ${dir} is held by another browser process (pid ${v.pid}${v.host ? ' on ' + v.host : ''}) — ${v.why || 'not provably VibeSpace\'s'}. VibeSpace does not end it; once it has exited (stop it from the Browser panel if it is VibeSpace's), run the command again`;
   return { code: 'profile_locked', error, holderPid: Number.isInteger(v.pid) ? v.pid : null };
+}
+// ── LANE PROFILE-LOCK-ROLL (2026-10-01): the launch-host lineage, and what a takeover leaves on the profile ──
+/** The hostnames a profile's browser record says this keeper launched on (`hosts` = every distinct one, newest last;
+ *  `host` = the last launch's) — a record from before the stamp inherits the registry FILE's writer (`fileHost`, the
+ *  hostname stamped at the file's last save), else none. Never a guess: an empty list refuses every foreign lock. */
+/** VERIFY r3 (T1): THE ONE ORDERED VERDICT — the ladder every start walks, in THIS order and no other (test-browser-share-model
+ *  ④g pins it; a control that swaps two steps goes red on the ④e leg):
+ *    ① live-holder  — a LIVE process naming the directory is judged by its own facts (our orphan ⇒ ended; a user's browser ⇒
+ *                     refused by name; an unreadable one ⇒ refused) BEFORE any hostname rule: a machine renamed under a running
+ *                     browser leaves a lock named yesterday's name at a browser alive here (r1 F1)
+ *    ② hostname     — nothing of this machine holds it: a previous name of this machine (the lineage witness) ⇒ taken over;
+ *                     a foreign name ⇒ refused by name; ours / none ⇒ launch
+ *    ③ ended-orphan — our own orphan ENDED under a previous name left its lock: THAT lock (its pid) is removed; a removal
+ *                     that fails ⇒ refused by name (r1 F5's shape — never a launch into a lock Chromium hangs on, r3 F1); a
+ *                     lock that is no longer the orphan's ⇒ left for the launch's judgement (r3 F2)
+ *    ④ launch
+ *    ⑤ post-launch  — a launch that FAILED (or a birth death) judges the lock AGAIN: a holder not ours ⇒ named (r2 F1); a
+ *                     previous name's lock that reached the launch ⇒ taken over now and named (r3 F3); else the launch's own failure
+ *  `lockVerdict(facts)` answers the step the facts are at (`facts.phase`: before | ended | after-launch) with `{step, kind, …}`;
+ *  the keeper only ACTS on it (ends, removes, launches, refuses). */
+const LOCK_LADDER = Object.freeze([
+  Object.freeze({ step: 'live-holder', phase: 'before', what: 'a live process naming the directory is judged by its own facts (our orphan ⇒ ended; a user\'s ⇒ refused by name; unreadable ⇒ refused)' }),
+  Object.freeze({ step: 'hostname', phase: 'before', what: 'nothing of this machine holds it: a previous name of this machine (the lineage witness) ⇒ taken over; a foreign name ⇒ refused by name; ours or none ⇒ launch' }),
+  Object.freeze({ step: 'ended-orphan', phase: 'ended', what: 'our orphan ended under a previous name left its lock: that lock (its pid) ⇒ removed; a removal that fails ⇒ refused by name; another\'s lock ⇒ left for the launch\'s judgement' }),
+  Object.freeze({ step: 'launch', phase: 'launch', what: 'the launch' }),
+  Object.freeze({ step: 'post-launch', phase: 'after-launch', what: 'a failed launch / a birth death judges the lock again: a holder not ours ⇒ named; a previous name\'s lock that reached the launch ⇒ taken over and named; else the launch\'s own failure' }),
+]);
+/** Step ③ after our orphan was ENDED (`endedPid`): `clear` = remove the three symlinks (THAT lock: a previous name's, dead,
+ *  the orphan's own pid); `leave` = not the orphan's lock any more (alive, or another pid — a writer between the end and the
+ *  clear: a relaunch in place, a stranger) — judged again at the launch; `none` = nothing to do (no lock; our own name's stale
+ *  lock is Chromium's to clear). Never a lineage question: the proof was the LIVE command line judged before the end. */
+function endedOrphanLockVerdict({ lock = null, hostname = '', alive = false, endedPid = null } = {}) {
+  const base = { step: 'ended-orphan' };
+  if (!lock || !Number.isInteger(lock.pid) || lock.pid <= 0) return { ...base, kind: 'none', pid: null, why: 'no lock left (the browser removed its own)' };
+  const host = cleanHost(lock.host);
+  if (!host || host === hostname) return { ...base, kind: 'none', pid: lock.pid, host, why: 'a lock under this machine\'s own name — Chromium clears a same-host stale lock itself' };
+  if (alive) return { ...base, kind: 'leave', pid: lock.pid, host, why: `the lock now names ${host}-${lock.pid} and that pid is alive here — not the ended orphan's lock; judged again at the launch` };
+  if (endedPid != null && Number(lock.pid) !== Number(endedPid)) return { ...base, kind: 'leave', pid: lock.pid, host, why: `the lock now names ${host}-${lock.pid}, not the orphan ended (pid ${endedPid}) — left alone; judged again at the launch` };
+  return { ...base, kind: 'clear', pid: lock.pid, host, why: `the ended orphan's lock named this machine's previous name ${host}` };
+}
+/** Step ⑤ after a FAILED launch / a birth death: `refuse` (a holder that is not ours — the verdict's refusal names it),
+ *  `take-over` (a previous name's lock reached the launch: taken over now, named), `none` (the launch's own failure stands). */
+function afterLaunchVerdict(facts = {}) {
+  const v = profileLockVerdict(facts);
+  if (v.kind === 'foreign') return { step: 'post-launch', kind: 'refuse', verdict: v };
+  if (v.kind === 'stale-previous-host') return { step: 'post-launch', kind: 'take-over', verdict: v };
+  return { step: 'post-launch', kind: 'none', verdict: v };
+}
+/** THE ONE entry: the facts carry their phase. */
+function lockVerdict(facts = {}) {
+  const phase = facts && facts.phase ? String(facts.phase) : 'before';
+  if (phase === 'ended') return endedOrphanLockVerdict(facts);
+  if (phase === 'after-launch') return afterLaunchVerdict(facts);
+  return profileLockVerdict(facts);
+}
+/** A hostname as the product prints it: THE belt (peer-text), bounded at HOST_MAX (a kernel hostname is ≤ 64; a lock symlink's
+ *  target is anybody's 4 095 bytes) — verify r1 (F8). */
+const HOST_MAX = 255;
+function cleanHost(h) { return PT.toAgentText(typeof h === 'string' ? h : (h == null ? '' : String(h)), { kind: 'line', max: HOST_MAX }).trim(); }
+function launchHostsOf(rec, fileHost = null) {
+  const r = rec && typeof rec === 'object' ? rec : null;
+  const out = [];
+  const add = (h) => { const s = cleanHost(h); if (s && !out.includes(s)) out.push(s); };
+  if (r) { for (const h of Array.isArray(r.hosts) ? r.hosts : []) add(h); add(r.host); }
+  if (!out.length) add(fileHost);
+  return out;
+}
+/** VERIFY r4 (T1 S26b / T2 4): THE LINEAGE OUTLIVES THE RECORD. A conversation's own browser runs on a KEPT directory (the PVC)
+ *  that outlives its record: the keeper RETIRES an ephemeral record whose conversation is not live, and a rolled pod's boot finds
+ *  NOTHING live — every ephemeral record goes, its lineage with it, while the old pod's lock stays in the directory. The first
+ *  life was saved by the FILE's writer (the old pod); one restart later (an Update — the remedy W3 was given) the file's writer
+ *  was THIS pod and the conversation's own directory was refused as FOREIGN (userW's class on the ephemeral row, reproduced:
+ *  plv4-t1.mjs S26b). `dirHosts` = the launch hosts per DIRECTORY, remembered at every launch stamp and before a record is
+ *  removed, read when the record (or no record) carries none — before the file witness. Bounded; a gone directory is pruned. */
+/** VERIFY r5 (T1 S32a / S34 / S35 / S36 / S42): the key is the directory's IDENTITY — the keeper passes its real path (the fleet's
+ *  home is reached through a symlink, /home/vibe → /home/<name>, and the spelling flips once at the personalization: remembered
+ *  under one, read under the other = the lineage orphaned, reproduced); an `ino` witness rides along (a fresh directory at a
+ *  forgotten one's path is NOT that directory — a mismatch answers none); the bound is 512 (200 kept directories at one roll's
+ *  boot evicted 72 lineages at 128) and what it evicts is handed back (`dirHostsEvicted`) so the keeper SAYS it; the keeper
+ *  prunes on ENOENT only (a flapping PVC's EACCES / EIO at one load pruned the lineage) and says every prune.
+ *  VERIFY r6 (T1 S43 / S44 / S48 / S54): the inode is NOT the witness — ext4 hands a removed directory's inode to the next mkdir
+ *  (measured 20/20 on the fleet's RBD ext4; tmpfs never), so a stranger's directory put at a forgotten path was taken over; a
+ *  file-level restore (every inode new, the same paths) orphaned every kept directory's lineage — the fleet's disaster-recovery
+ *  path refused each as foreign; a tree under two MOUNTS (bindfs: one inode, two real paths) was two identities. THE DIRECTORY'S
+ *  OWN MARKER is the witness now: `<dir>/LINEAGE_MARKER` holds a token written ONCE by the keeper at the first remember, stored on
+ *  the entry as `tok`; an entry with `tok` is answered only when the directory says the same token (a restore / a copy keeps it,
+ *  a fresh directory has none, a stranger's another); an entry without one (r5-era) keeps the inode rule until its next remember;
+ *  a path miss with a marker is found by the token (two spellings / two mounts / a directory moved aside = ONE identity, ONE entry). */
+const DIR_HOSTS_MAX = 512;
+const LINEAGE_MARKER = '.vibespace-lineage';
+const isLineageToken = (s) => typeof s === 'string' && /^[0-9a-f]{16,64}$/.test(s);
+function rememberDirHosts(map, dir, hosts, now = Date.now(), max = DIR_HOSTS_MAX, { ino = null, tok = null } = {}) {
+  const m = map && typeof map === 'object' && !Array.isArray(map) ? { ...map } : {};
+  const d = typeof dir === 'string' ? dir.replace(/\/+$/, '') : '';
+  const hs = (Array.isArray(hosts) ? hosts : []).map(cleanHost).filter(Boolean).slice(-8);
+  if (!d || !hs.length) return m;
+  const t = isLineageToken(tok) ? tok : null;
+  if (t) for (const k of Object.keys(m)) if (k !== d && m[k] && m[k].tok === t) delete m[k]; // one directory, one entry — its newest spelling
+  m[d] = { hosts: hs, at: Number(now) || Date.now(), ...(Number.isInteger(ino) && ino > 0 ? { ino } : {}), ...(t ? { tok: t } : {}) };
+  const ks = Object.keys(m);
+  if (ks.length > max) for (const k of ks.sort((a, b) => ((m[a] && m[a].at) || 0) - ((m[b] && m[b].at) || 0)).slice(0, ks.length - max)) delete m[k];
+  return m;
+}
+/** verify r7 (T1): one token ⇒ one entry at load — among entries sharing a `tok`, the NEWEST by `at` stays (a tie: the first listed). */
+function dedupeDirHostsByToken(map) {
+  const m = map && typeof map === 'object' && !Array.isArray(map) ? map : {};
+  const best = new Map(); // tok → key
+  for (const k of Object.keys(m)) { const e = m[k]; if (!e || !isLineageToken(e.tok)) continue; const have = best.get(e.tok); if (!have || (Number(e.at) || 0) > (Number(m[have].at) || 0)) best.set(e.tok, k); }
+  const out = {};
+  for (const k of Object.keys(m)) { const e = m[k]; if (e && isLineageToken(e.tok) && best.get(e.tok) !== k) continue; out[k] = e; }
+  return out;
+}
+/** The entries a load's token dedupe dropped (`{key, keptAs}` each) — the keeper says them. */
+function dirHostsDeduped(raw) {
+  const r = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const kept = dedupeDirHostsByToken(Object.fromEntries(Object.entries(r).filter(([k, v]) => typeof k === 'string' && v && typeof v === 'object').map(([k, v]) => [k.replace(/\/+$/, ''), v])));
+  const byTok = Object.fromEntries(Object.keys(kept).filter((k) => kept[k] && isLineageToken(kept[k].tok)).map((k) => [kept[k].tok, k]));
+  return Object.keys(r).map((k) => k.replace(/\/+$/, '')).filter((k) => !(k in kept) && r[k] && typeof r[k] === 'object' && isLineageToken(r[k].tok)).map((k) => ({ key: k, keptAs: byTok[r[k].tok] || null }));
+}
+/** The directories `next` no longer remembers (what a remember's bound evicted) — the keeper says them. */
+function dirHostsEvicted(prev, next) {
+  const p = prev && typeof prev === 'object' ? prev : {}, n = next && typeof next === 'object' ? next : {};
+  return Object.keys(p).filter((k) => !(k in n));
+}
+/** A lineage remembered under one spelling moved to the directory's identity (hosts united newest-last, the newer `at`, the inode and the token either). */
+function rekeyDirHosts(map, from, to) {
+  const m = map && typeof map === 'object' && !Array.isArray(map) ? { ...map } : {};
+  const f = typeof from === 'string' ? from.replace(/\/+$/, '') : '', t = typeof to === 'string' ? to.replace(/\/+$/, '') : '';
+  if (!f || !t || f === t || !m[f]) return m;
+  const a = m[f], b = m[t] || null;
+  const hosts = []; for (const h of [...((b && b.hosts) || []), ...(a.hosts || [])]) { const s = cleanHost(h); if (s && !hosts.includes(s)) hosts.push(s); }
+  m[t] = { hosts: hosts.slice(-8), at: Math.max(Number(a.at) || 0, (b && Number(b.at)) || 0), ...(Number.isInteger(a.ino) && a.ino > 0 ? { ino: a.ino } : (b && Number.isInteger(b.ino) && b.ino > 0 ? { ino: b.ino } : {})), ...(isLineageToken(a.tok) ? { tok: a.tok } : (b && isLineageToken(b.tok) ? { tok: b.tok } : {})) };
+  delete m[f];
+  return m;
+}
+/** VERIFY r7 (T1 the marker table / T2 ①): A TOKEN IS HONOURED FOR AT MOST ONE DIRECTORY AT A TIME. r6 found a path miss by the
+ *  token anywhere in the map and the next remember deleted every OTHER entry with that token ("one directory, one entry") — so an
+ *  agent's `cp -a` of a profile directory (the marker rides along) was honoured beside its original, its remember STOLE the
+ *  original's entry, and once the copy was deleted the original's own old-pod lock was refused as FOREIGN (reproduced: plv7-t1
+ *  S56 / S56b / S56c / S61 — a stranger's directory carrying a copy of OUR marker took the lineage the same way). The RULE that
+ *  tells a restore from a copy is the token's BEARER — the directory at the entry's own path, asked NOW (`bearer(key)` → its
+ *  marker + inode, null when gone): the bearer gone or carrying another / no token ⇒ the token moved here (a rename, a restore
+ *  elsewhere, a re-keyed spelling) ⇒ honoured, via `token`; the bearer still says the token with the SAME inode ⇒ one tree under
+ *  two mounts (bindfs: one inode, two devices — the owner's box) ⇒ honoured, via `token` / `mount`; the bearer still says it with
+ *  ANOTHER inode ⇒ a COPY ⇒ `none`, `why: 'copy'`, `key` = the original, `fresh: true` (the keeper mints the copy its OWN marker at
+ *  its first remember, so no remember ever deletes the original's entry). A reader that asks about the token without answering for
+ *  the bearer is FAIL-CLOSED on a path miss (`why: 'bearer-unknown'`): the keeper always answers for it. The marker never outranks a
+ *  LIVE holder: this is the lineage read at ladder step ② only — step ① (a live process naming the directory) ran before it.
+ *  → `{hosts, via: 'path'|'token'|'none', key, why, fresh}` — `why`: path | r5era | inode | marker-absent | marker-stranger |
+ *  no-entry | moved | mount | copy | bearer-unknown. */
+function lineageVerdict(map, dir, opts = {}) {
+  const o = opts && typeof opts === 'object' ? opts : {}; const { ino = null, tok = null, bearer = null } = o;
+  const asked = Object.prototype.hasOwnProperty.call(o, 'tok'); // a reader that ASKS about the marker is held to it (the keeper always asks); a bare read keeps the r5 rule
+  const none = (why, key = null) => ({ hosts: [], via: 'none', key, why, fresh: why === 'copy' });
+  const d = typeof dir === 'string' ? dir.replace(/\/+$/, '') : '';
+  const m = map && typeof map === 'object' && !Array.isArray(map) ? map : null;
+  if (!m) return none('no-entry');
+  const t = isLineageToken(tok) ? tok : null;
+  const hostsOf = (e) => (Array.isArray(e.hosts) ? e.hosts.map(cleanHost).filter(Boolean) : []);
+  const e = d ? m[d] || null : null;
+  let miss = 'no-entry';
+  if (e) {
+    if (asked && isLineageToken(e.tok)) {
+      if (e.tok === t) return { hosts: hostsOf(e), via: 'path', key: d, why: 'path', fresh: false };
+      miss = t ? 'marker-stranger' : 'marker-absent';
+    } else if (Number.isInteger(ino) && ino > 0 && Number.isInteger(e.ino) && e.ino > 0 && e.ino !== ino) miss = 'inode';
+    else return { hosts: hostsOf(e), via: 'path', key: d, why: 'r5era', fresh: false };
+  }
+  if (!t) return none(miss);
+  const k = Object.keys(m).find((x) => x !== d && m[x] && m[x].tok === t);
+  if (!k) return none(miss === 'no-entry' ? 'no-entry' : miss);
+  if (typeof bearer !== 'function') return none('bearer-unknown', k);
+  let b = null; try { b = bearer(k); } catch { b = null; }
+  const bt = b && isLineageToken(b.tok) ? b.tok : null;
+  if (!b || bt !== t) return { hosts: hostsOf(m[k]), via: 'token', key: k, why: 'moved', fresh: false };
+  const bi = b && Number.isInteger(b.ino) && b.ino > 0 ? b.ino : null;
+  if (bi && Number.isInteger(ino) && ino > 0 && bi === ino) return { hosts: hostsOf(m[k]), via: 'token', key: k, why: 'mount', fresh: false };
+  return none('copy', k);
+}
+/** The launch hosts remembered for a directory (none ⇒ []) — `lineageVerdict`'s hosts (r6's reader, kept for every caller). */
+function dirHostsOf(map, dir, opts = {}) { return lineageVerdict(map, dir, opts).hosts; }
+/** VERIFY r7 (T2 ③, userW's EXACT upgrade): THE ONE WITNESS A 2.369.199 REGISTRY LEFT. A fleet pod's checkout is pulled at the
+ *  boot after a roll, so the first run of this code is on the NEW pod against the OLD file — no `host`, no `dirHosts`, no marker
+ *  (read on userW's pod: 2.369.199, `host: null`, every record `hosts: null`); the file's writer is NOBODY and every kept directory
+ *  with the old pod's lock was refused as foreign (plv7-t1 S59a / S59a-eph — his original incident, once more, on the upgrade
+ *  itself). What .199 DID record is its own browser: `rec.browser = {pid, starttime, dir}` — and the lock the dead pod left is
+ *  `<oldPod>-<that pid>` in that directory. A lock naming the pid THIS keeper recorded as its own browser on THIS directory was
+ *  written by that browser; the hostname on it is the name this volume was under then ⇒ a previous name of this machine. Bounded
+ *  to a LEGACY record (no launch-host lineage at all — the upgrade window) on its own directory; never a guess about the volume.
+ *  VERIFY r8 (T2 ⑥, the fleet's OTHER order): the new pod's boot pull can be REFUSED — userW's package-lock.json is dirty against
+ *  .199 (read on his pod, 2026-10-02) and every bump touches it, so `git pull --ff-only` refuses and the .199 keeper boots FIRST on
+ *  the new pod; .199's own boot NULLS `rec.browser` (reapOrphan: the Chrome is dead) and REMOVES every ephemeral record (reconcile)
+ *  before .200 ever runs (plv8-t1 S70, reproduced with the real .199 keeper). What .199 leaves on a NAMED record then is `rec.cdpUrl`
+ *  (its boot never touches it), and what Chrome leaves in the directory is `DevToolsActivePort` (`<port>\n/devtools/browser/<GUID>`)
+ *  — MEASURED on 0.38.1 + Chrome 154: equal to the record's cdpUrl, written by the same launch 176 ms after the lock, both surviving
+ *  a SIGKILL. A directory whose DevToolsActivePort is the record's own CDP endpoint was last launched by that record's browser, so the
+ *  lock beside it is that launch's ⇒ the second witness form (`devtools`). (The ephemeral record is gone with every witness: refused
+ *  by name and said — held.) VERIFY r8 (T2 ①): a witness fact is this record's only if it was written DURING the record's own life —
+ *  the lock's ctime / the port file's mtime ≥ `rec.startedAt` − `slackMs` (5 s: the record is stamped BEFORE its daemon spawns and
+ *  Chrome writes the lock after, on the same node's clock — a lock that predates the record could not be its browser's: a reused pid;
+ *  plv8-t1 S71) — `lockAt` / `devtools.at` are the keeper's lstat facts, absent ⇒ not judged.
+ *  → `{host, form: 'pid' | 'devtools'}` (the host cleaned) or null. */
+function legacyLockWitness({ rec = null, lock = null, lockAt = null, devtools = null, dir = '', hostname = '', slackMs = 5000 } = {}) {
+  const r = rec && typeof rec === 'object' ? rec : null;
+  if (!r || launchHostsOf(r).length) return null;
+  if (!lock || !Number.isInteger(Number(lock.pid)) || Number(lock.pid) <= 0) return null;
+  const b = r.browser && typeof r.browser === 'object' ? r.browser : null;
+  const own = (b && typeof b.dir === 'string' && b.dir) || (typeof r.dir === 'string' && r.dir) || '';
+  if (!dir || (own && !sameDir(own, dir))) return null;
+  const h = cleanHost(lock.host);
+  if (!h || h === cleanHost(hostname)) return null;
+  const started = Number(r.startedAt);
+  const inLife = (at) => !(Number.isFinite(started) && started > 0 && Number.isFinite(Number(at)) && Number(at) > 0 && Number(at) < started - slackMs);
+  if (!inLife(lockAt)) return null; // the lock predates the record's own life: not its browser's
+  if (b && Number.isInteger(Number(b.pid)) && Number(b.pid) > 0 && Number(lock.pid) === Number(b.pid)) return { host: h, form: 'pid' };
+  const ep = cdpEndpointOf(r.cdpUrl); const dt = devtools && typeof devtools === 'object' ? devtools : null;
+  if (ep && dt && Number(dt.port) === ep.port && typeof dt.path === 'string' && dt.path === ep.path && inLife(dt.at)) return { host: h, form: 'devtools' };
+  return null;
+}
+/** `DevToolsActivePort` as Chrome writes it into a profile directory (`<port>\n/devtools/browser/<GUID>\n`) → {port, path} | null. */
+function parseDevToolsActivePort(text) {
+  const t = String(text || '').split('\n').map((x) => x.trim()); const port = Number(t[0]); const p = t[1] || '';
+  return Number.isInteger(port) && port > 0 && port < 65536 && /^\/devtools\/browser\/[A-Za-z0-9-]{8,}$/i.test(p) ? { port, path: p } : null;
+}
+/** A loopback CDP url (the record's `cdpUrl`) → its endpoint {port, path} | null. */
+function cdpEndpointOf(url) {
+  const m = /^wss?:\/\/(?:127\.0\.0\.1|localhost|\[::1\]):(\d+)(\/devtools\/browser\/[A-Za-z0-9-]{8,})\/?$/i.exec(String(url || '').trim());
+  return m ? { port: Number(m[1]), path: m[2] } : null;
+}
+/** The record's lineage WITH this launch's hostname (distinct, newest last, bounded). */
+function withLaunchHost(rec, hostname, { max = 8 } = {}) {
+  const h = cleanHost(hostname);
+  const hosts = launchHostsOf(rec).filter((x) => x !== h);
+  if (h) hosts.push(h);
+  return { host: h || null, hosts: hosts.slice(-max) };
+}
+/** How long the panel says "renamed from <old>" after a takeover. */
+const RENAMED_SHOWN_MS = 24 * 3600 * 1000;
+/** The takeover a profile carries while it is worth showing: `{host, at}` for RENAMED_SHOWN_MS after it, else null. */
+function renamedFromFact(p, now = Date.now()) {
+  const r = p && p.renamedFrom && typeof p.renamedFrom === 'object' ? p.renamedFrom : null;
+  const host = r ? cleanHost(r.host) : '';
+  if (!host) return null;
+  const at = Number(r.at) || 0;
+  if (!(at > 0) || (Number(now) || 0) - at > RENAMED_SHOWN_MS) return null;
+  return { host, at };
 }
 /**
  * OWNER RULING A — the pre-upgrade case: a conversation PINNED to a profile before this version was handed the
@@ -3049,6 +3361,11 @@ module.exports = {
   CONVERSATION_CAP_DEFAULT, CONVERSATION_CAP_MIN, CONVERSATION_CAP_MAX, clampConversationCap, conversationCapFor, conversationCapVerdict, DEFAULT_IDLE_RELEASE_MS, idleReleaseMs, idleReleaseVerdict,
   pidVerdict, adoptVerdict, attachedEnvFor, isLoopbackCdpUrl,
   pidLiveness, userDataDirsOf, sameDir, profileLockVerdict, profileLockedRefusal, // lane H verify r2: liveness vs signalling, the orphaned-browser lock
+  launchHostsOf, withLaunchHost, renamedFromFact, RENAMED_SHOWN_MS, cleanHost, HOST_MAX, // lane profile-lock-roll: the launch-host lineage, the takeover a profile shows for a day
+  LOCK_LADDER, lockVerdict, endedOrphanLockVerdict, afterLaunchVerdict, // verify r3 (T1): THE ONE ordered verdict over a profile's lock (five steps, one function)
+  rememberDirHosts, dirHostsOf, DIR_HOSTS_MAX, dirHostsEvicted, rekeyDirHosts, LINEAGE_MARKER, isLineageToken, // verify r4 (S26b): the lineage per DIRECTORY, outliving a retired record; r5: keyed by identity, the evictions handed back; r6: the directory's own marker is the witness (the inode is an r5-era fallback)
+  lineageVerdict, legacyLockWitness, dedupeDirHostsByToken, dirHostsDeduped, // verify r7: one token ⇒ ONE directory (the bearer tells a restore from a copy), the .199 record's own browser pid as the upgrade's witness, one token ⇒ one entry at load
+  parseDevToolsActivePort, cdpEndpointOf, // verify r8: the second legacy witness — the record's cdpUrl vs the directory's DevToolsActivePort (what a .199 boot on the new pod leaves)
   keeperMarksOf, keeperMarkArg, withKeeperMark, launchedByCli, // lane H verify r4: the keeper's launch mark (ownership by cmdline, never by directory)
   AUTOMATION_FLAG, automationFlagVerdict, withAutomationFlag, // lane browser-propose: the one launch flag that stops Chromium announcing automation
   HEAL_BUDGET, HEAL_WINDOW_MS, HEAL_RETRY_MS, healLedger, healBudgetVerdict, unstableText, unstableNotice, // lane H verify r5: the heal ledger + budget

@@ -618,7 +618,7 @@ let work, solo, shop;
     ok(lr.leftAfterRestart && lr.take && lr.take.adopted === true && lr.marked && lr.adoptedAfterRestart.includes('C0C0000000000000000000000000002D') && lr.closed.includes('tab close C0C0000000000000000000000000002D'),
       'verify r3: the orphan state crosses a RESTART — a conversation that left before it is still marked when he takes its tab after it (its return binds a new tab), and the tab he took is still his after the next restart (his Close closes it)', lr);
     const rsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-    const rn1 = "    try { reg = B.normalizeRegistry(JSON.parse(fs.readFileSync(storeFile, 'utf8'))); }";
+    const rn1 = "    try { rawDoc = JSON.parse(fs.readFileSync(storeFile, 'utf8')); reg = B.normalizeRegistry(rawDoc); }"; // (lane profile-lock-roll verify r7: the raw document is kept for the token dedupe's report)
     const rn2 = 'adopted: Array.isArray(r.adopted) ? r.adopted.slice() : [], fresh: null';
     ok(rsrc.includes(rn1) && rsrc.includes(rn2), 'the restart needles (the controls below remove each layer)');
     const Kr1 = M.load('src/server/browser-keeper.js', rsrc.replace(rn1, rn1.replace('; }', '; reg.leftTabs = {}; }')), 'left-not-loaded');
@@ -668,7 +668,7 @@ let work, solo, shop;
     const capL = await capLeg(K, 'data-left-cap');
     ok(capL.kept === 64 && capL.take && capL.take.adopted === true && capL.oldestBackNewTab === 1, 'verify r4: the left-tab bound (64 per profile) FAILS CLOSED — 65 conversations leave a page, he takes one, the one the bound evicted binds a NEW tab on its return (never lands in his page)', capL);
     const csrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-    const cneedle = '{ reg.tabClosed[`${pd.id}|${x}`] = now(); delete m[x]; }';
+    const cneedle = "{ markTabLost(pd.id, x, 'closed'); delete m[x]; }"; // lane profile-lock-roll: the ONE mark pair (verify r1 F6: the needle follows the rename)
     const capC = await capLeg(M.load('src/server/browser-keeper.js', csrc.replace(cneedle, 'delete m[x];'), 'left-bound-forgets'), 'data-left-capc');
     ok(csrc.includes(cneedle) && capC.kept === 64 && capC.oldestBackNewTab === 0, 'CONTROL: a keeper copy whose bound only forgets (r3) binds the evicted conversation nothing on its return — the leg above can go red', capC);
     // verify r4 (the tab-release census / THE TAKE IS MADE WHERE IT IS JUDGED): r3 adopted AFTER his `tab <id>` returned — a
@@ -1043,8 +1043,10 @@ let work, solo, shop;
     const hc = await healLeg(Kl0, 'data-heal-keep');
     ok(lsrc0.includes(ln) && hc.browse === 'join' && hc.keepMs === 10 * 60e3, 'CONTROL: the copy that counts only THIS press as his launch keeps his page 10 min after the heal — the leg above can go red', { keepMs: hc.keepMs });
   }
-  ok(hl.replaced && hl.human === null && J(hl.ended) === J(['stopped']) && !hl.marked && hl.convNewTab === 0 && hl.browse === 'join' && hl.hisNewTab === 1,
-    'verify r2 (the heal): a NEW Chrome replaced the one under his page — his browsing ends `stopped` (his window says so; Browse yourself JOINS with a new tab, never focuses a window on the dead tab); a conversation is left to the binary\'s own `tab_gone` naming `tab new` (lane H r4: the agent learns its page is gone — no silent blank tab)', hl);
+  // lane profile-lock-roll (L2; verify r1 F6 restated): a conversation's lease on the REPLACED browser is marked (`life`) and its
+  // next command binds it a tab FIRST and is TOLD (`rebound` → `[tab_rebound]`) — never a silent blank tab, never `tab_gone`
+  ok(hl.replaced && hl.human === null && J(hl.ended) === J(['stopped']) && hl.marked && hl.convNewTab === 1 && hl.browse === 'join' && hl.hisNewTab === 1,
+    'verify r2 (the heal): a NEW Chrome replaced the one under his page — his browsing ends `stopped` (his window says so; Browse yourself JOINS with a new tab, never focuses a window on the dead tab); a conversation\'s lease is marked and its next command binds a tab first and is told (lane profile-lock-roll L2 — the agent learns its page is gone from the note, never a silent blank tab)', hl);
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const needle = '    if (replaced) tabsWentWithBrowser(rec, seenBy);\n';
   ok(src.includes(needle), 'the replaced-browser needle (the control below removes it)');
@@ -1099,7 +1101,7 @@ let work, solo, shop;
   const m = await medLeg(K, 'data-mq');
   ok(m.marked && m.bound === 1 && m.left === undefined, 'verify r1 (H3): after Quit on a MEDIATED profile the conversation\'s tab is marked gone, and its next attach binds ONE new tab under ITS session in ITS namespace over ITS grant\'s url (never the raw endpoint, never another\'s namespace), then drops the mark', m);
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-  const needle = "      if (p && !isEph(p) && why !== 'switch') for (const l of reg.leases) if (l.profileId === profileId) reg.tabClosed[`${profileId}|${l.browserKey}`] = now();";
+  const needle = "      if (p && !isEph(p) && why !== 'switch') for (const l of reg.leases) if (l.profileId === profileId) markTabLost(profileId, l.browserKey, 'closed');"; // lane profile-lock-roll: the ONE mark pair (verify r1 F6)
   ok(src.includes(needle), 'the stop\'s tab-mark needle');
   const Kq = M.load('src/server/browser-keeper.js', src.replace(needle, needle.replace("!isEph(p) && why", "!isEph(p) && !isMediated(p) && why")), 'mediated-unmarked');
   const mc = await medLeg(Kq, 'data-mqc');
@@ -1300,6 +1302,20 @@ ok(hs && hs.browserKey === HL && hs.open && hs.recorded === true && hs.count >= 
       ['POST', '/api/browser/proposals/:id/approve', '/api/browser/proposals/bl-0000abcd/approve', { shown: 'pd-00000000' }],
       ['POST', '/api/browser/proposals/:id/reject', '/api/browser/proposals/bl-0000abcd/reject', {}],
       ['GET', '/api/browser/proposals/:id', '/api/browser/proposals/bl-0000abcd'],
+      // lane browser-admin 2a: which Chrome build a profile runs is the user's choice — Change build… (it restarts the browser
+      // under HIS page too: refused `browsing_yourself` while he browses), and a create / adopt that names a build (BUILD_IS_USERS)
+      ['POST', '/api/browser/profiles/:id/build', `/api/browser/profiles/${liveP.id}/build`, { choice: { kind: 'build', version: '151.0.7922.34' } }],
+      ['POST', '/api/browser/profiles', '/api/browser/profiles', { label: 'An agent-chosen build', browser: { kind: 'build', version: '151.0.7922.34' } }],
+      ['POST', '/api/browser/adopt', '/api/browser/adopt', { sessionId: 'sess-any', label: 'An agent-chosen build', browser: { kind: 'build', version: '151.0.7922.34' } }],
+      // verify r3 (Y4): the adopt route is the user's WHOLE (a bare {sessionId, label} from an agent's token moved a
+      // conversation's kept browser into a shared profile — test-browser-new-profile walks that body); the dialog's GET too
+      ['GET', '/api/browser/adopt', '/api/browser/adopt?sessionId=sess-any'],
+      // verify r1 F6 (lane browser-admin): "Who can use it" is the user's — the PATCH with a list (USE_IS_USERS; the create / adopt
+      // above refuse a list the same way, walked through their build rows)
+      ['PATCH', '/api/browser/profiles/:id', `/api/browser/profiles/${liveP.id}`, { use: { mode: 'all' } }],
+      // lane browser-admin 2b: a download is the user's act — both installs of the ONE slot (CloakBrowser, the browser CLI)
+      ['POST', '/api/browser/install', '/api/browser/install', {}],
+      ['POST', '/api/browser/cli/install', '/api/browser/cli/install', { version: '0.38.1' }],
     ];
     const table = WALK_H.map(([m, p]) => m + ' ' + p).sort();
     ok(J(derived) === J(table), `the human-route census: the routes that serve HIS browsing, derived from the routers (${derived.length}), are exactly the walk's table — a new one is RED until it is walked`, { derived, table });
@@ -1392,11 +1408,22 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
   lines.forEach((l, i) => { if (/^\s*(\*|\/\/|\/\*)/.test(l)) return; const n = (l.replace(/\/\/.*$/, '').match(/reg\.leases/g) || []).length; if (n) { const f = fnAt(i); sites[f] = (sites[f] || 0) + n; } });
   // conversation-only: admission, caps, pins, the takeover's siblings, the re-judge, the ephemeral records, the timers, the
   // log lines that count conversations — each needs a CONVERSATION (his row has no session, no key an agent could hold)
-  const CONVERSATION = { ephEventFields: 1, ephemerals: 1, leasesFor: 1, leasesOn: 1, removeVerdict: 1, updateProfileNow: 1, knownKeysOf: 1, rejudgeLeases: 1, ceilingNow: 1, ownsLive: 1, ownLive: 1, ensureEphemeral: 2, retireEphemeral: 1, attach: 6 /* lane browser-resume C: + the rebind's new tab as its lease's root */, detach: 3, stop: 1, releaseAll: 1, browse: 1, endHuman: 1, quitHuman: 1, navigateHuman: 1, mirrorLeaseInput: 1, takeover: 1, siblingLeases: 1, noteLeaseUrl: 1, inputSummaryFor: 1, handBackOnStop: 1, statusFor: 2, liveHoldingFor: 1, setFor: 1, driveHolderFacts: 1, noteDrive: 1, dropChild: 3, switcherView: 1, switchBackend: 1, reconcile: 3, boot: 1, tick: 1, ensureTimer: 1, api: 1,
+  const CONVERSATION = { ephEventFields: 1, ephemerals: 1, leasesFor: 1, leasesOn: 1, removeVerdict: 1, updateProfileNow: 1, knownKeysOf: 1, rejudgeLeases: 1, ceilingNow: 1, ownsLive: 1, ownLive: 1, ensureEphemeral: 2, retireEphemeral: 1,
+    keepRebound: 1, takeRebound: 1, // verify r3 (F4): the rebound note rides the CONVERSATION's lease until an answer carries it (his row binds no tab of ours)
+    attach: 7 /* lane browser-resume C: + the rebind's new tab as its lease's root; verify r2 F2: the queued rebind re-asks for ITS OWN lease after the wait (conversation-only) */, detach: 3, stop: 1, releaseAll: 1, browse: 1, endHuman: 1, quitHuman: 1, navigateHuman: 1, mirrorLeaseInput: 1, takeover: 1, siblingLeases: 1, noteLeaseUrl: 1, inputSummaryFor: 1, handBackOnStop: 1, statusFor: 2, liveHoldingFor: 1, setFor: 1, driveHolderFacts: 1, noteDrive: 1, dropChild: 3, switcherView: 1, switchBackend: 1, reconcile: 3, boot: 1, tick: 1, ensureTimer: 1, api: 1,
     rejudgeAll: 1, // the .197 integration: identity r4's Task Group re-judge asks "does a CONVERSATION lease this profile" (his row belongs to no Task Group)
     // lane browser-propose: a proposal's plan counts the OTHER conversations on the profile it would switch; the approved
     // new profile's page opens in THIS conversation's own lease (his row is no conversation's)
     proposalTargetFor: 1, openInLease: 1,
+    // lane browser-admin 2a: Change build… tells every CONVERSATION leased on the browser it restarts (his own browsing is
+    // refused `browsing_yourself` before it — never restarted under his page) and its view counts them; verify r1 F1: the
+    // second site of each is the DRIVEN check (SW.holdOf over the conversations' leases + their input states, humans excluded
+    // — his own browsing is refused by name a line earlier): a conversation driving it by hand ⇒ `browser_driven`, never a
+    // restart under the user's hands
+    buildsView: 2, setBrowserChoice: 2,
+    // verify r2 (B5): the fall-back from a build that closed within seconds tells every CONVERSATION it told "changed" (his own
+    // browsing was refused before the change; a takeover meanwhile is refused browser_restarting by the H2 rule)
+    fallBackFromChange: 1,
     // lane browser-resume B: a Resume of an attachment needs THIS conversation's lease (never widened; decideAttach judges);
     // the hand-back names a browser THIS conversation holds (his `hu-` row is never a conversation's to hand back)
     resumeAttachment: 1, continueState: 1,
@@ -1407,6 +1434,7 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
     // lane site-reset verify r3 #2: the PERSISTED WITNESS lives on a CONVERSATION's lease (`l.tabs` — the tabs the dialog watch
     // saw born of its verbs); his row holds no lease — his tabs are his row's own (`ownTab` / `adopted`)
     noteOwnTab: 1, forgetOwnTab: 1, dropLeaseTabs: 1, pruneOwnTabs: 1, // r4 #3: pruned to the browser's tabs at a watch's connect
+    tabsLost: 1, // lane profile-lock-roll L2: every CONVERSATION lease of a replaced browser is marked `life` (his row holds no lease — his tab ends with the browser, said by his window)
     holderTabs: 1, // lane site-reset verify r1: a CONVERSATION lease's pinned tab (+ r3's persisted witness); his tabs are read off his row, by his key, before this loop
   };
   // holder: "who holds this browser / is it used" — through holdersOn (the conversations' leases + his row)
@@ -1470,8 +1498,8 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
     for (const f of Object.keys(RECORDS)) if (!(f in c.releases)) bad.push(`dead row: ${f} releases nothing`);
     for (const f of Object.keys(c.forgets)) if (!(f in FORGETS)) bad.push(`forget in ${f} not in the census`);
     for (const f of Object.keys(FORGETS)) if (!(f in c.forgets)) bad.push(`dead row: ${f} forgets nothing`);
-    if (!c.body('noteLeftTab').includes('{ reg.tabClosed[`${pd.id}|${x}`] = now(); delete m[x]; }')) bad.push('the bound forgets without marking');
-    for (const f of Object.keys(c.ends)) { if (f in ENDS) { if (!/reg\.tabClosed\[/.test(c.body(f))) bad.push(`${f} closes a conversation's tab without the mark`); } else if (!(f in ENDS_DECLARED)) bad.push(`tab close in ${f} not in the census`); }
+    if (!c.body('noteLeftTab').includes("{ markTabLost(pd.id, x, 'closed'); delete m[x]; }")) bad.push('the bound forgets without marking'); // the ONE mark pair (lane profile-lock-roll)
+    for (const f of Object.keys(c.ends)) { if (f in ENDS) { if (!/reg\.tabClosed\[|markTabLost\(/.test(c.body(f))) bad.push(`${f} closes a conversation's tab without the mark`); } else if (!(f in ENDS_DECLARED)) bad.push(`tab close in ${f} not in the census`); }
     for (const f of Object.keys(ENDS)) if (!(f in c.ends)) bad.push(`dead row: ${f} closes nothing`);
     for (const [, from, to] of PATHS) if (!c.body(from).includes(to + '(')) bad.push(`path ${from} → ${to} gone`);
     return { bad, c };
@@ -1490,9 +1518,9 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
     ['dropChild without the recorder', cut('dropChild', '    for (const l of reg.leases) if (l.browserKey === handle) noteLeftTab(l.profileId, handle);', '    // (control)'), /release in dropChild without the recorder/],
     ['the tick without the recorder', cut('reconcile', '      noteLeftTab(d.lease.profileId, d.lease.browserKey);\n', ''), /release in reconcile without the recorder/],
     ['a NEW release site', judge(ksrc.replace('  function dropChild(handle) {', '  function dropAllLeases() { reg.leases = []; }\n  function dropChild(handle) {')).bad, /release in dropAllLeases \(1\) not in the census/],
-    ['the bound forgetting without the mark', cut('noteLeftTab', '{ reg.tabClosed[`${pd.id}|${x}`] = now(); delete m[x]; }', 'delete m[x];'), /the bound forgets without marking/],
+    ['the bound forgetting without the mark', cut('noteLeftTab', "{ markTabLost(pd.id, x, 'closed'); delete m[x]; }", 'delete m[x];'), /the bound forgets without marking/],
     ['a NEW forget site', judge(ksrc.replace('  function dropChild(handle) {', '  function forgetLeft(id) { delete reg.leftTabs[id]; }\n  function dropChild(handle) {')).bad, /forget in forgetLeft not in the census/],
-    ['closeLeaseSession without the mark', cut('closeLeaseSession', '      if (t && t.ok) { reg.tabClosed[`${p.id}|${browserKey}`] = now(); commit(); }', '      if (t && t.ok) { commit(); }'), /closeLeaseSession closes a conversation's tab without the mark/],
+    ['closeLeaseSession without the mark', cut('closeLeaseSession', "      if (t && t.ok) { markTabLost(p.id, browserKey, 'closed'); commit(); }", '      if (t && t.ok) { commit(); }'), /closeLeaseSession closes a conversation's tab without the mark/],
     ['a NEW tab-close site (lane browser-resume C)', judge(ksrc.replace('  function dropChild(handle) {', "  async function closeAnyTab(id) { return rt.exec(null, ['tab', 'close', id]); }\n  function dropChild(handle) {")).bad, /tab close in closeAnyTab not in the census/],
     ['a re-judge that no longer detaches', cut('rejudgeLeases', "      try { detach({ profileId, browserKey: l.browserKey, by: 'user' }); out.detached", "      try { (() => {})({ profileId, browserKey: l.browserKey, by: 'user' }); out.detached"), /path rejudgeLeases → detach gone/],
   ];

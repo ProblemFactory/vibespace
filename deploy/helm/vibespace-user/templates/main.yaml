@@ -1,6 +1,16 @@
 {{- include "vs.require" . -}}
 {{- $name := include "vs.name" . -}}
 {{- $host := include "vs.host" . -}}
+{{- /* COMPANY PRESETS (lane cluster-presets): the volume form unless presets.volume is false */ -}}
+{{- $presets := .Values.presets | default dict -}}
+{{- $vol := ne (toString (index $presets "volume")) "false" -}}
+{{- $ov := $presets.override | default dict -}}
+{{- $gd := .Values.gdrive | default dict -}}
+{{- $ovG := $ov.gdriveClients | default $gd.clients -}}
+{{- $ovI := $ov.integrations | default .Values.integrations -}}
+{{- if and $vol (not $ovG) $gd.clientId $gd.clientSecret -}}
+{{- $ovG = list (dict "key" "default" "label" "Default" "clientId" $gd.clientId "clientSecret" $gd.clientSecret) -}}
+{{- end -}}
 ---
 apiVersion: v1
 kind: Secret
@@ -29,13 +39,15 @@ stringData:
   {{- if and .Values.cephfs .Values.cephfs.secret }}
   cephfsSecret: {{ .Values.cephfs.secret | quote }}
   {{- end }}
-  {{- if and .Values.gdrive .Values.gdrive.clients }}
-  gdriveClients: {{ .Values.gdrive.clients | toJson | quote }}
-  {{- else if and .Values.gdrive .Values.gdrive.clientId }}
-  gdriveClientSecret: {{ .Values.gdrive.clientSecret | quote }}
+  {{- /* this release's preset layer: the OVERRIDE under the volume form (projected
+       to <mountPath>/override/), the env's source under presets.volume=false */}}
+  {{- if $ovG }}
+  gdriveClients: {{ $ovG | toJson | quote }}
+  {{- else if and (not $vol) $gd.clientId }}
+  gdriveClientSecret: {{ $gd.clientSecret | quote }}
   {{- end }}
-  {{- if .Values.integrations }}
-  integrations: {{ .Values.integrations | toJson | quote }}
+  {{- if $ovI }}
+  integrations: {{ $ovI | toJson | quote }}
   {{- end }}
 {{- if not .Values.storage.existingClaim }}
 ---
@@ -159,25 +171,33 @@ spec:
             - name: VIBESPACE_TELEMETRY_FORWARD_URL
               value: {{ . | quote }}
             {{- end }}
-            {{- if and .Values.gdrive .Values.gdrive.clients }}
+            {{- if $vol }}
+            # Company presets: FILES, not env (lane cluster-presets) — the
+            # projected `presets` volume below; the server watches the
+            # directory and re-applies a change live (no restart).
+            - name: VIBESPACE_PRESETS_DIR
+              value: {{ $presets.mountPath | default "/etc/vibespace/presets" | quote }}
+            {{- else }}
+            {{- if $ovG }}
             # Instance-preset Google OAuth clients (Drive mounts / Gmail): JSON
             # [{key,label,clientId,clientSecret},…] — the UI shows key/label,
             # a mount stores only the KEY; secrets stay in this env/Secret.
             - name: VIBESPACE_GDRIVE_CLIENTS
               valueFrom: { secretKeyRef: { name: {{ $name }}, key: gdriveClients } }
-            {{- else if and .Values.gdrive .Values.gdrive.clientId }}
+            {{- else if $gd.clientId }}
             # Legacy single default client
             - name: VIBESPACE_GDRIVE_CLIENT_ID
-              value: {{ .Values.gdrive.clientId | quote }}
+              value: {{ $gd.clientId | quote }}
             - name: VIBESPACE_GDRIVE_CLIENT_SECRET
               valueFrom: { secretKeyRef: { name: {{ $name }}, key: gdriveClientSecret } }
             {{- end }}
-            {{- if .Values.integrations }}
+            {{- if $ovI }}
             # Cluster-provided integration credentials: JSON
             # [{id,label,values:{…}},…] read by src/server/integration-store.js.
             # A user's own key in data/integrations.json always wins.
             - name: VIBESPACE_INTEGRATIONS
               valueFrom: { secretKeyRef: { name: {{ $name }}, key: integrations } }
+            {{- end }}
             {{- end }}
             # The instance's public address (agentd.publicUrl default): remote
             # machines use it for reverse mounts when no device tunnel exists.
@@ -246,6 +266,13 @@ spec:
               # user to .Values.user at boot (guarded on this mountPath) and
               # symlinks /home/vibe → here for recorded absolute paths
               mountPath: /home/{{ .Values.user }}
+            {{- if $vol }}
+            # Company presets, read-only and LIVE: the kubelet swaps `..data`
+            # when a Secret changes (never a subPath — those never update)
+            - name: presets
+              mountPath: {{ $presets.mountPath | default "/etc/vibespace/presets" }}
+              readOnly: true
+            {{- end }}
             {{- if and .Values.tun .Values.tun.enabled (eq (.Values.tun.mode | default "hostpath") "hostpath") }}
             # hostPath tun (Plugins kernel-mode Tailscale, 2.141.2): mount the
             # host's /dev/net/tun directly — no cluster device-plugin needed,
@@ -282,6 +309,28 @@ spec:
       volumes:
         - name: home
           persistentVolumeClaim: { claimName: {{ .Values.storage.existingClaim | default $name }} }
+        {{- if $vol }}
+        # ONE cluster-wide Secret every user's pod mounts (created once by the
+        # admin) + THIS release's own Secret as the per-key override. Both
+        # optional: a missing Secret or key projects nothing, never a pod that
+        # cannot start. The item list never depends on the values, so changing
+        # an override touches only the Secret — no pod roll.
+        - name: presets
+          projected:
+            sources:
+              - secret:
+                  name: {{ $presets.clusterSecret | default "vibespace-cluster-presets" }}
+                  optional: true
+                  items:
+                    - { key: gdriveClients, path: gdrive-clients.json }
+                    - { key: integrations, path: integrations.json }
+              - secret:
+                  name: {{ $name }}
+                  optional: true
+                  items:
+                    - { key: gdriveClients, path: override/gdrive-clients.json }
+                    - { key: integrations, path: override/integrations.json }
+        {{- end }}
         {{- if and .Values.tun .Values.tun.enabled (eq (.Values.tun.mode | default "hostpath") "hostpath") }}
         - name: nettun
           hostPath: { path: /dev/net/tun, type: CharDevice }

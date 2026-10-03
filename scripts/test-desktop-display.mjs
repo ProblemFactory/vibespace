@@ -394,7 +394,17 @@ console.log('§5 THE XPRA RUNG (P8-2, 2026-09-21): the argv table, the HTTP list
       if (homeAuthBefore !== null) ok(fs.statSync(homeAuth).mtimeMs === homeAuthBefore, 'the user\'s real ~/.Xauthority was NOT touched (the pinned file existed before xpra looked)');
       const members = D.sessionMembers(xpid, { fresh: true });
       ok(members.length >= 2, `xpra's session holds its own Xvfb (${members.length} members: ${members.join(', ')})`);
-      ok(!D.environHas(xpid, 'VIBESPACE_DESKTOP_APP=da-display-xpra'), 'MEASURED: xpra rewrites its own environ — the session marker is NOT readable on the xpra pid (the keeper\'s boot belt reaps its leftovers by pid+starttime instead)');
+      // lane fleet-image-2 (the fleet e2e read this row red on the 3.6.0-rc1 image and took it for an xpra 6.5.4 drift — this
+      // box runs 6.5.4 too and reads it green): WHO rewrites the environ is `setproctitle`, the python module xpra imports
+      // when it is installed (xpra/util/system.py) — python3-setproctitle, a Recommends of xpra-server that an image built
+      // with --no-install-recommends lacked. Both shapes measured on xpra 6.5.4: with the module the marker is gone (this box,
+      // the fleet image from 3.6.0), without it the marker stays (3.6.0-rc1); the version is not the discriminator.
+      const xpraPy = (() => { try { const fd = fs.openSync(bins.xpra, 'r'); const b = Buffer.alloc(128); const n = fs.readSync(fd, b, 0, 128, 0); fs.closeSync(fd); const m = /^#!\s*(\S+)(?:\s+(\S+))?/.exec(b.subarray(0, n).toString('latin1').split('\n')[0]); return m ? (m[1].endsWith('/env') ? (m[2] || null) : m[1]) : null; } catch { return null; } })();
+      const spt = xpraPy ? await new Promise((r) => execFile(xpraPy, ['-c', 'import setproctitle'], { timeout: 5000 }, (e) => r(!e))) : null;
+      const markerOnXpra = D.environHas(xpid, 'VIBESPACE_DESKTOP_APP=da-display-xpra');
+      if (spt === true) ok(!markerOnXpra, `MEASURED (xpra with python3-setproctitle — ${xpraPy} imports it): xpra rewrites its own environ — the session marker is NOT readable on the xpra pid (the keeper's boot belt reaps its leftovers by pid+starttime instead)`);
+      else if (spt === false) ok(markerOnXpra, `MEASURED (xpra WITHOUT python3-setproctitle — ${xpraPy} cannot import it): xpra leaves its environ as it was spawned — the session marker IS readable on the xpra pid (the belt reaps by pid+starttime all the same)`);
+      else console.log(`  - MEASURED xpra's environ: the session marker is ${markerOnXpra ? '' : 'NOT '}readable on the xpra pid — no python interpreter named on ${bins.xpra}'s first line, so no setproctitle verdict (the belt reaps by pid+starttime either way)`);
       // HiDPI (2.369.158): the recipe's ctx.dpi IS the display's font dpi (xpra writes Xft.dpi before any client) and
       // the keeper's X resources merge into THAT display's database (xterm's Xft face at a scale > 1)
       const XRDB = D.binOnPath('xrdb', { env: process.env });

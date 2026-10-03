@@ -59,6 +59,7 @@ const F = require('../src/browser-facts.js');
 const KS = require('../src/server/browser-kept.js');
 const BE = require('../src/server/browser-env.js');
 const K = require('../src/server/browser-keeper.js');
+const TBS = require('../src/browser-tabs.js'); // lane profile-lock-roll L2 (⑭)
 const LIMITS = require('../src/keeper-limits.js');
 const express = require('express');
 
@@ -1177,6 +1178,248 @@ console.log('— ⑬ verify r2: each fix\'s leg catches its broken copy');
     ok(again.profile && !again.profile.host && again.created === false, '…adoptDirectory answers the LOCAL record (idempotent), never the remote one', again.profile && again.profile.id);
   }
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 2, label: '⑬ ' })) ok(r.pass, r.name, r.detail);
+}
+
+// ═══ ⑭ LANE PROFILE-LOCK-ROLL (2026-10-01) L2: A BOUND TAB OF A PREVIOUS LIFE REBINDS ═══════════════════════
+// userW (W2): right after his pod rolled, the first command of his pinned session answered `tab_gone: bound tab is gone
+// (target DC0C…, last url about:blank). Run agent-browser tab new …` — the binary keeps a session's bound tab across a
+// daemon restart (its own `tab --help`) and, pinned, refuses once it is gone; every tab of a replaced browser is gone. A
+// `stop()` already marks every lease so its next attach binds a tab first; a browser life the keeper did NOT end (a daemon
+// found dead, a boot that could not adopt it, an in-place relaunch) left the leases unmarked. Now: those mark too (`life`),
+// and the bind prefers the browser's ONE unowned page (a fresh launch's single tab) over a second blank tab.
+console.log('— ⑭ lane profile-lock-roll L2: the first command after a replaced browser rebinds — the only page, else a new tab; a boot marks too');
+{
+  const M14 = mutantCopies('browser-kept-roll', REPO);
+  // (a) PURE: which tab, and the note
+  const T = (n) => n.repeat(32);
+  const pg = (id, url, extra = {}) => ({ type: 'page', targetId: id, url, ...extra });
+  const pick = (targets, holders, key = KEY_A) => TBS.rebindPick({ targets, holders, key });
+  const rows = [
+    [JSON.stringify(pick([pg(T('A'), 'about:blank')], [])), JSON.stringify({ targetId: T('A'), url: 'about:blank' }), 'one page nobody roots ⇒ bound to it'],
+    [JSON.stringify(pick([pg(T('A'), 'https://a.test/')], [{ key: KEY_A, roots: [T('A')] }])), JSON.stringify({ targetId: T('A'), url: 'https://a.test/' }), 'one page the session itself roots ⇒ still its'],
+    [pick([pg(T('A'), 'about:blank')], [{ key: KEY_B, roots: [T('A')] }]), null, 'one page ANOTHER holder roots ⇒ null (a new tab, never theirs)'],
+    [pick([pg(T('A'), 'about:blank')], [{ key: 'hu-0000f001', roots: [T('A')] }]), null, 'one page the USER holds ⇒ null'],
+    [pick([pg(T('A'), 'about:blank'), pg(T('B'), 'https://b.test/')], []), null, 'two pages ⇒ null'],
+    [JSON.stringify(pick([pg(T('A'), 'about:blank'), { type: 'service_worker', targetId: T('C'), url: 'https://c.test/sw.js' }], [])), JSON.stringify({ targetId: T('A'), url: 'about:blank' }), 'a worker beside the one page is not a page'],
+    [pick(null, []), null, 'targets unreadable ⇒ null (fail closed: a new tab)'],
+    [pick([], []), null, 'no page at all ⇒ null'],
+  ];
+  const bad = rows.filter((r) => r[0] !== r[1]);
+  ok(!bad.length, `⑭a PURE rebindPick: ${rows.length} rows (${rows.map((r) => r[2].split(' ⇒')[0]).join(' · ')})`, bad);
+  const w1 = TBS.reboundNoteText({ how: 'switched', url: 'about:blank', why: 'life' }), w2 = TBS.reboundNoteText({ how: 'new', why: 'closed' }), w3 = TBS.reboundNoteText({ how: 'switched', url: 'https://x.test/' + 'y'.repeat(400), why: 'life' });
+  ok(/previous run is gone/.test(w1) && /bound to about:blank/.test(w1) && /your tab was closed/.test(w2) && /new tab was opened/.test(w2) && w3.length < 320, '⑭a reboundNoteText: the restart and the closed-tab sentences, the url bounded', [w1, w2]);
+
+  // (b) the REAL keeper over the tab-keeping fake: a dead daemon ⇒ its leases marked `life` ⇒ the next attach binds the only page
+  const D14 = path.join(ROOT, 'k14'); fs.mkdirSync(D14, { recursive: true });
+  const rtE = { PATH: PATH_ENV, HOME, FAKE_AB_STATE: AB_STATE };
+  const readT = async (url) => { const m = /fake-([^/]+)$/.exec(String(url)); const tabs = m ? fakeTabs(m[1]) : []; return tabs.length ? { ok: true, targets: tabs.map((t) => ({ targetId: t.targetId, type: 'page', url: t.url, title: 'T ' + t.url })) } : { ok: false, error: 'no tabs' }; };
+  const lines14 = [];
+  const klog14 = { log: (...a) => lines14.push(a.join(' ')), warn: (...a) => lines14.push('WARN ' + a.join(' ')), error() { } };
+  const live14 = new Set([KEY_A, KEY_B]);
+  const mk14 = (Kmod, dataDir) => { const kk = Kmod.create({ dataDir, homeDir: HOME, env: () => rtE, liveKeys: () => live14, runtime: F.createBrowserRuntime({ env: rtE }), facts: F.createBrowserFacts({ env: rtE }), limits: { ...LIMITS }, log: klog14, tickMs: 3600e3, install: false, readTargets: readT }); keepers.push(kk); return kk; };
+  const sleep14 = (ms) => new Promise((r) => setTimeout(r, ms));
+  const killDaemon = async (kk, id) => { const rec = kk._reg().browsers[id]; try { process.kill(rec.pid, 'SIGKILL'); } catch { } for (let i = 0; i < 30; i++) { try { process.kill(rec.pid, 0); await sleep14(50); } catch { break; } } };
+  let kp = mk14(K, D14);
+  try {
+    const p = kp.createProfile({ label: 'Roll' });
+    const ns = 'vs-' + p.id;
+    const a1 = await kp.attach({ profileId: p.id, browserKey: KEY_A, sessionId: 'sess-a' });
+    ok(a1.browser.state === 'ready' && !a1.rebound && fakeTabs(ns).length === 1, '⑭b the first attach launches the browser (one tab), nothing to rebind', { tabs: fakeTabs(ns).length, rebound: a1.rebound });
+    const t1 = fakeTabs(ns)[0].targetId;
+    await killDaemon(kp, p.id); // the pod died / the daemon crashed: no stop() ran
+    const n0 = cmds(ns).length;
+    const a2 = await kp.attach({ profileId: p.id, browserKey: KEY_A, sessionId: 'sess-a' });
+    const after = cmds(ns).slice(n0).map((c) => c.argv.join(' '));
+    const t2 = fakeTabs(ns)[0] && fakeTabs(ns)[0].targetId;
+    ok(a2.browser.state === 'ready' && t2 && t2 !== t1 && a2.rebound && a2.rebound.how === 'switched' && a2.rebound.why === 'life' && a2.rebound.targetId === t2 && /previous run is gone/.test(a2.rebound.text) && after.includes(`tab ${t2}`) && after.indexOf(`tab ${t2}`) > after.findIndex((x) => /^open /.test(x)), '⑭b A DAEMON FOUND DEAD: the next attach marks the lease, relaunches, and binds the session to the browser\'s ONLY page (`tab <targetId>` after the launch) — said once as `rebound` (why: life)', { after, rebound: a2.rebound });
+    ok(!kp._reg().tabClosed[`${p.id}|${KEY_A}`] && !(kp._reg().tabLostWhy || {})[`${p.id}|${KEY_A}`] && B.findLease(kp._reg().leases, p.id, KEY_A).tabRoots.join() === t2 && fakeTabs(ns).length === 1, '⑭b …the mark is cleared, the bound tab is the lease\'s only root, no second blank tab was opened', { roots: B.findLease(kp._reg().leases, p.id, KEY_A).tabRoots, tabs: fakeTabs(ns).length });
+    ok(lines14.some((l) => /its browser is gone with its daemon gone/.test(l) && /1 lease\(s\) bind a tab again/.test(l)) && lines14.some((l) => new RegExp(`${KEY_A}: bound to the browser's only tab about:blank`).test(l)), '⑭b …the journal says the loss and the bind', lines14.filter((l) => /lease\(s\) bind|only tab/.test(l)));
+    const a3 = await kp.attach({ profileId: p.id, browserKey: KEY_A, sessionId: 'sess-a' });
+    ok(!a3.rebound && fakeTabs(ns).length === 1, '⑭b a later attach of the same session rebinds nothing (the mark was spent)');
+    // a second conversation joins; the daemon dies again ⇒ BOTH marked; the first rebinds to the only page, the second — that
+    // page is the first's root now — opens a new tab of its own (never another holder's)
+    const b1 = await kp.attach({ profileId: p.id, browserKey: KEY_B, sessionId: 'sess-b' });
+    ok(b1.browser.state === 'ready' && !b1.rebound, '⑭b a second conversation joins the live browser (no mark, no rebind)');
+    await killDaemon(kp, p.id);
+    const n1 = cmds(ns).length;
+    const a4 = await kp.attach({ profileId: p.id, browserKey: KEY_A, sessionId: 'sess-a' });
+    const t3 = fakeTabs(ns)[0].targetId;
+    const b2 = await kp.attach({ profileId: p.id, browserKey: KEY_B, sessionId: 'sess-b' });
+    const after2 = cmds(ns).slice(n1).map((c) => c.argv.join(' '));
+    ok(a4.rebound && a4.rebound.how === 'switched' && a4.rebound.targetId === t3 && b2.rebound && b2.rebound.how === 'new' && b2.rebound.why === 'life' && /new tab was opened/.test(b2.rebound.text) && fakeTabs(ns).length === 2 && after2.includes(`tab ${t3}`) && after2.includes('tab new') && B.findLease(kp._reg().leases, p.id, KEY_B).tabRoots.join() === fakeTabs(ns)[1].targetId, '⑭b two leases on one replaced browser: the first takes the only page, the second (that page is the first\'s root now) gets a NEW tab of its own — never another holder\'s', { a4: a4.rebound, b2: b2.rebound, after2 });
+    // verify r1 (F3): the same two leases, their first commands AT ONCE (two agents resumed together) — reproduced: both read
+    // the page list before either bound, both picked the one page, both rooted it (one tab for two conversations). The
+    // rebind is serialized per profile now: the second reads the list after the first's bind landed.
+    await killDaemon(kp, p.id);
+    const [c1, c2] = await Promise.all([kp.attach({ profileId: p.id, browserKey: KEY_A, sessionId: 'sess-a' }), kp.attach({ profileId: p.id, browserKey: KEY_B, sessionId: 'sess-b' })]);
+    const rootsA = B.findLease(kp._reg().leases, p.id, KEY_A).tabRoots, rootsB = B.findLease(kp._reg().leases, p.id, KEY_B).tabRoots;
+    ok(c1.rebound && c2.rebound && c1.rebound.targetId && c2.rebound.targetId && c1.rebound.targetId !== c2.rebound.targetId && [c1.rebound.how, c2.rebound.how].sort().join() === 'new,switched' && fakeTabs(ns).length === 2 && rootsA.length === 1 && rootsB.length === 1 && rootsA[0] !== rootsB[0], '⑭b TWO FIRST COMMANDS AT ONCE after a replaced browser: one takes the only page, the other opens its own — never the same tab for two conversations', { c1: c1.rebound, c2: c2.rebound, rootsA, rootsB, tabs: fakeTabs(ns).length });
+    // CONTROL: a keeper copy whose rebind runs unserialized — the race lands both on the one page
+    {
+      const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+      const noSerial = ksrc.replace('const run = prev.then(fn, fn);', 'const run = fn(); /* CONTROL: unserialized */');
+      ok(noSerial !== ksrc, '⑭b control setup: the per-profile chain is where the control cuts');
+      const DN = path.join(ROOT, 'k14-noserial'); fs.mkdirSync(DN, { recursive: true });
+      const kn = mk14(M14.load('src/server/browser-keeper.js', noSerial, 'no-serial-rebind'), DN);
+      const pn = kn.createProfile({ label: 'Race' }); const nsn = 'vs-' + pn.id;
+      await kn.attach({ profileId: pn.id, browserKey: KEY_A, sessionId: 'sess-a' });
+      await kn.attach({ profileId: pn.id, browserKey: KEY_B, sessionId: 'sess-b' });
+      await killDaemon(kn, pn.id);
+      const [d1, d2] = await Promise.all([kn.attach({ profileId: pn.id, browserKey: KEY_A, sessionId: 'sess-a' }), kn.attach({ profileId: pn.id, browserKey: KEY_B, sessionId: 'sess-b' })]);
+      ok(d1.rebound && d2.rebound && d1.rebound.targetId === d2.rebound.targetId && fakeTabs(nsn).length === 1, '⑭b CONTROL: an unserialized rebind binds BOTH concurrent sessions to the one page — the leg above catches it', { d1: d1.rebound, d2: d2.rebound, tabs: fakeTabs(nsn).length });
+      try { await kn.stop(pn.id, { why: 'user' }); } catch { /* none */ }
+      kn.shutdown();
+    }
+    // (c) THE BOOT: the pod rolled while VibeSpace was down — a new keeper over the same registry finds the daemon gone at
+    // boot, marks every lease `life`; the first command after the boot rebinds
+    await killDaemon(kp, p.id);
+    kp.shutdown();
+    const kp2 = mk14(K, D14);
+    await kp2.boot();
+    const why = kp2._reg().tabLostWhy || {};
+    ok(kp2._reg().browsers[p.id].state !== 'ready' && kp2._reg().tabClosed[`${p.id}|${KEY_A}`] && why[`${p.id}|${KEY_A}`] === 'life' && why[`${p.id}|${KEY_B}`] === 'life', '⑭c A BOOT THAT COULD NOT ADOPT THE BROWSER marks every lease `life` (the pod-roll shape: the daemon died while VibeSpace was down)', { state: kp2._reg().browsers[p.id].state, why });
+    const a5 = await kp2.attach({ profileId: p.id, browserKey: KEY_A, sessionId: 'sess-a' });
+    ok(a5.browser.state === 'ready' && a5.rebound && a5.rebound.how === 'switched' && a5.rebound.why === 'life' && a5.rebound.targetId === fakeTabs(ns)[0].targetId, '⑭c …and the first command after the boot is bound to the relaunched browser\'s only page — never tab_gone', a5.rebound);
+    kp2.shutdown();
+    // (d) CONTROL: a keeper whose dead-daemon path marks nothing — the pre-lane shape: the relaunch runs, no `tab` command
+    // binds, the answer carries no rebind (the pinned session's next verb would answer tab_gone)
+    const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+    const noMark = ksrc.replace(/tabsLost\(rec\.profileId, `its daemon gone \(seen by \$\{seenBy\}\)`\);[^\n]*/, '/* CONTROL: a dead daemon marks nothing */');
+    ok(noMark !== ksrc, '⑭d control setup: the dead-daemon mark is where the control cuts');
+    const D14c = path.join(ROOT, 'k14c'); fs.mkdirSync(D14c, { recursive: true });
+    const kc = mk14(M14.load('src/server/browser-keeper.js', noMark, 'no-dead-daemon-mark'), D14c);
+    const pc = kc.createProfile({ label: 'Roll control' });
+    const nsc = 'vs-' + pc.id;
+    await kc.attach({ profileId: pc.id, browserKey: KEY_A, sessionId: 'sess-a' });
+    await killDaemon(kc, pc.id);
+    const nc = cmds(nsc).length;
+    const ac = await kc.attach({ profileId: pc.id, browserKey: KEY_A, sessionId: 'sess-a' });
+    const afterc = cmds(nsc).slice(nc).map((c) => c.argv.join(' '));
+    ok(ac.browser.state === 'ready' && !ac.rebound && !afterc.some((x) => /^tab /.test(x)) && !kc._reg().tabClosed[`${pc.id}|${KEY_A}`], '⑭d CONTROL: without the mark the relaunch binds nothing and says nothing — the ⑭b leg catches it (userW\'s tab_gone)', { afterc, rebound: ac.rebound });
+    kc.shutdown();
+    // (e) verify r2 (F2 / F3): two sessions' first commands after a replaced browser — the second QUEUES behind the first's
+    // rebind (said in the journal, bounded by the CLI's timeouts); a session that DETACHES while queued opens no tab (it did:
+    // a blank tab nobody rooted was left in the browser, its mark spent) and keeps its mark for its next attach
+    {
+      const D14e = path.join(ROOT, 'k14e'); fs.mkdirSync(D14e, { recursive: true });
+      const slowFor = new Set();
+      const realRt = F.createBrowserRuntime({ env: rtE });
+      const slowRt = new Proxy(realRt, { get(t, k) { if (k !== 'exec') return t[k]; return async (ns, argv, o) => { if (argv.includes('tab') && o && o.session && slowFor.has(o.session)) await sleep14(1500); return t.exec(ns, argv, o); }; } });
+      const mkE = (Kmod, dd) => { const kk = Kmod.create({ dataDir: dd, homeDir: HOME, env: () => rtE, liveKeys: () => live14, runtime: slowRt, facts: F.createBrowserFacts({ env: rtE }), limits: { ...LIMITS }, log: klog14, tickMs: 3600e3, install: false, readTargets: readT }); keepers.push(kk); return kk; };
+      const runE = async (Kmod, tag) => {
+        const dd = path.join(D14e, tag); fs.mkdirSync(dd, { recursive: true });
+        const kk = mkE(Kmod, dd); const p = kk.createProfile({ label: 'Queue ' + tag }); const ns = 'vs-' + p.id;
+        await kk.attach({ profileId: p.id, browserKey: KEY_A, sessionId: 'sess-a' }); await kk.attach({ profileId: p.id, browserKey: KEY_B, sessionId: 'sess-b' });
+        await kk.stop(p.id, { why: 'user' }); // both leases marked: each rebinds at its next attach
+        slowFor.add(B.sessionNameFor(KEY_A)); const l0 = lines14.length;
+        const a1 = kk.attach({ profileId: p.id, browserKey: KEY_A, sessionId: 'sess-a' }); await sleep14(400);
+        const before = fakeTabs(ns).length;
+        const b1 = kk.attach({ profileId: p.id, browserKey: KEY_B, sessionId: 'sess-b' }); await sleep14(100);
+        let dErr = null; try { kk.detach({ profileId: p.id, browserKey: KEY_B }); } catch (e) { dErr = e.code; }
+        await Promise.allSettled([a1, b1]); slowFor.clear();
+        const said = lines14.slice(l0);
+        const r = { before, after: fakeTabs(ns).length, dErr, mark: !!kk._reg().tabClosed[`${p.id}|${KEY_B}`], lease: !!B.findLease(kk._reg().leases, p.id, KEY_B), waits: said.filter((l) => /a tab bind waits for the one in flight/.test(l)).length, noTab: said.filter((l) => /detached while waiting to bind a tab/.test(l)).length };
+        try { await kk.stop(p.id); } catch { /* none */ } kk.shutdown();
+        return r;
+      };
+      const r = await runE(K, 'product');
+      ok(r.before === 1 && r.after === 1 && !r.dErr && r.mark && !r.lease && r.noTab === 1, '⑭e a session that detaches while queued behind another\'s rebind opens NO tab, keeps its mark, holds no lease', r);
+      ok(r.waits === 1, '⑭e …and the queued wait is said in the journal (bounded by the CLI\'s own timeouts)', r);
+      const ksrcE = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+      const noReask = ksrcE.replace("if (!B.findLease(reg.leases, p.id, browserKey)) { log.log?.(`[browser] ${browserKey}: detached while waiting to bind a tab in ${p.id} \"${p.label}\" — no tab opened`); return; }", '/* CONTROL: the lease is not asked again after the wait */');
+      const noSay = ksrcE.replace("if (rebinding.has(profileId)) log.log?.(`[browser] ${profileId}: a tab bind waits for the one in flight (bounded by the browser CLI's own timeouts, ~30 s at most)`);", '/* CONTROL: the wait is not said */');
+      ok(noReask !== ksrcE && noSay !== ksrcE, '⑭e control setup: the re-ask and the word are where the controls cut');
+      const c1 = await runE(M14.load('src/server/browser-keeper.js', noReask, 'no-reask-after-wait'), 'ctl-reask');
+      ok(c1.after === 2 && !c1.mark, '⑭e CONTROL: without the re-ask the detached session\'s queued rebind opens a blank tab nobody roots and spends its mark — the ⑭e leg catches it', c1);
+      const c2 = await runE(M14.load('src/server/browser-keeper.js', noSay, 'no-wait-said'), 'ctl-say');
+      ok(c2.waits === 0 && c2.after === 1, '⑭e CONTROL: a keeper that queues in silence — the ⑭e journal leg catches it', c2);
+    }
+    // (f) verify r3 (F4): the rebound note is SAID ONCE, in an answer that is DELIVERED — THE REAL ROUTES. Two conversations'
+    // `use` at once after a replaced browser (a page verb's /resolve is refused busy while another drives; `use` attaches
+    // without the driver rule, so this is how a rebind QUEUES at the route); the second's client is KILLED while it queues
+    // (the agent harness's own tool timeout — the CLI's /resolve has no timeout of its own): its rebind ran into a gone
+    // client, the tab bound, the mark spent, and the answer that carried the note was never read. Reproduced: the next
+    // command's answer carried no note. Now the note rides the lease until a delivered answer carries it (`use` + `resolve`
+    // put an undelivered one back; `clientGone` = the response's socket — never `req.destroyed`, true for every consumed request).
+    {
+      const R14 = require('../src/routes/browser.js');
+      const D14f = path.join(ROOT, 'k14f'); fs.mkdirSync(D14f, { recursive: true });
+      const runF = async (Rmod, tag) => {
+        const dd = path.join(D14f, tag); fs.mkdirSync(dd, { recursive: true });
+        const slowFor = new Set(); const realRt = F.createBrowserRuntime({ env: rtE });
+        const slowRt = new Proxy(realRt, { get(t, k) { if (k !== 'exec') return t[k]; return async (ns, argv, o) => { if (argv.includes('tab') && o && o.session && slowFor.has(o.session)) await sleep14(1200); return t.exec(ns, argv, o); }; } });
+        const kk = K.create({ dataDir: dd, homeDir: HOME, env: () => rtE, liveKeys: () => live14, runtime: slowRt, facts: F.createBrowserFacts({ env: rtE }), limits: { ...LIMITS }, log: klog14, tickMs: 3600e3, install: false, readTargets: readT }); keepers.push(kk);
+        const act = new Map([['sess-fa', { _browserKey: KEY_A, name: 'A', agentToken: 'vsst_' + 'a'.repeat(32) }], ['sess-fb', { _browserKey: KEY_B, name: 'B', agentToken: 'vsst_' + 'b'.repeat(32) }]]);
+        Rmod.setup({ keeper: kk, activeSessions: act, browserEnv: () => beB, notice: () => { }, persistPin: () => { }, tasksForSession: () => [], continueHandBack: () => { } });
+        const app = express(); app.use(express.json()); app.use(Rmod.router);
+        const srv = http.createServer(app); servers.push(srv); await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+        const base = `http://127.0.0.1:${srv.address().port}`;
+        const call = async (method, url, body, tok) => { const r = await fetch(base + url, { method, headers: { 'Content-Type': 'application/json', authorization: 'Bearer ' + tok }, body: JSON.stringify(body) }); let j = null; try { j = await r.json(); } catch { } return { status: r.status, body: j }; };
+        const tA = act.get('sess-fa').agentToken, tB = act.get('sess-fb').agentToken;
+        const p = kk.createProfile({ label: 'Note ' + tag }); const ns = 'vs-' + p.id;
+        const u1 = await call('POST', '/api/agent/browser/use', { profile: 'Note ' + tag }, tA); const u2 = await call('POST', '/api/agent/browser/use', { profile: 'Note ' + tag }, tB);
+        await kk.stop(p.id, { why: 'user' }); // the browser replaced: both leases marked, each rebinds at its next attach
+        slowFor.add(B.sessionNameFor(KEY_A)); const l0 = lines14.length;
+        const a1 = call('POST', '/api/agent/browser/use', { profile: 'Note ' + tag }, tA); await sleep14(300); // A's rebind is in its slow `tab`
+        const body = JSON.stringify({ profile: 'Note ' + tag }); // B's `use` queues behind it; its client dies before any answer
+        const req = http.request(base + '/api/agent/browser/use', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body), authorization: 'Bearer ' + tB } }, () => { }); req.on('error', () => { }); req.end(body); await sleep14(150); req.destroy();
+        const ra = await a1; await sleep14(1800); slowFor.clear();
+        const next = await call('POST', '/api/agent/browser/resolve', { argv: ['snapshot'] }, tB);
+        const again = await call('POST', '/api/agent/browser/resolve', { argv: ['snapshot'] }, tB);
+        const r = { use: [u1.status, u2.status], a1: ra.status, a1Note: !!(ra.body && ra.body.rebound), tabs: fakeTabs(ns).length, mark: !!kk._reg().tabClosed[`${p.id}|${KEY_B}`], next: next.status, nextNote: next.body && next.body.rebound ? next.body.rebound.text : null, againNote: !!(again.body && again.body.rebound), leaseNote: !!(B.findLease(kk._reg().leases, p.id, KEY_B) || {}).rebound, viewNote: (kk.list().leases || []).some((l) => l && l.rebound), waits: lines14.slice(l0).filter((l) => /a tab bind waits for the one in flight/.test(l)).length };
+        srv.close(); try { await kk.stop(p.id); } catch { /* none */ } kk.shutdown();
+        return r;
+      };
+      const r = await runF(R14, 'product');
+      ok(r.use.join() === '200,200' && r.a1 === 200 && r.a1Note && r.tabs === 2 && !r.mark && r.waits === 1 && r.next === 200 && /new tab was opened|previous run is gone|your tab was closed/.test(r.nextNote || '') && !r.againNote && !r.leaseNote && !r.viewNote, '⑭f THE ROUTES: a client gone before its answer was written (its rebind had queued; the wait said) is told at its NEXT command — once; the mark spent, the tab bound, the note never in a lease view', r);
+      const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
+      const noRestore = rsrc.replace(/^.*k\.restoreRebound\(.*$/gm, '    /* CONTROL: an undelivered answer is nobody\'s business */');
+      ok((rsrc.match(/k\.restoreRebound\(/g) || []).length === 2 && !/k\.restoreRebound\(/.test(noRestore), '⑭f control setup: the restore (the two routes that attach: use + resolve) is where the control cuts');
+      const c = await runF(M14.load('src/routes/browser.js', noRestore, 'no-restore-rebound'), 'control');
+      ok(c.next === 200 && !c.mark && c.nextNote === null, '⑭f CONTROL: a route that never puts an undelivered note back leaves the agent untold (the mark spent, no note at the next command — the reproduced shape) — the ⑭f leg catches it', c);
+      R14.setup({ keeper: keeperB, activeSessions: actB, browserEnv: () => beB, notice: () => { }, persistPin: () => { }, tasksForSession: () => [], continueHandBack: () => { } }); // the suite's routes back on their keeper
+    }
+  } catch (err) { ok(false, '⑭ the rebind legs threw', err && (err.stack || err.message)); }
+  // (g) VERIFY r4 (T1, the W2 rows of THE THIRD JUDGEMENT): userW's W2 through the REAL roll door — the new keeper's boot cannot adopt
+  // the old life (its daemon died with the pod) ⇒ every lease marked `life` (browser-keeper's adoptAll branch) ⇒ the first command
+  // binds the restored browser's only tab and says so once; the user's close ⇒ a new tab; two first commands at once ⇒ two tabs; an
+  // undelivered note rides once; a note whose tab was closed meanwhile is superseded (T2 ③). CONTROL: a keeper whose boot marks nothing.
+  const runW2 = async (Kmod, tag) => {
+    const D = path.join(ROOT, 'k14g-' + tag); fs.mkdirSync(D, { recursive: true });
+    const out = {}; let kk = mk14(Kmod, D);
+    const p = kk.createProfile({ label: 'W2 ' + tag }); const ns = 'vs-' + p.id;
+    await kk.attach({ profileId: p.id, browserKey: KEY_A, sessionId: 'sess-a' }); const t0 = fakeTabs(ns)[0].targetId;
+    const roll = async () => { await killDaemon(kk, p.id); kk.shutdown(); await sleep14(250); kk = mk14(Kmod, D); const l0 = lines14.length; await kk.boot(); return lines14.slice(l0).join('\n'); };
+    const closeTab = (key) => { const f = path.join(AB_STATE, ns + '.json'); const st = JSON.parse(fs.readFileSync(f, 'utf8')); const roots = (B.findLease(kk._reg().leases, p.id, key) || {}).tabRoots || []; st.tabs = st.tabs.filter((t) => !roots.includes(t.targetId)); fs.writeFileSync(f, JSON.stringify(st)); kk._reg().tabClosed[`${p.id}|${key}`] = Date.now(); kk._reg().tabLostWhy = { ...(kk._reg().tabLostWhy || {}), [`${p.id}|${key}`]: 'closed' }; return roots.length; };
+    out.bootSaid = await roll();
+    const a1 = await kk.attach({ profileId: p.id, browserKey: KEY_A, sessionId: 'sess-a' });
+    out.S19 = { how: a1.rebound && a1.rebound.how, why: a1.rebound && a1.rebound.why, note: a1.rebound && a1.rebound.text, tabs: fakeTabs(ns).length, newTarget: !!(a1.rebound && a1.rebound.targetId && a1.rebound.targetId !== t0), journal: lines14.slice(-6).join('\n') };
+    const a1b = await kk.attach({ profileId: p.id, browserKey: KEY_A, sessionId: 'sess-a' }); out.S19b = { rebound: a1b.rebound || null, tabs: fakeTabs(ns).length };
+    await kk.attach({ profileId: p.id, browserKey: KEY_B, sessionId: 'sess-b' }); await roll(); const n0 = fakeTabs(ns).length;
+    const [c1, c2] = await Promise.all([kk.attach({ profileId: p.id, browserKey: KEY_A, sessionId: 'sess-a' }), kk.attach({ profileId: p.id, browserKey: KEY_B, sessionId: 'sess-b' })]);
+    out.S21 = { hows: [c1.rebound && c1.rebound.how, c2.rebound && c2.rebound.how].sort().join(), distinct: !!(c1.rebound && c2.rebound && c1.rebound.targetId !== c2.rebound.targetId), tabs: fakeTabs(ns).length, n0 };
+    if (c1.rebound) kk.restoreRebound(p.id, KEY_A, c1.rebound);
+    const d1 = await kk.attach({ profileId: p.id, browserKey: KEY_A, sessionId: 'sess-a' }); const d2 = await kk.attach({ profileId: p.id, browserKey: KEY_A, sessionId: 'sess-a' });
+    out.S22 = { next: d1.rebound && d1.rebound.text, after: d2.rebound || null, expected: c1.rebound && c1.rebound.text };
+    { const n1 = fakeTabs(ns).length; const removed = closeTab(KEY_A); const a2 = await kk.attach({ profileId: p.id, browserKey: KEY_A, sessionId: 'sess-a' }); out.S20 = { removed, how: a2.rebound && a2.rebound.how, why: a2.rebound && a2.rebound.why, note: a2.rebound && a2.rebound.text, tabs: fakeTabs(ns).length, n1 }; }
+    { kk.restoreRebound(p.id, KEY_A, { how: 'switched', targetId: 'STALE', url: 'https://stale.example/', why: 'life', text: 'your tab from the previous run is gone — bound to https://stale.example/' }); closeTab(KEY_A); const a3 = await kk.attach({ profileId: p.id, browserKey: KEY_A, sessionId: 'sess-a' }); out.S30 = { note: (a3.rebound && a3.rebound.text) || '' }; }
+    try { await kk.stop(p.id, { why: 'user' }); } catch { } kk.shutdown(); return out;
+  };
+  { const w = await runW2(K, 'product');
+    ok(/could not adopt it \(a pod roll[\s\S]*1 lease\(s\) bind a tab again at their next command/.test(w.bootSaid) && w.S19.how === 'switched' && w.S19.why === 'life' && /your tab from the previous run is gone \(the browser was restarted\) — bound to about:blank/.test(w.S19.note || '') && w.S19.tabs === 1 && w.S19.newTarget && /bound to the browser's only tab about:blank/.test(w.S19.journal), '⑭g S19 (W2 through the REAL roll door): the boot cannot adopt the old life ⇒ marked; the first command binds the restored browser\'s only tab, says it once, no second blank tab', w.S19);
+    ok(w.S19b.rebound === null && w.S19b.tabs === 1, '⑭g S19b: the next command of the same session says nothing (the mark spent)', w.S19b);
+    ok(w.S21.hows === 'new,switched' && w.S21.distinct && w.S21.tabs === w.S21.n0 + 1, '⑭g S21 (r1 F3): two sessions\' first commands at once after a roll ⇒ distinct tabs, never one page for two', w.S21);
+    ok(w.S22.next === w.S22.expected && w.S22.after === null, '⑭g S22 (r3 F4): a note whose answer was not delivered rides to the next command, once', w.S22);
+    ok(w.S20.removed === 1 && w.S20.how === 'new' && w.S20.why === 'closed' && /your tab was closed[\s\S]*a new tab was opened and bound for/.test(w.S20.note || '') && w.S20.tabs === w.S20.n1, '⑭g S20 (W2 mid-run): the user closed the tab ⇒ a NEW tab bound (never another holder\'s), "your tab was closed"', w.S20);
+    ok(/your tab was closed[\s\S]*a new tab was opened/.test(w.S30.note) && !/stale\.example/.test(w.S30.note), '⑭g S30 (T2 ③): a restored note whose tab was closed meanwhile is SUPERSEDED by the rebind that follows — never "bound to" a gone tab', w.S30);
+  }
+  { const ksrcG = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+    const noBootMark = ksrcG.replace("        else tabsLost(rec.profileId, 'a boot that could not adopt it (a pod roll, a crash while VibeSpace was down)'); // lane profile-lock-roll (L2)", "        else { /* CONTROL: a boot that cannot adopt marks nothing */ }");
+    ok(noBootMark !== ksrcG, '⑭g control setup: the boot door\'s mark is where the control cuts');
+    const c = await runW2(M14.load('src/server/browser-keeper.js', noBootMark, 'no-boot-tabs-lost'), 'control');
+    ok(!/bind a tab again/.test(c.bootSaid) && !c.S19.how && c.S19.tabs === 1, '⑭g CONTROL (keeper): a boot that marks nothing leaves the first command on the previous life\'s target (userW\'s W2: tab_gone) — S19 catches it', { bootSaid: c.bootSaid.slice(0, 160), how: c.S19.how });
+  }
+  for (const r of copiesCensus(M14.files, M14.dir, REPO, { minCopies: 1, label: '⑭ ' })) ok(r.pass, r.name, r.detail);
 }
 
 console.log(`\n${fail ? '✗' : '✓'} test-browser-kept: ${pass} passed, ${fail} failed`);

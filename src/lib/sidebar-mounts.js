@@ -9,6 +9,7 @@ import { classifyPrivateKey } from '../ssh-key-format.js'; // shared with the se
 import { dialRowState, pairNameVerdict, pairNameShown, deviceIdOf, commandOsOf } from '../dial-facts.js'; // lane-pairing ③: THE one dial state of a machine row (PURE, bundled); verify-r4 F6: the name rule + its collision verdict
 import { dialAddressPicker, dialStateText, generateConsequenceText } from './dial-address-picker.js'; // lane-pairing ①③: the address choice + the state's words
 import { openExitAccessDialog, exitSummaryText, lastRunText } from './exit-access-dialog.js'; // lane-pairing ⑥: "Who can use it" 
+import { platformLabel } from '../exit-shell.js'; // lane-exit-run-output E1: the device's stated platform on its row (its shell follows it: Windows ⇒ cmd.exe)
 
 
 // 16x16 stroke icons (project convention — no emoji in chrome)
@@ -757,7 +758,10 @@ export function installSidebarMounts(Sidebar) {
       sub.className = 'mounts-path';
       sub.style.direction = 'ltr';
       if (isDial) {
-        sub.textContent = rs.state === 'connected' ? `${tr('dial-out device')} · ${dialWords}` : dialWords;
+        // lane-exit-run-output E1: the device's STATED platform (the hub keeps it from its dial headers) — a Windows
+        // machine runs an agent's command under cmd.exe, so the row says what it is
+        const plat = platformLabel(h.dial && h.dial.lastAccept && h.dial.lastAccept.platform);
+        sub.textContent = (rs.state === 'connected' ? `${tr('dial-out device')} · ${dialWords}` : dialWords) + (plat ? ` · ${plat}` : '');
         sub.title = dotTip;
         sub.classList.add('mounts-dial-state');
         sub.dataset.dialState = rs.state;
@@ -1820,7 +1824,8 @@ export function installSidebarMounts(Sidebar) {
         { key: 'token', label: tr('Google Drive access'), type: 'textarea', placeholder: tr('click "Connect Google Drive" below — no terminal needed'), when: is('drive'), hint: tr('Advanced: you can also paste the JSON from `rclone authorize "drive"` run elsewhere.') },
         { key: 'driveFolder', label: tr('Folder (optional, blank = whole Drive)'), placeholder: 'Projects/Data', when: is('drive') },
         { key: 'clientChoice', label: tr('OAuth client'), type: 'select', options: clientOpts, value: presets[0]?.key || '', when: is('drive'),
-          hint: presets.length ? tr('Pick the preset matching your Google account\'s organization; external accounts may see a one-time "unverified app" warning.') : tr("Advanced: your own Google Cloud OAuth client avoids rclone's shared quota.") },
+          // lane cluster-presets (P3): no company client is SAID, never just an absent option
+          hint: presets.length ? tr('Pick the preset matching your Google account\'s organization; external accounts may see a one-time "unverified app" warning.') : tr("No company OAuth client on this instance — ask your admin. Meanwhile the built-in client works, and your own avoids rclone's shared quota.") },
         { key: 'clientId', label: tr('Custom OAuth client ID'), placeholder: '….apps.googleusercontent.com', when: isDriveCustom },
         { key: 'clientSecret', label: tr('Custom OAuth client secret'), type: 'password', when: isDriveCustom },
         { key: 'driveMode', label: tr('Cloud-side scope'), type: 'select', when: is('drive'),
@@ -1831,7 +1836,7 @@ export function installSidebarMounts(Sidebar) {
           hint: tr('From the folder’s Drive URL. Mounts just that folder — the way to mount a single folder someone shared with you (keep scope = My Drive).') },
         // Gmail (emails sync into the mount folder as .eml files, read-only)
         { key: 'gmailClientChoice', label: tr('OAuth client'), type: 'select', options: clientOpts.filter(([v]) => v !== ''), value: presets[0]?.key || 'custom', when: is('gmail'),
-          hint: tr('Gmail has no built-in fallback client — pick a preset or provide your own. The client needs the gmail.readonly scope.') },
+          hint: presets.length ? tr('Gmail has no built-in fallback client — pick a preset or provide your own. The client needs the gmail.readonly scope.') : tr('No company OAuth client on this instance — ask your admin, or provide your own (it needs the gmail.readonly scope).') },
         { key: 'gmailClientId', label: tr('Custom OAuth client ID'), placeholder: '….apps.googleusercontent.com', when: (v) => v.type === 'gmail' && v.gmailClientChoice === 'custom' },
         { key: 'gmailClientSecret', label: tr('Custom OAuth client secret'), type: 'password', when: (v) => v.type === 'gmail' && v.gmailClientChoice === 'custom' },
         { key: 'gmailToken', label: tr('Gmail access'), type: 'textarea', placeholder: tr('click "Connect Gmail" below — no terminal needed'), when: is('gmail'),

@@ -2,6 +2,7 @@ import { marked } from 'marked';
 import { HexViewer } from './hex-viewer.js';
 import { CodeEditor } from './code-editor.js';
 import { formatSize, escHtml, showConfirmDialog, showInputDialog, showToast, uiScale } from './utils.js';
+import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 import { hasDedicatedViewer, getViewerType, getFileIcon } from './file-types.js';
 import { FILE_ICONS } from './icons.js';
 import { renderDocxViewer, showDocxRefusal } from './docx-viewer.js';
@@ -367,19 +368,15 @@ class FileViewer {
     let panX = 0, panY = 0, dragging = false, startX, startY;
     imgWrap.style.overflow = 'hidden';
     const applyPan = () => { img.style.translate = `${panX}px ${panY}px`; };
-    imgWrap.addEventListener('mousedown', (e) => {
-      if (e.button !== 0) return;
+    const panSignal = container?._viewerCtl?.signal;
+    // THE DOOR (verify r2 census): a pointer press captured on the picture; the one feed ends the pan on every end kind
+    imgWrap.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || e.isPrimary === false || dragging) return;
       dragging = true; startX = e.clientX - panX; startY = e.clientY - panY;
       imgWrap.style.cursor = 'grabbing';
-      e.preventDefault();
+      startPointerDrag(imgWrap, e, { onMove: (ev) => { panX = ev.clientX - startX; panY = ev.clientY - startY; applyPan(); }, onEnd: () => { dragging = false; imgWrap.style.cursor = 'grab'; }, signal: panSignal });
     });
-    const panSignal = container?._viewerCtl?.signal;
-    document.addEventListener('mousemove', (e) => {
-      if (!dragging) return;
-      panX = e.clientX - startX; panY = e.clientY - startY;
-      applyPan();
-    }, panSignal ? { signal: panSignal } : undefined);
-    document.addEventListener('mouseup', () => { dragging = false; imgWrap.style.cursor = 'grab'; }, panSignal ? { signal: panSignal } : undefined);
+    imgWrap.addEventListener('mousedown', (e) => { if (e.button === 0) e.preventDefault(); }); // the compat press: no image drag, no selection
     imgWrap.style.cursor = 'grab';
 
     // Reset pan on fit
@@ -539,14 +536,13 @@ class FileViewer {
     // Sidebar resize handle (hover highlight via CSS :hover; width stays inline — user-dragged)
     const sidebarHandle = document.createElement('div');
     sidebarHandle.className = 'pptx-sidebar-handle';
-    sidebarHandle.addEventListener('mousedown', (e) => {
-      e.preventDefault();
+    sidebarHandle.addEventListener('pointerdown', (e) => { // THE DOOR (verify r2 census): captured on the handle, fed by the one feed
+      if (e.button !== 0 || e.isPrimary === false) return;
       const startX = e.clientX, startW = sidebar.offsetWidth;
       const onMove = (ev) => { sidebar.style.width = Math.max(120, Math.min(400, startW + (ev.clientX - startX) / uiScale())) + 'px'; if (viewer._resizeThumbs) viewer._resizeThumbs(); };
-      const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
+      startPointerDrag(sidebarHandle, e, { onMove, onEnd: () => {} });
     });
+    sidebarHandle.addEventListener('mousedown', (e) => { if (e.button === 0) e.preventDefault(); }); // the compat press: no selection
 
     const main = document.createElement('div');
     main.className = 'pptx-main';

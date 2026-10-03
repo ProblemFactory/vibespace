@@ -250,7 +250,7 @@ ln -sfn "$ROOT/$VER" "$ROOT/current"
 # unreachable · 13 not a VibeSpace dial endpoint · 14 refused by the server · 15 other). --no-check skips it.
 if [ -n "$DIAL_URL" ] && [ -z "$NO_CHECK" ]; then
   DHOST=$(printf '%s' "$DIAL_URL" | sed -E 's|^[a-z]+://([^/?]+).*|\1|')
-  echo "→ checking that this device can dial $DHOST…"
+  echo "→ checking that this device can dial ${DHOST}…"
   set +e
   CHECK_OUT=$(VIBESPACE_DIAL_TOKEN="$DIAL_TOKEN" VIBESPACE_DEVICE_ROOT="$ROOT" VIBESPACE_AGENTD_ROOT="$ROOT" "$NODE_BIN" "$ROOT/current/vibespace-device.js" --dial-check "$DIAL_URL" 2>&1)
   CHECK_RC=$?

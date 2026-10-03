@@ -120,7 +120,7 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   ok(ar.includes('cardText: text'), 'msg/send passes the RAW body as the card text');
   // channel-jump verify r5: the four drain sites are TWO helpers (drainStashUnderCap / drainNotifsUnderCap — the drains fit
   // the inline cap or wait), each the ONE card writer for its store, each called from both hook routes
-  ok(/function drainStashUnderCap[\s\S]{0,2600}?deliver\.emitPeerCard\(cid, \{ fromName: e\.fromName \|\| null, text: e\.text, kind: stashKindOf\(e\) \}\)/.test(ar) && /function drainNotifsUnderCap[\s\S]{0,1500}?deliver\.emitPeerCard\(cid, \{ fromName: 'Background Work · '/.test(ar)
+  ok(/function drainStashUnderCap[\s\S]{0,3400}?deliver\.emitPeerCard\(cid, \{ fromName: e\.fromName \|\| null, text: e\.text, kind: stashKindOf\(e\) \}\)/.test(ar) && /function drainNotifsUnderCap[\s\S]{0,2600}?deliver\.emitPeerCard\(cid, \{ fromName: 'Background Work · '/.test(ar)
     && ar.split('= drainStashUnderCap(deliver, ').length === 3 && ar.split('= drainNotifsUnderCap(jm, deliver, ').length === 3,
     'all four stash-drain sites (msg ×2 + jobs ×2) render cards for drained messages — through the two fit-or-wait helpers, each called by task-context AND prompt-context (verify r5)');
   ok(read('src/jobs.js').includes("fromName: 'Background Work · '"), 'jobs owner-notify labels its card');

@@ -42,10 +42,14 @@ import { btn, el as chromeEl, icon as chromeIcon } from './channel-chrome.js';
 import { createBackendIcon } from './agent-meta.js';
 import { whoChips, foldChips, CHIPS_WIDE, CHIPS_NARROW } from './browser-who-model.js';
 import { openWhoDialog, nameHelpers } from './browser-who-dialog.js';
+import { openNewProfileDialog } from './browser-new-profile.js'; // lane browser-admin: the panel's New profile…
+import { openBuildDialog } from './browser-build-dialog.js'; // lane browser-admin 2a: a row's Change build…
+import { cardBuildLine } from './browser-build-model.js'; // lane browser-admin 2a: the row's Chrome build line (PURE words)
+import { cliRowWords, cliOfferLabel, cliConfirmWords, cliOutcomeWords } from './browser-cli-model.js'; // lane browser-admin 2b: the Browser CLI row
 import { UI_ICONS } from './icons.js';
 import { memoryText } from '../runaway-guard.js';
 import { stuckWords } from '../browser-stuck.js'; // lane browser-stuck: a profile row whose page waits on a dialog / does not respond
-import { frameUrl, bytesText, traceSummary, timelineLabel, positionText, overlayGeometry, traceWindowFor, unionWindow, assignEntriesToWindows, armGapFor, EPHEMERAL_SCOPE, TRACE_BYTES_PER_PROFILE } from '../browser-trace.js';
+import { frameUrl, bytesText, traceSummary, timelineLabel, positionText, overlayGeometry, traceWindowFor, unionWindow, assignEntriesToWindows, armGapFor, EPHEMERAL_SCOPE, TRACE_BYTES_PER_PROFILE, foldFits, visibleEntries, isFitEntry, fitCount } from '../browser-trace.js'; // lane trace-fits: the page-size fold
 import { sessionOfEntry, sessionOrdinals } from '../browser-sessions.js'; // 2026-09-27: the live view's session dividers + Sessions list (PURE)
 import { humanStateLine, humanRefusalText } from '../browser-human.js'; // BROWSE YOURSELF (B-6ae8): the row's "You are browsing it" line (PURE)
 import { dividerText, sessionRowText, sessionReplays, retentionText, sizeText } from './browser-session-words.js'; // the words every session surface shares
@@ -96,25 +100,58 @@ export function retentionSentence(limitBytes = null) {
   return retentionText(Number(limitBytes) > 0 ? Number(limitBytes) : knownLimit);
 }
 
+// ── lane trace-fits (2026-10-01): THE PAGE-SIZE FOLD every surface draws ──
+// The owner: every resize / move of the live view re-fits the page and was a row of its own — the Actions list was all
+// "view fit". The recorder already folds a storm into one entry (src/browser-trace.js F1); here CONSECUTIVE fit entries
+// fold into ONE dim row (PURE `foldFits`), the counts say agent actions with the fits beside, and ONE per-device
+// preference (this toggle, localStorage, default OFF) expands them wherever a list is drawn.
+const SHOW_FITS_KEY = 'vibespace.browserTrace.showFits';
+export function showFitsPref() { try { return localStorage.getItem(SHOW_FITS_KEY) === '1'; } catch { return false; } }
+export function setShowFitsPref(on) { try { if (on) localStorage.setItem(SHOW_FITS_KEY, '1'); else localStorage.removeItem(SHOW_FITS_KEY); } catch { /* a device without storage keeps the default */ } }
+/** The toggle — a <label> wrapping its checkbox (a named control); `onChange(on)` runs after the preference is written. */
+export function fitsToggle({ onChange = null } = {}) {
+  const lab = el('label', 'browser-trace-fits-toggle');
+  const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = showFitsPref();
+  lab.title = t('Every resize or move of the live view fits the page to it and is recorded. Off: consecutive page-size changes are one dim row. On: each is its own row with its frames.');
+  cb.onchange = () => { setShowFitsPref(cb.checked); onChange && onChange(cb.checked); };
+  lab.append(cb, document.createTextNode(' ' + t('Show page-size changes')));
+  return { el: lab, input: cb, sync: () => { cb.checked = showFitsPref(); } };
+}
+/** The fold row's words: "Live view fitted ×N · 1072×907 (last)". */
+export function fitRowText(row) {
+  const size = positionText(row && row.last && row.last.position) || '';
+  return row && row.n > 1 ? t('Live view fitted ×{n} · {size} (last)', { n: row.n, size }) : t('Live view fitted · {size}', { size });
+}
+export function fitRowTitle(row) { return t('{n} page-size change(s) between {from} and {to} — the live view was resized or moved and the page fitted to it; click for the last one.', { n: row ? row.n : 0, from: clockText(row ? row.at : 0), to: clockText(row ? row.lastAt : 0) }); }
+/** The count line: "N action(s)[ · M failed][ · K page-size change(s)]" — fits beside, never in N. */
+export function countText(s) {
+  const base = s.n ? t('{n} action(s)', { n: s.n }) + (s.failed ? ' · ' + t('{n} failed', { n: s.failed }) : '') : '';
+  const fits = s.fits ? t('{n} page-size change(s)', { n: s.fits }) : '';
+  return base && fits ? base + ' · ' + fits : base || fits;
+}
+
 // ── the thumbnail strip ──
-/** A strip of after-frame thumbnails (the before-frame when nothing repainted, or when the action failed before anything could). */
-export function renderTraceStrip(container, entries, { onOpen = null, max = STRIP_MAX } = {}) {
+/** A strip of after-frame thumbnails (the before-frame when nothing repainted, or when the action failed before anything
+ *  could); a run of page-size changes is ONE dim thumb (its last frame, "×N") unless the toggle expands them. */
+export function renderTraceStrip(container, entries, { onOpen = null, max = STRIP_MAX, expand = showFitsPref() } = {}) {
   container.replaceChildren();
-  const list = (entries || []).filter(Boolean);
-  const shown = list.slice(Math.max(0, list.length - max));
-  for (const e of shown) {
-    const b = el('button', 'browser-trace-thumb' + (e.ok === false ? ' failed' : ''));
+  const rows = foldFits((entries || []).filter(Boolean), { expand });
+  const list = visibleEntries(rows);
+  const shown = rows.slice(Math.max(0, rows.length - max));
+  for (const r of shown) {
+    const e = r.kind === 'fits' ? r.last : r.entry;
+    const b = el('button', 'browser-trace-thumb' + (e.ok === false ? ' failed' : '') + (r.kind === 'fits' || r.fit ? ' fits' : ''));
     b.type = 'button';
     b.dataset.traceId = e.id;
-    b.title = `${clockText(e.at)} · ${timelineLabel(e)} · ${statusText(e)}`;
+    b.title = r.kind === 'fits' ? fitRowTitle(r) : `${clockText(e.at)} · ${timelineLabel(e)} · ${statusText(e)}`;
     const which = e.after ? 'after' : (e.before ? 'before' : null);
-    if (which) { const img = el('img', 'browser-trace-thumb-img'); img.alt = ''; img.loading = 'lazy'; img.draggable = false; img.src = frameUrl(e.id, which); b.appendChild(img); }
+    if (which) { const img = el('img', 'browser-trace-thumb-img'); img.alt = ''; img.loading = 'lazy'; img.draggable = false; img.src = frameUrl(e.id, which) + (isFitEntry(e) && e.n > 1 ? `?v=${e.n}` : ''); b.appendChild(img); }
     else b.appendChild(el('span', 'browser-trace-thumb-empty', t('no frame')));
-    b.appendChild(el('span', 'browser-trace-thumb-label', String(e.action || '?')));
+    b.appendChild(el('span', 'browser-trace-thumb-label', r.kind === 'fits' ? (r.n > 1 ? `×${r.n}` : t('page size')) : String(e.action || '?')));
     b.onclick = (ev) => { ev.stopPropagation(); onOpen && onOpen(e, list); };
     container.appendChild(b);
   }
-  if (list.length > shown.length) { const more = el('span', 'browser-trace-thumb-more', t('+{n} earlier', { n: list.length - shown.length })); container.appendChild(more); }
+  if (rows.length > shown.length) { const more = el('span', 'browser-trace-thumb-more', t('+{n} earlier', { n: rows.length - shown.length })); container.appendChild(more); }
   return shown.length;
 }
 
@@ -265,7 +302,7 @@ export function createCardTraceLoader(view) {
     const s = traceSummary(entries);
     if (sum) {
       if (error) sum.textContent = t('trace unavailable: {why}', { why: String(error) });
-      else if (s.n) sum.textContent = t('{n} action(s)', { n: s.n }) + (s.failed ? ' · ' + t('{n} failed', { n: s.failed }) : '');
+      else if (s.n || s.fits) sum.textContent = countText(s); // lane trace-fits: agent actions, the page-size changes beside
       else if (off) sum.textContent = t('action trace is off (Settings → Agent browser)');
       else if (unknown) sum.textContent = t('no conversation id to look up');
       // r2 L5: the recorder could not tap this browser — its actions in [at, until] were NOT recorded, and that is said
@@ -274,7 +311,7 @@ export function createCardTraceLoader(view) {
       else sum.textContent = h.closest('.chat-msg')?.querySelector('.chat-tool-output-pending') ? t('waiting for actions…') : t('no recorded actions in this call');
       sum.classList.toggle('empty', !s.n);
     }
-    if (strip) { const n = renderTraceStrip(strip, entries, { onOpen: (e, list) => openTraceEntryDialog(view.app, e, list) }); strip.style.display = n ? '' : 'none'; }
+    if (strip) { const n = renderTraceStrip(strip, entries, { expand: showFitsPref(), onOpen: (e, list) => openTraceEntryDialog(view.app, e, list) }); strip.style.display = n ? '' : 'none'; }
     if (h.dataset.traceOpen === '1') renderList(h);
   }
   function renderList(h) {
@@ -282,8 +319,23 @@ export function createCardTraceLoader(view) {
     list.replaceChildren();
     const entries = h._traceEntries || [];
     if (!entries.length) { list.appendChild(el('div', 'chat-status-dim', h.dataset.traceUntraced === '1' ? t('Actions are recorded only for browsers VibeSpace started (profiles) — this call drove a browser of its own.') : t('No actions were recorded in this call.'))); return; }
-    for (const e of entries) {
-      const row = el('div', 'browser-trace-row' + (e.ok === false ? ' failed' : ''));
+    // lane trace-fits: consecutive page-size changes are ONE dim row (the toggle in the live view's Actions pane expands them)
+    const rows = foldFits(entries, { expand: showFitsPref() });
+    const open = visibleEntries(rows);
+    for (const r of rows) {
+      if (r.kind === 'fits') {
+        const fr = el('button', 'browser-trace-row fits chat-status-dim'); fr.type = 'button'; fr.dataset.traceId = r.id; fr.dataset.fits = String(r.n);
+        const top = el('div', 'browser-trace-row-top');
+        top.appendChild(el('span', 'browser-trace-row-time', clockText(r.at) + (r.n > 1 ? '–' + clockText(r.lastAt) : '')));
+        top.appendChild(el('span', 'browser-trace-row-fits', fitRowText(r)));
+        fr.appendChild(top);
+        fr.title = fitRowTitle(r);
+        fr.onclick = (ev) => { ev.stopPropagation(); openTraceEntryDialog(view.app, r.last, open); };
+        list.appendChild(fr);
+        continue;
+      }
+      const e = r.entry;
+      const row = el('div', 'browser-trace-row' + (e.ok === false ? ' failed' : '') + (r.fit ? ' fits' : ''));
       const top = el('div', 'browser-trace-row-top');
       top.appendChild(el('span', 'browser-trace-row-time', clockText(e.at)));
       top.appendChild(el('code', 'browser-trace-row-cmd', String(e.text || e.action || '')));
@@ -295,7 +347,7 @@ export function createCardTraceLoader(view) {
         if (e[which]) { const img = el('img', 'browser-trace-thumb-img'); img.alt = ''; img.loading = 'lazy'; img.draggable = false; img.src = frameUrl(e.id, which); b.appendChild(img); }
         else b.appendChild(el('span', 'browser-trace-thumb-empty', t('no frame')));
         b.appendChild(el('span', 'browser-trace-thumb-label', which === 'before' ? t('before') : (e.afterSame ? t('after (same)') : t('after'))));
-        b.onclick = (ev) => { ev.stopPropagation(); openTraceEntryDialog(view.app, e, entries); };
+        b.onclick = (ev) => { ev.stopPropagation(); openTraceEntryDialog(view.app, e, open); };
         pics.appendChild(b);
       }
       row.append(top, pos, pics);
@@ -360,50 +412,84 @@ export function createTraceTimeline(app, { sessionId, browserKey: ownKey = null 
   sessBox.style.display = 'none';
   const head = el('div', 'browser-live-trace-head');
   const count = el('span', 'browser-live-trace-count', '');
-  head.appendChild(count);
+  // lane trace-fits: the toggle expands the folded page-size changes (shown once there are any)
+  const toggle = fitsToggle({ onChange: () => { st.showFits = showFitsPref(); renderList(); renderHead(); } });
+  toggle.el.style.display = 'none';
+  head.append(count, toggle.el);
   const listEl = el('div', 'browser-live-trace-list');
   const empty = el('div', 'browser-live-trace-empty chat-status-dim', t('No actions yet — every agent action lands here with its before / after frames.'));
   root.append(sessBox, head, listEl, empty);
-  const st = { entries: [], ids: new Set(), scope: undefined, off: false, loading: false, error: null, sessions: [], ordinals: new Map(), browserKey: ownKey || null, lastSid: undefined, sessTimer: null, rows: new Map(), sessRows: new Map() };
+  const st = { entries: [], ids: new Set(), scope: undefined, off: false, loading: false, error: null, sessions: [], ordinals: new Map(), browserKey: ownKey || null, lastSid: undefined, sessTimer: null, rows: new Map(), sessRows: new Map(), folds: new Map(), divs: new Map(), showFits: showFitsPref() };
   function scopeQuery() { if (st.scope === undefined) return ''; return st.scope === null ? EPHEMERAL_SCOPE : String(st.scope); }
+  const agentCount = () => st.entries.filter((e) => !isFitEntry(e)).length;
+  const fitTotal = () => st.entries.reduce((n, e) => n + fitCount(e), 0);
   function renderHead() {
+    const fits = fitTotal();
     if (st.error) count.textContent = t('trace unavailable: {why}', { why: String(st.error) });
     else if (st.off) count.textContent = t('action trace is off (Settings → Agent browser)');
-    else count.textContent = t('{n} action(s)', { n: st.entries.length }) + ' · ' + t('newest last');
+    else count.textContent = countText({ n: agentCount(), failed: 0, fits }) + ' · ' + t('newest last');
+    toggle.el.style.display = fits && !st.error ? '' : 'none';
+    toggle.sync();
     empty.style.display = st.entries.length || st.off || st.error ? 'none' : '';
   }
+  const openList = () => visibleEntries(foldFits(st.entries, { expand: st.showFits }));
   function rowFor(e) {
-    const row = el('button', 'browser-live-trace-row' + (e.ok === false ? ' failed' : '')); row.type = 'button'; row.dataset.traceId = e.id;
+    const row = el('button', 'browser-live-trace-row' + (e.ok === false ? ' failed' : '') + (isFitEntry(e) ? ' fits' : '')); row.type = 'button'; row.dataset.traceId = e.id;
     const which = e.after ? 'after' : (e.before ? 'before' : null);
     const thumb = el('span', 'browser-live-trace-thumb');
-    if (which) { const img = el('img', 'browser-trace-thumb-img'); img.alt = ''; img.loading = 'lazy'; img.draggable = false; img.src = frameUrl(e.id, which); thumb.appendChild(img); }
+    if (which) { const img = el('img', 'browser-trace-thumb-img'); img.alt = ''; img.loading = 'lazy'; img.draggable = false; img.src = frameUrl(e.id, which) + (isFitEntry(e) && e.n > 1 ? `?v=${e.n}` : ''); thumb.appendChild(img); }
     const text = el('span', 'browser-live-trace-text');
     text.appendChild(el('span', 'browser-live-trace-time', clockText(e.at)));
-    text.appendChild(el('span', 'browser-live-trace-label', timelineLabel(e)));
+    text.appendChild(el('span', 'browser-live-trace-label', timelineLabel(e) + (isFitEntry(e) && e.n > 1 ? ` ×${e.n}` : ''))); // a coalesced fit, expanded, says how many it stands for
     text.appendChild(el('span', 'browser-live-trace-status', statusText(e)));
     row.append(thumb, text);
     row.title = String(e.text || '');
-    row.onclick = () => openTraceEntryDialog(app, e, st.entries);
+    row.onclick = () => openTraceEntryDialog(app, e, openList());
     return row;
+  }
+  /** lane trace-fits: ONE dim row per run of page-size changes, keyed by its first fit and patched in place. */
+  function foldRow(r) {
+    let node = st.folds.get(r.id);
+    if (!node) { node = el('button', 'browser-live-trace-row fits fold chat-status-dim'); node.type = 'button'; node.dataset.traceId = r.id; st.folds.set(r.id, node); }
+    const sig = JSON.stringify([r.n, r.lastAt, r.last.id, positionText(r.last.position), r.failed]);
+    if (node.dataset.sig !== sig) {
+      node.dataset.sig = sig; node.dataset.fits = String(r.n);
+      const e = r.last;
+      const which = e.after ? 'after' : (e.before ? 'before' : null);
+      const thumb = el('span', 'browser-live-trace-thumb');
+      if (which) { const img = el('img', 'browser-trace-thumb-img'); img.alt = ''; img.loading = 'lazy'; img.draggable = false; img.src = frameUrl(e.id, which) + (e.n > 1 ? `?v=${e.n}` : ''); thumb.appendChild(img); }
+      const text = el('span', 'browser-live-trace-text');
+      text.appendChild(el('span', 'browser-live-trace-time', clockText(r.at) + (r.n > 1 ? '–' + clockText(r.lastAt) : '')));
+      text.appendChild(el('span', 'browser-live-trace-label', fitRowText(r)));
+      node.replaceChildren(thumb, text);
+      node.title = fitRowTitle(r);
+      node.onclick = () => openTraceEntryDialog(app, r.last, openList());
+    }
+    return node;
   }
   /** The session an entry belongs to (its tag, else the implicit session of a pre-session record). */
   const sidOf = (e) => sessionOfEntry(e, st.sessions);
   function dividerFor(sid) {
     const s = st.sessions.find((x) => x.id === sid) || null;
-    const d = el('div', 'browser-live-trace-divider', s ? dividerText(st.ordinals.get(sid) || 1, s.startAt) : t('Session {k} · started {time}', { k: st.ordinals.size + 1, time: '…' }));
-    d.dataset.session = sid || '';
+    const words = s ? dividerText(st.ordinals.get(sid) || 1, s.startAt) : t('Session {k} · started {time}', { k: st.ordinals.size + 1, time: '…' });
+    let d = st.divs.get(sid || '');
+    if (!d) { d = el('div', 'browser-live-trace-divider'); d.dataset.session = sid || ''; st.divs.set(sid || '', d); }
+    if (d.textContent !== words) d.textContent = words;
     return d;
   }
-  /** Rebuild the list from the entries, the SAME row nodes kept (keyed by id), a divider where a session begins. */
+  /** Rebuild the list from the entries, the SAME row nodes kept (keyed by id), a divider where a session begins;
+   *  consecutive page-size changes are ONE dim row unless the toggle expands them (lane trace-fits). */
   function renderList() {
     const nodes = [];
     let prev;
-    for (const e of st.entries) {
-      const sid = sidOf(e);
+    for (const r of foldFits(st.entries, { expand: st.showFits })) {
+      const first = r.kind === 'fits' ? r.entries[0] : r.entry;
+      const sid = sidOf(first);
       if (sid !== prev && sid) nodes.push(dividerFor(sid));
       prev = sid;
-      let r = st.rows.get(e.id); if (!r) { r = rowFor(e); st.rows.set(e.id, r); }
-      nodes.push(r);
+      if (r.kind === 'fits') { nodes.push(foldRow(r)); continue; }
+      let n = st.rows.get(r.entry.id); if (!n) { n = rowFor(r.entry); st.rows.set(r.entry.id, n); }
+      nodes.push(n);
     }
     st.lastSid = prev;
     listEl.replaceChildren(...nodes);
@@ -447,19 +533,21 @@ export function createTraceTimeline(app, { sessionId, browserKey: ownKey = null 
     st.ordinals = sessionOrdinals(st.sessions);
     renderSessions(); renderList();
   }
-  function push(entry) {
-    if (!entry || !entry.id || st.ids.has(entry.id)) return false;
-    st.ids.add(entry.id); st.entries.push(entry);
+  /** A new entry (or, lane trace-fits, a REPLACED fit row under its run's id — patched in place); `render: false` while
+   *  a load seeds many at once. */
+  function push(entry, { render = true } = {}) {
+    if (!entry || !entry.id) return false;
+    if (st.ids.has(entry.id)) {
+      const i = st.entries.findIndex((e) => e.id === entry.id);
+      if (i < 0) return false;
+      st.entries[i] = entry; st.rows.delete(entry.id);
+    } else { st.ids.add(entry.id); st.entries.push(entry); }
     const sid = sidOf(entry);
-    if (sid && sid !== st.lastSid) { listEl.appendChild(dividerFor(sid)); st.lastSid = sid; }
     if (sid && !st.sessions.some((x) => x.id === sid)) onSessions(); // a session the list has not heard of yet — re-read it
-    const r = rowFor(entry); st.rows.set(entry.id, r);
-    listEl.appendChild(r);
-    renderHead();
-    listEl.scrollTop = listEl.scrollHeight;
+    if (render) { renderList(); renderHead(); listEl.scrollTop = listEl.scrollHeight; }
     return true;
   }
-  function clear() { st.entries = []; st.ids = new Set(); st.rows = new Map(); st.lastSid = undefined; listEl.replaceChildren(); st.error = null; st.sessions = []; st.ordinals = new Map(); st.sessRows = new Map(); sessList.replaceChildren(); sessBox.style.display = 'none'; renderHead(); }
+  function clear() { st.entries = []; st.ids = new Set(); st.rows = new Map(); st.folds = new Map(); st.divs = new Map(); st.lastSid = undefined; listEl.replaceChildren(); st.error = null; st.sessions = []; st.ordinals = new Map(); st.sessRows = new Map(); sessList.replaceChildren(); sessBox.style.display = 'none'; renderHead(); }
   /** A session started or ended on this conversation's browser: re-read the list (debounced). */
   function onSessions() { if (st.sessTimer) clearTimeout(st.sessTimer); st.sessTimer = setTimeout(() => { st.sessTimer = null; loadSessions(); }, 500); }
   /** Seed (or re-seed after a reconnect — same scope keeps what it has, `push` dedups; a pane switch clears first). */
@@ -474,12 +562,14 @@ export function createTraceTimeline(app, { sessionId, browserKey: ownKey = null 
     if (!r || r.error) { st.error = (r && r.error) || t('server unreachable'); renderHead(); return; }
     st.off = r.traceOn === false;
     if (r.browserKey) st.browserKey = r.browserKey;
-    for (const e of r.entries || []) push(e);
+    for (const e of r.entries || []) push(e, { render: false });
     renderList();
     renderHead();
+    listEl.scrollTop = listEl.scrollHeight;
   }
   renderHead();
-  return { el: root, load, push, clear, onSessions, count: () => st.entries.length, sessionsCount: () => st.sessions.length, browserKey: () => st.browserKey, state: () => ({ n: st.entries.length, off: st.off, error: st.error, scope: st.scope, sessions: st.sessions.length, dividers: listEl.querySelectorAll('.browser-live-trace-divider').length }) };
+  // lane trace-fits: `count()` = the agent's actions (the window's "Actions (N)"); the fits are `fits()`
+  return { el: root, load, push, clear, onSessions, count: () => st.entries.filter((e) => !isFitEntry(e)).length, fits: fitTotal, sessionsCount: () => st.sessions.length, browserKey: () => st.browserKey, state: () => ({ n: agentCount(), entries: st.entries.length, fits: fitTotal(), folds: listEl.querySelectorAll('.browser-live-trace-row.fold').length, fitRows: listEl.querySelectorAll('.browser-live-trace-row.fits:not(.fold)').length, showFits: st.showFits, off: st.off, error: st.error, scope: st.scope, sessions: st.sessions.length, dividers: listEl.querySelectorAll('.browser-live-trace-divider').length }) };
 }
 
 // ── THE BROWSER PROFILES PANEL (§6.4 / §8 step 3 / D7 / D8) ──
@@ -624,17 +714,32 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
   const rowsById = new Map();   // profileId → { row, sig }
   const whoCellFor = (id) => { let c = whoCells.get(id); if (!c) { c = whoCell(app, { onChange: () => load() }); whoCells.set(id, c); } return c; };
   /** What a profile row draws OTHER than its list — equal ⇒ the row element is kept (its who cell patched). */
-  const rowSig = (r, v) => { const { use, ...rest } = r || {}; return JSON.stringify([rest, app.browserChipFor ? app.browserChipFor(r.id) : null, v?.limits?.recordingFloor || null, st.busy, pageStuckOf(r.id), autoDialogsOf(r)]); }; // lane browser-stuck: the page's state is part of what the row prints (+ verify r1 A6: its dialog mode)
+  // lane browser-admin: the row's AGE enters the signature as the words it prints (rowWhyText — minutes / hours), never the
+  // raw `ageMs`, which moves every millisecond and rebuilt every row on every load (the keyed reuse never held: a click
+  // across a load hit a detached node; the heavy UI suite caught it keeping the row a New profile… create must leave alone)
+  const rowSig = (r, v) => { const { use, ageMs, ...rest } = r || {}; return JSON.stringify([rest, rowWhyText(r), app.browserChipFor ? app.browserChipFor(r.id) : null, v?.limits?.recordingFloor || null, st.busy, pageStuckOf(r.id), autoDialogsOf(r), runningBuildOf(r.id)]); }; // lane browser-admin 2a: + the build its browser reports // lane browser-stuck: the page's state is part of what the row prints (+ verify r1 A6: its dialog mode)
   const root = el('div', 'bprof');
   const bar = el('div', 'bprof-bar');
   const summary = el('span', 'bprof-summary', t('Loading…'));
   const spacer = el('span'); spacer.style.flex = '1';
   const sweepBtn = el('button', 'file-tool-btn bprof-btn', t('Sweep now')); sweepBtn.title = t('Apply the size limit now: over it, the oldest sessions\' frames are removed and every action list stays; recordings keep their own limit — profiles are never touched');
   const refreshBtn = el('button', 'file-tool-btn bprof-btn', '⟳'); refreshBtn.title = t('Refresh');
-  bar.append(summary, spacer, sweepBtn, refreshBtn);
+  // lane browser-admin: THE create a person can reach without a conversation (the owner: "不能手动创建profile") — the
+  // New profile… dialog (name · browser · machine · build · who can use it); the new row appears in place and is focused
+  const newBtn = el('button', 'file-tool-btn bprof-btn bprof-new', t('New profile…'));
+  newBtn.title = t('Create a profile: its name, which browser, the computer it runs on and who can use it');
+  newBtn.onclick = () => openNewProfileDialog(app, { onCreated: (p) => { if (p && p.id) st.focus = p.id; load(); } });
+  bar.append(summary, spacer, newBtn, sweepBtn, refreshBtn);
   const hint = el('div', 'bprof-hint chat-status-dim');
+  // lane browser-admin 2b: THE BROWSER CLI ROW — which agent-browser VibeSpace drives (the measured version, the one on
+  // PATH, drift) and its ONE act; a keyed line, patched in place (its own fetch, GET /api/browser/cli)
+  const cliRow = el('div', 'bprof-cli');
+  const cliText = el('span', 'bprof-cli-text');
+  const cliBtn = el('button', 'file-tool-btn bprof-btn bprof-cli-btn', '');
+  cliRow.append(cliText, cliBtn);
+  cliRow.style.display = 'none';
   const body = el('div', 'bprof-body');
-  root.append(bar, hint, body);
+  root.append(bar, cliRow, hint, body);
   winInfo.content.appendChild(root);
 
   const section = (title, sub) => { const s = el('div', 'bprof-section'); const h = el('div', 'bprof-section-head'); h.appendChild(el('span', 'bprof-section-title', title)); if (sub) h.appendChild(el('span', 'bprof-section-sub chat-status-dim', sub)); s.appendChild(h); body.appendChild(s); return s; };
@@ -645,6 +750,13 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
   // lane headless-fallback: the launch's DISPLAY FACT under the state (no desktop session ⇒ headless; the window is back)
   const displayLine = (host, fact) => { const txt = displayFactText(fact); if (!txt) return; const s = el('span', 'bprof-display', txt); s.title = txt; host.appendChild(s); };
 
+  /** lane trace-fits: the live view's own page-size frames, beside the row's {used} of {size} (they go first in a sweep). */
+  const fitsLine = (host, tr) => {
+    if (!(Number(tr && tr.fitBytes) > 0)) return;
+    const fl = el('span', 'bprof-trace-fits chat-status-dim', t('page-size frames: {size}', { size: bytesText(Number(tr.fitBytes) || 0) }));
+    fl.title = t('{n} page-size change(s)', { n: Number(tr.fits) || 0 }) + ' — ' + t('Every resize or move of the live view fits the page to it and is recorded. Off: consecutive page-size changes are one dim row. On: each is its own row with its frames.');
+    host.appendChild(fl);
+  };
   function renderHint(v) {
     // 2026-09-27: by SIZE only (the setting, 1 GB by default) — the recordings keep their own days / MB bound
     const size = sizeText(v?.limits?.bytesPerProfile || TRACE_BYTES_PER_PROFILE);
@@ -660,6 +772,8 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     summary.textContent = t('{n} profile(s) · {size} on disk · {traces} traced action(s) · {recs} recording(s)', { n: rows.length, size: bytesText(bytes), traces, recs }) + (v?.orphans?.length ? ' · ' + t('{n} unregistered director(ies)', { n: v.orphans.length }) : '');
     summary.title = summary.textContent; // a narrow window ellipsizes the line; the whole of it is here (a phone wraps it — style.css)
   }
+  /** lane browser-admin 2a: the build a profile's browser REPORTS (the digest's browser record — the fact, not the choice). */
+  function runningBuildOf(id) { const b = app._browserProfiles && app._browserProfiles.browsers ? app._browserProfiles.browsers[id] : null; return b && typeof b.runningBuild === 'string' ? b.runningBuild : null; }
   /** lane browser-stuck: the digest's `pageStuck` row fact (a dialog holds its page / it does not respond). */
   function pageStuckOf(id) { const m = app._browserProfiles && app._browserProfiles.pageStuck; return m && typeof m === 'object' && m[id] && typeof m[id] === 'object' ? m[id] : null; }
   /** verify r1 A6: a running local browser launched BEFORE the lane (its record carries no `holdDialogs` launch stamp) still
@@ -674,6 +788,12 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     // now means WHO MAY USE it — the switch below — so the isolation chip says what it is)
     if (r.mediated) { const c = el('span', 'bprof-chip', t('separate tabs')); c.title = t('Each conversation sees and drives only its own tabs through a mediated CDP endpoint; while you drive, its input and navigation are refused.'); ident.appendChild(c); }
     if (r.host) ident.appendChild(el('span', 'bprof-chip', String(r.host)));
+    // lane profile-lock-roll (L3): a takeover of a previous name's lock is said for a day ("renamed from <old>"), and a
+    // record launched under another name than this machine's shows that name (the digest's `machine.host` is ours)
+    { const rf = r.renamedFrom && typeof r.renamedFrom === 'object' && r.renamedFrom.host ? r.renamedFrom : null;
+      const mine = app._browserProfiles && app._browserProfiles.machine ? String(app._browserProfiles.machine.host || '') : '';
+      if (rf) { const c = el('span', 'bprof-chip bprof-renamed', t('renamed from {host}', { host: String(rf.host) })); c.title = t('This machine was renamed (a pod restarted under a new name) — the lock its previous name {from} left on this profile was taken over; its browser runs here as {host}.', { from: String(rf.host), host: mine || String(r.launchHost || '') }); ident.appendChild(c); }
+      else if (r.launchHost && mine && String(r.launchHost) !== mine) { const c = el('span', 'bprof-chip', String(r.launchHost)); c.title = t('The machine this profile\'s browser last started on'); ident.appendChild(c); } }
     const chip = app.browserChipFor ? app.browserChipFor(r.id) : null;
     ident.appendChild(el('span', 'browser-chip', chip || String(r.provider || '')));
     row.appendChild(ident);
@@ -686,6 +806,9 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     { const hl = humanStateLine(r.human, t); if (hl) { const h = el('span', 'bprof-human' + (r.human.state === 'driving' ? ' driving' : ''), hl); h.title = r.human.state === 'driving' ? t('Your own tab in this browser — its window is open') : t('Your tab is kept for a while — Browse yourself to continue where you were'); state.appendChild(h); } }
     usageLine(state, r.usage);
     displayLine(state, r.display);
+    // lane browser-admin 2a: WHICH CHROME BUILD — the choice ("Chrome 151.0.7922.34 (pinned)" / the CLI's default build /
+    // a path) and, while it runs, the build the browser itself reports; a chosen build that vanished says so (amber)
+    { const bl = cardBuildLine({ provider: r.provider, choice: r.browser, running: runningBuildOf(r.id), missing: r.buildMissing, live: !!r.live }, t); if (bl) { const b = el('span', 'bprof-build' + (bl.warn ? ' warn' : ''), bl.text); b.title = bl.text; state.appendChild(b); } }
     cell(row, 'bprof-size', r.bytes === null || r.bytes === undefined ? t('not measured') : bytesText(r.bytes), r.dir ? String(r.dir) : '');
     const tr = r.trace || { n: 0, bytes: 0 };
     // 2026-09-27: what this profile's records take against its limit (the sweep's measure: frames + action lists)
@@ -693,6 +816,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     const trCell = cell(row, 'bprof-trace', tr.n ? t('{n} action(s)', { n: tr.n }) : t('no actions'), tr.last ? t('last {ago}', { ago: agoText(Date.now() - tr.last) }) : '');
     trCell.appendChild(el('span', 'bprof-trace-used', usedOf)); // its own line: the size is never the part an ellipsis eats
     trCell.dataset.used = String(Number(tr.used) || 0);
+    fitsLine(trCell, tr);
     const recs = Array.isArray(r.recordings) ? r.recordings : [];
     const recCell = cell(row, 'bprof-recs', recs.length ? t('{n} recording(s)', { n: recs.length }) + ' · ' + bytesText(r.recordingBytes || 0) : t('no recordings'));
     if (r.recording) { const live = el('span', 'bprof-rec-live', t('recording')); live.title = String(r.recording.file || ''); recCell.appendChild(live); }
@@ -758,6 +882,15 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
         load();
       };
       actions.appendChild(hold);
+    }
+    // lane browser-admin 2a: Change build… — a Chromium profile's Chrome build (a running browser restarts; its
+    // conversations are told; the dialog says so before the button)
+    if (String(r.provider || 'chromium') === 'chromium' && r.state !== 'not-ours') {
+      const cb2 = el('button', 'file-tool-btn bprof-btn bprof-build-btn', t('Change build…'));
+      cb2.disabled = st.busy;
+      cb2.title = t('Choose which installed Chrome build this profile runs');
+      cb2.onclick = () => openBuildDialog(app, r.id, { label: String(r.label || r.id), onDone: () => load() });
+      actions.appendChild(cb2);
     }
     // Rename… — validated like a new profile's name (unique, a human name, never a path)
     const rename = el('button', 'file-tool-btn bprof-btn bprof-rename', t('Rename…'));
@@ -918,7 +1051,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     renderHint(v); renderSummary(v);
     const prof = section(t('Profiles'), t('state · size on disk · traced actions · recordings · the per-profile screencast opt-in'));
     const rows = v.profiles || [];
-    if (!rows.length) prof.appendChild(el('div', 'bprof-empty chat-status-dim', t('No profiles yet — an agent gets one with `vibespace-browser new <label>`, or pin one from a session card.')));
+    if (!rows.length) prof.appendChild(el('div', 'bprof-empty chat-status-dim', t('No profiles yet — create one with New profile… above; an agent can make one too, or keep a conversation\'s browser from its session card.')));
     const seen = new Set();
     for (const r of rows) {
       seen.add(r.id);
@@ -933,7 +1066,9 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     const ei = el('div', 'bprof-ident'); ei.appendChild(el('span', 'bprof-label', t('Browsers without a profile'))); ei.appendChild(el('span', 'bprof-chip', t('ephemeral'))); eph.appendChild(ei);
     cell(eph, 'bprof-state', ''); cell(eph, 'bprof-size', '');
     const et = v.ephemeral?.trace || { n: 0, bytes: 0 };
-    cell(eph, 'bprof-trace', et.n ? t('{n} action(s)', { n: et.n }) : t('no actions')).appendChild(el('span', 'bprof-trace-used', t('{used} of {size}', { used: bytesText(Number(et.used) || 0), size: sizeText(Number(et.limit) || v?.limits?.bytesPerProfile || TRACE_BYTES_PER_PROFILE) })));
+    const ec = cell(eph, 'bprof-trace', et.n ? t('{n} action(s)', { n: et.n }) : t('no actions'));
+    ec.appendChild(el('span', 'bprof-trace-used', t('{used} of {size}', { used: bytesText(Number(et.used) || 0), size: sizeText(Number(et.limit) || v?.limits?.bytesPerProfile || TRACE_BYTES_PER_PROFILE) })));
+    fitsLine(ec, et);
     prof.appendChild(eph);
     // takeover C3: every conversation's managed ephemeral browser — watched like a profile, gone with its conversation
     const ephs = section(t('Ephemeral browsers'), t('one per conversation that browses without a profile — started by its first command, stopped after its idle timeout, removed with the conversation'));
@@ -980,8 +1115,44 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     const row = body.querySelector(`.bprof-profile[data-profile-id="${String(profileId).replace(/[^a-z0-9-]/gi, '')}"]`);
     if (row) { row.classList.add('focus'); row.scrollIntoView({ block: 'center' }); setTimeout(() => row.classList.remove('focus'), 2500); }
   }
+  function renderCli() {
+    const w = cliRowWords(st.cli, t);
+    cliRow.style.display = w ? '' : 'none';
+    if (!w) return;
+    if (cliText.textContent !== w.text) cliText.textContent = w.text;
+    cliText.title = w.title || '';
+    cliRow.classList.toggle('warn', !!w.warn);
+    const label = cliOfferLabel(w.offer, t, { version: w.version, table: st.cli && st.cli.table }); // verify r1 (F10): a named version by its number
+    cliBtn.style.display = label ? '' : 'none';
+    if (label && cliBtn.textContent !== label) cliBtn.textContent = label;
+    cliBtn.dataset.offer = w.offer || '';
+  }
+  cliBtn.onclick = async () => {
+    const offer = cliBtn.dataset.offer;
+    const f = st.cli;
+    if (!offer || !f) return;
+    // the setting is THE choice (`browser.cli`): the keeper re-reads it on its next resolve of the CLI
+    if (offer === 'use-path') { app.settings?.set?.('browser.cli', 'path'); showToast(t('VibeSpace drives the agent-browser on PATH from its next command.'), { duration: 6000 }); setTimeout(loadCli, 1500); return; }
+    if (offer === 'use-pinned') { app.settings?.set?.('browser.cli', 'pinned'); showToast(t('VibeSpace drives its own agent-browser {version} from its next command.', { version: f.table }), { duration: 6000 }); setTimeout(loadCli, 1500); return; }
+    const version = f.pinned && f.pinned.version ? f.pinned.version : f.table;
+    if (!(await showConfirmDialog({ ...cliConfirmWords(f, t, { version }) }))) return;
+    cliBtn.disabled = true;
+    const r = await fetchJson('/api/browser/cli/install', jsonInit('POST', { version }));
+    cliBtn.disabled = false;
+    const o = cliOutcomeWords(r, t);
+    showToast(o.text, { type: o.tone === 'error' ? 'error' : o.tone === 'warn' ? 'warn' : 'info', duration: 9000 });
+    if (r && r.ok && !r.error && (f.choice || {}).mode === 'path') app.settings?.set?.('browser.cli', version === f.table ? 'pinned' : version);
+    loadCli();
+  };
+  async function loadCli() {
+    const c = await fetchJson('/api/browser/cli');
+    if (st.closed) return;
+    st.cli = c && !c.error ? c : null;
+    renderCli();
+  }
   async function load() {
     if (st.closed) return;
+    loadCli();
     const r = await fetchJson('/api/browser/housekeeping');
     if (st.closed) return;
     if (!r || r.error) { st.error = (r && r.error) || t('server unreachable'); render(); return; }

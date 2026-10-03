@@ -252,6 +252,10 @@ try {
   chrome.of(OWNP).shotHang = true;
   r = await cli(sA, ['screenshot', path.join(ROOT, 'loop2.png')]);
   ok(r.code === 1 && /\[no_picture\]/.test(r.err) && /^no picture: the page never drew a frame within 4 s/.test(r.out) && r.ms < 800 + 2500 && !fs.existsSync(path.join(ROOT, 'loop2.png')), `a page that never draws: [no_picture] by name in ${r.ms} ms (the capture bounded — never the browser CLI's 30 s)`, r);
+  // lane fleet-image-2 (the fleet e2e's site-reset ③ on a pod's chromium 154, where the loop never painted within 4 s): the
+  // answer WITHOUT a picture tells the loop exactly as the answer with one does — the agent screenshotting a looping page
+  // learns it loops either way
+  ok(/note: .*\[navigation_loop\]/.test(r.err) && r.err.indexOf('[no_picture]') < r.err.indexOf('[navigation_loop]'), '…and the loop is said beside it (`note: … [navigation_loop]`, after [no_picture]) — as the answer with a picture says it', r.err);
   chrome.of(OWNP).shotHang = false;
   r = await cli(sA, ['stop']);
   const stopCall = chrome.of(OWNP).calls.find((c) => c.method === 'Page.stopLoading');

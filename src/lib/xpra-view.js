@@ -59,6 +59,7 @@
 // pointerup, per-press AbortController) — so the app never sees a button stuck down. `onMain(meta|null)` and
 // `onState(changed)` name the main window's metadata (its `decorations`) and the app's own maximize / minimize.
 import { t } from './i18n.js';
+import { dragEndVerdict } from './drag-end.js'; // the hand-over's hold ends as the WM's drag does (verify r1)
 import { showToast } from './utils.js';
 import { createPictureShell, streamUrl, copyViaSelection } from './picture-shell.js';
 import { createXpraClient, defaultDecode } from './xpra-client.js';
@@ -370,7 +371,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     if (!client) return;
     try { pane.setPointerCapture(e.pointerId); } catch {}
     const [x, y] = paneXY(e);
-    press = { pointerId: e.pointerId, button: e.button, xy: [x, y], client: { clientX: e.clientX, clientY: e.clientY } };
+    press = { pointerId: e.pointerId, button: e.button, xy: [x, y], client: { clientX: e.clientX, clientY: e.clientY, pointerId: e.pointerId } }; // the pointerId rides with the hand-over: the title bar / handle CAPTURES it (lane-drag-release)
     client.pointerButton(x, y, e.button, true, pointerMods(e));
   });
   pane.addEventListener('pointerup', (e) => {
@@ -403,8 +404,19 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
       const ctl = new AbortController();
       wmHold = { pointerId: press.pointerId, button: press.button, xy: press.xy, ctl };
       try { pane.releasePointerCapture(press.pointerId); } catch {}
-      document.addEventListener('pointerup', (e) => { if (e.pointerId === wmHold?.pointerId) { press = null; releaseWmHold(e); } }, { signal: ctl.signal });
-      document.addEventListener('pointercancel', (e) => { if (e.pointerId === wmHold?.pointerId) { press = null; releaseWmHold(e); } }, { signal: ctl.signal });
+      // THE HOLD ENDS WHEN THE WINDOW MANAGER'S DRAG ENDS (lane-drag-release verify r1, finding #2): the same PURE verdict
+      // the WM's doors ask (src/lib/drag-end.js) — the release / cancel of THIS pointer, a move of it with no button (a
+      // release the page never saw), the window's blur, the page hidden. It used to wait for a pointerup alone, so a
+      // drag the WM ended on blur left the pane deaf (no motion to X) and the X button down until the next click anywhere.
+      const st = { active: true, pointerId: press.pointerId };
+      const endHold = (e) => {
+        const v = dragEndVerdict({ type: e && e.type, buttons: e && e.buttons, pointerId: e && e.pointerId, hidden: typeof document !== 'undefined' && document.hidden === true }, st);
+        if (!v.end) return;
+        st.active = false; press = null;
+        releaseWmHold(v.why === 'release' || v.why === 'cancel' || v.why === 'released-unseen' ? e : null); // no point ⇒ released where the press was
+      };
+      for (const k of ['pointerup', 'pointercancel', 'pointermove', 'visibilitychange']) document.addEventListener(k, endHold, { signal: ctl.signal });
+      if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') window.addEventListener('blur', endHold, { signal: ctl.signal });
     }
     const hasRoot = Number.isFinite(ev.xRoot) && Number.isFinite(ev.yRoot) && (ev.xRoot !== 0 || ev.yRoot !== 0);
     // the gesture starts where the pointer WENT DOWN in this pane (its own press, viewport px) — the app's x_root/y_root

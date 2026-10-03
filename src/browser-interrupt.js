@@ -193,6 +193,34 @@ function takeoverText({ label = null, n = 0, verbs = [], target = 'browser' } = 
   if (!k) return `The user took over ${who}; nothing of yours was running there. Wait for the handback before using it again.`;
   return `The user took over ${who}; ${k} operation${k === 1 ? ' was' : 's were'} interrupted: ${listText(verbs)}. Wait for the handback, then run ${k === 1 ? 'it' : 'them'} again.`;
 }
+/**
+ * LANE BROWSER-ADMIN 2a — THE RELAUNCH'S WORDS: the user changed the Chrome build of a browser this conversation uses,
+ * so it RESTARTED — never silently under a holder: the takeover's rule (what was in flight is interrupted and named,
+ * read the page first, run it again) in one card + one zero-spend notice per conversation on it.
+ *   "The user changed the Chrome build of the "Work" browser from the default build to Chrome 151.0.7922.34; it
+ *    restarted and your tab reopened at its last address. 1 operation was interrupted: click — read the page first,
+ *    then run it again."
+ */
+function relaunchText({ label = null, from = '', to = '', n = 0, verbs = [], outcome = 'changed' } = {}) {
+  const who = whoOf(label, 'browser');
+  const k = Math.max(0, Math.floor(num(n)));
+  // verify r1 (F9): the words say what HAPPENED — said after the restart's outcome (the interrupt itself ran before the stop):
+  // the new build did not start ⇒ back on the old one (`restored`), or not running at all (`down`) — never "restarted on
+  // <the new build>" to a conversation whose browser runs the old one or none
+  // verify r2 (B5): the SECOND message after a "changed" — the new build closed within seconds of starting, so the browser
+  // fell back to the build it replaced (`fell-back`), or neither runs (`fell-down`)
+  const head = outcome === 'fell-back'
+    ? `${to || 'The new Chrome build'} — the build the user just chose for ${who} — closed within seconds of starting, so it restarted on ${from || 'its previous build'} again and your tab reopened at its last address.`
+    : outcome === 'fell-down'
+      ? `${to || 'The new Chrome build'} — the build the user just chose for ${who} — closed within seconds of starting, and ${from || 'its previous build'} did not start again either — it is not running now (your next browser command starts it on ${from || 'its previous build'}).`
+      : outcome === 'restored'
+    ? `The user tried to change the Chrome build of ${who}${from && to ? ` from ${from} to ${to}` : ''}; ${to || 'the new build'} did not start, so it restarted on ${from || 'its previous build'} again and your tab reopened at its last address.`
+    : outcome === 'down'
+      ? `The user tried to change the Chrome build of ${who}${from && to ? ` from ${from} to ${to}` : ''}; it did not start again, on either build — it is not running now (your next browser command starts it on ${from || 'its previous build'}).`
+      : `The user changed the Chrome build of ${who}${from && to ? ` from ${from} to ${to}` : to ? ` to ${to}` : ''}; it restarted and your tab reopened at its last address.`;
+  if (!k) return `${head} Nothing of yours was running there.`;
+  return `${head} ${k} operation${k === 1 ? ' was' : 's were'} interrupted: ${listText(verbs)} — read the page first, then run ${k === 1 ? 'it' : 'them'} again.`;
+}
 /** The handback's reminder; '' when there is nothing to re-run. */
 function rerunSentence(verbs) {
   const v = uniq(Array.isArray(verbs) ? verbs : []);
@@ -203,5 +231,5 @@ module.exports = {
   INTERRUPTED_CODE, INTERRUPTED_TEXT, interruptedText, SCRIPT_METHODS, NOT_AN_OPERATION, VERB_OF_ACTION, verbOfAction, isOperation, IN_FLIGHT_MAX_MS, SEEN_CAP,
   noteRecord, inFlightAt, openInterruption, noteRefused, closeInterruption, operationsOf, interruptedVerbs, interruptionView,
   USER_ACT_KINDS, USER_ACTS_CAP, noteUserAct, dropUserAct, // lane browser-resume C: the user's tab acts while he drove
-  takeoverText, rerunSentence,
+  takeoverText, rerunSentence, relaunchText, // lane browser-admin 2a: Change build… restarts a browser — said like a takeover
 };

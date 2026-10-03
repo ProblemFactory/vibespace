@@ -206,6 +206,57 @@ console.log('§2 the owner\'s own send, the digest\'s last line, the owner\'s re
   ok(!nf.ok && nf.code === 'not-found', 'markRead of an unknown group refuses by name');
 }
 
+// ── §2b WHERE A MESSAGE STANDS, in words (lane group-pending, the owner 2026-10-01) ──
+// The state is the model's ONE rule (deliveryOf, gated in test-channel-groups §1f); here: the words under the
+// message in en / zh / ja from one process (the dictionaries' own entries), the tone the dot reads, the title that
+// names every recipient, the width budget IN THE WORDS, and the re-export (never a second rule).
+console.log('§2b the line under a message: the words in three languages, the tone, the budget');
+{
+  const Wd = await import(path.join(REPO, 'src/lib/channel-words.js'));
+  ok(V.deliveryOf === G.deliveryOf && V.DELIVERY_STATES === G.DELIVERY_STATES, 'the view re-exports the MODEL\'s deliveryOf + DELIVERY_STATES (the window judges by the one rule, never a copy)');
+  const dictOf = (f) => { const m = new Map(); for (const ln of read(f).split('\n')) { const x = /^  ('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"): ('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"),?$/.exec(ln); if (x) { try { m.set(new Function('return ' + x[1])(), new Function('return ' + x[2])()); } catch { } } } return m; };
+  const dicts = { en: null, zh: dictOf('src/lib/i18n-zh.js'), ja: dictOf('src/lib/i18n-ja.js') };
+  const missing = [];
+  const tr = (d, lang) => ({
+    t: (s, v) => { const w = d ? d.get(s) : s; if (d && w === undefined) missing.push(lang + ':' + s); const x = w === undefined ? s : w; return v ? x.replace(/\{(\w+)\}/g, (m, k) => (k in v ? String(v[k]) : m)) : x; },
+    tc: (c, s, v) => { const key = c + '::' + s; const w = d ? d.get(key) : s; if (d && w === undefined) missing.push(lang + ':' + key); const x = w === undefined ? s : w; return v ? x.replace(/\{(\w+)\}/g, (m, k) => (k in v ? String(v[k]) : m)) : x; },
+  });
+  const row = (name, state, at = null) => ({ member: 'c-' + name, name, state, at });
+  const en = tr(null, 'en');
+  const one = (state) => Wd.deliveryLineText([row('beta', state)], en);
+  ok(one('waiting').text === "Waiting for beta's next turn" && one('waiting').tone === 'waiting' && one('waiting').title === one('waiting').text, 'ONE recipient waiting: "Waiting for beta\'s next turn", tone waiting (a hollow dot), the title the same sentence');
+  ok(one('handed').text === 'Read by beta' && one('handed').tone === 'handed', 'handed, a LEGACY row (no hand-over clock): "Read by beta", tone handed (a filled dot), no time');
+  // the hand-over CLOCK (the coordinator's follow-up): a handed row's `at` = the engine's `reportedAt` ⇒ the sentence says WHEN,
+  // drawn as the message head draws its time (the device's local HH:MM); the suite injects the formatter
+  const clocked = Wd.deliveryLineText([row('beta', 'handed', 1_700_000_000_000)], { ...en, time: () => '12:41' });
+  ok(clocked.text === 'Read by beta · 12:41' && clocked.tone === 'handed' && clocked.title === clocked.text, 'handed WITH the clock: "Read by beta · 12:41"');
+  const clockedLocal = Wd.deliveryLineText([row('beta', 'handed', Date.UTC(2026, 9, 1, 12, 41))], en).text;
+  ok(/^Read by beta · \d{2}:\d{2}$/.test(clockedLocal), 'the default formatter is the device\'s local 24 h HH:MM (the message head\'s own look)', clockedLocal);
+  ok(Wd.deliveryLineText([row('alpha', 'handed', 5), row('beta', 'waiting')], { ...en, time: () => '12:41' }).title.split('\n').includes('Read by alpha · 12:41'), 'a group line\'s title carries each handed row\'s clock');
+  ok(one('muted').text === 'beta is muted and will not read it' && one('muted').tone === 'none', 'muted: said, tone none');
+  ok(one('left').text === 'beta left' && one('left').tone === 'none', 'left: said, tone none');
+  const many = Wd.deliveryLineText([row('alpha', 'handed'), row('beta', 'waiting'), row('gamma', 'muted'), row('delta', 'left')], en);
+  const sorted = (s) => String(s).split('\n').sort().join('\n');
+  ok(many.text === '1 waiting · 1 read · 1 muted · 1 left' && many.tone === 'waiting' && sorted(many.title) === sorted("Waiting for beta's next turn\nRead by alpha\ngamma is muted and will not read it\ndelta left"), 'a GROUP line counts by state in a fixed order and its title names every recipient\'s sentence', JSON.stringify(many));
+  ok(Wd.deliveryLineText([row('a', 'handed'), row('b', 'handed')], en).tone === 'handed' && Wd.deliveryLineText([row('a', 'handed'), row('b', 'left')], en).tone === 'handed' && Wd.deliveryLineText([row('a', 'muted'), row('b', 'left')], en).tone === 'none', 'the tone: waiting beats handed beats none (anyone waiting ⇒ hollow; everyone it could reach ⇒ filled)');
+  ok(Wd.deliveryLineText([], en) === null && Wd.deliveryLineText(null, en) === null && Wd.deliveryLineText([{ member: 'x', state: 'bogus' }], en) === null, 'no recipient (or no known state) ⇒ no line');
+  // every language from the dictionaries, each key present; the width budget lives in the words (the pill lesson)
+  const BUDGET = { en: 44, zh: 24, ja: 30 };          // a pair line's words beside the name
+  const GROUP_BUDGET = { en: 44, zh: 36, ja: 40 };    // the widest group line: all four states at once (no name)
+  const len = (s) => Array.from(s).length;
+  for (const lang of ['zh', 'ja']) {
+    const L = tr(dicts[lang], lang);
+    const lines = ['waiting', 'handed', 'muted', 'left'].map((s) => Wd.deliveryLineText([row('生活方式助手', s)], L).text);
+    lines.push(Wd.deliveryLineText([row('生活方式助手', 'handed', 5)], { ...L, time: () => '12:41' }).text);   // the clocked sentence
+    const group = Wd.deliveryLineText([row('a', 'handed'), row('b', 'waiting'), row('c', 'muted'), row('d', 'left')], L).text;
+    ok(lines.every((x) => x.includes('生活方式助手') && !/Waiting|Read by|muted|left/.test(x)) && !/waiting|read|muted|left/.test(group) && lines[4].includes('12:41'), `${lang}: every line is in the device's language and names the recipient (the clocked one its time)`, JSON.stringify([...lines, group]));
+    ok(lines.every((x) => len(x.replace('生活方式助手', '').replace('12:41', '')) <= BUDGET[lang]) && len(group) <= GROUP_BUDGET[lang], `${lang}: every line is within its width budget (≤ ${BUDGET[lang]} characters beside the name and the time; the four-state group line ≤ ${GROUP_BUDGET[lang]})`, JSON.stringify([...lines, group].map(len)));
+  }
+  ok(['waiting', 'handed', 'muted', 'left'].every((s) => len(one(s).text.replace('beta', '')) <= BUDGET.en) && len(many.text) <= GROUP_BUDGET.en, 'en: within its width budget too');
+  ok(missing.length === 0, 'every new key has a zh AND a ja entry (incl. the `delivery::` contextual counts — "{n} waiting" is also the stash strip\'s, another meaning)', missing.join(', '));
+  ok(/tc\('delivery', '\{n\} waiting'/.test(read('src/lib/channel-words.js')) && dicts.zh.get('delivery::{n} waiting') === '{n} 人待读' && dicts.zh.get('{n} waiting') !== '{n} 人待读', 'the count is a CONTEXTUAL key (tc) — the stash strip\'s "{n} waiting" keeps its own translation');
+}
+
 // ── §3 SOURCE CENSUSES ────────────────────────────────────────────────────
 console.log('§3 censuses: XSS, the composer split, no adapter id, the fold, the i18n data paths');
 const CLIENT = ['src/lib/channels-panel.js', 'src/lib/channel-window.js', 'src/lib/channel-group-dialogs.js', 'src/lib/channel-groups-view.js', 'src/lib/channel-words.js', 'src/lib/channel-focus.js', 'src/lib/principal-picker.js'];
@@ -235,7 +286,8 @@ const CLIENT = ['src/lib/channels-panel.js', 'src/lib/channel-window.js', 'src/l
   ok(!/showContextMenu\([^)]*labelHtml/.test(P + W + D) && !/labelHtml/.test(W + D), 'the group menus use plain `label` (textContent) — never `labelHtml`');
 
   // the composer split
-  ok((W.match(/composerMode\(/g) || []).length === 2 && /const cm = composerMode\(\{ conv: c \}\);/.test(W) && /const mode = composerMode\(\{ group \}\);/.test(W), 'the composer\'s kind is decided ONLY by composerMode — once for a channel conversation, once for a group');
+  // lane reaction-hover (2026-10-01): the message bar's Quote asks the SAME verdict (a quote needs a composer that can send)
+  ok((W.match(/composerMode\(/g) || []).length === 3 && /const cm = composerMode\(\{ conv: c \}\);/.test(W) && /const mode = composerMode\(\{ group \}\);/.test(W) && /const composerNow = \(\) => composerMode\(\{ conv: lastConv \}\)\.mode;/.test(W), 'the composer\'s kind is decided ONLY by composerMode — once for a channel conversation, once for a group, and the message bar\'s Quote asks the same verdict');
   ok(/\$\{direct \? 'send' : 'propose'\}/.test(W) && /fetchJson\(`\/api\/channel-groups\/\$\{encodeURIComponent\(groupId\)\}\/post`/.test(W), 'a direct composer posts to /send, a proposal composer to /propose, a GROUP composer to /api/channel-groups/:id/post (never /propose)');
   const grpBlock = W.slice(W.indexOf('function openGroupWindow'));
   ok(grpBlock.length > 1000 && !/\/propose/.test(grpBlock) && !/channel-outbox/.test(grpBlock), 'the group window has NO proposal path at all (the owner\'s own words; agent drafts keep the outbox)');
@@ -248,7 +300,7 @@ const CLIENT = ['src/lib/channels-panel.js', 'src/lib/channel-window.js', 'src/l
   ok(/body: JSON\.stringify\(\{ channelsPanelFolds: FOLDS \}\)/.test(P) && /method: 'PATCH'/.test(P) && /FOLDS = foldsFrom\(/.test(P) && /msg\.type === 'user-state-updated' && msg\.state && msg\.state\.channelsPanelFolds/.test(P), 'the secondary sections\' fold is PATCHed to user state (`channelsPanelFolds`, merge-only), read through foldsFrom, and followed from other clients');
   // the i18n census knows the new data paths
   const I = await import(path.join(REPO, 'scripts/test-channels-i18n.mjs'));
-  const need = ['chan-grow-title', 'chan-grow-last', 'chan-src-chip', 'chan-gm-name', 'pp-name', 'pp-chip-name', 'chanmsg-ctx', 'chanmsg-sys-line', 'chan-mention-item', 'chan-tag-who'];
+  const need = ['chan-grow-title', 'chan-grow-last', 'chan-src-chip', 'chan-gm-name', 'pp-name', 'pp-chip-name', 'chanmsg-ctx', 'chanmsg-sys-line', 'chan-mention-item', 'chan-tag-who', 'chanmsg-dlv'];
   ok(need.every((c) => I.DATA_PATH_CLASSES.includes(c)), 'the i18n census excuses the NEW data paths (group name / last line / source label / member + picker names / context / system line / mention item) BY PATH', need.filter((c) => !I.DATA_PATH_CLASSES.includes(c)).join(', '));
   const leak = I.census([{ text: 'Members & notifications', paths: ['div.chan-gm-list < div.dialog-body'], surfaces: ['panel-02-tracked'] }]);
   ok(leak.violations.length === 1, 'NEGATIVE CONTROL: a CHROME string on a group surface (not a data path) is still a violation');
@@ -308,6 +360,13 @@ console.log('§4 wiring pins');
   const RL = read('src/lib/sidebar-rail.js');
   ok(/msg\.type === 'channel-groups-updated' && Array\.isArray\(msg\.groups\)\) this\._railChanBadge\('grp'/.test(RL) && /this\._railChanBadge\('ch', \(msg\.digest\.unreadTotal/.test(RL) && !/_railSetBadge\('channels'/.test(RL.replace(/_railChanBadge\(part, n\) \{[\s\S]*?\n    \},/, '')), 'PIN: the rail\'s Channels badge sums BOTH halves (the digest and the groups\' owner unread) through _railChanBadge — no other writer of that badge');
   ok(/if \(from === G\.OWNER\) ownerSaw\(gr, g\);/.test(GEsrc) && /list = \(\) => Object\.values\(all\(\)\)\.map\(\(g\) => \(\{ \.\.\.view\(g\), unread: ownerUnread\(g\) \}\)\)/.test(GEsrc), 'PIN: the owner\'s post moves the owner mark inside the door, and the owner list carries the derived unread');
+  // lane group-pending (2026-10-01): the line under every message — the ONE rule, keyed, patched in place, from the broadcast
+  const grp = W.slice(W.indexOf('function openGroupWindow'));
+  ok(/const rows = group \? deliveryOf\(group, rec, \{ log: log \|\| \[\.\.\.drawn\.values\(\)\] \}\) : \[\];/.test(grp) && /const words = deliveryLineText\(rows\);/.test(grp) && !/reportedUpTo/.test(grp), 'PIN: the window judges a message\'s line by the model\'s deliveryOf (over the drawn log) worded by deliveryLineText — it reads no marker itself');
+  ok(/const dlv = el\('div', 'chanmsg-dlv'\);/.test(grp) && /drawDelivery\(row, rec\);/.test(grp) && /if \(line\.dataset\.sig === sig\) return;/.test(grp) && /line\.querySelector\('\.chanmsg-dlv-text'\)\.textContent = words\.text;/.test(grp), 'PIN: every message row carries its line (textContent), keyed by the row and patched only when its signature moved');
+  ok(/if \(g \|\| landed\) redrawDelivery\(\);/.test(grp) && /for \(const row of list\.querySelectorAll\('\.chanmsg\[data-vid\]:not\(\.chanmsg-sys\)'\)\)/.test(grp), 'PIN: the broadcast (a marker, a mode, a landed departure) re-judges every drawn line in place — never a list rebuild');
+  ok(/reportedUpTo: Number\.isFinite\(m\.reportedUpTo\) \? m\.reportedUpTo : null, reportedAt: Number\.isFinite\(m\.reportedAt\) \? m\.reportedAt : null \}\)\)/.test(GEsrc) && /if \(moved\) announce\(\[gid\]\);/.test(GEsrc) && /m\.reportedUpTo = upTo; m\.reportedAt = now\(\); moved = true;/.test(GEsrc), 'PIN: the engine\'s view carries each member\'s marker AND its hand-over clock, the clock is stamped beside a marker that moves, and a moved marker is announced (the sender\'s window flips without a reload)');
+  ok(/\.chanmsg-dlv\[data-tone="handed"\] \.chanmsg-dlv-dot \{ background: currentColor; \}/.test(read('public/style.css')) && /\.chanmsg-dlv-dot \{[^}]*border-radius: 50%;[^}]*border: 1px solid currentColor/.test(read('public/style.css')), 'PIN: the dot is CSS (hollow by default, filled when handed) — never an emoji');
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);

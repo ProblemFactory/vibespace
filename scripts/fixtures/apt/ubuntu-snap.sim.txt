@@ -1,0 +1,388 @@
+NOTE: This is only a simulation!
+      apt-get needs root privileges for real execution.
+      Keep also in mind that locking is deactivated,
+      so don't depend on the relevance to the real current situation!
+Reading package lists...
+Building dependency tree...
+Reading state information...
+Solving dependencies...
+The following additional packages will be installed:
+  adduser apparmor apt base-files base-passwd ca-certificates dbus dbus-bin
+  dbus-daemon dbus-session-bus-common dbus-system-bus-common dbus-user-session
+  debconf debconf-i18n dirmngr dmsetup fuse3 gcc-16-base gnupg gnupg-l10n
+  gnupg-utils gpg gpg-agent gpg-wks-client gpgconf gpgsm gpgv
+  init-system-helpers krb5-locales libacl1 libapparmor1 libapt-pkg7.0
+  libassuan9 libaudit-common libaudit1 libblkid1 libbsd0 libbz2-1.0
+  libc-gconv-modules-extra libc6 libcap-ng0 libcap2 libcap2-bin libcbor0.10
+  libcom-err2 libcrypt1 libcryptsetup12 libdb5.3t64 libdbus-1-3
+  libdebconfclient0 libdevmapper1.02.1 libedit2 libexpat1 libffi8 libfido2-1
+  libfuse3-4 libgcc-s1 libgcrypt20 libgmp10 libgnutls30t64 libgpg-error-l10n
+  libgpg-error0 libgpm2 libgssapi-krb5-2 libhogweed6t64 libidn2-0 libjson-c5
+  libk5crypto3 libkeyutils1 libkmod2 libkrb5-3 libkrb5support0 libksba8
+  liblastlog2-2 libldap-common libldap2 liblocale-gettext-perl liblz4-1
+  liblzma5 liblzo2-2 libmd0 libmount1 libncursesw6 libnettle8t64 libnpth0t64
+  libnss-systemd libp11-kit0 libpam-cap libpam-modules libpam-modules-bin
+  libpam-runtime libpam-systemd libpam0g libpcre2-8-0 libreadline8t64
+  libsasl2-2 libsasl2-modules libsasl2-modules-db libseccomp2 libselinux1
+  libsemanage-common libsemanage2 libsepol2 libsmartcols1 libsqlite3-0
+  libssl3t64 libstdc++6 libsystemd-shared libsystemd0 libtasn1-6
+  libtext-charwidth-perl libtext-iconv-perl libtext-wrapi18n-perl libtinfo6
+  libudev1 libunistring5 libuuid1 libx11-6 libx11-data libxau6 libxcb1
+  libxdmcp6 libxext6 libxmuu1 libxxhash0 libzstd1 linux-sysctl-defaults login
+  login.defs mawk mount openssh-client openssl openssl-provider-legacy passwd
+  perl-base pinentry-curses readline-common sed sensible-utils snapd
+  squashfs-tools systemd systemd-cryptsetup systemd-hwe-hwdb systemd-resolved
+  systemd-sysv systemd-timesyncd ubuntu-keyring udev util-linux-extra xauth
+  zlib1g
+Suggested packages:
+  perl cron quota ecryptfs-utils apparmor-profiles-extra apparmor-utils
+  apt-doc aptitude | synaptic | wajig dpkg-dev powermgmt-base debconf-doc
+  debconf-kde-helper debconf-utils libgtk3-perl libnet-ldap-perl
+  libterm-readline-gnu-perl whiptail | dialog pinentry-gnome3 tor
+  gpg-wks-server parcimonie xloadimage scdaemon tpm2daemon glibc-doc locales
+  libnss-nis libnss-nisplus rng-tools gnutls-bin gpm krb5-doc krb5-user
+  cryptsetup-bin libtss2-esys-3.0.2-0t64 libtss2-mu-4.0.1-0t64 libtss2-rc0t64
+  systemd-userdbd libpam-doc libsasl2-modules-gssapi-mit
+  | libsasl2-modules-gssapi-heimdal libsasl2-modules-ldap libsasl2-modules-otp
+  libsasl2-modules-sql libarchive13t64 libbpf1 libdw1t64 libelf1t64
+  libpwquality1 libqrencode4 uuid-runtime nfs-common keychain libpam-ssh
+  monkeysphere ssh-askpass pinentry-doc readline-doc zenity | kdialog
+  systemd-container systemd-homed systemd-boot systemd-repart
+  libtss2-tcti-device0 polkitd
+The following NEW packages will be installed:
+  adduser apparmor apt base-files base-passwd ca-certificates chromium-browser
+  dbus dbus-bin dbus-daemon dbus-session-bus-common dbus-system-bus-common
+  dbus-user-session debconf debconf-i18n dirmngr dmsetup fuse3 gcc-16-base
+  gnupg gnupg-l10n gnupg-utils gpg gpg-agent gpg-wks-client gpgconf gpgsm gpgv
+  init-system-helpers krb5-locales libacl1 libapparmor1 libapt-pkg7.0
+  libassuan9 libaudit-common libaudit1 libblkid1 libbsd0 libbz2-1.0
+  libc-gconv-modules-extra libc6 libcap-ng0 libcap2 libcap2-bin libcbor0.10
+  libcom-err2 libcrypt1 libcryptsetup12 libdb5.3t64 libdbus-1-3
+  libdebconfclient0 libdevmapper1.02.1 libedit2 libexpat1 libffi8 libfido2-1
+  libfuse3-4 libgcc-s1 libgcrypt20 libgmp10 libgnutls30t64 libgpg-error-l10n
+  libgpg-error0 libgpm2 libgssapi-krb5-2 libhogweed6t64 libidn2-0 libjson-c5
+  libk5crypto3 libkeyutils1 libkmod2 libkrb5-3 libkrb5support0 libksba8
+  liblastlog2-2 libldap-common libldap2 liblocale-gettext-perl liblz4-1
+  liblzma5 liblzo2-2 libmd0 libmount1 libncursesw6 libnettle8t64 libnpth0t64
+  libnss-systemd libp11-kit0 libpam-cap libpam-modules libpam-modules-bin
+  libpam-runtime libpam-systemd libpam0g libpcre2-8-0 libreadline8t64
+  libsasl2-2 libsasl2-modules libsasl2-modules-db libseccomp2 libselinux1
+  libsemanage-common libsemanage2 libsepol2 libsmartcols1 libsqlite3-0
+  libssl3t64 libstdc++6 libsystemd-shared libsystemd0 libtasn1-6
+  libtext-charwidth-perl libtext-iconv-perl libtext-wrapi18n-perl libtinfo6
+  libudev1 libunistring5 libuuid1 libx11-6 libx11-data libxau6 libxcb1
+  libxdmcp6 libxext6 libxmuu1 libxxhash0 libzstd1 linux-sysctl-defaults login
+  login.defs mawk mount openssh-client openssl openssl-provider-legacy passwd
+  perl-base pinentry-curses readline-common sed sensible-utils snapd
+  squashfs-tools systemd systemd-cryptsetup systemd-hwe-hwdb systemd-resolved
+  systemd-sysv systemd-timesyncd ubuntu-keyring udev util-linux-extra xauth
+  zlib1g
+0 upgraded, 154 newly installed, 0 to remove and 0 not upgraded.
+Inst gcc-16-base (16-20260322-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Conf gcc-16-base (16-20260322-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Inst libc-gconv-modules-extra (2.43-2ubuntu2.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf libc-gconv-modules-extra (2.43-2ubuntu2.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst libc6 (2.43-2ubuntu2.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64]) []
+Inst libgcc-s1 (16-20260322-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Conf libgcc-s1 (16-20260322-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Conf libc6 (2.43-2ubuntu2.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst mawk (1.3.4.20260129-1 Ubuntu:26.04/resolute [amd64])
+Inst libcrypt1 (1:4.5.1-1 Ubuntu:26.04/resolute [amd64])
+Conf libcrypt1 (1:4.5.1-1 Ubuntu:26.04/resolute [amd64])
+Conf mawk (1.3.4.20260129-1 Ubuntu:26.04/resolute [amd64])
+Inst base-files (14ubuntu6.2 Ubuntu:26.04/resolute-updates [amd64])
+Conf base-files (14ubuntu6.2 Ubuntu:26.04/resolute-updates [amd64])
+Inst perl-base (5.40.1-7ubuntu0.3 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf perl-base (5.40.1-7ubuntu0.3 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst libacl1 (2.3.2-2 Ubuntu:26.04/resolute [amd64])
+Conf libacl1 (2.3.2-2 Ubuntu:26.04/resolute [amd64])
+Inst libpcre2-8-0 (10.46-1build1 Ubuntu:26.04/resolute [amd64])
+Conf libpcre2-8-0 (10.46-1build1 Ubuntu:26.04/resolute [amd64])
+Inst libselinux1 (3.9-4build1 Ubuntu:26.04/resolute [amd64])
+Conf libselinux1 (3.9-4build1 Ubuntu:26.04/resolute [amd64])
+Inst sed (4.9-2ubuntu1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf sed (4.9-2ubuntu1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst libdebconfclient0 (0.280ubuntu1 Ubuntu:26.04/resolute [amd64])
+Conf libdebconfclient0 (0.280ubuntu1 Ubuntu:26.04/resolute [amd64])
+Inst base-passwd (3.6.8 Ubuntu:26.04/resolute [amd64])
+Conf base-passwd (3.6.8 Ubuntu:26.04/resolute [amd64])
+Inst init-system-helpers (1.69 Ubuntu:26.04/resolute [all])
+Conf init-system-helpers (1.69 Ubuntu:26.04/resolute [all])
+Inst libaudit-common (1:4.1.2-1ubuntu0.1 Ubuntu:26.04/resolute-updates [all])
+Conf libaudit-common (1:4.1.2-1ubuntu0.1 Ubuntu:26.04/resolute-updates [all])
+Inst libcap-ng0 (0.8.5-4build5 Ubuntu:26.04/resolute [amd64])
+Conf libcap-ng0 (0.8.5-4build5 Ubuntu:26.04/resolute [amd64])
+Inst libaudit1 (1:4.1.2-1ubuntu0.1 Ubuntu:26.04/resolute-updates [amd64])
+Conf libaudit1 (1:4.1.2-1ubuntu0.1 Ubuntu:26.04/resolute-updates [amd64])
+Inst libdb5.3t64 (5.3.28+dfsg2-10ubuntu1 Ubuntu:26.04/resolute [amd64])
+Conf libdb5.3t64 (5.3.28+dfsg2-10ubuntu1 Ubuntu:26.04/resolute [amd64])
+Inst debconf (1.5.92 Ubuntu:26.04/resolute [all])
+Conf debconf (1.5.92 Ubuntu:26.04/resolute [all])
+Inst libpam0g (1.7.0-5ubuntu3.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf libpam0g (1.7.0-5ubuntu3.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst libsystemd0 (259.5-0ubuntu3.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf libsystemd0 (259.5-0ubuntu3.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst libpam-modules-bin (1.7.0-5ubuntu3.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf libpam-modules-bin (1.7.0-5ubuntu3.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst libpam-modules (1.7.0-5ubuntu3.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf libpam-modules (1.7.0-5ubuntu3.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst login.defs (1:4.17.4-2ubuntu3 Ubuntu:26.04/resolute [all])
+Conf login.defs (1:4.17.4-2ubuntu3 Ubuntu:26.04/resolute [all])
+Inst libmd0 (1.1.0-2build4 Ubuntu:26.04/resolute [amd64])
+Conf libmd0 (1.1.0-2build4 Ubuntu:26.04/resolute [amd64])
+Inst libbsd0 (0.12.2-2build2 Ubuntu:26.04/resolute [amd64])
+Conf libbsd0 (0.12.2-2build2 Ubuntu:26.04/resolute [amd64])
+Inst libsemanage-common (3.9-1build1 Ubuntu:26.04/resolute [all])
+Conf libsemanage-common (3.9-1build1 Ubuntu:26.04/resolute [all])
+Inst libbz2-1.0 (1.0.8-6ubuntu0.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf libbz2-1.0 (1.0.8-6ubuntu0.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst libsepol2 (3.9-2 Ubuntu:26.04/resolute [amd64])
+Conf libsepol2 (3.9-2 Ubuntu:26.04/resolute [amd64])
+Inst libsemanage2 (3.9-1build1 Ubuntu:26.04/resolute [amd64])
+Conf libsemanage2 (3.9-1build1 Ubuntu:26.04/resolute [amd64])
+Inst passwd (1:4.17.4-2ubuntu3 Ubuntu:26.04/resolute [amd64])
+Conf passwd (1:4.17.4-2ubuntu3 Ubuntu:26.04/resolute [amd64])
+Inst adduser (3.153ubuntu1 Ubuntu:26.04/resolute [all])
+Conf adduser (3.153ubuntu1 Ubuntu:26.04/resolute [all])
+Inst libgpg-error0 (1.58-2 Ubuntu:26.04/resolute [amd64])
+Conf libgpg-error0 (1.58-2 Ubuntu:26.04/resolute [amd64])
+Inst libgcrypt20 (1.12.0-2ubuntu1.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf libgcrypt20 (1.12.0-2ubuntu1.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst zlib1g (1:1.3.dfsg+really1.3.1-1ubuntu3.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf zlib1g (1:1.3.dfsg+really1.3.1-1ubuntu3.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst gpgv (2.4.8-4ubuntu3.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf gpgv (2.4.8-4ubuntu3.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst libxxhash0 (0.8.3-2build1 Ubuntu:26.04/resolute [amd64])
+Conf libxxhash0 (0.8.3-2build1 Ubuntu:26.04/resolute [amd64])
+Inst liblz4-1 (1.10.0-8 Ubuntu:26.04/resolute [amd64])
+Conf liblz4-1 (1.10.0-8 Ubuntu:26.04/resolute [amd64])
+Inst liblzma5 (5.8.3-1 Ubuntu:26.04/resolute [amd64])
+Conf liblzma5 (5.8.3-1 Ubuntu:26.04/resolute [amd64])
+Inst libzstd1 (1.5.7+dfsg-3 Ubuntu:26.04/resolute [amd64])
+Conf libzstd1 (1.5.7+dfsg-3 Ubuntu:26.04/resolute [amd64])
+Inst libssl3t64 (3.5.5-1ubuntu3.6 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64]) []
+Inst openssl-provider-legacy (3.5.5-1ubuntu3.6 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf openssl-provider-legacy (3.5.5-1ubuntu3.6 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf libssl3t64 (3.5.5-1ubuntu3.6 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst libstdc++6 (16-20260322-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Conf libstdc++6 (16-20260322-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Inst libudev1 (259.5-0ubuntu3.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf libudev1 (259.5-0ubuntu3.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst libapt-pkg7.0 (3.2.0 Ubuntu:26.04/resolute [amd64])
+Conf libapt-pkg7.0 (3.2.0 Ubuntu:26.04/resolute [amd64])
+Inst ubuntu-keyring (2023.11.28.1build1 Ubuntu:26.04/resolute [all])
+Conf ubuntu-keyring (2023.11.28.1build1 Ubuntu:26.04/resolute [all])
+Inst libseccomp2 (2.6.0-2ubuntu5 Ubuntu:26.04/resolute [amd64])
+Conf libseccomp2 (2.6.0-2ubuntu5 Ubuntu:26.04/resolute [amd64])
+Inst apt (3.2.0 Ubuntu:26.04/resolute [amd64])
+Conf apt (3.2.0 Ubuntu:26.04/resolute [amd64])
+Inst libpam-runtime (1.7.0-5ubuntu3.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [all])
+Inst login (1:4.16.0-2+really2.41.3-3ubuntu2.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst libblkid1 (2.41.3-3ubuntu2.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst libmount1 (2.41.3-3ubuntu2.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst libsmartcols1 (2.41.3-3ubuntu2.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf libblkid1 (2.41.3-3ubuntu2.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf libmount1 (2.41.3-3ubuntu2.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf libsmartcols1 (2.41.3-3ubuntu2.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst mount (2.41.3-3ubuntu2.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst libexpat1 (2.7.4-1ubuntu0.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst liblocale-gettext-perl (1.07-8 Ubuntu:26.04/resolute [amd64])
+Inst libsystemd-shared (259.5-0ubuntu3.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf libsystemd-shared (259.5-0ubuntu3.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst systemd (259.5-0ubuntu3.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf mount (2.41.3-3ubuntu2.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf systemd (259.5-0ubuntu3.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst systemd-sysv (259.5-0ubuntu3.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst libapparmor1 (5.0.2-0ubuntu1~26.04.1 Ubuntu:26.04/resolute-updates [amd64])
+Inst apparmor (5.0.2-0ubuntu1~26.04.1 Ubuntu:26.04/resolute-updates [amd64])
+Inst openssl (3.5.5-1ubuntu3.6 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst ca-certificates (20260601~26.04.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [all])
+Inst libfuse3-4 (3.18.2-1 Ubuntu:26.04/resolute [amd64])
+Inst fuse3 (3.18.2-1 Ubuntu:26.04/resolute [amd64])
+Inst libcap2 (1:2.75-10ubuntu2 Ubuntu:26.04/resolute [amd64])
+Inst libcap2-bin (1:2.75-10ubuntu2 Ubuntu:26.04/resolute [amd64])
+Inst libtinfo6 (6.6+20251231-1 Ubuntu:26.04/resolute [amd64])
+Inst libedit2 (3.1-20251016-1 Ubuntu:26.04/resolute [amd64])
+Inst libcbor0.10 (0.10.2-2ubuntu3 Ubuntu:26.04/resolute [amd64])
+Inst libfido2-1 (1.16.0-2build1 Ubuntu:26.04/resolute [amd64])
+Inst libkrb5support0 (1.22.1-2ubuntu4.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst libcom-err2 (1.47.2-3ubuntu4 Ubuntu:26.04/resolute [amd64])
+Inst libk5crypto3 (1.22.1-2ubuntu4.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst libkeyutils1 (1.6.3-6ubuntu3 Ubuntu:26.04/resolute [amd64])
+Inst libkrb5-3 (1.22.1-2ubuntu4.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst libgssapi-krb5-2 (1.22.1-2ubuntu4.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst openssh-client (1:10.2p1-2ubuntu3.6 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst liblzo2-2 (2.10-3build2 Ubuntu:26.04/resolute [amd64])
+Inst squashfs-tools (1:4.7.5-1 Ubuntu:26.04/resolute [amd64])
+Inst libkmod2 (34.2-2ubuntu2 Ubuntu:26.04/resolute [amd64])
+Inst udev (259.5-0ubuntu3.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst libdbus-1-3 (1.16.2-2ubuntu4 Ubuntu:26.04/resolute [amd64])
+Inst dbus-bin (1.16.2-2ubuntu4 Ubuntu:26.04/resolute [amd64])
+Inst dbus-session-bus-common (1.16.2-2ubuntu4 Ubuntu:26.04/resolute [all])
+Inst dbus-daemon (1.16.2-2ubuntu4 Ubuntu:26.04/resolute [amd64])
+Inst dbus-system-bus-common (1.16.2-2ubuntu4 Ubuntu:26.04/resolute [all])
+Inst dbus (1.16.2-2ubuntu4 Ubuntu:26.04/resolute [amd64])
+Inst libpam-systemd (259.5-0ubuntu3.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst dbus-user-session (1.16.2-2ubuntu4 Ubuntu:26.04/resolute [amd64])
+Inst snapd (2.76.3+ubuntu26.04 Ubuntu:26.04/resolute-updates [amd64])
+Conf libapparmor1 (5.0.2-0ubuntu1~26.04.1 Ubuntu:26.04/resolute-updates [amd64])
+Conf apparmor (5.0.2-0ubuntu1~26.04.1 Ubuntu:26.04/resolute-updates [amd64])
+Conf openssl (3.5.5-1ubuntu3.6 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf ca-certificates (20260601~26.04.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [all])
+Conf libfuse3-4 (3.18.2-1 Ubuntu:26.04/resolute [amd64])
+Conf fuse3 (3.18.2-1 Ubuntu:26.04/resolute [amd64])
+Conf libcap2 (1:2.75-10ubuntu2 Ubuntu:26.04/resolute [amd64])
+Conf libcap2-bin (1:2.75-10ubuntu2 Ubuntu:26.04/resolute [amd64])
+Conf libtinfo6 (6.6+20251231-1 Ubuntu:26.04/resolute [amd64])
+Conf libedit2 (3.1-20251016-1 Ubuntu:26.04/resolute [amd64])
+Conf libcbor0.10 (0.10.2-2ubuntu3 Ubuntu:26.04/resolute [amd64])
+Conf libfido2-1 (1.16.0-2build1 Ubuntu:26.04/resolute [amd64])
+Conf libkrb5support0 (1.22.1-2ubuntu4.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf libcom-err2 (1.47.2-3ubuntu4 Ubuntu:26.04/resolute [amd64])
+Conf libk5crypto3 (1.22.1-2ubuntu4.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf libkeyutils1 (1.6.3-6ubuntu3 Ubuntu:26.04/resolute [amd64])
+Conf libkrb5-3 (1.22.1-2ubuntu4.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf libgssapi-krb5-2 (1.22.1-2ubuntu4.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf openssh-client (1:10.2p1-2ubuntu3.6 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf liblzo2-2 (2.10-3build2 Ubuntu:26.04/resolute [amd64])
+Conf squashfs-tools (1:4.7.5-1 Ubuntu:26.04/resolute [amd64])
+Conf libkmod2 (34.2-2ubuntu2 Ubuntu:26.04/resolute [amd64])
+Conf udev (259.5-0ubuntu3.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf libdbus-1-3 (1.16.2-2ubuntu4 Ubuntu:26.04/resolute [amd64])
+Conf dbus-bin (1.16.2-2ubuntu4 Ubuntu:26.04/resolute [amd64])
+Conf dbus-session-bus-common (1.16.2-2ubuntu4 Ubuntu:26.04/resolute [all])
+Conf libexpat1 (2.7.4-1ubuntu0.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf dbus-daemon (1.16.2-2ubuntu4 Ubuntu:26.04/resolute [amd64])
+Conf libpam-runtime (1.7.0-5ubuntu3.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [all])
+Conf dbus-system-bus-common (1.16.2-2ubuntu4 Ubuntu:26.04/resolute [all])
+Conf dbus (1.16.2-2ubuntu4 Ubuntu:26.04/resolute [amd64])
+Conf systemd-sysv (259.5-0ubuntu3.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf libpam-systemd (259.5-0ubuntu3.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf dbus-user-session (1.16.2-2ubuntu4 Ubuntu:26.04/resolute [amd64])
+Conf snapd (2.76.3+ubuntu26.04 Ubuntu:26.04/resolute-updates [amd64])
+Inst chromium-browser (2:1snap1-0ubuntu4 Ubuntu:26.04/resolute [amd64])
+Inst libgmp10 (2:6.3.0+dfsg-5ubuntu2 Ubuntu:26.04/resolute [amd64])
+Inst libncursesw6 (6.6+20251231-1 Ubuntu:26.04/resolute [amd64])
+Inst libuuid1 (2.41.3-3ubuntu2.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst sensible-utils (0.0.26build1 Ubuntu:26.04/resolute [all])
+Inst libtext-charwidth-perl (0.04-11build4 Ubuntu:26.04/resolute [amd64])
+Inst libtext-iconv-perl (1.7-8.1 Ubuntu:26.04/resolute [amd64])
+Inst libtext-wrapi18n-perl (0.06-10 Ubuntu:26.04/resolute [all])
+Inst debconf-i18n (1.5.92 Ubuntu:26.04/resolute [all])
+Inst libdevmapper1.02.1 (2:1.02.205-2ubuntu3 Ubuntu:26.04/resolute [amd64])
+Inst dmsetup (2:1.02.205-2ubuntu3 Ubuntu:26.04/resolute [amd64])
+Inst krb5-locales (1.22.1-2ubuntu4.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [all])
+Inst libjson-c5 (0.18+ds-3 Ubuntu:26.04/resolute [amd64])
+Inst libcryptsetup12 (2:2.8.4-1ubuntu4 Ubuntu:26.04/resolute [amd64])
+Inst libffi8 (3.5.2-4 Ubuntu:26.04/resolute [amd64])
+Inst libnettle8t64 (3.10.2-1 Ubuntu:26.04/resolute [amd64])
+Inst libhogweed6t64 (3.10.2-1 Ubuntu:26.04/resolute [amd64])
+Inst libunistring5 (1.3-2build1 Ubuntu:26.04/resolute [amd64])
+Inst libidn2-0 (2.3.8-4build1 Ubuntu:26.04/resolute [amd64])
+Inst libp11-kit0 (0.26.2-2 Ubuntu:26.04/resolute [amd64])
+Inst libtasn1-6 (4.21.0-2 Ubuntu:26.04/resolute [amd64])
+Inst libgnutls30t64 (3.8.12-2ubuntu1.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst libgpg-error-l10n (1.58-2 Ubuntu:26.04/resolute [all])
+Inst libnss-systemd (259.5-0ubuntu3.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst libpam-cap (1:2.75-10ubuntu2 Ubuntu:26.04/resolute [amd64])
+Inst readline-common (8.3-4 Ubuntu:26.04/resolute [all])
+Inst libreadline8t64 (8.3-4 Ubuntu:26.04/resolute [amd64])
+Inst libsqlite3-0 (3.46.1-9ubuntu0.3 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst linux-sysctl-defaults (4.15ubuntu5 Ubuntu:26.04/resolute [all])
+Inst systemd-cryptsetup (259.5-0ubuntu3.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst systemd-hwe-hwdb (259.5.3ubuntu Ubuntu:26.04/resolute [all])
+Inst systemd-resolved (259.5-0ubuntu3.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst libgpm2 (1.20.7-12build1 Ubuntu:26.04/resolute [amd64])
+Inst libxau6 (1:1.0.11-1build2 Ubuntu:26.04/resolute [amd64])
+Inst libxdmcp6 (1:1.1.5-2 Ubuntu:26.04/resolute [amd64])
+Inst libxcb1 (1.17.0-2ubuntu1 Ubuntu:26.04/resolute [amd64])
+Inst libx11-data (2:1.8.13-1 Ubuntu:26.04/resolute [all])
+Inst libx11-6 (2:1.8.13-1 Ubuntu:26.04/resolute [amd64])
+Inst libxext6 (2:1.3.4-1build3 Ubuntu:26.04/resolute [amd64])
+Inst libxmuu1 (2:1.1.3-4 Ubuntu:26.04/resolute [amd64])
+Inst xauth (1:1.1.2-1.1build1 Ubuntu:26.04/resolute [amd64])
+Inst libassuan9 (3.0.2-2build1 Ubuntu:26.04/resolute [amd64])
+Inst gpgconf (2.4.8-4ubuntu3.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst libksba8 (1.6.7-2build1 Ubuntu:26.04/resolute [amd64])
+Inst libsasl2-modules-db (2.1.28+dfsg1-9ubuntu3 Ubuntu:26.04/resolute [amd64])
+Inst libsasl2-2 (2.1.28+dfsg1-9ubuntu3 Ubuntu:26.04/resolute [amd64])
+Inst libldap-common (2.6.10+dfsg-1ubuntu5 Ubuntu:26.04/resolute [all])
+Inst libldap2 (2.6.10+dfsg-1ubuntu5 Ubuntu:26.04/resolute [amd64])
+Inst libnpth0t64 (1.8-3build1 Ubuntu:26.04/resolute [amd64])
+Inst dirmngr (2.4.8-4ubuntu3.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst gpg (2.4.8-4ubuntu3.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst pinentry-curses (1.3.2-3ubuntu1 Ubuntu:26.04/resolute [amd64])
+Inst gpg-agent (2.4.8-4ubuntu3.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst gpgsm (2.4.8-4ubuntu3.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst gnupg (2.4.8-4ubuntu3.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [all])
+Inst gnupg-l10n (2.4.8-4ubuntu3.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [all])
+Inst gnupg-utils (2.4.8-4ubuntu3.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst gpg-wks-client (2.4.8-4ubuntu3.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst liblastlog2-2 (2.41.3-3ubuntu2.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst libsasl2-modules (2.1.28+dfsg1-9ubuntu3 Ubuntu:26.04/resolute [amd64])
+Inst systemd-timesyncd (259.5-0ubuntu3.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Inst util-linux-extra (2.41.3-3ubuntu2.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf login (1:4.16.0-2+really2.41.3-3ubuntu2.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf liblocale-gettext-perl (1.07-8 Ubuntu:26.04/resolute [amd64])
+Conf chromium-browser (2:1snap1-0ubuntu4 Ubuntu:26.04/resolute [amd64])
+Conf libgmp10 (2:6.3.0+dfsg-5ubuntu2 Ubuntu:26.04/resolute [amd64])
+Conf libncursesw6 (6.6+20251231-1 Ubuntu:26.04/resolute [amd64])
+Conf libuuid1 (2.41.3-3ubuntu2.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf sensible-utils (0.0.26build1 Ubuntu:26.04/resolute [all])
+Conf libtext-charwidth-perl (0.04-11build4 Ubuntu:26.04/resolute [amd64])
+Conf libtext-iconv-perl (1.7-8.1 Ubuntu:26.04/resolute [amd64])
+Conf libtext-wrapi18n-perl (0.06-10 Ubuntu:26.04/resolute [all])
+Conf debconf-i18n (1.5.92 Ubuntu:26.04/resolute [all])
+Conf libdevmapper1.02.1 (2:1.02.205-2ubuntu3 Ubuntu:26.04/resolute [amd64])
+Conf dmsetup (2:1.02.205-2ubuntu3 Ubuntu:26.04/resolute [amd64])
+Conf krb5-locales (1.22.1-2ubuntu4.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [all])
+Conf libjson-c5 (0.18+ds-3 Ubuntu:26.04/resolute [amd64])
+Conf libcryptsetup12 (2:2.8.4-1ubuntu4 Ubuntu:26.04/resolute [amd64])
+Conf libffi8 (3.5.2-4 Ubuntu:26.04/resolute [amd64])
+Conf libnettle8t64 (3.10.2-1 Ubuntu:26.04/resolute [amd64])
+Conf libhogweed6t64 (3.10.2-1 Ubuntu:26.04/resolute [amd64])
+Conf libunistring5 (1.3-2build1 Ubuntu:26.04/resolute [amd64])
+Conf libidn2-0 (2.3.8-4build1 Ubuntu:26.04/resolute [amd64])
+Conf libp11-kit0 (0.26.2-2 Ubuntu:26.04/resolute [amd64])
+Conf libtasn1-6 (4.21.0-2 Ubuntu:26.04/resolute [amd64])
+Conf libgnutls30t64 (3.8.12-2ubuntu1.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf libgpg-error-l10n (1.58-2 Ubuntu:26.04/resolute [all])
+Conf libnss-systemd (259.5-0ubuntu3.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf libpam-cap (1:2.75-10ubuntu2 Ubuntu:26.04/resolute [amd64])
+Conf readline-common (8.3-4 Ubuntu:26.04/resolute [all])
+Conf libreadline8t64 (8.3-4 Ubuntu:26.04/resolute [amd64])
+Conf libsqlite3-0 (3.46.1-9ubuntu0.3 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf linux-sysctl-defaults (4.15ubuntu5 Ubuntu:26.04/resolute [all])
+Conf systemd-cryptsetup (259.5-0ubuntu3.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf systemd-hwe-hwdb (259.5.3ubuntu Ubuntu:26.04/resolute [all])
+Conf systemd-resolved (259.5-0ubuntu3.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf libgpm2 (1.20.7-12build1 Ubuntu:26.04/resolute [amd64])
+Conf libxau6 (1:1.0.11-1build2 Ubuntu:26.04/resolute [amd64])
+Conf libxdmcp6 (1:1.1.5-2 Ubuntu:26.04/resolute [amd64])
+Conf libxcb1 (1.17.0-2ubuntu1 Ubuntu:26.04/resolute [amd64])
+Conf libx11-data (2:1.8.13-1 Ubuntu:26.04/resolute [all])
+Conf libx11-6 (2:1.8.13-1 Ubuntu:26.04/resolute [amd64])
+Conf libxext6 (2:1.3.4-1build3 Ubuntu:26.04/resolute [amd64])
+Conf libxmuu1 (2:1.1.3-4 Ubuntu:26.04/resolute [amd64])
+Conf xauth (1:1.1.2-1.1build1 Ubuntu:26.04/resolute [amd64])
+Conf libassuan9 (3.0.2-2build1 Ubuntu:26.04/resolute [amd64])
+Conf gpgconf (2.4.8-4ubuntu3.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf libksba8 (1.6.7-2build1 Ubuntu:26.04/resolute [amd64])
+Conf libsasl2-modules-db (2.1.28+dfsg1-9ubuntu3 Ubuntu:26.04/resolute [amd64])
+Conf libsasl2-2 (2.1.28+dfsg1-9ubuntu3 Ubuntu:26.04/resolute [amd64])
+Conf libldap-common (2.6.10+dfsg-1ubuntu5 Ubuntu:26.04/resolute [all])
+Conf libldap2 (2.6.10+dfsg-1ubuntu5 Ubuntu:26.04/resolute [amd64])
+Conf libnpth0t64 (1.8-3build1 Ubuntu:26.04/resolute [amd64])
+Conf dirmngr (2.4.8-4ubuntu3.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf gpg (2.4.8-4ubuntu3.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf pinentry-curses (1.3.2-3ubuntu1 Ubuntu:26.04/resolute [amd64])
+Conf gpg-agent (2.4.8-4ubuntu3.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf gpgsm (2.4.8-4ubuntu3.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf gnupg (2.4.8-4ubuntu3.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [all])
+Conf gnupg-l10n (2.4.8-4ubuntu3.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [all])
+Conf gnupg-utils (2.4.8-4ubuntu3.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf gpg-wks-client (2.4.8-4ubuntu3.1 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf liblastlog2-2 (2.41.3-3ubuntu2.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf libsasl2-modules (2.1.28+dfsg1-9ubuntu3 Ubuntu:26.04/resolute [amd64])
+Conf systemd-timesyncd (259.5-0ubuntu3.4 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])
+Conf util-linux-extra (2.41.3-3ubuntu2.2 Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security [amd64])

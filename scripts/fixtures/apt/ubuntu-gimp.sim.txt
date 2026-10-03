@@ -1,0 +1,85 @@
+NOTE: This is only a simulation!
+      apt-get needs root privileges for real execution.
+      Keep also in mind that locking is deactivated,
+      so don't depend on the relevance to the real current situation!
+Reading package lists...
+Building dependency tree...
+Reading state information...
+Solving dependencies...
+The following additional packages will be installed:
+  gimp-data gir1.2-babl-0.1 gir1.2-gegl-0.4 gir1.2-gexiv2-0.10 gir1.2-gimp-3.0
+  graphviz libamd3 libbabl-0.1-0 libcamd3 libccolamd3 libcdt6 libcfitsio10t64
+  libcgraph8 libcholmod5 libcolamd3 libgegl-0.4-0t64 libgegl-common
+  libgimp-3.0-0 libgvc7 libgvplugin-gd8 libgvplugin-pango8 libgvpr2 libmng2
+  libmypaint-1.5-1 libmypaint-common libpathplan4 libsuitesparseconfig7
+  libumfpack6 libxdot4
+Suggested packages:
+  gimp-data-extras gimp-help-en | gimp-help gsfonts graphviz-doc
+The following NEW packages will be installed:
+  gimp gimp-data gir1.2-babl-0.1 gir1.2-gegl-0.4 gir1.2-gexiv2-0.10
+  gir1.2-gimp-3.0 graphviz libamd3 libbabl-0.1-0 libcamd3 libccolamd3 libcdt6
+  libcfitsio10t64 libcgraph8 libcholmod5 libcolamd3 libgegl-0.4-0t64
+  libgegl-common libgimp-3.0-0 libgvc7 libgvplugin-gd8 libgvplugin-pango8
+  libgvpr2 libmng2 libmypaint-1.5-1 libmypaint-common libpathplan4
+  libsuitesparseconfig7 libumfpack6 libxdot4
+0 upgraded, 30 newly installed, 0 to remove and 7 not upgraded.
+Inst gimp-data (3.2.2-1ubuntu0.26.04.1 Ubuntu:26.04/resolute-updates [all])
+Inst libbabl-0.1-0 (1:0.1.124-1 Ubuntu:26.04/resolute [amd64])
+Inst gir1.2-babl-0.1 (1:0.1.124-1 Ubuntu:26.04/resolute [amd64])
+Inst libgegl-common (1:0.4.70-1 Ubuntu:26.04/resolute [all])
+Inst libsuitesparseconfig7 (1:7.12.2+dfsg-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Inst libamd3 (1:7.12.2+dfsg-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Inst libcamd3 (1:7.12.2+dfsg-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Inst libccolamd3 (1:7.12.2+dfsg-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Inst libcolamd3 (1:7.12.2+dfsg-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Inst libcholmod5 (1:7.12.2+dfsg-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Inst libumfpack6 (1:7.12.2+dfsg-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Inst libgegl-0.4-0t64 (1:0.4.70-1 Ubuntu:26.04/resolute [amd64])
+Inst gir1.2-gegl-0.4 (1:0.4.70-1 Ubuntu:26.04/resolute [amd64])
+Inst gir1.2-gexiv2-0.10 (0.14.6-2 Ubuntu:26.04/resolute [amd64])
+Inst libgimp-3.0-0 (3.2.2-1ubuntu0.26.04.1 Ubuntu:26.04/resolute-updates [amd64])
+Inst gir1.2-gimp-3.0 (3.2.2-1ubuntu0.26.04.1 Ubuntu:26.04/resolute-updates [amd64])
+Inst libcdt6 (14.1.2-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Inst libcgraph8 (14.1.2-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Inst libpathplan4 (14.1.2-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Inst libxdot4 (14.1.2-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Inst libgvc7 (14.1.2-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Inst libgvpr2 (14.1.2-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Inst libgvplugin-gd8 (14.1.2-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Inst libgvplugin-pango8 (14.1.2-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Inst graphviz (14.1.2-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Inst libcfitsio10t64 (4.6.3-1 Ubuntu:26.04/resolute [amd64])
+Inst libmng2 (2.0.3+dfsg-5 Ubuntu:26.04/resolute [amd64])
+Inst libmypaint-common (1.6.0-4build1 Ubuntu:26.04/resolute [all])
+Inst libmypaint-1.5-1 (1.6.0-4build1 Ubuntu:26.04/resolute [amd64])
+Inst gimp (3.2.2-1ubuntu0.26.04.1 Ubuntu:26.04/resolute-updates [amd64])
+Conf gimp-data (3.2.2-1ubuntu0.26.04.1 Ubuntu:26.04/resolute-updates [all])
+Conf libbabl-0.1-0 (1:0.1.124-1 Ubuntu:26.04/resolute [amd64])
+Conf gir1.2-babl-0.1 (1:0.1.124-1 Ubuntu:26.04/resolute [amd64])
+Conf libgegl-common (1:0.4.70-1 Ubuntu:26.04/resolute [all])
+Conf libsuitesparseconfig7 (1:7.12.2+dfsg-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Conf libamd3 (1:7.12.2+dfsg-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Conf libcamd3 (1:7.12.2+dfsg-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Conf libccolamd3 (1:7.12.2+dfsg-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Conf libcolamd3 (1:7.12.2+dfsg-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Conf libcholmod5 (1:7.12.2+dfsg-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Conf libumfpack6 (1:7.12.2+dfsg-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Conf libgegl-0.4-0t64 (1:0.4.70-1 Ubuntu:26.04/resolute [amd64])
+Conf gir1.2-gegl-0.4 (1:0.4.70-1 Ubuntu:26.04/resolute [amd64])
+Conf gir1.2-gexiv2-0.10 (0.14.6-2 Ubuntu:26.04/resolute [amd64])
+Conf libgimp-3.0-0 (3.2.2-1ubuntu0.26.04.1 Ubuntu:26.04/resolute-updates [amd64])
+Conf gir1.2-gimp-3.0 (3.2.2-1ubuntu0.26.04.1 Ubuntu:26.04/resolute-updates [amd64])
+Conf libcdt6 (14.1.2-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Conf libcgraph8 (14.1.2-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Conf libpathplan4 (14.1.2-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Conf libxdot4 (14.1.2-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Conf libgvc7 (14.1.2-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Conf libgvpr2 (14.1.2-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Conf libgvplugin-gd8 (14.1.2-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Conf libgvplugin-pango8 (14.1.2-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Conf graphviz (14.1.2-1ubuntu1 Ubuntu:26.04/resolute [amd64])
+Conf libcfitsio10t64 (4.6.3-1 Ubuntu:26.04/resolute [amd64])
+Conf libmng2 (2.0.3+dfsg-5 Ubuntu:26.04/resolute [amd64])
+Conf libmypaint-common (1.6.0-4build1 Ubuntu:26.04/resolute [all])
+Conf libmypaint-1.5-1 (1.6.0-4build1 Ubuntu:26.04/resolute [amd64])
+Conf gimp (3.2.2-1ubuntu0.26.04.1 Ubuntu:26.04/resolute-updates [amd64])

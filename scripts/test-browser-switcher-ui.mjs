@@ -162,7 +162,7 @@ const FONT_SOURCE = "document.addEventListener('DOMContentLoaded', () => { const
 // ── the judges (node-side) ──
 const DEV = /§|src\/|\.mjs|`|\btier\b|cloud:|binary_absent|\bprovider\b|\begress\b|\blease\b|\bseeded\b|\bbackend\b|\bnpm\b|\bcloak\b|\d{3}/i;
 const BAD = /\bundefined\b|\bnull\b|\bNaN\b|\[object/;
-const ALLOWED_LATIN = ['Amazon Bedrock AgentCore', 'Browser Use', 'CloakBrowser', 'Browserbase', 'Browserless', 'Chromium', 'Chrome', 'VibeSpace', 'Cookie', 'Kernel', 'Agent', 'agent', 'MB']; // product + browser names (the default browser's blurb names Chrome)
+const ALLOWED_LATIN = ['Amazon Bedrock AgentCore', 'Browser Use', 'CloakBrowser', 'Browserbase', 'Browserless', 'Chromium', 'Chrome', 'VibeSpace', 'Cookie', 'Kernel', 'Agent', 'agent', 'MB', 'CLI']; // product + browser names (the default browser's blurb names Chrome); CLI = the browser CLI's own name, as browser-admin's zh / ja dictionaries spell it (2.369.200 integration)
 const DATA_LATIN = ['Vendor portal', 'shop.example', 'shopping', 'captcha', 'dev-1', 'cloakbrowser.dev']; // the fixtures' own data (a label, a host, the agent's words) + the §7.2.1 record's download host (lane-cloak)
 function wordsProblems(lang, texts, { allowDigits = false } = {}) {
   const out = [];

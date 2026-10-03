@@ -178,7 +178,7 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
   keepOn = null, keptKeys = null } = {}) {
   const ENV_DIR = path.join(dataDir, 'browser-env');        // generated configs + pin symlinks (+ the C rung's `<key>.cwd`)
   const PROFILE_DIR = path.join(dataDir, 'browser-profiles'); // variant C scratch dirs (ours, swept)
-  const bf = facts || createBrowserFacts({});
+  const bf = facts || createBrowserFacts({ pinned: require('../browser-facts.js').cliPinReader(dataDir) }); // lane browser-admin 2b: the floor is judged on the CLI the sessions run (the keeper's pin file)
   const uid = () => (typeof process.getuid === 'function' ? process.getuid() : null);
   // The durable conversation → key store (r5). session-stdout's meta writer
   // records into the same file through its own instance; this one only reads.

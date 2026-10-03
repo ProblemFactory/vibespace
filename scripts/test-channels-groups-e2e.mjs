@@ -282,6 +282,62 @@ ok(fA1.length === 2 && /notify mode in this group is "always"/.test(fA1[1].messa
 ok(fB1.length === 1, 'the member on `next-turn` is NOT woken: its stub recorded nothing new (the message waits for its next report)', `beta frames ${fB1.length}`);
 ok(s1.drawnAs === 'You' && s1.body === 'hello team — status please' && /woke 1 agent\(s\) = 1 billed turn\(s\)/.test(s1.toast || '') && /1 will read it on their next turn/.test(s1.toast || ''), 'the owner\'s message is drawn at once as "You", and the toast states the wake count and who reads it next turn', JSON.stringify(s1));
 
+// ── ④b WHERE THE MESSAGE STANDS (lane group-pending; the owner 2026-10-01: a message to a next-turn member was
+//      drawn exactly like a delivered one) — the line under the owner's message: alpha (always, woken) read it,
+//      beta (next-turn) waits; beta's TURN START (its UserPromptSubmit hook on a typed turn) hands the report over
+//      and the SAME node flips to read with no reload; a muted member is said; a mode change repaints in place;
+//      the zh / ja lines whole on a second page ──
+const DLV = (body) => `(() => {
+  const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === '${gid}');
+  if (!w) return null;
+  const row = [...w.content.querySelectorAll('.chanmsg:not(.chanmsg-sys)')].find((r) => r.querySelector('.chanmsg-body').textContent === ${JSON.stringify(body)});
+  if (!row) return null;
+  const line = row.querySelector(':scope > .chanmsg-dlv');
+  if (!line) return { noLine: true };
+  if (!line.__mark) line.__mark = 'm' + Math.random().toString(36).slice(2);
+  const dot = getComputedStyle(line.querySelector('.chanmsg-dlv-dot'));
+  return { text: line.querySelector('.chanmsg-dlv-text').textContent, tone: line.dataset.tone, title: line.title, hidden: line.hidden, mark: line.__mark, whole: line.scrollWidth <= line.clientWidth + 1, dotFilled: dot.backgroundColor !== 'rgba(0, 0, 0, 0)' && dot.backgroundColor !== 'transparent' };
+})()`;
+const HELLO = 'hello team — status please';
+const d1 = await p1.evaljs(DLV(HELLO));
+ok(d1 && !d1.noLine && d1.text === '1 waiting · 1 read' && d1.tone === 'waiting' && d1.dotFilled === false && d1.whole && d1.hidden === false, '④b the owner\'s message carries its line: "1 waiting · 1 read" (alpha woken, beta waits), a HOLLOW dot, whole in its row', JSON.stringify(d1));
+ok(d1 && d1.title.split('\n').length === 2 && d1.title.split('\n').includes("Waiting for beta's next turn") && d1.title.split('\n').some((l) => /^Read by alpha · \d{2}:\d{2}$/.test(l)), '④b …its title names each recipient\'s state (alpha, woken, with its hand-over clock)', d1 && d1.title);
+// beta's next turn: one typed character into its session makes the next hook call a USER turn (the §22 gate — the
+// invite wake stamped a machine turn), the hook hands the report over (an HTTP answer: the stub records nothing),
+// the marker moves, the broadcast carries it, the line flips
+await p1.evaljs(`(() => { window.app.ws.send({ type: 'input', sessionId: 'sess-grp-${AGENTS[1].key}', data: ' ' }); return 1; })()`);
+await sleep(300);
+const pc = await api('GET', '/api/agent/prompt-context', undefined, { Authorization: 'Bearer ' + AGENTS[1].token });
+ok(pc.status === 200 && /hello team/.test(JSON.stringify(pc.body)), '④b beta\'s UserPromptSubmit hook (a typed turn) is handed the report carrying the owner\'s message', JSON.stringify(pc.body).slice(0, 300));
+const d2 = await until(`(() => { const d = ${DLV(HELLO)}; return d && d.text === '2 read' ? d : null; })()`);
+ok(d2 && d2.tone === 'handed' && d2.dotFilled === true && d2.mark === d1.mark, '④b …and the line under the owner\'s message flips to "2 read" with a FILLED dot — the SAME node, patched in place, no reload', JSON.stringify(d2));
+ok(d2 && /^Read by beta · \d{2}:\d{2}$/m.test(d2.title) && /^Read by alpha · \d{2}:\d{2}$/m.test(d2.title), '④b …its title says WHEN each was read (the hand-over clock, HH:MM like the message head)', d2 && d2.title);
+ok(frames(AGENTS[1]).length === fB1.length, 'CONTROL: the hand-over was the hook\'s answer — beta\'s stub recorded no frame for it (nobody was woken, nothing billed)', `beta frames ${frames(AGENTS[1]).length}`);
+// a muted member is said; a mode change repaints the line in place
+const mute = await api('POST', `/api/channel-groups/${gid}/notify`, { member: AGENTS[1].cid, notify: 'mute' });
+ok(mute.status === 200 && mute.body.ok, '④b FIXTURE: beta → mute (the owner may set anyone\'s mode)');
+const MUTED = 'a note while beta is muted';
+await p1.evaljs(SEND(MUTED));
+const d3 = await until(`(() => { const d = ${DLV(MUTED)}; return d && /muted/.test(d.text) ? d : null; })()`);
+ok(d3 && d3.text === '1 read · 1 muted' && d3.tone === 'handed' && /beta is muted and will not read it/.test(d3.title), `④b a muted member is SAID under the message ("${d3 && d3.text}"); alpha (always) read it`, JSON.stringify(d3));
+const unmute = await api('POST', `/api/channel-groups/${gid}/notify`, { member: AGENTS[1].cid, notify: 'next-turn' });
+const d4 = await until(`(() => { const d = ${DLV(MUTED)}; return d && d.text === '1 waiting · 1 read' ? d : null; })()`);
+ok(unmute.status === 200 && d4 && d4.mark === d3.mark && d4.tone === 'waiting', '④b beta back on next-turn ⇒ the SAME line now reads "1 waiting · 1 read" (a mode change repaints in place — the line is a live fact)', JSON.stringify(d4));
+// zh / ja: the same line whole on a second page in each language (the width budget lives in the words)
+for (const lang of ['zh', 'ja']) {
+  const p = await newPage();
+  await p.cdp('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', ${JSON.stringify(lang)}); } catch {}` });
+  ok(await p.load(), `④b ${lang}: a second page in ${lang} loaded`);
+  const want = lang === 'zh' ? '1 人待读 · 1 人已读' : '1 人が未読 · 1 人が既読';
+  await p.evaljs(`(() => { window.app.openChannel('groups', '${gid}'); return 1; })()`);
+  let dl = null;
+  for (const end = Date.now() + 20000; Date.now() < end && !dl;) { try { dl = await p.evaljs(`(() => { const d = ${DLV(MUTED)}; return d && d.text === ${JSON.stringify(want)} ? d : null; })()`); } catch {} if (!dl) await sleep(250); }
+  ok(dl && dl.whole && (lang === 'zh' ? /等待 beta 的下一回合/ : /beta の次のターンを待っています/).test(dl.title), `④b ${lang}: the line reads "${want}", whole in its row, its title in ${lang}`, JSON.stringify(dl));
+  const dlh = await p.evaljs(DLV(HELLO));
+  ok(dlh && (lang === 'zh' ? /beta 已在 \d{2}:\d{2} 读到/ : /beta が \d{2}:\d{2} に読みました/).test(dlh.title), `④b ${lang}: a read row says WHEN in ${lang}`, dlh && dlh.title);
+  await p.evaljs(`localStorage.removeItem('vibespace.lang'), 1`);
+}
+
 // ── ⑤ the @-autocomplete + a mention wakes a next-turn member ──
 const s2 = await p1.evaljs(SEND('can you take the data half?', { mention: '@be' }));
 await sleep(800);

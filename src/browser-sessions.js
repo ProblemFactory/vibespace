@@ -94,6 +94,11 @@ function entryFrameBytes(e) {
   return n;
 }
 const hasFrames = (e) => !!(e && ((e.before && e.before.file) || (e.after && e.after.file)));
+/** lane trace-fits: the live view's own re-fit (src/browser-trace.js FIT_ACTION — the same spelling, this module imports
+ *  nothing) — a session COUNTS the agent's actions and carries its fits beside (`fits`, every coalesced one). */
+const FIT_ACTION = 'viewer-fit';
+const isFitEntry = (e) => !!e && String(e.action || '') === FIT_ACTION;
+const fitCount = (e) => (isFitEntry(e) ? Math.max(1, Math.round(num(e.n)) || 1) : 0);
 
 /**
  * markers + entries → the sessions, NEWEST FIRST:
@@ -104,7 +109,7 @@ const hasFrames = (e) => !!(e && ((e.before && e.before.file) || (e.after && e.a
 function pairSessions({ markers = [], entries = [], now = 0, gapMs = LEGACY_GAP_MS } = {}) {
   const byId = new Map();
   let seq = 0; // the order sessions were first seen (the marker file is appended in time order) — the tie-break
-  const mk = (id, base) => { let s = byId.get(id); if (!s) { s = { id, order: seq++, implicit: false, browserKey: null, child: false, profileId: null, ephemeral: true, scope: null, label: null, webuiSessionId: null, holder: null, startAt: 0, endAt: null, open: false, reason: null, count: 0, markCount: null, firstAt: 0, lastAt: 0, durationMs: 0, frameEntries: 0, framesRemoved: 0, frameBytes: 0, hasStart: false, hasEnd: false, ...base }; byId.set(id, s); } return s; };
+  const mk = (id, base) => { let s = byId.get(id); if (!s) { s = { id, order: seq++, implicit: false, browserKey: null, child: false, profileId: null, ephemeral: true, scope: null, label: null, webuiSessionId: null, holder: null, startAt: 0, endAt: null, open: false, reason: null, count: 0, fits: 0, markCount: null, firstAt: 0, lastAt: 0, durationMs: 0, frameEntries: 0, framesRemoved: 0, frameBytes: 0, hasStart: false, hasEnd: false, ...base }; byId.set(id, s); } return s; };
   const sorted = (markers || []).filter(isMarker).slice().sort((a, b) => num(a.at) - num(b.at));
   for (const m of sorted) {
     const s = mk(m.id, {});
@@ -134,9 +139,9 @@ function pairSessions({ markers = [], entries = [], now = 0, gapMs = LEGACY_GAP_
         loose.set(lk, s);
       }
     }
-    s.count++;
+    if (isFitEntry(e)) s.fits += fitCount(e); else s.count++; // lane trace-fits: fits ride beside the count
     if (!s.firstAt || num(e.at) < s.firstAt) s.firstAt = num(e.at);
-    if (num(e.at) > s.lastAt) s.lastAt = num(e.at);
+    if (Math.max(num(e.at), num(e.lastAt)) > s.lastAt) s.lastAt = Math.max(num(e.at), num(e.lastAt));
     if (hasFrames(e)) { s.frameEntries++; s.frameBytes += entryFrameBytes(e); }
     else if (e.framesRemoved) s.framesRemoved++;
   }
@@ -280,7 +285,7 @@ function pickIndex(entries, at = null) {
 }
 
 module.exports = {
-  SESSION_ID_RE, MARKERS_FILE, LEGACY_GAP_MS, PLAY_STEP_MS, IDLE_STOPS, END_REASONS, HOLDERS,
+  SESSION_ID_RE, MARKERS_FILE, LEGACY_GAP_MS, PLAY_STEP_MS, IDLE_STOPS, END_REASONS, HOLDERS, FIT_ACTION,
   isSessionId, mintSessionId, sessionKey, stopEndsSession, endReasonFor, markerFor, isMarker, entryFrameBytes,
   pairSessions, sessionOrdinals, sessionOfEntry, sessionsOfKey, chatCardsFor, cardBlock, durationParts,
   replayEmpty, frameState, replayKey, playTick, pickSession, pickIndex,

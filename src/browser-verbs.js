@@ -941,7 +941,16 @@ const normDir = (d) => { let s = String(d || '').replace(/\/{2,}/g, '/'); while 
  * entry, and any candidate `isShim(path)` recognizes by content.
  * → `{ok:true, path}` | `{ok:false, code:'binary_absent', error, remedy}`.
  */
-function resolveRealBinary({ PATH = '', shimDirs = [], exists = () => false, isShim = () => false, name = REAL_BINARY } = {}) {
+function resolveRealBinary({ PATH = '', shimDirs = [], exists = () => false, isShim = () => false, name = REAL_BINARY, pinned = null } = {}) {
+  // lane browser-admin 2b: ONE rung FIRST — the browser CLI VibeSpace installed itself (the version its flag table was
+  // measured on, or the one the user named) when the setting `browser.cli` asks for it; a pinned path that is not an
+  // absolute, existing, non-shim executable is skipped (PATH answers, and the panel says the pin is not installed)
+  if (typeof pinned === 'string' && pinned.startsWith('/')) {
+    let hit = false, shim = false;
+    try { hit = !!exists(pinned); } catch { hit = false; }
+    try { shim = hit && !!isShim(pinned); } catch { shim = false; }
+    if (hit && !shim) return { ok: true, path: pinned, pinned: true };
+  }
   const skip = new Set(shimDirs.filter(Boolean).map(normDir));
   for (const raw of String(PATH || '').split(':')) {
     if (!raw || raw[0] !== '/') continue;
@@ -957,6 +966,82 @@ function resolveRealBinary({ PATH = '', shimDirs = [], exists = () => false, isS
     return { ok: true, path: p };
   }
   return { ok: false, code: 'binary_absent', error: 'the browser CLI VibeSpace drives is not installed on this machine', remedy: 'ask the user to install it; `vibespace-browser providers` lists what this machine has' };
+}
+
+// ── lane browser-admin 2b: THE BROWSER CLI VERSION VIBESPACE DRIVES ───────
+/** The npm package VibeSpace installs when the user pins the CLI (into data/browser-tools — never -g, never the checkout). */
+const CLI_PACKAGE = 'agent-browser';
+const CLI_VERSION_RE = /^\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+/** THE MEASURED PACKAGE (2026-10-01, `npm view agent-browser@0.38.1 dist` + one download of its tarball, sha1 equal to the
+ *  registry's shasum): what the download confirm says in plain numbers — the package, the ONE host it comes from, how big
+ *  it is and how big it unpacks (it carries every platform's native binary; nothing else is fetched: the install runs with
+ *  `--ignore-scripts`, so the package's postinstall — which downloads a binary from GitHub when the tarball lacks one —
+ *  never runs; the package's own launcher makes its binary executable). A version the table was NOT measured on carries
+ *  no numbers (the confirm says so). */
+const CLI_PIN_RECORD = Object.freeze({ package: CLI_PACKAGE, version: TABLE_VERSION, registryHost: 'registry.npmjs.org', tarballBytes: 52885291, unpackedBytes: 119129537, shasum: '429660c741782299f154e7fa7f03deb51bb32248', measured: '2026-10-01' });
+/** The setting `browser.cli` → `{mode:'path'}` (whatever agent-browser PATH has — every install before this lane) |
+ *  `{mode:'pinned', version: TABLE_VERSION}` (the version the flag table was measured on) | `{mode:'version', version}`
+ *  (another version the user names — the drift note stays: the table was measured on TABLE_VERSION). Anything else ⇒
+ *  path, `invalid` named. */
+function cliChoiceOf(v) {
+  const s = String(v == null ? '' : v).trim();
+  if (!s || s === 'path') return { mode: 'path' };
+  if (s === 'pinned') return { mode: 'pinned', version: TABLE_VERSION };
+  if (CLI_VERSION_RE.test(s)) return s === TABLE_VERSION ? { mode: 'pinned', version: TABLE_VERSION } : { mode: 'version', version: s };
+  return { mode: 'path', invalid: s.slice(0, 40) };
+}
+/** One install prefix per version (`npm install --no-save` into a shared prefix would prune a sibling install). */
+function cliInstallDirName(version) { if (!CLI_VERSION_RE.test(String(version || ''))) throw new Error(`cliInstallDirName: bad version ${JSON.stringify(version)}`); return `${CLI_PACKAGE}-${version}`; }
+/** The package's native binary for this machine — the package's own launcher's naming (bin/agent-browser.js
+ *  getBinaryName, 0.38.1), mirrored so a call runs the binary directly (no node launcher per command); null when the
+ *  platform is not one the package ships (the declared launcher is used then). */
+function cliNativeName({ platform = '', arch = '', musl = false } = {}) {
+  const os = platform === 'darwin' ? 'darwin' : platform === 'linux' ? (musl ? 'linux-musl' : 'linux') : platform === 'win32' ? 'win32' : null;
+  const a = arch === 'x64' || arch === 'x86_64' ? 'x64' : arch === 'arm64' || arch === 'aarch64' ? 'arm64' : null;
+  if (!os || !a) return null;
+  return `${CLI_PACKAGE}-${os}-${os === 'win32' && a === 'arm64' ? 'x64' : a}${os === 'win32' ? '.exe' : ''}`;
+}
+/** The agent's CLI reads the keeper's pin file BESIDE ITSELF (data/browser-tools/cli-pin.json — a remote machine has
+ *  none, so PATH answers there): only an absolute path INSIDE that tools directory is a pin (a file that names anything
+ *  else — another program, `..` — is no pin at all). → the path, or null. */
+function cliPinVerdict(json, { toolsDir = '' } = {}) {
+  const root = String(toolsDir || '').replace(/\/+$/, '');
+  const p = json && typeof json === 'object' && typeof json.path === 'string' ? json.path : '';
+  if (!root || !p.startsWith(root + '/') || p.split('/').includes('..') || /[\0\n]/.test(p)) return null;
+  return p;
+}
+/** verify r2 (H1, the coordinator's ruling 2026-10-01): A RUNNING BROWSER KEEPS THE CLI IT WAS LAUNCHED WITH. The 0.38.x
+ *  daemon restarts itself — and the Chrome it owns — the moment a client of ANOTHER version talks to it (measured
+ *  2026-10-01 on 0.38.0 ↔ 0.38.1: "Daemon version mismatch detected, restarting…", the daemon and Chrome pids replaced,
+ *  the active tab back on the first; `session info` and `--version` are the calls that never restart it). So every
+ *  command of a running browser runs a binary of THE VERSION ITS DAEMON RUNS, and a `browser.cli` switch applies at its
+ *  next launch. `want` = that version; `candidates` = `{path, version, how}` the caller can run, in its order (the binary
+ *  the browser was launched with first). → `{ok:true, path, how}` (`path` null = a browser whose version is not known:
+ *  the current CLI, as before) | `{ok:false, code:'browser_cli_gone', error, remedy}` — never another version. */
+function cliForBrowser({ want = null, candidates = [], current = null } = {}) {
+  const v = String(want == null ? '' : want);
+  if (!CLI_VERSION_RE.test(v)) return { ok: true, path: null, how: 'unknown' };
+  for (const c of Array.isArray(candidates) ? candidates : []) {
+    if (c && typeof c.path === 'string' && c.path.startsWith('/') && c.version === v) return { ok: true, path: c.path, how: c.how || 'same-version' };
+  }
+  return { ok: false, code: 'browser_cli_gone', error: browserCliGoneText({ version: v, current }), remedy: 'ask the user to restart this browser (Agent browser panel → Stop; the next command starts it on the current CLI)' };
+}
+/** The words of `browser_cli_gone` (the agent's refusal, the keeper's closed verdict, the panel's line). */
+function browserCliGoneText({ version, current = null } = {}) {
+  const cur = typeof current === 'string' && CLI_VERSION_RE.test(current) && current !== String(version) ? ` (${current})` : '';
+  return `this browser runs on ${CLI_PACKAGE} ${version}, which is no longer installed here — nothing ran (a command from another version would restart the browser and lose its tabs); it keeps its pages until it stops — restart it to use the current CLI${cur}`;
+}
+/** THE CLI INSTALL VERDICT (a user act; the keeper's ONE install slot — the cloak install's): the version is a dotted
+ *  triple · on this machine only · nothing running in the slot · not already installed · npm here. → `{ok, spec, version,
+ *  package, record}` | `{ok:false, code, error}`. `record` = the measured numbers when it IS the table's version. */
+function cliInstallVerdict({ version = TABLE_VERSION, host = null, running = false, installed = null, npm = true } = {}) {
+  const v = String(version || '');
+  if (!CLI_VERSION_RE.test(v)) return { ok: false, code: 'bad-request', error: `a browser CLI version is three numbers (like ${TABLE_VERSION})` };
+  if (host) return { ok: false, code: 'install_local_only', error: `the browser CLI VibeSpace drives is installed on this machine only — host ${JSON.stringify(String(host))} refused` };
+  if (running) return { ok: false, code: 'install_running', error: 'an install is already running — wait for it to finish' };
+  if (installed && installed.ok && installed.version === v) return { ok: false, code: 'already_installed', error: `${CLI_PACKAGE} ${v} is already installed at ${installed.path}`, path: installed.path };
+  if (!npm) return { ok: false, code: 'install_unavailable', error: `npm is not on PATH — install ${CLI_PACKAGE}@${v} by hand` };
+  return { ok: true, spec: `${CLI_PACKAGE}@${v}`, version: v, package: CLI_PACKAGE, record: v === CLI_PIN_RECORD.version ? CLI_PIN_RECORD : null };
 }
 
 // ── the CONFIG FILE (r3, takeover finding 2) ─────────────────────────────
@@ -1147,6 +1232,8 @@ module.exports = {
   KEEPER_MARK, // lane H verify r4: the keeper's launch mark (only the keeper writes it)
   // r4
   TABLE_VERSION, versionDrift, NAV_VERBS, localSchemeOf, stateFileVerdict, parseBatchStdin,
+  CLI_PACKAGE, CLI_PIN_RECORD, cliChoiceOf, cliInstallDirName, cliNativeName, cliInstallVerdict, cliPinVerdict, // lane browser-admin 2b: the pinned browser CLI
+  cliForBrowser, browserCliGoneText, // verify r2 (H1): a running browser keeps the CLI it was launched with
   SWITCH_VERBS, pausedSwitchNote, // verify S2 r3: a paused refusal names a verb that would move the user's view
   // lane L r2
   SECRET_HOME_DIRS, SECRET_DATA_DIRS, secretUploadRoots, uploadPathVerdict,

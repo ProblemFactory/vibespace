@@ -626,6 +626,16 @@ console.log('① the PURE router');
   ok(!r.ok && r.code === 'binary_absent' && r.remedy && !new RegExp(V.REAL_BINARY).test(r.error + r.remedy), 'empty/relative PATH entries are never a binary; absent ⇒ binary_absent (its words never name the binary)');
   r = V.resolveRealBinary({ PATH: '/shim:/nvm/bin', shimDirs: [], exists });
   ok(r.ok && r.path === '/shim/agent-browser', 'CONTROL: without the shim dirs the first hit wins (the skip is what the leg above measured)');
+  // lane browser-admin 2b: THE PINNED RUNG comes FIRST — the CLI VibeSpace installed (Settings browser.cli) beats PATH; a pin
+  // that is missing / a shim / relative is skipped and PATH answers exactly as before
+  const pfiles = new Set([...files, '/data/browser-tools/agent-browser-0.38.1/node_modules/agent-browser/bin/agent-browser-linux-x64']);
+  r = V.resolveRealBinary({ PATH: '/shim:/nvm/bin', shimDirs: ['/shim'], exists: (p) => pfiles.has(p), isShim, pinned: '/data/browser-tools/agent-browser-0.38.1/node_modules/agent-browser/bin/agent-browser-linux-x64' });
+  ok(r.ok && r.pinned === true && /browser-tools/.test(r.path), 'the pinned install is the FIRST rung (before PATH)', JSON.stringify(r));
+  r = V.resolveRealBinary({ PATH: '/shim:/nvm/bin', shimDirs: ['/shim'], exists, isShim, pinned: '/data/browser-tools/gone' });
+  ok(r.ok && !r.pinned && r.path === '/nvm/bin/agent-browser', 'a pin whose program is gone is skipped: PATH answers', JSON.stringify(r));
+  r = V.resolveRealBinary({ PATH: '/shim:/nvm/bin', shimDirs: ['/shim'], exists, isShim, pinned: '/prod/data/bin/agent-browser' });
+  ok(r.ok && r.path === '/nvm/bin/agent-browser', 'a pin that IS the shim is never run', JSON.stringify(r));
+  ok(V.LAUNCH_FLAGS.includes('--executable-path') && V.REFUSED_VERBS.install && V.REFUSED_VERBS.upgrade, 'the refused flags / verbs are unchanged by the pin: --executable-path stays a refused launch flag, install / upgrade not offered');
 }
 
 // ═══ ② the SHIM ═══
@@ -1315,7 +1325,7 @@ try {
     ok(r9.status === 0 && !/flag_table_drift/.test(r9.stderr) && JSON.stringify(realCalls().pop().argv) === '["get","--json","text","cdp-url"]', 'r4 CONTROL: on the measured version the same read runs (the <cdp-url> element\'s text) and nothing is said', r9.stderr);
     fs.writeFileSync(FAKE_VERSION, '0.33.0');
     const src = fs.readFileSync(CLI, 'utf8');
-    const r3 = src.replace('const drift = V.versionDrift(installedVersion(bin.path));', 'const drift = null;');
+    const r3 = src.replace('const drift = V.versionDrift(binVersionRaw);', 'const drift = null;'); // verify r2 (H1): the version string is read once (binVersionRaw) — the browser's own version is judged after /resolve
     const D7 = path.join(ROOT, 'r3-driftctl'); fs.mkdirSync(D7, { recursive: true });
     fs.writeFileSync(path.join(D7, 'vibespace-browser'), r3); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(D7, 'vibespace-browser-verbs.js'));
     r9 = await nodeCli(path.join(D7, 'vibespace-browser'), ['get', '--json', 'text', 'cdp-url'], { env: baseEnv });

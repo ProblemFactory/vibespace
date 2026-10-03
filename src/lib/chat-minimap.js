@@ -4,6 +4,7 @@
  * TOC button (top of the track) opens a filterable outline of all user messages.
  */
 import { createPopover, uiScale } from './utils.js';
+import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 import { t } from './i18n.js';
 
 export class ChatMinimap {
@@ -353,8 +354,10 @@ export class ChatMinimap {
       }
     };
 
-    this._minimap.addEventListener('mousedown', (e) => {
-      e.preventDefault();
+    // THE DOOR (verify r2 census): a pointer press captured on the minimap; the one feed ends the scrub on every end kind (a
+    // release over another window's iframe used to never arrive — the next move kept jumping the chat)
+    this._minimap.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || e.isPrimary === false || dragging) return;
       dragging = true;
       if (this._fullExtent) {
         const turn = getFullTurnAtY(e);
@@ -365,15 +368,14 @@ export class ChatMinimap {
         this._jumpToIndex(idx);
         updateLabel(e, getTurnAtIdx(idx));
       }
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', () => {
+      startPointerDrag(this._minimap, e, { onMove, onEnd: () => {
         dragging = false;
-        document.removeEventListener('mousemove', onMove);
         this._label.classList.add('hidden');
         if (jumpTimer) { clearTimeout(jumpTimer); jumpTimer = null; }
         if (fullJumpTimer) { clearTimeout(fullJumpTimer); fullJumpTimer = null; }
-      }, { once: true });
+      } });
     });
+    this._minimap.addEventListener('mousedown', (e) => { if (e.button === 0) e.preventDefault(); }); // the compat press: no selection
 
     this._minimap.addEventListener('mousemove', (e) => {
       if (dragging) return;

@@ -2484,7 +2484,9 @@ function create(deps = {}) {
         readReactions: caps.offers(c, effectiveConvCaps(rec, en), 'read-reactions', t),
       },
       // the conversation's thread shape (a topic group opens a thread per message) + the adapter's rows as the window draws them
-      threads: { mode: ((effectiveConvCaps(rec, en) || {}).threads || {}).mode || null, read: threadsRow(c).read, listing: threadsRow(c).listing },
+      // + the PLACEMENTS the channel declares (PURE `placementsOf` — the engine's own verdict reads the same list): the
+      //   window's message bar offers Quote / Reply in thread only where they are declared (lane reaction-hover)
+      threads: { mode: ((effectiveConvCaps(rec, en) || {}).threads || {}).mode || null, read: threadsRow(c).read, listing: threadsRow(c).listing, placements: P.placementsOf(c) },
       reactionCaps: { read: reactionsRow(c).read, add: reactionsRow(c).add, remove: reactionsRow(c).remove, custom: reactionsRow(c).custom, perMessageMax: reactionsRow(c).perMessageMax },
       attachments: c.attachments || 'metadata',
       olderHistory: c.olderHistory || 'none',
@@ -7655,7 +7657,9 @@ function create(deps = {}) {
     // a reply sent INTO a thread whose replies are not in the listing: ONE walk of that thread (its floor applies) so the
     // reply shows up in the pane the way the vendor holds it; a listing that carries replies brings it with the next page
     if (to === 'sent' && p1.inThread && p1.threadKey && rec && threadsRow(registry.capsOf(rec.kind)).listing === 'separate') track(threadRefresh(p1.adapterId, p1.convId, p1.threadKey, { vendorNamed: true }).catch(() => {}));
-    else if (to === 'sent' && p1.inThread && rec) { const e2 = live.get(rec.id); if (e2) kick(rec, e2, p1.convId); }
+    // lane reaction-hover: a QUOTED reply (the window's Quote) is a reply the listing carries too — the same one kick, so
+    // it shows under what it quotes as promptly as a thread reply does (a plain message still waits for its pass)
+    else if (to === 'sent' && (p1.inThread || P.placementOf(p1) === 'quote') && rec) { const e2 = live.get(rec.id); if (e2) kick(rec, e2, p1.convId); }
     if (to === 'sent' && rec && r.observed) { try { await noteIdentityObserved(rec, p1.result.sentAs, r.observed, p1.result.vendorMessageId); } catch (err) { log.warn(`[channels] identity observation not recorded: ${(err && err.message) || err}`); } }
     if (to === 'sent') await noteSentBy(p1);
     if (to === 'unknown') await speakUnknown(p1);

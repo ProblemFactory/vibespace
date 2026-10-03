@@ -216,7 +216,10 @@ function create({
       // rule (or by any writer that skipped cleanName) is judged on its way out, like every member name (displayName)
       id: g.id, name: agentText(g.name, { kind: 'line', max: G.NAME_MAX * 4 }), pair: g.pair ? g.pair.slice() : null, createdBy: g.createdBy, createdAt: g.createdAt,
       archivedAt: g.archivedAt || null, lastAt: g.lastAt || g.createdAt, lastText: g.lastText || '', lastCleared: !!g.lastCleared, // lastCleared: the last line IS the cleared sentence (a client words it)
-      members: g.members.map((m) => ({ member: m.member, name: displayName(g, m.member), notify: m.notify, joinedAt: m.joinedAt, invitedBy: m.invitedBy, live: !!sessionOf(m.member) })),
+      // lane group-pending (2026-10-01): the member's report MARKER rides the view — the window's line under every
+      // message ("waiting for beta's next turn" / "read by beta") and the CLI's trailing clause are judged off it
+      // (PURE G.deliveryOf); it was a private fact before, so a message handed over looked exactly like one waiting
+      members: g.members.map((m) => ({ member: m.member, name: displayName(g, m.member), notify: m.notify, joinedAt: m.joinedAt, invitedBy: m.invitedBy, live: !!sessionOf(m.member), reportedUpTo: Number.isFinite(m.reportedUpTo) ? m.reportedUpTo : null, reportedAt: Number.isFinite(m.reportedAt) ? m.reportedAt : null })),
     };
   }
   /** THE OWNER'S READ MARK (the panel's unread count, g3): the groups file's
@@ -336,12 +339,19 @@ function create({
 
   async function markReported(gid, member, upTo) {
     if (!Number.isFinite(upTo)) return;
+    let moved = false;
     await store.groups.update((gr) => {
       const g = gr.groups[gid];
       const m = g && G.memberOf(g, member);
-      if (m && !(Number(m.reportedUpTo) >= upTo)) m.reportedUpTo = upTo;
+      // the hand-over CLOCK (the coordinator's follow-up): the marker is a record instant, so the instant the report / wake
+      // actually went out is its own field — persisted with the row through the same door; a legacy row has none
+      if (m && !(Number(m.reportedUpTo) >= upTo)) { m.reportedUpTo = upTo; m.reportedAt = now(); moved = true; }
     });
-    pendingChanged();   // what waits for that member moved
+    // lane group-pending: a marker that MOVED is announced through the one broadcast (the view carries it) — the
+    // sender's window flips "waiting for beta's next turn" to "read by beta" without a reload; an unmoved marker
+    // is not a dirty signal (nothing sent). announce() re-publishes the pending strip like the bare call did.
+    if (moved) announce([gid]);
+    else pendingChanged();   // what waits for that member may still have moved (a marker already past it)
   }
 
   const WAKE_LEAD = {

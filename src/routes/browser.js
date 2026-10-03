@@ -168,6 +168,10 @@ const STATUS = { 'not-found': 404, no_lease: 404, 'bad-request': 400, label_requ
   'list-changed': 409, empty_list: 400, too_many: 400, unknown_task: 400, unknown_conversation: 400, no_browser_key: 409, 'session-gone': 410, groups_unreadable: 409,
   // lane browser-stuck (2026-09-28): a page dialog holds the page; nothing open to answer; no watch on that browser; the browser did not take the answer
   dialog_open: 409, no_dialog: 409, not_watched: 409, answer_failed: 502,
+  // lane browser-admin 2a: which Chrome build a profile runs (src/browser-builds.js BUILD_CODES) + Change build…'s own
+  browser_choice_invalid: 400, browser_choice_user_only: 403, browser_choice_provider: 400, builds_unsupported: 409, builds_unreadable: 503,
+  browser_build_missing: 409, browser_build_not_executable: 409, browser_path_missing: 409, browser_path_not_executable: 409, build_noop: 409, browsing_yourself: 409,
+  browser_driven: 409, // verify r1 (F1): the user drives that browser by hand right now — never restarted under his hands
   // lane browser-propose (2026-09-30): a proposal's Approve / Reject — not in a state to decide, a card that is not the proposal as it stands, nothing to approve here
   proposal_state: 409, proposal_changed: 409, proposal_unavailable: 409,
   // lane site-reset: a tab that is not this conversation's; a stop the tab did not answer; the site-reset refusals
@@ -326,11 +330,35 @@ function needKey(res, f) {
 /** The wrapper's answer WITHOUT the CDP url (§5.1) — only the wrapper form asks for it, and it asks explicitly.
  *  `agent` = the asking conversation's facts: the record rides as the AGENT's view (identity verify r2, 2026-09-28 — the
  *  `use` / `resolve` answers carried the raw record: the list, every other conversation's key, `createdBy`). */
+/** verify r3 (F4): is the client that asked still there to read the answer? Its SOCKET closed (the response destroyed) — never
+ *  `req.destroyed`: Node auto-destroys an IncomingMessage once its body is consumed, on every request (measured: true for a
+ *  live client; a killed client shows res.destroyed + both sockets destroyed). */
+const clientGone = (req, res) => !!((res && res.destroyed) || (res && res.socket && res.socket.destroyed) || (req && req.socket && req.socket.destroyed));
 function attachAnswer(r, { cdp = false, agent = null } = {}) {
   const { cdpUrl, ...rest } = r;
   const out = cdp ? { ...rest, cdpUrl: cdpUrl || null } : rest;
   if (agent && out.profile) out.profile = require('../browser-profiles.js').agentProfileView(out.profile, agent, { mediated: !!out.profile.mediated });
+  if (agent && out.browser) out.browser = agentBrowserOf(out.browser);
   return out;
+}
+/** verify r1 (F5): a browser record in an AGENT's answer — never its launch view (`launchEnv` carries the executable's
+ *  path) and a path choice by kind only (versions cross to an agent, paths never; the keeper's `agentBrowserView` rule). */
+function agentBrowserOf(b) {
+  if (!b || typeof b !== 'object') return b;
+  const { launchEnv, ...rest } = b; // eslint-disable-line no-unused-vars
+  // verify r2 (H1): the CLI the browser runs, by VERSION (the agent's CLI finds that version on its own machine) + the words
+  // when it left this machine — never the program's path
+  const cli = b.cli && typeof b.cli === 'object' && b.cli.version ? { version: String(b.cli.version), ...(typeof b.cli.gone === 'string' ? { gone: b.cli.gone } : {}) } : null;
+  return { ...rest, cli, ...(b.browserChoice ? { browserChoice: require('../browser-builds.js').agentChoiceView(b.browserChoice) } : {}) };
+}
+/** verify r2 (H1): a browser whose CLI version is no longer on this machine runs no command — refused by name BEFORE the
+ *  agent's CLI picks a binary (a binary of another version would restart it and lose its tabs). → a verdict | null. */
+async function cliGoneVerdict(k, browser) {
+  // verify r3 (Y1): the keeper's doors' fact — a binary of an unproven version is ASKED before the browser is refused
+  // (a same-version re-install at the same path was refused once, "no longer installed", with a remedy that loses its tabs)
+  if (browser && typeof browser === 'object' && browser.profileId && k && typeof k.cliFactReady === 'function') { try { const f = await k.cliFactReady(browser.profileId); if (f || browser.cli) browser.cli = f; } catch { /* the view's own reading stands */ } }
+  const g = browser && browser.cli && typeof browser.cli.gone === 'string' ? browser.cli.gone : null;
+  return g ? { code: 'browser_cli_gone', error: g, remedy: 'ask the user to restart this browser (Agent browser panel → Stop; the next command starts it on the current CLI)' } : null;
 }
 
 // ── UI ──
@@ -339,21 +367,63 @@ function attachAnswer(r, { cdp = false, agent = null } = {}) {
 router.get('/api/browser/display', async (req, res) => {
   if (refuseHost(req, res)) return;
   const k = keeperOr503(res); if (!k) return;
-  try { res.json({ display: typeof k.machineDisplay === 'function' ? await k.machineDisplay() : null, mode: typeof k.noDisplayMode === 'function' ? k.noDisplayMode() : 'auto' }); } catch (e) { fail(res, e); }
+  try { res.json({ display: typeof k.machineDisplay === 'function' ? await k.machineDisplay() : null, mode: typeof k.noDisplayMode === 'function' ? k.noDisplayMode() : 'auto', preference: typeof k.headedSetting === 'function' ? k.headedSetting() : null }); } catch (e) { fail(res, e); } // H5: `preference` = browser.headed as stored (null = unset) — Settings' line says what an UNSET one does here
 });
 router.get('/api/browser/profiles', (req, res) => {
   if (refuseHost(req, res)) return;
   const k = keeperOr503(res); if (!k) return;
   try { res.json(k.list()); } catch (e) { fail(res, e); }
 });
-router.post('/api/browser/profiles', (req, res) => {
+/**
+ * lane browser-admin (the New profile… dialog): "Who can use it" CHOSEN AT THE CREATE. The `use` body is the PATCH's
+ * (`{mode:'all'}` | `{mode:'only', who:[{kind:'task', id} | {kind:'session', session:<webui id>} | {kind:'session', key}]}`);
+ * a picked live session is resolved to its conversation's browser key by THE one resolver (keyForPickedSession — a
+ * session on another machine refused by name), so the keeper judges keys only. → `{ok, use, knownKeys}` | the refusal
+ * (`{ok:false, status, body}`) — one refusal and nothing is created (a partial list is a list the user never saw).
+ * `undefined` ⇒ `{ok:true, use:null}` (every conversation, owner ruling A's default).
+ */
+async function resolveUseRows(use) {
+  if (use === undefined || use === null) return { ok: true, use: null, knownKeys: [] };
+  const B = require('../browser-profiles.js');
+  const sv = B.useShapeVerdict(use);
+  if (!sv.ok) return { ok: false, status: STATUS[sv.code] || 400, body: { error: sv.error, code: sv.code } };
+  if (sv.mode === 'all') return { ok: true, use: { mode: 'all' }, knownKeys: [] };
+  const rows = [], knownKeys = [];
+  for (const r of sv.rows) {
+    if (r.kind === 'session' && r.session !== undefined) {
+      const kr = await keyForPickedSession(r.session);
+      if (!kr || !kr.ok) return { ok: false, status: STATUS[kr && kr.code] || 409, body: { error: (kr && kr.error) || 'that conversation could not be added', code: (kr && kr.code) || 'no_browser_key', session: r.session, name: (kr && kr.name) || null, ...(kr && kr.why ? { why: kr.why } : {}) } };
+      rows.push({ kind: 'session', key: kr.key }); knownKeys.push(kr.key);
+    } else if (r.kind === 'session') rows.push({ kind: 'session', key: r.key });
+    else rows.push({ kind: 'task', id: r.id });
+  }
+  return { ok: true, use: { mode: 'only', who: rows }, knownKeys };
+}
+router.post('/api/browser/profiles', async (req, res) => {
   // P4: on a CREATE, `host` is the PAIRED MACHINE the browser runs on (D5
   // (b)) — the PURE row decides whether the provider may run there and the
   // keeper whether the id names a paired machine; both refuse by name, so
   // this route does not pre-refuse it (the registry itself is the hub's)
   const k = keeperOr503(res); if (!k) return;
-  // owner ruling A: a named profile is usable by ALL of the owner's conversations by default (the row's switch narrows it)
-  try { res.json({ profile: k.createProfile(req.body || {}, { owner: { kind: 'instance', id: null } }) }); } catch (e) { fail(res, e); }
+  const { use, ...input } = req.body || {};
+  // lane browser-admin 2a: which Chrome build it runs is the USER's choice — an agent's own token is refused by name
+  if (input.browser != null && refuseAgentBearer(req, res, BUILD_IS_USERS)) return;
+  // verify r1 (F6): "Who can use it" is the USER's too — an agent's token never writes the list (its own `new` makes a
+  // profile every conversation can use; the PATCH in routes/browser-trace.js and the adopt below refuse the same way)
+  if (use !== undefined && refuseAgentBearer(req, res, USE_IS_USERS)) return;
+  try {
+    const u = await resolveUseRows(use);
+    if (!u.ok) return res.status(u.status).json(u.body);
+    // a build on a PAIRED machine is judged against THAT machine's list (asked now, through its agent — an agent too old
+    // to list builds is refused by name); this machine's is read by the keeper itself
+    const B0 = require('../browser-builds.js');
+    const ch = B0.normalizeBrowserChoice(input.browser);
+    const remoteHost = input.host && input.host !== 'local' ? String(input.host) : null;
+    const builds = ch && ch.kind === 'build' && remoteHost && typeof k.buildsFor === 'function' ? await k.buildsFor(remoteHost) : null;
+    // owner ruling A: a named profile is usable by ALL of the owner's conversations by default (the dialog / the row's
+    // "Who can use it" narrows it); with a list, the record is born with it — ONE write
+    res.json({ profile: k.createProfile(input, { owner: { kind: 'instance', id: null }, by: 'user', builds, ...(u.use ? { use: u.use, knownKeys: u.knownKeys } : {}) }) });
+  } catch (e) { fail(res, e); }
 });
 /** P4 (§7.1): the provider rows with their capability cells, each with the
  *  local verdict and — with `?host=` — the verdict FOR that machine (a
@@ -413,6 +483,10 @@ const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.header
 // THE ONE agent-token guard of this file's human routes (the .197 integration collapsed lane browser-stuck's
 // `refuseAgentRestart` onto it): `error` = the route's own sentence, the code is always `agent_forbidden`
 const OWN_BROWSING_IS_USERS = 'the user\'s own browsing — an agent token may not start, drive, end or read it';
+const INSTALL_IS_USERS = 'installing a program is the user\'s act — an agent token may not start a download; tell the user what to install';
+const BUILD_IS_USERS = 'which Chrome build a profile runs is the user\'s choice (Agent browser panel → Change build…) — an agent token may not set it; `vibespace-browser providers` lists the builds';
+const USE_IS_USERS = 'who may use a profile is the user\'s choice (Agent browser panel → Who can use it) — an agent token may not set it; an agent\'s own `new` makes a profile every conversation can use'; // verify r1 (F6)
+const ADOPT_IS_USERS = 'a persistent profile made from a conversation\'s browser is the user\'s act (the picker\'s "New persistent profile…") — an agent token may not adopt a conversation\'s kept browser, its own or another\'s; an agent\'s `new --adopt` is the door for a folder of its own'; // verify r3 (Y4)
 const RESTART_IS_USERS = 'restarting a browser is the user\'s act — an agent token may not do it; tell the user which page is not responding';
 function refuseAgentBearer(req, res, error = OWN_BROWSING_IS_USERS) { if (!isAgentBearer(req)) return false; res.status(403).json({ error, code: 'agent_forbidden' }); return true; }
 router.post('/api/browser/profiles/:id/browse', async (req, res) => {
@@ -460,6 +534,32 @@ router.post('/api/browser/profiles/:id/restart', async (req, res) => {
   if (typeof k.humanOf === 'function' && k.humanOf(req.params.id)) { const p0 = typeof k.profile === 'function' ? k.profile(req.params.id) : null; return res.status(409).json({ error: require('../browser-human.js').humanRefusalText('browsing_yourself', { label: (p0 && p0.label) || req.params.id, act: 'restart' }), code: 'browsing_yourself' }); }
   try { await k.stop(req.params.id, { why: 'user' }); res.json({ browser: await k.start(req.params.id, { why: 'restarted by the user (the page was not responding)' }) }); } catch (e) { fail(res, e); }
 });
+/** lane browser-admin 2a: CHANGE BUILD… — GET = what the dialog shows (the profile's machine's builds, its choice, the
+ *  build its browser RUNS, how many conversations would be told); POST `{choice, confirmed?}` = the user's act (an
+ *  agent's token refused by name): THE verdict, then — a running browser — every holder told (interrupt + card +
+ *  zero-spend notice), the browser restarted on the new build, its tabs reopened. */
+router.get('/api/browser/builds', async (req, res) => {
+  const k = keeperOr503(res); if (!k) return;
+  const h = hostOf(req);
+  if (typeof k.machineBuilds !== 'function') return res.status(503).json({ error: 'this keeper cannot list Chrome builds', code: 'unavailable' });
+  try { res.json(await k.machineBuilds(LOCAL.has(h) ? null : h)); } catch (e) { fail(res, e); }
+});
+router.get('/api/browser/profiles/:id/builds', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  const k = keeperOr503(res); if (!k) return;
+  if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+  if (typeof k.buildsView !== 'function') return res.status(503).json({ error: 'this keeper cannot choose a Chrome build', code: 'unavailable' });
+  try { res.json(await k.buildsView(req.params.id)); } catch (e) { fail(res, e); }
+});
+router.post('/api/browser/profiles/:id/build', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, BUILD_IS_USERS)) return;
+  const k = keeperOr503(res); if (!k) return;
+  if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+  if (typeof k.setBrowserChoice !== 'function') return res.status(503).json({ error: 'this keeper cannot choose a Chrome build', code: 'unavailable' });
+  try { res.json(await k.setBrowserChoice({ profileId: req.params.id, choice: req.body?.choice, confirmed: req.body?.confirmed === true, by: 'user' })); }
+  catch (e) { if (e && (e.needsConfirm || e.waysOut || e.restored !== undefined)) return res.status(STATUS[e.code] || 409).json({ error: String(e.message || e), code: e.code || 'launch_failed', needsConfirm: !!e.needsConfirm, waysOut: e.waysOut || [], ...(e.restored !== undefined ? { restored: !!e.restored } : {}), ...(e.wrote != null ? { wrote: e.wrote } : {}) }); fail(res, e); }
+});
 router.post('/api/browser/attach', async (req, res) => {
   if (refuseHost(req, res)) return;
   const k = keeperOr503(res); if (!k) return;
@@ -489,33 +589,88 @@ router.post('/api/browser/detach', (req, res) => {
  *  usable by ALL of the owner's conversations (`createdBy` = this one), and on rung C the conversation's own browser is
  *  STOPPED before its directory moves — its Chrome holds the lock under a mark that names the conversation, and the
  *  keeper's launch on the adopted directory would be refused `profile_locked` (never a raw kill of a used browser). */
-router.post('/api/browser/adopt', async (req, res) => {
+/** verify r1 (F7, lane browser-admin): WHAT THE PICKER'S "New persistent profile…" WILL DO for this conversation — ONE
+ *  answer for the dialog (GET below) and the POST, never the client's guess off `browserVariant` (rung D keeps its
+ *  directory since lane browser-resume, so the dialog's guess "empty" drew a browser / machine / build the keep dropped).
+ *  → `{keep:true, variant, keptOwn}` (its own kept directory becomes the profile — Chromium, this computer, the build it
+ *  ran) | `{keep:false, variant}` (an EMPTY profile — the dialog's browser, machine and build are the new profile's). */
+function adoptPlanOf(f) {
+  const B = require('../browser-profiles.js');
+  const variant = f.session._browserVariant || null;
+  const be = ctx.browserEnv?.() || null;
+  if (!be) return { keep: false, variant, keptOwn: null };
+  // lane browser-resume (§3.9): rung D KEEPS its directory now (the generated config names `data/browser-profiles/<key>`)
+  // — adopted exactly like rung C's; only the conversation's OWN kept directory (named by its key), never a directory a
+  // pin-era config still names (a registered profile's: clearPinnedDir's class)
+  const keptOwn = variant === B.VARIANTS.D && typeof be.scratchDirFor === 'function' ? (() => { let d = null; try { d = be.resolvedProfileDir(f.browserKey); } catch { d = null; } return d && B.sameDir(d, be.scratchDirFor(f.browserKey)) ? d : null; })() : null;
+  return { keep: variant === B.VARIANTS.C || !!keptOwn, variant, keptOwn };
+}
+/** verify r1 (F7): a kept directory is adopted AS IT IS — another browser / machine / port / build cannot be it (refused by
+ *  name, nothing moves; the dialog draws the keep form off the GET — this is the belt for a form drawn before it). */
+function adoptKeepRefusal(body) {
+  const b = body || {};
+  const asks = [];
+  if (b.provider != null && String(b.provider) !== 'chromium') asks.push('browser');
+  if (b.host != null && !LOCAL.has(String(b.host))) asks.push('machine');
+  if (b.cdpPort != null) asks.push('port');
+  const c = require('../browser-builds.js').normalizeBrowserChoice(b.browser);
+  if (b.browser != null && !(c && c.kind === 'default')) asks.push('build');
+  if (!asks.length) return null;
+  return { code: 'adopt_keeps_browser', asks, error: `this conversation's browser is kept with its logins, so the profile made from it is that browser as it is — Chromium on this computer, the build it ran (asked for another: ${asks.join(', ')}); create it without them and use Change build… afterwards, or make an empty profile from the Agent browser panel` };
+}
+router.get('/api/browser/adopt', (req, res) => {
   if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, ADOPT_IS_USERS)) return; // verify r3 (Y4): the dialog's door is the user's
+  const f = sessionFacts(String(req.query?.sessionId || ''));
+  if (!f) return res.status(404).json({ error: 'no such live session', code: 'not-found' });
+  const plan = f.browserKey ? adoptPlanOf(f) : { keep: false, variant: f.session._browserVariant || null }; // no key yet ⇒ no directory of its own
+  res.json({ keep: !!plan.keep, variant: plan.variant || null });
+});
+router.post('/api/browser/adopt', async (req, res) => {
+  // verify r3 (Y4): the WHOLE route is the user's — verify r1 (F6) refused an agent token only when the body carried a
+  // who-list or a build, so a bare {sessionId, label} from an agent's token (an auth-off instance answers every cookie
+  // route) moved a conversation's KEPT browser — its own, or by naming another session's id ANOTHER conversation's, with
+  // the logins the user completed there — into a profile every conversation may use (reproduced: 200, the directory
+  // gone); an agent's own door for a folder of its own is `new --adopt` (/api/agent/browser/new)
+  if (refuseAgentBearer(req, res, ADOPT_IS_USERS)) return;
+  // verify r1 (F7): the body's `host` is the NEW (empty) profile's machine — judged by the create's own verdict below; the
+  // kept directory's adopt refuses it by name (never "browser profiles are local-only" for a machine that is paired)
   const k = keeperOr503(res); if (!k) return;
   const f = needKey(res, sessionFacts(String(req.body?.sessionId || ''))); if (!f) return;
   const B = require('../browser-profiles.js');
   try {
+    // lane browser-admin: the picker's "New persistent profile…" rows open THE New profile… dialog — its "Who can use it"
+    // (and, for an EMPTY profile, its provider / machine) ride this body; resolved before anything moves
+    const u = await resolveUseRows(req.body?.use);
+    if (!u.ok) return res.status(u.status).json(u.body);
+    const useOpts = u.use ? { use: u.use, knownKeys: u.knownKeys } : {};
     const variant = f.session._browserVariant || null;
     const be = ctx.browserEnv?.() || null;
     let profile, adopted = false, note;
     const all = { owner: { kind: 'instance', id: null }, createdBy: f.browserKey };
-    // lane browser-resume (§3.9): rung D KEEPS its directory now (the generated config names `data/browser-profiles/<key>`)
-    // — adopted exactly like rung C's; only the conversation's OWN kept directory (named by its key), never a directory a
-    // pin-era config still names (a registered profile's: clearPinnedDir's class)
-    const keptOwn = variant === B.VARIANTS.D && be && typeof be.scratchDirFor === 'function' ? (() => { let d = null; try { d = be.resolvedProfileDir(f.browserKey); } catch { d = null; } return d && B.sameDir(d, be.scratchDirFor(f.browserKey)) ? d : null; })() : null;
-    if ((variant === B.VARIANTS.C || keptOwn) && be) {
+    const plan = adoptPlanOf(f), keptOwn = plan.keptOwn; // verify r1 (F7): THE plan the dialog's GET answered
+    // verify r2 (B4): …and still the plan the dialog DREW — the conversation's rung can change while the dialog is open (a
+    // respawn, a pin from before owner ruling A put back): the form it names is re-judged here and a changed one refused by
+    // name, nothing moved — never an empty profile for "keeps its logins", never the conversation's kept browser taken (its
+    // directory moved, its browser stopped, its logins every conversation's) for "a new, empty profile"
+    const form = req.body && (req.body.form === 'keep' || req.body.form === 'empty') ? req.body.form : null;
+    if (form && (form === 'keep') !== !!(plan.keep && be)) return res.status(409).json({ code: 'adopt_form_changed', form, now: plan.keep && be ? 'keep' : 'empty', error: `this conversation's browser ${plan.keep && be ? 'now keeps its own directory (its logins would become the profile)' : 'no longer keeps a directory of its own (the profile would be a new, empty one)'} — not what the dialog showed; nothing was created — open "New persistent profile…" again` });
+    if (plan.keep && be) {
+      const kr = adoptKeepRefusal(req.body); // verify r1 (F7): the dialog's browser / machine / build are never dropped in silence
+      if (kr) return res.status(409).json({ error: kr.error, code: kr.code, asks: kr.asks });
       // the symlink's target IS the browserKey-named scratch directory (rung C); rung D's config names the same directory
       const dir = keptOwn || be.resolvedProfileDir(f.browserKey);
       if (!dir) throw Object.assign(new Error('this session\'s browser directory could not be read back off its indirection'), { code: 'adopt_failed' });
       if (typeof k.stopEphemeralOf === 'function') { try { await k.stopEphemeralOf(f.browserKey); } catch (e) { console.warn(`[browser] ${f.browserKey}: its own browser did not stop before the adopt — ${e && e.message}`); } }
-      profile = k.adoptScratch({ label: req.body?.label, scratchDir: dir, ...all });
+      profile = k.adoptScratch({ label: req.body?.label, scratchDir: dir, ...all, ...useOpts });
       adopted = true;
       try { k.keptStore?.()?.adopted?.(f.browserKey); } catch (e) { console.warn(`[browser] ${f.browserKey}: its kept entry was not ended after the adopt — ${e && e.message}`); } // lane browser-resume: its directory is the profile's now
       note = 'the login that exists in this browser right now is kept: its directory was moved under ~/.agent-browser/ and registered — every conversation of yours can use it';
     } else {
       // rung D with keeping off / a fenced one (no directory of its own), N, none, H:
       // the honest form is an EMPTY profile, said plainly (§3.2.5)
-      profile = k.createProfile({ label: req.body?.label }, all);
+      const { sessionId: _s, use: _u, label: _l, form: _f, ...fields } = req.body || {}; // (verify r2: `form` is the dialog's, never a profile field)
+      profile = k.createProfile({ ...fields, label: req.body?.label }, { ...all, ...useOpts });
       note = 'this session\'s browser had no directory of its own to adopt (rung ' + (variant || 'none') + '), so an EMPTY persistent profile was created — the login you just completed was NOT saved; the next browser command opens the new profile and you log in once more';
     }
     const pin = pinAnswer(k, f, profile.id, { by: 'user' });
@@ -851,8 +1006,27 @@ router.get('/api/browser/install', (req, res) => {
 });
 router.post('/api/browser/install', async (req, res) => {
   if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, INSTALL_IS_USERS)) return; // lane browser-admin 2b: a download is the user's act (both installs of the ONE slot)
   const k = keeperOr503(res); if (!k) return;
   try { res.json(await k.installCloak()); } catch (e) { fail(res, e); }
+});
+/** lane browser-admin 2b: THE BROWSER CLI VIBESPACE DRIVES — GET = the facts the panel row says (the version the flag table
+ *  was measured on + its download numbers, the choice `browser.cli`, the pinned install, the one on PATH, the one in use and
+ *  its drift, the install slot); POST `{version?}` = install it (the user's act — an agent token refused by name; the ONE
+ *  install slot cloak's install uses; `npm install --prefix <data>/browser-tools/agent-browser-<v> --no-save --ignore-scripts
+ *  agent-browser@<v>` — the npm registry only). */
+router.get('/api/browser/cli', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  const k = keeperOr503(res); if (!k) return;
+  if (typeof k.cliFacts !== 'function') return res.status(503).json({ error: 'this keeper cannot pin the browser CLI', code: 'unavailable' });
+  try { res.json(await k.cliFacts()); } catch (e) { fail(res, e); }
+});
+router.post('/api/browser/cli/install', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, INSTALL_IS_USERS)) return;
+  const k = keeperOr503(res); if (!k) return;
+  if (typeof k.installCli !== 'function') return res.status(503).json({ error: 'this keeper cannot install the browser CLI', code: 'unavailable' });
+  try { res.json(k.installCli({ version: req.body && req.body.version ? String(req.body.version) : undefined })); } catch (e) { fail(res, e); }
 });
 /** OWNER RULING A: a pin never hands a directory. A session pinned BEFORE the ruling may still have its indirection (rung
  *  D's generated config / rung C's symlink) naming a registered profile's directory — the next launch of its OWN
@@ -1116,6 +1290,9 @@ router.post('/api/agent/browser/use', async (req, res) => {
   try {
     const t0 = typeof k.clock === 'function' ? k.clock() : Date.now(); // lane headless-fallback: a launch at or after this is THIS use's
     const r = await k.attach({ profile: req.body?.profile, browserKey: f.browserKey, sessionId: f.sessionId, taskIds: f.taskIds, groupsUnreadable: f.groupsUnreadable, alias: req.body?.alias });
+    // verify r3 (F4): `use` attaches too (two conversations' `use` at once is how a rebind QUEUES at the route — a page verb's
+    // /resolve is refused busy while another drives) — an undelivered answer's note goes back for the next command
+    if (r && r.rebound && r.profile && clientGone(req, res) && typeof k.restoreRebound === 'function') k.restoreRebound(r.profile.id, f.browserKey, r.rebound);
     const set = k.setFor(f.browserKey);
     k.tell(f.browserKey);
     stampActive(f, r.profile.id); // `use` execs a subshell on this profile: the agent's next direct commands land here
@@ -1237,9 +1414,10 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
       const pairs = shared ? null : managedPairs(f);
       if (pairs && typeof k.ensureEphemeral === 'function') {
         const e = await k.ensureEphemeral({ browserKey: f.browserKey, sessionId: f.sessionId, envPairs: pairs, sessionName: sessionNameOf(f), variant: f.session._browserVariant || null });
+        { const g = await cliGoneVerdict(k, e.browser); if (g) return failVerdict(res, g); }
         stampActive(f, '');
         ensureBindingOnce(f); // lane H: its actions stay findable after the conversation stops
-        return send({ ok: true, kind: 'ephemeral', shared: false, handle: null, env: pairs, ...envBasis(f, { k, pairs }), profile: e.profile, browser: e.browser, lease: e.lease, created: e.created, handles: v.handles, pinTab: false, at: resolvedAt, ...(await dialogAnswerFor(k, f, e.profile && e.profile.id, { verb })), ...displayNoteOf(e.browser, resolvedAt), ...keptAnswerOf(e.kept) });
+        return send({ ok: true, kind: 'ephemeral', shared: false, handle: null, env: pairs, ...envBasis(f, { k, pairs }), profile: e.profile, browser: agentBrowserOf(e.browser), lease: e.lease, created: e.created, handles: v.handles, pinTab: false, at: resolvedAt, ...(await dialogAnswerFor(k, f, e.profile && e.profile.id, { verb })), ...displayNoteOf(e.browser, resolvedAt), ...keptAnswerOf(e.kept) });
       }
       stampActive(f, '');
       return send({ ok: true, kind: 'none', shared, handle: null, env: [], ...envBasis(f, { k, pairs: f.session._browserEnv, ephemeral: !shared }), handles: v.handles, pinTab: false, at: resolvedAt });
@@ -1253,12 +1431,17 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
       const childPairs = B.childPairsOver(parentPairs || (Array.isArray(f.session._browserEnv) ? f.session._browserEnv : []), env);
       if (parentPairs && typeof k.ensureEphemeral === 'function') {
         const e = await k.ensureEphemeral({ browserKey: v.handle, sessionId: f.sessionId, envPairs: childPairs, sessionName: `${sessionNameOf(f)} · child ${v.handle.slice(v.handle.indexOf('.') + 1)}`, variant: f.session._browserVariant || null });
+        { const g = await cliGoneVerdict(k, e.browser); if (g) return failVerdict(res, g); }
         // verify r2 (D6): a helper's browser keeps nothing — said ONCE, in its own first answer (the CLI prints the note)
-        return send({ ok: true, kind: 'child', handle: v.handle, env: env.pairs, unset: env.unset, ...envBasis(f, { k, pairs: childPairs }), handles: v.handles, pinTab: false, profile: e.profile, browser: e.browser, at: resolvedAt, ...(await dialogAnswerFor(k, f, e.profile && e.profile.id, { verb })), ...displayNoteOf(e.browser, resolvedAt), ...(e.created ? { notKept: { text: require('../browser-kept.js').helperNotKeptText() } } : {}) });
+        return send({ ok: true, kind: 'child', handle: v.handle, env: env.pairs, unset: env.unset, ...envBasis(f, { k, pairs: childPairs }), handles: v.handles, pinTab: false, profile: e.profile, browser: agentBrowserOf(e.browser), at: resolvedAt, ...(await dialogAnswerFor(k, f, e.profile && e.profile.id, { verb })), ...displayNoteOf(e.browser, resolvedAt), ...(e.created ? { notKept: { text: require('../browser-kept.js').helperNotKeptText() } } : {}) });
       }
       return send({ ok: true, kind: 'child', handle: v.handle, env: env.pairs, unset: env.unset, ...envBasis(f, { k, pairs: childPairs }), handles: v.handles, pinTab: false, at: resolvedAt });
     }
     const r = await k.attach({ profileId: v.attachment.profileId, browserKey: f.browserKey, sessionId: f.sessionId, taskIds: f.taskIds, groupsUnreadable: f.groupsUnreadable });
+    // verify r3 (F4): the rebound note is SAID ONCE — in an answer that is delivered. A client gone before this write (the
+    // agent harness's own tool timeout fired while the rebind queued) never reads it: put it back for the next command.
+    if (r && r.rebound && clientGone(req, res) && typeof k.restoreRebound === 'function') k.restoreRebound(v.attachment.profileId, f.browserKey, r.rebound);
+    { const g = await cliGoneVerdict(k, r.browser); if (g) return failVerdict(res, g); }
     stampActive(f, v.attachment.profileId); // the command RUNS on this attachment: that is what the chip calls "last used"
     // r2: an attachment's daemon lives under the keeper's own root (its pairs never carry SOCKET_DIR), whatever the session's spawn pairs say
     send({ ok: true, kind: 'attachment', handle: v.handle, ...attachAnswer(r, { cdp: req.body?.wrapper === true, agent: agentFactsOf(f) }), ...envBasis(f, { k, pairs: r.env, ephemeral: false }), handles: v.handles, isDefault: !!v.attachment.isDefault, at: resolvedAt, ...(await dialogAnswerFor(k, f, r.profile && r.profile.id, { verb })), ...displayNoteOf(r.browser, resolvedAt) });
@@ -1592,14 +1775,22 @@ router.post('/api/agent/browser/site-reset', async (req, res) => {
 /** P4: the same provider rows for the CLI (`vibespace-browser providers`),
  *  with the verdict for `?host=` when given — an agent learns WHY a provider
  *  is refused before it asks for one. */
-router.get('/api/agent/browser/providers', (req, res) => {
+router.get('/api/agent/browser/providers', async (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   const f = agentFacts(req, res); if (!f) return;
   const B = require('../browser-profiles.js');
   const host = hostOf(req);
   const h = LOCAL.has(host) ? null : host;
   const cloak = typeof ctx.cloakPlan === 'function' ? ctx.cloakPlan() : { ok: false, code: 'cloak_opt_in_off', error: 'CloakBrowser is not wired on this instance' };
-  res.json({ providers: B.providerRows({ host: h, desktopConsent: typeof k.desktopConsent === 'function' ? k.desktopConsent() : undefined }), proof: B.CLOAK_EGRESS_PROOF, egress: B.egressHostsOf(B.CLOAK_EGRESS_PROOF), cloakSites: typeof k.cloakEgress === 'function' ? k.cloakEgress().allowlist : [], host: h, hostKnown: h ? k.hostKnown(h) : true, cloak: cloak.ok ? { ok: true, image: cloak.image, egress: cloak.egress } : cloak });
+  // lane browser-admin (chunk 3): the Chrome BUILDS of the machine asked about and the browser CLI version VibeSpace
+  // drives — FACTS an agent may read (versions only: never a path, never a way to choose — `--executable-path` stays a
+  // refused launch flag, `install` not offered, a build is the user's choice in the Agent browser panel)
+  const B0 = require('../browser-builds.js');
+  let builds = null, cli = null;
+  try { builds = typeof k.buildsFor === 'function' ? B0.buildsView(await k.buildsFor(h)) : null; } catch { builds = null; }
+  if (builds && builds.ok) builds = { ok: true, missing: builds.missing, cut: builds.cut, builds: builds.builds }; // no root path for an agent
+  try { const c = typeof k.cliFacts === 'function' ? await k.cliFacts() : null; cli = c ? { table: c.table, mode: c.choice.mode, chosen: c.choice.version || null, inUse: c.inUse.version || null, inUsePinned: !!c.inUse.pinned, onPath: c.onPath.version || null, pinnedInstalled: c.pinned ? !!c.pinned.installed : null, drift: c.drift || null } : null; } catch { cli = null; }
+  res.json({ providers: B.providerRows({ host: h, desktopConsent: typeof k.desktopConsent === 'function' ? k.desktopConsent() : undefined }), proof: B.CLOAK_EGRESS_PROOF, egress: B.egressHostsOf(B.CLOAK_EGRESS_PROOF), cloakSites: typeof k.cloakEgress === 'function' ? k.cloakEgress().allowlist : [], host: h, hostKnown: h ? k.hostKnown(h) : true, cloak: cloak.ok ? { ok: true, image: cloak.image, egress: cloak.egress } : cloak, builds, cli });
 });
 router.post('/api/agent/browser/new', (req, res) => {
   const k = keeperOr503(res); if (!k) return;
@@ -1612,6 +1803,8 @@ router.post('/api/agent/browser/new', (req, res) => {
     // a conversation on ANOTHER machine never makes a profile here: it could never use it (r2's fence at every admission),
     // so a `new` from an ssh host / a paired device is refused by the same name — it keeps its own browser on its machine
     if (f.remote) { const rr = B.remoteSessionRefusal({ label: String(req.body?.label || '') }); return res.status(STATUS[rr.code] || 409).json({ error: rr.error, code: rr.code, remedy: rr.remedy }); }
+    // lane browser-admin 2a: nothing an agent sends chooses a Chrome build (the user's choice — Change build…)
+    if (req.body && req.body.browser != null) return res.status(403).json({ error: BUILD_IS_USERS, code: 'browser_choice_user_only' });
     // `--adopt <dir>`: REGISTER a directory that already exists, in place (the
     // remedy the path refusal names — a path becomes a HANDLE here, never on a
     // command); refused with the reason when it is not a directory
@@ -1637,7 +1830,7 @@ router.post('/api/agent/browser/new', (req, res) => {
     }
     // owner ruling A ("A吧"): an agent's `new` makes a profile EVERY conversation of the owner can use — the study's path A
     // (`new work` in one chat, `use work` in the next ⇒ not_owner) is gone; only the user's row switch keeps one to one chat
-    res.json({ profile: view(k.createProfile(req.body || {}, { owner: { kind: 'instance', id: null }, createdBy: f.browserKey })) });
+    res.json({ profile: view(k.createProfile(req.body || {}, { owner: { kind: 'instance', id: null }, createdBy: f.browserKey, by: 'agent' })) });
   } catch (e) { fail(res, e); }
 });
 router.post('/api/agent/browser/detach', (req, res) => {

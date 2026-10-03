@@ -117,7 +117,21 @@ const MEASURE = (appId, rect) => `(() => {
   for (let y = 0; y < c.height; y += 2) for (let x = 0; x < c.width; x += 2) { const i = (y * c.width + x) * 4; n++; const isBlack = d[i] + d[i + 1] + d[i + 2] < 30; if (isBlack) black++; if (R && !(x >= R.x && x < R.x + R.w && y >= R.y && y < R.y + R.h)) { outside++; if (isBlack) outsideBlack++; } }
   return { win: { w: w.element.offsetWidth, h: w.element.offsetHeight }, mount: { w: Math.round(mr.width), h: Math.round(mr.height) }, canvas: { w: c.width, h: c.height }, sampled: n, blackFrac: black / n, outsideSampled: outside, outsideBlack, status: w.content.querySelector('.desktop-status')?.textContent, chip: w.content.querySelector('.desktop-app-chip-backend')?.textContent, fitChip: w.content.querySelector('.desktop-app-chip-fit')?.textContent, fitChipShown: getComputedStyle(w.content.querySelector('.desktop-app-chip-fit')).display !== 'none', title: w.title, titleText: w.titleSpan ? w.titleSpan.textContent : null, titleElems: w.titleSpan ? w.titleSpan.querySelectorAll('*').length : -1 };
 })()`;
-const topLevel = async (appId) => { const r = await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/apps/${appId}/windows`)).json(); return (r.windows || []).filter((w) => w.depth === 1 && w.mapped !== false && w.w > 1 && w.h > 1).sort((a, b) => b.w * b.h - a.w * a.h)[0] || null; };
+// lane fleet-image-2 (the fleet e2e: 8 rows red on a pod): a REPARENTING window manager — the fleet image's vnc-display
+// rung runs xfwm4 — wraps every top-level in a FRAME: the depth-1 rows are the frames (no name, no class) and the app's
+// own window is the named depth-2 row inside one (xwininfo -tree lists a frame's children right after it). Each
+// top-level is read as X shows it: its OUTER rect (the frame, else the window itself) with the CLIENT's name, class and
+// size (`framed` says which); with no window manager the depth-1 row is both.
+const topLevelsOf = (rows) => {
+  const out = []; let cur = null;
+  for (const w of rows || []) {
+    if (w.depth === 1) { cur = { ...w, client: (w.title || w.cls) ? w : null, framed: false }; out.push(cur); }
+    else if (cur && !cur.client && w.depth === 2 && (w.title || w.cls)) { cur.client = w; cur.framed = true; cur.title = w.title; cur.cls = w.cls; cur.instance = w.instance; }
+  }
+  return out.filter((t) => t.mapped !== false && t.w > 1 && t.h > 1);
+};
+const windowsOf = async (appId) => (await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/apps/${appId}/windows`)).json());
+const topLevel = async (appId) => topLevelsOf((await windowsOf(appId)).windows).sort((a, b) => (!!b.client - !!a.client) || (b.w * b.h - a.w * a.h))[0] || null;
 const record = async (appId) => (await fetch(`http://127.0.0.1:${PORT}/api/desktop/apps/${appId}`)).json();
 
 let p1 = await page(target);
@@ -144,11 +158,15 @@ try {
       const rec = await record(appId); if (!rec.fb || rec.fb.w !== m.canvas.w || rec.fb.h !== m.canvas.h) return null;
       if (Math.abs(m.mount.w - rec.fb.w) > 2 || Math.abs(m.mount.h - rec.fb.h) > 2) return null;
       const top = await topLevel(appId); if (!top || top.w !== rec.fb.w || top.h !== rec.fb.h || top.x !== 0 || top.y !== 0) return null;
-      if (!rec.fit || !rec.fit.ok || rec.fit.w !== rec.fb.w || rec.fit.h !== rec.fb.h) return null;
+      if (!rec.fit || !rec.fit.ok) return null;
+      // a window manager's frame IS the picture: it keeps the app's window maximised as the framebuffer follows (the
+      // keeper asked it once — fit via 'wm'; a later plan is settled, no act), the client filling the frame under its title
+      if (top.framed) { if (rec.fit.via !== 'wm' || top.client.w !== top.w || top.client.x !== 0 || top.client.y + top.client.h !== top.h) return null; }
+      else if (rec.fit.w !== rec.fb.w || rec.fit.h !== rec.fb.h) return null;
       return { m: await p1.evalJs(MEASURE(appId, { x: 0, y: 0, w: top.w, h: top.h })), rec, top, ms: Date.now() - t0 };
     }, 8000, 150);
     if (!r) { const m = await p1.evalJs(MEASURE(appId, null)); const rec = await record(appId); const top = await topLevel(appId); return { ok: false, evidence: { m, fb: rec.fb, fit: rec.fit, top } }; }
-    console.log(`    ${label}: window ${r.m.win.w}x${r.m.win.h}, pane ${r.m.mount.w}x${r.m.mount.h}, framebuffer ${r.rec.fb.w}x${r.rec.fb.h} = canvas ${r.m.canvas.w}x${r.m.canvas.h}, app window ${r.top.w}x${r.top.h}+${r.top.x}+${r.top.y}; pixels outside the app: ${r.m.outsideSampled} (black ${r.m.outsideBlack}); black share of the canvas ${(100 * r.m.blackFrac).toFixed(1)} %; settled in ${r.ms} ms (fit ${r.rec.fit.ms} ms, why "${r.rec.fit.why}")`);
+    console.log(`    ${label}: window ${r.m.win.w}x${r.m.win.h}, pane ${r.m.mount.w}x${r.m.mount.h}, framebuffer ${r.rec.fb.w}x${r.rec.fb.h} = canvas ${r.m.canvas.w}x${r.m.canvas.h}, app window ${r.top.w}x${r.top.h}+${r.top.x}+${r.top.y}${r.top.framed ? ` (a window manager's frame; the app's own window ${r.top.client.w}x${r.top.client.h} inside it)` : ''}; pixels outside the app: ${r.m.outsideSampled} (black ${r.m.outsideBlack}); black share of the canvas ${(100 * r.m.blackFrac).toFixed(1)} %; settled in ${r.ms} ms (fit ${r.rec.fit.ms} ms, why "${r.rec.fit.why}")`);
     return { ok: true, ...r };
   };
   const s0 = await settle('after connect');
@@ -172,7 +190,8 @@ try {
     check(`resize to ${W}x${H}: the framebuffer CHANGED within 2 s (${followed && `${followed.fb.w}x${followed.fb.h}`} in ${fbMs} ms)`, !!followed && fbMs <= 2000, followed && followed.fb);
     const s = await settle(`after resize to ${W}x${H}`);
     check(`resize to ${W}x${H}: framebuffer = pane = canvas, the app window = the framebuffer, ZERO pixels outside the app (settled ${s.ok && s.ms} ms after the change was seen)`, s.ok && s.m.outsideSampled === 0 && s.m.blackFrac < 0.2 && s.m.win.w === W && s.m.win.h === H, s.ok ? undefined : s.evidence);
-    check(`resize to ${W}x${H}: the fit's cause is the client's ask (why "${s.ok && s.rec.fit.why}")`, s.ok && /^client asked/.test(s.rec.fit.why));
+    if (s.ok && s.top.framed) check(`resize to ${W}x${H}: under a window manager the WM keeps the app's window maximised as the framebuffer follows — the keeper's plan is settled, no act of its own (its fit: "${s.rec.fit.why}", via ${s.rec.fit.via}; the frame ${s.top.w}x${s.top.h} holds the app's ${s.top.client.w}x${s.top.client.h} under its title)`, s.rec.fit.via === 'wm' && /^(client asked|ready)/.test(s.rec.fit.why));
+    else check(`resize to ${W}x${H}: the fit's cause is the client's ask (why "${s.ok && s.rec.fit.why}")`, s.ok && /^client asked/.test(s.rec.fit.why));
   }
   // a second window of the same app (xterm's own child xterm) is nudged inside — driven at the X level: the keeper's plan on the next tick keeps it in the pane
   {
@@ -181,7 +200,7 @@ try {
     // matched by WM_CLASS (`-class`): the shell inside an xterm rewrites the TITLE from its prompt (the first run matched on the title and lost the window to the prompt); spawned from the scratch HOME
     const dlg = spawn(XTERM, ['-geometry', '40x10+2000+1500', '-class', 'VsFitDialog', '-T', 'vs-dialog'], { env: { ...xenv, HOME: home }, cwd: home, stdio: 'ignore', detached: true }); dlg.unref();
     let seen = null;
-    const nudged = await until(async () => { const r = await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/apps/${appId}/windows`)).json(); const d = (r.windows || []).find((w) => w.depth === 1 && w.cls === 'VsFitDialog'); const fb = (await record(appId)).fb; seen = { windows: (r.windows || []).filter((w) => w.depth === 1).map((w) => ({ id: w.id, cls: w.cls, rect: `${w.w}x${w.h}+${w.x}+${w.y}` })), fb, why: r.why }; return d && fb && d.x + d.w <= fb.w && d.y + d.h <= fb.h && d.x >= 0 && d.y >= 0 ? { d, fb } : null; }, 12000, 250);
+    const nudged = await until(async () => { const r = await windowsOf(appId); const tops = topLevelsOf(r.windows); const d = tops.find((w) => w.cls === 'VsFitDialog'); const fb = (await record(appId)).fb; seen = { windows: tops.map((w) => ({ id: w.id, cls: w.cls, framed: w.framed, rect: `${w.w}x${w.h}+${w.x}+${w.y}` })), fb, why: r.why }; return d && fb && d.x + d.w <= fb.w && d.y + d.h <= fb.h && d.x >= 0 && d.y >= 0 ? { d, fb } : null; }, 12000, 250);
     check(`a second top-level of the app placed off-screen by X (+2000+1500) is NUDGED inside the framebuffer by the belt, its size kept (${nudged && `${nudged.d.w}x${nudged.d.h}+${nudged.d.x}+${nudged.d.y} in ${nudged.fb.w}x${nudged.fb.h}`})`, !!nudged, nudged || { seen, dialogExit: dlg.exitCode, server: serverLines(/\[desktop\]/) });
     check('…and the main window was NOT touched by that nudge (still the whole framebuffer)', !!nudged && seen.windows.some((w) => w.rect === `${nudged.fb.w}x${nudged.fb.h}+0+0`), seen);
     try { dlg.kill('SIGKILL'); } catch {}

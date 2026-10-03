@@ -1,4 +1,5 @@
 import { uiScale } from './utils.js';
+import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 /**
  * Reusable drag-to-resize handle.
  *
@@ -56,8 +57,11 @@ class Resizer {
     }
 
     // Drag logic
-    this.handle.addEventListener('mousedown', (e) => {
-      e.preventDefault(); e.stopPropagation();
+    // THE DOOR (verify r2 census): a pointer press captured on the handle; the feed ends it on every end kind (a release over
+    // a window's iframe / canvas used to never arrive — the sidebar kept resizing when the pointer came back)
+    this.handle.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || e.isPrimary === false) return;
+      e.stopPropagation();
       const startPos = dir === 'horizontal' ? e.clientX : e.clientY;
       const startSize = dir === 'horizontal' ? target.offsetWidth : target.offsetHeight;
       let currentSize = startSize;
@@ -82,8 +86,6 @@ class Resizer {
         this.handle.classList.remove('active');
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
         const finalSize = currentSize;
         if (!this.liveResize) this._setSize(finalSize);
         if (this.storageKey) localStorage.setItem(this.storageKey, finalSize);
@@ -91,9 +93,9 @@ class Resizer {
         if (this.onResizeEnd) this.onResizeEnd(finalSize);
       };
 
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
+      startPointerDrag(this.handle, e, { onMove, onEnd: onUp, shield: 'resizer:' + dir });
     });
+    this.handle.addEventListener('mousedown', (e) => { if (e.button === 0) { e.preventDefault(); e.stopPropagation(); } }); // the compat press: no selection, no focus change
   }
 
   _setSize(px) {

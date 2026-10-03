@@ -81,7 +81,8 @@ const USAGE = `vibespace-msg — message other agent sessions (groups; Task-Grou
         ← an agent: your direct (two-member) group with it · a group: everyone in it.
           Default: it reaches them on THEIR next turn (free). @name in the text, or --wake, wakes them NOW (a billed turn each).
           Waking more than 5 at once is refused with the count until you add --yes; at most 8 wakes per minute are yours.
-  vibespace-msg read <group> [--before <ts>] [--limit N]   ← the group's log (older history on purpose)
+  vibespace-msg read <group> [--before <ts>] [--limit N]   ← the group's log (older history on purpose); each message ends with where it
+          stands: "waiting for <name>'s next turn" (not handed over yet) / "read by <name>" / muted / left
   vibespace-msg group create <name> <member…> [--context "why"] [--quiet] [--yes]
   vibespace-msg group invite <group> <member…> [--context "why"] [--quiet] [--yes]   ← an invite wakes each invitee (billed) unless --quiet; > 5 need --yes
   vibespace-msg group leave <group> | kick <group> <member> | rename <group> <new name> | archive <group>
@@ -102,6 +103,21 @@ const wokeLine = (r) => {
   return bits.join(' · ');
 };
 const MEMBERSHIP_OPS = new Set(['create', 'invite', 'leave', 'kick', 'rename', 'archive', 'notify']);
+/** WHERE A MESSAGE STANDS with its recipients, as one trailing clause (the server's `delivery` rows — the same rule
+ *  the user's window shows under the message): " — waiting for beta's next turn" / " — read by beta"; a group ⇒
+ *  " — waiting: a, b · read: c". An older server sends no rows ⇒ no clause. */
+const deliveryClause = (rows) => {
+  if (!Array.isArray(rows) || !rows.length) return '';
+  // a handed row's `at` = when the report / wake went out (UTC HH:MM + Z, like every other instant this CLI prints); a row without one says no time
+  const hhmm = (ms) => (Number.isFinite(ms) ? ' ' + new Date(ms).toISOString().slice(11, 16) + 'Z' : '');
+  const word = (x) => (x.state === 'waiting' ? `waiting for ${x.name}'s next turn` : x.state === 'handed' ? `read by ${x.name}${hhmm(x.at)}` : x.state === 'muted' ? `${x.name} is muted (never reads it)` : x.state === 'left' ? `${x.name} left` : '');
+  if (rows.length === 1) { const w = word(rows[0]); return w ? ' — ' + w : ''; }
+  const names = (s) => rows.filter((x) => x.state === s).map((x) => x.name);
+  const parts = [];
+  const named = (s) => rows.filter((x) => x.state === s).map((x) => x.name + (s === 'handed' ? hhmm(x.at) : ''));
+  for (const [s, label] of [['waiting', 'waiting'], ['handed', 'read'], ['muted', 'muted'], ['left', 'left']]) if (names(s).length) parts.push(`${label}: ${named(s).join(', ')}`);
+  return parts.length ? ' — ' + parts.join(' · ') : '';
+};
 
 (async () => {
   if (!verb || verb === 'list') {
@@ -151,7 +167,7 @@ const MEMBERSHIP_OPS = new Set(['create', 'invite', 'leave', 'kick', 'rename', '
     if (flags.limit) q.set('limit', flags.limit);
     const r = await call('GET', '/api/agent/msg/read?' + q.toString());
     console.log(`group "${r.group.name}" (${r.group.id}) — ${r.records.length} record(s), oldest first:`);
-    for (const x of r.records) console.log(`- [${x.at}] ${x.kind === 'message' ? x.from + ':' : '(' + x.kind + ')'} ${x.text}`);
+    for (const x of r.records) console.log(`- [${x.at}] ${x.kind === 'message' ? x.from + ':' : '(' + x.kind + ')'} ${x.text}${x.kind === 'message' ? deliveryClause(x.delivery) : ''}`);
     if (r.records.length) console.log(`older: vibespace-msg read ${r.group.id} --before ${r.records[0].at}`);
     return;
   }

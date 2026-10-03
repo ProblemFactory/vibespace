@@ -67,6 +67,14 @@ const TRACE_BYTES_SETTING = 'browser.traceBytesPerProfile';
 const TRACE_TAP_FPS = 4;
 /** The after-frame is the first frame at least this long after the result … */
 const AFTER_SETTLE_MS = 400;
+/** lane trace-fits (2026-10-01, the owner: every resize / move of the live view was counted as an action and the Actions
+ *  list was all "view fit" rows): a `viewer-fit` landing within this long of the previous fit of the SAME browser +
+ *  scope, with no other traced action between, REPLACES it in the index (`fitCoalesceVerdict` / `coalesceFits`) — one
+ *  row per run of re-fits (a drag, a snap, a desktop switch), the reflow between two agent actions still its own row. */
+const FIT_COALESCE_MS = 10 * 1000;
+/** The live view's own re-fit as the bridge taps it (src/server/browser-stream.js tapOwnSet) — the ONE action name the
+ *  fold reads; the agent's own `viewport` verb is an untraced observation and never one of these. */
+const FIT_ACTION = 'viewer-fit';
 /** … or, failing one by then, the latest frame seen (marked `afterSame` when
  *  it is the before-frame itself — a page that did not repaint). */
 const AFTER_MAX_MS = 1500;
@@ -280,6 +288,8 @@ function entryFor({ id, at, sessionId = null, browserKey = null, profileId = nul
   const human = holder === 'user';
   return {
     ...(human ? { holder: 'user' } : {}),
+    // lane trace-fits: a fit carries its run's count and last instant (1 and its own `at` until a later fit is folded in)
+    ...(action === FIT_ACTION ? { n: 1, lastAt: Number(at) || 0 } : {}),
     id: String(id), at: Number(at) || 0, sessionId: human ? null : (sessionId || null), browserKey: browserKey || null, profileId: profileId || null,
     // the browser SESSION this action belongs to (`bs-…`, src/browser-sessions.js) — null only for a pre-session record
     browserSession: /^bs-[0-9a-f]{8}$/.test(String(browserSession || '')) ? browserSession : null,
@@ -295,6 +305,67 @@ function entryFor({ id, at, sessionId = null, browserKey = null, profileId = nul
 }
 function isEntryId(v) { return ENTRY_ID_RE.test(String(v || '')); }
 function mintEntryId(hex12) { return 'tr-' + String(hex12 || '').toLowerCase().replace(/[^0-9a-f]/g, '').slice(0, 12).padEnd(12, '0'); }
+
+// ── lane trace-fits (2026-10-01): the page-size fold ──
+/** Is this entry the live view's own re-fit? (only `viewer-fit` — never the agent's `viewport` verb, never a click) */
+function isFitEntry(e) { return !!e && String(e.action || '') === FIT_ACTION; }
+/** How many re-fits an entry stands for (a coalesced run counts every fit folded into it); 0 for an agent action. */
+function fitCount(e) { return isFitEntry(e) ? Math.max(1, Math.round(Number(e.n)) || 1) : 0; }
+const scopeOfEntry = (e) => (e && (e.scope || e.profileId)) || EPHEMERAL_SCOPE;
+/**
+ * F1 — THE COALESCE VERDICT. `prev` = the tap's last written fit (its run), `next` = the fit landing now, `between` =
+ * a traced action that landed between them (null = none), `now` = the instant `next` landed (its `at`). Answers
+ * {coalesce, why}: the same browser + scope within `coalesceMs` of the run's LAST fit (`lastAt`, so a long drag stays
+ * one row) with nothing traced between ⇒ the new fit REPLACES the run; anything else ⇒ a new run. Every refusal is named.
+ */
+function fitCoalesceVerdict(prev, next, { now = null, between = null, coalesceMs = FIT_COALESCE_MS } = {}) {
+  if (!next || !isFitEntry(next)) return { coalesce: false, why: 'not a fit' };
+  if (!prev) return { coalesce: false, why: 'no previous fit' };
+  if (!isFitEntry(prev)) return { coalesce: false, why: `the previous action is ${prev.action || 'not a fit'}` };
+  if (between && between.action !== FIT_ACTION) return { coalesce: false, why: `another action between (${between.action})` };
+  if ((prev.browserKey || null) !== (next.browserKey || null)) return { coalesce: false, why: 'another browser' };
+  if (scopeOfEntry(prev) !== scopeOfEntry(next)) return { coalesce: false, why: 'another scope' };
+  const at = now !== null && now !== undefined && Number.isFinite(Number(now)) ? Number(now) : Number(next.at) || 0;
+  const since = at - (Number(prev.lastAt) || Number(prev.at) || 0);
+  if (since < 0) return { coalesce: false, why: 'out of order' };
+  if (since > coalesceMs) return { coalesce: false, why: `${Math.round(since / 1000)} s since the last fit (> ${Math.round(coalesceMs / 1000)} s)` };
+  return { coalesce: true, why: `within ${Math.round(coalesceMs / 1000)} s of the last fit` };
+}
+/**
+ * F1 — THE MERGE: the run keeps its FIRST id / at / before frame / session, takes the LAST fit's geometry, text, result and
+ * after frame (the run's own when the new fit brought none), counts every fit (`n`) and stamps `lastAt`. PURE — the
+ * recorder owns the files (the superseded after frame is unlinked there, at once).
+ */
+function coalesceFits(prev, next) {
+  const p = prev || {}, q = next || {};
+  const after = q.after && q.after.file ? { ...q.after } : (p.after ? { ...p.after } : null);
+  return {
+    ...q,
+    id: p.id, at: Number(p.at) || 0, lastAt: Number(q.lastAt) || Number(q.at) || 0, n: fitCount(p) + fitCount(q),
+    before: p.before ? { ...p.before } : null, after,
+    afterSame: q.after && q.after.file ? false : !!p.afterSame,
+    sessionId: p.sessionId || q.sessionId || null, browserSession: p.browserSession || q.browserSession || null,
+  };
+}
+/**
+ * F2 — THE FOLD every list draws: an agent action is its own row `{kind:'entry', id, entry, fit:false}`; CONSECUTIVE
+ * fits fold into ONE row `{kind:'fits', id: the first's, entries, n, at, lastAt, last, failed}` (a click between
+ * keeps two runs apart). `expand` = the toggle: every fit its own row, marked `fit: true`.
+ */
+function foldFits(entries, { expand = false } = {}) {
+  const rows = [];
+  let run = null;
+  for (const e of entries || []) {
+    if (!e) continue;
+    if (!isFitEntry(e) || expand) { run = null; rows.push({ kind: 'entry', id: e.id, entry: e, fit: isFitEntry(e) }); continue; }
+    const last = Number(e.lastAt) || Number(e.at) || 0;
+    if (run) { run.entries.push(e); run.n += fitCount(e); run.lastAt = Math.max(run.lastAt, last); run.last = e; if (e.ok === false) run.failed++; }
+    else { run = { kind: 'fits', id: e.id, entries: [e], n: fitCount(e), at: Number(e.at) || 0, lastAt: last, last: e, failed: e.ok === false ? 1 : 0 }; rows.push(run); }
+  }
+  return rows;
+}
+/** The entries a folded list lets a person open: every agent action, and the LAST fit of each run. */
+function visibleEntries(rows) { return (rows || []).map((r) => (r && r.kind === 'fits' ? r.last : r && r.entry)).filter(Boolean); }
 /** The one-line label the timeline strip and the CLI print. */
 function timelineLabel(entry) {
   const e = entry || {};
@@ -370,22 +441,33 @@ function traceSizePlan({ scopes = [], bytesPerScope = TRACE_BYTES_PER_PROFILE } 
   for (const sc of scopes || []) {
     const key = String(sc.key || '');
     const sessions = [...(sc.sessions || [])].filter(Boolean).map((s) => ({ ...s, entries: [...(s.entries || [])].filter((e) => e && e.id).sort((a, b) => (Number(a.at) || 0) - (Number(b.at) || 0)) }));
-    let frames = 0, lists = 0;
-    for (const s of sessions) for (const e of s.entries) { frames += Number(e.frameBytes) || 0; lists += Number(e.listBytes) || 0; }
+    let frames = 0, lists = 0, fitFrames = 0;
+    for (const s of sessions) for (const e of s.entries) { frames += Number(e.frameBytes) || 0; lists += Number(e.listBytes) || 0; if (e.fit) fitFrames += Number(e.frameBytes) || 0; }
+    const taken = new Set();
+    // F3: page-size frames go FIRST (lane trace-fits): over the limit, the frames of the live view's own re-fits — oldest
+    // fit first, whatever session holds it — go before any agent action's frame, so a fit storm never crowds the agent's
+    // actions out of the limit; their action lists stay like every other
+    const fitsFirst = sessions.flatMap((s) => s.entries.filter((e) => e.fit && (Number(e.frameBytes) || 0) > 0).map((e) => ({ s, e }))).sort((a, b) => (Number(a.e.at) || 0) - (Number(b.e.at) || 0));
+    for (const { s, e } of fitsFirst) {
+      if (frames + lists <= limit) break;
+      const b = Number(e.frameBytes) || 0;
+      removeFrames.push({ key, id: e.id, session: s.id || null, bytes: b, fit: true, why: `over ${mb} MB for this profile — page-size frames go first; its action list is kept` });
+      frames -= b; fitFrames -= b; taken.add(e.id);
+    }
     const order = [...sessions.filter((s) => !s.open), ...sessions.filter((s) => s.open)].map((s, i) => ({ s, i }))
       .sort((a, b) => (a.s.open === b.s.open ? 0 : a.s.open ? 1 : -1) || (Number(a.s.startAt) || 0) - (Number(b.s.startAt) || 0) || a.i - b.i).map((x) => x.s);
     for (const s of order) {
       if (frames + lists <= limit) break;
       for (const e of s.entries) {
         const b = Number(e.frameBytes) || 0;
-        if (!b) continue;
+        if (!b || taken.has(e.id)) continue;
         if (s.open && frames + lists <= limit) break;
         removeFrames.push({ key, id: e.id, session: s.id || null, bytes: b, why: `over ${mb} MB for this profile — the oldest session's frames go first; its action list is kept` });
-        frames -= b;
+        frames -= b; if (e.fit) fitFrames -= b;
       }
     }
     const used = frames + lists;
-    kept.push({ key, used, frameBytes: frames, listBytes: lists, limit, overBy: Math.max(0, used - limit), why: used > limit ? `the action lists alone take ${Math.round(lists / 1048576)} MB of ${mb} MB — every frame is gone, the lists stay` : `${Math.round(used / 1048576)} MB of ${mb} MB` });
+    kept.push({ key, used, frameBytes: frames, listBytes: lists, fitFrameBytes: fitFrames, limit, overBy: Math.max(0, used - limit), why: used > limit ? `the action lists alone take ${Math.round(lists / 1048576)} MB of ${mb} MB — every frame is gone, the lists stay` : `${Math.round(used / 1048576)} MB of ${mb} MB` });
   }
   return { removeFrames, kept, bytesRemoved: removeFrames.reduce((n, r) => n + r.bytes, 0) };
 }
@@ -567,12 +649,16 @@ function toolCommandText(input) {
   if (Array.isArray(c)) return c.map((x) => String(x)).join(' ');
   return typeof c === 'string' ? c : '';
 }
-/** The tool card's digest of its entries: how many, how many failed, first/last instants. */
+/** The tool card's digest of its entries: how many AGENT actions (`n`), how many of them failed, first/last instants —
+ *  and the live view's re-fits BESIDE them (`fits`, every coalesced one counted), never in `n` (lane trace-fits). */
 function traceSummary(entries) {
   const list = (entries || []).filter(Boolean);
-  let failed = 0, first = 0, last = 0;
-  for (const e of list) { if (e.ok === false) failed++; if (!first || e.at < first) first = e.at; if (e.at > last) last = e.at; }
-  return { n: list.length, failed, first, last };
+  let n = 0, failed = 0, first = 0, last = 0, fits = 0;
+  for (const e of list) {
+    if (isFitEntry(e)) fits += fitCount(e); else { n++; if (e.ok === false) failed++; }
+    if (!first || e.at < first) first = e.at; if (e.at > last) last = e.at;
+  }
+  return { n, failed, first, last, fits };
 }
 /** ONE fetch for many cards: the union of their windows ([{id, from, to}]), or null with none. */
 function unionWindow(windows) {
@@ -613,17 +699,24 @@ function positionText(position) {
   return p.why ? String(p.why) : '';
 }
 
-/** The byte / count digest the panel prints per scope. */
+/** The byte / count digest the panel prints per scope: `n` = the agent's actions, `fits` + `fitBytes` = the live view's
+ *  re-fits beside them (lane trace-fits), `bytes` = every frame. */
 function scopeDigest(entries) {
-  let bytes = 0, n = 0, last = 0;
-  for (const e of entries || []) { n++; bytes += (e.before ? Number(e.before.bytes) || 0 : 0) + (e.after ? Number(e.after.bytes) || 0 : 0) + (Number(e.bytes) || 0); if (e.at > last) last = e.at; }
-  return { n, bytes, last };
+  let bytes = 0, n = 0, last = 0, fits = 0, fitBytes = 0;
+  for (const e of entries || []) {
+    const b = (e.before ? Number(e.before.bytes) || 0 : 0) + (e.after ? Number(e.after.bytes) || 0 : 0) + (Number(e.bytes) || 0);
+    bytes += b;
+    if (isFitEntry(e)) { fits += fitCount(e); fitBytes += b; } else n++;
+    if (e.at > last) last = e.at;
+  }
+  return { n, bytes, last, fits, fitBytes };
 }
 
 module.exports = {
   TRACE_BYTES_PER_PROFILE, TRACE_BYTES_FLOOR, TRACE_BYTES_SETTING, TRACE_TAP_FPS, AFTER_SETTLE_MS, AFTER_MAX_MS, BOX_PROBE_TIMEOUT_MS, PENDING_CAP, FRAME_RING,
+  FIT_COALESCE_MS, FIT_ACTION, isFitEntry, fitCount, fitCoalesceVerdict, coalesceFits, foldFits, visibleEntries, // lane trace-fits: the page-size fold
   RECORDING_FLOOR, RECORDING_DIR, TRACE_DIR, FORGOTTEN_FILE, STALE_PROFILE_DAYS, INFLIGHT_GRACE_MS, PROFILE_MARKERS, FORGOTTEN_SUFFIX, EPHEMERAL_SCOPE,
-  TRACED_ACTIONS, classifyAction, isTracedCommand, selectorOf, redactParams, withoutUserinfo, withoutUrlSecrets, credentialKey, commandText, positionOf, resultOk, resultError, frameMeta, boxFromProbe, afterFramePick,
+  TRACED_ACTIONS, classifyAction, isTracedCommand, selectorOf, redactParams, withoutUserinfo, withoutUrlSecrets, credentialKey, CREDENTIAL_WORDS, commandText, positionOf, resultOk, resultError, frameMeta, boxFromProbe, afterFramePick,
   entryFor, isEntryId, mintEntryId, timelineLabel, traceWindowFor, commandDrivesBrowser, entriesInWindow, overlayGeometry,
   traceBytesLimit, entryFrameBytes, entryListBytes, traceSizePlan, recordingVerdict, recordingFileFor, isRecordingFile,
   cleanRecordError, recordingChipWords, // lane live-input: a failed record start's words kept without its command line / paths; the bar's recording chip

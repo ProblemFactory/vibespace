@@ -23,7 +23,7 @@
 //      verb, Stop ends its Xvfb;
 //   ④ CONTROL: a keeper copy (scripts/mutant-copy.mjs) whose launch records no fact — the pre-fix keeper — answers
 //      `open` with launch_failed on the real binary, and no Chrome ever came up for it: the incident, reproduced.
-// SKIPs with evidence without the real agent-browser (only the shim resolves) or Google Chrome.
+// SKIPs with evidence without the real agent-browser (only the shim resolves) or a system Chrome / Chromium.
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -48,10 +48,14 @@ const done = () => { console.log(`\n${pass} passed, ${fail} failed${skipped ? `,
 const BASE_ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(AGENT_BROWSER_|VIBESPACE_|WAYLAND_DISPLAY$|DISPLAY$)/.test(k)));
 const REAL = (() => { try { return F.binaryResolver('agent-browser', BASE_ENV)(); } catch { return null; } })();
 let VER = null; try { VER = REAL ? execFileSync(REAL, ['--version'], { encoding: 'utf8', timeout: 10000, env: { PATH: BASE_ENV.PATH || '/usr/bin:/bin', HOME: '/nonexistent' } }).trim() : null; } catch { VER = null; }
-const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable'].find((p) => { try { fs.accessSync(p, fs.constants.X_OK); return true; } catch { return false; } }) || null;
+// lane fleet-image-2: the browser the CLI LAUNCHES is the gate — with no browser installed under its home, agent-browser
+// 0.38.1 takes the system one it finds by name (google-chrome, google-chrome-stable, …, chromium, chromium-browser):
+// Google Chrome on the dev box, the Debian chromium 154 on the fleet image. Either runs every leg; the version the legs
+// read (Chrome/154) is the CDP census's.
+const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => { try { fs.accessSync(p, fs.constants.X_OK); return true; } catch { return false; } }) || null;
 console.log(`— the installed browser CLI: ${REAL || 'none'} (${VER || '?'}), chrome: ${CHROME || 'none'}`);
 if (!REAL || !VER) { skip(`no real agent-browser resolves on PATH past the shim (PATH=${BASE_ENV.PATH || ''})`); done(); }
-if (!CHROME) { skip('no Google Chrome at /usr/bin/google-chrome — the measured launch needs it'); done(); }
+if (!CHROME) { skip('no system Chrome or Chromium (/usr/bin/google-chrome, /usr/bin/chromium) — the launch needs one'); done(); }
 
 const ROOT = scratch('bdisp-chrome'); // short: the daemon's socket path lives under it
 fs.rmSync(ROOT, { recursive: true, force: true });
@@ -144,7 +148,7 @@ function chromesOf(daemonPid) {
       let cmd = ''; try { cmd = fs.readFileSync(`/proc/${c}/cmdline`, 'utf8'); } catch { continue; }
       let argv = cmd.split('\0').filter(Boolean);
       if (argv.length === 1) argv = argv[0].split(/\s+/).filter(Boolean); // a title-rewritten Chrome cmdline is ONE space-joined string (measured, lane H r3)
-      if (/chrome/i.test(argv[0] || '') && !argv.some((a) => a.startsWith('--type='))) out.push({ pid: c, argv });
+      if (/chrom(e|ium)/i.test(argv[0] || '') && !argv.some((a) => a.startsWith('--type='))) out.push({ pid: c, argv }); // Debian's /usr/bin/chromium execs /usr/lib/chromium/chromium
     }
     frontier = next;
   }
@@ -286,7 +290,7 @@ console.log('— ④ CONTROL: a keeper whose launch records no display fact (the
 {
   const MK = mutantCopies('bdisp-chrome-keeper', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-  const factLine = '        rec.display = await displays.factFor({ baseFile: env0[VERBS.CONFIG_KEY] || ephemeralConfigFor(env0), prev: prev && prev.display, mode: noDisplayMode() });';
+  const factLine = '        rec.display = await displays.factFor({ baseFile: env0[VERBS.CONFIG_KEY] || ephemeralConfigFor(env0), prev: prev && prev.display, mode: noDisplayMode(), preference: headedSetting() });'; // + H5's preference (lane hooks-create; the 2.369.200 integration re-anchored)
   const envLine = '        const r = await rt.launch(null, { idleMs: launchIdle, headed: null, extraEnv: { ...env0, ...rec.display.env } });';
   ok(src.includes(factLine) && src.includes(envLine), 'CONTROL setup: the launch\'s fact line is found in the keeper');
   const pre = MK.load('src/server/browser-keeper.js', src.replace(factLine, '        rec.display = null;').replace(envLine, '        const r = await rt.launch(null, { idleMs: launchIdle, headed: null, extraEnv: env0 });'), 'no-fact');

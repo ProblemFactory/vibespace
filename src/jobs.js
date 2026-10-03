@@ -11,6 +11,7 @@ const path = require('path');
 const net = require('net');
 const http = require('http');
 const crypto = require('crypto');
+const { withoutNoticeHead } = require('./notification-senders.js'); // lane notify-retry: a parked frame carries the ladder's head; the floor's digest is of the raw text
 const textDigest = (t) => crypto.createHash('sha256').update(String(t)).digest('hex'); // a flood floor's memory of a text (verify r9)
 const { spawn, execFile } = require('child_process');
 const M = require('./job-model.js');
@@ -26,17 +27,22 @@ function writeJsonAtomic(file, obj) {
  *  handed over and leaves by that hand-over's own drain (channel-jump verify r4 — the ladder's store has the same
  *  rule, conversation-deliver `capUnclaimed`). The store may exceed the cap by the claimed count while one is in flight. */
 const NOTIF_STASH_CAP = 30;
+const FLOOR_DROP_WINDOW_MS = 60 * 60 * 1000;   // verify r4: a floor witness from the future is dropped once; a second within this window is re-based (the clock keeps going back)
 function capUnclaimedNotifs(q) {
   // the cap counts the UNCLAIMED entries (when every slot is claimed, a newcomer is the only unclaimed one — a
   // cap over the whole store would evict exactly the entry that just arrived); the oldest unclaimed fall off
+  // A MAY-HAVE-LANDED COPY GIVES WAY FIRST (notify-retry verify r3, reproduced on the ladder's twin: a possible repeat
+  // handed over from the retry park evicted a certain miss) — the dropped entries are returned so the log names them
   let over = q.filter((e) => !(e && e.ho)).length - NOTIF_STASH_CAP;
-  if (over <= 0) return 0;
-  let n = 0;
-  for (let i = 0; i < q.length && over > 0;) {
-    if (q[i] && q[i].ho) { i++; continue; }
-    q.splice(i, 1); over--; n++;
+  const dropped = [];
+  if (over <= 0) return dropped;
+  for (const pass of [(e) => !!(e.held && e.held.maybeDelivered), () => true]) {
+    for (let i = 0; i < q.length && over > 0;) {
+      if (!q[i] || q[i].ho || !pass(q[i])) { i++; continue; }
+      dropped.push(...q.splice(i, 1)); over--;
+    }
   }
-  return n;
+  return dropped;
 }
 function readStarttime(pid) {
   try {
@@ -65,6 +71,8 @@ const ARCHIVE_SWEEP_MS = 5 * 60 * 1000;
 function heldOf(r, reason) {
   const kind = M.heldKind(r, reason);
   const out = { kind };
+  if (r && r.phase) out.phase = String(r.phase);                       // lane notify-retry: the attempt's facts ride the held record
+  if (r && (r.busy === true || r.busy === false)) out.busy = r.busy;
   if (kind === 'spend-cap' && r) {
     if (r.why) out.why = String(r.why);
     if (r.identity && (r.identity.name || r.identity.key)) out.identity = String(r.identity.name || r.identity.key);
@@ -104,7 +112,11 @@ class JobManager {
     this.ansWaiters = new Map(); // jobId → [{resolve, timer}]
     this._timers = [];
     this._dirty = false;
+    // THE RETRY PARK'S EVENTS (lane notify-retry, 2026-10-01): a notification the ladder parked (a transient miss on a
+    // live pid) is this engine's to book — parked / attempt / delivered / fell — by the job id the park's meta names
+    if (typeof deps.onRetry === 'function') { try { deps.onRetry((ev, cid, entry, extra) => this._onRetryEvent(ev, cid, entry, extra)); } catch (e) { deps.log && deps.log('[jobs] retry events unavailable:', e.message); } }
     this._notifyRate = new Map(); // conversationId → {ts, h} — engine-side floor under the CLI's own throttles; `h` = the text's DIGEST (lane-redact verify r9: the TEXT — a job's name + words — sat here per conversation, pruned only past 500, out of every clear's reach)
+    this._floorDrops = new Map(); // conversationId → {at, saidAt}: when its floor witness was last DROPPED for a backward clock (verify r4: the second drop within the hour re-bases instead, said once an hour)
   }
 
   // ── lifecycle ───────────────────────────────────────────────────────────
@@ -560,6 +572,23 @@ class JobManager {
     // DISTINCT event is STASHED, not dropped (2.344.1 review catch); only an
     // identical repeat is dropped outright.
     const rate = this._notifyRate.get(cid) || {};
+    // a floor stamp ahead of now is the clock's, not the delivery's (notify-retry verify r3 — the park's own floor had
+    // the same hole): a backward step would read every notification as "within the floor" (stashed) or "a duplicate
+    // within 10 min" (dropped) for the length of the step; the witness is DROPPED (floor and duplicate window start
+    // fresh — re-basing it to now would hold the very next notification 30 s for a post that never happened), said once
+    // …ONCE AN HOUR (verify r4, reproduced on the park's twin: a clock that keeps stepping back — two time daemons fighting —
+    // dropped the witness at every attempt and posted seven frames in the same millisecond, the floor gone entirely). A
+    // second future witness within the hour of the last drop is RE-BASED to now (one floor held, said once per hour)
+    if (rate.ts && rate.ts > now()) {
+      const drop = this._floorDrops.get(cid) || null;
+      if (drop && now() - drop.at < FLOOR_DROP_WINDOW_MS) {
+        if (!(drop.saidAt && now() - drop.saidAt < FLOOR_DROP_WINDOW_MS)) { drop.saidAt = now(); this.d.log(`[jobs] ${cid}: the notify floor was stamped in the future again within the hour — the clock keeps going back; the witness is re-based to now (one floor held, not dropped) and this is said once an hour`); }
+        rate.ts = now();   // the stored record itself (the `{}` fallback never reaches here: its ts is falsy) — `_stampNotifyFloor` stays the ONE writer of the map (record-clear census §I)
+      } else {
+        this.d.log(`[jobs] ${cid}: the notify floor was stamped ${Math.round((rate.ts - now()) / 60000)} min in the future — the clock went back; the witness is dropped (no floor, no duplicate window)`);
+        this._floorDrops.set(cid, { at: now(), saidAt: 0 }); this._notifyRate.delete(cid); delete rate.ts; delete rate.h;
+      }
+    }
     if (rate.h === textDigest(text) && rate.ts && now() - rate.ts < 600_000) {
       if (!subscriber) { job.lastNotify = { ts: now(), lane: 'suppressed', ok: false, reason: 'duplicate within 10min' }; this._notifyLogPush(job, { lane: 'suppressed', ok: false, reason: 'duplicate within 10min' }); }
       return;
@@ -569,7 +598,7 @@ class JobManager {
       this._dirty = true;
       return;
     }
-    this._notifyRate.set(cid, { ts: now(), h: textDigest(text) });
+    this._stampNotifyFloor(cid, text);
     if (this._notifyRate.size > 500) { // prune: keep the map bounded
       const cut = now() - 600_000;
       for (const [k, v] of this._notifyRate) if (!v.ts || v.ts < cut) this._notifyRate.delete(k);
@@ -583,13 +612,23 @@ class JobManager {
     // only it knows whether a turn is running. The 30s floor + stash below stay
     // exactly as they were: a floored batch is drained as ONE injected block by
     // agent-routes (renderNotifStash), never re-delivered per entry.
+    // THE RETRY PARK (lane notify-retry): a transient miss on a LIVE pid is parked by the ladder for this producer —
+    // the meta is what this engine needs to book the outcome later (the job, the event, the raw text's digest for
+    // the floor), with or without the job record still in the registry
+    const retry = { producer: 'jobs', meta: { jobId: job.id, jobName: job.name || job.id, ev: { what: (ev && ev.what) || job.state, at: (ev && ev.at) || now() }, subscriber: !!subscriber } };
     const deliver = this.d.deliverToConversation
-      ? this.d.deliverToConversation(cid, text, { fromName: 'Background Work · ' + (job.name || job.id), kind: 'notification', spendReason: 'job-notification' })
+      ? this.d.deliverToConversation(cid, text, { fromName: 'Background Work · ' + (job.name || job.id), kind: 'notification', spendReason: 'job-notification', retry })
       : Promise.resolve({ ok: false, reason: 'no delivery lane wired' });
     Promise.resolve(deliver).then((r) => {
       if (r && r.ok) {
         if (!subscriber) job.lastNotify = { ts: now(), lane: r.lane || 'message', ok: true, to: r.peerName || null };
         this._notifyLogPush(job, { lane: r.lane || 'message', ok: true, to: r.peerName || null, ...(subscriber ? { sub: true } : {}) });
+      } else if (r && r.parked === true) {
+        // parked, never stashed: the ladder retries it at the conversation's turn end and on its backoff; the
+        // journal line is this engine's R2 measurement (phase / busy / late) and the panel's Delivery log reads it
+        if (!subscriber) job.lastNotify = { ts: now(), lane: 'retry', ok: false, reason: r.reason || 'timeout', retryAt: r.retryAt || null };
+        this._notifyLogPush(job, { lane: 'message', ok: false, parked: true, id: r.id || null, reason: r.reason || 'timeout', phase: r.phase || null, busy: r.busy === true || r.busy === false ? r.busy : null, ...(Number(r.late) > 0 ? { late: Number(r.late) } : {}), retryAt: r.retryAt || null, retries: 0, to: String(cid).slice(0, 8), ...(subscriber ? { sub: true } : {}) });
+        this.d.log(`[jobs] notify → parked for retry for ${cid} (${r.reason || 'timeout'}; phase ${r.phase || '?'}; target mid-turn: ${r.busy === true ? 'yes' : r.busy === false ? 'no' : 'unknown'}${Number(r.late) > 0 ? `; our loop was ${Number(r.late)} ms late` : ''}; next attempt ${r.retryAt ? new Date(r.retryAt).toISOString() : '?'} or at the turn end)`);
       } else {
         this._stashNotif(cid, job, ev, (r && r.reason) || 'unreachable', { stampLast: !subscriber, held: heldOf(r, (r && r.reason) || 'unreachable') });
       }
@@ -599,6 +638,58 @@ class JobManager {
       this._stashNotif(cid, job, ev, e.message, { stampLast: !subscriber, held: { kind: 'not-reachable' } }); // degrade path logs verbatim inside
       this._dirty = true;
     });
+  }
+  /** THE ONE WRITE of the per-conversation flood floor (record-clear census §I, verify r9 ⑥: a DIGEST of the last text,
+   *  never the text) — the attempt stamps it, and a parked delivery that LANDS re-stamps it (lane notify-retry R5). */
+  _stampNotifyFloor(cid, text) {
+    this._notifyRate.set(cid, { ts: now(), h: textDigest(text) });
+  }
+  /** THE RETRY PARK'S OUTCOMES (lane notify-retry): `attempt` updates the parked Delivery-log line in place (retries,
+   *  the last attempt's phase / busy, the next instant — never one line per attempt, the log holds 12); `delivered`
+   *  books the one wake (lane + retries + deliveredAt + parkedFor, `via` message | hand-over | prompt) and RE-STAMPS
+   *  the 30 s floor — the floor counts the SUCCESSFUL delivery (R5); `fell` stashes it in THIS store with the park's
+   *  reason typed (`not-running` / `not-reachable` / `spend-cap` + the attempts' facts) and answers true = taken. A
+   *  job record that is gone (archived, removed) is still booked by the meta the park kept. */
+  _onRetryEvent(ev, cid, entry, extra = {}) {
+    if (!entry || entry.producer !== 'jobs' || !entry.meta || !entry.meta.jobId) return false;
+    const meta = entry.meta;
+    const job = this.jobs.get(meta.jobId) || null;
+    const subscriber = !!meta.subscriber;
+    const retries = Math.max(0, (Number(extra.attempts) || entry.attempts.length || 1) - 1);
+    if (ev === 'attempt') {
+      if (!job) return false;
+      const line = [...(job.notifyLog || [])].reverse().find((l) => l && l.parked && l.id === entry.id);
+      const last = entry.attempts[entry.attempts.length - 1];
+      if (line) { line.retries = retries; line.nextAt = extra.nextAt || null; if (last) { line.reason = last.reason; line.phase = last.phase || null; line.busy = last.busy === true || last.busy === false ? last.busy : null; if (last.late) line.late = last.late; } this._dirty = true; }
+      return false;
+    }
+    if (ev === 'delivered') {
+      const via = extra.via || 'message';
+      const lane = extra.lane || (via === 'prompt' ? 'stash' : 'message');
+      if (job) {
+        if (!subscriber && via === 'message') job.lastNotify = { ts: now(), lane, ok: true, to: extra.peerName || null, retries };
+        this._notifyLogPush(job, { lane, ok: true, to: extra.peerName || null, retries, deliveredAt: extra.deliveredAt || now(), parkedFor: Number(extra.parkedFor) || 0, via, ...(subscriber ? { sub: true } : {}) });
+        if (via === 'prompt' && Number(entry.firstAt) >= M.terminalAt(job)) this.markAck(job, 'notified', now(), { quiet: true });   // rode the next prompt: read like a drained stash entry
+      }
+      if (via === 'message') this._stampNotifyFloor(cid, withoutNoticeHead(entry.text));   // R5: the floor counts the delivery that LANDED — the raw text's digest (the ladder's head stripped)
+      this._dirty = true;
+      try { this.d.broadcast('jobs-updated', { id: meta.jobId }); } catch { }
+      return false;
+    }
+    if (ev === 'fell') {
+      // verify r4 (T1 S4/S22, reproduced): `expired` was the one detail this listener dropped — the digest's tail
+      // ("The hour of retries passed…", job-model NOTIF_TAIL_DETAIL) could never fire for a jobs notification, and the
+      // parked Delivery-log line stayed one retry short of the attempts the stash line named (the last attempt's
+      // failure IS the fall: no `attempt` event follows it) — the line is closed here with the attempts as counted
+      const held = { kind: extra.kind || 'not-reachable', ...(extra.why ? { why: String(extra.why) } : {}), ...(extra.maybeDelivered === true ? { maybeDelivered: true } : {}), ...(extra.evicted === true ? { evicted: true } : {}), ...(extra.expired === true ? { expired: true } : {}), ...(extra.identity ? { identity: String(extra.identity) } : {}), ...(Number.isFinite(Number(extra.cap)) && extra.cap != null ? { cap: Number(extra.cap) } : {}), ...(Number(extra.retryAfter) > 0 ? { retryAfter: Number(extra.retryAfter) } : {}), attempts: Number(extra.attempts) || entry.attempts.length, ...(extra.phase ? { phase: String(extra.phase) } : {}), ...(extra.busy === true || extra.busy === false ? { busy: extra.busy } : {}) };
+      if (job) { const line = [...(job.notifyLog || [])].reverse().find((l) => l && l.parked && l.id === entry.id); if (line) { line.retries = retries; line.nextAt = null; } }
+      const target = job || { id: meta.jobId, name: meta.jobName || meta.jobId };   // the record is gone: the stash still names it
+      this._stashNotif(cid, target, { what: (meta.ev && meta.ev.what) || meta.jobName, at: (meta.ev && meta.ev.at) || entry.firstAt }, extra.reason || held.kind, { stampLast: !subscriber && !!job, held });
+      this._dirty = true;
+      try { this.d.broadcast('jobs-updated', { id: meta.jobId }); } catch { }
+      return true;
+    }
+    return false;
   }
   /** bounded per-job delivery journal (2.361.5, owner ask: "投递细节我好监控")
    *  — one entry per delivery ATTEMPT outcome, any lane. Rides the registry
@@ -617,10 +708,9 @@ class JobManager {
     // captured before the clear (verify r3): an event born before the clear is held as the sentence
     const stale = job.clearedAt && !((ev && ev.at) > Math.max(job.clearedAt, job.reclearedAt || 0));   // …born before the LATEST clear (verify r4: a second clear of an `already` record keeps the first clearedAt)
     q.push({ jobId: job.id, jobName: stale ? CLEARED_TEXT : job.name, text: stale ? CLEARED_TEXT : ((ev && ev.what) || job.state), ts: now(), urgency: job.state === 'failed' ? 'normal' : 'low', held: held || heldOf(null, reason) });
-    const unclaimed = q.filter((e) => !(e && e.ho));
-    const dropped = unclaimed.slice(0, Math.max(0, unclaimed.length - NOTIF_STASH_CAP));
-    const n = capUnclaimedNotifs(q); // per-conversation cap; the oldest UNCLAIMED fall off (a claimed one is being handed over — verify r4)
-    if (n) this.d.log(`[jobs] ${cid}: ${n} oldest waiting notification(s) fell off the ${NOTIF_STASH_CAP}-entry cap (${dropped.map((e) => `${e.jobId} ${new Date(Number(e.ts) || 0).toISOString()}`).join('; ')}) — never delivered (channel-jump verify r6: an eviction is said)`);
+    const dropped = capUnclaimedNotifs(q); // per-conversation cap; a may-have-landed copy first, then the oldest UNCLAIMED (a claimed one is being handed over — verify r4)
+    const n = dropped.length;
+    if (n) this.d.log(`[jobs] ${cid}: ${n} oldest waiting notification(s) fell off the ${NOTIF_STASH_CAP}-entry cap (${dropped.map((e) => `${e.jobId} ${new Date(Number(e.ts) || 0).toISOString()}${e.held && e.held.maybeDelivered ? ' — a may-have-landed copy, gave way first' : ''}`).join('; ')}) — never delivered (channel-jump verify r6: an eviction is said)`);
     this.pendingNotifs.set(cid, q);
     if (stampLast) job.lastNotify = { ts: now(), lane: 'stash', ok: true, reason: reason || null };
     this._notifyLogPush(job, { lane: 'stash', ok: false, reason: reason || 'not reachable', to: String(cid).slice(0, 8) });

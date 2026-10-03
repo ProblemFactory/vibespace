@@ -175,7 +175,7 @@ console.log('\n§7 WIRING PINS (code only, comments stripped)');
     && !/':default:soft'/.test(eng) && /':default'\); return; \}/.test(eng));
   for (const f of ['src/message-manager.js', 'src/codex-message-manager.js']) {
     const m = strip(f);
-    ok(`${f}: injectPeerCard carries a sanitized resetCredit offer (offerOf)`, /injectPeerCard\(\{[^}]*resetCredit = null(?:, kind = null)?(?:, group = null)? \}\)/.test(m) && /const rc = offerOf\(resetCredit\);\s*\n\s*if \(rc\) msg\.resetCredit = rc;/.test(m));
+    ok(`${f}: injectPeerCard carries a sanitized resetCredit offer (offerOf)`, /injectPeerCard\(\{[^}]*resetCredit = null(?:, kind = null)?(?:, group = null)?(?:, exitRun = null)? \}\)/.test(m) && /const rc = offerOf\(resetCredit\);\s*\n\s*if \(rc\) msg\.resetCredit = rc;/.test(m));
   }
   const { createMessageManager } = require(path.join(REPO, 'src/normalizers.js'));
   for (const be of ['claude', 'codex']) {

@@ -57,7 +57,7 @@ function access() {
     installPlan: async () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
     installXpra: async () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
     installPackage: async () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
-    installBusy: () => null,
+    installBusy: () => null, setAppPlanner: () => { },
   };
 }
 
@@ -194,8 +194,18 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
   /** The install rung's facts + the PURE plan for one machine: the plan is SHOWN before anything runs. `what` (§7.9) =
    *  which install — absent / 'xpra' the display rung, a LibreOffice install by its catalog id (M.installPlanFor: a
    *  closed set, anything else `bad-request` by name, before the machine is asked). */
-  async function installPlan(hostId, what = 'xpra') {
+  /** Layer 0 apps (docs/design-app-persistence.zh.md §3.1): an `app:<…>` install is planned BY THE MACHINE (its own
+   *  `app-plan` op — the simulations as its user, the argv with its own paths and a fresh nonce), through the planner the
+   *  apps engine registers: `(hostId, what, planOpts) → {plan, install}`. The run is then THIS slot's, like xpra's. */
+  let appPlanner = null;
+  function setAppPlanner(fn) { appPlanner = typeof fn === 'function' ? fn : null; }
+  async function installPlan(hostId, what = 'xpra', planOpts = null) {
     const w = what || 'xpra';
+    if (/^app:[a-z0-9][a-z0-9:.+-]{0,80}$/.test(String(w))) {
+      if (!appPlanner) throw named('host_unavailable', 'the apps engine is not wired on this instance');
+      const r = await appPlanner(hostId, w, planOpts || {});
+      return { hostId: isLocal(hostId) ? 'local' : hostId, facts: r.install || null, plan: r.plan, digest: planDigest(r.plan) };
+    }
     if (!M.INSTALL_WHATS.includes(w)) throw named('bad-request', `unknown install ${JSON.stringify(String(w).slice(0, 40))} — one of ${M.INSTALL_WHATS.join(', ')}`);
     const r = await call(hostId, 'facts', { install: true });
     const plan = M.installPlanFor(w, r.install);
@@ -207,7 +217,9 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
    *  as root) is refused `plan_changed` with the new plan, nothing run. null for a refused plan. */
   function planDigest(plan) {
     if (!plan || !plan.ok) return null;
-    return crypto.createHash('sha256').update(JSON.stringify({ commands: plan.commands || [], source: plan.source || null, packages: plan.packages || [] })).digest('hex').slice(0, 32);
+    // an app plan also binds its CLOSURE (every package + version apt would install — `closureKey`): the same commands
+    // over a moved archive are another plan; an xpra / LibreOffice plan carries none, so its digest is unchanged
+    return crypto.createHash('sha256').update(JSON.stringify({ commands: plan.commands || [], source: plan.source || null, packages: plan.packages || [], ...(plan.closureKey != null ? { closure: String(plan.closureKey) } : {}) })).digest('hex').slice(0, 32);
   }
   const machineKey = (hostId) => (isLocal(hostId) ? 'local' : String(hostId));
   const machineName = (hostId) => (isLocal(hostId) ? 'this machine' : String(hostId));
@@ -303,7 +315,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
    *  install. The machine has ONE slot for every package (dpkg runs one install at a time anyway): an install of
    *  another package already running there is FOLLOWED like any live install (the dialog is told `reattached`), and
    *  the caller re-checks what it wanted afterwards (the route: `still-absent` by name). */
-  async function installPackage(hostId, { what = 'xpra', onData = () => { }, onReattach = () => { }, expectDigest = null } = {}) {
+  async function installPackage(hostId, { what = 'xpra', onData = () => { }, onReattach = () => { }, expectDigest = null, planOpts = null } = {}) {
     const key = machineKey(hostId);
     const cur = installs.get(key);
     if (cur) throw named('busy', `an install is already running on ${machineName(hostId)} (started ${new Date(cur.since).toISOString()}) — wait for it to finish, then check again`);
@@ -311,7 +323,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     installs.set(key, slot);
     let held = null;
     try {
-      const { plan, facts } = await installPlan(hostId, what);
+      const { plan, facts } = await installPlan(hostId, what, planOpts);
       const running = facts && facts.installing && facts.installing.pid ? facts.installing : null;
       if (!running) {
         if (!plan.ok) { const e = named(plan.code, plan.error); e.plan = plan; throw e; }
@@ -319,7 +331,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
         // verify-r6 I1: the plan that runs is the plan that was SHOWN (a caller that names none — an older client, the
         // API — keeps the pre-r6 behaviour)
         if (expectDigest != null && planDigest(plan) !== String(expectDigest)) { const e = named('plan_changed', `what would run on ${machineName(hostId)} changed after it was shown (${plan.source}: ${(plan.packages || []).join(' ')}) — nothing ran; read the new commands, then press Install again`); e.plan = plan; e.digest = planDigest(plan); throw e; }
-        log.log?.(`[desktop] installing ${plan.label || 'xpra'} on ${hostId || 'this machine'} from ${plan.source} (${plan.packages.join(' ')}), detached`);
+        log.log?.(`[desktop] installing ${plan.label || 'xpra'} on ${hostId || 'this machine'} from ${plan.source} (${(plan.packages || []).join(' ')}), detached`);
       } else {
         if (running.since) slot.since = running.since;
         log.log?.(`[desktop] an install is still running on ${hostId || 'this machine'} (pid ${running.pid}) — re-attached to its log`);
@@ -327,10 +339,13 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
       }
       slot.running = true;
       let r;
-      try { r = await runArgv(hostId, plan.ok ? M.installArgv(plan) : ['false'], { onData, stateDir: (facts && facts.stateDir) || '', mode: running ? 'follow' : 'start' }); }
+      // an app plan carries its own argv (the machine's paths + the run's nonce — src/app-manifest.js appArgv); every
+      // other plan's argv is its script under sudo -n — the SAME slot either way: one install per machine, re-attached
+      try { r = await runArgv(hostId, plan.ok ? (Array.isArray(plan.argv) ? plan.argv : M.installArgv(plan)) : ['false'], { onData, stateDir: (facts && facts.stateDir) || '', mode: running ? 'follow' : 'start' }); }
       catch (e) { if (e && (e.code === 'install_timeout' || e.code === 'install_link_lost')) held = e.code; if (e && !e.plan) e.plan = plan; throw e; }
       if (r.code === M.INSTALL_UNRECORDED_EXIT) { const e = named('install_unrecorded', `the install on ${hostId || 'this machine'} ended without recording its exit (it was stopped, or the machine restarted) — check again`); e.plan = plan; throw e; }
       if (r.code !== 0) { const e = named('install_failed', `the install exited ${r.code} on ${hostId || 'this machine'} — the log above says why`); e.plan = plan; throw e; }
+      if (Array.isArray(plan.argv)) return { ok: true, what, hostId: isLocal(hostId) ? 'local' : hostId, plan, before: facts, after: null, facts: null, reattached: !!running }; // an app's own record op reads the result (src/app-serve.js)
       const after = await call(hostId, 'facts', { install: true });
       return { ok: true, what, hostId: isLocal(hostId) ? 'local' : hostId, plan, before: facts, after: after.install || null, facts: after.facts || null, reattached: !!running };
     } finally {
@@ -358,7 +373,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     try { return !!(hosts && typeof hosts.connectedDevice === 'function' && hosts.connectedDevice(hostId)); } catch { return false; }
   }
 
-  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow };
+  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow, setAppPlanner, planDigest };
   if (install) installed = layer;
   return layer;
 }

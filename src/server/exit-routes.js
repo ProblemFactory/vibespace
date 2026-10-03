@@ -37,8 +37,9 @@ function agentOr401(req, res) {
   if (!e) { res.status(401).json({ error: 'missing or unknown session token', code: 'session_token_required' }); return null; }
   return e;
 }
-const STATUS = { not_granted: 403, ask_denied: 403, ask_changed: 409, ask_expired: 403, ask_unfiled: 409, groups_unreadable: 409, fork_pending: 409, ask_pending: 409, no_machine: 404, no_exits: 404, ambiguous: 400, offline: 503, run_failed: 502, bad_command: 400, unknown_shape: 409, conversation_gone: 410, remote_session: 409 };
-const agentFail = (res, e) => res.status(STATUS[e && e.code] || 400).json({ error: (e && e.message) || 'failed', code: (e && e.code) || 'failed', ...(e && e.grant ? { grant: e.grant } : {}), ...(e && e.has ? { has: e.has } : {}) });
+const STATUS = { not_granted: 403, ask_denied: 403, ask_changed: 409, ask_expired: 403, ask_unfiled: 409, groups_unreadable: 409, fork_pending: 409, ask_pending: 409, no_machine: 404, no_exits: 404, ambiguous: 400, offline: 503, run_failed: 502, spawn_failed: 502, bad_command: 400, unknown_shape: 409, conversation_gone: 410, remote_session: 409 };
+// lane-exit-run-output E2: a spawn failure's answer carries the error, the interpreter, the platform and the shell's exit code (the CLI exits by it)
+const agentFail = (res, e) => res.status(STATUS[e && e.code] || 400).json({ error: (e && e.message) || 'failed', code: (e && e.code) || 'failed', ...(e && e.grant ? { grant: e.grant } : {}), ...(e && e.has ? { has: e.has } : {}), ...(e && e.spawnError ? { spawnError: e.spawnError, interpreter: e.interpreter || null, platform: e.platform || null, exitCode: e.exitCode } : {}) });
 app.get('/api/agent/exit', (req, res) => {
   const e = agentOr401(req, res); if (!e) return;
   res.json({ exits: exitProxy.listFor(e[1], e[0]) });
@@ -51,6 +52,12 @@ app.post('/api/agent/exit/use', async (req, res) => {
 // RUN a command natively ON the exit machine (the universal fallback for ICMP/UDP/proxy-unaware tools + that
 // machine's own DNS) — bounded by the daemon's 30 s cap (EXIT_RUN_TIMEOUT_MS), possibly waiting ≤ 60 s for the
 // user's Allow first ("ask me each time").
+// lane-exit-run-output E4: THIS conversation's own runs (never another's) — the agent's `vibespace-exit runs`
+app.get('/api/agent/exit/runs', (req, res) => {
+  const e = agentOr401(req, res); if (!e) return;
+  try { res.json({ runs: exitProxy.runsFor(e[1], e[0], { machine: req.query.machine ? String(req.query.machine) : null, limit: Number(req.query.limit) || undefined }) }); }
+  catch (err) { agentFail(res, err); }
+});
 app.post('/api/agent/exit/run', async (req, res) => {
   const e = agentOr401(req, res); if (!e) return;
   const { machine, cmd } = req.body || {};
@@ -100,6 +107,16 @@ app.patch('/api/hosts/:id/exit-access', async (req, res) => {
     const out = await exitProxy.setAccess(req.params.id, b, { by: 'user' });
     res.json({ ...out, resolved });
   } catch (e) { cookieFail(res, e); }
+});
+// lane-exit-run-output E4: THE OWNER's command history of one machine (the "Commands…" dialog) — cookie only, every
+// conversation's runs there with their output heads; an agent token is refused by name (never another conversation's)
+app.get('/api/hosts/:id/exit-runs', (req, res) => {
+  if (isAnyBearer(req)) return res.status(403).json({ error: 'the machine\'s command history is the user\'s — an agent sees only its own (vibespace-exit runs)', code: 'human_only' });
+  let h = null;
+  try { h = hosts.get(req.params.id); } catch { }
+  if (!h) return res.status(404).json({ error: 'no such machine', code: 'not-found' });
+  const platform = h.dial && h.dial.lastAccept && typeof h.dial.lastAccept.platform === 'string' ? h.dial.lastAccept.platform : null;
+  res.json({ machine: { id: h.id, name: h.name || h.id, platform, interpreter: platform ? E.interpreterOf(platform) : null }, runs: exitProxy.runsOf(h.id, { limit: Number(req.query.limit) || undefined }) });
 });
 app.get('/api/exits/audit', (req, res) => {
   if (isAnyBearer(req)) return res.status(403).json({ error: 'the exit audit is the user\'s', code: 'human_only' });

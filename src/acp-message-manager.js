@@ -227,7 +227,7 @@ class AcpMessageManager {
   }
 
   /** Server-side peer card (same shape as the claude/codex twins). */
-  injectPeerCard({ fromName, text, kind = null, group = null }) {
+  injectPeerCard({ fromName, text, kind = null, group = null, exitRun = null }) {
     const body = String(text || '').trim();
     if (!body) return null;
     this._currentRk = null;
@@ -238,6 +238,7 @@ class AcpMessageManager {
     msg.originKind = 'peer-message';
     msg.peerFrom = fromName && String(fromName).trim() ? String(fromName).trim() : null; // a name is its words, never surrounding whitespace (lane S3)
     if (kind === 'notification' || kind === 'peer') msg.peerVia = kind; // the PATH the card's words took (S3 verify F3)
+    if (exitRun && typeof exitRun === 'object') msg.exitRun = exitRun;   // lane-exit-run-output E3: the run's output block (bounded by the producer)
     const gc = groupCardOf(group);   // lane group-report-card: sender → group, a peer's words
     if (gc) { msg.peerGroup = gc; msg.peerVia = 'peer'; msg.peerFrom = gc.self ? null : (gc.from || msg.peerFrom); }
     this._emit({ op: 'create', message: msg });

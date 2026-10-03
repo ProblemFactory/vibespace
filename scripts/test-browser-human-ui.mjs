@@ -387,7 +387,9 @@ ok(!!(cr0.pid && healed), `his Chrome (pid ${cr0.pid}) killed — the tick heale
 const e2 = await until(() => E.h('if (!L) return null; const s = L.state(); return s.humanEnded ? { ended: s.humanEnded, again: [...L.el().querySelectorAll("button")].some((b) => b.textContent === "Browse again" && b.style.display !== "none"), share: s.shareLine } : null;').catch(() => null), 15000, 200);
 ok(e2 && e2.ended === 'stopped' && e2.again && e2.share === null, `his window says his browsing ended with the old Chrome and offers Browse again (${JSON.stringify(e2)}) — never a window driving a dead tab`);
 const conv = await S1.vb(['get', 'url']);
-ok(/tab_gone/.test(conv.stdout + conv.stderr) && /tab new/.test(conv.stdout + conv.stderr), 'the conversation\'s next command is told its page went with the old Chrome — the binary\'s own `tab_gone` naming `tab new` (lane H r4\'s rule, unchanged)', (conv.stdout + conv.stderr).slice(-240));
+// 2.369.200 integration: lane profile-lock-roll L2 superseded lane H r4's `tab_gone` here — the first command after a replaced
+// Chrome REBINDS to the new Chrome's tab and says so ([tab_rebound], "…previous run is gone…open your page again"), never tab_gone
+ok(/\[tab_rebound\]/.test(conv.stdout + conv.stderr) && /previous run is gone/.test(conv.stdout + conv.stderr) && !/tab_gone/.test(conv.stdout + conv.stderr), 'the conversation\'s next command is told its page went with the old Chrome — profile-lock-roll\'s rebind ([tab_rebound]: a new tab bound for it, open the page again), never tab_gone', (conv.stdout + conv.stderr).slice(-240));
 await S1.vb(['tab', 'new', 'about:blank']); // (the agent follows the remedy — the next legs use its browser)
 ok(await E.h('const b = [...L.el().querySelectorAll("button")].find((x) => x.textContent === "Browse again" && x.style.display !== "none"); if (!b) return false; b.click(); return true;'), 'a real press of Browse again');
 const w4 = await until(() => E.h('if (!L) return null; const s = L.state(); return s.mode === "takeover" && s.mine && !s.humanEnded ? true : null;').catch(() => null), 40000, 200);

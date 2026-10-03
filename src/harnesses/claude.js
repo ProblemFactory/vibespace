@@ -47,9 +47,13 @@ function parseClaudeAuth(dir) {
 // §2): ~/.claude/settings.json — the hook entries AND the managed keys
 // (cleanupPeriodDays) live in it, so `inject.hookFile` and `configFiles.settings`
 // are the SAME object (test-harness-contract pins the identity; the path is
-// spelled once, in the PURE table's `files.settings.rel`). Never created by us:
-// the CLI writes its own on first run.
-const SETTINGS_FILE = cliConfigFile(HARNESS_SETTINGS.claude.files.settings, { createIfMissing: false });
+// spelled once, in the PURE table's `files.settings.rel`). CREATED BY US WHEN
+// ~/.claude EXISTS ('dir-exists', lane hooks-create 2026-10-01): the CLI does
+// NOT write settings.json on its first run — only when somebody changes a
+// setting — so a fleet user who only chats never had one, VibeSpace's hooks
+// were never registered and her agents never learned the tools. ~/.claude
+// existing proves the CLI has run here; the directory itself is never created.
+const SETTINGS_FILE = cliConfigFile(HARNESS_SETTINGS.claude.files.settings, { createIfMissing: 'dir-exists' });
 
 function claudeLoginState(dir, now = Date.now()) {
   const fp = path.join(dir, '.credentials.json');

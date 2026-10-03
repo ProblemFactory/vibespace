@@ -31,7 +31,9 @@
 //                     PURE src/lib/channel-focus.js) — the first screen is the
 //                     ATTENTION list: what matters, one tag per row, the full
 //                     list one switch away.
-import { GROUP_ADAPTER_ID, NOTIFY_MODES, DEFAULT_NOTIFY, OWNER, mentionsIn } from '../channel-groups.js';
+import { GROUP_ADAPTER_ID, NOTIFY_MODES, DEFAULT_NOTIFY, OWNER, mentionsIn, deliveryOf, DELIVERY_STATES } from '../channel-groups.js';
+// lane group-pending (2026-10-01): the window's line under every message judges by the model's ONE rule — re-exported, never copied
+export { deliveryOf, DELIVERY_STATES };
 
 export { GROUP_ADAPTER_ID, NOTIFY_MODES, DEFAULT_NOTIFY, OWNER };
 export { focusRows, statusTag, filterRows, firstScreen, heldOf, heldPending, FOCUS_WINDOW_MS, HELD_WINDOW_MS, TAG_ORDER } from './channel-focus.js';

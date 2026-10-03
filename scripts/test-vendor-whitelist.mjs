@@ -423,5 +423,70 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 6, label: '§7 ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
 }
 
+// ── 8: THE BROWSER-TOOLS INSTALL SLOT (lane browser-admin 2b, 2026-10-01) ──
+// VibeSpace downloads a program in exactly ONE place: the browser keeper's install slot (data/browser-tools), shared by the
+// CloakBrowser install (lane-cloak) and the browser CLI install (`agent-browser@<version>`). Allowlisted HERE deliberately
+// with its gates, as a FUNCTION of the source text (an ungated copy turns it red):
+//   USER-ONLY   each install is reached from ONE route, and that route refuses an agent's token by name
+//               (refuseAgentBearer) — no timer, no boot path, no agent route installs anything;
+//   ONE SPAWN   every npm the keeper runs is `SW.installArgv(...)` (a prefix of ours, --no-save, a pinned spec);
+//   REGISTRY    the CLI install's spec is CLI_PACKAGE@<the verdict's version> and its argv carries --ignore-scripts (the
+//               package's postinstall — the one script that would fetch from GitHub — never runs): the npm registry
+//               is the ONE host (the measured record CLI_PIN_RECORD names it);
+//   ONE SLOT    the CLI install's verdict is asked the slot's `installState.running` (never two installs at once).
+{
+  const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+  const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const keeperRel = 'src/server/browser-keeper.js', routesRel = 'src/routes/browser.js';
+  const keeperSrc = fs.readFileSync(path.join(REPO, keeperRel), 'utf-8'), routesSrc = fs.readFileSync(path.join(REPO, routesRel), 'utf-8');
+  const serverTexts = Object.fromEntries(files.map((f) => [path.relative(REPO, f), (() => { try { return fs.readFileSync(f, 'utf-8'); } catch { return ''; } })()]));
+  const slotCensus = (K, R, texts) => {
+    const rows = [];
+    const k = strip(K), r = strip(R);
+    const fnBody = (src, name) => { const at = src.indexOf(`function ${name}(`); if (at < 0) return ''; const end = src.indexOf('\n  }\n', at); return end < 0 ? '' : src.slice(at, end); };
+    const cli = fnBody(k, 'installCli');
+    rows.push(['installCli exists', !!cli, '']);
+    rows.push(['ONE SPAWN: every npm the keeper runs is SW.installArgv (cloak\'s runStep + the CLI\'s spawn)', (k.match(/SW\.installArgv\(/g) || []).length === 2 && /spawn\(npm, argv,/.test(cli) && /const argv = \[\.\.\.SW\.installArgv\(\{ spec: v0\.spec, prefix \}\), '--ignore-scripts'\];/.test(cli), `${(k.match(/SW\.installArgv\(/g) || []).length} installArgv`]);
+    rows.push(['REGISTRY: the CLI install runs --ignore-scripts and its spec comes from THE verdict (CLI_PACKAGE@<version>)', /'--ignore-scripts'/.test(cli) && /VERBS\.cliInstallVerdict\(/.test(cli), '']);
+    rows.push(['ONE SLOT: the CLI install\'s verdict is asked the slot\'s running state', /cliInstallVerdict\(\{ version: String\(version \|\| ''\), running: installState\.running,/.test(cli), '']);
+    // USER-ONLY: who calls installCli / installCloak across the server tree — only routes/browser.js, each behind refuseAgentBearer
+    const callers = [];
+    for (const [rel, text] of Object.entries(texts)) {
+      const code = strip(text);
+      for (const m of code.matchAll(/\.(installCli|installCloak)\(/g)) callers.push(rel + ':' + m[1]);
+      if (rel !== keeperRel && /\binstallCli\(|\binstallCloak\(/.test(code.replace(/\.(installCli|installCloak)\(/g, ''))) callers.push(rel + ':bare');
+    }
+    // the ONE other caller: lane browser-propose's runner — its `inst.start` (= installCloak) runs only inside run(), run()
+    // only from approve(), and approve only from the user's Approve route (refuseAgentBearer, PROPOSAL_IS_USERS)
+    const PROPOSE = 'src/server/browser-propose.js';
+    const ext = callers.filter((c) => !c.startsWith(routesRel + ':') && c !== PROPOSE + ':installCloak');
+    const pr = strip(texts[PROPOSE] || '');
+    const proposeOk = (pr.match(/inst\.start\(/g) || []).length === 1 && /async function run\(entry\) \{[\s\S]*inst\.start\(/.test(pr) && (pr.match(/[^.\w]run\(/g) || []).length === 2 && /function approve\([\s\S]{0,600}run\(st\.entry\)/.test(pr)
+      && /router\.post\('\/api\/browser\/proposals\/:id\/approve'[\s\S]{0,120}refuseAgentBearer\(req, res, PROPOSAL_IS_USERS\)/.test(r);
+    rows.push(['USER-ONLY: installCli / installCloak are called only from src/routes/browser.js and the proposal runner\'s user-approved run (no timer, no boot path, no other module)', ext.length === 0 && callers.filter((c) => c.startsWith(routesRel)).length === 2 && proposeOk, callers.join(', ') + (proposeOk ? '' : ' · the proposal runner\'s install is not approve-only')]);
+    const route = (p) => { const at = r.indexOf(`router.post('${p}'`); if (at < 0) return ''; const end = r.indexOf('\n});', at); return end < 0 ? '' : r.slice(at, end); };
+    const rc = route('/api/browser/cli/install'), rk = route('/api/browser/install');
+    rows.push(['USER-ONLY: each install route refuses an agent\'s token (refuseAgentBearer) BEFORE the keeper is asked', /refuseAgentBearer\(req, res, INSTALL_IS_USERS\)/.test(rc) && rc.indexOf('refuseAgentBearer') < rc.indexOf('installCli(') && /refuseAgentBearer\(req, res, INSTALL_IS_USERS\)/.test(rk) && rk.indexOf('refuseAgentBearer') < rk.indexOf('installCloak('), '']);
+    rows.push(['no AGENT route installs anything', !/router\.(get|post)\('\/api\/agent\/[^']*'[\s\S]{0,800}?(installCli|installCloak)\(/.test(r.replace(/router\.(get|post|patch|delete)\('\/api\/(?!agent)/g, '§')), '']);
+    return rows;
+  };
+  const reds = (rows) => rows.filter(([, p]) => !p).map(([n, , d]) => n + (d ? ' [' + d + ']' : ''));
+  for (const [n, p, d] of slotCensus(keeperSrc, routesSrc, serverTexts)) ok(p, '§8 ' + n + (p || !d ? '' : ' — ' + d));
+  const V = require(path.join(REPO, 'src/browser-verbs.js'));
+  ok(V.CLI_PIN_RECORD.registryHost === 'registry.npmjs.org' && V.cliInstallVerdict({}).spec === `${V.CLI_PACKAGE}@${V.TABLE_VERSION}` && V.cliInstallVerdict({ version: 'https://evil.example/x.tgz' }).ok === false, '§8 the CLI spec is the package at a dotted version (never a URL / a tarball / another package); the measured record names the ONE host');
+  // CONTROLS
+  const MUT = mutantCopies('vendor-whitelist-slot', REPO);
+  const mut = (label, rel, src, from, to) => { ok(src.includes(from), `§8 CONTROL ${label}: the edit's anchor is in ${rel}`); const f = MUT.write(rel, src.replace(from, to), label); return fs.readFileSync(f, 'utf-8'); };
+  const scripts = mut('scripts-run', keeperRel, keeperSrc, "    const argv = [...SW.installArgv({ spec: v0.spec, prefix }), '--ignore-scripts'];", '    const argv = [...SW.installArgv({ spec: v0.spec, prefix })];');
+  ok(reds(slotCensus(scripts, routesSrc, { ...serverTexts, [keeperRel]: scripts })).some((n) => /REGISTRY|ONE SPAWN/.test(n)), '§8 CONTROL: a CLI install that lets the package\'s scripts run is RED');
+  const timer = mut('timer', keeperRel, keeperSrc, '  const reattached = reattachInstall();', '  const reattached = reattachInstall(); setInterval(() => { try { api.installCli({}); } catch { /* none */ } }, 3600e3);');
+  ok(reds(slotCensus(timer, routesSrc, { ...serverTexts, [keeperRel]: timer })).some((n) => /USER-ONLY/.test(n)), '§8 CONTROL: a keeper that installs on a timer is RED');
+  const open = mut('agent-token', routesRel, routesSrc, "  if (refuseAgentBearer(req, res, INSTALL_IS_USERS)) return;\n  const k = keeperOr503(res); if (!k) return;\n  if (typeof k.installCli", "  const k = keeperOr503(res); if (!k) return;\n  if (typeof k.installCli");
+  ok(reds(slotCensus(keeperSrc, open, { ...serverTexts, [routesRel]: open })).some((n) => /USER-ONLY/.test(n)), '§8 CONTROL: a CLI install route an agent token reaches is RED');
+  const twoSlots = mut('two-slots', keeperRel, keeperSrc, "VERBS.cliInstallVerdict({ version: String(version || ''), running: installState.running,", "VERBS.cliInstallVerdict({ version: String(version || ''), running: false,");
+  ok(reds(slotCensus(twoSlots, routesSrc, { ...serverTexts, [keeperRel]: twoSlots })).some((n) => /ONE SLOT/.test(n)), '§8 CONTROL: a CLI install that ignores the slot is RED');
+  for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 4, label: '§8 ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+}
+
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -19,12 +19,13 @@ const fs = require('fs');
 const path = require('path');
 const { capsOf, notificationDelivery } = require('../backend-caps.js');
 const { wrapperCaps } = require('./wrapper-files.js');
-const { vibespaceNoticeText } = require('../notification-senders.js'); // lane S3: every kind:'notification' delivery opens with the ONE head naming VibeSpace as the speaker
+const { vibespaceNoticeText, withoutNoticeHead } = require('../notification-senders.js'); // lane S3: every kind:'notification' delivery opens with the ONE head naming VibeSpace as the speaker
 // verify r6 (lane channel-withdraw, 2026-09-27): THE ONE PREDICATE behind "which live session carries this conversation" —
 // a pending fork carries its PARENT's id, and the three raw lookups below (rung 0, rung 1.5, the charged identity) handed
 // the parent's frame to the fork's wrapper / channel socket and the parent's turn to the fork's credential slot
 const { addressableId } = require('../claude-lock-capture.js');
-const { kindOf: stashKindOf } = require('../stash-summary.js'); // PURE: an entry's kind (a peer's by its sender's name, VibeSpace's own by its path)
+const stashSummary = require('../stash-summary.js'); const { kindOf: stashKindOf } = stashSummary; // PURE: an entry's kind (a peer's by its sender's name, VibeSpace's own by its path)
+const { RESERVE_TTL_MS } = require('../spend-authorizer.js'); // the park re-judges a parked delivery's authorization once its hold's TTL has passed (lane notify-retry)
 
 const STASH_CAP = 30; // per-conversation; oldest fall off
 // `about` on a stashed entry (lane channel-threads verify r3): its producer's description of where the words came
@@ -48,6 +49,46 @@ function aboutOf(a) {
 // a billed queue-add does not.
 const SETTLE_TTL_MS = 120 * 1000;
 
+// THE RETRY PARK (lane notify-retry, 2026-10-01 — the owner: "以前这个是自动唤醒的啊 怎么现在开始排队要我手动发了？").
+// ONE 5-second attempt used to decide for ever: a local peer post that timed out while the CLI's pid LIVED was
+// stashed for the next prompt, and a conversation nobody types into never heard its job finish. MEASURED on the
+// primitive (src/peer-messaging.js): a unix-socket connect completes at the syscall or fails at once (a full
+// backlog answers EAGAIN, never a hang), so a bare "timeout" was our own loop not hearing a completed connect
+// before the timer. Either way the frame did not land and the CLI is alive — a TRANSIENT miss. Such a delivery is
+// PARKED here (data/msg-retry.json, beside the stash): the SAME text is posted again at that conversation's next
+// TURN END (the stdout consumers' `result` / `task_complete` — noteTurnEnd) and on a bounded backoff while idle —
+// 30 s, 1, 2, 5, 10 min, then every 10 min, ≤ 60 min from the first miss — after which it falls to the producer's
+// stash with the reason named (`not-reachable`: the agent did not accept it). A miss on a DEAD pid / a socket
+// nobody serves stashes at once as before, typed `not-running`. The money: the authorization the first attempt
+// took is HELD on the parked entry and converted when the retry lands — ONE billed wake, never two; it is
+// re-judged (asked again) only once the hold's TTL has passed. The ladder's own floor — no retry post within
+// RETRY_FLOOR_MS of the last SUCCESSFUL post to that conversation — is pacing; the jobs engine's 30 s floor and
+// the spend authorizer are untouched.
+const RETRY_STEPS_MS = [30 * 1000, 60 * 1000, 2 * 60 * 1000, 5 * 60 * 1000, 10 * 60 * 1000];
+const RETRY_MAX_MS = 60 * 60 * 1000;
+// THE SECOND JUDGE OF THE BOUND (verify r2, reproduced): the wall clock can step BACK (a VM restored from a snapshot, an NTP
+// step after a sleep) — a parked entry's `firstAt` was then two hours in the future, the 60-min bound could not pass for
+// three hours, the backoff timer slept until the clock caught up, and every turn end posted the frame again (50 attempts).
+// So a future stamp is RE-BASED to now at every schedule and attempt (said once), and the schedule is bounded by ATTEMPTS
+// too: 3× the attempts the timer alone makes inside the hour — whichever judge expires first
+const RETRY_TIMER_ATTEMPTS = (() => { let t = 0, n = 1; for (let i = 0; ; i++) { t += RETRY_STEPS_MS[Math.min(i, RETRY_STEPS_MS.length - 1)]; if (t > RETRY_MAX_MS) break; n++; } return n; })();   // 10 with the steps above
+const RETRY_MAX_ATTEMPTS = 3 * RETRY_TIMER_ATTEMPTS;
+const RETRY_FLOOR_MS = 30 * 1000;
+const FLOOR_DROP_WINDOW_MS = RETRY_MAX_MS;   // verify r4: a floor witness from the future is dropped once; a second within this window is re-based (the clock keeps going back)
+const RETRY_TERMINAL_BUSY_MS = 3000;   // a terminal session that wrote output this recently is read as busy (its turn state is unknown)
+// ONE WAKE CARRIES EVERYTHING WAITING (verify r1 N1d, reproduced: five parked notices for one conversation became five
+// posts = five billed wakes, one every 30 s by the floor; a busy agent with a job every half hour would have paid one
+// turn per notice). An attempt for a conversation takes EVERY parked entry of it into ONE frame — the hand-over's shape
+// and bounds (the renderer is injected; the rest stay parked for the next frame) — under ONE authorization.
+const RETRY_FRAME_MAX_ENTRIES = STASH_CAP;
+const RETRY_FRAME_MAX_BYTES = 12 * 1024;
+const RETRY_FRAME_HEADING = '### Notices VibeSpace could not deliver at once (the agent was busy)';   // the frame's own heading (a hand-over's says "unreachable" — this agent was not)
+const FROM_NAME = 'VibeSpace notices';   // the hand-over's sender (src/notification-senders.js lists it; stash-handover's FROM_NAME): the batch card reads like a hand-over's
+// BOUNDED, AND THE DROP IS SAID (verify r1 N1e, reproduced: 100 parks for one conversation = 100 entries, 58 KB, no cap —
+// the stash beside it caps at STASH_CAP and names an eviction). The park holds STASH_CAP per conversation: the oldest
+// waiting entry falls to its producer's stash as `not-reachable` with `evicted: true` (never dropped, never silent)
+const RETRY_CAP = STASH_CAP;   // the hand-over's sender (src/notification-senders.js lists it): the batch card reads like a hand-over's
+
 // THE SPEND CEILING ON THIS LADDER (design-account-hardening §4.4c / P9).
 // Rungs 0-2 all put a message into a LIVE agent session: when that session is
 // idle the CLI opens a BILLED TURN for it, exactly as if somebody had typed.
@@ -62,7 +103,7 @@ const SETTLE_TTL_MS = 120 * 1000;
 // cannot name. It is charged to a NAMED bucket (`host:<id>` / `unattributed`)
 // rather than guessed at or waved through — the instance/day ceiling still
 // applies to it, and the name says what we do not know.
-function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activeSessions, emitPeerCard, authorizeSpend = null, noteSpend = null, releaseSpend = null, onStashChange = () => { }, log = () => { } }) {
+function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activeSessions, emitPeerCard, authorizeSpend = null, noteSpend = null, releaseSpend = null, onStashChange = () => { }, log = () => { }, retryClock = null, renderBatch = null }) {   // renderBatch (verify r1 N1d): the hand-over's renderer (agent-routes renderMsgStash), injected — a batch of parked entries goes out as ONE frame in its shape
   const stashFile = path.join(dataDir, 'msg-stash.json');
   let stash = {};
   try { stash = JSON.parse(fs.readFileSync(stashFile, 'utf-8')) || {}; } catch { }
@@ -137,13 +178,20 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // "evicted" for a receipt a hand-over delivered, and a restore never trims.
   function capUnclaimed(q) {
     // the cap counts the UNCLAIMED entries (when every slot is claimed, a newcomer is the only unclaimed one — a
-    // cap over the whole store would evict exactly the entry that just arrived); the oldest unclaimed fall off
+    // cap over the whole store would evict exactly the entry that just arrived); the oldest unclaimed fall off.
+    // A MAY-HAVE-LANDED COPY GIVES WAY FIRST (notify-retry verify r3, reproduced: a park entry claimed by a hand-over when
+    // the previous server died fell into a FULL stash as may-have-landed and the cap dropped the OLDEST real entry to
+    // make room for it — a certain miss displaced by a possible repeat). At the cap, the unclaimed entries whose frame
+    // may already have reached the agent (`held.maybeDelivered`) fall before any other, oldest first; then the oldest
+    // unclaimed as before. The same rule in the jobs engine's store (src/jobs.js capUnclaimedNotifs)
     let over = q.filter((e) => !(e && e.ho)).length - STASH_CAP;
     const dropped = [];
     if (over <= 0) return dropped;
-    for (let i = 0; i < q.length && over > 0;) {
-      if (q[i] && q[i].ho) { i++; continue; }
-      dropped.push(...q.splice(i, 1)); over--;
+    for (const pass of [(e) => !!(e.held && e.held.maybeDelivered), () => true]) {
+      for (let i = 0; i < q.length && over > 0;) {
+        if (!q[i] || q[i].ho || !pass(q[i])) { i++; continue; }
+        dropped.push(...q.splice(i, 1)); over--;
+      }
     }
     return dropped;
   }
@@ -155,7 +203,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     // `about` (lane channel-threads verify r3): the producer's own description of where the words came from — the
     // stash gate below judges it at every read (opaque here; bounded)
     const about = aboutOf(envelope.about);
-    const entry = { source: envelope.source || 'agent', ...(kind ? { kind } : {}), ...(envelope.ref ? { ref: String(envelope.ref).slice(0, 200) } : {}), ...(about ? { about } : {}), fromName: envelope.fromName || null, text: String(envelope.text || ''), ts: Number(envelope.ts) > 0 ? Number(envelope.ts) : Date.now() };
+    const entry = { source: envelope.source || 'agent', ...(kind ? { kind } : {}), ...(envelope.ref ? { ref: String(envelope.ref).slice(0, 200) } : {}), ...(about ? { about } : {}), ...(envelope.held && typeof envelope.held === 'object' && envelope.held.kind ? { held: { ...envelope.held } } : {}), fromName: envelope.fromName || null, text: String(envelope.text || ''), ts: Number(envelope.ts) > 0 ? Number(envelope.ts) : Date.now() };   // `held` (lane notify-retry): why the producer could not deliver it — the hand-over's words read it
     // "Clear content…" (verify r4): the stores judge the entry BEFORE it is written — a frame handed back after the clear
     // (see judgeEntry) is held as the sentence, never as the words the clear already took
     if (judgeEntry(entry)) log(`[deliver] ${cid}: a held entry named a cleared record — stored as the cleared sentence`);
@@ -190,7 +238,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     // the journal names an evicted entry by its KIND, a peer by its sender's name — never by a label VibeSpace composed
     // from a record (`Background Work · <the job's name>`): every console line rides the server's ring into each incident
     // captured later, past a "Clear content…" of that job (lane-redact verify r8)
-    if (evicted.length) log(`[deliver] ${cid}: ${evicted.length} oldest waiting entr${evicted.length === 1 ? 'y' : 'ies'} fell off the ${STASH_CAP}-entry cap (${evicted.map((e) => `${e.source}:${stashKindOf(e)}${stashKindOf(e) === 'peer' && e.fromName ? ` "${String(e.fromName).replace(/\s+/g, ' ').slice(0, 40)}"` : ''} ${new Date(Number(e.ts) || 0).toISOString()}`).join('; ')}) — never delivered`);
+    if (evicted.length) log(`[deliver] ${cid}: ${evicted.length} oldest waiting entr${evicted.length === 1 ? 'y' : 'ies'} fell off the ${STASH_CAP}-entry cap (${evicted.map((e) => `${e.source}:${stashKindOf(e)}${stashKindOf(e) === 'peer' && e.fromName ? ` "${String(e.fromName).replace(/\s+/g, ' ').slice(0, 40)}"` : ''} ${new Date(Number(e.ts) || 0).toISOString()}${e.held && e.held.maybeDelivered ? ' — a may-have-landed copy, gave way first' : ''}`).join('; ')}) — never delivered`);
     emitStash('stashed', cid, [entry]);
     if (evicted.length) emitStash('evicted', cid, evicted, { held: q.length });
     stashChanged(cid);
@@ -340,6 +388,26 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         n++; touched.add(cid);
       }
     }
+    // THE PARK IS A COPY TOO (notify-retry verify r1, found by the record-clear census and reproduced): a cleared job's
+    // words sat in its parked entry and the retry posted them after the clear. The same matcher judges the park's
+    // entries; a notification keeps the ladder's head on the sentence (the post is a frame, not a drain row); the
+    // card text (a summary of the words) is dropped — the landing card draws the sentence
+    let parked = 0;
+    for (const [cid, q] of Object.entries(retry)) {
+      for (const e of q) {
+        let r = null;
+        try { r = match(e); } catch { r = null; }
+        if (!r || typeof r !== 'object') continue;
+        if (typeof r.text === 'string') { e.text = e.kind === 'notification' ? vibespaceNoticeText(r.text) : r.text; e.cardText = null; }
+        if (typeof r.fromName === 'string') e.fromName = r.fromName;
+        // THE WORDS ARE ON THE WIRE (verify r2, reproduced): an entry whose frame is in flight carried the words before the
+        // clear — the clear cannot recall them (the CLI's transcript holds the frame). SAID here, and the landing card is
+        // built from the entries' words as they stand (the cleared sentence), with `recorded` = the frame as written
+        if (e.inflight) { e.clearedInFlight = true; log(`[deliver] ${cid}: ${e.id} was cleared while its frame was on the wire — the frame carried the words before the clear (the transcript keeps them); the card will draw the cleared sentence`); }
+        n++; parked++; touched.add(cid);
+      }
+    }
+    if (parked) writeRetryNow();
     // a clear is written at once and the conversation's `stash` fact re-published (the strip above its composer
     // draws a peer's NAME — a cleared job's `Background Work · <name>` label must not outlive the clear there)
     if (n) { writeStashNow(); for (const cid of touched) stashChanged(cid); }
@@ -377,6 +445,435 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   /** The entries waiting for a conversation (the SAME objects — `drainStash(cid, new Set(these))` takes them). Every
    *  read passes the stash gate first (verify r3): what a revoked reach no longer covers is never handed out. */
   function stashEntries(cid) { gateQueue(cid); return (stash[cid] || []).slice(); }
+
+  // ── THE RETRY PARK (see the header constants) ──────────────────────────────
+  const clock = retryClock || { now: () => Date.now(), setTimeout: (fn, ms) => { const t = setTimeout(fn, ms); t.unref?.(); return t; }, clearTimeout: (t) => clearTimeout(t) };
+  const retryFile = path.join(dataDir, 'msg-retry.json');
+  let retry = {};
+  // A TORN FILE IS SET ASIDE, NEVER SILENTLY EMPTY (verify r1 N5, reproduced: a torn msg-retry.json read as {} without a
+  // word and the next park overwrote its bytes). The bytes move to `msg-retry.json.corrupt-<ts>` (never unlinked — the
+  // channel store's rule) with ONE named log line; the park starts empty and the next write makes a fresh file.
+  {
+    let rawText = null;
+    try { rawText = fs.readFileSync(retryFile, 'utf-8'); } catch { rawText = null; }   // absent = a fresh park
+    if (rawText != null) {
+      let parsed = null, bad = null;
+      try { parsed = JSON.parse(rawText); } catch (e) { bad = e && e.message; }
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) retry = parsed;
+      else if (rawText.trim() !== '') {
+        const aside = `${retryFile}.corrupt-${new Date(clock.now()).toISOString().replace(/[:.]/g, '-')}`;
+        try { fs.renameSync(retryFile, aside); log(`[deliver] data/msg-retry.json could not be read (${bad || 'not an object'}) — set aside as ${path.basename(aside)} (${rawText.length} bytes kept); the retry park starts empty`); }
+        catch (e) { log(`[deliver] data/msg-retry.json could not be read (${bad || 'not an object'}) and could not be set aside (${e && e.message}) — the park starts empty and will overwrite it`); }
+      }
+    }
+  }
+  let retrySeq = 0;
+  const retryListeners = new Set();
+  const turnEndListeners = new Set();
+  const lastPostAt = new Map();   // cid → the last SUCCESSFUL post's instant (the park's own floor)
+  const floorDrops = new Map();   // cid → the instant its floor witness was last DROPPED for a backward clock (verify r4: the second within the hour re-bases)
+  const floorRebaseSaidAt = new Map();   // cid → when the re-base was last said
+  let parkTimer = null;
+  let retryClosed = false;           // shutdown: no new post leaves (closeRetries)
+  const retryInFlight = new Set();   // the attempt promises in flight (settleRetries waits for them)
+  const writeRetryNow = () => {
+    for (const [cid, q] of Object.entries(retry)) if (!Array.isArray(q) || !q.length) delete retry[cid];
+    try { fs.writeFileSync(retryFile + '.tmp', JSON.stringify(retry)); fs.renameSync(retryFile + '.tmp', retryFile); return true; }
+    catch (e) { log('[deliver] retry park persist failed:', e.message); return false; }
+  };
+  // BOOT: the previous process's holds are gone (the guard is in-memory) — every parked entry is re-judged at its
+  // next attempt. An entry stamped `inflight` was being posted when that process stopped: its frame MAY HAVE LANDED
+  // (a connect + write on a live socket completes in milliseconds; the stamp is cleared only after the post) — it is
+  // NEVER posted again (verify r1 N2, reproduced: the boot re-posted a landed frame = the same notice twice, two billed
+  // turns; the CLI's own dedup is "identical to the previous message from this sender", and a restarted hub is a new
+  // sender). It falls to the producer's stash at the first sweep, typed not-reachable with `maybeDelivered`, so the
+  // next prompt carries it for free. A graceful stop never leaves one: server.js waits for the posts in flight
+  // (closeRetries / settleRetries, the hand-over's shape).
+  {
+    const notes = [];
+    for (const [cid, q] of Object.entries(retry)) {
+      if (!Array.isArray(q)) { delete retry[cid]; continue; }
+      for (const e of q) {
+        if (!e || typeof e !== 'object') continue;
+        if (e.charged) e.charged.hold = null;
+        if (e.inflight) { notes.push(`${cid}: ${e.id} was being posted when the previous server stopped — its frame may have landed, so it is handed to the stash at the first sweep and never posted again`); delete e.inflight; e.maybeDelivered = true; e.nextAt = 0; }
+        // A HAND-OVER'S CLAIM IS THE SAME STAMP (verify r2, reproduced): an entry stamped `ho:<id>` was riding a hand-over's
+        // frame when the process died inside that post. The stash releases ITS claimed entries at boot (they wait again); a
+        // park entry nobody released was invisible to every door — the timer, the turn end, the bound, the hand-over's view
+        // all skip a claimed one — and sat in the file for ever, counted as "being retried". It joins its stash siblings:
+        // handed to the stash at the first sweep as may-have-landed, never posted by the park again
+        if (e.ho) { notes.push(`${cid}: ${e.id} was claimed by hand-over ${e.ho} when the previous server stopped — its frame may have landed, so it is handed to the stash at the first sweep (its siblings wait there) and never posted again`); delete e.ho; e.maybeDelivered = true; e.nextAt = 0; }
+      }
+    }
+    if (Object.keys(retry).length) writeRetryNow();
+    for (const n of notes) log(`[deliver] ${n}`);
+    const n = Object.values(retry).reduce((a, q) => a + q.length, 0);
+    if (n) log(`[deliver] ${n} parked deliver${n === 1 ? 'y waits' : 'ies wait'} for retry from the previous server`);
+  }
+  function onRetry(fn) { if (typeof fn !== 'function') return () => { }; retryListeners.add(fn); return () => retryListeners.delete(fn); }
+  /** `fn(ev, cid, entry, extra)` — parked | attempt | delivered | fell; for `fell` a listener answering `true` TOOK
+   *  the entry (the producer stashed it in its own store); nobody ⇒ this ladder's stash. Synchronous, never throws
+   *  into the park. */
+  function emitRetry(ev, cid, entry, extra = {}) {
+    let taken = false;
+    for (const fn of retryListeners) { try { if (fn(ev, cid, entry, extra) === true) taken = true; } catch (e) { log('[deliver] a retry listener threw:', e && e.message); } }
+    return taken;
+  }
+  function onTurnEnd(fn) { if (typeof fn !== 'function') return () => { }; turnEndListeners.add(fn); return () => turnEndListeners.delete(fn); }
+  /** The target's turn state as this server knows it: a chat session's authoritative streaming flag; a terminal
+   *  session is read busy only by recent output (unknown ⇒ null) — the R2 measurement rides every attempt. */
+  function busyOf(cid) {
+    const s = localSessionFor(cid);
+    if (!s) return null;
+    // a chat session's "busy" is evidence (a record set the flag); "idle" is said only once the harness has spoken its own
+    // turn state this process (`_turnStateSeen`) — a RESTORED session wires `_isStreaming = false` before any record, and
+    // that default read as "target mid-turn: no" (verify r1 N3, reproduced); unknown is said as unknown
+    if (s.mode === 'chat') return s._isStreaming === true ? true : (s._turnStateSeen === true ? false : null);
+    const at = Number(s._lastPtyDataAt) || 0;
+    return at && clock.now() - at < RETRY_TERMINAL_BUSY_MS ? true : null;
+  }
+  const machineTurnFor = (cid) => { try { const s = localSessionFor(cid); if (s) s._machineInputAt = Date.now(); } catch { } };
+  const armTurnFor = (cid) => {
+    try {
+      const s = localSessionFor(cid);
+      if (!s) return () => { };
+      const prev = s._machineInputAt;
+      s._machineInputAt = Date.now();
+      const at = s._machineInputAt;
+      return () => { if (s._machineInputAt === at) s._machineInputAt = prev; };
+    } catch { return () => { }; }
+  };
+  function retryQueue(cid) { return retry[cid] || (retry[cid] = []); }
+  function retryCount(cid) { return (retry[cid] || []).length; }
+  function retryPeek(cid) { return (retry[cid] || []).map((e) => ({ ...e })); }
+  /** the park's view of a conversation: entries in the STASH's shape (the summary / the hand-over / the drains read
+   *  them beside the stash), each carrying its original under `_retry` (the SAME object — `retryTake` takes it). */
+  // verify r1 (N1c, reproduced): an entry whose post is IN FLIGHT is not waiting — it is being delivered this instant. The
+  // view used to list it, the hand-over claimed + took it, posted its own frame carrying it, and the retry's post landed
+  // too: the same notice twice, TWO billed turns. An in-flight entry is invisible to every taker (it is back in the
+  // view if its post fails), and the claim / take doors refuse it by construction
+  function retryEntries(cid) {
+    return (retry[cid] || []).filter((e) => e && !e.inflight && !e.maybeDelivered).map((e) => ({ source: 'retry', kind: e.kind, fromName: e.fromName || null, text: e.text, ts: e.firstAt, held: { kind: 'retrying', nextAt: e.nextAt, attempts: e.attempts.length, phase: (e.attempts[e.attempts.length - 1] || {}).phase || null, busy: (e.attempts[e.attempts.length - 1] || {}).busy ?? null, producer: e.producer || null, meta: e.meta || null }, ho: e.ho || undefined, _retry: e }));
+  }
+  function releaseHoldOf(e) {
+    if (e && e.charged && e.charged.hold && releaseSpend) { try { releaseSpend({ reason: e.charged.reason, identity: e.charged.identity, hold: e.charged.hold }); } catch (err) { log('[deliver] releasing the parked hold failed:', err.message); } }
+    if (e && e.charged) e.charged.hold = null;
+  }
+  function removeRetry(e) {
+    const q = retry[e.cid];
+    if (!q) return;
+    const i = q.indexOf(e);
+    if (i >= 0) q.splice(i, 1);
+    if (!q.length) delete retry[e.cid];
+  }
+  // A HELD AUTHORIZATION IS GIVEN BACK ON ITS OWN TTL, never on a reschedule: the hold binds the ceiling like a
+  // charge, so a parked slot must not refuse the account's real turns for the hour a park can last — but inside
+  // the TTL a turn-end attempt converts it without asking again (ONE authorization), so it is released only when
+  // the guard would expire it anyway (a hair before, so the guard's "expired with no charge" census stays clean)
+  const HOLD_RELEASE_MARGIN_MS = 5 * 1000;
+  const holdDueAt = (e) => (e && e.charged && e.charged.hold ? (Number(e.charged.holdAt) || 0) + RESERVE_TTL_MS - HOLD_RELEASE_MARGIN_MS : Infinity);
+  /** A STAMP IN THE FUTURE IS THE CLOCK'S, NOT THE ENTRY'S (verify r2): `firstAt` / `holdAt` ahead of now are re-based to now,
+   *  a `nextAt` further off than the longest step is pulled to the entry's own step — the bound and the backoff keep
+   *  counting from the moment the leap was seen; said once per entry. Runs at every schedule and attempt. */
+  function repairClock() {
+    const now = clock.now();
+    const maxStep = RETRY_STEPS_MS[RETRY_STEPS_MS.length - 1];
+    let n = 0;
+    for (const [cid, q] of Object.entries(retry)) for (const e of q) {
+      if (!e || typeof e !== 'object') continue;
+      const back = Math.max(Number(e.firstAt) - now, e.charged ? Number(e.charged.holdAt) - now : 0, Number(e.nextAt) - now - maxStep);
+      if (!(back > 0)) continue;
+      if (Number(e.firstAt) > now) e.firstAt = now;
+      if (e.charged && Number(e.charged.holdAt) > now) e.charged.holdAt = now;
+      if (Number(e.nextAt) > now + maxStep) e.nextAt = now + RETRY_STEPS_MS[Math.min(Math.max(0, e.attempts.length - 1), RETRY_STEPS_MS.length - 1)];
+      n++;
+      log(`[deliver] ${cid}: ${e.id} was stamped ${Math.round(back / 60000)} min in the future — the clock went back; its first miss, hold and next attempt are re-based to now (the 60-min bound counts from here)`);
+    }
+    // THE FLOOR'S WITNESS TOO (verify r3, reproduced): `lastPostAt` is this process's memory of the last LANDED post; a
+    // clock that stepped back after one left it in the future, `since` read negative, every attempt for the length of
+    // the step hit the floor and rescheduled (120 times over an hour), and the entry expired without ever being posted.
+    // A witness ahead of now is no witness: it is DROPPED (a floor re-based to now would hold the next frame 30 s for a
+    // post that, by this clock, never happened — the "held instead of woken" shape the lane exists to end) and said once
+    // …ONCE AN HOUR (verify r4, reproduced: a clock that KEEPS stepping back — two time daemons fighting — found every
+    // witness in the future, dropped it at every attempt and posted seven frames in the same millisecond, seven billed
+    // wakes with no floor between them; the money was bounded only by the spend ceiling). The first drop stands; a
+    // second future witness within the hour of it is RE-BASED to now instead (one floor held — the lesser harm while
+    // the clock misbehaves), said once an hour
+    for (const [cid, at] of lastPostAt) {
+      if (!(at > now)) continue;
+      const prevDrop = floorDrops.get(cid) || 0;
+      if (prevDrop && now - prevDrop < FLOOR_DROP_WINDOW_MS) {
+        lastPostAt.set(cid, now); n++;
+        const saidAt = floorRebaseSaidAt.get(cid) || 0;
+        if (!(saidAt && now - saidAt < FLOOR_DROP_WINDOW_MS)) { floorRebaseSaidAt.set(cid, now); log(`[deliver] ${cid}: the last landed post was stamped in the future again within the hour — the clock keeps going back; the witness is re-based to now (one floor held, not dropped) and this is said once an hour`); }
+        continue;
+      }
+      floorDrops.set(cid, now); lastPostAt.delete(cid); n++;
+      log(`[deliver] ${cid}: the last landed post was stamped ${Math.round((at - now) / 60000)} min in the future — the clock went back; the witness is dropped (no floor)`);
+    }
+    if (n) writeRetryNow();
+    return n;
+  }
+  /** schedule the one park timer at the earliest due attempt or hold release */
+  function scheduleRetry() {
+    if (parkTimer) { clock.clearTimeout(parkTimer); parkTimer = null; }
+    if (retryClosed) return;
+    repairClock();
+    let due = Infinity;
+    for (const q of Object.values(retry)) for (const e of q) {
+      if (!e || e.inflight) continue;   // an in-flight entry arms nothing (its hold is the post's; a due hold on it re-armed the timer at 0 ms)
+      if (holdDueAt(e) < due) due = holdDueAt(e);
+      if (!e.ho && Number(e.nextAt) < due) due = Number(e.nextAt);
+    }
+    if (!Number.isFinite(due)) return;
+    parkTimer = clock.setTimeout(() => { parkTimer = null; runDueRetries().catch((e) => log('[deliver] retry sweep failed:', e && e.message)); }, Math.max(0, due - clock.now()));
+  }
+  async function runDueRetries() {
+    repairClock();
+    const now = clock.now();
+    let changed = false;
+    for (const q of Object.values(retry)) for (const e of q) if (e && !e.inflight && holdDueAt(e) <= now) { releaseHoldOf(e); changed = true; }   // never an in-flight entry's (verify r1): the post's own outcome converts or keeps it within seconds
+    if (changed) writeRetryNow();
+    const due = [];
+    for (const [cid, q] of Object.entries(retry)) if (q.some((e) => e && !e.inflight && !e.ho && Number(e.nextAt) <= now)) due.push(cid);
+    for (const cid of due) await runAttempt(cid, 'timer');   // one frame per conversation: a due entry carries the not-yet-due ones along
+    // THE BELT (verify r1): an entry still due after its conversation's pass was not moved by anything above — it is
+    // paced to the first step, never left to re-arm the timer at 0 ms (a hot loop is the one failure a park must not have)
+    let belted = 0;
+    for (const cid of due) for (const e of (retry[cid] || [])) if (e && !e.inflight && !e.ho && Number(e.nextAt) <= clock.now()) { e.nextAt = clock.now() + RETRY_STEPS_MS[0]; belted++; }
+    if (belted) { writeRetryNow(); log(`[deliver] ${belted} parked entr${belted === 1 ? 'y was' : 'ies were'} still due after the sweep — paced to ${RETRY_STEPS_MS[0] / 1000} s (a sweep that moves nothing must not re-arm at once)`); }
+    scheduleRetry();
+  }
+  /** `opts` = the ladder call's own (the relay of its caller's fromName / cardText / group / retry) */
+  function parkRetry(cid, text, opts, { kind, spendReason, charged, attempt }) {
+    const now = clock.now();
+    const e = { id: `rt-${now.toString(36)}-${++retrySeq}`, cid, text, fromName: opts.fromName || null, cardText: opts.cardText || null, kind, ...(opts.group ? { group: opts.group } : {}), spendReason, producer: (opts.retry && opts.retry.producer) || null, meta: (opts.retry && opts.retry.meta) || null,
+      charged: charged ? { reason: charged.reason, identity: charged.identity ? { key: charged.identity.key, name: charged.identity.name || charged.identity.key } : null, hold: charged.hold || null, holdAt: now } : null,
+      firstAt: now, attempts: [attempt], nextAt: now + RETRY_STEPS_MS[0], retries: 0 };
+    retryQueue(cid).push(e);
+    writeRetryNow();
+    scheduleRetry();
+    stashChanged(cid);
+    emitRetry('parked', cid, e, { nextAt: e.nextAt, phase: attempt.phase, busy: attempt.busy, late: attempt.late || 0 });
+    // the cap counts the entries WAITING (not in flight, not claimed) and the oldest of them falls — said by name with its
+    // age. An entry in flight or claimed is spoken for and lands or returns within seconds; counting it made a thirty-first
+    // park, arriving while thirty were on the wire, the only waiting entry — evicted at once and called "the oldest",
+    // though the frame landed a second later and it would have ridden the next one (verify r2, reproduced)
+    // …nor one marked may-have-landed at boot (verify r3): it is leaving at the first sweep, and evicting it here would
+    // call a possible repeat "the oldest waiting" and stash it without the may-have-landed word
+    const waiting = () => (retry[cid] || []).filter((x) => x && !x.inflight && !x.ho && !x.maybeDelivered);
+    while (waiting().length > RETRY_CAP) {
+      const victim = waiting()[0];
+      log(`[deliver] ${cid}: the retry park holds ${RETRY_CAP} waiting per conversation — ${victim.id} (the oldest waiting, parked ${Math.round((now - Number(victim.firstAt || now)) / 1000)} s ago${(retry[cid] || []).length - waiting().length ? `; ${(retry[cid] || []).length - waiting().length} more on the wire, claimed or leaving`: ''}) falls to the stash, evicted`);
+      fellRetry(victim, 'not-reachable', `the retry park holds ${RETRY_CAP} per conversation — the oldest falls to the stash`, { evicted: true });
+    }
+    return e;
+  }
+  function fellRetry(e, kind, reason, detail = {}) {
+    releaseHoldOf(e);
+    removeRetry(e);
+    writeRetryNow();
+    const extra = { kind, reason, attempts: e.attempts.length, phase: (e.attempts[e.attempts.length - 1] || {}).phase || null, busy: (e.attempts[e.attempts.length - 1] || {}).busy ?? null, ...detail };
+    log(`[deliver] ${e.cid}: ${e.id} falls to the stash after ${e.attempts.length} attempt${e.attempts.length === 1 ? '' : 's'} — ${kind}: ${reason}`);
+    const taken = emitRetry('fell', e.cid, e, extra);
+    if (!taken) { try { stashFor(e.cid, { source: 'agent', kind: e.kind, fromName: e.fromName || null, text: e.text, ts: e.firstAt, held: { kind, ...detail } }); } catch (err) { log('[deliver] the fallen entry could not be stashed:', err && err.message); } }
+    stashChanged(e.cid);
+  }
+  /** THE FRAME of a batch: one entry goes out as its own original text (the SAME delivery); several go out as ONE
+   *  frame in the hand-over's shape, bounded like a hand-over (`rest` stays parked for the next frame). */
+  // THE OLDEST RIDE FIRST (verify r2, reproduced: 16 notices parked over an hour, the agent busy throughout — the frame
+  // kept the NEWEST twelve under its 12 KiB and left the four oldest parked; 30 s later the next frame found the oldest
+  // past the 60-min bound and dropped it to the stash: the one that waited longest was the one that never rode a
+  // retry, and the agent read the newer first). The batch is in time order and the cut keeps its head; the rest follow
+  // in the next frame after the floor, still in time order — never split, never dropped by the frame itself.
+  function retryFrameOf(batch) {
+    if (batch.length === 1) return { text: batch[0].text, shown: batch, rest: [], body: null };
+    const views = [...batch].sort((a, b) => (Number(a.firstAt) || 0) - (Number(b.firstAt) || 0)).map((e) => ({ source: 'agent', kind: e.kind, fromName: e.fromName || null, text: e.text, ts: e.firstAt, _retry: e }));
+    let pm = null;
+    if (typeof renderBatch === 'function') { try { pm = renderBatch(views, { maxEntries: RETRY_FRAME_MAX_ENTRIES, maxBytes: RETRY_FRAME_MAX_BYTES, keep: 'oldest', heading: RETRY_FRAME_HEADING }); } catch (err) { log('[deliver] batch render failed (joining plainly):', err && err.message); pm = null; } }
+    if (!pm || !Array.isArray(pm.shown) || !pm.shown.length) {
+      const shownV = views.slice(0, RETRY_FRAME_MAX_ENTRIES);
+      pm = { text: shownV.map((v) => `- ${v.fromName || 'VibeSpace'}: ${withoutNoticeHead(v.text)}`).join('\n'), shown: shownV, rest: views.slice(shownV.length) };
+    }
+    const shown = pm.shown.map((v) => v._retry);
+    const rest = (pm.rest || []).map((v) => v._retry);
+    const body = String(pm.text || '');
+    return { text: vibespaceNoticeText(`${shown.length} notice(s) VibeSpace could not deliver earlier (the agent did not accept them at once):\n\n${body}`), shown, rest, body };
+  }
+  /** ONE attempt for a conversation: every parked entry of it (unclaimed, not in flight) in ONE frame. The pid first
+   *  (gone ⇒ not-running at once), the floor, the money (an entry's held authorization still inside its TTL, else ONE
+   *  fresh verdict for the frame — a refusal falls the frame's entries as a first attempt's would), then the post. */
+  async function attemptRetry(cid, why) {
+    if (retryClosed) return;   // shutting down: no new post leaves (the ones in flight are waited for)
+    for (const e of (retry[cid] || []).filter((x) => x && x.maybeDelivered && !x.inflight && !x.ho)) fellRetry(e, 'not-reachable', 'it was being posted when the previous server stopped — its frame may have landed, so it is not posted again', { maybeDelivered: true });
+    // THE BOUND HOLDS AT EVERY ATTEMPT (verify r1 N5, reproduced: an entry two hours old at boot — a downtime — was posted and
+    // billed): a parked entry past RETRY_MAX_MS from its first miss is not posted, at a boot, a late timer or a turn end
+    repairClock();   // a future stamp never holds the bound off (verify r2)
+    for (const e of (retry[cid] || []).filter((x) => x && !x.inflight && !x.ho && clock.now() - Number(x.firstAt || 0) > RETRY_MAX_MS)) fellRetry(e, 'not-reachable', `the retry schedule's ${RETRY_MAX_MS / 60000} min bound passed ${Math.round((clock.now() - Number(e.firstAt || 0)) / 60000)} min after the first miss (${e.attempts.length} attempt${e.attempts.length === 1 ? '' : 's'})`, { expired: true });
+    // the second judge: the attempts themselves (a turn end attempts regardless of the backoff; a clock that lies cannot run them for ever)
+    for (const e of (retry[cid] || []).filter((x) => x && !x.inflight && !x.ho && x.attempts.length >= RETRY_MAX_ATTEMPTS)) fellRetry(e, 'not-reachable', `the agent did not accept the message in ${e.attempts.length} attempts (the schedule's ${RETRY_MAX_ATTEMPTS}-attempt bound) over ${Math.round((clock.now() - Number(e.firstAt || 0)) / 60000)} min`, { expired: true });
+    const all = (retry[cid] || []).filter((e) => e && !e.inflight && !e.ho);
+    if (!all.length) return;
+    const now = clock.now();
+    const peer = peerMsg.findPeer(cid);
+    if (!peer) { for (const e of all) fellRetry(e, 'not-running', 'the conversation is no longer running (no live inbox on this machine)'); return; }
+    const since = now - (lastPostAt.get(cid) || 0);
+    if (since < RETRY_FLOOR_MS) { rescheduleMany(all, (lastPostAt.get(cid) || now) + RETRY_FLOOR_MS, 'floor'); return; }
+    const frame = retryFrameOf(all);
+    const shown = frame.shown;
+    // ONE authorization for ONE frame: an entry's hold still inside its TTL, else asked ONCE for the frame (a restart
+    // dropped the holds, or the TTL passed) — judged against the ceiling as it stands now
+    let charged = null;
+    for (const e of shown) if (e.charged && e.charged.hold && now - (e.charged.holdAt || 0) <= RESERVE_TTL_MS) { charged = e.charged; break; }
+    if (authorizeSpend && !charged) {
+      const session = localSessionFor(cid);
+      const prev = shown.find((e) => e.charged && e.charged.identity);
+      const identity = session ? null : (prev && prev.charged.identity) || { key: '__unattributed__', name: 'unattributed conversation' };
+      const spendReason = shown[0].spendReason;
+      let v = null;
+      try { v = authorizeSpend({ reason: spendReason, session, identity, cid }); }
+      catch (err) { log('[deliver] spend authorizer threw at a retry (refusing, the stash keeps the message):', err.message); for (const e of shown) fellRetry(e, 'spend-cap', 'spend authorizer failed: ' + err.message); return; }   // FAIL CLOSED
+      if (v && v.ok === false) {
+        const cap = v.why === 'hour-cap' ? v.limits?.perIdentityHour : v.why === 'day-cap' ? v.limits?.perIdentityDay : v.why === 'instance-cap' ? v.limits?.perInstanceDay : null;
+        for (const e of shown) fellRetry(e, 'spend-cap', `spend budget: ${v.detail || v.why}`, { why: v.why, identity: v.identity ? String(v.identity.name || v.identity.key) : undefined, cap: Number.isFinite(Number(cap)) ? Number(cap) : undefined, retryAfter: Number(v.retryAfter) > 0 ? Number(v.retryAfter) : undefined });
+        return;
+      }
+      charged = { reason: spendReason, identity: (v && v.identity) ? { key: v.identity.key, name: v.identity.name || v.identity.key } : identity, hold: (v && v.hold) || null, holdAt: now };
+      shown[0].charged = charged;   // ONE entry carries the frame's fresh verdict (the others keep their own, released on landing)
+    }
+    for (const e of shown) e.inflight = now;
+    writeRetryNow();   // the claim door: a process that dies inside the post leaves the stamp, the next boot says so
+    const busy = busyOf(cid);
+    const undo = armTurnFor(cid);
+    let r;
+    try { r = await peerMsg.postToPeer(peer, frame.text); } catch (err) { r = { ok: false, reason: err.message, transient: false }; }
+    for (const e of shown) delete e.inflight;
+    if (r && r.ok) {
+      lastPostAt.set(cid, clock.now());
+      machineTurnFor(cid);
+      if (charged && noteSpend) { try { noteSpend({ reason: charged.reason, session: localSessionFor(cid), identity: charged.identity, hold: charged.hold }); } catch (err) { log('[deliver] spend accounting failed:', err.message); } }
+      for (const e of shown) { if (e.charged && e.charged !== charged) releaseHoldOf(e); e.charged = null; e.retries = e.attempts.length; removeRetry(e); }
+      writeRetryNow();
+      // THE CARD DRAWS THE WORDS AS THEY STAND, `recorded` IS THE FRAME AS WRITTEN (verify r2, reproduced: a clear that landed
+      // while the post was on the wire left the single card's `recorded` = the cleared sentence — the rebuild then rendered
+      // the transcript's record AND replayed the card, two cards — and the batch card's body, rendered before the post,
+      // still showed the cleared words). A cleared entry's card says the sentence; the frame's own text is what dedups
+      const clearedMid = shown.filter((e) => e.clearedInFlight);
+      if (shown.length === 1) { try { emitPeerCard?.(cid, { fromName: shown[0].fromName || null, text: shown[0].cardText || shown[0].text, recorded: frame.text, kind: shown[0].kind, ...(shown[0].group ? { group: shown[0].group } : {}) }); } catch (err) { log('[deliver] card emit failed:', err.message); } }
+      else {
+        let body = frame.body;
+        if (clearedMid.length) { try { body = retryFrameOf(shown).body; } catch { body = null; } }   // the same set, re-rendered from the words as they stand now
+        try { emitPeerCard?.(cid, { fromName: FROM_NAME, text: stashSummary.handoverCardText(shown.length, body, { why: stashSummary.HELD_WHY.retrying }), recorded: frame.text, kind: 'notification' }); } catch (err) { log('[deliver] card emit failed:', err.message); }
+      }
+      if (clearedMid.length) log(`[deliver] ${cid}: ${clearedMid.map((e) => e.id).join(', ')} landed after a clear reached ${clearedMid.length === 1 ? 'it' : 'them'} mid-flight — the frame carried the words before the clear; the card draws the cleared sentence`);
+      const ids = shown.map((e) => e.id).join(', ');
+      log(`[deliver] ${cid}: ${ids} delivered on retry (${why}, ${shown.length === 1 ? `attempt ${shown[0].attempts.length + 1}` : `${shown.length} notices in ONE frame`}, phase ${r.phase || '?'}, ${Number(r.elapsedMs) || 0} ms, target mid-turn: ${busy === null ? 'unknown' : busy ? 'yes' : 'no'}${frame.rest.length ? `; ${frame.rest.length} more stay parked for the next frame` : ''})`);
+      const at = clock.now();
+      for (const e of shown) emitRetry('delivered', cid, e, { lane: 'message', peerName: peer.name || null, attempts: e.attempts.length + 1, why, deliveredAt: at, parkedFor: at - e.firstAt, via: 'message', ...(shown.length > 1 ? { frame: shown.length } : {}) });
+      stashChanged(cid);
+      scheduleRetry();
+      return;
+    }
+    undo();
+    for (const e of shown) delete e.clearedInFlight;   // the frame did not land: the words before the clear reached nobody — the retry carries the sentence
+    const attempt = { at: now, reason: (r && r.reason) || 'unknown', phase: (r && r.phase) || null, busy, late: Number(r && r.late) || 0, why };
+    for (const e of shown) e.attempts.push({ ...attempt });
+    log(`[deliver] ${cid}: ${shown.map((e) => e.id).join(', ')} retry (${why}${shown.length > 1 ? `, ${shown.length} in one frame` : ''}) failed: ${attempt.reason} (phase ${attempt.phase || '?'}, ${Number(r && r.elapsedMs) || 0} ms${attempt.late ? `, our loop was ${attempt.late} ms late` : ''}, target mid-turn: ${busy === null ? 'unknown' : busy ? 'yes' : 'no'})`);
+    if (!(r && r.transient) || !peerMsg.findPeer(cid)) { for (const e of shown) fellRetry(e, 'not-running', attempt.reason); return; }
+    // the bound is on the SCHEDULE: an entry whose next attempt would fall past RETRY_MAX_MS from its first miss is not
+    // retried; the frame's survivors share ONE next instant (the most eager step among them — a failed frame costs nothing)
+    let step = Infinity;
+    const keep = [...frame.rest];   // the entries beyond the frame's bound wait with the frame: a failed frame moves EVERY entry, or the timer re-arms at 0 ms for ever (verify r1: reproduced as a hot loop)
+    for (const e of shown) {
+      const st = RETRY_STEPS_MS[Math.min(e.attempts.length - 1, RETRY_STEPS_MS.length - 1)];
+      if (clock.now() + st - e.firstAt > RETRY_MAX_MS || e.attempts.length >= RETRY_MAX_ATTEMPTS) { fellRetry(e, 'not-reachable', `the agent did not accept the message in ${e.attempts.length} attempts over ${Math.round((clock.now() - e.firstAt) / 60000)} min${e.attempts.length >= RETRY_MAX_ATTEMPTS ? ` (the schedule's ${RETRY_MAX_ATTEMPTS}-attempt bound)` : ''}`, { expired: true }); continue; }
+      step = Math.min(step, st); keep.push(e);
+    }
+    if (keep.length) rescheduleMany(keep, clock.now() + step, why);
+  }
+  /** the survivors of one frame share one next instant: one write, one timer, one fact change, an `attempt` each */
+  function rescheduleMany(entries, at, why) {
+    for (const e of entries) e.nextAt = at;
+    writeRetryNow();
+    scheduleRetry();
+    if (entries.length) stashChanged(entries[0].cid);
+    for (const e of entries) emitRetry('attempt', e.cid, e, { why, nextAt: at, attempts: e.attempts.length });
+  }
+  // SHUTDOWN (verify r1 N2): the door shuts, then the posts in flight are waited for (bounded) — the hand-over's shape
+  // ONE ATTEMPT IN FLIGHT PER CONVERSATION (verify r3, reproduced): the floor is read off the last LANDED post, so a
+  // turn end arriving while a frame was still on the wire posted a second frame 5 ms behind it — two billed wakes
+  // inside the 30 s the floor exists to keep apart. A second attempt for the same conversation waits for the one in
+  // flight, then re-asks the floor (the landed frame re-stamped it: the newcomer rides 30 s later, in its own frame)
+  const attempting = new Map();   // cid → the attempt promise in flight
+  async function runAttempt(cid, why) {
+    while (attempting.has(cid)) { try { await attempting.get(cid); } catch { } }
+    const p = attemptRetry(cid, why);
+    attempting.set(cid, p);
+    retryInFlight.add(p);
+    try { await p; } finally { retryInFlight.delete(p); if (attempting.get(cid) === p) attempting.delete(cid); }
+  }
+  function closeRetries() { retryClosed = true; if (parkTimer) { clock.clearTimeout(parkTimer); parkTimer = null; } }
+  function retryInFlightCount() { return retryInFlight.size; }
+  /** resolves the number settled (negative: the deadline passed with that many still in flight — stamped on disk, the boot hands them to the stash) */
+  function settleRetries(maxMs = 5000) {
+    const ps = [...retryInFlight];
+    if (!ps.length) return Promise.resolve(0);
+    return Promise.race([Promise.allSettled(ps).then(() => ps.length), new Promise((res) => { const t = setTimeout(() => res(-ps.length), maxMs); if (t.unref) t.unref(); })]);
+  }
+  /** A TURN ENDED on a live local session (server.js wraps the pool engine's noteTurnEnd): every parked delivery of
+   *  that conversation is attempted now, then the registered turn-end listeners (the stash hand-over's auto arm). */
+  async function noteTurnEnd(session) {
+    let cid = null;
+    try { cid = session ? addressableId(session) : null; } catch { cid = null; }
+    if (!cid) return;
+    // the listeners FIRST (R3: an armed hand-over carries the parked entries too — ONE frame, ONE authorization; it
+    // claims and takes them), then whatever is still parked is posted by itself
+    for (const fn of turnEndListeners) { try { await fn(cid, session); } catch (e) { log('[deliver] a turn-end listener threw:', e && e.message); } }
+    await runAttempt(cid, 'turn-end');   // ONE frame for everything still parked
+    scheduleRetry();
+  }
+  /** the hand-over / a drain took these parked entries (`retryEntries` views or their originals): their holds go
+   *  back, they leave the park, the producer hears `delivered` with `via` */
+  function retryTake(cid, entries, { via = 'hand-over', lane = null } = {}) {
+    const mine = [];
+    for (const x of (entries instanceof Set ? [...entries] : Array.isArray(entries) ? entries : [])) { const e = x && x._retry ? x._retry : x; if (e && !e.inflight && retry[cid] && retry[cid].includes(e)) mine.push(e); }   // never one in flight (verify r1)
+    if (!mine.length) return [];
+    for (const e of mine) { releaseHoldOf(e); delete e.ho; removeRetry(e); }
+    writeRetryNow();
+    for (const e of mine) emitRetry('delivered', cid, e, { lane, attempts: e.attempts.length, via, deliveredAt: clock.now(), parkedFor: clock.now() - e.firstAt });
+    stashChanged(cid);
+    scheduleRetry();
+    return mine;
+  }
+  /** a hand-over CLAIMS parked entries like stash entries (the `ho` stamp on disk): the park skips them until released */
+  function claimRetry(cid, entries, id = null) {
+    const tag = id ? String(id) : 'ho';
+    const mine = [];
+    for (const x of (Array.isArray(entries) ? entries : [])) { const e = x && x._retry ? x._retry : x; if (e && !e.inflight && retry[cid] && retry[cid].includes(e)) { e.ho = tag; mine.push(e); } }   // never one in flight (verify r1)
+    if (mine.length) writeRetryNow();
+    let released = false;
+    return () => { if (released) return; released = true; let n = 0; for (const e of mine) if (e.ho === tag) { delete e.ho; n++; } if (n) { writeRetryNow(); scheduleRetry(); } };
+  }
+  scheduleRetry();
+  // THE ARMED HAND-OVER (R3): a prompt's injection could not carry the waiting notices under the inline cap (the
+  // 10 KiB hook payload holds the tools / rules first) — for a LIVE local conversation the drain arms a hand-over
+  // that the turn end runs through the ladder (src/server/stash-handover.js, spendReason 'stash-retry'), instead of
+  // "wait for the next prompt", which for a conversation nobody types into is never. In memory: a restart loses an
+  // arm, and the next prompt's drain re-arms it.
+  const armedHandover = new Map();   // cid → {at, why}
+  function armStashHandover(cid, why = 'inline-cap') {
+    if (!cid || !turnEndListeners.size) return false;
+    let peer = null;
+    try { peer = peerMsg.findPeer(cid); } catch { peer = null; }
+    if (!peer) return false;
+    armedHandover.set(cid, { at: clock.now(), why });
+    stashChanged(cid);
+    return true;
+  }
+  function handoverArmed(cid) { return armedHandover.has(cid); }
+  function takeArmedHandover(cid) { const a = armedHandover.get(cid) || null; if (a) { armedHandover.delete(cid); stashChanged(cid); } return a; }
+  /** ms since the last SUCCESSFUL post to this conversation on any live rung (Infinity: none this process) */
+  function sincePost(cid) { const at = lastPostAt.get(cid); return at ? clock.now() - at : Infinity; }
 
   // rung 1.5 helper: a LIVE local chat session whose backend declares the
   // 'rpc-queue' peer-delivery lane AND whose wrapper adverts caps.peerMessage
@@ -626,7 +1123,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
           return () => { if (s._machineInputAt === at) s._machineInputAt = prev; };
         } catch { return () => { }; }
       };
-      const spent = () => { machineTurn(); if (!charged) return; money.settled = true; if (noteSpend) { try { noteSpend(charged); } catch (e) { log('[deliver] spend accounting failed:', e.message); } } };
+      const spent = () => { machineTurn(); lastPostAt.set(cid, clock.now()); if (!charged) return; money.settled = true; if (noteSpend) { try { noteSpend(charged); } catch (e) { log('[deliver] spend accounting failed:', e.message); } } };
       // `kind` rides the card (S3 verify F3): a peer's card is never a VibeSpace notice, whatever its name or first sentence.
       // verify r6 (S2): `recorded` = the exact text the CLI's transcript now holds for this delivery — a first-attach rebuild
       // renders THAT record and skips the held card (normalizers.replayCard), never both; the card's own text may be a summary
@@ -652,11 +1149,21 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         const peer = noWake ? null : peerMsg.findPeer(cid);
         if (peer) {
           undo1 = armTurn();
+          const busy = busyOf(cid);
           const r = await peerMsg.postToPeer(peer, text);
           if (r.ok) { spent(); cardOk(); return { ok: true, lane: 'message', kind, peerName: peer.name || null }; }
           undo1();
-          log(`[deliver] local peer post to ${peer.socketPath} failed: ${r.reason}`);
-          return { ok: false, lane: 'message', reason: r.reason };
+          const where = `phase ${r.phase || '?'}, ${Number(r.elapsedMs) || 0} ms${Number(r.late) > 0 ? `, our loop was ${Number(r.late)} ms late` : ''}, target mid-turn: ${busy === null ? 'unknown' : busy ? 'yes' : 'no'}`;
+          // THE RETRY PARK (see the header): a TRANSIENT miss while the pid still lives is parked for the caller
+          // that opted in (`opts.retry`), never stashed — the park now owns the authorization hold
+          if (r.transient === true && opts.retry && typeof opts.retry === 'object' && peerMsg.findPeer(cid)) {
+            const e = parkRetry(cid, text, opts, { kind, spendReason, charged, attempt: { at: clock.now(), reason: r.reason, phase: r.phase || null, busy, late: Number(r.late) || 0, why: 'first' } });
+            money.settled = true;
+            log(`[deliver] local peer post to ${peer.socketPath} failed: ${r.reason} (${where}) — parked for retry at ${new Date(e.nextAt).toISOString()} (${e.id}; the next turn end posts it sooner)`);
+            return { ok: false, lane: 'message', reason: r.reason, parked: true, id: e.id, retryAt: e.nextAt, phase: r.phase || null, busy, late: Number(r.late) || 0 };
+          }
+          log(`[deliver] local peer post to ${peer.socketPath} failed: ${r.reason} (${where})${r.transient ? '' : ' — the socket is not served: the conversation is not running'}`);
+          return { ok: false, lane: 'message', reason: r.reason, phase: r.phase || null, busy, ...(r.transient ? {} : { notRunning: true }) };
         }
       } catch (e) { if (undo1) undo1(); return { ok: false, reason: e.message }; }
       // rung 1.5: backend-declared RPC lane (REGISTRY-gated: capsOf(backend)
@@ -735,7 +1242,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
           return { ok: false, lane: 'remote-message', hostId: hid, reason: e.message };
         }
       }
-      return { ok: false, reason: 'no live inbox for this conversation on any reachable machine' };
+      return { ok: false, reason: 'no live inbox for this conversation on any reachable machine', notRunning: true };   // typed: the conversation is not running (lane notify-retry — `not-reachable` is reserved for an agent that did not accept)
     } finally {
       // …AND THIS IS THE ONLY PLACE IT IS GIVEN BACK. `money.settled` is raised
       // by the two sites that took responsibility for the hold — `spent()` (it
@@ -766,6 +1273,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     stashEntries, claimStash, claimedCount, restoreStash, registerFrameRestorer, restoreFrame, releasedAtBoot, flush, capUnclaimed, redactStash, registerRedactor, registerStashJudge,   // stashEntries: the SAME objects; claimStash / claimedCount: the hand-over's claim (a full drain leaves a claimed entry in place; the `ho` stamp is on disk); restoreStash / restoreFrame: a frame that came back is its original entries
     registerStashGate,   // verify r3 (lane channel-threads): a producer re-asks, at every read, whether an entry's `about` still reaches its conversation
     settleRpcDelivery,   // the wrapper's own peer_message_result settles a predicted-free steer
+    onRetry, onTurnEnd, noteTurnEnd, retryPeek, retryEntries, retryTake, claimRetry, retryCount, RETRY_STEPS_MS, RETRY_MAX_MS, RETRY_MAX_ATTEMPTS, RETRY_FLOOR_MS, RETRY_CAP, closeRetries, settleRetries, retryInFlightCount, armStashHandover, handoverArmed, takeArmedHandover, sincePost,   // R3: the hand-over a turn end runs for what the prompt could not carry   // THE RETRY PARK (lane notify-retry): a transient local miss on a live pid, retried at the turn end + on the backoff, ONE authorization
     _unsettledCount: (cid) => (unsettled.get(cid) || []).length,
     // exposed for the stash-drain sites: a drained message enters the agent's
     // context invisibly — the drain site emits the same card the live lanes do

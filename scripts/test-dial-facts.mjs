@@ -106,7 +106,7 @@ console.log('naive-user N-loop: a loopback address is the LAST row and never the
   const pub = DF.dialAddressCandidates({ origin: 'https://ws.example.com', interfaces: IF, port: 3456 });
   eq(DF.dialDefaultChoice({ candidates: pub }), { kind: 'row', base: 'https://ws.example.com', why: 'first-reachable' }, 'a reachable origin stays first and the default');
   for (const b of ['http://127.0.0.1:3456', 'http://127.1.2.3:1', 'http://localhost:3456', 'http://a.localhost:1', 'http://[::1]:3456', 'http://0.0.0.0:3456']) ok(DF.isLoopbackBase(b), `isLoopbackBase(${b}) — only this machine`);
-  for (const b of ['http://10.0.0.1:1', 'http://mart-aimax395:3456', 'https://relay.example.net', 'http://[2001:db8::5]:1', 'http://128.0.0.1:1', 'garbage', null]) ok(!DF.isLoopbackBase(b), `isLoopbackBase(${b}) — not loopback (never throws)`);
+  for (const b of ['http://10.0.0.1:1', 'http://workstation-1:3456', 'https://relay.example.net', 'http://[2001:db8::5]:1', 'http://128.0.0.1:1', 'garbage', null]) ok(!DF.isLoopbackBase(b), `isLoopbackBase(${b}) — not loopback (never throws)`);
   // verify-r4 F3: nothing another device can reach ⇒ never a loopback row checked (was: "that row — a device on this very machine")
   eq(DF.dialDefaultChoice({ candidates: [{ base: 'http://127.0.0.1:1', loopback: true }] }), { kind: 'custom', value: '', why: 'only-loopback' }, 'F3: only loopback rows ⇒ Custom… EMPTY (the loopback row stays pickable, never checked for a device elsewhere)');
   eq(DF.dialDefaultChoice({ candidates: [{ base: 'http://127.0.0.1:1', loopback: true }], relayPublishable: true }), { kind: 'relay-publish', why: 'first-reachable' }, 'F3: …the relay-publish row when the relay can publish this server');
@@ -140,23 +140,23 @@ console.log('verify-r4 F3: a row only for an address the server\'s SOCKET accept
 }
 console.log('naive-user N-sheet: a paired device\'s sheet checks the device\'s OWN address');
 {
-  const rows = DF.dialAddressCandidates({ origin: 'http://127.0.0.1:3456', relay: 'https://relay.example.net', hostname: 'mart-aimax395', interfaces: { ts0: [{ address: '100.87.42.107', family: 'IPv4', internal: false }], eth0: [{ address: '192.168.4.116', family: 'IPv4', internal: false }] }, port: 3456 });
+  const rows = DF.dialAddressCandidates({ origin: 'http://127.0.0.1:3456', relay: 'https://relay.example.net', hostname: 'workstation-1', interfaces: { ts0: [{ address: '100.87.42.107', family: 'IPv4', internal: false }], eth0: [{ address: '192.168.4.116', family: 'IPv4', internal: false }] }, port: 3456 });
   const C = (dial) => DF.dialDefaultChoice({ candidates: rows, dial });
   const T = [
     ['a new device (no facts) ⇒ the first reachable row', null, { kind: 'row', base: 'https://relay.example.net', why: 'first-reachable' }],
     ['paired on the tailnet, never connected ⇒ the tailnet row (pre-fix: row 1 — the push moved it)', { tokenMintedAt: 10, mintedHost: '100.87.42.107:3456', mintedBase: 'http://100.87.42.107:3456' }, { kind: 'row', base: 'http://100.87.42.107:3456', why: 'paired' }],
-    ['paired on the relay, CONNECTED through a hand-edited hostname (the owner\'s Mac) ⇒ the hostname row', { tokenMintedAt: 10, mintedBase: 'https://relay.example.net', mintedHost: 'relay.example.net:443', lastConnectAt: 20, lastAccept: { host: 'mart-aimax395:3456', dialed: 'http://mart-aimax395:3456' } }, { kind: 'row', base: 'http://mart-aimax395:3456', why: 'connected' }],
-    ['a connection from BEFORE the current command is no evidence ⇒ the command\'s base', { tokenMintedAt: 30, mintedBase: 'http://192.168.4.116:3456', lastConnectAt: 20, lastAccept: { dialed: 'http://mart-aimax395:3456' } }, { kind: 'row', base: 'http://192.168.4.116:3456', why: 'paired' }],
+    ['paired on the relay, CONNECTED through a hand-edited hostname (the owner\'s Mac) ⇒ the hostname row', { tokenMintedAt: 10, mintedBase: 'https://relay.example.net', mintedHost: 'relay.example.net:443', lastConnectAt: 20, lastAccept: { host: 'workstation-1:3456', dialed: 'http://workstation-1:3456' } }, { kind: 'row', base: 'http://workstation-1:3456', why: 'connected' }],
+    ['a connection from BEFORE the current command is no evidence ⇒ the command\'s base', { tokenMintedAt: 30, mintedBase: 'http://192.168.4.116:3456', lastConnectAt: 20, lastAccept: { dialed: 'http://workstation-1:3456' } }, { kind: 'row', base: 'http://192.168.4.116:3456', why: 'paired' }],
     ['a record from before mintedBase (mintedHost x:443) ⇒ the https row', { tokenMintedAt: 10, mintedHost: 'relay.example.net:443' }, { kind: 'row', base: 'https://relay.example.net', why: 'paired' }],
     ['the device states wss://relay ⇒ the https relay row (its own scheme, never guessed from a port)', { tokenMintedAt: 10, mintedBase: 'https://relay.example.net', lastConnectAt: 20, lastAccept: { host: 'relay.example.net', dialed: 'https://relay.example.net' } }, { kind: 'row', base: 'https://relay.example.net', why: 'connected' }],
     // verify-r4 F1: THE HOST HEADER IS THE LAST PROXY'S FACT — VibeSpace's own frp relay rewrites it to 127.0.0.1
     ['F1: relay-paired + connected, the Host header rewritten to 127.0.0.1 (frp hostHeaderRewrite) ⇒ the relay row the device states (pre-fix: Custom… http://127.0.0.1)', { tokenMintedAt: 10, mintedBase: 'https://relay.example.net', mintedHost: 'relay.example.net:443', lastConnectAt: 20, lastAccept: { host: '127.0.0.1', dialed: 'https://relay.example.net' } }, { kind: 'row', base: 'https://relay.example.net', why: 'connected' }],
-    ['F1: nginx\'s default Host ($proxy_host = its upstream 127.0.0.1:3456) ⇒ the address the device states', { tokenMintedAt: 10, mintedBase: 'http://192.168.4.116:3456', lastConnectAt: 20, lastAccept: { host: '127.0.0.1:3456', dialed: 'http://mart-aimax395:3456' } }, { kind: 'row', base: 'http://mart-aimax395:3456', why: 'connected' }],
+    ['F1: nginx\'s default Host ($proxy_host = its upstream 127.0.0.1:3456) ⇒ the address the device states', { tokenMintedAt: 10, mintedBase: 'http://192.168.4.116:3456', lastConnectAt: 20, lastAccept: { host: '127.0.0.1:3456', dialed: 'http://workstation-1:3456' } }, { kind: 'row', base: 'http://workstation-1:3456', why: 'connected' }],
     ['F1: a device too old to state its address (no `dialed`) ⇒ the command\'s base — the Host header is never evidence', { tokenMintedAt: 10, mintedBase: 'https://relay.example.net', lastConnectAt: 20, lastAccept: { host: '127.0.0.1' } }, { kind: 'row', base: 'https://relay.example.net', why: 'paired' }],
     ['F1: TLS on a non-443 port (wss://h:8443) ⇒ https://h:8443 as stated (a port-guess read it as http)', { tokenMintedAt: 10, mintedBase: 'http://192.168.4.116:3456', lastConnectAt: 20, lastAccept: { host: 'h.example:8443', dialed: 'https://h.example:8443' } }, { kind: 'row', base: 'http://192.168.4.116:3456', why: 'paired', claim: 'https://h.example:8443' }],
     ['F1: a stated address that is not a base (junk) ⇒ the command\'s base', { tokenMintedAt: 10, mintedBase: 'http://192.168.4.116:3456', lastConnectAt: 20, lastAccept: { dialed: 'javascript:alert(1)' } }, { kind: 'row', base: 'http://192.168.4.116:3456', why: 'paired' }],
     ['a base no row names (a MagicDNS name) ⇒ Custom… filled with it', { tokenMintedAt: 10, mintedBase: 'http://mac-mini.tail1234.ts.net:3456' }, { kind: 'custom', value: 'http://mac-mini.tail1234.ts.net:3456', why: 'paired' }],
-    ['connected through a name no row names, no mint facts ⇒ the first reachable row, SAID to be a guess, the device\'s CLAIM beside it (verify-r5 C1 / verify-r6 L1: VibeSpace did not offer it — never checked)', { tokenMintedAt: 10, lastConnectAt: 20, lastAccept: { dialed: 'http://mart-aimax395.tail1234.ts.net:3456' } }, { kind: 'row', base: 'https://relay.example.net', why: 'claim-held', claim: 'http://mart-aimax395.tail1234.ts.net:3456' }],
+    ['connected through a name no row names, no mint facts ⇒ the first reachable row, SAID to be a guess, the device\'s CLAIM beside it (verify-r5 C1 / verify-r6 L1: VibeSpace did not offer it — never checked)', { tokenMintedAt: 10, lastConnectAt: 20, lastAccept: { dialed: 'http://workstation-1.tail1234.ts.net:3456' } }, { kind: 'row', base: 'https://relay.example.net', why: 'claim-held', claim: 'http://workstation-1.tail1234.ts.net:3456' }],
     // verify-r5 C1: THE DEVICE'S STATEMENT IS ITS CLAIM — whatever holds the dial token says what it dials; `connected`
     // only for an address VibeSpace offered (a reachable row, the current command's base), else a CLAIM. verify-r6 L1: a
     // claim is NEVER the default (r5 pre-checked it: one Generate minted it as the command's base ⇒ `connected` for good)
@@ -723,7 +723,7 @@ console.log('verify-r5 G1: the address picker, built on a mini DOM — what it c
     ok(loopRows.length === 1 && loopRows[0].loopback === true && g1.checked.join() === 'custom' && g1.custom === '' && !!g1.value.error && g1.listen, 'G1: a server bound to 127.0.0.1 ⇒ Custom… checked and EMPTY under the listen note — the loopback row stays pickable, never checked, and Generate asks for an address', g1);
     const g2 = view(PK.dialAddressPicker({ candidates: loopRows, relayPublishable: true, listen: LISTEN }));
     ok(g2.checked.join() === 'relay' && g2.value.viaRelay === true, 'G1: …with a relay that can be published ⇒ "Publish through the relay" checked (Generate publishes)', g2);
-    const rows = DF.dialAddressCandidates({ origin: 'http://127.0.0.1:3456', relay: 'https://relay.example.net', hostname: 'mart-aimax395', interfaces: { eth0: [{ address: '192.168.4.116', family: 'IPv4', internal: false }] }, port: 3456 });
+    const rows = DF.dialAddressCandidates({ origin: 'http://127.0.0.1:3456', relay: 'https://relay.example.net', hostname: 'workstation-1', interfaces: { eth0: [{ address: '192.168.4.116', family: 'IPv4', internal: false }] }, port: 3456 });
     const g3 = view(PK.dialAddressPicker({ candidates: rows }));
     ok(g3.checked.join() === 'base:https://relay.example.net' && g3.own === null && g3.value.base === 'https://relay.example.net', 'G1: a new device on a 0.0.0.0 server ⇒ the first row another device reaches (the relay), no "own" tag', g3);
     const g4 = view(PK.dialAddressPicker({ candidates: rows, dial: { tokenMintedAt: 10, mintedBase: 'http://192.168.4.116:3456' } }));
@@ -731,10 +731,10 @@ console.log('verify-r5 G1: the address picker, built on a mini DOM — what it c
     // verify-r5 C3: an old daemon on a record from before the mint facts — the checked row is a guess, said so (warn)
     const g7 = view(PK.dialAddressPicker({ candidates: rows, dial: { lastConnectAt: 20, lastAccept: { host: '127.0.0.1' } }, online: true }));
     ok(g7.checked.join() === 'base:https://relay.example.net' && g7.ownCls === 'dap-own dap-claim' && g7.own === '这台设备没有说明它拨号用的地址（它的 VibeSpace 守护进程较旧）— 发给它新命令前请先确认它能连到这个地址', 'C3: a paired device that stated nothing (an older daemon) and has no mint facts ⇒ the first reachable row, SAID to be a guess (pre-fix: checked in silence)', g7);
-    const conn = { tokenMintedAt: 10, mintedBase: 'https://relay.example.net', lastConnectAt: 20, lastAccept: { dialed: 'http://mart-aimax395:3456' } };
+    const conn = { tokenMintedAt: 10, mintedBase: 'https://relay.example.net', lastConnectAt: 20, lastAccept: { dialed: 'http://workstation-1:3456' } };
     const g5 = view(PK.dialAddressPicker({ candidates: rows, dial: conn, online: true }));
     const g6 = view(PK.dialAddressPicker({ candidates: rows, dial: conn, online: false }));
-    ok(g5.checked.join() === 'base:http://mart-aimax395:3456' && g5.own === '这台设备正在通过它连接' && g6.own === '这台设备上次通过它连接', 'G1: a device that connected through an offered row ⇒ that row, "正在通过它连接" while dialed in, "上次通过它连接" after (r4 F1\'s tense)', { g5, g6 });
+    ok(g5.checked.join() === 'base:http://workstation-1:3456' && g5.own === '这台设备正在通过它连接' && g6.own === '这台设备上次通过它连接', 'G1: a device that connected through an offered row ⇒ that row, "正在通过它连接" while dialed in, "上次通过它连接" after (r4 F1\'s tense)', { g5, g6 });
     // verify-r5 C1 / verify-r6 L1: an address VibeSpace did not offer is shown as the DEVICE's claim — a row of its own,
     // UNCHECKED, with choose-it-only-if-yours words; the command's base stays checked
     const claim = { tokenMintedAt: 10, mintedBase: 'http://192.168.4.116:3456', lastConnectAt: 20, lastAccept: { dialed: 'https://evil.example' } };
@@ -1011,6 +1011,31 @@ console.log('controls (patched copies)');
     ok(c1.unclaimed.some((x) => /location\.origin/.test(x)) && c2.unclaimed.some((x) => /^src\/server\/dial-pairing\.js: req\.headers\.host,req\.headers\.host/.test(x)), 'CONTROL (q): the browser\'s origin as the Custom… default, and the device\'s address read off the Host header, each turn THE CENSUS red', { c1, c2 });
   }
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 16, label: 'mutant-copy: ' })) ok(r.pass, r.name, r.detail);
+}
+
+// ── macOS bash 3.2 (the owner's Mac, 2026-10-02 "bash: line 253: DHOST?: unbound variable") ──
+// /bin/bash on macOS is 3.2 (2007). Under it a byte ≥ 0x80 right after `$NAME` is absorbed INTO the name (the
+// `…` after `$DHOST` made the variable `DHOST\xe2`, unset under `set -u`), so the repair command died before the
+// dial check. The rule: an expansion followed by a non-ASCII byte is written `${NAME}`. The census runs over every
+// shell script a device may run from a VibeSpace instance (the installer, the repo's install.sh, scripts/*.sh).
+{
+  console.log('macOS bash 3.2: no `$NAME` followed by a non-ASCII byte in a shipped shell script');
+  const BARE_BEFORE_HIGH_BYTE = /\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7F]/;
+  const offenders = (text) => text.split('\n').map((l, i) => (BARE_BEFORE_HIGH_BYTE.test(l) ? `${i + 1}: ${l.trim()}` : null)).filter(Boolean);
+  const shellFiles = ['scripts/vibespace-agentd-install.sh', 'install.sh', ...fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => f.endsWith('.sh')).map((f) => 'scripts/' + f)];
+  const seen = new Set();
+  for (const rel of shellFiles) {
+    if (seen.has(rel) || !fs.existsSync(path.join(REPO, rel))) continue;
+    seen.add(rel);
+    const hits = offenders(fs.readFileSync(path.join(REPO, rel), 'utf8'));
+    ok(hits.length === 0, `${rel}: every expansion followed by a non-ASCII byte is braced`, hits);
+  }
+  ok(seen.has('scripts/vibespace-agentd-install.sh') && seen.size >= 2, `the census covered ${seen.size} shell scripts incl. the device installer`, [...seen]);
+  const fixed = fs.readFileSync(path.join(REPO, 'scripts/vibespace-agentd-install.sh'), 'utf8');
+  ok(/echo "→ checking that this device can dial \$\{DHOST\}…"/.test(fixed), 'the dial-check line itself is the braced form');
+  // CONTROL: the pre-fix line (b924041f) is caught by the same rule
+  const preFix = fixed.replace('can dial ${DHOST}…', 'can dial $DHOST…');
+  ok(preFix !== fixed && offenders(preFix).length === 1 && /DHOST…/.test(offenders(preFix)[0]), 'CONTROL: the 2.369.197–.199 line `$DHOST…` is the one offender the rule names');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

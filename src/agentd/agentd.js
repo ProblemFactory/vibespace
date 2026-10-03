@@ -393,6 +393,7 @@ const STATE = path.join(ROOT, 'state');
 // daemon writes the path it listens on to `state/socket-path` (the WITNESS the
 // --stdio bridge and the hub read first).
 const SOCKP = require('../sock-path.js');
+const XS = require('../exit-shell.js'); // lane-exit-run-output: the shell plan + the spawn-failure judge, run WHERE the command runs
 const SOCK_PICK = process.platform === 'win32' ? null : SOCKP.daemonSocketPath({
   root: ROOT, platform: process.platform, tmpdir: os.tmpdir(), xdgRuntimeDir: process.env.XDG_RUNTIME_DIR || '',
   uid: typeof process.getuid === 'function' ? process.getuid() : null,
@@ -1350,7 +1351,7 @@ function serveConnection(sock) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'desktop-serve', 'dial-status'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'desktop-serve', 'dial-status', 'run-shell', 'app-install'],
         });
         return;
       }
@@ -1974,18 +1975,28 @@ function serveConnection(sock) {
       if (msg.op === 'run-cmd') {
         try {
           const { execFile } = require('child_process');
-          const child = execFile(String(msg.cmd), (msg.args || []).map(String), {
+          // lane-exit-run-output E1: THE SHELL IS THE DEVICE'S FACT — `{shell: <line>}` runs under the interpreter THIS
+          // machine has (PURE src/exit-shell.js: win32 ⇒ cmd.exe /d /s /c "<line>" + windowsVerbatimArguments, else
+          // sh -lc); the hub never names it (it used to send `sh -lc` to a Windows box: ENOENT in 8 ms, read as exit 1).
+          // A line cmd.exe cannot run whole (CR / LF) is refused by name BEFORE a spawn, as a spawn failure.
+          const plan = typeof msg.shell === 'string' ? XS.shellPlan(process.platform, msg.shell) : { ok: true, file: String(msg.cmd), args: (msg.args || []).map(String), windowsVerbatimArguments: false, interpreter: null };
+          if (!plan.ok) { mux.control({ op: 'cmd-result', id: msg.id, code: XS.spawnExitCode(plan), spawnError: { code: plan.code, message: plan.message }, interpreter: plan.interpreter, stdout: '', stderr: '', timedOut: false, signal: null, truncated: false }); return; }
+          const child = execFile(plan.file, plan.args, {
             timeout: Math.min(Number(msg.timeoutMs) || 10000, 30000), maxBuffer: 2 * 1024 * 1024,
-            env: spawnEnv(msg.env),
+            env: spawnEnv(msg.env), ...(plan.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
           }, (err, stdout, stderr) => {
             // lane-pairing ⑥: a command the 30 s cap killed says so (`timedOut` + the signal) — it read as a bare `code 1`.
             // verify-r1 A5: `code` is ALWAYS a number (node's maxBuffer overflow set it to the STRING
             // 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER', on which the CLI's process.exit() threw), and an output cut here
             // (1 MiB stdout / 64 KiB stderr / the 2 MiB maxBuffer) is NAMED: `truncated: true` — a clean exit 0 with a
             // silently missing tail read as the whole output.
+            // lane-exit-run-output E2: a child that NEVER STARTED (an errno under a spawn syscall: ENOENT, EACCES…) is
+            // NAMED — `spawnError: {code, message}` beside the shell's own exit code (127 / 126) an older hub still reads;
+            // it used to fold into `code 1` with empty streams and the message dropped.
             const overflow = !!(err && err.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER');
+            const sf = XS.spawnFailure(err);
             const so = String(stdout), se = String(stderr);
-            mux.control({ op: 'cmd-result', id: msg.id, code: err ? (Number.isInteger(err.code) ? err.code : 1) : 0, stdout: so.slice(0, 1024 * 1024), stderr: se.slice(0, 65536),
+            mux.control({ op: 'cmd-result', id: msg.id, code: sf ? XS.spawnExitCode(sf) : err ? (Number.isInteger(err.code) ? err.code : 1) : 0, ...(sf ? { spawnError: sf } : {}), ...(plan.interpreter ? { interpreter: plan.interpreter } : {}), stdout: so.slice(0, 1024 * 1024), stderr: se.slice(0, 65536),
               timedOut: !!(err && err.killed && !overflow), signal: (err && err.signal) || null, truncated: overflow || so.length > 1024 * 1024 || se.length > 65536 });
           });
           if (msg.stdin64) { try { child.stdin.end(Buffer.from(msg.stdin64, 'base64')); } catch { } } else { try { child.stdin.end(); } catch { } }

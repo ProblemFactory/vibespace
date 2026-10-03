@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Root boot stage (image 3.5.0): personalize the container user to the
-# INSTANCE NAME (user directive: prompts/paths should say walter/lengyue/…,
+# INSTANCE NAME (user directive: prompts/paths should say userW/userL/…,
 # not the impersonal `vibe`), then drop privileges and run the normal
 # entrypoint. The app itself never runs as root (Claude blocks
 # bypassPermissions as root).

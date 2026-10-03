@@ -602,7 +602,7 @@ function assertTable(table, ctx) {
 
 /** THE CONFIG PLAN (design §6): self-contained, relative paths only, ONE
  *  object every machine applies with the ONE shared applier. Input = one spec
- *  per harness: `{ harness, table, files: { id: {createIfMissing, hooks?} },
+ *  per harness: `{ harness, table, files: { id: {createIfMissing (false|'dir-exists'), hooks?} },
  *  values: { key: raw } }` — the descriptor-side facts (createIfMissing, the
  *  hook events of the file that is ALSO the hook file) come pre-resolved so
  *  this stays pure. A row whose coerced value is its `off` value is NOT in
@@ -625,7 +625,10 @@ function buildConfigPlan(specs) {
       }
       const hooks = facts.hooks && Array.isArray(facts.hooks.events) && facts.hooks.events.length ? { events: [...facts.hooks.events] } : null;
       if (!set.length && !hooks) continue;
-      const entry = { harness: spec.harness || table.prefix, id, rel: [...f.rel], format: f.format, createIfMissing: !!facts.createIfMissing, set };
+      // the create rule rides as its closed-set value (false | 'dir-exists' — harness-config.js CREATE_RULES; the legacy
+      // `true` is the same rule): an older helper reads it truthy and applies the same rule, a newer one by name
+      const createIfMissing = facts.createIfMissing === 'dir-exists' || facts.createIfMissing === true ? 'dir-exists' : false;
+      const entry = { harness: spec.harness || table.prefix, id, rel: [...f.rel], format: f.format, createIfMissing, set };
       if (hooks) entry.hooks = hooks;
       files.push(entry);
     }

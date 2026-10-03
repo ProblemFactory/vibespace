@@ -69,25 +69,88 @@ function findPeer(backendSessionId, dir = REGISTRY_DIR) {
   return null;
 }
 
-// Post one text message to a peer's inbox socket. Resolves {ok, reason?}.
+// Post one text message to a peer's inbox socket. Resolves {ok, reason?, phase, elapsedMs, transient?, late?, code?, closeError?}.
 // Auth frame is sent when a key was published (the binary marks auth REQUIRED
 // on Linux); the user frame is the CLI's documented injection shape.
-function postToPeer(peer, text, { timeoutMs = 5000 } = {}) {
+//
+// THE VERDICT IS THE SOCKET'S, NEVER A TIMER'S ALONE (lane notify-retry, 2026-10-01 — the owner's conversation
+// missed a job notification after ONE "timeout" on a live, idle CLI). What this records, per attempt:
+//   phase    connect → write (the frames handed to the kernel) → written (flushed: the CLI's to read; no ack
+//            exists) → closed (the CLI closed first). A timeout can only ever name `connect` or `write`: a frame
+//            that flushed is delivered as far as this side can know (a later reset is NAMED in `closeError`,
+//            never a failure — whether the CLI read it is the ambiguity the kb states).
+//   transient  true when the next attempt may clear by itself (the timer, EAGAIN = a listener not accepting,
+//            ECONNRESET / EPIPE before the flush); false when the registry's path is a socket nobody serves
+//            (ENOENT / ECONNREFUSED / ENOTSOCK — the CLI is gone or re-bound: the caller stashes at once).
+//   late     how far past the timer the verdict came. MEASURED on this box: a unix-socket connect completes
+//            AT THE SYSCALL (or fails at once — a full backlog answers EAGAIN, never a hang), and libuv hands
+//            the callback to the NEXT loop iteration's pending phase, which runs AFTER the timers phase. So a
+//            stall of OUR loop longer than the timer, right after net.connect(), fired "timeout" on a
+//            connection that had already succeeded. The timer therefore defers its verdict ONE loop turn
+//            (setImmediate: the check phase runs after pending) and only then judges — and `late` says how
+//            stalled the loop was, which is the one number that tells the two causes apart in the journal.
+const TRANSIENT_CODES = new Set(['EAGAIN', 'EWOULDBLOCK', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'EBUSY', 'ENOBUFS']);
+const WRITE_GRACE_MS = 1000;   // a write still in flight when the timer fires is given this much more, bounded
+const FLUSH_GRACE_MS = 150;    // after the flush: the CLI may hold the connection open (no ack exists)
+const POST_TIMEOUT_MS = 5000;  // the default timer
+// THE PRIMITIVE'S OWN BOUND (notify-retry verify r2, measured: a never-reading inbox answered at 6 006 ms): a post resolves
+// within the timer + the write grace + the flush grace. A wait for a post in flight that is shorter than this (the exit's
+// settle was 5 s) calls a post that lands a second later "unsettled" and the next boot hands a LANDED frame to the stash
+const POST_BOUND_MS = POST_TIMEOUT_MS + WRITE_GRACE_MS + FLUSH_GRACE_MS;
+function postToPeer(peer, text, { timeoutMs = POST_TIMEOUT_MS } = {}) {
   return new Promise((resolve) => {
+    const t0 = Date.now();
+    let phase = 'connect';
     let settled = false;
-    const done = (ok, reason) => { if (!settled) { settled = true; try { sock.destroy(); } catch { } resolve({ ok, reason }); } };
+    let closeError = null;
+    let timer = null;
+    const finish = (res) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      try { sock.destroy(); } catch { }
+      resolve({ ...res, phase, elapsedMs: Date.now() - t0 });
+    };
+    const fail = (reason, { code = null, transient = false, late = 0 } = {}) => finish({ ok: false, reason, ...(code ? { code } : {}), transient, ...(late > 0 ? { late } : {}) });
+    const delivered = () => finish({ ok: true, ...(closeError ? { closeError } : {}) });
     const sock = net.connect(peer.socketPath);
-    const timer = setTimeout(() => done(false, 'timeout'), timeoutMs);
+    const judgeTimeout = () => {
+      if (settled || phase === 'written' || phase === 'closed') return;
+      const late = Math.max(0, Date.now() - t0 - timeoutMs);
+      if (phase === 'write') {   // connected, the frames in flight: one bounded grace, then it is a timeout in the write phase
+        timer = setTimeout(() => { if (!settled && phase === 'write') fail('timeout', { transient: true, late: Math.max(0, Date.now() - t0 - timeoutMs - WRITE_GRACE_MS) }); }, WRITE_GRACE_MS);
+        timer.unref?.();
+        return;
+      }
+      fail('timeout', { transient: true, late });
+    };
+    // the timer's verdict waits one loop turn: a connect / flush already queued by libuv is heard first
+    timer = setTimeout(() => { setImmediate(judgeTimeout); }, timeoutMs);
     timer.unref?.();
-    sock.on('error', (e) => done(false, 'socket error: ' + e.message));
+    sock.on('error', (e) => {
+      const code = (e && e.code) || null;
+      if (phase === 'written' || phase === 'closed') { closeError = code || String(e && e.message); return; }
+      fail('socket error: ' + (e && e.message), { code, transient: TRANSIENT_CODES.has(code) });
+    });
+    sock.on('close', () => {
+      if (settled) return;
+      if (phase === 'written') { phase = 'closed'; delivered(); return; }
+      fail('socket closed before the frame was written', { transient: true });
+    });
     sock.on('connect', () => {
+      phase = 'write';
       try {
-        if (peer.key) sock.write(JSON.stringify({ type: 'auth', token: peer.key }) + '\n');
-        sock.write(JSON.stringify({ type: 'user', message: { role: 'user', content: String(text) } }) + '\n');
-        // no success ack exists — give the CLI a beat to read before FIN so a
-        // racing close can't truncate the line, then treat written as sent
-        setTimeout(() => done(true), 150).unref?.();
-      } catch (e) { done(false, 'write failed: ' + e.message); }
+        const frames = (peer.key ? JSON.stringify({ type: 'auth', token: peer.key }) + '\n' : '')
+          + JSON.stringify({ type: 'user', message: { role: 'user', content: String(text) } }) + '\n';
+        sock.write(frames, (err) => {
+          if (settled) return;
+          if (err) { fail('write failed: ' + err.message, { code: err.code || null, transient: TRANSIENT_CODES.has(err.code) }); return; }
+          phase = 'written';
+          // flushed to the kernel = the CLI's to read. No success ack exists: give the CLI a beat (it may close
+          // first — that settles it sooner), then treat written as sent. Never a timeout past this line.
+          setTimeout(delivered, FLUSH_GRACE_MS).unref?.();
+        });
+      } catch (e) { fail('write failed: ' + e.message, { code: e.code || null }); }
     });
   });
 }
@@ -113,4 +176,4 @@ function postChannelEvent(sockPath, content, meta, { timeoutMs = 4000 } = {}) {
   });
 }
 
-module.exports = { findPeer, postToPeer, postChannelEvent, REGISTRY_DIR };
+module.exports = { findPeer, postToPeer, postChannelEvent, REGISTRY_DIR, TRANSIENT_CODES, pidAlive, POST_BOUND_MS };

@@ -254,6 +254,7 @@ console.log('§9 attachPopoverClose OWNS its listener (behaviour, in node over a
   const helperSrc = fnText('export function onOutsidePress(');
   const srcNow = helperSrc && fnText('export function attachPopoverClose(') ? helperSrc + '\n' + fnText('export function attachPopoverClose(') : '';
   const OP = await import('../src/lib/outside-press.js');
+  const PSEL = await import('../src/lib/press-select.js');
   // the pre-fix function (master's, its comments dropped) — the NEGATIVE CONTROL judged by the same cases
   const srcOld = `function attachPopoverClose(popover, ...excludeEls) {
   setTimeout(() => {
@@ -276,7 +277,9 @@ console.log('§9 attachPopoverClose OWNS its listener (behaviour, in node over a
     // a MOUSE press: the pre-lane closers hear its `mousedown`, the helper its capture `pointerdown` (stamped after arming)
     const fire = (target) => { for (const r of [...live]) if ((r.type === 'mousedown' || r.type === 'pointerdown') && live.has(r)) r.fn({ target, pointerType: 'mouse', pointerId: 1, clientX: 0, clientY: 0, timeStamp: 1e9 }); };
     const flush = () => { while (q.length) q.shift()(); };
-    const fn = new Function('document', 'setTimeout', 'performance', 'pressCloses', 'pressPhase', 'tapVerdict', `${src}\nreturn attachPopoverClose;`)(doc, (f) => q.push(f), { now: () => 0 }, OP.pressCloses, OP.pressPhase, OP.tapVerdict);
+    // the helper's free names, injected (lane mobile-select added the touch selection closer: `isTouchDevice` — a MOUSE
+    // device here, the harness fires mouse presses — and PURE `selectionCloses`)
+    const fn = new Function('document', 'setTimeout', 'performance', 'pressCloses', 'pressPhase', 'tapVerdict', 'isTouchDevice', 'selectionCloses', `${src}\nreturn attachPopoverClose;`)(doc, (f) => q.push(f), { now: () => 0 }, OP.pressCloses, OP.pressPhase, OP.tapVerdict, () => false, PSEL.selectionCloses);
     const mkPop = () => { const p = { isConnected: true, removed: 0, contains: (t) => t === 'inside', remove() { if (p.isConnected) p.removed++; p.isConnected = false; } }; return p; };
     const outside = { closest: () => null }, inChild = { closest: (sel) => (sel === '[data-popover]' ? {} : null) };
     const n = () => [...live].filter((r) => r.type === 'mousedown' || r.type === 'pointerdown').length; // the closer's PRESS listener (the helper's pointerup / pointercancel ride the same signal)

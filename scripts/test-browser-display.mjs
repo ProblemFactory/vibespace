@@ -155,6 +155,44 @@ const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,-
   ok(/no desktop session, so this browser runs headless/.test(D.agentNote(f1)) && /\[browser_headless\]$/.test(D.agentNote(f1)) && /back/.test(D.agentNote(f2)) && D.agentNote(null) === '' && !/agent-browser/.test(D.agentNote(f1)), 'the agent\'s sentence (English, a code tag, never the hidden CLI\'s name)');
   ok(/launched headless instead of the window/.test(D.journalLine(f1, 'x')) && /dropped --ozone-platform=wayland/.test(D.journalLine(f1, 'x')) && D.journalLine({ kind: 'wayland' }, 'x') === '', 'the journal line names what was dropped');
 
+  // THE UNSET PREFERENCE (lane hooks-create H5 — the owner's decision 2026-10-01): on a machine with NO desktop session where
+  // Xvfb is installed (mode auto) an unset browser.headed asks for a window ⇒ the hidden-window rung; with a desktop, or
+  // without Xvfb, or Xvfb unknown, or "Always headless", unset keeps today's meaning (inherit); 'yes' / 'no' always win.
+  // THE TABLE: desktop × Xvfb × preference × mode ⇒ what the launch does, over a POD's config (no headed key at all)
+  const POD = { args: '--no-sandbox' };
+  // 2.369.200: H5's rule ships behind a switch that is OFF (D.NO_DESKTOP_WINDOW_DEFAULT) — the table judges the RULE with the
+  // switch ON (the .201 shape); the shipped default is judged right after the table
+  const H5 = { noDesktopWindow: true };
+  const launchOf = (setting, display, mode = 'auto') => { const r = D.resolveHeaded({ setting, display, mode, ...H5 }); return D.launchPlan({ wanted: D.wantedOf(POD, { headedEnv: r.why === 'no-desktop' ? true : (r.headed === null ? null : r.headed) }), display, mode }); };
+  const rung = (pl) => pl.fallback ? pl.fallback.rung || pl.fallback.why : (pl.headed === true ? 'window' : 'inherit');
+  const ROWS = [
+    // [display, preference, mode, expected resolveHeaded.why, expected launch]
+    ['no desktop + Xvfb', noneX, '', 'auto', 'no-desktop', 'hidden-window'],
+    ['no desktop + Xvfb', noneX, null, 'auto', 'no-desktop', 'hidden-window'],
+    ['no desktop + Xvfb (stale DISPLAY)', staleX, '', 'auto', 'no-desktop', 'hidden-window'],
+    ['no desktop + Xvfb, Always headless', noneX, '', 'headless', 'inherit', 'inherit'],
+    ['no desktop, no Xvfb', { ...noneX, xvfb: false }, '', 'auto', 'inherit', 'inherit'],
+    ['no desktop, Xvfb unknown', none, '', 'auto', 'inherit', 'inherit'],
+    ['Wayland desktop + Xvfb', { ...wl, xvfb: true }, '', 'auto', 'inherit', 'inherit'],
+    ['X11 desktop + Xvfb', { ...x11, xvfb: true }, '', 'auto', 'inherit', 'inherit'],
+    ['no desktop + Xvfb, setting no', noneX, 'no', 'auto', 'setting', 'inherit'],
+    ['no desktop + Xvfb, setting false', noneX, false, 'auto', 'setting', 'inherit'],
+    ['no desktop + Xvfb, setting yes', noneX, 'yes', 'auto', 'setting', 'hidden-window'],
+    ['Wayland desktop, setting yes', wl, 'yes', 'auto', 'setting', 'window'],
+    ['no display probed yet', null, '', 'auto', 'inherit', 'inherit'],
+  ];
+  const tableBad = ROWS.filter(([, d, pref, mode, why, want]) => D.resolveHeaded({ setting: pref, display: d, mode, ...H5 }).why !== why || (d ? rung(launchOf(pref, d, mode)) !== want : false));
+  ok(tableBad.length === 0, `H5 THE TABLE (${ROWS.length} rows): unset + no desktop + Xvfb + auto ⇒ a window ⇒ the hidden-window rung; a desktop, no / unknown Xvfb, "Always headless" ⇒ inherit; yes / no win`, tableBad.map((r) => r[0]));
+  // THE SHIPPED DEFAULT (2.369.200): the switch is OFF — every row the rule turns into a window reads inherit (.199's meaning);
+  // an explicit 'yes' still runs the hidden-window rung (the 'setting yes' row is unchanged)
+  const offBad = ROWS.filter(([, d, pref, mode, why]) => D.resolveHeaded({ setting: pref, display: d, mode }).why !== (why === 'no-desktop' ? 'inherit' : why));
+  ok(D.NO_DESKTOP_WINDOW_DEFAULT === false && offBad.length === 0 && ROWS.filter((r) => r[4] === 'no-desktop').length === 3, 'H5 THE SHIPPED DEFAULT (2.369.200): the switch is OFF — unset + no desktop + Xvfb inherits (headless), exactly as .199; "yes" still asks the hidden window', offBad.map((r) => r[0]));
+  const ph = launchOf('', staleX);
+  ok(ph.headed === true && ph.args === '--no-sandbox,--ozone-platform=x11' && eq(ph.env, { DISPLAY: '', WAYLAND_DISPLAY: '' }), 'H5: the pod\'s launch is the hidden-window rung exactly (x11 pinned, a stale display cleared)', ph);
+  const fd = D.displayFact({ display: noneX, plan: launchOf('', noneX), wanted: { headed: true, args: '--no-sandbox' }, mode: 'auto', byDefault: true });
+  ok(fd.wanted.byDefault === true && D.factCode(fd) === 'hidden-window' && eq(D.planForFact(POD, fd), launchOf('', noneX)) && D.applyPlan(POD, D.planForFact(POD, fd)).headed === true && D.planForFact({ ...POD, headed: false }, fd).headed === true, 'H5: the fact says the window was the default\'s (wanted.byDefault) and EVERY later call re-derives the same planned config — headed:true — from a base that says nothing (or false)', fd);
+  ok(D.displayFact({ display: noneX, plan: h1, wanted: { headed: true } }).wanted.byDefault === undefined && !D.planForFact(POD, D.displayFact({ display: noneX, wanted: { headed: false, args: '--no-sandbox' }, mode: 'auto' })).changed, 'H5: a fact without the default\'s mark never asks a window for a base that says nothing (today\'s meaning)');
+
   // CONTROLS: patched copies of the PURE module, judged by the SAME rows
   const MP = mutantCopies('browser-display-pure', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/browser-display.js'), 'utf8');
@@ -172,6 +210,13 @@ const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,-
   ok(DM.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: noneX, mode: 'headless' }).fallback.rung === 'hidden-window', 'CONTROL: a plan that ignores browser.noDisplayMode is caught by the "headless" row');
   const DC = MP.load('src/browser-display.js', src.replace(clearLine, 'env: {} };'), 'keeps-stale-display');
   ok(eq(DC.launchPlan({ wanted: { headed: true, args: OWNER_ARGS }, display: staleX }).env, {}), 'CONTROL: a plan that keeps a stale DISPLAY is caught by the stale-display row (the fake below fails that launch)');
+  // H5 CONTROL: the OLD meaning (unset ⇒ inherit everywhere) — a patched copy without the no-desktop branch — fails the table
+  const h5Line = "  if (noDesktopWindow === true && noDisplayModeOf(mode) === 'auto' && isObj(display) && noDesktop(display) && display.xvfb === true) return { headed: true, why: 'no-desktop' };";
+  ok(src.includes(h5Line), 'CONTROL setup: resolveHeaded\'s no-desktop branch is found');
+  const DI = MP.load('src/browser-display.js', src.replace(h5Line, ''), 'keeps-inherit');
+  const badOld = ROWS.filter(([, d, pref, mode, why]) => DI.resolveHeaded({ setting: pref, display: d, mode, ...H5 }).why !== why);
+  const noDesk = ROWS.filter((r) => r[4] === 'no-desktop').length;
+  ok(noDesk === 3 && badOld.length === noDesk && badOld.every((r) => r[4] === 'no-desktop'), 'CONTROL: a copy that keeps the old inherit reads every no-desktop + Xvfb row as inherit — the table goes red on exactly those 3 rows', badOld.map((r) => r[0]));
   for (const r of copiesCensus(MP.files, MP.dir, REPO, { label: 'PURE controls: ' })) ok(r.pass, r.name, r.detail);
 }
 
@@ -416,6 +461,78 @@ const KEY_N = 'bk-0000d001', KEY_D = 'bk-0000d002', KEY_W = 'bk-0000d003', KEY_C
   Rt.setup({ keeper: k, activeSessions: sessions, browserEnv: () => null, adoptRoots: { homeDir: fakeHome, dataDir: DATA }, tasksForSession: () => [] });
 }
 
+// ─ H5 (lane hooks-create, the owner's decision 2026-10-01): A FLEET POD — no desktop, Xvfb installed, NO user config,
+//   browser.headed UNSET ⇒ the launch asks for a window ⇒ the hidden-window rung (UA Chrome/154: Google sign-in
+//   treats it as a normal browser); 'no' still headless; a desktop keeps today's meaning
+{
+  const podHome = path.join(ROOT, 'pod-home'); fs.mkdirSync(podHome, { recursive: true }); // no ~/.agent-browser/config.json at all
+  const rtEnvP = { PATH: `${BIN}:${XBIN}:${SYSBIN}`, HOME: podHome, FAKE_AB_STATE: AB_STATE, XDG_RUNTIME_DIR: XDG };
+  const DATAP = path.join(ROOT, 'data-pod'); fs.mkdirSync(DATAP, { recursive: true });
+  const podSettings = { 'browser.idleTimeoutMs': 600000 }; // browser.headed never set
+  const kp = K.create({ dataDir: DATAP, homeDir: podHome, env: () => rtEnvP, broadcast: null, serverSetting: (x) => podSettings[x], serverNotice: () => 1, getTelemetry: () => null,
+    liveKeys: () => live, runtime: F.createBrowserRuntime({ env: rtEnvP }), facts: F.createBrowserFacts({ env: rtEnvP }), log: jlog, install: false });
+  Rt.setup({ keeper: kp, activeSessions: sessions, browserEnv: () => null, adoptRoots: { homeDir: podHome, dataDir: DATAP }, tasksForSession: () => [] });
+  const cliP = (s) => ({ ...cliEnvFor(s), PATH: rtEnvP.PATH, HOME: podHome });
+  const sP = mkSession('sess-pod', 'bk-0000e5a1', 'p', pairsN('bk-0000e5a1'), 'N');
+  const b0 = launches().length, r0 = restarts().length;
+  let c = await cli(['snapshot'], cliP(sP));
+  const recP = ephOf(kp, 'bk-0000e5a1') ? kp.browserOf(ephOf(kp, 'bk-0000e5a1').id) : null;
+  const LP = launches().slice(b0).filter((l) => l.sess === 'vs-bk-0000e5a1');
+  let planned = null; try { planned = LP[0] && LP[0].config ? JSON.parse(fs.readFileSync(LP[0].config, 'utf8')) : null; } catch { planned = null; }
+  if (D.NO_DESKTOP_WINDOW_DEFAULT) ok(c.status === 0 && LP.length === 1 && LP[0].headed === true && LP[0].xvfb === true && /--ozone-platform=x11/.test(LP[0].args), 'H5 the pod, setting UNSET: the launch is HEADED on the CLI\'s own Xvfb (the hidden-window rung), not headless', { LP, stderr: c.stderr });
+  else ok(c.status === 0 && LP.length === 1 && LP[0].headed === false && recP && recP.display && !recP.display.wanted.byDefault && !recP.display.fallback, 'H5 OFF (2.369.200) the pod, setting UNSET: the launch is headless as in .199 — no window asked, no plan, no default mark', { LP, d: recP && recP.display, stderr: c.stderr });
+  if (D.NO_DESKTOP_WINDOW_DEFAULT) ok(planned && planned.headed === true && recP && recP.display && recP.display.wanted.byDefault === true && recP.display.fallback.rung === 'hidden-window', 'H5 …the LAUNCH CONFIG the keeper names carries headed:true, and the record\'s fact says the window was the default\'s (wanted.byDefault)', { planned, d: recP && recP.display });
+  else ok(!planned || planned.headed !== true, 'H5 OFF …the launch config the keeper names asks no window', { planned });
+  c = await cli(['eval', 'navigator.userAgent'], cliP(sP));
+  if (D.NO_DESKTOP_WINDOW_DEFAULT) ok(c.status === 0 && /Chrome\/154/.test(c.stdout) && !/HeadlessChrome/.test(c.stdout) && restarts().length === r0, 'H5 …navigator.userAgent = Chrome/154 (never HeadlessChrome) and the agent\'s next verb restarts nothing (the same planned file)', { stdout: c.stdout, restarts: restarts().slice(r0) });
+  else ok(c.status === 0 && restarts().length === r0, 'H5 OFF …the agent\'s next verb runs and restarts nothing', { stdout: c.stdout, restarts: restarts().slice(r0) });
+  const dispP = await (await fetch(API + '/api/browser/display')).json();
+  const W5 = await import('../src/lib/browser-display-words.js');
+  if (D.NO_DESKTOP_WINDOW_DEFAULT) ok(dispP.preference === null && dispP.display.kind === 'none' && dispP.display.xvfb === true && /with the window setting unset, an agent's browser runs in a hidden window/.test(W5.machineDisplayText(dispP)), 'H5 Settings\' line on the pod: "with the window setting unset, an agent\'s browser runs in a hidden window" (the route answers the stored preference)', { dispP, line: W5.machineDisplayText(dispP) });
+  else ok(dispP.preference === null && dispP.display.kind === 'none' && dispP.display.xvfb === true && /a browser that asks for a window runs in a hidden window/.test(W5.machineDisplayText(dispP)) && !/with the window setting unset/.test(W5.machineDisplayText(dispP)), 'H5 OFF Settings\' line on the pod: .199\'s sentence (a browser that ASKS for a window runs in a hidden one) — never the unset rule', W5.machineDisplayText(dispP));
+  // 'no' still forces headless
+  podSettings['browser.headed'] = 'no';
+  const sP2 = mkSession('sess-pod2', 'bk-0000e5a2', 'q', pairsN('bk-0000e5a2'), 'N');
+  const b1 = launches().length;
+  c = await cli(['snapshot'], cliP(sP2));
+  const LP2 = launches().slice(b1).filter((l) => l.sess === 'vs-bk-0000e5a2');
+  const recP2 = ephOf(kp, 'bk-0000e5a2') ? kp.browserOf(ephOf(kp, 'bk-0000e5a2').id) : null;
+  const dispP2 = await (await fetch(API + '/api/browser/display')).json();
+  ok(c.status === 0 && LP2.length === 1 && LP2[0].headed === false && LP2[0].xvfb === false && recP2 && !recP2.display.wanted.byDefault && /says Headless/.test(W5.machineDisplayText(dispP2)), 'H5 browser.headed = "no" on the pod: still headless (and Settings\' line says the setting decided)', { LP2, d: recP2 && recP2.display, line: W5.machineDisplayText(dispP2) });
+  delete podSettings['browser.headed'];
+  // a DESKTOP (a live Wayland socket) + Xvfb, unset ⇒ today's meaning: nothing asks a window — headless as the pod config says
+  await listenAt(path.join(XDG, 'wayland-0'));
+  const sP3 = mkSession('sess-pod3', 'bk-0000e5a3', 'r', pairsN('bk-0000e5a3'), 'N');
+  const b2 = launches().length;
+  c = await cli(['snapshot'], cliP(sP3));
+  const LP3 = launches().slice(b2).filter((l) => l.sess === 'vs-bk-0000e5a3');
+  const recP3 = ephOf(kp, 'bk-0000e5a3') ? kp.browserOf(ephOf(kp, 'bk-0000e5a3').id) : null;
+  ok(c.status === 0 && LP3.length === 1 && LP3[0].headed === false && recP3 && !recP3.display.fallback && !recP3.display.wanted.byDefault, 'H5 with a desktop session, unset keeps today\'s meaning (inherit: no window asked, no plan)', { LP3, d: recP3 && recP3.display });
+  for (const s0 of servers.splice(0)) { await new Promise((res) => s0.close(() => res())); }
+  try { fs.unlinkSync(path.join(XDG, 'wayland-0')); } catch { /* gone */ }
+  for (const e of kp.ephemerals()) { try { await kp.stop(e.profileId, { why: 'user' }); } catch { /* */ } }
+  // a PAIRED machine resolves against ITS OWN display: the hub sends the preference as stored (unset ⇒ null)
+  const BS5 = require('../src/browser-serve.js');
+  const sHome5 = path.join(ROOT, 'serve-pod'); fs.mkdirSync(sHome5, { recursive: true }); // no config there either
+  let dsp5 = { ...D.displayVerdict({}), xvfb: true };
+  const bs5 = BS5.install({ env: { PATH: `${BIN}:${XBIN}:${SYSBIN}`, HOME: sHome5, FAKE_AB_STATE: AB_STATE, XDG_RUNTIME_DIR: XDG }, homeDir: sHome5, displayProbe: async () => dsp5 });
+  const pid5 = 'bp-0000e5e1', ns5 = 'vs-' + pid5;
+  const b3 = launches().length;
+  let r5 = await BS5.runBrowserServeOp(bs5, 'start', { profileId: pid5, idleMs: 0, headed: null });
+  const L5 = launches().slice(b3).filter((l) => l.ns === ns5);
+  let plan5 = null; try { plan5 = JSON.parse(fs.readFileSync(BS5.planFileOf(bs5, ns5), 'utf8')); } catch { plan5 = null; }
+  if (D.NO_DESKTOP_WINDOW_DEFAULT) ok(r5.ok && r5.display.wanted.byDefault === true && r5.display.fallback.rung === 'hidden-window' && L5.length === 1 && L5[0].headed === true && L5[0].xvfb === true && plan5 && plan5.headed === true, 'H5 a paired machine (browser-serve start, preference unset): ITS no-desktop + Xvfb ⇒ the hidden-window rung under its planned copy (headed:true)', { r5: r5.display, L5, plan5 });
+  else ok(r5.ok && !r5.display.fallback && !r5.display.wanted.byDefault && L5.length === 1 && L5[0].headed === false, 'H5 OFF a paired machine (browser-serve start, preference unset): headless as in .199, no plan', { r5: r5.display, L5 });
+  await BS5.runBrowserServeOp(bs5, 'stop', { profileId: pid5 });
+  dsp5 = { ...D.displayVerdict({}), xvfb: false };
+  const b4 = launches().length;
+  r5 = await BS5.runBrowserServeOp(bs5, 'start', { profileId: pid5, idleMs: 0, headed: null });
+  const L6 = launches().slice(b4).filter((l) => l.ns === ns5);
+  ok(r5.ok && !r5.display.fallback && !r5.display.wanted.byDefault && L6.length === 1 && L6[0].headed === false, 'H5 …the same machine without Xvfb: unset keeps today\'s meaning (headless, no plan)', { r5: r5.display, L6 });
+  await BS5.runBrowserServeOp(bs5, 'stop', { profileId: pid5 });
+  Rt.setup({ keeper: k, activeSessions: sessions, browserEnv: () => null, adoptRoots: { homeDir: fakeHome, dataDir: DATA }, tasksForSession: () => [] });
+}
+
 // ─ A PAIRED MACHINE: the `browser-serve` op (what its daemon runs) probes ITS display and plans against ITS config
 {
   const BS = require('../src/browser-serve.js');
@@ -451,7 +568,7 @@ const KEY_N = 'bk-0000d001', KEY_D = 'bk-0000d002', KEY_W = 'bk-0000d003', KEY_C
 {
   const MK = mutantCopies('browser-display-keeper', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-  const factLine = '        rec.display = await displays.factFor({ baseFile: env0[VERBS.CONFIG_KEY] || ephemeralConfigFor(env0), prev: prev && prev.display, mode: noDisplayMode() });';
+  const factLine = '        rec.display = await displays.factFor({ baseFile: env0[VERBS.CONFIG_KEY] || ephemeralConfigFor(env0), prev: prev && prev.display, mode: noDisplayMode(), preference: headedSetting() });';
   const envLine = '        const r = await rt.launch(null, { idleMs: launchIdle, headed: null, extraEnv: { ...env0, ...rec.display.env } });';
   const plannedLine = '    const planned = (file) => (rec && rec.display && file ? displays.fileFor(file, rec.display) : file);';
   ok(src.includes(factLine) && src.includes(envLine) && src.includes(plannedLine), 'CONTROL setup: the launch\'s fact line and /resolve\'s planned-file line are found in the keeper');

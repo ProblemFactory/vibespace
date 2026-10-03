@@ -24,6 +24,12 @@
 // user, up to 30 s; optionally "ask me each time" — the user's Allow in For you,
 // 60 s, else refused). `vibespace-exit list` shows what THIS conversation may do.
 // Background Work jobs (jbt_) can never use an exit.
+// THE SHELL IS THE MACHINE'S (lane-exit-run-output, 2026-10-01): `run` hands the machine ONE line and the machine's
+// agent runs it under the interpreter it has — cmd.exe on Windows (`cmd.exe /d /s /c "<line>"`: one line, join steps
+// with & or &&, %VAR% and inner quotes are cmd's own), `sh -lc` everywhere else. A command that could not START (no
+// such interpreter, not executable) is said by name and this CLI exits with the shell's own code (127 / 126) —
+// never a bare "exit 1". The first 4 KiB of stdout and stderr of every run are kept on the machine's command list
+// and shown in the user's chat card; `runs` lists this conversation's own runs with those heads.
 const api = process.env.VIBESPACE_API;
 const token = process.env.VIBESPACE_SESSION_TOKEN;
 if (!api || !token) { console.error('vibespace-exit: not running inside a VibeSpace session (missing env)'); process.exit(2); }
@@ -37,20 +43,39 @@ const USAGE = [
   '  vibespace-exit url <machine>            print just the socks5h://<user>:<pass>@127.0.0.1:PORT url (for --proxy; the',
   '                                            credentials are THIS conversation\'s — the port refuses every other client)',
   '  vibespace-exit run <machine> -- <cmd>   run <cmd> ON the machine as its user, up to 30 s (universal: ICMP/UDP/proxy-unaware/its DNS);',
-  '                                            with "ask me each time" it first waits (≤ 60 s) for the user\'s Allow',
+  '                                            with "ask me each time" it first waits (≤ 60 s) for the user\'s Allow.',
+  '                                            The machine picks the shell: Windows runs the line under cmd.exe (ONE line — join',
+  '                                            steps with & or &&; %VAR% and inner quotes are cmd\'s own), everything else under sh -lc.',
+  '                                            A command that could not start is said by name (exit 127 not found / 126 not executable).',
+  '  vibespace-exit runs [<machine>] [--limit N]',
+  '                                          this conversation\'s own recent runs there (newest first): the verdict, the duration and',
+  '                                            the first line of output — the machine keeps the first 4 KiB of stdout and stderr of',
+  '                                            every run (the user sees them on the chat card and the machine\'s command list)',
   '',
   '  <machine> = id / name / unique name substring (omit if only one machine is open to you).',
   '  The user decides who may: Remote tab → the machine\'s exit icon → "Who can use it" (network and commands are two grants).',
   '  Use an exit ONLY when a request needs that machine\'s network position; otherwise go direct.',
 ].join('\n');
 const WAY_OUT = '  way out: ask the user to allow this conversation under "Who can use it" on the machine row (Remote tab)';
+// the ONE wording of a spawn failure (src/exit-shell.js spawnFailureText — this file ships alone to every host, so it
+// carries the three sentences it prints rather than requiring the module)
+function describeSpawn(r) {
+  const code = r.spawnError.code, what = r.interpreter || 'sh';
+  if (code === 'ENOENT') return `${what}: not found on that machine`;
+  if (code === 'EACCES' || code === 'EPERM') return `${what}: permission denied on that machine`;
+  if (code === 'ENOEXEC') return `${what}: not executable on that machine`;
+  if (code === 'ESHELLLINE') return String(r.spawnError.message || 'the shell line could not be run whole').slice(0, 200);
+  return `${code}: ${String(r.spawnError.message || '').slice(0, 200)}`;
+}
 
 // every refusal prints the server's sentence (it names the grant this conversation lacks — never another one);
 // a missing grant adds the way out
 function fail(data, status) {
   console.error('vibespace-exit:', (data && data.error) || status);
   if (data && data.code === 'not_granted') console.error(WAY_OUT);
-  process.exit(1);
+  // a command that could not START exits with the shell's own code (127 not found / 126 not executable) — the server
+  // names it (`exitCode`); every other refusal is 1
+  process.exit(data && data.code === 'spawn_failed' && Number.isInteger(data.exitCode) ? data.exitCode : 1);
 }
 async function get(path) {
   const res = await fetch(api + path, { headers: { Authorization: 'Bearer ' + token } });
@@ -75,6 +100,25 @@ async function main() {
     for (const e of exits) {
       const g = e.grants || {};
       console.log(`  ${e.name}${e.online ? '' : ' (offline)'}   network: ${g.use ? 'yes' : 'no'} · commands: ${g.run ? (g.runAsk ? 'ask' : 'yes') : 'no'}${e.active ? '  [active: socks5h://127.0.0.1:' + e.localPort + ']' : ''}   id=${e.id}`);
+    }
+    return;
+  }
+
+  if (cmd === 'runs') {
+    // vibespace-exit runs [<machine>] [--limit N] — THIS conversation's own runs (the server answers nothing of another's)
+    const li = rest.indexOf('--limit');
+    const limit = li >= 0 ? Number(rest[li + 1]) || 50 : 50;
+    const machine = rest.filter((a, i) => a !== '--limit' && i !== (li >= 0 ? li + 1 : -1)).join(' ').trim() || undefined;
+    const { runs } = await get('/api/agent/exit/runs?' + new URLSearchParams({ ...(machine ? { machine } : {}), limit: String(limit) }).toString());
+    if (!runs.length) { console.log(machine ? `  no command of this conversation has run on "${machine}" yet` : '  no command of this conversation has run on a machine yet'); return; }
+    for (const r of runs) {
+      const when = new Date(r.at).toISOString().replace('T', ' ').slice(0, 19);
+      const verdict = r.outcome === 'spawn_failed' ? `could not start — ${r.spawnError && r.spawnError.code ? describeSpawn(r) : '?'}`
+        : r.outcome === 'timed_out' ? 'timed out after 30 s' : r.outcome === 'refused' ? `refused (${r.refusal})` : `exit ${r.code == null ? '?' : r.code}`;
+      const secs = `${(Math.max(0, Number(r.ms) || 0) / 1000).toFixed(1)} s`;
+      console.log(`  ${when}  ${r.machine}  ${verdict} · ${secs}${r.interpreter ? ' · ' + r.interpreter : ''}  ${r.cmd.length > 100 ? r.cmd.slice(0, 99) + '…' : r.cmd}`);
+      const first = (r.stderr && r.stderr.trim() ? r.stderr : r.stdout || '').split('\n').find((l) => l.trim());
+      if (first) console.log(`      ${r.stderr && r.stderr.trim() ? 'stderr' : 'stdout'}: ${first.slice(0, 200)}${(r.cut && (r.cut.stdout || r.cut.stderr)) ? '  (cut at 4 KiB)' : ''}`);
     }
     return;
   }

@@ -4,16 +4,17 @@
 //   · THE STRIP under a message: one chip per reaction — the vendor's emoji as CONTENT (a text glyph, or a custom
 //     picture through OUR route `…/emoji/<key>` as `img.src`, else `:key:` as text — never a vendor URL, never
 //     innerHTML), the count, `.rx-mine` (aria-pressed) when the account's user reacted, the who-list in the title
-//     and on a long press; the `+` chip (the ONE chrome icon, SVG) opens the picker. A click toggles — the chip
-//     flips when the ROUTE answers (never optimistically), disabled while in flight. The strip is patched IN PLACE
-//     by key (PURE `chipPlan`): a count re-spelled, a key appended, a key removed — never a rebuilt strip under the
-//     pointer (the a3 keyed-chips rule).
+//     and on a long press. A click toggles — the chip flips when the ROUTE answers (never optimistically), disabled
+//     while in flight. The strip is patched IN PLACE by key (PURE `chipPlan`): a count re-spelled, a key appended, a
+//     key removed — never a rebuilt strip under the pointer (the a3 keyed-chips rule). A message with no reaction has
+//     NO strip (lane reaction-hover, 2026-10-01: the `+` that took a line under every message moved into the message's
+//     hover action bar, src/lib/channel-msg-bar.js — the picker opens from there).
 //   · THE PICKER: a popover (createPopover — the `data-popover` Esc protocol, an outside press closes it): a quick
 //     row, a search box, a keyed grid (8 a row) of the keys the adapter's set LISTS (a key it does not list is never
 //     offered — the vendor would refuse it anyway), arrows move, Enter picks.
 import { createPopover, fetchJson, showToast } from './utils.js';
 import { t } from './i18n.js';
-import { icon, el } from './channel-chrome.js';
+import { el } from './channel-chrome.js';
 import { routeErrorText } from './channel-words.js';
 import * as Rx from '../channel-reactions.js';
 import { humanAge } from '../channel-caps.js';
@@ -72,7 +73,7 @@ export function refaceStrips(root, set, adapterBase) {
   if (!root || !set || !Array.isArray(set.keys)) return 0;
   const byKey = new Map(set.keys.filter((k) => k && k.key).map((k) => [k.key, k]));
   let n = 0;
-  for (const chip of root.querySelectorAll('.rx-chip:not(.rx-add)')) {
+  for (const chip of root.querySelectorAll('.rx-chip')) {
     const face = chip.firstElementChild;
     if (!face || !face.classList.contains('rx-name')) continue;
     const e = byKey.get(chip.dataset.key);
@@ -110,65 +111,41 @@ function showWho(chip) {
 }
 
 /**
- * THE STRIP for a record (null when it has no reactions and none may be added; a system line never has one).
- * `ctx` = { offers: {react}, adapterBase, asOf, onToggle(chip, key), onAdd(anchor) }.
+ * THE STRIP for a record — null when it has no reactions (a system line never has one; adding one is the message's
+ * hover action bar, never a chip in the flow). `ctx` = { adapterBase, asOf, onToggle(chip, key) }.
  */
 export function renderReactionStrip(rec, ctx) {
   const list = Array.isArray(rec && rec.reactions) ? rec.reactions : [];
-  const canAdd = !!(ctx && ctx.canAdd);
-  if (!list.length && !canAdd) return null;
+  if (!list.length) return null;
   const strip = el('div', 'chanmsg-rx');
   strip.dataset.vid = rec.vendorId || '';
   for (const x of list) strip.appendChild(chipOf(x, ctx));
-  if (canAdd) strip.appendChild(addChip(ctx));
   return strip;
 }
-function addChip(ctx) {
-  const a = document.createElement('button');
-  a.type = 'button';
-  a.className = 'rx-chip rx-add';
-  a.appendChild(icon('plus', 11));
-  sayWhyUnread(a, ctx);
-  a.setAttribute('aria-label', t('Add reaction'));
-  a.onclick = (ev) => { ev.stopPropagation(); ctx.onAdd && ctx.onAdd(a); };
-  return a;
-}
-/** owner ruling (2026-09-28): while the account's sign-in cannot READ reactions the `+` says why, by name — the same
- *  sentence as the window's line and the account card (`ctx.readNote`); re-spelled in place on a patch. */
-function sayWhyUnread(a, ctx) {
-  const note = (ctx && ctx.readNote) || '';
-  const title = note ? `${t('Add reaction')} — ${note}` : t('Add reaction');
-  if (a.title !== title) a.title = title;
-  if (note) a.dataset.rxReadNote = '1'; else delete a.dataset.rxReadNote;
-}
 /**
- * PATCH a drawn row's strip IN PLACE (spec §4.4): the kept chips re-spelled, new keys appended BEFORE the `+`,
- * gone keys removed — by `data-key`, never a rebuilt strip. A row with no strip yet gets one (after its body).
+ * PATCH a drawn row's strip IN PLACE (spec §4.4): the kept chips re-spelled, new keys appended, gone keys removed — by
+ * `data-key`, never a rebuilt strip. A row with no strip yet gets one (after its body, before its action bar); the
+ * last reaction gone takes the strip with it (the row closes up — no empty line is reserved).
  */
 export function patchReactionStrip(row, rec, list, ctx) {
   if (!row) return;
   let strip = row.querySelector(':scope > .chanmsg-rx');
-  const canAdd = !!(ctx && ctx.canAdd);
   if (!strip) {
-    if (!list.length && !canAdd) return;
+    if (!list.length) return;
     strip = renderReactionStrip({ ...rec, reactions: list }, ctx);
-    if (strip) row.appendChild(strip);
+    if (strip) row.insertBefore(strip, row.querySelector(':scope > .chanmsg-bar'));
     return;
   }
-  const drawn = [...strip.querySelectorAll(':scope > .rx-chip:not(.rx-add)')];
+  const drawn = [...strip.querySelectorAll(':scope > .rx-chip')];
   const plan = Rx.chipPlan(drawn.map((c) => c.dataset.key), list);
   const byKey = new Map(drawn.map((c) => [c.dataset.key, c]));
   for (const k of plan.remove) { const c = byKey.get(k); if (c) c.remove(); }
-  const add = strip.querySelector(':scope > .rx-add');
   for (const x of list) {
     const c = byKey.get(x.key);
     if (c && c.isConnected) spellChip(c, x, ctx);
-    else strip.insertBefore(chipOf(x, ctx), add || null);
+    else strip.appendChild(chipOf(x, ctx));
   }
-  if (!canAdd && add) add.remove();
-  if (canAdd && add) sayWhyUnread(add, ctx);
-  if (canAdd && !add) strip.appendChild(addChip(ctx));
-  if (!list.length && !canAdd) strip.remove();
+  if (!list.length) strip.remove();
 }
 
 /**

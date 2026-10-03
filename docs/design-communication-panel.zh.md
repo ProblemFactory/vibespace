@@ -2629,6 +2629,16 @@ integrations: []
   Google 的 OAuth client)适合; **按席位付费的 key 不适合** —— 集群给一把就是集群替所有人付钱,
   而供应商的并发席位会让用户互相踩(CloakBrowser 的分档就是按并发会话数卖的)。
 
+> **2026-10-01 补记(lane cluster-presets, 2.369.200, B-53fe):本节的「values → Secret → env」已不是默认形态。**
+> env 在启动时读、按 release 写 —— 每轮换一个公司 client 就要给每个用户 helm upgrade 一次 = 每人滚一次 pod,
+> 而没写这块的 release(新用户)悄无声息地什么都没有。现在 chart 默认把**一个**命名空间级 Secret
+> (`vibespace-cluster-presets`,键 `gdriveClients` / `integrations`)以只读 projected volume 挂到每个 pod 的
+> `/etc/vibespace/presets`,再叠上 release 自己的 Secret 作为**按键**覆盖层(`override/`,两个来源都 `optional`);
+> 服务端 `src/server/cluster-presets.js` 监视该目录(kubelet 原子替换 `..data`,≤ 约 2 分钟),变化时重读一次、
+> 实时重新派生 `cluster:<k>` 那一档并广播,日志只写一行键名。env 仍是**兜底档**(`presets.volume=false` 原样渲染
+> 旧的 env 形态)。上面的四条规则不变;单字段形式、「绝不 `value:`」、「解析失败绝不抛」照旧适用于文件档。
+> 管理员的一条命令与迁移说明见 `deploy/README.md`「Company presets」。
+
 ### 14.9 一个 OAuth client, N 个实例, N 个公开地址
 
 集群把每个实例自己的公开地址注进去(`main.yaml:172-176`), 所以"一个注册过的 OAuth 应用怎么服务

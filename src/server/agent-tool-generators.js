@@ -10,7 +10,7 @@ const path = require('path');
 const os = require('os');
 const { execFileSync } = require('child_process');
 
-function create({ rootDir, port }) {
+function create({ rootDir, port, onHookFileCreated = null }) { // onHookFileCreated({harness, file, rel, at}) — the registration that CREATED a hook file (lane hooks-create: src/server/late-hooks.js tells the sessions that predate it)
   const ensureDir = (dir) => { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); };
   const USAGE_CACHE_DIR = path.join(rootDir, 'data', 'usage-cache');
 // The harness registry + the settings/plan modules are needed by createHookHelper()
@@ -371,9 +371,12 @@ function agentHooksStatus() {
     let found = [];
     const evs = HOOK_EVENTS_FOR(key);
     try { found = evs.map(ev => root ? _findOurHookIn(root.hooks?.[ev]) : null); } catch { found = evs.map(() => null); }
+    const fileExists = fs.existsSync(file), dirExists = fs.existsSync(path.dirname(file));
     out[key] = {
       file,
-      fileExists: fs.existsSync(file),
+      fileExists,
+      dirExists,                                                               // the CLI has run here (its config directory exists)
+      creatable: !fileExists && dirExists && def.createIfMissing === 'dir-exists', // missing, and the next registration creates it (lane hooks-create)
       parseError,
       installed: found.every(h => h && h.command === hookCmd),
       stale: found.some(h => h && h.command !== hookCmd) || (found.some(Boolean) && !found.every(Boolean)),
@@ -408,12 +411,23 @@ function ensureAgentHooks({ auto = false } = {}) {
   const results = {};
   for (const [key, def] of Object.entries(HOOK_FILES)) {
     try {
-      _patchHookFile(def.file(), def.createIfMissing, (root) => registerHookEntries(root, HOOK_EVENTS_FOR(key), hookCmd))
-        && console.log(`Registered VibeSpace hooks in ${def.file()}`);
-      results[key] = { ok: true };
+      const w = _patchHookFile(def.file(), def.createIfMissing, (root) => registerHookEntries(root, HOOK_EVENTS_FOR(key), hookCmd));
+      if (w === 'created') {
+        // THE FILE THE CLI NEVER WROTE (lane hooks-create): created here because its directory proves the CLI has run
+        // ('dir-exists'); a session already running snapshotted its hooks without ours — the caller tells them
+        const rel = def.rel.join('/');
+        console.log(`created ~/${rel} (the CLI had never written one) and registered VibeSpace hooks`);
+        results[key] = { ok: true, created: true };
+        if (typeof onHookFileCreated === 'function') {
+          try { onHookFileCreated({ harness: key, file: def.file(), rel, at: Date.now() }); } catch (e) { console.warn(`[hooks] ${key}: the sessions that predate ~/${rel} were not told — ${e && e.message}`); }
+        }
+      } else {
+        if (w) console.log(`Registered VibeSpace hooks in ${def.file()}`);
+        results[key] = { ok: true };
+      }
     } catch (e) {
       console.log(`Hook registration (${key}) skipped:`, e.message);
-      results[key] = { ok: false, error: e.message };
+      results[key] = { ok: false, error: e.message, ...(e.missing ? { missing: e.missing } : {}) };
     }
   }
   return results;

@@ -33,7 +33,7 @@ const WHO_MAX = 64;
 const REFUSALS = Object.freeze(['not_granted', 'groups_unreadable', 'unknown_shape', 'fork_pending', 'no_machine', 'ambiguous',
   'no_exits', 'offline', 'ask_pending', 'ask_denied', 'ask_changed', 'ask_expired', 'ask_settled', 'ask_unfiled', 'human_only',
   'session_token_required', 'bad_command', 'bad_grant', 'bad_mode', 'bad_principal', 'empty_list',
-  'too_many', 'list_changed', 'run_failed', 'conversation_gone', 'remote_session']);
+  'too_many', 'list_changed', 'run_failed', 'conversation_gone', 'remote_session', 'spawn_failed']);
 /** THE run bound: the device daemon kills a `run-cmd` child at 30 s (src/agentd/agentd.js `Math.min(…, 30000)`);
  *  the exit route used to promise 120 s and never got it. ONE number: the daemon's cap, the CLI's help, the card
  *  (test-architecture pins the daemon's literal to this). */
@@ -59,6 +59,21 @@ const cmdBytes = (s) => (typeof Buffer !== 'undefined' ? Buffer.byteLength(Strin
 // (no CR, no joiners): whatever the row / window / card would not show as itself is refused
 const HC = require('./hidden-chars.js');
 const hiddenOrderOf = (s) => HC.hiddenCharsOf(String(s == null ? '' : s), { max: 64 });
+// lane-exit-run-output (2026-10-01): a command's OUTPUT is text a MACHINE wrote, toward the user (the card, the
+// machine's command list) and toward agents (the CLI's `runs`) — it goes through THE belt (src/peer-text.js: bound →
+// fold → frames inert) and browser-trace's URL-secret cut before it is stored; one writer (exit-proxy's audit line)
+const PT = require('./peer-text.js');
+const { withoutUrlSecrets } = require('./browser-trace.js');
+// verify r1 F1 (2026-10-01): the stored heads redact SECRET SHAPES (a PEM block, `KEY=value`, a bearer, a known token
+// prefix, `password <x>`) — the URL rule and the belt hid none of them; src/secret-shapes.js is THE one rule
+const { redactSecrets, REDACTED } = require('./secret-shapes.js');
+const XS = require('./exit-shell.js');
+// re-exported under their own names as SHORTHAND entries below: node's CJS-to-ESM lexer (the client modules import this file
+// as ESM in the suites) detects `{ a, b }`, never `{ a: X.a }`
+const platformLabel = XS.platformLabel, interpreterOf = XS.interpreterOf, knownInterpreter = XS.knownInterpreter, spawnFailureText = XS.spawnFailureText, RUN_SHELL_CAP = XS.RUN_SHELL_CAP;
+const OUTPUT_HEAD_BYTES = 4096;      // per stream, on the audit line / the card / the history row
+const RUNS_DEFAULT = 50;             // the history's default length
+const RUNS_MAX = 200;
 
 // ── the reader ──────────────────────────────────────────────────────────────
 /** The rows a grant stores: closed kinds, well-formed ids, no name (a name is a live read), dedup, ≤ WHO_MAX. */
@@ -81,10 +96,17 @@ function normGrant(g, grant) {
   if (grant === 'run') out.ask = g.ask === true;
   return out;
 }
+/** A daemon's `spawnError` (the child never started) normalized to its two fields, or null (no code ⇒ nothing). */
+function spawnErrorOf(x) {
+  if (!x || typeof x !== 'object' || typeof x.code !== 'string' || !x.code) return null;
+  // verify r1 F5a: the message is a DAEMON's words toward the user and the agent — the belt (invisibles folded, a frame inert)
+  return { code: x.code.replace(/[^A-Z0-9_]/g, '').slice(0, 24) || 'ESPAWN', message: PT.toAgentText(cleanCmd(x.message, 200), { max: 200, kind: 'line' }) };
+}
 function normLastRun(x) {
   if (!x || typeof x !== 'object') return null;
   const by = x.by && typeof x.by === 'object' ? { key: String(x.by.key || '').slice(0, 200), name: cleanCmd(x.by.name, 120) } : null;
-  return { at: Number(x.at) || 0, by, cmd: cleanCmd(x.cmd, LAST_RUN_CMD_MAX), code: Number.isFinite(Number(x.code)) ? Number(x.code) : null, ms: Number(x.ms) || 0, outcome: String(x.outcome || 'ran').slice(0, 20), ...(x.timedOut ? { timedOut: true } : {}), ...(x.revokedDuringRun ? { revokedDuringRun: true } : {}) };
+  const sf = spawnErrorOf(x.spawnError);
+  return { at: Number(x.at) || 0, by, cmd: cleanCmd(x.cmd, LAST_RUN_CMD_MAX), code: x.code === null || x.code === undefined ? null : (Number.isFinite(Number(x.code)) ? Number(x.code) : null), ms: Number(x.ms) || 0, outcome: String(x.outcome || 'ran').slice(0, 20), ...(x.timedOut ? { timedOut: true } : {}), ...(x.revokedDuringRun ? { revokedDuringRun: true } : {}), ...(sf ? { spawnError: sf } : {}), ...(knownInterpreter(x.interpreter) ? { interpreter: knownInterpreter(x.interpreter) } : {}) };
 }
 /**
  * THE ONE READER of a host record's exit access (every shape on disk):
@@ -247,8 +269,109 @@ function answerVerdict(ask, { answer, by, now = Date.now() } = {}) {
 
 // ── the run ledger ──────────────────────────────────────────────────────────
 /** The stored `lastRun` (the row's "last run"): the command's first 120 chars, control characters as spaces. */
-function runRecord({ cmd, code = null, ms = 0, by = null, at = Date.now(), outcome = 'ran', timedOut = false, revokedDuringRun = false } = {}) {
-  return normLastRun({ at, by, cmd, code, ms, outcome, timedOut, revokedDuringRun });
+function runRecord({ cmd, code = null, ms = 0, by = null, at = Date.now(), outcome = 'ran', timedOut = false, revokedDuringRun = false, spawnError = null, interpreter = null } = {}) {
+  return normLastRun({ at, by, cmd, code, ms, outcome, timedOut, revokedDuringRun, spawnError, interpreter });
+}
+
+// ── the output (lane-exit-run-output, 2026-10-01) ────────────────────────────
+/** The longest prefix of `s` within `n` UTF-8 bytes, never inside a code point (no Buffer: the bundle runs this too). */
+function cutBytes(s, n) {
+  const t = String(s == null ? '' : s);
+  let bytes = 0, i = 0;
+  for (const ch of t) {
+    const cp = ch.codePointAt(0);
+    const b = cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
+    if (bytes + b > n) return { text: t.slice(0, i), cut: true };
+    bytes += b; i += ch.length;
+  }
+  return { text: t, cut: false };
+}
+/**
+ * THE STORED HEADS of a command's output: each stream cut to `bytes` (4 KiB) — the cut SAID, never silent —, the
+ * secrets of any URL in it cut (browser-trace's rule: userinfo, a credential-named query / fragment), every SECRET
+ * SHAPE redacted (src/secret-shapes.js: a PEM block, a secret-named `KEY=value`, a bearer, a known prefix — verify r1
+ * F1: nine such shapes were stored verbatim), then THE belt
+ * (peer-text: fold, frames inert per line). The ONE place the output is bounded and judged; the audit line, the card
+ * and the history rows carry exactly this. → `{stdout, stderr, cut: {stdout, stderr}}`.
+ */
+function outputHeads({ stdout, stderr } = {}, { bytes = OUTPUT_HEAD_BYTES } = {}) {
+  const one = (s) => {
+    const pre = cutBytes(s, bytes * 2);                       // bound BEFORE the URL walk (a 1 MiB body is never regexed whole)
+    // verify r2 F1: THE FOLD FIRST — the belt's fold (a NUL / control → a space, a format character out) ran AFTER the
+    // secret rule, so what the rule judged was not what the reader saw: `cat /proc/<pid>/environ` (NUL-separated) hid
+    // every variable but the first behind a byte the rule's boundary class does not know, and a zero-width character
+    // inside a name (`SEC\u200bRET=`) split the name — the fold then revealed both whole. Folded ⇒ URL rule ⇒ shapes ⇒ cut
+    const folded = PT.foldHidden(pre.text);
+    const c = cutBytes(redactSecrets(withoutUrlSecrets(folded)).text, bytes);   // the URL rule, then the secret shapes (verify r1 F1), then the cut
+    if (c.cut) c.text = withoutHalfMarker(c.text);                              // verify r3 F4: the cut never leaves half a marker
+    const text = PT.toAgentText(c.text, { max: Math.max(1, c.text.length), kind: 'block' });
+    return { text, cut: pre.cut || c.cut };
+  };
+  const o = one(stdout), e = one(stderr);
+  return { stdout: o.text, stderr: e.text, cut: { stdout: o.cut, stderr: e.cut } };
+}
+/** What the card shows before "Show output": stderr when it has anything (the error is there), else stdout — the
+ *  first `n` lines; `more` = lines beyond them, the other stream, or a cut. */
+function outputPreview(heads, n = 3) {
+  const h = heads && typeof heads === 'object' ? heads : {};
+  const se = String(h.stderr || ''), so = String(h.stdout || '');
+  const stream = se.trim() ? 'stderr' : so.trim() ? 'stdout' : null;
+  if (!stream) return { stream: null, lines: [], more: false };
+  const text = stream === 'stderr' ? se : so;
+  const lines = text.replace(/\n+$/, '').split('\n');
+  const cut = h.cut && typeof h.cut === 'object' ? h.cut : {};
+  const other = stream === 'stderr' ? !!so.trim() : false;
+  return { stream, lines: lines.slice(0, n), more: lines.length > n || other || !!cut.stdout || !!cut.stderr };
+}
+/** verify r1 F5b: a stored head is JUDGED ON THE WAY OUT — the fold, the secret rule, the belt again (all idempotent): a line
+ *  on disk is never trusted because it is on disk (a hand-written frame in `stdout` was printed live by `vibespace-exit runs`). */
+const judgeHead = (x) => {   // verify r2 F1: folded first, here too
+  let t = redactSecrets(PT.foldHidden(String(x == null ? '' : x).slice(0, OUTPUT_HEAD_BYTES))).text;
+  // verify r3 F4: a head that GREW under the rule (an older line stored before it: `token=a` → `token=«redacted»`, ten times
+  // longer) is cut by the belt's rule (4 095 + …), never inside a marker
+  if (t.length > OUTPUT_HEAD_BYTES) t = withoutHalfMarker(PT.cutText(t, OUTPUT_HEAD_BYTES).slice(0, -1)) + '…';
+  return PT.toAgentText(t, { max: OUTPUT_HEAD_BYTES, kind: 'block' });
+};
+/** verify r3 F4: a cut never leaves HALF a marker — the byte cut fell inside `«redacted»` for ten of the pads before 4096 and the
+ *  stored head ended `TOKEN=«redac` (no material, but a half marker reads as a value). A cut text ending in a proper prefix of the
+ *  marker loses that prefix; the cut is said either way. */
+function withoutHalfMarker(t) {
+  const i = t.lastIndexOf('«');
+  if (i < 0 || t.length - i >= REDACTED.length) return t;
+  return REDACTED.startsWith(t.slice(i)) ? t.slice(0, i) : t;
+}
+/** The structured block the chat card carries beside its words (exit-proxy builds it, the renderer draws it). */
+function cardOutput({ code = null, ms = 0, timedOut = false, truncated = false, spawnError = null, interpreter = null, heads = null } = {}) {
+  const h = heads && typeof heads === 'object' ? heads : { stdout: '', stderr: '', cut: { stdout: false, stderr: false } };
+  return {
+    code: Number.isInteger(code) ? code : null, ms: Number(ms) || 0, timedOut: !!timedOut, truncated: !!truncated,
+    spawnError: spawnErrorOf(spawnError), interpreter: knownInterpreter(interpreter),
+    stdout: judgeHead(h.stdout), stderr: judgeHead(h.stderr),
+    cut: { stdout: !!(h.cut && h.cut.stdout), stderr: !!(h.cut && h.cut.stderr) },
+  };
+}
+/**
+ * ONE history row off an audit line (the owner's `GET /api/hosts/:id/exit-runs`, the agent's `vibespace-exit runs`):
+ * a `run` line with a command — ran / timed_out / spawn_failed / refused — re-bounded AND re-judged (verify r1 F5b: a
+ * hand-written line is still a line, and its heads pass the belt + the secret rule again on the way out). `agent: true` drops the conversation's name and key (the agent's rows are its own). null = not a run.
+ */
+function runRow(l, { agent = false } = {}) {
+  if (!l || typeof l !== 'object' || l.verb !== 'run' || typeof l.cmd !== 'string') return null;
+  const sf = spawnErrorOf(l.spawnError);
+  const refusal = typeof l.refusal === 'string' && l.refusal ? l.refusal.slice(0, 40) : null;
+  const outcome = sf ? 'spawn_failed' : refusal && refusal !== 'spawn_failed' ? 'refused' : l.timedOut ? 'timed_out' : 'ran';
+  const cut = l.cut && typeof l.cut === 'object' ? { stdout: !!l.cut.stdout, stderr: !!l.cut.stderr } : { stdout: false, stderr: false };
+  return {
+    id: typeof l.id === 'string' ? l.id.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32) || null : null,   // verify r2 F7: the line's own key (an older line has none)
+    at: Number(l.at) || 0, hostId: typeof l.hostId === 'string' ? l.hostId.slice(0, 120) : null, machine: cleanCmd(l.machine, 120),
+    ...(agent ? {} : { name: cleanCmd(l.name, 120), sessionKey: typeof l.sessionKey === 'string' ? l.sessionKey.slice(0, 200) : null }),
+    cmd: cleanCmd(l.cmd, CMD_MAX), outcome,
+    code: Number.isInteger(l.code) ? l.code : null, ms: Number(l.ms) || 0,
+    timedOut: !!l.timedOut, truncated: !!l.truncated, asked: !!l.asked, revokedDuringRun: !!l['revoked-during-run'],
+    refusal: outcome === 'refused' ? refusal : null, spawnError: sf,
+    interpreter: knownInterpreter(l.interpreter),   // verify r1 F5a: the closed set, never a stored string as itself
+    stdout: judgeHead(l.stdout), stderr: judgeHead(l.stderr), cut,   // verify r1 F5b: judged at read, never trusted raw
+  };
 }
 
 // ── machines ────────────────────────────────────────────────────────────────
@@ -282,9 +405,21 @@ const head = (cmd, n = 80) => { const c = cleanCmd(cmd, 100000).replace(/`/g, "'
  * never another conversation's name, a Task Group title or a key (the words census poisons all three).
  * `has` = the other grant this caller DOES hold (`{use}` / `{run}`) — the sentence offers it.
  */
-function refusalText(code, { machine = '', grant = 'run', has = {}, cmd = '', error = '', where = '', same = false, hidden = null } = {}) {
+function refusalText(code, { machine = '', grant = 'run', has = {}, cmd = '', error = '', where = '', same = false, hidden = null, spawnError = null, interpreter = null, platform = null } = {}) {
   const M = q(machine);
   switch (code) {
+    // lane-exit-run-output: the child NEVER STARTED (the owner's Windows box had no `sh`) — why, that nothing ran, what
+    // the machine runs commands under, and that an `sh` failure on a Windows machine means its agent is older than this
+    // VibeSpace (an older daemon only knows the argv form the hub ran as `sh -lc`)
+    case 'spawn_failed': {
+      const sf = spawnErrorOf(spawnError);
+      const interp = String(interpreter || XS.POSIX_SHELL);
+      const label = platformLabel(platform);
+      const own = platform ? XS.interpreterOf(platform) : null;
+      return `could not start \`${head(cmd)}\` on ${M} — ${XS.spawnFailureText(sf, { interpreter: interp })}${sf && sf.code !== 'ESHELLLINE' ? ` (${sf.code})` : ''}; nothing ran.`
+        + (label && own ? ` ${M} runs ${label}: commands there run under ${own}` : '')
+        + (own && interp !== own ? ` — its agent is older than this VibeSpace (it ran \`${interp}\`): ask the user to update it (Remote tab → the machine row → Test connection)` : '');
+    }
     case 'not_granted':
       if (grant === 'run') return has && has.use
         ? `machine ${M} is not open to this conversation for running commands — ${WAY_OUT}; you may still borrow its network (vibespace-exit use ${String(machine).slice(0, 60)})`
@@ -333,12 +468,15 @@ function cardText(rec, { machine = '' } = {}) {
   if (r.outcome === 'unfiled') return `did not run \`${c}\` on ${machine} — its approval could not be put in For you`;
   if (r.outcome === 'offline') return `did not run \`${c}\` on ${machine} — ${machine} is offline`;
   if (r.outcome === 'run_failed') return `could not finish \`${c}\` on ${machine} — the link was lost while it ran`;
+  // lane-exit-run-output: the child never started — the card says WHY (the owner read "exit 1 · 0.0 s" four times)
+  if (r.outcome === 'spawn_failed') return `could not start \`${c}\` on ${machine} — ${XS.spawnFailureText(spawnErrorOf(r.spawnError), { interpreter: r.interpreter || XS.POSIX_SHELL })}`;
   return `did not run \`${c}\` on ${machine} — this conversation may not run commands there`;
 }
 /** The CLI's stderr line for a terminal-mode session (no chat card). */
 function cliLine(rec, { machine = '' } = {}) {
   const r = rec || {};
   if (r.outcome === 'ran') return `# ran on ${machine} — ${r.timedOut ? `timed out after ${EXIT_RUN_TIMEOUT_MS / 1000} s` : `exit ${r.code == null ? '?' : r.code}`}, ${secs(r.ms)}${r.truncated ? ' — OUTPUT CUT (the machine keeps 1 MiB of stdout / 64 KiB of stderr; the tail is missing)' : ''} (recorded)`;
+  if (r.outcome === 'spawn_failed') return `# could not start on ${machine} — ${XS.spawnFailureText(spawnErrorOf(r.spawnError), { interpreter: r.interpreter || XS.POSIX_SHELL })} (recorded)`;
   return `# did not run on ${machine} (recorded)`;
 }
 /** The row's numbers (the words are the client's, §11.3). */
@@ -362,7 +500,9 @@ function migrateExitAccess(h, { now = Date.now() } = {}) {
 
 module.exports = {
   GRANTS, MODES, WHO_MAX, REFUSALS, EXIT_RUN_TIMEOUT_MS, ASK_TTL_MS, CMD_MAX, LAST_RUN_CMD_MAX, ASK_STATES, WAY_OUT,
+  OUTPUT_HEAD_BYTES, RUNS_DEFAULT, RUNS_MAX, RUN_SHELL_CAP,
   sessionKeyOf, callerKeys, principalsNow, cmdBytes, hiddenOrderOf,
   exitAccessOf, exitVerdict, agentView, exitStamp, exitBaseVerdict, patchVerdict, storedExit,
   askState, answerVerdict, runRecord, resolveMachine, refusalText, cardText, cliLine, summaryOf, anyGrant, migrateExitAccess,
+  spawnErrorOf, outputHeads, outputPreview, cardOutput, runRow, platformLabel, interpreterOf, knownInterpreter, spawnFailureText,
 };

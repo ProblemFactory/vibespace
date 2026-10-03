@@ -19,7 +19,8 @@
 //   billing chip (lane billing-chip, 2026-09-30): a stub active-sessions frame
 //       moves the live chat's pool member A → B ⇒ the status-bar chip names B,
 //       on the same node (DOM text + a screenshot, the chip scrolled into view)
-//   #5  the message long-press menu; the hover buttons are display:none
+//   #5  the message menu from the … button (a long press on the words selects them — lane mobile-select); the
+//       hover buttons are display:none
 //   #7  switcher: the "+" desktop tab, tab long-press → Rename/Delete, window
 //       row long-press → the 'window' menu incl. Move to Desktop
 //   #10 the terminal key row shows every key inside the viewport and carries
@@ -348,11 +349,12 @@ try {
   await escape();
   const hover = await evalJs(`(() => { const btns = [...document.querySelectorAll('.chat-view .chat-msg > .chat-open-editor-btn')]; return { n: btns.length, shown: btns.filter((b) => getComputedStyle(b).display !== 'none').length }; })()`);
   check(`the ${hover.n} per-message hover buttons are display:none ≤768px (the overlap defect)`, hover.n > 0 && hover.shown === 0, hover);
-  // a real long-press on an assistant message → the message menu
+  // the message menu opens from the message's … button (lane mobile-select: a long press on the WORDS is the
+  // platform's selection — scripts/test-mobile-select.mjs drives that and the chrome presses)
   await evalJs(`document.querySelector('.chat-message-list').scrollTop = document.querySelector('.chat-message-list').scrollHeight; true`); await sleep(200);
-  await longPress('.chat-view .chat-msg.chat-msg-assistant');
+  await tap('.chat-view .chat-msg.chat-msg-assistant .chat-msg-more');
   const msgMenu = await evalJs(`[...document.querySelectorAll('.context-menu.chat-msg-menu .context-menu-item')].map((el) => el.textContent.trim())`);
-  check(`a long-press on a message opens the message menu: ${msgMenu.join(' / ')}`, msgMenu.includes('Copy text') && msgMenu.includes('Open in editor') && msgMenu.includes('Message details'), msgMenu);
+  check(`a tap on a message's … button opens the message menu: ${msgMenu.join(' / ')}`, msgMenu.includes('Copy text') && msgMenu.includes('Open in editor') && msgMenu.includes('Message details'), msgMenu);
   check('…without a Fork row in a VIEW-ONLY window (the fork gate holds)', !msgMenu.includes('Fork from here'), msgMenu);
   await evalJs(`[...document.querySelectorAll('.chat-msg-menu .context-menu-item')].find((el) => el.textContent.trim() === 'Message details').click(); true`); await sleep(200);
   check('Message details opens the per-message metadata popup', await evalJs(`!!document.querySelector('.msg-meta-pop')`));

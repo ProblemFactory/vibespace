@@ -4,6 +4,8 @@ import { t } from './i18n.js';
 import { UI_ICONS } from './icons.js';
 import { inboxCountText } from './title-chips.js'; // lane G: the inbox chip never grows past icon + '99+'
 import { showWindowContextMenu } from './taskbar.js';
+import { dragEndVerdict } from './drag-end.js';
+import { captureOn, setDragShield, attachDragFeed, startPointerDrag } from './drag-feed.js'; // ONE feed for every drag door (lane-drag-release verify r1)
 import { normalizeChain, displayedPanes, clampRatio, splitColumns, paneMinPx, visualTabOrder, splitPartner, ownerColor, chainSyncKey, showTab, enterSplit, insertTab, moveTab, removeTab, swapSides, SPLIT_RATIO_DEFAULT, holdRatio, heldRatio, releaseRatio, ratioDiffers, followFor, foldBackTarget, tabDragMode } from './chain-layout.js';
 
 /**
@@ -129,12 +131,23 @@ const tabGroupMethods = {
     let mouseDown = false, dragging = false, ghost = null, startX, startY;
     let targetWin = null, fromRect = null; // fromRect = where the window stood before the drag (F3's Undo puts it back)
 
-    icon.addEventListener('mousedown', (e) => {
-      if (e.button !== 0) return;
-      e.stopPropagation(); e.preventDefault();
+    // THE DOOR (lane-drag-release verify r1): a POINTER press captured on the icon — the drag is fed from the icon
+    // whatever the cursor crosses (another window's iframe / canvas used to swallow the document mouseup: the source
+    // window stayed INVISIBLE with its ghost on screen). The compat mousedown stays, cancelled as before (no title-bar
+    // drag, no selection, no focus change from the icon).
+    let feed = null, feedState = { active: false, pointerId: null }, lastPoint = null;
+    const shieldKey = 'icon:' + winInfo.id; // this drag's hold on the shield (verify r2 #2)
+    icon.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || e.isPrimary === false || mouseDown) return;
+      e.stopPropagation();
       mouseDown = true; dragging = false;
-      startX = e.clientX; startY = e.clientY;
+      startX = e.clientX; startY = e.clientY; lastPoint = { clientX: e.clientX, clientY: e.clientY };
+      const pid = captureOn(icon, e);
+      feedState = { active: true, pointerId: pid };
+      if (feed) feed.stop();
+      feed = attachDragFeed({ el: pid != null ? icon : null, pointerId: pid, onMove, onEnd, signal: winInfo._listenerCtl?.signal });
     });
+    icon.addEventListener('mousedown', (e) => { if (e.button === 0) { e.stopPropagation(); e.preventDefault(); } });
 
     let prevVisibility = '';
     const processMove = (e) => {
@@ -143,6 +156,7 @@ const tabGroupMethods = {
       if (!dragging) {
         if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
         dragging = true;
+        setDragShield(true, shieldKey); // no window's content takes the pointer while the icon is dragged (verify r1)
         fromRect = this._rectSnap(winInfo);
         // Hide source window during icon drag — the ghost represents it
         prevVisibility = winInfo.element.style.visibility;
@@ -168,15 +182,26 @@ const tabGroupMethods = {
     let pendingEv = null, raf = 0;
     const onMove = (e) => {
       if (!mouseDown) return;
+      if (dragEndVerdict({ type: 'pointermove', buttons: e.buttons, pointerId: e.pointerId }, feedState).end) { onUp(e, 'released-unseen'); return; } // a move with no button = a release the page never saw
+      if (Number.isFinite(e.clientX)) lastPoint = { clientX: e.clientX, clientY: e.clientY };
       pendingEv = e;
       if (raf) return;
       raf = requestAnimationFrame(() => { raf = 0; const ev = pendingEv; pendingEv = null; if (ev && mouseDown) processMove(ev); });
     };
 
-    const onUp = (e) => {
+    /** THE END DOOR of the icon drag (verify r1): once, whatever ended it — the release, its cancel, the capture lost,
+     *  the window's blur, the page hidden, a move with no button (dragEndVerdict names them); the drop at the pointer's
+     *  point, else where it was last seen. */
+    const onUp = (e, why = 'release') => {
       if (raf) { cancelAnimationFrame(raf); raf = 0; pendingEv = null; }
+      if (feed) { feed.stop(); feed = null; }
+      feedState = { active: false, pointerId: null };
       if (!mouseDown) return;
       mouseDown = false;
+      setDragShield(false, shieldKey);
+      winInfo._lastIconDragEnd = why; // the end's cause (the suites read it)
+      const pointed = e && Number.isFinite(e.clientX) && (why === 'release' || why === 'cancel' || why === 'released-unseen');
+      e = pointed ? e : (lastPoint || { clientX: startX, clientY: startY });
       if (ghost) { ghost.remove(); ghost = null; }
       for (const [, w] of this.windows) w.element.classList.remove('tab-drop-target');
       if (dragging) {
@@ -185,6 +210,7 @@ const tabGroupMethods = {
       }
       if (!dragging) return;
       dragging = false;
+      if (why === 'owner-gone') { targetWin = null; return; } // the window closed mid-drag (verify r2 #1): no merge of a window that is leaving
 
       if (targetWin && targetWin.id !== winInfo.id) {
         if (winInfo._tabChain && winInfo._tabChain === targetWin._tabChain) return;
@@ -193,10 +219,10 @@ const tabGroupMethods = {
       }
       targetWin = null;
     };
-
-    const signal = winInfo._listenerCtl?.signal;
-    document.addEventListener('mousemove', onMove, { signal });
-    document.addEventListener('mouseup', onUp, { signal });
+    const onEnd = (e) => {
+      const v = dragEndVerdict({ type: e && e.type, buttons: e && e.buttons, pointerId: e && e.pointerId, hidden: typeof document !== 'undefined' && document.hidden === true }, feedState);
+      if (v.end) onUp(e, v.why);
+    };
   },
 
   /** THE CHAIN WITNESS (lane desktop-move verify r5 ②): `win._chainAt` on every member of a group THIS PAGE changed — a merge,
@@ -371,14 +397,11 @@ const tabGroupMethods = {
       end(); ctl = new AbortController();
       const startRatio = chain.split.ratio;
       divider.classList.add('dragging'); host()?.element.classList.add('split-resizing');
-      try { divider.setPointerCapture(e.pointerId); } catch { /* optional */ }
       const onMove = (ev) => { pending = ev; if (raf) return; raf = requestAnimationFrame(() => { raf = 0; const x = pending; pending = null; if (x) apply(x); }); };
       // a drag that MOVED the divider holds its ratio until a save carries it (verify r1 ①: a record held for this
       // pointerup must not overwrite it — PURE holdRatio / heldRatio)
       const onUp = () => { const h = host(); end(); divider.classList.remove('dragging'); h?.element.classList.remove('split-resizing'); if (chain.layout === 'split' && chain.split && Math.abs(chain.split.ratio - startRatio) > 0.005) this._holdSplitRatio(chain); this._resizePanes(chain); this._notify(); };
-      document.addEventListener('pointermove', onMove, { signal: ctl.signal });
-      document.addEventListener('pointerup', onUp, { signal: ctl.signal });
-      document.addEventListener('pointercancel', onUp, { signal: ctl.signal });
+      startPointerDrag(divider, e, { onMove, onEnd: onUp, signal: ctl.signal, shield: 'divider:' + chain.tabs[0] }); // THE feed (verify r2 census): captured on the divider, every end kind (blur / hidden / a release the page never saw used to leave the panes resizing)
     });
     divider.addEventListener('dblclick', (e) => { e.stopPropagation(); const r0 = chain.split ? chain.split.ratio : null; this.setSplitRatio(chain, SPLIT_RATIO_DEFAULT); if (chain.split && r0 !== null && Math.abs(chain.split.ratio - r0) > 0.005) this._holdSplitRatio(chain); });
     divider.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); this._showSplitMenu(chain, e.clientX, e.clientY); });
@@ -1118,41 +1141,53 @@ const tabGroupMethods = {
     let savedBounds = null;
     let dragCtl = null;
     let marker = null;
-    const endDrag = () => { if (dragCtl) { dragCtl.abort(); dragCtl = null; } };
+    let feed = null, feedState = { active: false, pointerId: null }, lastPoint = null;
+    const shieldKey = 'tab:' + winId; // this drag's hold on the shield (verify r2 #2)
+    const endDrag = () => { if (feed) { feed.stop(); feed = null; } if (dragCtl) { dragCtl.abort(); dragCtl = null; } feedState = { active: false, pointerId: null }; };
     const endReorder = () => {
       if (marker) { marker.remove(); marker = null; }
       document.querySelectorAll('.tab-item.tab-reordering').forEach((el) => el.classList.remove('tab-reordering'));
     };
 
-    tabEl.addEventListener('mousedown', (e) => {
-      if (e.target.closest('.tab-close') || e.button !== 0) return;
+    // THE DOOR (lane-drag-release verify r1): a POINTER press, the pointer CAPTURED on the strip's TITLE BAR — the one
+    // element that outlives the tear-off (the detach re-renders the tab bar and the tab element itself is rebuilt: a
+    // capture on it would be lost under the user's finger); the drag is fed from there whatever the cursor crosses (a
+    // release over another window's iframe / canvas used to leave the torn-off window armed with its highlight on).
+    // Drag listeners live on a per-drag controller, NOT chain._tabCtl: detaching re-renders the tab bar (which aborts
+    // _tabCtl) MID-DRAG, which used to kill onMove/onUp — freezing the drag and leaving the grid highlight stuck until
+    // something else repainted it. The compat mousedown stays, cancelled (no selection); the tab's own mousedown shows it.
+    // …nor the tab's two click chips, the mini-inbox badge and the billing chip (2.369.200 integration: the capture on the title
+    // bar retargets the click — neither chip's fired)
+    const notATabDrag = (e) => !!(e.target && typeof e.target.closest === 'function' && (e.target.closest('.tab-close') || e.target.closest('.win-inbox-badge') || e.target.closest('.win-auth-badge')));
+    tabEl.addEventListener('pointerdown', (e) => {
+      if (notATabDrag(e) || e.button !== 0 || e.isPrimary === false || mouseDown) return;
       if (chain.tabs.length <= 1) return;
       mouseDown = true; detached = false; mergeTarget = null; mode = null;
-      startX = e.clientX; startY = e.clientY;
-      // Drag listeners live on a per-drag controller, NOT chain._tabCtl:
-      // detaching re-renders the tab bar (which aborts _tabCtl) MID-DRAG, which
-      // used to kill onMove/onUp — freezing the drag and leaving the grid
-      // highlight stuck until something else repainted it.
+      startX = e.clientX; startY = e.clientY; lastPoint = { clientX: e.clientX, clientY: e.clientY, altKey: !!e.altKey };
       endDrag();
+      const capEl = (typeof tabEl.closest === 'function' && tabEl.closest('.window-titlebar')) || tabEl;
+      const pid = captureOn(capEl, e);
+      feedState = { active: true, pointerId: pid };
       dragCtl = new AbortController();
-      document.addEventListener('mousemove', onMove, { signal: dragCtl.signal });
-      document.addEventListener('mouseup', onUp, { signal: dragCtl.signal });
+      // the feed's owner = this drag AND the dragged window (verify r2 #1: a window closed mid-drag ends the drag it is in — owner-gone — instead of leaving its chrome and the shield behind)
+      const own = this.windows.get(winId)?._listenerCtl?.signal;
+      feed = attachDragFeed({ el: pid != null ? capEl : null, pointerId: pid, onMove, onEnd, signal: own && typeof AbortSignal.any === 'function' ? AbortSignal.any([dragCtl.signal, own]) : dragCtl.signal });
       document.addEventListener('keydown', onKey, { signal: dragCtl.signal, capture: true });
-      e.preventDefault();
     });
+    tabEl.addEventListener('mousedown', (e) => { if (!notATabDrag(e) && e.button === 0 && chain.tabs.length > 1) e.preventDefault(); });
 
     // Esc cancels a REORDER (nothing moved yet — the move happens on the drop)
     const onKey = (e) => {
       if (e.key !== 'Escape' || mode !== 'reorder' || !mouseDown) return;
       e.preventDefault(); e.stopPropagation();
-      mouseDown = false;
+      mouseDown = false; setDragShield(false, shieldKey);
       if (moveRaf) { cancelAnimationFrame(moveRaf); moveRaf = 0; pendingEv = null; }
       endReorder(); endDrag();
     };
 
     const reorderMove = (e) => {
       const host = this.windows.get(chain.tabs[0]);
-      if (!host || host._tabChain !== chain || !chain.tabs.includes(winId)) { mouseDown = false; endReorder(); endDrag(); return; }
+      if (!host || host._tabChain !== chain || !chain.tabs.includes(winId)) { mouseDown = false; setDragShield(false, shieldKey); endReorder(); endDrag(); return; }
       const slot = this._stripSlot(host, e.clientX, e.clientY, winId);
       if (!slot.container) return;
       host.titleBar.querySelector(`.tab-item[data-win-id="${CSS.escape(winId)}"]`)?.classList.add('tab-reordering');
@@ -1182,6 +1217,7 @@ const tabGroupMethods = {
       const band = mode === 'reorder' && hostNow && hostNow._tabChain === chain ? hostNow.titleBar.getBoundingClientRect() : null;
       const next = tabDragMode({ mode, dx: e.clientX - startX, dy: e.clientY - startY, y: e.clientY, band, reorderable: this._stripReorderable() });
       if (!next) return;
+      if (mode === null) setDragShield(true, shieldKey); // verify r1: no window's content takes the pointer while a tab is dragged (reorder or tear-off)
       const tore = mode === 'reorder' && next === 'detach';
       mode = next;
       if (tore) endReorder(); // the insertion marker goes; the tab comes out under the pointer below
@@ -1192,7 +1228,7 @@ const tabGroupMethods = {
         const frame = this.windows.get(chain.tabs[0] === winId ? chain.tabs[1] : chain.tabs[0]) || null;
         this._detachFromChain(chain, winId);
         const win = this.windows.get(winId);
-        if (!win) { mouseDown = false; return; }
+        if (!win) { mouseDown = false; setDragShield(false, shieldKey); endDrag(); return; }
         // on the Stage the torn-off window belongs to the workspace of the frame it left (inc-muly2izg-cks3: an unbound
         // one was hidden by the next leave and never shown again by the enter)
         try { this._app?.stage?.onTornOff?.(win, frame); } catch (err) { console.warn('[tab-group] stage onTornOff failed', err); }
@@ -1267,18 +1303,37 @@ const tabGroupMethods = {
     let pendingEv = null, moveRaf = 0;
     const onMove = (e) => {
       if (!mouseDown) return;
+      if (dragEndVerdict({ type: 'pointermove', buttons: e.buttons, pointerId: e.pointerId }, feedState).end) { onUp(e, 'released-unseen'); return; } // a move with no button = a release the page never saw
+      if (Number.isFinite(e.clientX)) lastPoint = { clientX: e.clientX, clientY: e.clientY, altKey: !!e.altKey };
       pendingEv = e;
       if (moveRaf) return;
       moveRaf = requestAnimationFrame(() => { moveRaf = 0; const ev = pendingEv; pendingEv = null; if (ev && mouseDown) processMove(ev); });
     };
+    const onEnd = (e) => {
+      const v = dragEndVerdict({ type: e && e.type, buttons: e && e.buttons, pointerId: e && e.pointerId, hidden: typeof document !== 'undefined' && document.hidden === true }, feedState);
+      if (v.end) onUp(e, v.why);
+    };
 
-    const onUp = (e) => {
+    /** THE END DOOR of the tab drag (verify r1): once, whatever ended it (dragEndVerdict names it); the drop at the
+     *  pointer's point, else where the pointer was last seen. */
+    const onUp = (e, why = 'release') => {
       if (moveRaf) { cancelAnimationFrame(moveRaf); moveRaf = 0; pendingEv = null; }
       // Release the per-drag listeners first — the drag is over regardless of
       // which branch we take below (safe to abort the signal mid-handler).
       endDrag();
       if (!mouseDown) return;
       mouseDown = false;
+      setDragShield(false, shieldKey);
+      const w0 = this.windows.get(winId); if (w0) w0._lastTabDragEnd = why; // the end's cause (the suites read it)
+      const pointed = e && Number.isFinite(e.clientX) && (why === 'release' || why === 'cancel' || why === 'released-unseen');
+      e = pointed ? e : (lastPoint || { clientX: startX, clientY: startY, altKey: false });
+      if (why === 'owner-gone') { // the torn window closed mid-drag (verify r2 #1): the drag's chrome goes, nothing is dropped
+        endReorder(); mergeTarget = null; savedBounds = null;
+        if (mergeGhost) { mergeGhost.remove(); mergeGhost = null; }
+        for (const [, w] of this.windows) w.element.classList.remove('tab-drop-target');
+        this.snapIndicator.style.display = 'none'; this.gridOverlay.classList.remove('dragging'); this._clearGridHighlight();
+        return;
+      }
       if (mode === 'reorder') {
         // THE DROP: the slot under the pointer, through the ONE mutation path
         const host = this.windows.get(chain.tabs[0]);

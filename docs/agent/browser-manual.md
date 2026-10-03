@@ -490,6 +490,13 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
   that profile answers `browser_unstable` until the user presses Stop on it in
   ⚙ → Tools → Agent browser… (that resets it). Do not retry in a loop: tell
   the user, wait for them to stop it, then run your command again.
+* **`browser_cli_gone` — your browser runs on a browser CLI version that is no
+  longer installed.** A running browser keeps the browser CLI version it was
+  started with (the user switching VibeSpace's CLI applies at its next start —
+  a command from another version would restart it and lose its tabs). When that
+  version is removed from the machine, every command on that browser is refused
+  by name and nothing runs: tell the user to restart it (Stop in ⚙ → Tools →
+  Agent browser…); your next command starts it on the current CLI.
 * **The user may have the profile open themselves.** A start answers
   `profile_locked … is open in a browser VibeSpace did not start (pid N) — it
   may be your own browser — close it first`: that is the USER's browser on
@@ -518,6 +525,13 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
   be used, WHY. `new <label> --host <machine>` runs the profile's browser on a
   paired machine; `new <label> --provider cdp --cdp-port <n>` reaches a browser
   somebody else started — nothing is started, nothing of yours is stopped.
+* **Which Chrome build, which driver version — facts, not choices.** `providers`
+  also lists the Chrome builds installed on the machine and the browser driver
+  version in use. Which build a profile runs is the user's choice (the Agent
+  browser panel's Change build…); nothing you send chooses one
+  (`--executable-path` and `install` are not offered). When the user
+  changes a build, the browser restarts: you are told what was interrupted —
+  read the page, then run it again.
 * **Being blocked — you PROPOSE, the user approves.** When a sign-in page
   says the browser may not be secure (your navigation's result then carries
   `hint: may-need-cloak — … sign-in page says this browser may not be secure`),

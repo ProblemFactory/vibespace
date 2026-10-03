@@ -87,7 +87,10 @@ console.log('— ⑤ controls: every rule catches its plant');
 const M = mutantCopies('chlog', REPO);
 const planted = [];
 const plant = (name, text) => { const f = path.join(M.dir, name); fs.writeFileSync(f, text); planted.push(f); return fs.readFileSync(f, 'utf8'); };
-const firstBullet = (text) => { const m = /^- (.*)$/m.exec(text); return m[1]; };
+// the plant's host bullet has ROOM for the planted words (lane hooks-create, 2026-10-01: the newest entry's first bullet
+// was 153 chars, so "+ (lane-changelog)" also broke the 160 limit and every patched copy without ONE rule still saw a
+// problem — the control judged the length rule, not its own); the first bullet of ≤ 120 chars
+const firstBullet = (text) => { const re = /^- (.*)$/gm; let m; while ((m = re.exec(text))) if (m[1].length <= 120) return m[1]; throw new Error('no bullet of ≤ 120 chars to plant into'); };
 const replaceOnce = (text, from, to) => { const i = text.indexOf(from); if (i < 0) throw new Error('plant anchor missing: ' + from.slice(0, 60)); return text.slice(0, i) + to + text.slice(i + from.length); };
 {
   const en = TEXT.en, b0 = firstBullet(en);

@@ -1,4 +1,5 @@
 import { onOutsidePress, uiScale } from './utils.js';
+import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 // CustomizeMode — Firefox-style "Customize Toolbar" edit mode for the chrome.
 //
 // Instead of hunting through the Settings dialog for abstract toggle names,
@@ -482,9 +483,9 @@ export class CustomizeMode {
   // plain click still toggles visibility. While dragging: a ghost follows the
   // cursor, allowed zones light up, an insertion marker shows the drop slot.
   _setupDrag(el, meta) {
-    const onDown = (e) => {
-      if (e.button !== 0) return;
-      e.preventDefault(); e.stopPropagation();
+    const onDown = (e) => { // THE DOOR (verify r2 census): a pointer press captured on the element, fed by the one feed
+      if (e.button !== 0 || e.isPrimary === false) return;
+      e.stopPropagation();
       const startX = e.clientX, startY = e.clientY;
       let dragging = false, ghost = null, marker = null, raf = 0, last = e;
 
@@ -528,8 +529,6 @@ export class CustomizeMode {
       const onMove = (ev) => { last = ev; if (!raf) raf = requestAnimationFrame(process); };
       const onUp = () => {
         if (raf) cancelAnimationFrame(raf);
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
         if (!dragging) return; // plain click → the click handler toggles visibility
         ghost.remove();
         el.classList.remove('cz-drag-src');
@@ -539,11 +538,12 @@ export class CustomizeMode {
         // let the trailing click event fire (and be swallowed) first
         setTimeout(() => { this._justDragged = false; }, 0);
       };
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
+      startPointerDrag(el, e, { onMove, onEnd: onUp, shield: 'customize:' + (el.id || 'item') });
     };
-    el.addEventListener('mousedown', onDown, true);
-    return () => el.removeEventListener('mousedown', onDown, true);
+    const onPress = (e) => { if (e.button === 0) { e.preventDefault(); e.stopPropagation(); } }; // the compat press: no selection, nothing below hears it
+    el.addEventListener('pointerdown', onDown, true);
+    el.addEventListener('mousedown', onPress, true);
+    return () => { el.removeEventListener('pointerdown', onDown, true); el.removeEventListener('mousedown', onPress, true); };
   }
 
   /** Read the live DOM back into a zone→ids map and persist it. */

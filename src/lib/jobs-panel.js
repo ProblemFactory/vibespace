@@ -370,7 +370,11 @@ async function expandDetail(app, el, j, refresh) {
     d.appendChild(dl);
     for (const e of job.notifyLog.slice(-6).reverse()) {
       const row = document.createElement('div'); row.className = 'jobs-run';
-      row.textContent = `${new Date(e.ts).toLocaleTimeString()} · ${e.lane}${e.sub ? ' (subscriber)' : ''} · ${e.ok ? '✓' : '✗'}${e.to ? ' → ' + e.to : ''}${e.reason ? ' — ' + e.reason : ''}`;
+      // lane notify-retry: a PARKED attempt (the agent did not accept it at once — retried at its turn end and on a
+      // schedule) and a delivery that came after retries say so in words, never as raw fields
+      const retryWords = e.parked ? ' · ' + (e.retries ? t('retrying ({n} so far, {phase}, {busy})', { n: e.retries, phase: e.phase || '?', busy: e.busy === true ? t('agent busy') : e.busy === false ? t('agent idle') : t('turn state unknown') }) : t('parked for retry ({phase}, {busy})', { phase: e.phase || '?', busy: e.busy === true ? t('agent busy') : e.busy === false ? t('agent idle') : t('turn state unknown') })) + (e.nextAt || e.retryAt ? ' · ' + t('next attempt {at}', { at: new Date(e.nextAt || e.retryAt).toLocaleTimeString() }) : '')
+        : e.ok && e.retries ? ' · ' + t('after {n} retries', { n: e.retries }) + (e.via && e.via !== 'message' ? ' · ' + (e.via === 'prompt' ? t('rode the next prompt') : t('handed over')) : '') : '';
+      row.textContent = `${new Date(e.ts).toLocaleTimeString()} · ${e.lane}${e.sub ? ' (subscriber)' : ''} · ${e.ok ? '✓' : '✗'}${e.to ? ' → ' + e.to : ''}${e.reason ? ' — ' + e.reason : ''}${retryWords}`;
       d.appendChild(row);
     }
   }

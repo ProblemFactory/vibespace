@@ -520,9 +520,11 @@ try {
   await dropMenu(P1);
   const mMore = msg + ' .chanmsg-more';
   await P1.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 2 }); // the right-click left the pointer ON the message
-  const hid = await P1.waitFor(`(() => { const b = document.querySelector(${J(mMore)}); return !!b && getComputedStyle(b).opacity === '0' && getComputedStyle(b).pointerEvents === 'none'; })()`, 2000);
-  check('THE VISIBLE DOOR: the message\'s ⋯ is hidden (and takes no click) until the pointer rests on the message, then shown (verify r2)', hid && await hover(P1, msg + ' .chanmsg-body') && await P1.waitFor(`getComputedStyle(document.querySelector(${J(mMore)})).opacity === '1'`, 2000),
-    await P1.evalJs(`(() => { const b = document.querySelector(${J(mMore)}); return b ? { op: getComputedStyle(b).opacity, pe: getComputedStyle(b).pointerEvents } : null; })()`));
+  // lane reaction-hover (2026-10-01): the ⋯ lives in the message's hover action bar (the SVG glyph, one bar per message) —
+  // the BAR carries the opacity; its pointer-events reach the button by inheritance
+  const hid = await P1.waitFor(`(() => { const b = document.querySelector(${J(mMore)}); const bar = b && b.closest('.chanmsg-bar'); return !!bar && getComputedStyle(bar).opacity === '0' && getComputedStyle(b).pointerEvents === 'none' && !!b.querySelector('svg') && b.textContent.trim() === ''; })()`, 2000);
+  check('THE VISIBLE DOOR: the message\'s ⋯ (an SVG glyph in its hover action bar) is hidden (and takes no click) until the pointer rests on the message, then shown (verify r2)', hid && await hover(P1, msg + ' .chanmsg-body') && await P1.waitFor(`(() => { const b = document.querySelector(${J(mMore)}); return getComputedStyle(b.closest('.chanmsg-bar')).opacity === '1' && getComputedStyle(b).pointerEvents === 'auto'; })()`, 2000),
+    await P1.evalJs(`(() => { const b = document.querySelector(${J(mMore)}); const bar = b && b.closest('.chanmsg-bar'); return b ? { op: bar && getComputedStyle(bar).opacity, pe: getComputedStyle(b).pointerEvents } : null; })()`));
   check('client 1: ⋯ → "Clear content…" → the dialog → cleared', await press(P1, mMore) && await pickMenu(P1, 'Clear content…') && await P1.waitFor(`!!document.getElementById('record-clear-dialog')`, 3000) && (await dialogState(P1)).rows[0].words === `“pasting the ${MARK} mail: the CFO wrote …”` && await confirmIt(P1),
     await P1.evalJs(`(() => { const e = document.querySelector(${J(mMore)}); if (!e) return 'gone'; const q = e.getBoundingClientRect(); return { rect: [q.left, q.top, q.width, q.height], hoverNone: matchMedia('(hover: none)').matches, coarse: matchMedia('(pointer: coarse)').matches }; })()`));
   check('client 1: the message reads the sentence in its place, its ⋯ gone', await P1.waitFor(`document.querySelector(${J(msg)})?.querySelector('.chanmsg-body')?.textContent === ${J(CT)} && !document.querySelector(${J(mMore)})`, 5000));

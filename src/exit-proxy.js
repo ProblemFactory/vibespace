@@ -32,10 +32,15 @@ const net = require('net');
 const path = require('path');
 const crypto = require('crypto');
 const E = require('./exit-reach.js');
+const XS = require('./exit-shell.js');
 const R = require('./window-reach.js');
 const { addressableId, liveForkPending } = require('./claude-lock-capture.js');
 
 const AUDIT_FILE = 'exit-audit.jsonl';
+// verify r1 F2 (2026-10-01): the audit is a RING of two files (exit-audit.jsonl → .1 at AUDIT_MAX_BYTES, usage-probe-log's
+// shape) — with 8 KiB of output heads per `run` line it grew 8 MB per thousand runs for ever (measured: 10 000 runs = 79 MB)
+const AUDIT_MAX_BYTES = 8 * 1024 * 1024;
+const AUDIT_READ_CHUNK = 512 * 1024;
 // the For-you item's words as STRUCTURE (the client words them in the device's language); i18nKey is the extraction
 // marker scripts/i18n-extract.mjs reads (the key lives in the zh / ja dictionaries)
 const i18nKey = (k) => k;
@@ -91,7 +96,7 @@ function socksAuth(sock, check) {
 
 class ExitProxyManager {
   /** @param deps { hosts, log, groupsOf(session, webuiId), userTodos, emitCard(session, card), dataDir, now, sessionsMap(), bcastAll } */
-  constructor({ hosts, log, groupsOf = null, userTodos = null, emitCard = null, dataDir = null, now = () => Date.now(), sessionsMap = null, bcastAll = null,
+  constructor({ hosts, log, groupsOf = null, userTodos = null, emitCard = null, dataDir = null, now = () => Date.now(), sessionsMap = null, bcastAll = null, auditMaxBytes = AUDIT_MAX_BYTES,
     timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) } } = {}) {
     this.timers = timers; // the ask's 60 s clock (a suite drives it with a fake one)
     this.hosts = hosts;
@@ -103,6 +108,7 @@ class ExitProxyManager {
     this.now = now;
     this.sessionsMap = sessionsMap || (() => new Map());
     this.bcastAll = bcastAll || (() => {});
+    this.auditMaxBytes = Math.max(64 * 1024, Number(auditMaxBytes) || AUDIT_MAX_BYTES);
     this._live = new Map(); // hostId → { server, sockets:Set, localPort, deviceSocksPort, users:Set<sessionId> }
     this._asks = new Map(); // askId → { askId, hostId, machine, sessionKey, sessionId, name, cmd, askedAt, timer, resolve, todoId }
     this._settled = new Map(); // askId → outcome — a SECOND answer says settled / expired by name (bounded: the last 256)
@@ -148,30 +154,104 @@ class ExitProxyManager {
 
   // ── the audit ─────────────────────────────────────────────────────────────
   audit(line) {
-    const rec = { at: this.now(), origin: ORIGIN, ...line };
+    // verify r2 F7: every line carries its own `id` — the command list keyed its rows by (instant, conversation, command) and
+    // two runs of one command in the same millisecond collapsed into one row (the second re-worded the first)
+    const rec = { at: this.now(), id: crypto.randomBytes(6).toString('hex'), origin: ORIGIN, ...line };
     // the audit line is the ONE durable record of what ran: the WHOLE command (≤ CMD_MAX bytes, control characters
     // as spaces) — verify-r1 A1: cut at 120 chars, a 4 KB command's payload past the head was in no record at all
     // (the row's lastRun and the card keep their 120 / 80-char heads by design)
     if (typeof rec.cmd === 'string') rec.cmd = rec.cmd.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, E.CMD_MAX);
     if (this.dataDir) {
-      try { fs.mkdirSync(this.dataDir, { recursive: true }); fs.appendFileSync(path.join(this.dataDir, AUDIT_FILE), JSON.stringify(rec) + '\n'); }
-      catch (e) { this.log(`audit line not written: ${e.message}`); }
+      try {
+        fs.mkdirSync(this.dataDir, { recursive: true });
+        const f = path.join(this.dataDir, AUDIT_FILE), text = JSON.stringify(rec) + '\n';
+        // verify r1 F2: the ring — the live file rotates to `.1` when this line would carry it past the bound (the
+        // previous `.1` is gone: the history is the last ~16 MB of lines, said in the owner's list)
+        let size = 0; try { size = fs.statSync(f).size; } catch { }
+        if (size > 0 && size + Buffer.byteLength(text) > this.auditMaxBytes) { try { fs.renameSync(f, f + '.1'); } catch (e) { this.log(`audit not rotated: ${e.message}`); } }
+        fs.appendFileSync(f, text);
+      } catch (e) { this.log(`audit line not written: ${e.message}`); }
     }
+    // lane-exit-run-output E4: the ONE audit writer NOTIFIES — an open command list (the machine's "Commands…" dialog)
+    // patches its keyed row in place off this broadcast instead of re-reading the tail (the 2.309.0 rule)
+    try { this.bcastAll({ type: 'exit-audit', line: rec }); } catch { }
     return rec;
   }
-  auditTail({ hostId = null, limit = 50 } = {}) {
-    if (!this.dataDir) return [];
-    let text = '';
-    try {
-      const f = path.join(this.dataDir, AUDIT_FILE);
-      const st = fs.statSync(f);
-      const len = Math.min(st.size, 2 * 1024 * 1024); // ≥ 200 lines of 4 KB commands
-      const fd = fs.openSync(f, 'r');
-      try { const b = Buffer.alloc(len); fs.readSync(fd, b, 0, len, st.size - len); text = b.toString('utf8'); } finally { fs.closeSync(fd); }
-    } catch { return []; }
+  /** THE ONE run/attempt history: `run` lines with a command, newest first, ≤ RUNS_MAX (verify: a hand-written
+   *  line is re-bounded by E.runRow). `agent: true` drops names / keys. */
+  _runs({ hostId = null, sessionKeys = null, machine = null, limit = E.RUNS_DEFAULT, agent = false } = {}) {
+    const n = Math.max(1, Math.min(E.RUNS_MAX, Number(limit) || E.RUNS_DEFAULT));
+    const keys = sessionKeys ? new Set(sessionKeys.map(String)) : null;
+    const ref = machine == null || machine === '' ? null : String(machine).toLowerCase();
     const out = [];
-    for (const l of text.split('\n')) { try { const j = JSON.parse(l); if (!hostId || j.hostId === hostId) out.push(j); } catch { } }
-    return out.slice(-Math.max(1, Math.min(200, Number(limit) || 50)));
+    // verify r1 F2: the predicate rides INTO the tail read — a quiet machine's (or conversation's) rows are found behind
+    // another machine's storm (the old 2 MiB window held ~240 lines of 8 KiB heads: the owner's list of B read 0 of 1)
+    const want = (l) => !!l && l.verb === 'run' && typeof l.cmd === 'string'
+      && (!keys || keys.has(String(l.sessionKey || '')))
+      && (!ref || String(l.hostId || '') === String(machine) || String(l.machine || '').toLowerCase().includes(ref) || String(l.hostId || '').toLowerCase().includes(ref));
+    // verify r2 F6: the agent's read carries its keys as RAW marks too — without them every line of the ring was JSON.parsed
+    // before the predicate said no (16 MB ⇒ 2 000 parses ⇒ ~100 ms on the event loop for a conversation with no rows)
+    const marks = keys ? [...keys].map((k) => `"sessionKey":${JSON.stringify(k)}`) : null;
+    const lines = this.auditTail({ hostId, limit: n, filter: want, marks });
+    for (let i = lines.length - 1; i >= 0 && out.length < n; i--) {
+      const row = E.runRow(lines[i], { agent });
+      if (row) out.push(row);
+    }
+    return out;
+  }
+  /** The OWNER's list for one machine (GET /api/hosts/:id/exit-runs): every conversation's runs there. */
+  runsOf(hostId, { limit } = {}) { return this._runs({ hostId, limit }); }
+  /** The AGENT's list (vibespace-exit runs): THIS conversation's own runs only — never another's (its keys through
+   *  addressableId, like every verb). */
+  runsFor(session, sessionId, { machine = null, limit } = {}) {
+    const keys = this.ctxFor(session, sessionId).sessionKeys;
+    return this._runs({ sessionKeys: keys, machine, limit, agent: true });
+  }
+  /** What the daemon told us about itself at its hello (capabilities, platform) — a fake device may say nothing. */
+  _daemonInfo(dm) {
+    try { const st = typeof dm.status === 'function' ? dm.status() : null; return (st && st.info) || {}; } catch { return {}; }
+  }
+  /** The newest `limit` audit lines that match (oldest first), read BACKWARDS in chunks over the ring (the live file,
+   *  then `.1`) and stopped at `limit` matches — verify r1 F2: the old read took the last 2 MiB whole and filtered
+   *  after, so a machine's 8 KiB-head lines pushed every other machine's history out of the window. A line is parsed
+   *  only after a raw substring check for `hostId` (and for one of `marks` — verify r2 F6); `filter(line)` is the
+   *  caller's predicate (the run list's). */
+  auditTail({ hostId = null, limit = 50, filter = null, marks = null } = {}) {
+    if (!this.dataDir) return [];
+    const n = Math.max(1, Math.min(E.RUNS_MAX, Number(limit) || 50));
+    const hostMark = hostId ? `"hostId":${JSON.stringify(String(hostId))}` : null;
+    // verify r2 F6: `marks` = raw substrings of which a line must carry at least ONE before it is parsed (the agent's
+    // session keys); the parse then re-checks every fact — a mark inside a stored stdout admits a line to the parse only
+    const anyMark = Array.isArray(marks) && marks.length ? marks.map(String) : null;
+    const judge = (raw, out) => {
+      if (!raw || (hostMark && !raw.includes(hostMark)) || (anyMark && !anyMark.some((m) => raw.includes(m)))) return;
+      let j = null; try { j = JSON.parse(raw); } catch { return; }
+      if (!j || typeof j !== 'object' || (hostId && j.hostId !== hostId) || (filter && !filter(j))) return;
+      out.push(j);
+    };
+    const out = []; // newest first while collecting
+    for (const name of [AUDIT_FILE, AUDIT_FILE + '.1']) {
+      if (out.length >= n) break;
+      const f = path.join(this.dataDir, name);
+      let fd = null;
+      try {
+        const st = fs.statSync(f); fd = fs.openSync(f, 'r');
+        let pos = st.size, carry = Buffer.alloc(0);
+        while (pos > 0 && out.length < n) {
+          const len = Math.min(AUDIT_READ_CHUNK, pos); pos -= len;
+          const b = Buffer.alloc(len); fs.readSync(fd, b, 0, len, pos);
+          const buf = carry.length ? Buffer.concat([b, carry]) : b;
+          const firstNl = buf.indexOf(0x0a);
+          if (firstNl < 0) { carry = buf; continue; }                 // no whole line yet: keep reading backwards
+          const lines = buf.subarray(firstNl + 1).toString('utf8').split('\n');
+          for (let i = lines.length - 1; i >= 0 && out.length < n; i--) judge(lines[i], out);
+          carry = buf.subarray(0, firstNl);                            // the head is a partial line (unless at the start)
+        }
+        if (pos === 0 && out.length < n && carry.length) judge(carry.toString('utf8'), out);
+      } catch { /* no such file: the next ring file, or nothing */ }
+      finally { if (fd !== null) { try { fs.closeSync(fd); } catch { } } }
+    }
+    return out.reverse();
   }
 
   // ── the user's side ───────────────────────────────────────────────────────
@@ -476,10 +556,22 @@ class ExitProxyManager {
     const again = E.exitVerdict(this.access(h.id), 'run', this.ctxFor(session, sessionId));
     if (!again.ok) { card({ outcome: 'not_granted', cmd }); throw this._refused(session, sessionId, { code: again.code, grant: 'run', h, has: j.has, cmd }); }
     const t0 = this.now();
-    let r;
+    let r, interpreter = XS.POSIX_SHELL, platform = null;
     try {
       const dm = await this.hosts.deviceBounded(h.id, 8000);
-      r = await dm.runCmd('sh', ['-lc', cmd], { timeoutMs: E.EXIT_RUN_TIMEOUT_MS, waitMs: E.EXIT_RUN_TIMEOUT_MS + 10000 });
+      // lane-exit-run-output E1: THE SHELL IS THE DEVICE'S FACT. A daemon that advertises `run-shell` is handed the LINE
+      // and picks its own interpreter (cmd.exe on Windows, sh elsewhere — PURE src/exit-shell.js, run where it lives);
+      // an older daemon is never asked an op it lacks (the three-touch rule): it gets the `sh -lc` form it always ran,
+      // and the reply + the audit say which. The owner's four commands on a Windows box were `sh -lc` chosen HERE.
+      const info = this._daemonInfo(dm);
+      const caps = Array.isArray(info.capabilities) ? info.capabilities : [];
+      platform = typeof info.platform === 'string' ? info.platform.replace(/[^a-z0-9]/gi, '').slice(0, 16) || null : null; // verify r1 F5a: a daemon's word, bounded to a platform name's shape
+      const useShell = caps.includes(XS.RUN_SHELL_CAP);
+      const opts = { timeoutMs: E.EXIT_RUN_TIMEOUT_MS, waitMs: E.EXIT_RUN_TIMEOUT_MS + 10000 };
+      r = useShell ? await dm.runShell(cmd, opts) : await dm.runCmd(XS.POSIX_SHELL, ['-lc', cmd], opts);
+      // verify r1 F5a: the reply's `interpreter` is read through the CLOSED set — a daemon's raw string (`<system-reminder`,
+      // an RLO) reached the agent's sentence, the card, the audit and the history as itself; off the set ⇒ what the hub asked for
+      interpreter = XS.knownInterpreter(r && r.interpreter) || (useShell ? XS.interpreterOf(platform) : XS.POSIX_SHELL);
     } catch (e) {
       const offline = /offline|not dialed in|unreachable|timed out connecting|ECONNREFUSED/i.test(String(e && e.message));
       const outcome = offline ? 'offline' : 'run_failed';
@@ -490,23 +582,43 @@ class ExitProxyManager {
     const ms = this.now() - t0;
     // a revoke DURING the daemon's run cannot stop the command (no cancel op; ≤ 30 s) — it is recorded as such
     const revokedDuringRun = !E.exitVerdict(this.access(h.id), 'run', this.ctxFor(session, sessionId)).ok;
+    const by = { key: this.keyOf(session, sessionId), name: (session && session.name) || '' };
+    // lane-exit-run-output E2: the child NEVER STARTED (`cmd-result.spawnError`, the daemon's judge) — distinct from a
+    // non-zero exit: the row, the audit line, the card and the agent all say WHY (pre-fix: "exit 1 · 0.0 s", a guess)
+    const sf = E.spawnErrorOf(r.spawnError);
+    if (sf) {
+      const rec = E.runRecord({ cmd, code: null, ms, by, at: t0, outcome: 'spawn_failed', spawnError: sf, interpreter });
+      try { this.hosts.setLastRun?.(h.id, rec); } catch (e) { this.log(`last run not recorded: ${e.message}`); }
+      this.audit({ hostId: h.id, machine, sessionId, sessionKey: by.key, name: session && session.name || null, grant: 'run', verb: 'run', cmd, code: null, ms, ok: false, refusal: 'spawn_failed', spawnError: sf, interpreter, ...(platform ? { platform } : {}), via: again.via, asked });
+      this.log(`${machine}: could not start "${cmd.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 80)}" for ${(session && session.name) || sessionId} — ${XS.spawnFailureText(sf, { interpreter })} (${sf.code}, ${ms} ms)`);
+      card({ outcome: 'spawn_failed', cmd, spawnError: sf, interpreter, ms, exitRun: E.cardOutput({ code: null, ms, spawnError: sf, interpreter }) });
+      try { this.bcastAll({ type: 'hosts-updated' }); } catch { }
+      throw namedError('spawn_failed', E.refusalText('spawn_failed', { machine, cmd, spawnError: sf, interpreter, platform }), { grant: 'run', spawnError: sf, interpreter, platform, exitCode: XS.spawnExitCode(sf) });
+    }
     const timedOut = r.timedOut === undefined ? null : !!r.timedOut;
     // verify-r1 A5: the code is a NUMBER here whatever an older daemon sent (node's maxBuffer overflow named a string);
     // an output the daemon cut (1 MiB / 64 KiB / its 2 MiB maxBuffer) is said — `truncated` rides the reply, the audit
     // and the CLI's line (an old daemon omits it ⇒ null: unknown, never "whole")
     const code = Number.isInteger(r.code) ? r.code : (r.code == null ? 0 : 1);
     const truncated = r.truncated === undefined ? null : !!r.truncated;
-    const rec = E.runRecord({ cmd, code, ms, by: { key: this.keyOf(session, sessionId), name: (session && session.name) || '' }, at: t0, outcome: 'ran', timedOut: !!timedOut, revokedDuringRun });
+    // lane-exit-run-output E3: OUTPUT WHERE THE USER LOOKS — the first 4 KiB of each stream (URL secrets cut, THE belt:
+    // text a machine wrote, toward the user and, through `vibespace-exit runs`, toward agents) on the audit line, the
+    // card and the history row; a cut is said. The whole streams still ride the API back to the agent as before.
+    const heads = E.outputHeads({ stdout: r.stdout, stderr: r.stderr });
+    const anyCut = heads.cut.stdout || heads.cut.stderr;
+    const rec = E.runRecord({ cmd, code, ms, by, at: t0, outcome: 'ran', timedOut: !!timedOut, revokedDuringRun, interpreter });
     try { this.hosts.setLastRun?.(h.id, rec); } catch (e) { this.log(`last run not recorded: ${e.message}`); }
-    this.audit({ hostId: h.id, machine, sessionId, sessionKey: this.keyOf(session, sessionId), name: session && session.name || null, grant: 'run', verb: 'run', cmd, code, ms, ok: true, via: again.via, asked, ...(timedOut ? { timedOut: true } : {}), ...(truncated ? { truncated: true } : {}), ...(revokedDuringRun ? { 'revoked-during-run': true } : {}) });
-    this.log(`${machine}: ran "${cmd.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 80)}" for ${(session && session.name) || sessionId} — ${timedOut ? 'timed out' : 'exit ' + code}, ${ms} ms`);
-    card({ outcome: 'ran', cmd, code, ms, timedOut: !!timedOut, revokedDuringRun });
+    this.audit({ hostId: h.id, machine, sessionId, sessionKey: by.key, name: session && session.name || null, grant: 'run', verb: 'run', cmd, code, ms, ok: true, via: again.via, asked, interpreter, ...(platform ? { platform } : {}), ...(timedOut ? { timedOut: true } : {}), ...(truncated ? { truncated: true } : {}), ...(revokedDuringRun ? { 'revoked-during-run': true } : {}), stdout: heads.stdout, stderr: heads.stderr, ...(anyCut ? { cut: heads.cut } : {}) });
+    this.log(`${machine}: ran "${cmd.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 80)}" for ${(session && session.name) || sessionId} — ${timedOut ? 'timed out' : 'exit ' + code}, ${ms} ms (${interpreter})`);
+    card({ outcome: 'ran', cmd, code, ms, timedOut: !!timedOut, revokedDuringRun, exitRun: E.cardOutput({ code, ms, timedOut: !!timedOut, truncated: !!truncated, interpreter, heads }) });
     try { this.bcastAll({ type: 'hosts-updated' }); } catch { }
-    return { machine, code, stdout: String(r.stdout || ''), stderr: String(r.stderr || ''), ms, timedOut, truncated, asked, revokedDuringRun, line: E.cliLine({ outcome: 'ran', code, ms, timedOut: !!timedOut, truncated: !!truncated }, { machine }) };
+    return { machine, code, stdout: String(r.stdout || ''), stderr: String(r.stderr || ''), ms, timedOut, truncated, asked, revokedDuringRun, interpreter, platform, line: E.cliLine({ outcome: 'ran', code, ms, timedOut: !!timedOut, truncated: !!truncated }, { machine }) };
   }
+  /** The display-only card in the calling chat; `rec.exitRun` (E.cardOutput) rides beside the words so the renderer
+   *  draws the exit line + the first lines of output + "Show output" — never a second card, never re-created. */
   _card(session, machine, rec) {
     if (!this.emitCard || !session) return false;
-    try { return !!this.emitCard(session, { fromName: `Machines · ${machine}`, kind: 'notification', text: E.cardText(rec, { machine }) }); }
+    try { return !!this.emitCard(session, { fromName: `Machines · ${machine}`, kind: 'notification', text: E.cardText(rec, { machine }), ...(rec && rec.exitRun ? { exitRun: rec.exitRun } : {}) }); }
     catch (e) { this.log(`card not shown: ${e.message}`); return false; }
   }
 
@@ -635,4 +747,4 @@ class ExitProxyManager {
   }
 }
 
-module.exports = { ExitProxyManager, AUDIT_FILE };
+module.exports = { ExitProxyManager, AUDIT_FILE, AUDIT_MAX_BYTES };

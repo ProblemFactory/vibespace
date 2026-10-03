@@ -64,3 +64,23 @@ fs-appa-secret-0001
 { token: 'job-notifications
 # test-browser-kept: a kept url's user:password is stripped — the fixture spells one on a reserved .test host (not a credential)
 https://user:secret@bank.test/a
+# 2.369.200 integration — test fixtures of the secret-shape redaction (lane exit-run-output: scripts/test-exit-run.mjs), all invented or documentation examples:
+ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+wJalrXUtnFEMI/K7MDENG
+user:hunter2@api\.example
+u:hunter2@x\.example
+eyJhbGciOiJSUzI1NiIsImtpZCI6IjEifQ\.eyJpc3MiOiJrdWJlIn0\.AbCdEfGhIjKlMnOp
+eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiJ1In0\.c2lnbmF0dXJl
+AKIAIOSFODNN7EXAMPLE
+sk-proj-abcdefghijklmnopqrstuvwxyz0123456789
+VIBESPACE_SESSION_TOKEN=vsst_abcdef0123456789
+user:pa55word@db/app
+eyJa{8,}\.eyJb{8,}\.c{8,}
+# the same class described in the engineering log's prose:
+`postgres://user:pw@`
+# a Kubernetes Secret NAME in the helm chart (lane cluster-presets), not a value:
+clusterSecret: vibespace-cluster-presets
+# invented integration keys in the presets / store suites (lanes cluster-presets, custom-app):
+MINE-OWN-browserless-key-0000
+env-browserless-key-0000000
+cb_env_license_Z{16}

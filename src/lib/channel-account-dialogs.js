@@ -177,6 +177,9 @@ function clientFieldSpecs(spec, { sfx = '', when = null, value, custom = null, s
   if (cf.id) out.push({ key: `cid${sfx}`, label: customLabel(cf.id.label), placeholder: cf.id.placeholder || '', value: (custom && custom.appId) || '', when: isCustom, hint: cf.id.help ? tr(cf.id.help) : undefined });
   if (cf.secret) out.push({ key: `csec${sfx}`, label: customLabel(cf.secret.label), type: secretType, value: (custom && custom.appSecret) || '', when: isCustom, hint: secretHint !== undefined ? secretHint : (cf.secret.help ? tr(cf.secret.help) : undefined) });
   if (mounts.length) out.push({ key: `mnote${sfx}`, type: 'note', value: tr('The server copies this storage mount’s client id and secret onto the account — the secret never passes through this page. The account then signs in under that client.'), when: isMount });
+  // lane cluster-presets (P3): an instance with NO company client says so — the select
+  // holding only "Custom" read as a broken list; the user is told who can add one
+  if (!presets.length) out.push({ key: `npnote${sfx}`, type: 'note', value: tr('No company {name} client on this instance — ask your admin, or use your own client.', { name: signinOf(spec) }), when: when || undefined });
   if (spec.setup && spec.setup.callbackUrl) {
     out.push({ key: `cb${sfx}`, label: tr('Callback URL (register it on your app first)'), type: 'copy', value: spec.setup.callbackUrl, when: isCustom,
       hint: [spec.setup.callbackNote ? tr(spec.setup.callbackNote) : null, ...(spec.setup.prerequisites || []).map((p) => tr(p))] });

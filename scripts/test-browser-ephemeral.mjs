@@ -187,7 +187,11 @@ console.log('— ② the real keeper, the routes and the shipped CLI');
 const express = require('express');
 const R = require('../src/routes/browser.js');
 const rtEnv = { PATH: PATH_ENV, HOME: fakeHome, FAKE_AB_STATE: AB_STATE };
-const settings = { 'browser.idleTimeoutMs': 600000 };
+// 2.369.200 integration (lane hooks-create H5 × this suite): the keeper's env (rtEnv) names no desktop and its PATH carries the
+// system's Xvfb, so an UNSET window preference plans the hidden-window rung once H5's switch is on (OFF in 2.369.200, ON in .201) and the keeper launches with the display-
+// planned copy (browser-env/display/…) — a fact of the box, never this suite's subject (the config the keeper NAMES): it pins
+// headless, as test-browser-env pins a PATH without Xvfb; test-browser-display owns the display legs.
+const settings = { 'browser.idleTimeoutMs': 600000, 'browser.noDisplayMode': 'headless' };
 const notices = [];
 let desktopApps = [];
 const live = new Set([KEY_A, KEY_F, KEY_P]);
@@ -402,7 +406,9 @@ const auditLines = () => { try { return fs.readFileSync(k.auditFile, 'utf8').tri
     // NEGATIVE CONTROL: the keeper without the r3 wrapper (a patched copy loaded from the real path) launches with NO config — the search the finding is about
     fs.writeFileSync(UCFG, JSON.stringify({ args: '--no-sandbox' }));
     const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-    const kpre = ksrc.replace('const rt = configured(runtime || F.createBrowserRuntime({ env: rtEnv, log }));', 'const rt = runtime || F.createBrowserRuntime({ env: rtEnv, log });');
+    // (verify r2 G4: the anchor carries the pinned-CLI rung lane browser-admin 2b added — the old spelling matched nothing and
+    // this control judged the UNPATCHED keeper, red on the lane head)
+    const kpre = ksrc.replace('const rt = configured(runtime || F.createBrowserRuntime({ env: rtEnv, log, pinned: pinnedCli }));', 'const rt = runtime || F.createBrowserRuntime({ env: rtEnv, log, pinned: pinnedCli });');
     const { createRequire: cr } = await import('node:module');
     const kreq = cr(path.join(REPO, 'src/server/browser-keeper.js'));
     const km = { exports: {} }; new Function('module', 'exports', 'require', '__dirname', '__filename', kpre)(km, km.exports, kreq, path.join(REPO, 'src/server'), path.join(REPO, 'src/server/browser-keeper.js'));
@@ -1414,7 +1420,7 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
   const k1 = await stormLeg(K, 'storm');
   ok(!k1.threw && k1.relaunches === B.HEAL_BUDGET && k1.rec && k1.rec.closed === 'browser_unstable' && k1.rec.state === 'ready' && !k1.rec.browser && k1.ledger && Array.isArray(k1.ledger.attempts) && k1.ledger.attempts.length === B.HEAL_BUDGET && k1.ledger.lastOutcome === 'unstable', `⑥ r5 MAJOR 1 (a) THE STORM: a chrome that dies 1.2 s after every relaunch, six leased ticks — ${k1.relaunches} relaunches (the budget, ${B.HEAL_BUDGET} in ${B.HEAL_WINDOW_MS / 60000} min), then \`${k1.rec && k1.rec.closed}\`, the ledger persisted on the record (${k1.perTick.join(' ')})`, k1);
   ok(!k1.threw && k1.notices.length === 1 && k1.notices[0].key === 'browser' && k1.notices[0].origin === 'browser' && k1.notices[0].kind === 'notice' && k1.notices[0].text.includes(k1.label) && k1.notices[0].text.includes(String(B.HEAL_BUDGET)) && /Stop/.test(k1.notices[0].detail || ''), `⑥ r5 MAJOR 1 (a): ONE For-you notice (origin browser) naming the profile and the count — "${k1.notices[0] ? k1.notices[0].text : ''}"`, k1.notices);
-  ok(!k1.threw && /^browser_unstable /.test(k1.attach || '') && /Browser panel/.test(k1.attach) && k1.relaunchesAfter === k1.relaunches && k1.noticesAfter === 1 && k1.journal <= 12, `⑥ r5 MAJOR 1 (a): an attach while unstable is refused by name (${String(k1.attach).slice(0, 90)}…), the next tick relaunches nothing and files no second notice; ${k1.journal} journal lines over the whole storm (never a line per tick forever)`, k1);
+  ok(!k1.threw && /^browser_unstable /.test(k1.attach || '') && /Browser panel/.test(k1.attach) && k1.relaunchesAfter === k1.relaunches && k1.noticesAfter === 1 && k1.journal <= 12 + 3 /* lane profile-lock-roll: one tab-loss line per in-place relaunch, bounded by the heal budget (3) */, `⑥ r5 MAJOR 1 (a): an attach while unstable is refused by name (${String(k1.attach).slice(0, 90)}…), the next tick relaunches nothing and files no second notice; ${k1.journal} journal lines over the whole storm (never a line per tick forever)`, k1);
   ok(!k1.threw && k1.afterStop && k1.afterStop.state === 'ready' && !k1.afterStop.closed && k1.afterStop.attempts === 0 && k1.afterStop.browser, '⑥ r5 MAJOR 1 (a): a Stop from the panel ends the record — the next start runs with a NEW ledger (0 attempts, no verdict)', k1.afterStop);
   const wipeLeg = async (Kmod, tag) => {
     clear6();
@@ -1932,9 +1938,10 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
     ok(rfD.code === 'profile_locked' && rfD.error.includes('pid 77') && /live browser daemon \(pid 900\)/.test(rfD.error) && !/may be the user's|it may be theirs/.test(rfD.error), '⑥ PURE r3: a minted directory held under a live daemon is refused naming the daemon — never "it may be the user\'s"', rfD);
     const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     // r4 LOW 6: a lock written under ANOTHER hostname names the file and the remedy that exists (a renamed machine)
-    const vh = V({ lock: { host: 'old-pod-abc12', pid: 77 } });
+    // verify r1 (F1): the renamed-machine shape is a lock whose pid is GONE — a pid alive here on the directory is judged by its own facts (the user's browser: refused by name), never by the hostname
+    const vh = V({ lock: { host: 'old-pod-abc12', pid: 77 }, holder: { pid: 77, alive: false } });
     const rh = B.profileLockedRefusal({ label: 'Bank', dir: D, verdict: vh });
-    ok(vh.kind === 'foreign' && rh.error.includes('old-pod-abc12') && rh.error.includes(D + '/SingletonLock') && /renamed/.test(rh.error) && /close it there/.test(rh.error), '⑥ PURE r4 LOW 6: a lock naming another hostname says which, and offers the remedy that exists — close it on that machine, or (this machine renamed) remove <dir>/SingletonLock', rh.error);
+    ok(vh.kind === 'foreign' && rh.error.includes('old-pod-abc12') && rh.error.includes('box') && rh.error.includes(D + '/SingletonLock') && /previous name/.test(rh.error) && /close it there/.test(rh.error) && /rm -f '/.test(rh.error) && !/held by another browser process/.test(rh.error), '⑥ PURE r4 LOW 6 (re-worded by lane profile-lock-roll): a lock naming another hostname names BOTH hostnames and offers the remedy that exists — close it on that machine, or (that was this machine\'s previous name) the one command that removes <dir>/SingletonLock; a lock this keeper launched under is taken over by itself (test-browser-share-model ④)', rh.error);
     // r4: the launch mark itself — composed into a config's args (a string stays a string, a forged mark dropped), read back
     ok(B.withKeeperMark(undefined, 'bp-1') === '--vibespace-keeper=bp-1' && B.withKeeperMark('--no-sandbox,--vibespace-keeper=bp-evil', 'bp-1') === '--no-sandbox,--vibespace-keeper=bp-1' && B.withKeeperMark('--a\n--b', 'bk-2') === '--a\n--b\n--vibespace-keeper=bk-2' && eq(B.withKeeperMark(['--a', '--vibespace-keeper=x'], 'bk-2'), ['--a', '--vibespace-keeper=bk-2']), '⑥ PURE r4: withKeeperMark composes the mark into `args` (string / newline string / list), dropping a forged one');
     ok(eq(B.keeperMarksOf('/opt/chrome --a --vibespace-keeper=bp-1 --b'), ['bp-1']) && eq(B.keeperMarksOf('n\0--vibespace-keeper=bk-2\0'), ['bk-2']) && eq(B.keeperMarksOf('n\0-e\0x --vibespace-keeper=bk-2\0'), []) && B.launchedByCli('/c --remote-debugging-port=0 --x') && !B.launchedByCli('/c --remote-debugging-port=9222'), '⑥ PURE r4: keeperMarksOf reads the mark off both cmdline forms (exact on NUL-separated argv); launchedByCli = the CLI\'s --remote-debugging-port=0');
@@ -2003,9 +2010,11 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
       }
     } else ok(false, '⑥ r3 M1 (a) CONTROL: the recaptureBrowser anchor was not found in src/server/browser-keeper.js');
     // (5) r3 LOW 3 (launch half) pre-fix: the named start's unread-starttime check neutered — the record is `ready` with no identity
-    const LC = "      if (info.pid && rec.starttime == null && F.startsReadable()) { rec.state = 'failed'; rec.endedAt = now(); rec.lastError = unrecordedLaunch(info.pid); commit(); throw namedError('launch_failed', rec.lastError); }\n      captureBrowser(rec, p.dir);";
+    // (verify r2: the named start stamps the CLI its daemon runs between the check and the capture — the anchor carries that line)
+    const CLI_STAMP = "      if (!rec.cli || (info.version && info.version !== rec.cli.version)) rec.cli = cliOfDaemon(info) || rec.cli || null; // verify r2 (H1): the daemon's own answer decides\n";
+    const LC = "      if (info.pid && rec.starttime == null && F.startsReadable()) { rec.state = 'failed'; rec.endedAt = now(); rec.lastError = unrecordedLaunch(info.pid); commit(); throw namedError('launch_failed', rec.lastError); }\n" + CLI_STAMP + "      captureBrowser(rec, p.dir);";
     if (k6src.includes(LC)) {
-      const cu = await launchLeg(M6.load('src/server/browser-keeper.js', k6src.replace(LC, '      captureBrowser(rec, p.dir);'), 'launch-unread'), 'ctl-unread');
+      const cu = await launchLeg(M6.load('src/server/browser-keeper.js', k6src.replace(LC, CLI_STAMP + '      captureBrowser(rec, p.dir);'), 'launch-unread'), 'ctl-unread');
       ok(cu.state === 'ready' && !cu.err, `⑥ r3 LOW 3 CONTROL: a keeper copy without the launch check records the identity-less daemon ${cu.state} — the launch leg can go red`, cu);
     } else ok(false, '⑥ r3 LOW 3 CONTROL: the launch-check anchor was not found in src/server/browser-keeper.js');
     // (6) r4 MAJOR 1: the heal neutered — a named profile whose chrome died stays `ready` with NO browser after the leased

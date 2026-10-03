@@ -797,6 +797,14 @@ export function installUserTodos(app) {
       model.runAction(todos.open.find((i) => i.id === id)); // THE producer's verb (the model maps the type)
       return;
     }
+    const appBtn = e.target.closest('.ut-action-app');
+    if (appBtn) {
+      // Layer 0 apps: Install… opens THE install dialog on the proposal (nothing runs before its own button); Not now declines
+      if (appBtn.dataset.answer === 'install') hidePopup();
+      appBtn.disabled = true;
+      Promise.resolve(model.runAction(todos.open.find((i) => i.id === id), appBtn.dataset.answer)).finally(() => { appBtn.disabled = false; });
+      return;
+    }
     const propBtn = e.target.closest('.ut-action-proposal');
     if (propBtn) {
       // lane browser-propose: the agent's proposal answered where it appears (Approve / Reject) — an Approve that appeared

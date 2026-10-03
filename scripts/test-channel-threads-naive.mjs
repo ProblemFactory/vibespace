@@ -8,9 +8,11 @@
 //      account drew the engine's raw sentence — `routeErrorText` had no words for the code `disabled`. The REAL engine
 //      answers `disabled` for the thread walk and the refresh; the words are the device's, in both dictionaries.
 //   ② the pane's per-reply ↩ ("reply to this message in the thread") on a thread that cannot be answered: it was drawn
-//      (always visible on a touch device) and did NOTHING when pressed — the foot was the read-only line. The REAL
-//      pane over a small fake DOM: no-offer ⇒ the pane wears `chanthread-noreply` (CSS: the ↩ is not displayed) and a
-//      press changes nothing; offered ⇒ the ↩ shows and a press targets that reply in the composer.
+//      (always visible on a touch device) and did NOTHING when pressed — the foot was the read-only line. Since lane
+//      reaction-hover (2026-10-01) the reply target is picked from the row's hover action bar (`pane.pick(rec)`): the
+//      PURE table offers the bar's "thread" action only where thread-reply is offered; the REAL pane over a small fake
+//      DOM: no-offer ⇒ the pane wears `chanthread-noreply` (CSS: a stale bar's thread button is not displayed) and a
+//      pick changes nothing; offered ⇒ the action shows and a pick targets that reply in the composer.
 //   ③ WHO REACTED, in names only: the chip's title read "👌 u-me, Ada, Brook and 7 more" — the account OWNER's own id,
 //      and the id of every reactor the conversation has no name for ("u-cass"; on Lark an `ou_…`); the long press
 //      listed them as "unknown". The fold marks the owner's entry `self`, whoList counts a nameless reactor in "and N
@@ -158,41 +160,53 @@ async function paneWith(mod, offered, why = 'read-only-adapter') {
   let conv = { offers: { threadReply: { offered, why: offered ? null : why } }, policy: { mode: 'direct' }, authority: 'send' };
   const p = mod.createThreadPane(host, { base: '/api/channels/a/c', renderRecord: (rec) => { const r = new El('div'); r.className = 'chanmsg'; r.dataset.vid = rec.vendorId; r.textContent = rec.text; return r; }, getConv: () => conv, observe: () => { } });
   p.open({ key: 'm0', root: 'm0', count: 2 });
-  for (let i = 0; i < 20 && !p.el.querySelector('.chanthread-pick'); i++) await tick();
+  for (let i = 0; i < 20 && p.el.querySelectorAll('.chanmsg').length < 3; i++) await tick();
   await tick(); await tick();
   return { p, host, setOffered: (v) => { conv = { ...conv, offers: { threadReply: { offered: v, why: v ? null : why } } }; p.redrawFoot(); } };
 }
-/** What a person sees and gets: the ↩ is DISPLAYED (not under `.chanthread-noreply`, per the CSS rule) and a press
- *  targets the reply in the composer ("Replying to …"). */
+/** What a person sees and gets (lane reaction-hover): a reply row's bar offers "thread" by the PURE table over the offer
+ *  the bar was DRAWN under (`drawnOffered` — a bar drawn before a withdrawal is stale until the window re-syncs it), it is
+ *  DISPLAYED unless the pane wears `.chanthread-noreply` (the CSS belt), and its press = `pane.pick(reply)` targets that
+ *  reply in the composer ("Replying to …"). */
 const CSS = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf-8');
-const hidesPick = CSS.includes('.chanthread-noreply .chanthread-pick { display: none; }');
-const judge = (x) => {
-  const picks = x.p.el.querySelectorAll('.chanthread-pick');
-  const shown = picks.length > 0 && !(hidesPick && x.p.el.classList.contains('chanthread-noreply'));
+const BM = await import(pathToFileURL(path.join(REPO, 'src/lib/msg-bar-model.js')).href);
+const hidesPick = CSS.includes('.chanthread-noreply .chanmsg-bar-btn[data-act="thread"] { display: none; }');
+const barOffers = (offered) => BM.msgBarActions({ inPane: true, place: null, conv: { offers: { threadReply: { offered } }, threads: { placements: ['chat', 'quote', 'thread'] } }, composer: 'direct' }).includes('thread');
+const judge = (x, drawnOffered) => {
+  const rows = x.p.el.querySelectorAll('.chanmsg').length;
+  const inBar = barOffers(drawnOffered);
+  const shown = inBar && !(hidesPick && x.p.el.classList.contains('chanthread-noreply'));
   const foot = () => x.p.el.querySelector('.chanthread-foot');
   const before = foot().textContent;
-  if (picks[1]) picks[1].click();
+  if (shown) x.p.pick(REC('m2', 'second reply', { replyTo: 'm0' }));
   const after = foot().textContent;
-  return { picks: picks.length, shown, readOnly: !!foot().querySelector('.chanwin-readonly'), pressDid: before !== after, targeted: /Replying to/.test(after) };
+  return { rows, inBar, shown, readOnly: !!foot().querySelector('.chanwin-readonly'), pressDid: before !== after, targeted: /Replying to/.test(after) };
 }
 {
-  const ro = judge(await paneWith(Pane, false));
-  ok(ro.picks === 2 && ro.readOnly, 'setup: the REAL pane over a fake DOM drew the thread (the root + two replies with a ↩ each) and the foot is the read-only line', J(ro));
-  ok(hidesPick && !ro.shown && !ro.pressDid && !ro.targeted, 'a thread that cannot be answered shows NO ↩ (the pane wears `chanthread-noreply`; the CSS does not display it) and a press changes nothing', J(ro));
-  const on = judge(await paneWith(Pane, true));
-  ok(on.shown && on.pressDid && on.targeted && !on.readOnly, 'where the thread CAN be answered the ↩ shows and a press targets that reply ("Replying to …")', J(on));
+  const ro = judge(await paneWith(Pane, false), false);
+  ok(ro.rows === 3 && ro.readOnly, 'setup: the REAL pane over a fake DOM drew the thread (the root + two replies) and the foot is the read-only line', J(ro));
+  ok(hidesPick && !ro.inBar && !ro.shown && !ro.pressDid && !ro.targeted, 'a thread that cannot be answered offers NO reply action in the rows\' bar (the PURE table) — nothing to press', J(ro));
+  const on = judge(await paneWith(Pane, true), true);
+  ok(on.inBar && on.shown && on.pressDid && on.targeted && !on.readOnly, 'where the thread CAN be answered the bar offers it and a press targets that reply ("Replying to …")', J(on));
   const x = await paneWith(Pane, true);
   x.setOffered(false);
-  ok(x.p.el.classList.contains('chanthread-noreply') && judge(x).shown === false, 'the offer withdrawn while the pane is open (a broadcast redraws the foot) hides the ↩ with it', J(judge(x)));
+  const stale = judge(x, true);
+  ok(x.p.el.classList.contains('chanthread-noreply') && stale.shown === false, 'the offer withdrawn while the pane is open (a broadcast redraws the foot): a bar drawn before it is not displayed (`chanthread-noreply`) until the window re-syncs it', J(stale));
+  const before = x.p.el.querySelector('.chanthread-foot').textContent;
+  x.p.pick(REC('m2', 'second reply', { replyTo: 'm0' }));
+  ok(x.p.el.querySelector('.chanthread-foot').textContent === before, '…and a pick that still arrives (a key on the stale button) changes nothing — the pane refuses it');
   x.setOffered(true);
   ok(!x.p.el.classList.contains('chanthread-noreply'), '…and it comes back when the offer does');
-  // CONTROL: the pane as it was (no class toggled) — the ↩ is displayed on the read-only thread and its press is a no-op
+  // CONTROL: the pane without the class toggle — a stale bar's reply action is displayed on the read-only thread and its
+  // press does nothing (the dead control the user pressed, one window re-sync later)
   const src = fs.readFileSync(PANE_PATH, 'utf-8');
   const toggle = "    pane.classList.toggle('chanthread-noreply', !(offer && offer.offered));\n";
   ok(src.includes(toggle), 'CONTROL setup: the toggle line is found verbatim');
   const Old = await import(pathToFileURL(M.write(PANE_PATH, src.replace(toggle, ''), 'no-noreply')).href);
-  const c = judge(await paneWith(Old, false));
-  ok(c.shown && !c.pressDid && c.readOnly, 'CONTROL: the copy without the toggle SHOWS the ↩ on the read-only thread and its press does nothing — the dead control the user pressed', J(c));
+  const y = await paneWith(Old, true);
+  y.setOffered(false);
+  const c = judge(y, true);
+  ok(c.shown && !c.pressDid && c.readOnly, 'CONTROL: the copy without the toggle SHOWS the stale reply action on the read-only thread and its press does nothing — the dead control the user pressed', J(c));
 }
 // ═══ ⑥ the pane's composer line wraps instead of cutting (the chrome leg measures it) ═══════════════════
 console.log('⑥ the pane\'s composer line — where and how a reply goes — is never cut');

@@ -14,7 +14,8 @@ import { t } from './i18n.js';
 import { createModalShell, showToast } from './utils.js';
 import { principalPicker, rosterFromApp } from './principal-picker.js';
 import { agoText } from './user-todos-row.js';
-import { exitAccessOf, summaryOf } from '../exit-reach.js';
+import { exitAccessOf, summaryOf, spawnFailureText } from '../exit-reach.js';
+import { openExitRunsDialog } from './exit-runs-dialog.js'; // lane-exit-run-output E4: the machine's command list
 
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
 const MODE_WORDS = { nobody: () => t('Nobody'), everyone: () => t('All my conversations'), only: () => t('Only these') };
@@ -34,6 +35,8 @@ export function lastRunText(lr) {
   if (!lr) return t('No command has run here yet');
   const cmd = String(lr.cmd || '');
   const head = cmd.length > 40 ? cmd.slice(0, 39) + '…' : cmd;
+  // lane-exit-run-output E2: a child that never started says why on the row too (it read "exit 1")
+  if (lr.outcome === 'spawn_failed') return t('Last run: {cmd} — {who}, {when}, could not start — {why}', { cmd: head, who: (lr.by && lr.by.name) || '?', when: lr.at ? agoText(lr.at, t) : '', why: spawnFailureText(lr.spawnError, { interpreter: lr.interpreter || 'sh' }) });
   const code = lr.timedOut ? t('timed out') : (lr.code == null ? (lr.outcome === 'offline' ? t('offline') : '?') : lr.code);
   return t('Last run: {cmd} — {who}, {when}, exit {code}', { cmd: head, who: (lr.by && lr.by.name) || '?', when: lr.at ? agoText(lr.at, t) : '', code });
 }
@@ -166,6 +169,12 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
     }
     const lr = el('p', 'agents-note exit-access-last', lastRunText(d.lastRun));
     if (d.lastRun && d.lastRun.cmd) lr.title = d.lastRun.cmd;
+    // lane-exit-run-output E4: the machine's command list (the last 50 runs with their output) — human-triggered
+    const runsBtn = el('button', 'btn-cancel exit-access-runs', t('Recent commands…'));
+    runsBtn.type = 'button';
+    runsBtn.onclick = (e) => { e.preventDefault(); openExitRunsDialog(app, { hostId, name: machine }); };
+    lr.appendChild(document.createTextNode(' '));
+    lr.appendChild(runsBtn);
     const refuseLine = el('div', 'exit-access-refuse');
     refuseLine.setAttribute('role', 'alert');
     const actions = el('div', 'dialog-actions exit-access-actions');

@@ -208,9 +208,9 @@ console.log('§4 the plan');
   const codexCfg = plan.files.find((f) => f.harness === 'codex' && f.id === 'config');
   const codexHooks = plan.files.find((f) => f.harness === 'codex' && f.id === 'hooks');
   ok('plan v1 with claude settings.json (hooks + cleanupPeriodDays=36500), codex config.toml ([history] persistence=save-all), codex hooks.json (hooks only)',
-    plan.v === 1 && claude && claude.hooks?.events?.includes('Stop') && claude.set.length === 1 && claude.set[0].path.join('.') === 'cleanupPeriodDays' && claude.set[0].value === 36500 && claude.createIfMissing === false
+    plan.v === 1 && claude && claude.hooks?.events?.includes('Stop') && claude.set.length === 1 && claude.set[0].path.join('.') === 'cleanupPeriodDays' && claude.set[0].value === 36500 && claude.createIfMissing === 'dir-exists'
     && codexCfg && codexCfg.format === 'toml' && codexCfg.set[0].path.join('.') === 'history.persistence' && codexCfg.set[0].value === 'save-all' && !codexCfg.hooks
-    && codexHooks && codexHooks.hooks?.events?.includes('SessionStart') && codexHooks.set.length === 0 && codexHooks.createIfMissing === true, JSON.stringify(plan));
+    && codexHooks && codexHooks.hooks?.events?.includes('SessionStart') && codexHooks.set.length === 0 && codexHooks.createIfMissing === 'dir-exists', JSON.stringify(plan)); // lane hooks-create: the create rule rides by name (claude settings.json is created when ~/.claude exists)
   store['claude.transcriptRetentionDays'] = 0; store['codex.historyPersistence'] = '';
   const off = sync.cliConfigPlan();
   ok('an OFF value is NOT in the plan (never written, never deleted) — the claude file stays for its hooks, the codex toml drops out', off.files.find((f) => f.id === 'settings').set.length === 0 && !off.files.find((f) => f.id === 'config'));
@@ -295,7 +295,7 @@ console.log('§5 applyConfigPlan (scratch HOME)');
   ok('JSON: a missing settings.json is reported (missing), not created (the CLI creates its own)', r.receipts.find((x) => x.key === 'transcriptRetentionDays')?.state === 'missing' && !fs.existsSync(sf));
   fs.rmSync(path.join(home, '.codex'), { recursive: true, force: true });
   r = HC.applyConfigPlan(plan(36500), { home });
-  ok('TOML: createIfMissing creates the FILE but never the CLI dir (~/.codex absent ⇒ missing, by name)', r.receipts.find((x) => x.key === 'historyPersistence')?.state === 'missing' && /install the CLI first/.test(r.receipts.find((x) => x.key === 'historyPersistence').reason) && !fs.existsSync(path.join(home, '.codex')));
+  ok('TOML: createIfMissing creates the FILE but never the CLI dir (~/.codex absent ⇒ missing, by name)', r.receipts.find((x) => x.key === 'historyPersistence')?.state === 'missing' && /the CLI has not run on this machine; nothing is created/.test(r.receipts.find((x) => x.key === 'historyPersistence').reason) && r.receipts.find((x) => x.key === 'historyPersistence').missing === 'no-dir' && !fs.existsSync(path.join(home, '.codex')));
   // hookCmd (the remote helper's path): hooks registered beside the managed key; uninstall strips only hooks
   fs.mkdirSync(path.join(home, '.codex'), { recursive: true });
   fs.writeFileSync(sf, JSON.stringify({ cleanupPeriodDays: 30, permissions: { allow: ['Read'] } }, null, 2));
@@ -475,7 +475,21 @@ console.log('§8 receipt wording');
   ok('applied with a local write receipt says when', /written 3 min ago/.test(line('applied', {}, { lastWriteAt: Date.now() - 3 * 60000 }).text));
   ok('differs → warn, names current vs wanted, local wording', line('differs', { current: 30 }).tone === 'warn' && /is 30 \(wanted 36500\)/.test(line('differs', { current: 30 }).text) && /next start or setting change/.test(line('differs', { current: 30 }).text));
   ok('differs on a remote host says next install/spawn', /next tool install or session start on that machine/.test(line('differs', { current: 30 }, { remote: true, where: 'userW-mac' }).text));
-  ok('missing → warn "start the CLI once"', line('missing').tone === 'warn' && /not found — start the CLI once/.test(line('missing').text));
+  // lane hooks-create: a missing file says what is TRUE now, by why it is missing (the receipt's `missing`, or the reason
+  // code a remote helper's CFG line carries) — the CLI never writes settings.json on its own, so "start the CLI once"
+  // was false for a chat-only user and is retired everywhere (census below)
+  const wc = line('missing', { missing: 'will-create', reason: 'will-create' });
+  ok('missing + will-create (local) → warn "will be created at the next start — or press Apply" + apply:true (the surface draws the Apply button)', wc.tone === 'warn' && /~\/.claude\/settings.json will be created at the next start — or press Apply/.test(wc.text) && wc.apply === true, wc);
+  const wcr = line('missing', { reason: 'will-create' }, { remote: true, where: 'userW-mac' });
+  ok('missing + will-create on a remote host (the CFG reason code alone) → next install/session start, NO Apply (no button there)', /userW-mac: ~\/.claude\/settings.json will be created at the next tool install or session start on that machine/.test(wcr.text) && !wcr.apply, wcr);
+  const nd = line('missing', { missing: 'no-dir', reason: 'no-dir' });
+  ok('missing + no-dir → dim "~/.claude not found — the CLI has not run on this machine, so nothing is written", no Apply', nd.tone === 'dim' && /\? this machine: ~\/.claude not found — the CLI has not run on this machine, so nothing is written/.test(nd.text) && !nd.apply, nd);
+  const lg = line('missing');
+  ok('missing with no reason (an older helper) → "not found", no promise, no Apply', lg.tone === 'warn' && /~\/.claude\/settings.json not found$/.test(lg.text) && !lg.apply, lg);
+  const retired = /start the CLI once|run the CLI once/;
+  const censusFiles = [...fs.readdirSync(path.join(repo, 'src'), { recursive: true }).filter((f) => /\.(js|mjs)$/.test(f)).map((f) => 'src/' + f), 'server.js', 'data/bin/vibespace-hook-register.mjs'];
+  const hits = censusFiles.filter((f) => retired.test(fs.readFileSync(path.join(repo, f), 'utf8')));
+  ok(`the retired "start the CLI once" / "run the CLI once" sentence is in no source file, dictionary (zh/ja) or the shipped helper (census over ${censusFiles.length} files)`, censusFiles.length > 300 && hits.length === 0, hits);
   ok('unreadable/refused → bad "not valid after a hand edit — not touched"', line('unreadable').tone === 'bad' && /not valid after a hand edit — not touched/.test(line('refused', { reason: 'x' }).text));
   ok('unknown → dim "not checked — reinstall"', line('unknown').tone === 'dim' && /not checked — reinstall the agent tools/.test(line('unknown').text));
   ok('no-node marker → bad', line('unknown', { reason: 'no-node' }).tone === 'bad');

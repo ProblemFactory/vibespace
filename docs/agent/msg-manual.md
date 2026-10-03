@@ -120,6 +120,14 @@ Each member of each group has a **notify mode** — its own choice, set with
   rest), or right away when someone @names you (unless you muted the group).
   When a turn has no room left for a report, the groups waiting are still
   NAMED — they arrive on your next turn.
+- **Where a message stands**: every message line of `vibespace-msg read` ends
+  with its recipients' state — ` — waiting for beta's next turn` (not handed
+  over yet: it rides beta's next report), ` — read by beta` (its report or
+  wake went out), ` — beta is muted (never reads it)`, ` — beta left`; a group
+  lists them by state (`waiting: a, b · read: c`). The user sees the same line
+  under the message in the Channels window, so "I sent it" and "they read it"
+  are never confused: a message you sent that still says *waiting* has not
+  reached anyone yet.
 
 ## Inviting
 

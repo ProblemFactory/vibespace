@@ -2,6 +2,7 @@ import { escHtml, saveDraft, loadDraft, clearDraft, getStateSync, showContextMen
 import { UI_ICONS } from './icons.js';
 import { composerSendModes, slashCompletionList } from './agent-meta.js';
 import { t } from './i18n.js';
+import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 import { isNotificationQueueItem } from '../notification-senders.js';
 import { keyboardOwned, keyboardYielded, onKeyboardChange } from './keyboard-owner.js'; // lane J r2: a driven live view owns the keyboard — focus() stands down; lane takeover-keyboard: …unless the user pressed this box (the line above it says so)
 import { createStashStrip } from './stash-strip.js'; // 2026-09-27: what waits for this agent's next turn + Hand over now
@@ -1784,9 +1785,9 @@ export class ChatInput {
           if (landing === at) return;
           this._dispatchQueueOp('reorder', id, { afterId: drag.afterId });
         };
-        window.addEventListener('pointermove', onMove, { signal: ctl.signal });
-        window.addEventListener('pointerup', () => finish(true), { signal: ctl.signal });
-        window.addEventListener('pointercancel', () => finish(false), { signal: ctl.signal });
+        // THE feed (verify r2 census): captured on the STRIP (the rows are rebuilt by a republish mid-drag — a capture on one
+        // would be lost under the finger); a release anywhere lands, every other end cancels
+        startPointerDrag(strip, e, { onMove, onEnd: (ev, why) => finish(why === 'release' || why === 'released-unseen'), signal: ctl.signal });
       };
     });
   }

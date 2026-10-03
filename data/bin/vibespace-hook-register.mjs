@@ -27,6 +27,19 @@ const __applier = (() => { const module = { exports: {} }; const exports = modul
 // file is created only when the plan says so and NEVER its directory (a
 // missing ~/.codex means codex is not installed here).
 //
+// THE CREATE RULE IS A CLOSED SET (lane hooks-create, 2026-10-01 — a fleet
+// user who only chats never had ~/.claude/settings.json: the CLI writes it
+// only when somebody changes a setting, so VibeSpace's hooks were never
+// registered and her agents never learned the tools): `createIfMissing` is
+// `false` (never ours to create) or 'dir-exists' (create the FILE when its
+// directory already exists — the directory proves the CLI has run here —
+// never the directory). The legacy `true` spelled the same rule (the writer
+// never created a directory) and is read as 'dir-exists'. A created file is
+// linked into place EXCLUSIVELY (a file the CLI wrote in the gap is never
+// clobbered — the loop re-reads it), mode 0600, owned by its directory's
+// owner when the writer runs as root; the writers answer 'created' so the
+// caller can say so.
+//
 // THE BYTES LAND ON THE REAL FILE (2026-09-21, verifier finding): a symlinked
 // config — the dotfiles pattern, ~/.codex/config.toml → dotfiles/codex.toml —
 // is written THROUGH: the tmp file goes beside the link's TARGET and the
@@ -54,9 +67,31 @@ const HOOK_MARKER = 'vibespace-hook.mjs';
 function cliConfigFile(spec, { createIfMissing = false, writable = true, home = null } = {}) {
   if (!spec || !Array.isArray(spec.rel)) throw new Error('cliConfigFile: spec.rel required');
   return {
-    rel: spec.rel, format: spec.format, createIfMissing: !!createIfMissing, writable: writable !== false,
+    rel: spec.rel, format: spec.format, createIfMissing: createRule(createIfMissing), writable: writable !== false,
     file: () => path.join(home || os.homedir(), ...spec.rel),
   };
+}
+/** THE create rule's closed set: false | 'dir-exists' (the legacy `true` is
+ *  the same rule). Anything else is false — never a guess that creates. */
+const CREATE_RULES = Object.freeze([false, 'dir-exists']);
+function createRule(v) { return v === 'dir-exists' || v === true ? 'dir-exists' : false; }
+/** Why a file is not there, as ONE code the receipts and the chips share:
+ *  'will-create' (the rule allows it and its directory exists — the next
+ *  write creates it), 'no-dir' (its directory does not exist: the CLI has
+ *  not run here; nothing is created), 'not-ours' (the rule is false). */
+function missingKind(file, rule) {
+  if (!fs.existsSync(path.dirname(file))) return 'no-dir';
+  return createRule(rule) ? 'will-create' : 'not-ours';
+}
+/** The writers' refusal for a missing file, by kind (the message names the
+ *  path; `code` carries the kind for the receipt). */
+function missingError(file, rule) {
+  const kind = missingKind(file, rule);
+  const e = new Error(kind === 'no-dir'
+    ? `${path.dirname(file)} not found — the CLI has not run on this machine; nothing is created`
+    : `${file} not found — VibeSpace does not create it`);
+  e.missing = kind;
+  return e;
 }
 
 // ── The write law shared by both writers ─────────────────────────────────────
@@ -100,6 +135,30 @@ function commitWrite(file, out) {
   if (mode != null) fs.chmodSync(tmp, mode); // the umask clears bits at create time; the file's own mode wins
   fs.renameSync(tmp, target);
 }
+/** CREATE a missing file (the 'dir-exists' rule): mode 0600, its directory's
+ *  owner when we run as root (a container server writing a user's HOME), and
+ *  linked into place EXCLUSIVELY — a file that appeared since the read (the
+ *  CLI's own first write) is never replaced: false = it exists now, re-read. */
+const LINKLESS = Object.freeze(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'EMLINK', 'ENOSYS']);
+function commitCreate(file, out) {
+  const tmp = file + '.tmp';
+  fs.writeFileSync(tmp, out, { mode: 0o600 });
+  try {
+    fs.chmodSync(tmp, 0o600);
+    if (typeof process.getuid === 'function' && process.getuid() === 0) {
+      const d = fs.statSync(path.dirname(file));
+      if (d.uid !== 0) fs.chownSync(tmp, d.uid, d.gid);
+    }
+    try { fs.linkSync(tmp, file); } catch (e) {
+      if (e && e.code === 'EEXIST') return false;
+      // a filesystem without hard links (some FUSE / network mounts): the rename the old create used, only while the
+      // file is still absent — the exclusivity narrows to that check, never worse than before
+      if (e && LINKLESS.includes(e.code)) { if (fs.existsSync(file)) return false; fs.renameSync(tmp, file); return true; }
+      throw e;
+    }
+    return true;
+  } finally { try { fs.unlinkSync(tmp); } catch { } }
+}
 
 // ── JSON ─────────────────────────────────────────────────────────────────────
 function getJsonPath(root, p) {
@@ -116,9 +175,11 @@ function setJsonPath(root, p, value) {
   cur[p[p.length - 1]] = value;
 }
 /** Read → mutate(root) → CAS → atomic write. `mutate` returns true when it
- *  changed something. Returns true when written, false when nothing changed.
- *  Throws (by name) on invalid JSON, a missing file without createIfMissing,
- *  a missing parent directory, or a file that keeps changing underneath. */
+ *  changed something. Returns 'created' when the file did not exist and was
+ *  created (the 'dir-exists' rule), true when written, false when nothing
+ *  changed (a missing file is never created for a no-op). Throws (by name,
+ *  `e.missing` = the kind) on a missing file the rule does not create or whose
+ *  directory is missing, on invalid JSON, or on a file that keeps changing. */
 function writeJsonManaged(file, { createIfMissing = false } = {}, mutate) {
   const parse = () => ({ text: readManaged(file) });
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -127,8 +188,7 @@ function writeJsonManaged(file, { createIfMissing = false } = {}, mutate) {
     if (text != null) { try { root = JSON.parse(text); } catch { throw new Error(`${file} exists but is not valid JSON — not touching it`); } }
     if (!root || typeof root !== 'object' || Array.isArray(root)) {
       if (text != null) throw new Error(`${file} exists but is not valid JSON — not touching it`);
-      if (!createIfMissing) throw new Error(`${file} not found (start the CLI once to create it)`);
-      if (!fs.existsSync(path.dirname(file))) throw new Error(`${path.dirname(file)} not found (install the CLI first)`);
+      if (missingKind(file, createIfMissing) !== 'will-create') throw missingError(file, createIfMissing);
       root = {};
     }
     const changed = mutate(root);
@@ -136,6 +196,7 @@ function writeJsonManaged(file, { createIfMissing = false } = {}, mutate) {
     const out = JSON.stringify(root, null, 2) + '\n';
     const cur = parse();
     if (cur.text !== text) continue; // someone wrote it — re-read + re-apply
+    if (text == null) { if (commitCreate(file, out)) return 'created'; continue; } // the CLI wrote it in the gap — re-read + re-apply
     commitWrite(file, out);
     return true;
   }
@@ -457,15 +518,14 @@ function tomlSet(text, section, key, value) {
   return { text: body + newLine + eol, changed: true };
 }
 /** Read → apply every set → CAS → atomic write. `sets` = [{path:[section,key]|[key], value}].
- *  Any refusal throws BY NAME and nothing is written. Returns true when written. */
+ *  Any refusal throws BY NAME and nothing is written. Returns 'created' / true when written. */
 function writeTomlManaged(file, { createIfMissing = false } = {}, sets) {
   const read = () => readManaged(file);
   for (let attempt = 0; attempt < 4; attempt++) {
     const text = read();
     let cur = text;
     if (cur == null) {
-      if (!createIfMissing) throw new Error(`${file} not found (start the CLI once to create it)`);
-      if (!fs.existsSync(path.dirname(file))) throw new Error(`${path.dirname(file)} not found (install the CLI first)`);
+      if (missingKind(file, createIfMissing) !== 'will-create') throw missingError(file, createIfMissing);
       cur = '';
     }
     let changed = false;
@@ -478,6 +538,7 @@ function writeTomlManaged(file, { createIfMissing = false } = {}, sets) {
     }
     if (!changed) return false;
     if (read() !== text) continue;
+    if (text == null) { if (commitCreate(file, cur)) return 'created'; continue; }
     commitWrite(file, cur);
     return true;
   }
@@ -511,7 +572,7 @@ function applyConfigPlan(plan, { home = null, hookCmd = null, uninstall = false 
     try {
       if (f.format === 'json') {
         const before = {};
-        const written = writeJsonManaged(file, { createIfMissing: !!f.createIfMissing && !uninstall }, (root) => {
+        const written = writeJsonManaged(file, { createIfMissing: uninstall ? false : f.createIfMissing }, (root) => {
           let changed = false;
           if (uninstall) { if (stripHookEntries(root)) { changed = true; out.hooks = 'stripped'; } }
           else if (hooks) { if (registerHookEntries(root, hooks, hookCmd)) { changed = true; out.hooks = 'registered'; } }
@@ -523,18 +584,18 @@ function applyConfigPlan(plan, { home = null, hookCmd = null, uninstall = false 
           return changed;
         });
         for (const s of sets) receipts.push(receipt(f, s, before[s.key] === s.value ? 'unchanged' : 'applied', { current: s.value, previous: before[s.key] === undefined ? null : before[s.key] }));
-        out.written = !!written;
+        out.written = !!written; if (written === 'created') out.created = true;
       } else if (f.format === 'toml') {
-        const written = writeTomlManaged(file, { createIfMissing: !!f.createIfMissing }, sets);
+        const written = writeTomlManaged(file, { createIfMissing: f.createIfMissing }, sets);
         for (const s of sets) receipts.push(receipt(f, s, written ? 'applied' : 'unchanged', { current: s.value }));
-        out.written = !!written;
+        out.written = !!written; if (written === 'created') out.created = true;
       } else {
         throw new Error(`unknown config format ${JSON.stringify(f.format)}`);
       }
     } catch (e) {
-      const state = /not found/.test(e.message) ? 'missing' : /not valid JSON|not touching it|could not read/.test(e.message) ? 'refused' : 'error';
-      for (const s of sets) receipts.push(receipt(f, s, state, { reason: e.message }));
-      out.error = e.message; if (touchesHooks) out.hooks = 'error';
+      const state = e.missing ? 'missing' : /not valid JSON|not touching it|could not read/.test(e.message) ? 'refused' : 'error';
+      for (const s of sets) receipts.push(receipt(f, s, state, { reason: e.message, ...(e.missing ? { missing: e.missing } : {}) }));
+      out.error = e.message; if (e.missing) out.missing = e.missing; if (touchesHooks) out.hooks = 'error';
     }
     files.push(out);
   }
@@ -552,7 +613,9 @@ function readConfigPlan(plan, { home = null } = {}) {
     const file = path.join(base, ...f.rel);
     let text = null;
     try { text = fs.readFileSync(file, 'utf-8'); } catch { }
-    if (text == null) { for (const s of sets) receipts.push(receipt(f, s, 'missing')); continue; }
+    // WHY it is missing rides as the receipt's reason — one code the chips word ('will-create' | 'no-dir' | 'not-ours'),
+    // the only free field a remote helper's CFG line carries
+    if (text == null) { const kind = missingKind(file, f.createIfMissing); for (const s of sets) receipts.push(receipt(f, s, 'missing', { reason: kind, missing: kind })); continue; }
     if (f.format === 'json') {
       let root = null;
       try { root = JSON.parse(text); } catch { }
@@ -603,7 +666,7 @@ function decodePlan(b64) {
 }
 
 module.exports = {
-  HOOK_MARKER, RECEIPT_STATES, cliConfigFile, checkRel,
+  HOOK_MARKER, RECEIPT_STATES, CREATE_RULES, cliConfigFile, createRule, missingKind, checkRel,
   getJsonPath, setJsonPath, writeJsonManaged, findOurHookIn, registerHookEntries, stripHookEntries,
   tomlTokenize, tomlGet, tomlSet, formatTomlValue, writeTomlManaged,
   applyConfigPlan, readConfigPlan, ensureCliConfig, formatReceiptLines, parseReceiptLines, encodePlan, decodePlan,
@@ -611,7 +674,7 @@ module.exports = {
 
 return module.exports; })();
 // ---- end of src/harness-config.js ----
-const DEFAULT_PLAN = {"v":1,"files":[{"harness":"claude","id":"settings","rel":[".claude","settings.json"],"format":"json","createIfMissing":false,"set":[],"hooks":{"events":["SessionStart","UserPromptSubmit","Stop"]}},{"harness":"codex","id":"hooks","rel":[".codex","hooks.json"],"format":"json","createIfMissing":true,"set":[],"hooks":{"events":["SessionStart","UserPromptSubmit"]}}]};
+const DEFAULT_PLAN = {"v":1,"files":[{"harness":"claude","id":"settings","rel":[".claude","settings.json"],"format":"json","createIfMissing":"dir-exists","set":[],"hooks":{"events":["SessionStart","UserPromptSubmit","Stop"]}},{"harness":"codex","id":"hooks","rel":[".codex","hooks.json"],"format":"json","createIfMissing":"dir-exists","set":[],"hooks":{"events":["SessionStart","UserPromptSubmit"]}}]};
 const UNINSTALL = process.argv.includes('--uninstall');
 const STATUS = process.argv.includes('--status');
 const plan = __applier.decodePlan(process.env.VIBESPACE_CLI_CONFIG) || DEFAULT_PLAN;

@@ -12,9 +12,11 @@ FROM node:22-bookworm-slim
 # dtach = session persistence; procps/psmisc = discovery; zip/unzip/tar = archives;
 # git/curl = tooling + self-update; python3/make/g++ = node-pty native fallback;
 # fontconfig = /api/fonts; openssh-client = remote hosts; rclone/fuse3 = S3 mounts.
+# tini = pid 1 (see ENTRYPOINT below): a real init that REAPS every orphan.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       dtach procps psmisc zip unzip tar git curl ca-certificates \
       python3 make g++ fontconfig openssh-client rclone fuse3 sudo ceph-common kmod \
+      tini \
     && rm -rf /var/lib/apt/lists/*
 
 # In-container desktop (noVNC through VibeSpace's own auth — src/vnc.js):
@@ -27,7 +29,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 3.1.3 (its html5 protocol never measured — the old §9-1 / §9-4) is no longer installed. The same source + pin the
 # in-product install rung writes on a paired Linux box (src/desktop-apps.js xpraInstallPlan). xpra-x11 (the X11 server
 # half) and xpra-html5 (the hosted client's worker) are RECOMMENDS of xpra-server there — named, since this image
-# installs with --no-install-recommends.
+# installs with --no-install-recommends. So is python3-setproctitle: with it xpra rewrites its own process title and
+# environ (xpra/util/system.py) — the shape the rung was measured on; without it (3.6.0-rc1) the environ stays as spawned.
 # xterm is the default registry's first row (presence-checked, never assumed).
 # xdotool + wmctrl (P8-2 x4, design §7 / §9-8): the vnc-display rung's APP-FIT step
 # moves/resizes the app's window to the framebuffer through xdotool (measured on
@@ -45,6 +48,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # window-target TREE (src/window-targets-helper.py reads libatspi through
 # GObject introspection) — without them every shared window is pixels-only;
 # xdotool above is the window-target INPUT rung (XTest) as well as the app-fit.
+# x11vnc (3.6.0): the vnc-display rung's second recipe, Xvfb + x11vnc
+# (src/desktop-apps.js `needs`), beside Xvnc. xclip: the X clipboard the
+# server's image paste and the desktop apps' clipboard read and write
+# (src/routes/files.js, the xpra clipboard leg). ffmpeg: the pixels of a
+# shared window (x11grab, src/window-desktop.js captureVerdict refuses
+# `capture_unavailable` without it).
 RUN install -d -m 0755 /usr/share/keyrings \
     && curl -fsSL https://xpra.org/xpra.asc -o /usr/share/keyrings/xpra.asc \
     && printf '%s\n' 'Types: deb' 'URIs: https://xpra.org' 'Suites: bookworm' 'Components: main' 'Signed-By: /usr/share/keyrings/xpra.asc' > /etc/apt/sources.list.d/xpra.sources \
@@ -52,8 +61,9 @@ RUN install -d -m 0755 /usr/share/keyrings \
 RUN apt-get update && apt-get install -y --no-install-recommends \
       tigervnc-standalone-server dbus-x11 xfce4-session xfwm4 xfce4-panel \
       xfdesktop4 xfce4-terminal thunar chromium xterm xdotool wmctrl \
-      xpra xpra-x11 xpra-html5 \
+      xpra xpra-x11 xpra-html5 python3-setproctitle \
       xvfb at-spi2-core gir1.2-atspi-2.0 python3-gi \
+      x11vnc xclip ffmpeg \
       fonts-noto-cjk fonts-noto-color-emoji xdg-utils \
       adwaita-icon-theme \
     && rm -rf /var/lib/apt/lists/*
@@ -103,6 +113,16 @@ RUN set -e; arch="$(dpkg --print-architecture)"; \
 RUN curl -fsSL https://downloads.rclone.org/v1.65.2/rclone-v1.65.2-linux-amd64.zip -o /tmp/rc.zip \
     && unzip -j /tmp/rc.zip -d /usr/local/bin '*/rclone' && chmod +x /usr/local/bin/rclone && rm /tmp/rc.zip
 RUN npm install -g @anthropic-ai/claude-code @openai/codex
+# agent-browser = the engine the agent's browser runs on (data/bin/vibespace-browser
+# drives it). PINNED to the version src/browser-verbs.js measured its verb and
+# flag tables on (TABLE_VERSION); the build fails by name if npm hands back
+# anything else. Baked here so every pod has it — a copy a user installed into
+# /usr/local is wiped by the next roll. Its postinstall points
+# /usr/local/bin/agent-browser at the native binary; nothing is downloaded at
+# runtime: with no ~/.agent-browser/browsers it launches the Debian chromium
+# installed above (in the CDP census).
+RUN npm install -g agent-browser@0.38.1 \
+    && test "$(agent-browser --version)" = "agent-browser 0.38.1"
 
 # node:22 ships a `node` user at UID 1000 — remove it so `vibe` gets 1000
 # (matches the default host user, keeps bind-mount ownership sane).
@@ -127,11 +147,23 @@ RUN echo 'vibe ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/vibe && chmod 0440 /etc/
 ARG VIBESPACE_REF=master
 # reset --hard (not checkout): a SHA ref must NOT leave the seed on a detached
 # HEAD — the PVC copy inherits it and `git pull` self-update breaks.
+# THE SEED IS CLEAN BY ASSERTION (lane cluster-presets P6): the build's own
+# tracked rewrites (package-lock.json under an npm that reformats it,
+# src/agentd/version.js stamped by build:agentd — THE SAME LIST as
+# src/server/auto-update.js BUILD_REWRITTEN_TRACKED and scripts/update.sh) go
+# back to the commit's, then `git status --porcelain` must be EMPTY or the
+# image build fails naming the file: a fresh pod's first bare
+# `git pull --ff-only` must never meet a modified tree. A tracked file a build
+# rewrites is a bug to name (add it to the three lists), never to tolerate.
 RUN git clone https://github.com/ProblemFactory/vibespace /opt/vibespace-dist \
     && cd /opt/vibespace-dist \
     && git reset --hard "$VIBESPACE_REF" \
     && npm ci \
     && npm run build \
+    && git checkout HEAD -- package-lock.json \
+    && git checkout HEAD -- src/agentd/version.js \
+    && dirty="$(git status --porcelain)" \
+    && if [ -n "$dirty" ]; then echo "the seed checkout is DIRTY after the build (a tracked file a build rewrites, or an unignored build output):" >&2; echo "$dirty" >&2; exit 1; fi \
     && chown -R vibe:vibe /opt/vibespace-dist
 # NOTE: do NOT `rm -rf data` — data/bin/ holds TRACKED static tools the server
 # references (pty-wrapper.js, chat-wrapper.js, vibespace-*). A fresh clone's
@@ -156,4 +188,11 @@ ENV HOME=/home/vibe \
     HOST=0.0.0.0
 WORKDIR /home/vibe
 EXPOSE 3456
-ENTRYPOINT ["/usr/local/bin/vibespace-boot"]
+# pid 1 = tini (3.6.0): every detached process the product starts (dtach
+# masters, agent-browser daemons and their Chrome, xpra, Xvfb, install
+# runners) is reparented to pid 1 when its parent dies. `runuser` as pid 1
+# never reaped them — they stayed zombies until the pod restarted (thousands
+# per pod), and a zombie reads ALIVE to `kill -0` and `tail --pid`, so a
+# wait on one never ended. tini reaps every orphan and forwards SIGTERM to
+# the boot wrapper (runuser passes it on to the supervised entrypoint).
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/vibespace-boot"]

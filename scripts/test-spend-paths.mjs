@@ -1146,8 +1146,10 @@ console.log('\n§5 the delivery ladder: a refusal stashes, an allowed delivery i
   deliver.stashFor('cid-1', { source: 'agent', text: 'hello again' });
   ok('§5 the refused message is STASHED and drains into the next injection (a refusal is not a dropped promise)',
     deliver.stashCount('cid-1') === 1 && deliver.drainStash('cid-1')[0].text === 'hello again');
-  ok('§5 the jobs engine stashes exactly this shape on a not-ok answer (source pin at the caller)',
-    /if \(r && r\.ok\) \{[\s\S]{0,400}\} else \{\s*\n\s*this\._stashNotif\(cid, job, ev,/.test(read('src/jobs.js')));
+  // lane notify-retry (2026-10-01): between the ok branch and the stash there is now the PARKED branch — a transient
+  // miss on a live pid the ladder keeps (and retries under the SAME authorization); every other not-ok answer stashes
+  ok('§5 the jobs engine stashes exactly this shape on a not-ok answer (source pin at the caller: ok → parked → stashed)',
+    /if \(r && r\.ok\) \{[\s\S]{0,400}\} else if \(r && r\.parked === true\) \{[\s\S]{0,2000}\} else \{\s*\n\s*this\._stashNotif\(cid, job, ev,/.test(read('src/jobs.js')));
   const led = guard.snapshot();
   ok('§5 the ledger charged the delivered one ONLY', (led.budget.identities['sub-a'] || []).length === 1, JSON.stringify(led.budget.identities));
 }

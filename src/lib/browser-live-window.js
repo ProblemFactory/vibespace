@@ -420,7 +420,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
   // P4 (§7.4) → the rebuilt switch dialog (2026-09-27): the profile's BROWSER NAME (`Chromium` / `CloakBrowser`, the digest's
   // fact in words — never a version or a plan). A BUTTON opening the switch dialog only when another browser is available
   // for this profile (`app.browserChoicesFor`), else the same words as a plain label; neither for the temporary browser.
-  const backendBtn = document.createElement('button'); backendBtn.className = 'file-tool-btn browser-live-backend'; backendBtn.style.display = 'none'; backendBtn.title = t('Your agent’s browser; click to switch it');
+  const backendBtn = document.createElement('button'); backendBtn.className = 'file-tool-btn browser-live-backend'; backendBtn.style.display = 'none'; backendBtn.title = t('Your agent’s browser; click to switch it'); backendBtn.dataset.baseTitle = backendBtn.title;
   const backendLabelEl = document.createElement('span'); backendLabelEl.className = 'browser-live-backend-label browser-chip'; backendLabelEl.style.display = 'none';
   // P7 (§4.6): BIND — snap this pane beside its session's window in ONE tab group, or unbind. ICON-ONLY (lane I): its
   // words carry the session's NAME (unbounded) — they are its accessible name + tooltip and the ⋯ row's label
@@ -1437,6 +1437,9 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     backendLabelEl.style.display = pid && !asButton ? '' : 'none';
     if (backendBtn.textContent !== words) backendBtn.textContent = words;
     if (backendLabelEl.textContent !== words) backendLabelEl.textContent = words;
+    // lane browser-admin 2a: the build the browser itself REPORTS rides the pill's tooltip (a pill carries no version — the
+    // switch dialog's word law); the Agent browser panel row prints it
+    { const rb = pid && app._browserProfiles && app._browserProfiles.browsers && app._browserProfiles.browsers[pid] ? app._browserProfiles.browsers[pid].runningBuild : null; const tip = rb ? t('Running Chrome {version}', { version: rb }) : ''; for (const n of [backendBtn, backendLabelEl]) if ((n.dataset.buildTip || '') !== tip) { n.dataset.buildTip = tip; n.title = [n.dataset.baseTitle || '', tip].filter(Boolean).join(' · '); } }
     const claims = app.browserBlockedFor ? app.browserBlockedFor({ profileId: pid, sessionId }) : [];
     blockedBar.style.display = claims.length ? '' : 'none';
     // rebuilt only when what it says changed — a digest broadcast never re-creates a button under the pointer; an opened
@@ -1781,6 +1784,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
       case 'trace': if (m.entry && timeline.push(m.entry)) renderTraceBtn(); break;
       case 'refused':
         if (m.code === 'held') showToast(t('Another viewer holds the controls'), { type: 'warn' });
+        else if (m.code === 'browser_restarting') showToast(t('The browser is restarting — take over again in a few seconds, when it is back'), { type: 'warn' }); // verify r2 (H2)
         else if (m.code === 'wake_count_changed') { st.wakes = Number.isInteger(m.wakes) ? m.wakes : st.wakes; renderMode(); showToast(t('Hand back now wakes {n} conversation(s) — nothing was handed back; press it again to confirm', { n: Number(m.wakes) || 0 }), { type: 'warn' }); }
         else if (m.code !== 'watch-mode') showToast(String(m.error || m.code || 'refused'), { type: 'warn' });
         break;

@@ -1,0 +1,156 @@
+// THE NEW PROFILE… DIALOG, AS A PURE MODEL (lane browser-admin, 2026-10-01 — the owner: "不能手动创建profile"; the only
+// create was a conversation's card menu, a label and nothing else). DOM-free, imports only the switch dialog's PURE word
+// module, `t` injected. The server sends STRUCTURE — the provider rows with their verdicts (GET /api/browser/providers,
+// `?host=` for the per-machine verdict), the install verdict (GET /api/browser/install), the machines (GET
+// /api/desktop/machines) — and this file turns it into the choices the dialog draws, the ONE body it POSTs and the
+// words a refusal is said in (by the server's CODE; the server's English sentence is the agent's).
+//
+// Laws (the switch dialog's, kept): every provider is a row — one that cannot be a profile HERE is shown with its
+// reason in words, never hidden; a row that needs a step first (CloakBrowser not installed) offers that step (Install…,
+// behind the download confirm), and is chosen once it is done; a machine a provider cannot run on is shown greyed WITH
+// the reason as text (P4's rule — never a tooltip-only "you can't"); "Who can use it" defaults to every conversation
+// (owner ruling A).
+import { backendName, blurbOf } from './browser-switcher-model.js';
+
+const i18nKey = (s) => s;
+
+/** The closed set of a provider row's states in this dialog (first match wins, `providerChoices`). */
+export const PROVIDER_STATES = Object.freeze(['ready', 'needs-port', 'needs-key', 'needs-install', 'installing', 'install-failed', 'not-a-profile', 'other-machine', 'unavailable']);
+/** The states a person may pick. */
+export const PICKABLE = Object.freeze(['ready', 'needs-port', 'needs-key']);
+/** The closed set of a machine row's states. */
+export const MACHINE_STATES = Object.freeze(['ready', 'offline', 'no-browser', 'provider-here-only']);
+
+const isCloud = (id) => /^cloud:[a-z0-9-]+$/.test(String(id || ''));
+
+/**
+ * The provider rows, for the machine the profile will run on. `providers` = the route's rows (each `{id, label, tier,
+ * leaseKind, control:{ok, code}, onHost?:{ok, code}}`); `host` = null for this machine; `install` = the CloakBrowser
+ * install verdict (`{ok, code, state:{running, failed}, npm}` — null when the server has none).
+ * → `[{id, name, blurb, state, pickable, note, offer}]` — `note` = the sentence under the name (null when nothing needs
+ * saying), `offer` = 'install' / 'install-again' / null.
+ */
+export function providerChoices({ providers = [], install = null, host = null, t = (s) => s } = {}) {
+  const out = [];
+  for (const r of Array.isArray(providers) ? providers : []) {
+    if (!r || !r.id) continue;
+    const id = String(r.id);
+    const v = host ? (r.onHost || r.control || {}) : (r.control || {});
+    let state = 'ready', note = null, offer = null;
+    if (r.leaseKind === 'window-target') { state = 'not-a-profile'; note = t(i18nKey('A window on your desktop is shared with an agent from the window itself — it is not a profile.')); }
+    else if (v.ok === false && (v.code === 'provider_needs_local_key' || v.code === 'provider_local_only')) { state = 'other-machine'; note = t(i18nKey('Runs only on the computer VibeSpace runs on — pick This computer to use it.')); }
+    else if (v.ok === false) { state = 'unavailable'; note = v.code === 'provider_needs_consent' ? t(i18nKey('Off until you allow agents to use windows on your desktop (Settings → Agent browser).')) : t(i18nKey("Can't be used in this version of VibeSpace.")); }
+    else if (id === 'cloak' && !host && install && install.code !== 'already_installed') {
+      const s = install.state || {};
+      if (s.running) { state = 'installing'; note = t(i18nKey('Installing… it can be chosen once it is done.')); }
+      else if (s.failed) { state = 'install-failed'; note = t(i18nKey("The last install of {name} didn't finish."), { name: 'CloakBrowser' }); offer = install.npm === false ? null : 'install-again'; }
+      else if (install.ok && install.npm !== false) { state = 'needs-install'; note = t(i18nKey('Not installed yet — install it first, then choose it.')); offer = 'install'; }
+      else { state = 'unavailable'; note = t(i18nKey("VibeSpace can't install {name} here by itself. Ask whoever runs VibeSpace, or install it yourself and enter where it is under Settings → Agent browser."), { name: 'CloakBrowser' }); }
+    } else if (id === 'cdp') { state = 'needs-port'; note = t(i18nKey('Connects to a browser that is already running with a debugging port — enter its port.')); }
+    else if (isCloud(id)) { state = 'needs-key'; note = t(i18nKey('Runs at the vendor; it needs your key (⚙ → Integrations) before its first start.')); }
+    // the switch dialog's names and blurbs speak of SWITCHING ("…so it can't be switched from here"); a row here names what
+    // a new profile would BE — its own head for the two that are not a browser VibeSpace starts, the blurb only where it
+    // describes the browser itself (Chromium, CloakBrowser); the note says the rest
+    const name = id === 'cdp' ? t(i18nKey('A browser that is already running')) : id === 'local-window' ? t(i18nKey('A window on your desktop')) : backendName(id, t);
+    const blurb = id === 'chromium' || id === 'cloak' ? blurbOf(id, t) : null;
+    out.push({ id, name, blurb, state, pickable: PICKABLE.includes(state), note, offer });
+  }
+  return out;
+}
+
+/**
+ * The machine rows (GET /api/desktop/machines' list). A paired machine runs a profile browser through its agent's
+ * `browser-serve` op — one without it (an older agent) or offline is listed with why; a provider that runs only here
+ * greys every other machine with the sentence (`providerOnHost` = the chosen provider's verdict on a paired machine,
+ * from the `?host=` rows: `{ok, code}` | null when unknown).
+ */
+export function machineChoices({ machines = [], providerOnHost = null, t = (s) => s } = {}) {
+  const out = [];
+  for (const m of Array.isArray(machines) ? machines : []) {
+    if (!m || !m.hostId) continue;
+    const local = m.hostId === 'local';
+    const name = local ? t(i18nKey('This computer')) : String(m.label || m.hostId);
+    let state = 'ready', note = null;
+    if (!local) {
+      if (!m.connected) { state = 'offline'; note = t(i18nKey('Not connected right now.')); }
+      else if (!(Array.isArray(m.capabilities) && m.capabilities.includes('browser-serve'))) { state = 'no-browser'; note = t(i18nKey("Its VibeSpace agent is too old to run a browser — update the agent on it.")); }
+      else if (providerOnHost && providerOnHost.ok === false) { state = 'provider-here-only'; note = t(i18nKey('This browser runs only on the computer VibeSpace runs on.')); }
+    }
+    out.push({ hostId: local ? null : String(m.hostId), name, state, pickable: state === 'ready', note });
+  }
+  if (!out.some((m) => m.hostId === null)) out.unshift({ hostId: null, name: t(i18nKey('This computer')), state: 'ready', pickable: true, note: null });
+  return out;
+}
+
+/** verify r1 (F7): which form the picker's door draws — 'keep' (the conversation's own kept browser becomes the profile as
+ *  it is: Chromium, this computer, its build — said, not offered) | 'empty' (a new empty profile: browser, machine and build
+ *  are offered) | null (the panel's own New profile…). The SERVER's plan decides (`adoptKeeps`, GET /api/browser/adopt —
+ *  rung D keeps its directory too since lane browser-resume); only an unanswered GET falls back to the rung (C keeps). */
+export function adoptFormOf(fromSession) {
+  if (!fromSession) return null;
+  const keeps = typeof fromSession.adoptKeeps === 'boolean' ? fromSession.adoptKeeps : fromSession.browserVariant === 'C';
+  return keeps ? 'keep' : 'empty';
+}
+
+/** A port the cdp provider names: 1–65535, an integer. */
+export function portOk(v) { const n = Number(String(v == null ? '' : v).trim()); return Number.isInteger(n) && n >= 1 && n <= 65535; }
+
+/**
+ * THE ONE BODY the dialog POSTs (POST /api/browser/profiles, or the adopt route from a conversation's picker):
+ * `{label, provider, host?, cdpPort?, use?, browser?}` — `use` only when the list is narrowed (absent = every
+ * conversation, the server's default), `browser` only when a build / path was chosen. → `{ok, body}` | `{ok:false,
+ * field, code}` (the dialog says it beside the field, nothing is sent).
+ */
+export function createBody({ label = '', provider = 'chromium', host = null, cdpPort = '', mode = 'all', who = [], browser = null, adopt = null } = {}) {
+  const l = String(label || '').trim();
+  if (!l) return { ok: false, field: 'label', code: 'label_required' };
+  const body = { label: l };
+  // verify r2 (B4): the picker's door names the FORM it drew — the adopt route refuses by name when the conversation's plan
+  // changed since (never the other form applied: an empty profile for a dialog that said "keeps its logins", or the
+  // conversation's own browser taken for a dialog that said "empty")
+  if (adopt === 'keep' || adopt === 'empty') body.form = adopt;
+  if (adopt !== 'keep') {
+    body.provider = String(provider || 'chromium');
+    if (host) body.host = String(host);
+    if (body.provider === 'cdp') { if (!portOk(cdpPort)) return { ok: false, field: 'cdpPort', code: 'cdp_port_required' }; body.cdpPort = Number(String(cdpPort).trim()); }
+  }
+  if (mode === 'only') {
+    const w = Array.isArray(who) ? who.filter(Boolean) : [];
+    if (!w.length) return { ok: false, field: 'use', code: 'empty_list' };
+    body.use = { mode: 'only', who: w };
+  }
+  if (browser && typeof browser === 'object' && browser.kind && browser.kind !== 'default') body.browser = { ...browser };
+  return { ok: true, body };
+}
+
+/**
+ * A refused create, in the device's words by the server's CODE. null = the caller says the generic sentence + the
+ * server's own (a code this table does not know yet — never silence).
+ */
+export function createRefusalWords(r, t = (s) => s) {
+  const code = String((r && r.code) || '');
+  const name = (r && r.name) || '';
+  switch (code) {
+    case 'label_required': return t(i18nKey('Give the profile a name.'));
+    case 'label_taken': return t(i18nKey('A profile with this name already exists — pick another name.'));
+    case 'cdp_port_required': return t(i18nKey('Enter the port the browser listens on (1–65535).'));
+    case 'unsupported-host': return t(i18nKey('That machine is not paired with this VibeSpace any more — pick another.'));
+    case 'provider_needs_local_key': case 'provider_local_only': return t(i18nKey('This browser runs only on the computer VibeSpace runs on.'));
+    case 'provider_unavailable': case 'provider_unknown': return t(i18nKey("This browser can't be used in this version of VibeSpace."));
+    case 'provider_needs_consent': return t(i18nKey('Off until you allow agents to use windows on your desktop (Settings → Agent browser).'));
+    case 'tier3_is_a_window_target': return t(i18nKey('A window on your desktop is shared with an agent from the window itself — it is not a profile.'));
+    case 'sharing_refused': return t(i18nKey("Separate tabs can't be used here."));
+    case 'dir_unwritable': return t(i18nKey("VibeSpace couldn't create the profile's folder on this computer."));
+    case 'empty_list': return t(i18nKey('Pick at least one conversation or Task Group, or choose “All my conversations”.'));
+    case 'no_browser_key': return r && r.why === 'remote' ? t(i18nKey('“{name}” runs on another machine — the Agent browser runs on this machine only'), { name }) : t(i18nKey('“{name}” has no browser of its own yet — restart it (Terminate → Resume), then add it'), { name });
+    case 'session-gone': return t(i18nKey('That conversation is not running any more — pick it again from the list'));
+    case 'unknown_task': return t(i18nKey('That Task Group no longer exists — pick another one'));
+    case 'unknown_conversation': return t(i18nKey('That conversation can no longer be added — pick it again from the list'));
+    case 'too_many': return t(i18nKey('At most {n} conversations and Task Groups'), { n: 64 });
+    case 'adopt_failed': return t(i18nKey("This conversation's browser could not be kept as a profile."));
+    case 'adopt_form_changed': return t(i18nKey("This conversation's browser changed since this dialog opened — nothing was created; the dialog was reopened with the form that applies now."));
+    case 'adopt_keeps_browser': return t(i18nKey("This conversation's browser is kept with its logins, so the profile is that browser as it is — Chromium on this computer. Create it with those, then use Change build… if you want another build."));
+    case 'agent_forbidden': return t(i18nKey('Only you can do this, not an agent.'));
+    default: return null;
+  }
+}

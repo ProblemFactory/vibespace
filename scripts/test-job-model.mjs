@@ -194,7 +194,11 @@ ok(M.renderNotifStash(stash, { budget: 250, spillPath: '/data/job-notifications-
   // held-kind typing
   ok(M.heldKind({ ok: false, refused: 'spend', reason: 'spend budget: …' }) === 'spend-cap', 'a spend refusal types spend-cap');
   ok(M.heldKind(null, 'rate floor — queued for injection instead') === 'rate-floor', 'the rate floor types rate-floor');
-  ok(M.heldKind({ ok: false, reason: 'no live inbox' }) === 'not-reachable' && M.heldKind(null, 'unreachable') === 'not-reachable', 'anything else is not-reachable');
+  // lane notify-retry (2026-10-01): "no live inbox" = the conversation is NOT RUNNING (a dead pid, a socket nobody
+  // serves); `not-reachable` is reserved for an agent that was alive and did not accept the message
+  ok(M.heldKind({ ok: false, reason: 'no live inbox' }) === 'not-running' && M.heldKind({ ok: false, notRunning: true, reason: 'socket error: connect ENOENT' }) === 'not-running', 'no live inbox / a typed notRunning answer is not-running');
+  ok(M.heldKind({ ok: false, parked: true, reason: 'timeout' }) === 'retrying' && M.heldKind({ ok: false, lane: 'remote-message', reason: 'remote daemon could not reach the inbox' }) === 'not-reachable' && M.heldKind(null, 'unreachable') === 'not-reachable', 'a parked answer is retrying; a remote miss / anything else is not-reachable');
+  ok(M.HELD_KINDS.includes('not-running') && M.HELD_KINDS.includes('retrying'), 'HELD_KINDS declares both new kinds');
   const dg = M.heldDigest(new Map([['conv-A', [{ jobId: 'jb-1', ts: 1, held: { kind: 'spend-cap', identity: 'Member A', cap: 12 } }, { jobId: 'jb-2', ts: 2, held: { kind: 'rate-floor' } }]], ['conv-B', []]]));
   ok(dg.total === 2 && dg.byConversation['conv-A'].count === 2 && dg.byConversation['conv-A'].kinds['spend-cap'] === 1 && dg.byConversation['conv-A'].reason.kind === 'rate-floor' && !dg.byConversation['conv-B'], 'heldDigest: per-conversation counts by kind, the NEWEST reason, empty queues omitted');
 }

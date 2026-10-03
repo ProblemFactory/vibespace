@@ -614,6 +614,7 @@ const STORAGE = {
   'src/lib/appearance-panel.js|localStorage|\'termFontFamily\'': ['pref', 'terminal font'],
   'src/lib/appearance-panel.js|localStorage|key': ['pref', 'a UI pref percentage (scale / font size)'],
   'src/lib/browser-live-window.js|localStorage|\'vibespace.deviceTag\'': ['ids', 'a random device tag'],
+  'src/lib/browser-trace-view.js|localStorage|SHOW_FITS_KEY': ['pref', 'lane trace-fits: show the live view\'s page-size changes as rows (a "1" flag, never a record\'s words)'],
   'src/lib/channel-outbox.js|localStorage|DELIVER_KEY': ['pref', 'next-turn | wake-now (the Approve button\'s remembered delivery)'],
   'src/lib/code-editor.js|localStorage|\'editorSettings\'': ['pref', 'editor settings'],
   'src/lib/desktop-app-window.js|sessionStorage|prevKey': ['ids', 'a desktop-app pane key per app (this tab)'],
@@ -928,6 +929,7 @@ const BELT = [
   ['src/lib/jobs-layout.js', 'const family = familyOf(j.name);', 'the family KEY; the panel draws a family equal to the stored key as clearedText()'],
   ['src/lib/channel-window.js', "const body = renderBlocks(blocksOfRecord(rec), { t, folds, foldKey: rec.vendorId || rec.id || '', fallbackText: rec.text || '' });", 'an ADAPTER conversation\'s system row (Lark / Gmail) — not a group message'],
   ['src/lib/channel-window.js', "t, folds, foldKey: rec.vendorId || rec.id || '', fallbackText: rec.text || '',", 'an ADAPTER conversation\'s row (Lark / Gmail) — not a group message'],
+  ['src/lib/channel-window.js', "quoteTarget = { vid: rec.vendorId, who: (rec.author && (rec.author.name || rec.author.id)) || '', text: firstLine(rec.text || '', 80) };", 'lane reaction-hover: the Quote line above an ADAPTER conversation\'s composer (Lark / Gmail) — not a group message (msgBarActions gives a group row its ⋯ only)'],
   ['src/lib/channel-window.js', "default: return rec.text || '';", 'a group system record of an UNKNOWN kind (create / invite / leave / kick / rename / archive are worded); renderGroupRecord appends the cleared sentence under a cleared one'],
   ['src/lib/channel-window.js', "const words = (rec.raw && rec.raw.kind && rec.raw.kind !== 'message') ? groupSysText(rec, nameOf) : (rec.text || '');", 'the menu of a message NOT cleared (both doors return on isCleared(rec)); the dialog is spent at the answer'],
   ['src/lib/channels-panel.js', 'const sig = JSON.stringify([\'g\', r.kind, r.id, r.adapterId, r.title, r.lastAt, r.unread, r.archived, r.pair, r.memberCount, r.sourceLabel, r.lastText,', 'a row SIGNATURE (never drawn): lastText + lastCleared rebuild the row'],
@@ -1629,6 +1631,7 @@ const I_RECV = {
   'src/lib/user-todos-panel.js|nameFor()': ['todo', 'a For-you item\'s label (a Background Work item\'s is the job\'s name)'],
   'src/lib/user-todos-panel.js|wordsOf()': ['todo', 'a For-you item\'s words (the model\'s)'],
   'src/server/conversation-deliver.js|opts': ['carrier', 'the card label + text of a delivery (a job\'s `Background Work · <name>`)'],
+  'src/server/conversation-deliver.js|shown[0]': ['carrier', 'the retry park\'s single landed entry at its card (notify-retry verify r2: the card is built AFTER the post from the words as they stand — a clear that reached it mid-flight already rewrote them to the sentence)'],
   'src/server/groups-engine.js|rec': ['group-message', 'a group message a wake delivers'],
   'src/server/groups-engine.js|rep': ['group-message', 'a wake REPORT (a line per group message)'],
   'src/server/session-brain.js|fact': ['status', 'the vcs event entry of a session\'s status history (its branch) — the record itself'],
@@ -1649,7 +1652,7 @@ const I_RECV = {
   'src/lib/app.js|BACKEND_META[h.id]': ['harness', 'a harness label'], 'src/lib/app.js|BACKEND_META[msg.backend]': ['harness', 'a harness label'],
   'src/lib/app.js|lost': ['account', 'an account'], 'src/lib/app.js|msg': ['frame', 'a server-notice / backend-status frame\'s text (its producer is judged at the `notice` sink)'],
   'src/lib/browser-live-window.js|dw': ['words', 'a PURE outcome\'s sentence (browser-switcher-model)'],
-  'src/lib/browser-profile-picker.js|r.pin': ['browser profile', 'a profile label'], 'src/lib/browser-profile-picker.js|r.profile': ['browser profile', 'a profile label'], 'src/lib/browser-profile-picker.js|r': ['browser profile', 'a route\'s note on the pick'],
+  'src/lib/browser-profile-picker.js|r.pin': ['browser profile', 'a profile label'], 'src/lib/browser-build-dialog.js|view': ['browser profile', 'a profile label (Change build…, lane browser-admin)'], 'src/lib/browser-new-profile.js|o': ['browser profile', 'an install outcome\'s words (the New profile… dialog, lane browser-admin)'],
   'src/lib/browser-switcher.js|e': ['error', 'an Error\'s name'], 'src/lib/browser-switcher.js|w': ['words', 'a PURE outcome\'s sentence'],
   'src/lib/browser-trace-view.js|e': ['browser profile', 'a profile label'], 'src/lib/browser-trace-view.js|f': ['browser profile', 'a profile / its file'], 'src/lib/browser-trace-view.js|o': ['browser profile', 'an orphan profile dir'],
   'src/lib/browser-trace-view.js|res.profile': ['browser profile', 'a profile label'], 'src/lib/browser-trace-view.js|res': ['browser profile', 'the profile adopted from'], 'src/lib/browser-trace-view.js|r': ['browser profile', 'a profile label'],
@@ -1683,6 +1686,7 @@ const I_RECV = {
   'src/server/channels-engine.js|head': ['channel', 'a failing adapter\'s head sentence'], 'src/server/channels-engine.js|h': ['host', 'a machine name'], 'src/server/channels-engine.js|mod': ['channel', 'an adapter label'],
   'src/server/channels-engine.js|p.choice.fromMount': ['mount', 'a storage mount\'s name'], 'src/server/channels-engine.js|p': ['outbox proposal', 'a proposal\'s reason'], 'src/server/channels-engine.js|rec': ['channel', 'an account / adapter label'],
   'src/server/channels-engine.js|row': ['integration', 'an integration row label'], 'src/server/channels-engine.js|r': ['outbox proposal', 'a decision reason'], 'src/server/channels-engine.js|src': ['mount', 'a storage label'],
+  'src/server/hooks-late.js|item': ['words', 'the late-hooks For-you line\'s own words (PURE src/hooks-late.js forYouItem: VibeSpace\'s sentence + the names of the running sessions it lists) — the source of a new For-you record, never a copy of one (lane hooks-create)'], 'src/server/hooks-late.js|h': ['words', 'a harness descriptor\'s constant label (Claude Code / Codex) in the journal line — never a record (lane hooks-create)'],
   'src/server/fd-gauge.js|w': ['words', 'the fd gauge\'s own sentence (handle counts by kind, the busiest folders) — never a record (lane-dead-bridge)'], 'src/server/fd-gauge.js|b': ['words', 'the EMFILE blame sentence (who ran out: this server / a mount\'s FUSE daemon / the machine) — never a record (lane-dead-bridge)'],
   'src/server/channels-engine.js|v': ['outbox proposal', 'a verdict reason'], 'src/server/channels-engine.js|w.principal': ['session', 'a watcher\'s name'],
   'src/server/groups-engine.js|g': ['agent group', 'a group\'s name'], 'src/server/groups-engine.js|group': ['agent group', 'a group\'s name'], 'src/server/groups-engine.js|rg.group': ['agent group', 'a group\'s name'],
@@ -1706,13 +1710,22 @@ const I_RECV = {
   'src/port-forward.js|h': ['host', 'a machine name'], 'src/server/auto-cli-loop.js|it.pj': ['quota', 'a projection\'s label'],
   'src/server/auto-resume.js|chk': ['quota', 'a pre-fire check\'s reason'], 'src/server/auto-resume.js|ident': ['account', 'a billing identity'],
   'src/server/boot-restore.js|h': ['host', 'a machine name'], 'src/server/boot-restore.js|session': ['session', 'a session\'s name'],
-  'src/server/browser-env.js|f': ['browser profile', 'a pin repoint\'s previous profile'], 'src/server/browser-keeper.js|rec': ['browser profile', 'a browser record\'s label'],
+  'src/server/browser-env.js|f': ['browser profile', 'a pin repoint\'s previous profile'], 'src/server/browser-keeper.js|rec': ['browser profile', 'a browser record\'s label'], 'src/server/browser-keeper.js|bc': ['browser profile', 'verify r2 (B5): a Chrome build change\'s from / to — build words ("Chrome 151.0.7922.34"), never a record\'s text'],
   'src/server/browser-keeper.js|v': ['browser profile', 'a resource verdict\'s reason'], 'src/server/browser-stream.js|next.switched': ['browser profile', 'the browser a view switched from'],
   'src/server/browser-trace.js|p': ['browser profile', 'a profile label'], 'src/server/channels-engine.js|choice.fromMount': ['mount', 'a storage mount\'s name'],
   'src/server/channels-engine.js|p1': ['outbox proposal', 'a proposal\'s decision reason'], 'src/server/channels-engine.js|s': ['channel', 'a channel state\'s reason'],
   'src/server/channels-engine.js|target': ['session', 'a wake target\'s name'], 'src/server/cli-cmd.js|e': ['harness', 'a CLI binary entry\'s name'],
   'src/server/conversation-deliver.js|e': ['delivery', 'a ladder stash entry at the eviction line: its sender name is printed only for kind `peer` (a session\'s own name); VibeSpace\'s own labels (a job\'s `Background Work · <name>`) print as their kind (verify r8 ③)'],
-  'src/server/conversation-deliver.js|r': ['delivery', 'a rung\'s refusal reason'], 'src/server/desktop-access.js|plan': ['desktop app', 'an install plan\'s label'],
+  'src/server/conversation-deliver.js|r': ['delivery', 'a rung\'s refusal reason'],
+  // lane notify-retry (2026-10-01): the retry park's journal lines — the primitive's reason (timeout / a socket error code) and
+  // the ceiling's own sentence at a re-judge (an account name + numbers); a parked entry's WORDS are in its `text`, which no
+  // journal line prints (the fall line names the entry by id and kind)
+  'src/server/conversation-deliver.js|v': ['delivery', 'the spend verdict at a parked delivery\'s re-judge: the ceiling\'s own detail (an account + numbers), never a record\'s words'],
+  // notify-retry verify r1: a batch of parked entries posted as ONE frame — the entries' own stored text (a clear rewrote
+  // the park's copies through redactStash, so a cleared one rides as the sentence under the head); `recorded` on the card
+  'src/server/conversation-deliver.js|frame': ['delivery', 'the retry park\'s ONE frame of several parked entries: their STORED text joined (redactStash rewrites the park too — a cleared entry is the sentence) — the post and the card\'s `recorded`'],
+  'src/server/conversation-deliver.js|attempt': ['delivery', 'a parked delivery\'s attempt record: the primitive\'s reason (timeout / a socket error code) + phase, never a record\'s words'],
+  'src/jobs.js|r': ['delivery', 'the ladder\'s answer to a notification (a rung\'s refusal reason; the parked reason + phase)'], 'src/server/desktop-access.js|plan': ['desktop app', 'an install plan\'s label'],
   'src/server/desktop-app-keeper.js|rec': ['desktop app', 'an app label'], 'src/server/incident-wiring.js|req.body': ['caller', 'the owner\'s own incident note'],
   'src/server/session-stdout.js|session': ['session', 'a session\'s name'], 'src/server/spend-guard.js|v': ['quota', 'a spend verdict\'s detail'],
   'src/server/stdout/acp-events.js|msg': ['harness', 'an ACP frame\'s reason'], 'src/server/stdout/codex-events.js|msg.payload': ['harness', 'a codex event\'s reason'],
@@ -1739,6 +1752,10 @@ const I_RECV = {
   'src/server/usage-pool-engine.js|ds': ['pool verdict', 'a per-session switch decision (member ids and numbers)'],
   'src/server/usage-pool-engine.js|s': ['session', 'the conversation a removed member held (its own name on the For-you item) — lane pool-pin'],
   'src/server/groups-engine.js|c': ['group-message', 'a group REPORT card (lane group-report-card): each message a member\'s report carried, drawn at the injection — the ring copy is re-worded by the groups door\'s onCleared'],
+  // ── lane custom-app (apps Layer 0) ──
+  'src/app-serve.js|r.refused': ['app install', 'the root script\'s refusal (a code + the machine\'s own detail line) — never a record of the five kinds'],
+  'src/server/apps-engine.js|p.by': ['session', 'a proposal\'s proposer — the session\'s name on the journal line'],
+  'src/server/apps-engine.js|by': ['session', 'the proposer\'s session name on the For-you item it files'],
   // ── verify r9: the receivers of the one-level alias pass (a field copied into a local, then handed to a sink) ──
   'src/agent-routes.js|req.body||{}': ['status', 'the caller\'s OWN status write (the owner\'s route / the agent\'s vibespace-status), destructured — the record itself'],
   'src/desktop-apps.js|s': ['desktop app', 'an install spec\'s label'], 'src/lib/browser-switcher.js|st.view?.profile': ['browser profile', 'a profile label'],
@@ -1767,6 +1784,11 @@ const I_SITES = {
   'src/lib/user-todos-panel.js|toast|wordsOf()': ['ref', 'the arrival toast: the history keeps the head + {kind: todo, id} (r4 ⑤)'],
   'src/server/conversation-deliver.js|peer|opts.fromName': ['transcript', 'the card drawn when a delivery REACHED the conversation (cardOk)'],
   'src/server/conversation-deliver.js|peer|opts.cardText': ['transcript', 'the card drawn when a delivery reached the conversation'],
+  // notify-retry verify r2: the retry park's landing card is built AFTER the post from the entry's words AS THEY STAND (a clear
+  // that reached it mid-flight already rewrote them to the sentence — redactStash rewrites the park); `recorded` = the frame
+  'src/server/conversation-deliver.js|peer|shown[0].fromName': ['transcript', 'the parked delivery\'s landing card: the entry\'s name as it stands after any clear (the park is rewritten by the door)'],
+  'src/server/conversation-deliver.js|peer|shown[0].cardText': ['transcript', 'the parked delivery\'s landing card: the entry\'s card text as it stands (dropped by a clear)'],
+  'src/server/conversation-deliver.js|peer|shown[0].text': ['transcript', 'the parked delivery\'s landing card: the entry\'s words as they stand after any clear (a mid-flight clear = the sentence; the frame the CLI holds is `recorded`)'],
   'src/server/groups-engine.js|peer|rep.text': ['transcript', 'a wake report delivered to a member (a refused one rides the next report; a handed-back one is the stash the door rewrites)'],
   'src/server/groups-engine.js|peer|rec.text': ['transcript', 'a group message delivered to a member'],
   'src/server/session-brain.js|status|fact.branch': ['own', 'the vcs entry\'s own write (the door drops its branch)'],

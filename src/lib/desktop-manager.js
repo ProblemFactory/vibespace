@@ -1,4 +1,5 @@
 import { cssVarDefault, showContextMenu, showInputDialog, showToast, uiScale } from './utils.js';
+import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 import { t } from './i18n.js';
 import { stageRefusalSentence } from './stage-rules.js'; // inc-muly2izg-cks3: the Stage's move refusal, in words (PURE)
 import { mergeDesktopRecord, windowIds } from './desktop-record.js'; // userW inc-mun7qjmw-iksh: a held record is a VIEW — every write merges (PURE)
@@ -1020,8 +1021,8 @@ export class DesktopManager {
       this.app.wm._reflowWindows?.();
       this.app.layoutManager.scheduleAutoSave();
     });
-    handle.addEventListener('mousedown', (e) => {
-      e.preventDefault();
+    handle.addEventListener('pointerdown', (e) => { // THE DOOR (verify r2 census): captured on the handle, fed by the one feed
+      if (e.button !== 0 || e.isPrimary === false) return;
       const startY = e.clientY;
       const startS = curScale();
       handle.classList.add('active');
@@ -1032,8 +1033,6 @@ export class DesktopManager {
       const onUp = () => {
         handle.classList.remove('active');
         document.body.style.cursor = ''; document.body.style.userSelect = '';
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
         const s = curScale();
         if (Math.abs(s - 1) < 0.03) { root.style.removeProperty('--toolbar-scale'); localStorage.removeItem('toolbarScale'); }
         else localStorage.setItem('toolbarScale', s.toFixed(3));
@@ -1041,9 +1040,9 @@ export class DesktopManager {
         this.app.wm._reflowWindows?.();
         this.app.layoutManager.scheduleAutoSave();
       };
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
+      startPointerDrag(handle, e, { onMove, onEnd: onUp, shield: 'toolbar-scale' });
     });
+    handle.addEventListener('mousedown', (e) => { if (e.button === 0) e.preventDefault(); }); // the compat press: no selection
   }
 
   // ── Taskbar resize ──
@@ -1075,8 +1074,8 @@ export class DesktopManager {
     });
     handle.title = t('Drag to resize · double-click to reset');
 
-    handle.addEventListener('mousedown', (e) => {
-      e.preventDefault();
+    handle.addEventListener('pointerdown', (e) => { // THE DOOR (verify r2 census)
+      if (e.button !== 0 || e.isPrimary === false) return;
       const startY = e.clientY;
       const startH = taskbar.offsetHeight;
       handle.classList.add('active');
@@ -1097,8 +1096,6 @@ export class DesktopManager {
         handle.classList.remove('active');
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
         localStorage.setItem('taskbarHeight', taskbar.offsetHeight);
         // Re-enable reflow and do one final reflow
         this.app.wm._suppressReflow = false;
@@ -1106,9 +1103,9 @@ export class DesktopManager {
         // Broadcast height to other clients via layout sync
         this.app.layoutManager.scheduleAutoSave();
       };
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
+      startPointerDrag(handle, e, { onMove, onEnd: onUp, shield: 'taskbar-height' });
     });
+    handle.addEventListener('mousedown', (e) => { if (e.button === 0) e.preventDefault(); });
   }
 
   /** Adapt desktop preview and taskbar element sizes to current height */

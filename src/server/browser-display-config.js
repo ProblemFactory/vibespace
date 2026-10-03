@@ -23,7 +23,7 @@ const path = require('path');
 const crypto = require('crypto');
 const D = require('../browser-display.js');
 
-function create({ dir, writeJson, log = console, env = () => ({}), probe = null, now = Date.now } = {}) {
+function create({ dir, writeJson, log = console, env = () => ({}), probe = null, now = Date.now, noDesktopWindow = undefined } = {}) { // noDesktopWindow: H5's switch for a gate (undefined = the module's default, OFF in 2.369.200)
   if (!dir) throw new Error('browser-display-config: dir is required');
   const memo = new Map();
   const said = new Set();
@@ -39,13 +39,22 @@ function create({ dir, writeJson, log = console, env = () => ({}), probe = null,
       return v;
     }
   };
-  /** THE LAUNCH'S FACT (async: the probe stats + connects). `cfg` wins over `baseFile`; neither ⇒ `{}` (headless by default). */
-  async function factFor({ baseFile = null, cfg = null, headedEnv = null, prev = null, mode = 'auto' } = {}) {
+  /** THE LAUNCH'S FACT (async: the probe stats + connects). `cfg` wins over `baseFile`; neither ⇒ `{}` (headless by default).
+   *  `preference` (lane hooks-create H5) = `browser.headed` as the keeper reads it (true | false | null = unset), handed
+   *  by every keeper launch: an UNSET preference is resolved HERE against the display just probed (PURE resolveHeaded —
+   *  no desktop + Xvfb + auto ⇒ a window ⇒ the hidden-window rung), and the fact says so (`wanted.byDefault`) so every
+   *  later call of the record names the same planned file. Omitted (an older caller) ⇒ today's meaning. */
+  async function factFor({ baseFile = null, cfg = null, headedEnv = null, prev = null, mode = 'auto', preference } = {}) {
     const base = (cfg && typeof cfg === 'object') ? cfg : (baseFile ? readCfg(baseFile) : null) || {};
-    const wanted = D.wantedOf(base, { headedEnv });
     const display = await probeNow();
+    let env = headedEnv, byDefault = false;
+    if (preference !== undefined && (headedEnv === null || headedEnv === undefined)) {
+      const r = D.resolveHeaded({ setting: preference, display, mode, ...(noDesktopWindow === undefined ? {} : { noDesktopWindow }) });
+      if (r.why === 'no-desktop') { env = true; byDefault = true; }
+    }
+    const wanted = D.wantedOf(base, { headedEnv: env });
     const plan = D.launchPlan({ wanted, display, mode }); // `mode` = browser.noDisplayMode (auto: the hidden window where Xvfb is here)
-    return D.displayFact({ display, plan, wanted, prev, at: now(), mode });
+    return D.displayFact({ display, plan, wanted, prev, at: now(), mode, byDefault });
   }
   /** The file a call of a browser whose record carries `fact` names (sync — every runtime call goes through it). */
   function fileFor(baseFile, fact, { headedEnv = null } = {}) {

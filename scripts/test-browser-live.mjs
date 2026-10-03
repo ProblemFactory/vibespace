@@ -439,6 +439,11 @@ function viewer(port, q, { cookie = 'vs=1', pauseAfterOpen = false } = {}) {
 const FAKE_AB_SOURCE = () => `#!${process.execPath}
 const fs = require('fs'), path = require('path'), { spawn } = require('child_process');
 const st = process.env.FAKE_AB_STATE; const ns = process.env.AGENT_BROWSER_NAMESPACE || 'default';
+// verify r1 ⑦ (lane browser-windows): the version is answered BEFORE any state is touched — the keeper's own version probe
+// runs this program WITHOUT FAKE_AB_STATE, and a crash here printed node's "v24.12.0" on stderr, which the probe read as the
+// CLI's version ⇒ every browser of this fake refused browser_cli_gone (the suite's own red, base and lane)
+if (process.argv[2] === '--version') { console.log('agent-browser 0.38.0'); process.exit(0); }
+if (!st) { process.stderr.write('fake agent-browser: FAKE_AB_STATE is not set\\n'); process.exit(1); }
 const f = path.join(st, ns + '.json');
 const read = () => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
@@ -1216,7 +1221,12 @@ await (async () => {
   if (!dtachOk) return skip('⑤ dtach is not installed — a local session cannot be created here');
   if (!REAL_AB || !abVer) return skip(`⑤ the real agent-browser is not resolvable here (${REAL_AB || 'only the VibeSpace shim / nothing on PATH'})`);
   if (!/\b0\.(3[2-9]|[4-9]\d)\.|\b[1-9]\d*\./.test(abVer)) return skip(`⑤ agent-browser ${abVer} is below 0.32 — no stream server`);
-  if (!fs.existsSync(realBrowsers)) return skip(`⑤ the real agent-browser has no installed browser under ${realBrowsers} (the leg never downloads one)`);
+  // lane fleet-image-2 (the fleet image bakes agent-browser 0.38.1 and no ~/.agent-browser/browsers): with no browser
+  // installed under its home, agent-browser launches the system Chrome / Chromium it finds (measured on 0.38.1: the
+  // Debian chromium 154 of the fleet image) or answers "Chrome not found" — it never downloads one. The leg links the
+  // installed browsers when there are some, else runs on that system browser.
+  const installedBrowsers = fs.existsSync(realBrowsers);
+  console.log(`  ⑤ the agent's own browser: ${installedBrowsers ? `the one installed under ${realBrowsers}` : 'the system Chrome / Chromium agent-browser finds (no installed browser under ' + realBrowsers + ')'}`);
   const M = mutantCopies('browser-live', repo);
   // THE CONTROL: the pre-fix belief — "the frame's metadata IS the frame" — as ONE edit to frameGeometry in a patched
   // copy of src/browser-stream.js: the claim becomes both the picture (the letterbox) and the page (the scale). The
@@ -1229,7 +1239,7 @@ await (async () => {
   const cleanupHome5 = () => { try { fs.rmSync(HOME5, { recursive: true, force: true }); } catch { } };
   process.on('exit', cleanupHome5);
   fs.mkdirSync(path.join(HOME5, '.agent-browser'), { recursive: true });
-  fs.symlinkSync(realBrowsers, path.join(HOME5, '.agent-browser', 'browsers')); // the INSTALLED browser, read-only use; never a download, never the owner's profiles
+  if (installedBrowsers) fs.symlinkSync(realBrowsers, path.join(HOME5, '.agent-browser', 'browsers')); // the INSTALLED browser, read-only use; never a download, never the owner's profiles
   const D5 = path.join(ROOT, 'real5'); const BIN5 = path.join(D5, 'bin'); const ENVS = path.join(D5, 'envs'); fs.mkdirSync(BIN5, { recursive: true }); fs.mkdirSync(ENVS, { recursive: true });
   const SID5 = crypto.randomUUID();
   const hook5 = JSON.stringify({ type: 'system', subtype: 'hook_started', session_id: SID5, hook_name: 'SessionStart' });

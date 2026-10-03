@@ -30,6 +30,14 @@
 //      unbounded nested quantifier (the 2 s harness kills it — a hang is time by nature); the pre-fix `compactSide`
 //      (an `order` array scanned per delta, every key kept) — the census's own measurement reads it ×3.9 in WORK and
 //      over the line bound.
+//   ⑧ THE MESSAGE ACTION BAR (lane reaction-hover, 2026-10-01 — the owner: the `+` under every message "太丑了"; one
+//      Lark-style hover bar at the message's right edge, add reaction · reply in thread · quote, the layout untouched):
+//      PURE src/lib/msg-bar-model.js's table — which actions a row offers by the conversation's offers, the channel's
+//      declared placements, the composer's mode and the message's place (Quote never inside a topic — the engine's PL5;
+//      never in the pane; a system line / a cleared message none; a group row its ⋯) — over the REAL adapters' caps
+//      rows; the toolbar's arrow steps; the re-sync key; the WIRING (the strip lost its `+`, the bar is SVG + named +
+//      an overlay hidden by default and never drawn on a touch device, the picker opens from the bar, the phone's long
+//      press opens the same list, a quote rides the send as its placement); two patched-copy controls.
 import path from 'node:path';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
@@ -322,6 +330,106 @@ const M = mutantCopies('chanrx', REPO);
   const big = (fn) => fn(Array.from({ length: 3000 }, (_, i) => censusDelta(i, 'add', 'K' + i, 'u')))[0];
   ok(JSON.stringify(big(e.compactSide)).length > R.SIDE_LINE_MAX_BYTES && !big(e.compactSide).truncated && JSON.stringify(big(RX.compactSide)).length <= R.SIDE_LINE_MAX_BYTES, `CONTROL (e'): the pre-fix compactSide's snapshot of 3 000 keys is ${JSON.stringify(big(e.compactSide)).length} bytes, no \`truncated\` — past the ${R.SIDE_LINE_MAX_BYTES}-byte line bound the census cap asserts`);
   for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 5, label: 'chanrx: ' })) ok(row.pass, row.name, row.detail);
+}
+
+// ═══ ⑧ THE MESSAGE ACTION BAR (lane reaction-hover) ═════════════════════════════════════════════
+console.log('⑧ the message action bar — the PURE table, the wiring, the controls');
+{
+  const { pathToFileURL } = await import('node:url');
+  const BAR_MODEL = 'src/lib/msg-bar-model.js';
+  const BM = await import(pathToFileURL(path.join(REPO, BAR_MODEL)).href);
+  const P = require(path.join(REPO, 'src/channel-policy.js'));
+  const fake = require(path.join(REPO, 'src/channels/fake.js'));
+  const agents = require(path.join(REPO, 'src/channels/agents.js'));
+  const gmail = require(path.join(REPO, 'src/channels/gmail.js'));
+  const YES = { offered: true, why: null }, NO = { offered: false, why: 'x' };
+  const conv = ({ react = YES, thread = YES, placements = ['chat', 'quote', 'thread', 'thread+chat'] } = {}) => ({ offers: { react, threadReply: thread }, threads: { placements } });
+  const place = (kind) => (kind ? { kind, thread: kind.startsWith('topic-') ? { key: 'k', isRoot: kind === 'topic-root' } : null } : null);
+  const rows = [
+    // [name, input, expected]
+    ['a plain message, everything offered, sending as you', { place: place('plain'), conv: conv(), composer: 'direct' }, ['react', 'thread', 'quote']],
+    ['a message with no place fact (an adapter without threads)', { place: null, conv: conv(), composer: 'direct' }, ['react', 'thread', 'quote']],
+    ['a QUOTE (a reply chain, not a topic) — quoted and threaded like any message', { place: place('quote'), conv: conv(), composer: 'direct' }, ['react', 'thread', 'quote']],
+    ['a TOPIC ROOT — no Quote (the vendor files the reply in the topic: PL5)', { place: place('topic-root'), conv: conv(), composer: 'direct' }, ['react', 'thread']],
+    ['a TOPIC REPLY — no Quote', { place: place('topic-reply'), conv: conv(), composer: 'direct' }, ['react', 'thread']],
+    ['a quote INSIDE a topic — no Quote', { place: place('topic-quote'), conv: conv(), composer: 'direct' }, ['react', 'thread']],
+    ['in the PANE — never Quote (every message there is in the thread)', { inPane: true, place: place('plain'), conv: conv(), composer: 'direct' }, ['react', 'thread']],
+    ['sending only as the bot (proposals) — Quote proposes', { place: place('plain'), conv: conv(), composer: 'propose' }, ['react', 'thread', 'quote']],
+    ['a read-only conversation — no composer, no Quote', { place: place('plain'), conv: conv(), composer: 'readonly' }, ['react', 'thread']],
+    ['react not offered (a sign-in without the scope) — no Add reaction', { place: place('plain'), conv: conv({ react: NO }), composer: 'direct' }, ['thread', 'quote']],
+    ['thread-reply not offered (a group that forbids topics) — no Reply in thread', { place: place('plain'), conv: conv({ thread: NO }), composer: 'direct' }, ['react', 'quote']],
+    ['the channel declares chat only (the Agents adapter) — no Quote', { place: place('plain'), conv: conv({ placements: ['chat'], react: NO, thread: NO }), composer: 'direct' }, []],
+    ['thread-reply offered but `thread` not declared — no Reply in thread', { place: place('plain'), conv: conv({ placements: ['chat', 'quote'] }), composer: 'direct' }, ['react', 'quote']],
+    ['an older server (no placements in the view) — Quote unknown ⇒ not drawn; the thread offer stands', { place: place('plain'), conv: { offers: { react: YES, threadReply: YES }, threads: {} }, composer: 'direct' }, ['react', 'thread']],
+    ['no conversation drawn yet — nothing', { place: place('plain'), conv: null, composer: null }, []],
+    ['a SYSTEM line — no bar', { sys: true, place: place('plain'), conv: conv(), composer: 'direct' }, []],
+    ['a CLEARED message — no bar', { cleared: true, place: place('plain'), conv: conv(), composer: 'direct' }, []],
+    ['an agent GROUP message — its ⋯ only', { group: true }, ['more']],
+    ['a cleared GROUP message — no bar', { group: true, cleared: true }, []],
+  ];
+  const bad = rows.filter(([, inp, want]) => !eq(BM.msgBarActions(inp), want)).map(([n, inp]) => `${n}: ${JSON.stringify(BM.msgBarActions(inp))}`);
+  ok(bad.length === 0, `msgBarActions: ${rows.length} rows — each action only where offered, Quote never inside a topic / in the pane / without a composer`, bad);
+  const order = rows.every(([, inp]) => { const xs = BM.msgBarActions(inp); return eq(xs, BM.MSG_ACTIONS.filter((x) => xs.includes(x))); });
+  ok(order && eq(BM.MSG_ACTIONS, ['react', 'thread', 'quote', 'more']), 'the bar\'s order is ONE closed list (react · thread · quote · more) — every answer is a subsequence of it');
+  // the REAL caps rows: the placements the engine's view carries (P.placementsOf, the same list its verdict reads)
+  const real = [['fake-poll', fake.fakePoll.caps, ['react', 'thread', 'quote']], ['fake-scan', fake.fakeScan.caps, ['react', 'quote']], ['agents', agents.caps || (agents.agentsAdapter && agents.agentsAdapter.caps), ['react']], ['gmail', gmail.caps || (gmail.gmailAdapter && gmail.gmailAdapter.caps), null]];
+  const realBad = [];
+  for (const [id, caps, want] of real) {
+    if (!caps) { realBad.push(`${id}: no caps row exported`); continue; }
+    const pl = P.placementsOf(caps);
+    const got = BM.msgBarActions({ place: place('plain'), conv: { offers: { react: YES, threadReply: pl.includes('thread') ? YES : NO }, threads: { placements: pl } }, composer: 'direct' });
+    const expect = want || ['react', ...(pl.includes('thread') ? ['thread'] : []), ...(pl.includes('quote') ? ['quote'] : [])];
+    if (!eq(got, expect)) realBad.push(`${id}: placements ${pl.join(',')} → ${got.join(',')} (want ${expect.join(',')})`);
+  }
+  ok(realBad.length === 0, `over the REAL adapters' caps rows (fake-poll / fake-scan / agents / gmail): Quote and Reply in thread follow each one's DECLARED placements`, realBad);
+  // the toolbar's arrows (ONE tab stop per bar, wrapping)
+  const steps = [['ArrowRight', 0, 3, 1], ['ArrowRight', 2, 3, 0], ['ArrowLeft', 0, 3, 2], ['ArrowLeft', 2, 3, 1], ['Home', 2, 3, 0], ['End', 0, 3, 2], ['ArrowRight', -1, 3, 1], ['Tab', 0, 3, null], ['Enter', 1, 3, null], ['ArrowDown', 0, 3, null], ['ArrowRight', 0, 0, null], ['ArrowRight', 0, 1, 0]];
+  const stepBad = steps.filter(([k, i, n, w]) => BM.barKeyStep(k, i, n) !== w).map((x) => `${x.join(' ')} → ${BM.barKeyStep(x[0], x[1], x[2])}`);
+  ok(stepBad.length === 0, `barKeyStep: ${steps.length} rows — ← → wrap, Home / End, Tab / Enter / ↓ are not the bar's (the list's paging keys keep theirs)`, stepBad);
+  const k0 = BM.barKey({ conv: conv(), composer: 'direct', note: '' });
+  const keyMoves = [BM.barKey({ conv: conv({ react: NO }), composer: 'direct' }), BM.barKey({ conv: conv({ thread: NO }), composer: 'direct' }), BM.barKey({ conv: conv({ placements: ['chat'] }), composer: 'direct' }), BM.barKey({ conv: conv(), composer: 'readonly' }), BM.barKey({ conv: conv(), composer: 'direct', note: 'needs a sign-in' })];
+  ok(BM.barKey({ conv: conv(), composer: 'direct', note: '' }) === k0 && keyMoves.every((k) => k !== k0) && new Set(keyMoves).size === keyMoves.length, 'barKey: the same inputs ⇒ the same key (a broadcast that changed nothing re-syncs no bar); each input that changes an answer or a title changes it');
+  ok(BM.inTopic({ kind: 'topic-root' }) && BM.inTopic({ kind: 'topic-quote' }) && !BM.inTopic({ kind: 'quote' }) && !BM.inTopic({ kind: 'plain' }) && !BM.inTopic(null), 'inTopic reads the ONE classifier\'s kind (topic-* only — a quote is not a topic)');
+
+  // THE WIRING (the files as shipped)
+  const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+  const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
+  const picker = strip(read('src/lib/reaction-picker.js'));
+  const win = strip(read('src/lib/channel-window.js'));
+  const barJs = strip(read('src/lib/channel-msg-bar.js'));
+  const pane = strip(read('src/lib/channel-thread-pane.js'));
+  const css = read('public/style.css');
+  const icons = read('src/lib/icons.js');
+  ok(!/rx-add|addChip|icon\('plus'/.test(picker) && /if \(!list\.length\) return null;/.test(picker), 'reaction-picker.js: the strip has NO `+` (no .rx-add, no plus glyph) and a message without reactions has no strip — no line is reserved under it');
+  ok(/row\._acts = \(\) => ctx\.bar\(rec, ctx, row\);\s*const bar = renderMsgBar\(row\._acts\(\)\);\s*if \(bar\) row\.appendChild\(bar\);/.test(win), 'channel-window.js renderRecord: every row gets its bar from `ctx.bar` (the PURE table over the offers NOW), appended last');
+  ok(/msgBarActions\(\{ sys: isSysRow\(rec\), inPane: !!\(c && c\.inPane\), place, conv: lastConv, composer: composerNow\(\) \}\)/.test(win) && !/canAdd|onAdd/.test(win), 'the window asks the PURE table with the offers it last drew (no second copy of the rule — canAdd / onAdd are gone)');
+  ok(/const pop = openReactionPicker\(anchor, \{/.test(win) && /holdBarOpen\(anchor, pop\);/.test(win), 'Add reaction opens THE picker (openReactionPicker, createPopover) anchored to the bar\'s button, and the bar stays while it is open');
+  ok(/split\.addEventListener\('contextmenu'[\s\S]{0,700}msgActionMenu\(ev\.clientX, ev\.clientY, acts,/.test(win) && /a\[href\], img, textarea, input, \.chanmsg-bar/.test(win), 'the phone\'s long press (the contextmenu synthesis) opens the row\'s SAME actions as a menu; a link / picture / text field keeps its own');
+  ok(/\.\.\.\(q \? \{ replyTo: q\.vid, placement: 'quote' \} : \{\}\)/.test(win) && /P\.placementText\('quote'/.test(win), 'a Quote rides the composer\'s send as `{replyTo, placement: \'quote\'}` (the engine\'s verdict re-judges it), the line above the box worded by the card\'s own placementText');
+  ok(/renderMsgBar\(msgBarActions\(\{ group: true \}\)\.map\(\(id\) => \(\{ id, label: t\('More actions'\), cls: 'chanmsg-more' \}\)\)\)/.test(win) && !/el\('button', 'chanmsg-more', '⋯'\)/.test(win), 'the group row\'s ⋯ is the same bar with the SVG glyph — never a text "⋯" button');
+  ok(/b\.appendChild\(icon\(GLYPH\[a\.id\] \|\| 'more', 14\)\)/.test(barJs) && /b\.title = title/.test(barJs) && /b\.setAttribute\('aria-label', a\.label\)/.test(barJs) && /setAttribute\('role', 'toolbar'\)/.test(barJs) && /b\.tabIndex = i === 0 \? 0 : -1;/.test(barJs) && !/textContent\s*=\s*['"`]\+/.test(barJs), 'channel-msg-bar.js: every button is an SVG from the library, named by title + aria-label; a toolbar with ONE tab stop; no text "+"');
+  ok(/emojiAdd:\s*_s\(/.test(icons) && /\n  quote:\s*_s\(/.test(icons), 'icons.js carries the two new glyphs (emojiAdd, quote)');
+  ok(!/chanthread-pick/.test(pane) && /function pick\(rec\)/.test(pane) && /el: pane, mode, open, close, pick,/.test(pane), 'the pane\'s per-reply ↩ button is gone — its "reply to this message" is the row\'s bar (`pane.pick`)');
+  const barRule = (css.match(/\n\.chanmsg-bar \{[^}]*\}/) || [''])[0];
+  ok(/position: absolute;/.test(barRule) && /opacity: 0;/.test(barRule) && /pointer-events: none;/.test(barRule) && /transform: translateY\(-50%\)/.test(barRule) && /right: 6px/.test(barRule), 'CSS: the bar is an OVERLAY (absolute, centred on the line, at the right edge), transparent and click-through by default', barRule);
+  ok(/\.chanmsg:hover > \.chanmsg-bar, \.chanmsg-bar:has\(:focus-visible\), \.chanmsg-bar\.open \{ opacity: 1; pointer-events: auto; \}/.test(css) && /@media \(hover: none\) and \(pointer: coarse\) \{ \.chanmsg-bar \{ display: none; \} \}/.test(css), 'CSS: shown on hover, keyboard focus (focus-visible — a click leaves no stuck bar) or an open picker; NEVER drawn on a touch device (hover none + a coarse pointer — headless Chrome and a pen report hover: none with a fine one)');
+  ok(!/\.rx-add|chanthread-pick|\.chanmsg-more \{/.test(css), 'CSS: the old `+` chip, the pane\'s ↩ and the text ⋯ rules are gone');
+  const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
+  const words = ['Message actions', 'Quote', 'Remove the quote', 'Add reaction', 'Reply in thread', 'Reply to this message in the thread', 'More actions'];
+  const missing = words.filter((w) => !zh.includes(JSON.stringify(w) + ':') || !ja.includes(JSON.stringify(w) + ':'));
+  ok(missing.length === 0, `the bar's ${words.length} words are in both dictionaries (zh + ja)`, missing);
+
+  // CONTROLS (patched copies of the PURE table, scratch only): each rule removed reads RED on the table above
+  const MB = mutantCopies('chanrx-bar', REPO);
+  const BSRC = read(BAR_MODEL);
+  const runTable = (mod) => rows.filter(([, inp, want]) => !eq(mod.msgBarActions(inp), want)).length;
+  const noTopic = BSRC.replace(" && !inTopic(place)) out.push('quote');", ") out.push('quote');");
+  const m1 = await import(pathToFileURL(MB.write(BAR_MODEL, noTopic, 'no-topic', { esm: true })).href);
+  ok(noTopic !== BSRC && runTable(m1) === 3, `CONTROL: a table that forgets the topic clause offers Quote on a topic's messages — ${runTable(m1)} rows RED (the engine would refuse the send: PL5)`);
+  const noComposer = BSRC.replace(" && (composer === 'direct' || composer === 'propose')", '');
+  const m2 = await import(pathToFileURL(MB.write(BAR_MODEL, noComposer, 'no-composer', { esm: true })).href);
+  ok(noComposer !== BSRC && runTable(m2) === 1, `CONTROL: a table that ignores the composer offers Quote in a read-only conversation (a button with nowhere to put the quote) — ${runTable(m2)} row RED`);
+  for (const row of copiesCensus(MB.files, MB.dir, REPO, { minCopies: 2, label: 'chanrx-bar: ' })) ok(row.pass, row.name, row.detail);
 }
 
 // ═══ PURE ═══════════════════════════════════════════════════════════════════════════════════════

@@ -28,10 +28,11 @@ const os = require('os');
 const path = require('path');
 const B = require('./browser-profiles.js');
 const F = require('./browser-facts.js');
+const BB = require('./browser-builds.js'); // lane browser-admin 2a: this machine's Chrome builds + the ONE verdict
 
 /** The closed op set — a caller cannot invent one (unknown ops on an old
  *  daemon hang; unknown ops here are refused by name). */
-const BROWSER_SERVE_OPS = Object.freeze(['version', 'status', 'start', 'stop', 'cdp-url']);
+const BROWSER_SERVE_OPS = Object.freeze(['version', 'status', 'start', 'stop', 'cdp-url', 'builds']); // lane browser-admin 2a: + builds (capability `browser-builds` — an older daemon is never asked)
 
 /** ONE facts instance per PROCESS (the daemon keeps it in a module-level
  *  variable, never on a connection — a dial-out device reconnects on every
@@ -61,11 +62,16 @@ async function planLaunch(bs, ns, headed, mode = 'auto') {
   const D = require('./browser-display.js');
   let user = {};
   try { const v = JSON.parse(fs.readFileSync(path.join(bs.homeDir, '.agent-browser', 'config.json'), 'utf8')); if (v && typeof v === 'object' && !Array.isArray(v)) user = v; } catch { /* the CLI's own default */ }
-  const wanted = D.wantedOf(user, { headedEnv: headed });
   let display;
   try { display = await bs.displayProbe(); } catch (e) { display = D.displayVerdict({ env: {}, runtimeDir: null, entries: [] }); display.why = [`the display probe failed: ${e && e.message}`]; }
+  // lane hooks-create H5: the hub sends the window preference AS STORED; an unset one is resolved against THIS machine's
+  // display (no desktop + Xvfb + auto ⇒ the hidden-window rung) — the hub's own display never decides a paired machine's
+  // (2.369.200: the rule's switch D.NO_DESKTOP_WINDOW_DEFAULT is OFF — an unset preference inherits, as in .199)
+  const r = D.resolveHeaded({ setting: headed, display, mode });
+  const byDefault = r.why === 'no-desktop';
+  const wanted = D.wantedOf(user, { headedEnv: byDefault ? true : headed });
   const plan = D.launchPlan({ wanted, display, mode }); // `mode` = the hub's browser.noDisplayMode (an older hub sends none ⇒ auto)
-  const fact = D.displayFact({ display, plan, wanted, at: Date.now(), mode });
+  const fact = D.displayFact({ display, plan, wanted, at: Date.now(), mode, byDefault });
   const f = planFileOf(bs, ns);
   if (!plan.changed) { try { fs.unlinkSync(f); } catch { /* none */ } return { fact, env: { ...fact.env }, headed }; }
   try {
@@ -77,6 +83,28 @@ async function planLaunch(bs, ns, headed, mode = 'auto') {
   // the planned file carries `headed` itself — the launch names no HEADED of its own, so its view equals every later op's
   // (a hidden-window launch also clears a named display in its own env — fact.env — so the CLI starts its Xvfb)
   return { fact, env: { ...fact.env, AGENT_BROWSER_CONFIG: f }, headed: null };
+}
+
+/**
+ * LANE BROWSER-ADMIN 2a — THE CHOSEN BUILD rides EVERY op of the profile's session (a call whose launch view differs
+ * relaunches Chrome — measured on 0.38.1, the rule the hub's keeper keeps with `rec.launchEnv`): the start writes the
+ * executable it was asked to run beside the planned config (`<ns>.build.json`, 0600) and every later op of that
+ * namespace names it; a start with the default build removes it, so its existence IS the view. The machine resolves a
+ * build BY VERSION in its OWN list (the hub never points a machine at a path it did not name itself — a `path` choice
+ * is the user's own, judged here as a file).
+ */
+const buildFileOf = (bs, ns) => path.join(bs.homeDir, '.vibespace', 'browser-serve', ns + '.build.json');
+function buildEnvOf(bs, ns) {
+  try { const v = JSON.parse(fs.readFileSync(buildFileOf(bs, ns), 'utf8')); return v && typeof v.executablePath === 'string' && v.executablePath.startsWith('/') ? { AGENT_BROWSER_EXECUTABLE_PATH: v.executablePath } : null; } catch { return null; }
+}
+const viewEnvOf = (bs, ns) => { const a = planEnvOf(bs, ns), b = buildEnvOf(bs, ns); return a || b ? { ...(a || {}), ...(b || {}) } : null; };
+function writeBuildView(bs, ns, executablePath) {
+  const f = buildFileOf(bs, ns);
+  if (!executablePath) { try { fs.unlinkSync(f); } catch { /* none */ } return; }
+  fs.mkdirSync(path.dirname(f), { recursive: true, mode: 0o700 });
+  const tmp = f + '.' + process.pid + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify({ executablePath }), { mode: 0o600 });
+  fs.renameSync(tmp, f);
 }
 
 /** The profile's namespace + the directory THIS machine owns for it. */
@@ -96,6 +124,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  *   start   {profileId, idleMs?, headed?, noDisplayMode?} → {ok, pid, starttime, socketDir, cdpUrl, cdpPort, dir, active, display}
  *   stop    {profileId}     → {ok, closed, left|null}
  *   cdp-url {profileId}     → {ok, url, port}
+ *   builds                  → {ok, listing}   (lane browser-admin 2a: this machine's Chrome builds — browser-builds.js)
+ *   start   {…, browser?}  — the chosen build ({kind:'build', version} | {kind:'path', path}), judged on this machine
  */
 async function runBrowserServeOp(bs, action, params = {}) {
   const op = String(action || '');
@@ -105,6 +135,8 @@ async function runBrowserServeOp(bs, action, params = {}) {
     const v = await bs.facts.probeVersion();
     return { ok: true, version: v, floor: B.floorVerdict(v, B.FLOOR_VERSION), cmd: bs.cmd };
   }
+  // lane browser-admin 2a: THIS machine's Chrome builds (never a profile's — the list is the machine's)
+  if (op === 'builds') return { ok: true, listing: BB.buildsView(BB.listBuilds({ homeDir: bs.homeDir })) };
   const place = placeOf(bs, p.profileId);
   if (!place.ok) return place;
   const { ns, dir } = place;
@@ -118,19 +150,30 @@ async function runBrowserServeOp(bs, action, params = {}) {
     const headed = p.headed === true || p.headed === 'yes' ? true : (p.headed === false || p.headed === 'no' ? false : null);
     // lane headless-fallback: this machine's display, now — the launch runs with the plan and answers the fact
     const plan = await planLaunch(bs, ns, headed, p.noDisplayMode === 'headless' ? 'headless' : 'auto');
-    const r = await bs.runtime.launch(ns, { dir, idleMs: Number(p.idleMs) || 0, headed: plan.headed, extraEnv: plan.env });
+    // lane browser-admin 2a: the chosen build, judged HERE (this machine's list / file) — gone ⇒ refused by name, never
+    // a silent fall back; the hub already decided it is the user's choice
+    let buildEnv = {};
+    const choice = BB.normalizeBrowserChoice(p.browser);
+    if (p.browser != null && !choice) return { ok: false, code: 'browser_choice_invalid', error: 'the start named a browser build that is not one' };
+    if (choice && choice.kind !== 'default') {
+      const bv = BB.browserChoiceVerdict({ choice, provider: 'chromium', by: 'user', builds: choice.kind === 'build' ? BB.listBuilds({ homeDir: bs.homeDir }) : null, pathFact: choice.kind === 'path' ? BB.fileFact(choice.path) : null, machine: os.hostname() });
+      if (!bv.ok) return { ok: false, code: bv.code === 'browser_build_not_executable' ? 'browser_build_missing' : bv.code, error: bv.error, display: plan.fact };
+      buildEnv = { AGENT_BROWSER_EXECUTABLE_PATH: bv.executablePath };
+    }
+    try { writeBuildView(bs, ns, buildEnv.AGENT_BROWSER_EXECUTABLE_PATH || null); } catch (e) { return { ok: false, code: 'launch_failed', error: `the launch view could not be written (${e && e.message})`, display: plan.fact }; }
+    const r = await bs.runtime.launch(ns, { dir, idleMs: Number(p.idleMs) || 0, headed: plan.headed, extraEnv: { ...plan.env, ...buildEnv } });
     if (!r.ok) return { ok: false, code: 'launch_failed', error: `the browser did not start: ${(r.stderr || r.error || r.stdout || '').trim().slice(0, 300)}`, display: plan.fact };
     const info = await bs.runtime.info(ns, { dir });
     if (!info.active) return { ok: false, code: 'launch_failed', error: 'the daemon did not report itself active after open', display: plan.fact };
     // …and this op's own cdp-url asks under the LAUNCH's view (the planned file, its idle, its HEADED) — a differing view
     // relaunches the browser on 0.38.1 (measured by the keeper's lane H; this op asked with none before)
-    const view = { ...(planEnvOf(bs, ns) || {}), AGENT_BROWSER_IDLE_TIMEOUT_MS: String(Math.max(0, Number(p.idleMs) || 0)), ...(plan.headed === true ? { AGENT_BROWSER_HEADED: '1' } : plan.headed === false ? { AGENT_BROWSER_HEADED: '0' } : {}) };
+    const view = { ...(viewEnvOf(bs, ns) || {}), AGENT_BROWSER_IDLE_TIMEOUT_MS: String(Math.max(0, Number(p.idleMs) || 0)), ...(plan.headed === true ? { AGENT_BROWSER_HEADED: '1' } : plan.headed === false ? { AGENT_BROWSER_HEADED: '0' } : {}) };
     const cdp = await bs.runtime.cdpUrl(ns, { dir, extraEnv: view });
     const cdpUrl = cdp.ok ? cdp.url : null;
     return { ok: true, active: true, pid: info.pid, starttime: info.pid ? F.procStart(info.pid) : null, socketDir: info.socketDir, version: info.version, cdpUrl, cdpPort: cdpUrl ? B.cdpPortOf(cdpUrl) : null, dir, display: plan.fact };
   }
   if (op === 'cdp-url') {
-    const cdp = await bs.runtime.cdpUrl(ns, { dir, extraEnv: planEnvOf(bs, ns) });
+    const cdp = await bs.runtime.cdpUrl(ns, { dir, extraEnv: viewEnvOf(bs, ns) });
     if (!cdp.ok) return { ok: false, code: 'no_cdp', error: `no CDP url for ${ns}: ${(cdp.raw && (cdp.raw.stderr || cdp.raw.error)) || 'the browser is not running'}` };
     return { ok: true, url: cdp.url, port: B.cdpPortOf(cdp.url) };
   }
@@ -138,7 +181,7 @@ async function runBrowserServeOp(bs, action, params = {}) {
   // a pid that survives the grace is reported, never signalled by THIS op —
   // the hub's keeper decides what to do with a machine's stray process.
   const before = await bs.runtime.info(ns, { dir });
-  const r = await bs.runtime.closeAll(ns, { dir, extraEnv: planEnvOf(bs, ns) });
+  const r = await bs.runtime.closeAll(ns, { dir, extraEnv: viewEnvOf(bs, ns) });
   let left = null;
   if (before.pid) {
     const until = Date.now() + STOP_GRACE_MS;
@@ -149,4 +192,4 @@ async function runBrowserServeOp(bs, action, params = {}) {
 }
 function dirExists(d) { try { return fs.statSync(d).isDirectory(); } catch { return false; } }
 
-module.exports = { BROWSER_SERVE_OPS, install, runBrowserServeOp, placeOf, STOP_GRACE_MS, planFileOf };
+module.exports = { BROWSER_SERVE_OPS, install, runBrowserServeOp, placeOf, STOP_GRACE_MS, planFileOf, buildFileOf };

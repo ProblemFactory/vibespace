@@ -25,7 +25,11 @@
 // engine, not in a stash (src/server/stash-handover.js adds the engine's preview as entries with source 'group'), so a
 // hand-over never carries it: it rides the next message the owner types (or an @mention's wake)
 const { CLEARED_TEXT } = require('./record-clear.js');   // PURE: the stored sentence a clear leaves (worded by previewWords)
-const KIND_ORDER = Object.freeze(['channel-receipt', 'channel', 'channel-reaction', 'job', 'handback', 'window-request', 'notice', 'group', 'peer']);
+// 'retrying' (lane notify-retry, 2026-10-01): a notification the delivery ladder PARKED — the agent was alive and did
+// not accept it at once (a transient miss on a live pid); it is posted again at the conversation's turn end and on a
+// bounded backoff (src/server/conversation-deliver.js, the retry park). It is listed first: it is on its way, not
+// waiting for a prompt. The fact carries `retrying: {n, nextAt}` beside the items.
+const KIND_ORDER = Object.freeze(['retrying', 'channel-receipt', 'channel', 'channel-reaction', 'job', 'handback', 'window-request', 'notice', 'group', 'peer']);
 /** THE sender name of the reaction digest (lane channel-threads, spec §5.4 — `👍 ×3 on your reply in <conversation>`), spelled
  *  ONCE: the channels engine files under it, this module and the agent's injection read it. The naive-user pass
  *  (2026-09-28): a digest was a "channel message" in the strip — the owner could not tell a reaction from a message —
@@ -39,6 +43,7 @@ function kindOf(e, { job = false } = {}) {
   if (!e || typeof e !== 'object') return 'notice';
   const src = String(e.source || '');
   const from = typeof e.fromName === 'string' ? e.fromName.trim() : '';
+  if (src === 'retry' || (e.held && e.held.kind === 'retrying')) return 'retrying';
   if (src === 'group') return 'group';
   if (src === 'channel-receipt') return 'channel-receipt';
   if (src === 'channel') return from === REACTION_DIGEST_FROM ? 'channel-reaction' : 'channel';
@@ -66,9 +71,11 @@ function summarize({ msg = [], jobs = [] } = {}) {
     const at = Number(ts) || 0;
     if (at > 0 && (!oldestAt || at < oldestAt)) oldestAt = at;
   };
+  let retrying = null;   // {n, nextAt}: the parked ones and the soonest next attempt
   for (const e of Array.isArray(msg) ? msg : []) {
     const kind = kindOf(e);
     add(kind, kind === 'peer' || kind === 'group' ? String((e && e.fromName) || '').slice(0, 80) || null : null, e && e.ts);
+    if (kind === 'retrying') { const at = Number(e && e.held && e.held.nextAt) || 0; retrying = { n: (retrying ? retrying.n : 0) + 1, nextAt: retrying && retrying.nextAt && (!at || retrying.nextAt < at) ? retrying.nextAt : at || null }; }
   }
   for (const n of Array.isArray(jobs) ? jobs : []) add('job', null, n && n.ts);
   if (!count) return null;
@@ -78,11 +85,11 @@ function summarize({ msg = [], jobs = [] } = {}) {
   // PREVIEW_CHARS. A head is PEER-WRITTEN text: the strip draws it as textContent, never markup, and the count
   // says how many are not previewed (`previewsHeld`) so the list never pretends to be whole.
   const all = [
-    ...(Array.isArray(msg) ? msg : []).map((e) => ({ kind: kindOf(e), label: kindOf(e) === 'peer' ? String((e && e.fromName) || '').slice(0, 80) || null : null, at: Number(e && e.ts) || 0, head: previewHead(e && e.text) })),
+    ...(Array.isArray(msg) ? msg : []).map((e) => ({ kind: kindOf(e), label: kindOf(e) === 'peer' || kindOf(e) === 'retrying' ? String((e && e.fromName) || '').slice(0, 80) || null : null, at: Number(e && e.ts) || 0, head: previewHead(e && e.text) })),
     ...(Array.isArray(jobs) ? jobs : []).map((n) => ({ kind: 'job', label: n && n.jobName ? String(n.jobName).slice(0, 80) : null, at: Number(n && n.ts) || 0, head: previewHead(n && n.text) })),
   ].sort((a, b) => a.at - b.at);
   const previews = all.slice(0, PREVIEW_MAX);
-  return { count, oldestAt: oldestAt || null, items, previews, previewsHeld: Math.max(0, all.length - previews.length) };
+  return { count, oldestAt: oldestAt || null, items, previews, previewsHeld: Math.max(0, all.length - previews.length), ...(retrying ? { retrying } : {}) };
 }
 
 /** The first non-empty line of a waiting entry's text, cut at PREVIEW_CHARS (an ellipsis names the cut). A frame
@@ -111,14 +118,16 @@ function previewWords(p, t) {
   // the .197 integration (lane-redact's owed note on lane stash-detail): a CLEARED entry holds the stored English key —
   // said in the device's words (a job's name and a line's head alike)
   const w = (s) => (s === CLEARED_TEXT ? t(CLEARED_TEXT) : s);
-  const who = p.kind === 'job' && p.label ? t('Background Work · {name}', { name: w(p.label) }) : partWords({ kind: p.kind, n: 1, label: p.label ? w(p.label) : p.label }, t);
+  const who = p.kind === 'job' && p.label ? t('Background Work · {name}', { name: w(p.label) })
+    : p.kind === 'retrying' && p.label ? t('{name} · being retried', { name: w(p.label) })   // the parked notification names its sender (a job's "Background Work · <name>")
+      : partWords({ kind: p.kind, n: 1, label: p.label ? w(p.label) : p.label }, t);
   return p.head ? `${who} · ${w(p.head)}` : who;
 }
 
 /** A digest that changes with every printed field (the strip / the card patch only on a change). */
 function summaryDigest(s) {
   if (!s || !s.count) return '';
-  return s.count + '|' + s.items.map((i) => `${i.kind}:${i.label || ''}:${i.n}`).join(',');
+  return s.count + '|' + s.items.map((i) => `${i.kind}:${i.label || ''}:${i.n}`).join(',') + (s.retrying ? `|rt:${s.retrying.n}:${s.retrying.nextAt || 0}` : '');
 }
 
 /** One part of the sentence per group, in the device's words. */
@@ -126,6 +135,7 @@ function partWords(item, t) {
   const n = Number(item && item.n) || 0;
   const one = n === 1;
   switch (item && item.kind) {
+    case 'retrying': return one ? t('a notice being retried') : t('{n} notices being retried', { n });
     case 'channel-receipt': return one ? t('a channel receipt') : t('{n} channel receipts', { n });
     case 'channel': return one ? t('a channel message') : t('{n} channel messages', { n });
     case 'channel-reaction': return one ? t('a reaction notice') : t('{n} reaction notices', { n });
@@ -155,10 +165,17 @@ function partWords(item, t) {
  *  notification into the turn already running — the MECHANISM, not a price, because that fold is the wrapper's to
  *  refuse (a review / compact turn, a turn that ends first: the frame then runs as its own billed turn, and the ledger
  *  says so; measured through the real codex consumer). `cost` = that word alone; `held` rides beside the button. */
-function stashSummaryWords(summary, t, { billed = true, inFlight = false, held = 0, reachable = true } = {}) {
+function stashSummaryWords(summary, t, { billed = true, inFlight = false, held = 0, reachable = true, now = Date.now(), armed = false } = {}) {
   if (!summary || !summary.count) return null;
   const n = summary.count;
-  const head = n === 1 ? t('1 notice is waiting for this agent’s next turn') : t('{n} notices are waiting for this agent’s next turn', { n });
+  // THE RETRYING ONES (lane notify-retry): on their way by themselves — the head says so when they are all there is,
+  // and the next attempt is named either way ("when this turn ends" is the sooner door)
+  const rt = summary.retrying && Number(summary.retrying.n) > 0 ? summary.retrying : null;
+  const allRetrying = !!rt && rt.n >= n;
+  const head = allRetrying ? (n === 1 ? t('1 notice is being retried for this agent') : t('{n} notices are being retried for this agent', { n }))
+    : n === 1 ? t('1 notice is waiting for this agent’s next turn') : t('{n} notices are waiting for this agent’s next turn', { n });
+  const retryWords = rt ? (allRetrying ? t('next attempt {when} or when this turn ends', { when: whenWords(rt.nextAt, now, t) })
+    : (rt.n === 1 ? t('1 of them is being retried ({when})', { when: whenWords(rt.nextAt, now, t) }) : t('{n} of them are being retried ({when})', { n: rt.n, when: whenWords(rt.nextAt, now, t) }))) : null;
   const parts = summary.items.map((i) => partWords(i, t));
   const h = Number(held) > 0 ? Number(held) : 0;
   const heldWords = h ? (h === 1 ? t('1 more is held for the next hand-over') : t('{n} more are held for the next hand-over', { n: h })) : null;
@@ -175,10 +192,11 @@ function stashSummaryWords(summary, t, { billed = true, inFlight = false, held =
     line: `${head}: ${parts.join(', ')}`,
     button: inFlight ? t('Handing over…') : t('Hand over now'),
     cost: reachable ? costWords : null,
-    held: [heldWords, ridesWords].filter(Boolean).join(' · ') || null,
+    held: [armed ? t('they will arrive as a message when this turn ends') : null, retryWords, heldWords, ridesWords].filter(Boolean).join(' · ') || null,   // `armed` (R3): the last prompt could not carry them inline
     // no hand-over for this harness: the sentence stands where the button would
     noButton: reachable ? null : t('they ride your next message'),
-    title: groupOnly ? t('Group messages reach this agent with your next message — or at once when a member @mentions it')
+    title: allRetrying ? t('The agent did not accept this at once; VibeSpace posts it again when its turn ends and on a schedule — Hand over now delivers it this instant')
+      : groupOnly ? t('Group messages reach this agent with your next message — or at once when a member @mentions it')
       : !reachable ? t('This agent has no live inbox — every waiting notice is delivered with your next message')
       : inFlight ? t('A hand-over is on its way')
         : billed ? t('Delivers every waiting notice now, as one message — it starts a billed turn for this agent')
@@ -198,17 +216,48 @@ function handedOverWords(r, t) {
  *  ("2 waiting notice(s) handed over") and carries the delivered notices below it — the card's title is that head in
  *  the device's words and the notices sit behind an expander that says how many it holds (the owner: the count
  *  alone was all the card showed). Returns null for any other text (noticeCardView's other rules apply). */
-const HANDOVER_HEAD_RE = /^(\d+) waiting notice\(s\) handed over$/;
+/** "in 25 s" / "in 4 min" / "now" — a next attempt relative to `now` (a clock the caller injects). */
+function whenWords(at, now, t) {
+  const d = Math.max(0, (Number(at) || 0) - (Number(now) || 0));
+  if (!Number(at) || d < 1000) return t('now');
+  if (d < 90 * 1000) return t('in {n} s', { n: Math.round(d / 1000) });
+  return t('in {n} min', { n: Math.round(d / 60000) });
+}
+/** WHY THE NOTICES WAITED (lane notify-retry, R4 — the hand-over card said "completed while this conversation was
+ *  closed" for a conversation that never closed): the English sentence for a set of held kinds, ONE closed table,
+ *  read back by `handoverFacts` as a key the client translates. Null when nothing states a reason (a peer's message). */
+const HELD_WHY = Object.freeze({
+  'not-running': 'they arrived while this conversation was not running',
+  'not-reachable': 'the agent did not accept them at once (busy or unreachable) — delivered now',
+  'retrying': 'their delivery was being retried — delivered now',
+  'maybe-delivered': 'the server stopped while they were being sent — some may have reached the agent already, delivered again now',   // verify r2: a may-have-landed entry (its own key — `heldKeyOf`)
+  'rate-floor': 'they were paced by the 30 s per-conversation floor',
+  'spend-cap': 'the spending ceiling held them',
+  'wrapper-no-steer': 'this agent’s process predates mid-turn notifications',
+  'off': 'auto-notify was off for this conversation',
+});
+/** the why-key of a held record: its kind, except a may-have-landed one (verify r2) — the hand-over card must say a repeat is possible */
+function heldKeyOf(held) { return held && typeof held === 'object' ? (held.maybeDelivered === true ? 'maybe-delivered' : held.kind || null) : null; }
+function heldWhyOf(kinds) {
+  const ks = [...new Set((Array.isArray(kinds) ? kinds : []).filter((k) => HELD_WHY[k]))];
+  if (!ks.length) return null;
+  if (ks.length === 1) return HELD_WHY[ks[0]];
+  return 'they were held until now';
+}
+const HANDOVER_HEAD_RE = /^(\d+) waiting notice\(s\) handed over(?: — (.+))?$/;
 function handoverFacts(body) {
   const lines = String(body == null ? '' : body).replace(/\r\n?/g, '\n').split('\n');
   const m = HANDOVER_HEAD_RE.exec((lines[0] || '').trim());
   if (!m) return null;
   const n = Number(m[1]) || 0;
   const rest = lines.slice(1).join('\n').trim();
-  return { title: { key: '{n} waiting notice(s) handed over', params: { n } }, body: rest, foldLabel: { key: 'Show the {n} notice(s)', params: { n } } };
+  // the why is ONE of the table's sentences (anything else is not ours): a param that is itself a key — the client's
+  // card translates it (chat-renderers)
+  const why = m[2] && (Object.values(HELD_WHY).includes(m[2]) || m[2] === 'they were held until now') ? m[2] : null;
+  return { title: why ? { key: '{n} waiting notice(s) handed over — {why}', params: { n, why: { key: why } } } : { key: '{n} waiting notice(s) handed over', params: { n } }, body: rest, foldLabel: { key: 'Show the {n} notice(s)', params: { n } }, ...(why ? { why } : {}) };
 }
 /** The hand-over card's text: the head line, then the delivered notices (what the agent was given, minus the
  *  hand-over sentence and its id). */
-function handoverCardText(n, text) { return `${Number(n) || 0} waiting notice(s) handed over\n\n${String(text || '').trim()}`; }
+function handoverCardText(n, text, { why = null } = {}) { return `${Number(n) || 0} waiting notice(s) handed over${why ? ` — ${why}` : ''}\n\n${String(text || '').trim()}`; }
 
-module.exports = { KIND_ORDER, REACTION_DIGEST_FROM, kindOf, summarize, summaryDigest, previewDigest, previewWords, previewHead, PREVIEW_MAX, PREVIEW_CHARS, partWords, stashSummaryWords, handedOverWords, handoverFacts, handoverCardText, HANDOVER_HEAD_RE };
+module.exports = { KIND_ORDER, REACTION_DIGEST_FROM, kindOf, summarize, summaryDigest, previewDigest, previewWords, previewHead, PREVIEW_MAX, PREVIEW_CHARS, partWords, stashSummaryWords, handedOverWords, handoverFacts, handoverCardText, HANDOVER_HEAD_RE, HELD_WHY, heldWhyOf, heldKeyOf, whenWords };

@@ -76,6 +76,7 @@ const PURE = new Set(['src/record-lateness.js' /* lane-hot-switch: a late record
   'src/collab-row.js', // codex multi-agent collab row labels/HTML — esc/t/icons injected, so the XSS rule is unit-provable
   'src/model-echo.js', // the CLI's `Set model to` echo — ONE parser for the status bar, the command-card label and the server's model-lock repin
   'src/changelog-style.js', // the user changelog's style rules (lint + parity of CHANGELOG.md / .zh / .ja) — test-changelog-style runs them over the three files; imports nothing
+  'src/preset-layers.js', // lane cluster-presets: the company presets' per-key merge (cluster < release override), the ONE parser of both preset JSON shapes, the value-free diff + the Integrations line's words — imports only the PURE registry (a row's label); the server reader and the bundle share it
   // login-session lifetime (2026-09-07): the claude harness descriptor reads the
   // credential file, this decides what the numbers MEAN; pool decisions + accounts
   // + the watcher all consume it, so it must stay dependency-free
@@ -213,6 +214,13 @@ const PURE = new Set(['src/record-lateness.js' /* lane-hot-switch: a late record
   // the ask) — imports only window-reach's principal spelling (PURE → PURE), bundled into the exit dialog. (Listed
   // BEFORE workflow-disk: test-workflow-disk pins that module as the list's last entry.)
   'src/dial-facts.js', 'src/exit-reach.js',
+  // LANE-EXIT-RUN-OUTPUT (2026-10-01): THE SHELL IS THE DEVICE'S FACT — the shell plan per platform (cmd.exe / sh), the
+  // spawn-failure judge and its one wording; imports nothing; the daemon bundles it (it runs where the command runs),
+  // exit-reach composes its words, the row / card words in the bundle read its platform labels
+  'src/exit-shell.js',
+  // verify r1 F1 (2026-10-01): THE SECRET SHAPES a stored command head never keeps — imports only browser-trace's
+  // CREDENTIAL_WORDS (PURE); exit-reach's outputHeads calls it once; the bundle carries it with exit-reach
+  'src/secret-shapes.js',
   'src/workflow-disk.js']);
 const SHARED = new Set(['src/discovery-facts.js', 'src/sysinfo.js', 'src/machine-probes.js', 'src/usage-walker.js',
   'src/transcript-service.js', 'src/ctx-sync.js', 'src/writer-sweep.js', 'src/remote-shell.js', 'src/account-material.js',
@@ -1356,9 +1364,9 @@ for (const [edge] of EXCEPTIONS) {
     { file: 'src/cli-identity.js', needle: "execImpl('ps', ['-eo', 'pid=,ppid=']", why: 'NO-/proc FALLBACK ONLY, ONE per sweep for the whole table — see (a).' },
     { file: 'src/cli-identity.js', needle: "execFile('pgrep', ['-f', String(needle)]", why: 'NO-/proc FALLBACK ONLY (pidsMatchingCmdline), ONE per question — see (a).' },
     { file: 'src/discovery-facts.js', needle: "spawnSync('lsof', ['-Fpn', '+D', root]", why: 'NO-/proc FALLBACK ONLY (macOS/BSD codex liveness), ONE per scan — see (a).' },
-    { file: 'server.js', needle: "execFileSync('git', ['-C', repoDir, 'pull', '--ff-only']", why: 'BOOT ONLY, ONCE (the auto-update pull, before anything is served).' },
-    { file: 'server.js', needle: "execFileSync('npm', ['install'", why: 'BOOT ONLY, ONCE, and only when the pull actually moved.' },
-    { file: 'server.js', needle: "execFileSync('npm', ['run', 'build']", why: 'BOOT ONLY, ONCE, same branch.' },
+    // (lane cluster-presets P6: server.js's three BOOT-ONLY spawns — the auto-update's
+    // git pull / npm install / npm run build — moved to src/server/auto-update.js,
+    // which defines no sweep fact; their rows went with them.)
   ];
   const swWalked = [], swStray = [], swHit = new Set();
   for (const f of [...sweepFiles].sort()) {
@@ -2741,8 +2749,19 @@ console.log('§65 every producer that can carry a conversation\'s facts to an ag
     for (const p of paths) if (!p.startsWith('/api/agent/channels/')) bad.push(`(D) the CLI calls ${p} — not an agent route`);
     return { roster: [...roster], ladder, owners, paths, bad };
   };
+  // (D) for the EXIT CLI too (lane-exit-run-output E4): a machine's command history has an OWNER route
+  // (GET /api/hosts/:id/exit-runs — every conversation's runs there, 403 for any bearer) and an AGENT route
+  // (GET /api/agent/exit/runs — the caller's own); data/bin/vibespace-exit may name agent routes only
+  const exitCliPaths = (src) => [...src.matchAll(/['`"](\/api\/[^'`"$?]*)/g)].map((m) => m[1]);
+  const exitCliBad = (src) => exitCliPaths(src).filter((p) => !p.startsWith('/api/agent/exit')).map((p) => `(D) vibespace-exit calls ${p} — not an agent route`);
   const esrc = read(ENGP), asrc = read('src/agent-routes.js'), cli = read('data/bin/vibespace-channels');
   const c = census(esrc, asrc, cli);
+  const xcli = read('data/bin/vibespace-exit');
+  const xpaths = exitCliPaths(xcli);
+  ok(xpaths.length >= 4 && xpaths.some((p) => p === '/api/agent/exit/runs') && exitCliBad(xcli).length === 0, `§65 (D) vibespace-exit names agent routes only (${xpaths.length} paths incl. /api/agent/exit/runs) — never the owner's /api/hosts/:id/exit-runs`, exitCliBad(xcli));
+  const xctl = exitCliBad(xcli.replace("'/api/agent/exit/runs?'", "'/api/hosts/' + machine + '/exit-runs?'"));
+  ok(xctl.length === 1 && /vibespace-exit calls \/api\/hosts\//.test(xctl[0]), '§65 (D) NEGATIVE CONTROL: the exit CLI pointed at the owner\'s command list (/api/hosts/…/exit-runs) is caught by name', xctl);
+  ok(/isAnyBearer\(req\)\) return res\.status\(403\)\.json\(\{ error: 'the machine\\'s command history is the user\\'s/.test(read('src/server/exit-routes.js')), '§65 (C) the owner\'s command list refuses any bearer 403 human_only (exit-routes.js)');
   const want = ['listFor', 'readFor', 'readThreadFor', 'agentRefresh', 'agentThreadRefresh', 'propose', 'proposeReaction', 'compose', 'replaceProposal', 'withdrawProposal', 'withdrawNow', 'searchFor', 'statusFor', 'accessFor', 'request'];
   ok(want.every((n) => c.roster.includes(n)) && c.ladder.length >= 4 && c.paths.length >= 10, `§65 census scope is non-vacuous (${c.roster.length} agent answers, ${c.ladder.length} ladder producers: ${c.ladder.join(', ')}, ${c.owners.length} owner surfaces, ${c.paths.length} CLI paths)`, JSON.stringify(c.roster));
   ok(c.bad.length === 0, `§65 every agent answer asks reach first and again after an await, every stash/ladder producer carries a gate, every owner surface is named, the CLI names agent routes only${c.bad.length ? ' — ' + c.bad.join('; ') : ''}`);
@@ -2836,6 +2855,102 @@ console.log('§67 the hot-switch verdict is a measurement with its record');
   try { ctl2 = verdictProblems({ y: { hotSwitch: 'verified', hotSwitchEvidence: { cli: '9.9.9', measuredAt: 'x', mechanism: 'x', record: path.relative(REPO, heldRec), gate: 'scripts/test-claude-hot-switch.mjs' } } }); } finally { try { fs.unlinkSync(heldRec); } catch { } }
   ok(ctl1.some((x) => /without a complete hotSwitchEvidence/.test(x)) && ctl2.some((x) => /does not show the link followed/.test(x)),
     '§67 NEGATIVE CONTROLS: a bare \'verified\' and a record showing the process held its first member are both caught', JSON.stringify({ ctl1, ctl2 }));
+}
+
+// §68 A SUITE'S REACH INTO A HOME IS $HOME (lane profile-lock-roll verify r6; r5's F5 held, fixed here). A suite that must not touch
+// the owner's home is run under a pinned HOME; a read of `os.userInfo().homedir` (the passwd entry) or a literal `/home/<name>`
+// reaches past the pin — test-browser-propose-chrome linked the OWNER's ~/.agent-browser/browsers into its fake home that way
+// (read-only binaries, never profiles; os.homedir() now, like test-browser-live). DERIVED over every scripts/*.mjs: no
+// `userInfo().homedir` outside a comment (test-browser-verbs' preload DESCRIBES the passwd read it pins — a comment line); a
+// literal /home/<name> is red only when <name> is a REAL account of this machine (/etc/passwd, a home under /home/) — the scripts'
+// fixture homes (/home/u, /home/user, /home/tester, /home/vibe, …) are strings, never a reach.
+console.log('§68 a suite reaches a home through $HOME only');
+{
+  let locals = new Set(); try { locals = new Set(fs.readFileSync('/etc/passwd', 'utf8').split('\n').map((l) => l.split(':')).filter((p) => p[5] && p[5].startsWith('/home/')).map((p) => p[0])); } catch { locals = new Set(); }
+  const judge = (src, accounts = locals) => { const hits = []; const code = src.split('\n').map((l) => (/^\s*\/\//.test(l) ? '' : l)).join('\n'); for (const m of code.matchAll(/userInfo\(\)\s*\.\s*homedir/g)) hits.push(`${code.slice(0, m.index).split('\n').length}: userInfo().homedir`); for (const m of code.matchAll(/['"`]\/home\/([^/'"`\s]+)/g)) if (accounts.has(m[1])) hits.push(`${code.slice(0, m.index).split('\n').length}: /home/${m[1]}`); return hits; };
+  const scope = fs.readdirSync('scripts').filter((f) => f.endsWith('.mjs') && f !== 'test-architecture.mjs').map((f) => 'scripts/' + f);
+  const bad = scope.map((f) => [f, judge(fs.readFileSync(f, 'utf8'))]).filter(([, h]) => h.length);
+  ok(scope.length >= 100, `§68 census scope is non-vacuous (${scope.length} scripts; ${locals.size} local accounts under /home)`);
+  ok(bad.length === 0, `§68 no suite reads the passwd home or names a real account's /home/<name>${bad.length ? ' — ' + bad.map(([f, h]) => f + ' [' + h.join(' ; ') + ']').join(' | ') : ''}`);
+  ok(judge("const realBrowsers = path.join(os.userInfo().homedir, '.agent-browser');").length === 1 && judge("// a comment naming os.userInfo().homedir\nconst h = path.join(os.homedir(), 'x');").length === 0 && judge("const h = '/home/alice/.agent-browser';", new Set(['alice'])).length === 1 && judge("const h = '/home/u/.agent-browser'; const g = path.join(os.homedir(), 'x');", new Set(['alice'])).length === 0,
+    '§68 NEGATIVE CONTROLS: the passwd read is caught (not in a comment); a real account\'s literal home is caught; a fixture home and os.homedir() pass');
+  // verify r7 (T2 ④): the PRODUCT too — a lane env pins HOME to a scratch home and src/ must never reach the real one past it:
+  // src/**, server.js read NO passwd home (the keeper's own ~/.agent-browser is os.homedir()); data/bin holds exactly TWO deliberate
+  // passwd reads, each with its reason in the file — vibespace-browser reads THE ACCOUNT's home on purpose (r4 takeover finding 2:
+  // an agent's `HOME=/tmp/mine` must not make its file "the machine's own config"), vibespace-window lists every home spelling for
+  // the screenshot allow-list. A third site, or one of these without its reason, is red.
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : (e.name.endsWith('.js') || e.name.endsWith('.mjs') ? [path.join(d, e.name)] : [])));
+  const srcScope = [...walk('src'), 'server.js'];
+  const srcBad = srcScope.map((f) => [f, judge(fs.readFileSync(f, 'utf8')).filter((h) => h.includes('userInfo().homedir'))]).filter(([, h]) => h.length);
+  ok(srcScope.length >= 300, `§68 src census scope is non-vacuous (${srcScope.length} files)`);
+  ok(srcBad.length === 0, `§68 src/ + server.js read no passwd home (the product reaches a home through $HOME / os.homedir() only)${srcBad.length ? ' — ' + srcBad.map(([f, h]) => f + ' [' + h.join(' ; ') + ']').join(' | ') : ''}`);
+  const BIN_ALLOW = { 'data/bin/vibespace-browser': /THE ACCOUNT'S HOME, never \$HOME/, 'data/bin/vibespace-window': /SHOT_HOMES/ };
+  const binFiles = fs.readdirSync('data/bin').filter((f) => { try { return fs.statSync(path.join('data/bin', f)).isFile(); } catch { return false; } }).map((f) => 'data/bin/' + f);
+  const binHits = binFiles.map((f) => { const src = fs.readFileSync(f, 'utf8'); return [f, judge(src).filter((h) => h.includes('userInfo().homedir')), src]; }).filter(([, h]) => h.length);
+  const binUnlisted = binHits.filter(([f]) => !(f in BIN_ALLOW)).map(([f, h]) => f + ' [' + h.join(' ; ') + ']');
+  const binUnreasoned = binHits.filter(([f, , src]) => f in BIN_ALLOW && !BIN_ALLOW[f].test(src)).map(([f]) => f);
+  const binMissing = Object.keys(BIN_ALLOW).filter((f) => !binHits.some(([g]) => g === f));
+  ok(binUnlisted.length === 0 && binUnreasoned.length === 0 && binMissing.length === 0, `§68 data/bin reads the passwd home at exactly its two DELIBERATE sites, each carrying its reason (${binHits.map(([f]) => f).join(', ')})${binUnlisted.length ? ' — unlisted: ' + binUnlisted.join(' | ') : ''}${binUnreasoned.length ? ' — reason missing: ' + binUnreasoned.join(', ') : ''}${binMissing.length ? ' — allow-listed but gone (prune the list): ' + binMissing.join(', ') : ''}`);
+}
+
+// §69 EVERY ROOT PACKAGE RUN GOES THROUGH THE MACHINE'S ONE PACKAGE SLOT (Layer 0 apps, docs/design-app-persistence.zh.md
+// §3.1 — "一台机器一个包槽": the xpra install, the LibreOffice installs and now the apps (install / remove / refresh / the
+// boot replay) are the THIRD kind of `sudo -n` site, and the slot is what keeps two apt runs off one machine). DERIVED over
+// the server tree (src/, comments stripped; the browser bundle in src/lib is out — it spawns nothing):
+//   (a) a line that runs a PACKAGE MANAGER under `sudo -n` exists only in a DECLARED row (a remote host's bootstrap, before
+//       any VibeSpace agent — hence any slot — runs there);
+//   (b) the argv-array spelling `['sudo', '-n'` (a root SCRIPT the slot runs) is built in exactly the two plan builders:
+//       desktop-apps.js installArgv and app-manifest.js appArgv;
+//   (c) their outputs reach a machine only through the slot: `installArgv(` and `plan.argv` are read only in
+//       src/server/desktop-access.js, `installLauncherArgv(` only there (runArgv), `appArgv(` only in the machine half
+//       (src/app-serve.js — whose plans hand the argv to the slot);
+//   (d) every direct `execFile('sudo'` / `spawn('sudo'` names a command that is neither a package manager nor a shell.
+console.log('§69 every root package run goes through the machine\'s ONE package slot');
+{
+  const PKG = /\b(?:apt-get|apt|dpkg|yum|dnf|apk|zypper|pacman)\b/;
+  // comment LINES only (a `/*` inside a shell script held in a template literal — `bin/*` — must not swallow the code after it)
+  const strip68 = (t) => t.split('\n').map((l) => (/^\s*(?:\/\/|\*|\/\*)/.test(l) ? '' : l)).join('\n');
+  const walk68 = (dir) => fs.readdirSync(path.join(REPO, dir), { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? (d.name === 'lib' && dir === 'src' ? [] : walk68(dir + '/' + d.name)) : /\.(c|m)?js$/.test(d.name) ? [dir + '/' + d.name] : []));
+  const DECLARED = { 'src/hosts.js': 'a REMOTE host\'s bootstrap installs dtach over ssh before any VibeSpace agent runs there — no slot exists yet; nothing of the apps catalog' };
+  const census = (files) => {
+    const out = { pkgLines: [], argvBuilders: [], consumers: { installArgv: [], planArgv: [], launcher: [], appArgv: [] }, directSudo: [] };
+    for (const [f, raw] of Object.entries(files)) {
+      const t = strip68(raw);
+      t.split('\n').forEach((l, i) => {
+        if (/sudo -n /.test(l) && PKG.test(l.slice(l.indexOf('sudo -n')))) out.pkgLines.push(`${f}:${i + 1}`);
+        if (/\[\s*'sudo'\s*,\s*'-n'/.test(l)) out.argvBuilders.push(f);
+        if (/(?:^|[^\w.])installArgv\(|\bM\.installArgv\(/.test(l) && !/function installArgv\(/.test(l)) out.consumers.installArgv.push(f); // desktop-apps' — never browser-switch's own npm argv (SW.installArgv)
+        if (/\bplan\.argv\b/.test(l)) out.consumers.planArgv.push(f);
+        if (/\binstallLauncherArgv\(/.test(l) && !/function installLauncherArgv\(/.test(l)) out.consumers.launcher.push(f);
+        if (/\bappArgv\(/.test(l) && !/function appArgv\(/.test(l)) out.consumers.appArgv.push(f);
+        const m = /\b(?:execFile|execFileSync|spawn|spawnSync)\(\s*'sudo'\s*,\s*\[\s*'-n'\s*,\s*'([^']+)'/.exec(l);
+        if (m && (PKG.test(m[1]) || /^(?:sh|bash|dash)$/.test(m[1]))) out.directSudo.push(`${f}:${i + 1} (${m[1]})`);
+      });
+    }
+    const uniq = (a) => [...new Set(a)].sort();
+    out.argvBuilders = uniq(out.argvBuilders);
+    for (const k of Object.keys(out.consumers)) out.consumers[k] = uniq(out.consumers[k]);
+    return out;
+  };
+  const files = Object.fromEntries(walk68('src').concat(['server.js']).map((f) => [f, read(f)]));
+  const c = census(files);
+  ok(Object.keys(files).length > 150 && c.argvBuilders.length >= 2, `§69 census scope: the server tree (${Object.keys(files).length} files)`);
+  const undeclared = c.pkgLines.filter((x) => !DECLARED[x.split(':')[0]]);
+  ok(undeclared.length === 0 && c.pkgLines.some((x) => x.startsWith('src/hosts.js:')), `§69a a package manager under \`sudo -n\` only in a declared row (${c.pkgLines.join(' ')})${undeclared.length ? ' — UNDECLARED: ' + undeclared.join(' ') : ''}`);
+  ok(JSON.stringify(c.argvBuilders) === JSON.stringify(['src/app-manifest.js', 'src/desktop-apps.js']), `§69b the root-script argv ['sudo', '-n', …] is built only by the two plan builders (${c.argvBuilders.join(' ')})`);
+  ok(JSON.stringify(c.consumers.installArgv) === JSON.stringify(['src/server/desktop-access.js']) && JSON.stringify(c.consumers.planArgv) === JSON.stringify(['src/server/desktop-access.js']) && JSON.stringify(c.consumers.launcher) === JSON.stringify(['src/server/desktop-access.js']) && JSON.stringify(c.consumers.appArgv) === JSON.stringify(['src/app-serve.js']),
+    `§69c their argv reaches a machine only through the slot (installArgv / plan.argv / installLauncherArgv in desktop-access.js; appArgv in the machine half): ${JSON.stringify(c.consumers)}`);
+  ok(c.directSudo.length === 0, `§69d no direct sudo exec of a package manager or a shell${c.directSudo.length ? ' — ' + c.directSudo.join(' ') : ''}`);
+  // NEGATIVE CONTROLS — each planted shape in a patched listing is caught by its rule
+  const plant = (f, line) => ({ ...files, [f]: (files[f] || '') + '\n' + line + '\n' });
+  const p1 = census(plant('src/server/apps-engine.js', "const r = await run('sh', ['-c', 'sudo -n apt-get install -y gimp']);"));
+  const p2 = census(plant('src/desktop-serve.js', "const argv = ['sudo', '-n', 'sh', '-c', 'apt-get install -y x'];"));
+  const p3 = census(plant('src/routes/apps.js', 'const launch = M.installLauncherArgv(argv, { stateDir });'));
+  const p4 = census(plant('src/server/jobs.js', "execFile('sudo', ['-n', 'apt-get', 'install', '-y', name], cb);"));
+  const p5 = census(plant('src/server/apps-engine.js', "execFile('sudo', ['-n', 'sh', '-c', script], cb);"));
+  ok(p1.pkgLines.some((x) => x.startsWith('src/server/apps-engine.js:')) && p2.argvBuilders.includes('src/desktop-serve.js') && p3.consumers.launcher.includes('src/routes/apps.js') && p4.directSudo.some((x) => x.startsWith('src/server/jobs.js:')) && p5.directSudo.some((x) => x.startsWith('src/server/apps-engine.js:')),
+    '§69 NEGATIVE CONTROLS: a `sudo -n apt-get` line outside the slot, a third root-script argv builder, a second launcher caller, a direct sudo of a package manager and of a shell are each caught');
+  ok(strip68("  // sudo -n apt-get install y\n   * sudo -n apt-get install z\n").split('\n').every((l) => !/sudo -n/.test(l)), '§69 a comment line naming `sudo -n apt-get` is no site');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

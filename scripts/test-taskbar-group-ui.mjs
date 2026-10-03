@@ -529,7 +529,10 @@ try {
   await mouse('mouseReleased', tbar.x, tbar.y, { button: 'left', buttons: 0, clickCount: 1 });
   await sleep(500);
   const dEnd = await evalJs(`({ opens: window.__tg.opens.length, dragging: !!document.querySelector('.window.dragging') })`);
-  check(`a real title-bar drag was in progress (${dragging}), the pointer ENTERED the button during it (${during.entered > enterBefore}), and ~600 ms there opened NOTHING (opens ${during.opens} → ${dEnd.opens})`, dragging && during.entered > enterBefore && during.opens === 0 && dEnd.opens === 0 && !dEnd.dragging, { dragging, enterBefore, during, dEnd });
+  // 2.369.200 integration (lane drag-release × this leg): the title bar CAPTURES the pointer for the whole drag, so the button
+  // under it sees no pointerenter at all — the drag's hover can no longer reach the hover rule (whose `dragging` row is PURE
+  // test-taskbar-group's); what the person sees is the same: nothing opens, during the drag or after the release
+  check(`a real title-bar drag was in progress (${dragging}); under the title bar's pointer capture the button saw ${during.entered > enterBefore ? 'an enter' : 'no enter'}, and ~600 ms there opened NOTHING (opens ${during.opens} → ${dEnd.opens})`, dragging && during.opens === 0 && dEnd.opens === 0 && !dEnd.dragging, { dragging, enterBefore, during, dEnd });
 
   // ══ (g) ══ (before touch emulation changes the page's pointer facts)
   console.log('(g) the single button is unchanged');

@@ -885,7 +885,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   // the hot zone: the top HOT_ZONE_PX of the window (a geometry test, so the resize handles keep the edge) — and, once
   // revealed, the bars themselves
   winInfo.element.addEventListener('pointermove', (e) => {
-    lastPointer = { clientX: e.clientX, clientY: e.clientY };
+    lastPointer = { clientX: e.clientX, clientY: e.clientY, pointerId: e.pointerId }; // the id rides along so a header-bar drag continued from it can capture (lane-drag-release)
     if (!seamless.seamless) return;
     const r = winInfo.element.getBoundingClientRect();
     const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top - 2 && e.clientY <= r.bottom;

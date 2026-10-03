@@ -72,43 +72,111 @@ anonymous instance ids and error names/stacks/metrics only, never content.
 Deployment-specific values (your domain, registry, storage class, issuer,
 allow-listed CIDRs) belong in a private values file, not in this repo.
 
-## Cluster-provided integration credentials (optional)
+## Company presets — OAuth clients and integration keys (optional)
 
 Some integrations need a credential a user would otherwise have to obtain
-themselves (a Lark app's id/secret, a Google OAuth client). The cluster can
-supply a DEFAULT for those through the `integrations:` values block; each
-user's instance shows which credential is in use in ⚙ → Integrations, and
-**a user's own key always wins** over the cluster default.
+themselves: the Google OAuth client Drive and Gmail sign in with, a Lark app's
+id/secret, a browser key. The cluster supplies these as COMPANY PRESETS; each
+instance shows where its presets come from in ⚙ → Integrations & keys, and
+**a user's own key always wins** over a preset.
 
-| Values key | Rendered as | Read by |
+### Add or rotate a company OAuth client: edit ONE Secret
+
+Every user's pod mounts the namespace-wide Secret `vibespace-cluster-presets`
+(read-only, at `/etc/vibespace/presets`). Create it once, and use the SAME
+command to add, rotate or remove a client later — **every instance picks the
+change up within ~2 min, with no helm upgrade and no restart**:
+
+```
+kubectl -n vibespace create secret generic vibespace-cluster-presets \
+  --from-file=gdriveClients=gdrive-clients.json \
+  --from-file=integrations=integrations.json \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+Both keys are optional (omit a `--from-file` you do not use). The files hold
+the same JSON the chart always took:
+
+| Secret key | File shape | Read by |
 |---|---|---|
-| `integrations: [{id, label, values: {…}}, …]` | Secret key `integrations` → env `VIBESPACE_INTEGRATIONS` (JSON) | `src/server/integration-store.js` — the ONLY reader |
-| `gdrive.clients` (existing) | env `VIBESPACE_GDRIVE_CLIENTS` | `src/mounts.js` — the Gmail integration row DELEGATES to these presets; it has no key of its own. Name the preset channels should default to `channels` when you provide more than one |
+| `gdriveClients` | `[{key, label, clientId, clientSecret}, …]` — Google OAuth clients (Drive mounts, Gmail mounts and Gmail channel accounts). Name the one channels should default to `channels` when you provide more than one | `src/mounts.js` (`drivePresets`) |
+| `integrations` | `[{id, key?, label?, values: {…}}, …]` — one entry per registry row id (`src/integration-registry.js`); `values` keys are that row's field keys | `src/server/integration-store.js` |
 
-Four rules:
+How it works: Kubernetes updates a mounted Secret in place by atomically
+swapping the volume's `..data` link (within the kubelet's sync period — 1 min
+by default — plus its watch delay); the server watches the directory
+(`src/server/cluster-presets.js`), re-reads it once, re-applies the presets
+live (the Integrations window, the storage and channel sign-in dialogs, every
+consumer's next request) and logs ONE line naming which keys were added,
+removed or rotated — never a value. A file that cannot be parsed keeps the
+previous presets in effect and is reported (log + the Integrations window);
+it never takes the instance down. A mount stores only a preset's KEY, so a
+rotated secret reaches every mount (a running rclone mount at its next
+remount) and a withdrawn key is reported by name, never silently replaced by
+another client.
 
-- **Never `value:`, always `secretKeyRef`** — the chart already does this for
-  `gdriveClients` and the cephfs secret. A `value:` prints the credential in
-  `kubectl get deploy -o yaml`.
-- **The single-field form** `VIBESPACE_INTEGRATION_<ID>_<FIELD>` (id and field
-  upper-cased, `-` → `_`, e.g. `VIBESPACE_INTEGRATION_LARK_APPSECRET`) exists
-  for self-hosting / docker-compose, where the JSON form is quoting hell. When
-  both name the same row, **the JSON form wins** and the server says so once
-  at boot.
-- **A mistyped block never takes the pod down**: an unparseable
-  `VIBESPACE_INTEGRATIONS` is logged (`[integrations] … unparseable`) and
-  treated as "no cluster default".
-- **Which rows suit a cluster default**: register-once, everyone-may-use
+### A new user inherits them; per-user blocks are overrides
+
+A new user's release needs no preset block at all — the pod mounts the
+cluster Secret. A release MAY carry its own `presets.override`
+(`{gdriveClients: [...], integrations: [...]}`) — or, as before, the legacy
+`gdrive.clients` / `integrations:` blocks, which now mean the same thing. The
+override is layered over the cluster Secret **per key**: an entry whose key
+the cluster also names replaces it for that user; the cluster's other entries
+stay. The override lives in the release's own Secret and is projected next to
+the cluster's; changing it is a helm upgrade that touches only that Secret,
+so the pod does not roll and the instance picks it up live.
+
+Chart values: `presets.volume` (default `true`), `presets.clusterSecret`
+(default `vibespace-cluster-presets`), `presets.mountPath` (default
+`/etc/vibespace/presets`), `presets.override`. Both projected sources are
+`optional`: a missing Secret or key projects nothing (the instance then says
+"Company presets: none — ask your admin"), never a pod that cannot start.
+
+### Migrating an existing release (one roll, the last)
+
+A release installed before this chart keeps its env (`VIBESPACE_GDRIVE_CLIENTS`
+/ `VIBESPACE_INTEGRATIONS`, read at boot) until its next `helm upgrade`, which
+switches it to the volume: the env goes, the volume comes — that roll is the
+last one a preset change ever needs. Before it, check the VibeSpace version
+INSIDE the pod (a helm upgrade does not update the app in the PVC): an app
+older than 2.369.200 reads no presets directory, so either let the user
+update first or keep `presets.volume=false` (the env form, rendered exactly as
+before) until it does. The pod's entrypoint says it on every start (a
+`WARNING: company presets are mounted at … but this VibeSpace (…) predates the
+presets reader` line in the pod log) until the checkout carries the reader —
+the boot auto-update normally brings it with the first pull. Create `vibespace-cluster-presets` first so the
+switched instances have the company's clients from their first boot.
+
+### Rules
+
+- **Never `value:`, always a Secret** — the chart keeps every credential in a
+  Secret (the projected volume, or `secretKeyRef` in the env form). A
+  `value:` prints the credential in `kubectl get deploy -o yaml`.
+- **Self-hosting without Kubernetes**: point `VIBESPACE_PRESETS_DIR` at a
+  local directory holding `integrations.json` / `gdrive-clients.json` (and
+  `override/…`), or keep the env: `VIBESPACE_GDRIVE_CLIENTS`,
+  `VIBESPACE_INTEGRATIONS`, and the single-field form
+  `VIBESPACE_INTEGRATION_<ID>_<FIELD>` (id and field upper-cased, `-` → `_`,
+  e.g. `VIBESPACE_INTEGRATION_LARK_APPSECRET`) for docker-compose. The
+  directory wins for a kind it holds a file for; the env is the fallback.
+  When the JSON form and the single-field form both name the same row, **the
+  JSON form wins** and the server says so once.
+- **A mistyped block never takes the instance down**: it is logged
+  (`[presets] … could not be read` / `[integrations] … unparseable`) and the
+  previous presets (or none) stay in effect.
+- **Which rows suit a company preset**: register-once, everyone-may-use
   credentials (a Lark app — same tenant only; a Google OAuth client). **Not**
   per-seat keys (a CloakBrowser license): one cluster key there means the
   cluster pays for every user, and users share the vendor's concurrent-session
   cap.
+- **Who can read them**: the files are readable by the instance's own user —
+  the same exposure the env had. Agent sessions get a sanitized environment
+  (no `VIBESPACE_*` but their own), but run as that user.
 
-Values are read from the environment at the moment a consumer asks and are
-never copied into the instance's `data/`, so rotating the Secret rotates every
-consumer on every instance; a withdrawn default leaves the row answering
-"not configured" with the reason, never serving a stale value. The rows and
-their field keys are declared in `src/integration-registry.js`.
+Values are never copied into the instance's `data/`, so rotating the Secret
+rotates every consumer on every instance; a withdrawn default leaves the row
+answering "not configured" with the reason, never serving a stale value.
 
 ## Public URLs / NAT relay (optional)
 

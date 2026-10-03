@@ -8,6 +8,19 @@ set -euo pipefail
 APP="$HOME/vibespace"
 DIST="/opt/vibespace-dist"
 
+# Company presets (lane cluster-presets, verify r1 ④): the chart mounts them as
+# FILES and sets VIBESPACE_PRESETS_DIR — and passes NO preset env any more. A
+# VibeSpace older than 2.369.200 has no reader for the directory, so a pod on
+# the new chart with an old app has NO company presets at all, silently. Say
+# it, on every (re)spawn, until the checkout carries the reader (the server's
+# own boot auto-update normally brings it with the first pull).
+presets_reader_check() {
+  if [ -n "${VIBESPACE_PRESETS_DIR:-}" ] && [ ! -f "$1/src/server/cluster-presets.js" ]; then
+    local v; v="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$1/package.json" 2>/dev/null | head -1)"
+    echo "[entrypoint] WARNING: company presets are mounted at $VIBESPACE_PRESETS_DIR but this VibeSpace (${v:-unknown}) predates the presets reader (2.369.200) and the chart passes them as env no more — the instance has NO company presets until the app updates (the boot auto-update pulls it; if that cannot run, update by hand, or set presets.volume=false on the release)" >&2
+  fi
+}
+
 # 1. Seed the app into the PVC on first boot (from the image, offline).
 if [ ! -e "$APP/server.js" ]; then
   echo "[entrypoint] first boot — seeding VibeSpace into $APP"
@@ -43,7 +56,7 @@ if [ -f "$HOME/.vibespace-init.sh" ]; then
   bash "$HOME/.vibespace-init.sh" || echo "[entrypoint] init hook failed (continuing)"
 fi
 
-# 2b. Persistent CLI migration (2.229.0, the walter rollback incident): the
+# 2b. Persistent CLI migration (2.229.0, the userW rollback incident): the
 #     image bakes an npm-global claude in the EPHEMERAL layer — a user's
 #     `claude update` is silently reverted by the next pod rebuild (real
 #     incident: 3 days of Opus 5, then a rebuild put the opus alias back on
@@ -83,6 +96,7 @@ child=0
 on_term() { [ "$child" != 0 ] && kill -TERM "$child" 2>/dev/null; wait "$child" 2>/dev/null; exit 0; }
 trap on_term TERM INT
 while true; do
+  presets_reader_check "$APP"
   node server.js &
   child=$!
   rc=0; wait "$child" || rc=$?

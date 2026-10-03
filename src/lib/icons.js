@@ -146,6 +146,10 @@ export const UI_ICONS = {
   // lane channel-threads (2026-09-28): a THREAD — a message and the replies hanging under it (the chip on a
   // root, the "in thread" tag on a reply, the pane's bar)
   thread:    _s('<path d="M2.5 3.5h8v5h-4l-2 2v-2h-2z"/><path d="M12.5 6.5h1v5h-1.5v1.5l-1.8-1.5H7.5V10"/>'),
+  // lane reaction-hover (2026-10-01): a message's hover action bar — ADD A REACTION (a face with a small plus at its
+  // shoulder, the chat apps' own glyph; never a text "+") and QUOTE (two quotation marks)
+  emojiAdd:  _s('<path d="M7.5 3A5.5 5.5 0 1 0 13 8.5"/><path d="M5.3 10.2c.6.8 1.3 1.2 2.2 1.2s1.6-.4 2.2-1.2"/><path d="M5.6 7.1h.01M9.4 7.1h.01"/><path d="M12.8 1.5v4M10.8 3.5h4"/>'),
+  quote:     _s('<path d="M2.5 8.5h3.5v4H2.5z"/><path d="M2.5 8.5c0-2.4 1.2-4 3.5-5"/><path d="M9.5 8.5H13v4H9.5z"/><path d="M9.5 8.5c0-2.4 1.2-4 3.5-5"/>'),
   // the Word viewer's zoom out / in (a magnifier with − / +)
   zoomOut:   _s('<circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14M5 7h4"/>'),
   zoomIn:    _s('<circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14M5 7h4M7 5v4"/>'),

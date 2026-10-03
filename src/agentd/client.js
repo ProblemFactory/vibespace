@@ -614,6 +614,15 @@ class DeviceManager {
   runCmd(cmd, args = [], { stdin, env, timeoutMs, waitMs } = {}) {
     return this._request({ op: 'run-cmd', cmd, args, env, timeoutMs, ...(waitMs ? { waitMs } : {}), stdin64: stdin ? Buffer.from(stdin).toString('base64') : undefined });
   }
+  /** lane-exit-run-output E1: a SHELL LINE run under the interpreter the DEVICE has (cmd.exe on Windows, sh elsewhere —
+   *  PURE src/exit-shell.js decides THERE); the reply carries `interpreter`, and `spawnError` when the child never
+   *  started. Capability-gated (`run-shell` in the hello-ack): an older daemon only knows the argv form — the caller
+   *  falls back to `sh -lc` itself and says which it ran; a daemon is never asked an op it lacks (it would hang). */
+  async runShell(line, { env, timeoutMs, waitMs } = {}) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('run-shell')) { const e = new Error('daemon lacks run-shell (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw e; }
+    return this._request({ op: 'run-cmd', shell: String(line), env, timeoutMs, ...(waitMs ? { waitMs } : {}) });
+  }
   /** streaming argv exec: stdout arrives via onData (byte channel); resolves
    *  {code} at exit. For outputs too large for runCmd (usage-scan NDJSON).
    *  COUNT-GATED like fsReadRange: a NEW daemon's stream-exit carries `sent`
@@ -732,6 +741,9 @@ class DeviceManager {
   async browserServe(action, params = {}, { timeoutMs = 90000 } = {}) {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('browser-serve')) { const e = new Error('daemon lacks browser-serve (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw e; }
+    // lane browser-admin 2a: the Chrome build list is its own capability — an older agent is never asked (it would refuse
+    // the action by name; a start carrying a build it ignores would run its default build), said by name here
+    if ((action === 'builds' || (action === 'start' && params && params.browser && params.browser.kind && params.browser.kind !== 'default')) && !conn.info.capabilities.includes('browser-builds')) { const e = new Error('this machine\'s agent cannot list Chrome builds (it predates the list) -- upgrade the agent on this machine'); e.code = 'builds_unsupported'; throw e; }
     const r = await this._request({ op: 'browser-serve', action, params, timeoutMs });
     if (r.error) throw new Error(r.error);
     return r.result || {};
@@ -745,6 +757,9 @@ class DeviceManager {
   async desktopServe(action, params = {}, { timeoutMs = 60000 } = {}) {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('desktop-serve')) { const e = new Error('daemon lacks desktop-serve (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw e; }
+    // Layer 0 apps (docs/design-app-persistence.zh.md §3.1): the app-* actions are asked only of a daemon whose hello-ack
+    // names `app-install` — an agent that predates them would refuse them by name, but the GATE is the capability
+    if (/^app-/.test(String(action)) && !conn.info?.capabilities?.includes?.('app-install')) { const e = new Error('daemon lacks app-install (capabilities gate) -- upgrade the agent on this machine to install apps there'); e.code = 'host_needs_daemon'; throw e; }
     const r = await this._request({ op: 'desktop-serve', action, params, timeoutMs });
     if (r.error) throw new Error(r.error);
     return r.result || {};

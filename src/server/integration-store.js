@@ -73,6 +73,7 @@
 const fs = require('fs');
 const path = require('path');
 const R = require('../integration-registry.js');
+const PL = require('../preset-layers.js');
 const { secretBox, SecretBoxError, describeJsonError } = require('../secret-box.js');
 const { writeJsonAtomic } = require('../channel-store.js');
 
@@ -105,6 +106,9 @@ function create(deps = {}) {
     now = () => Date.now(),
     broadcast = () => {},
     drivePresets = () => [],      // MountManager.drivePresets — the EXISTING reader the gmail row delegates to
+    // lane cluster-presets: the presets DIRECTORY's reader (src/server/cluster-presets.js) —
+    // the FILE rung, asked before the env; `entries('integrations')` null = the env is the fallback
+    presets = null,
     log = console,
   } = deps;
   if (!dataDir) throw new Error('integration-store: dataDir is required');
@@ -211,21 +215,21 @@ function create(deps = {}) {
     return { values: out, undecryptable };
   }
 
-  // ── the cluster env: THE ONLY READER of both forms ───────────────────────
+  // ── the cluster presets: the FILE rung, then the env (THE ONLY READER of both env forms) ──
+  // lane cluster-presets (B-53fe): the JSON list a cluster provides now arrives
+  // first from the presets DIRECTORY (one cluster Secret every pod mounts +
+  // the release's override, merged per key, re-read live when the kubelet
+  // swaps `..data`); the env below is the FALLBACK rung for an instance whose
+  // presets directory says nothing about integrations (a release still on env).
+  // Both go through ONE parser (src/preset-layers.js parseIntegrations).
   let envCache = { raw: undefined, parsed: [] };
   function envJsonEntries() {
     const raw = env.VIBESPACE_INTEGRATIONS;
     if (raw === envCache.raw) return envCache.parsed;
     let parsed = [];
     if (raw) {
-      try {
-        const arr = JSON.parse(raw);
-        if (!Array.isArray(arr)) throw new Error('not an array');
-        for (const e of arr) {
-          if (!e || typeof e !== 'object' || !e.id || !e.values || typeof e.values !== 'object') continue;
-          parsed.push({ id: String(e.id), key: e.key ? String(e.key) : 'default', label: e.label ? String(e.label) : null, values: Object.fromEntries(Object.entries(e.values).map(([k, v]) => [k, String(v)])) });
-        }
-      } catch (e) {
+      try { parsed = PL.parseIntegrations(JSON.parse(raw)); }
+      catch (e) {
         // A mistyped values block must not take the pod down (§14.8) — and
         // the line about it must not carry the block's BYTES: V8's SyntaxError
         // message embeds a source snippet around the error position (a
@@ -238,6 +242,13 @@ function create(deps = {}) {
     }
     envCache = { raw, parsed };
     return parsed;
+  }
+  /** The keyed JSON entries in effect: the presets directory's when it has an
+   *  integrations file (cluster < release override, per key), else the env's;
+   *  `rung` = 'file' | 'env'. */
+  function clusterJsonEntries() {
+    const fromFile = presets && typeof presets.entries === 'function' ? presets.entries('integrations') : null;
+    return fromFile ? { entries: fromFile, rung: 'file' } : { entries: envJsonEntries(), rung: 'env' };
   }
   function envPrefixValues(row) {
     if (!row.clusterEnv || !row.clusterEnv.prefix) return null;
@@ -257,11 +268,13 @@ function create(deps = {}) {
     if (row.delegate) {
       return (drivePresets() || []).map((p) => ({ key: String(p.key), label: String(p.label || p.key), values: { clientId: String(p.clientId || ''), clientSecret: String(p.clientSecret || '') } }));
     }
-    const json = envJsonEntries().filter((e) => e.id === row.id);
+    const src = clusterJsonEntries();
+    const json = src.entries.filter((e) => e.id === row.id);
     const fromPrefix = envPrefixValues(row);
     if (json.length && fromPrefix && !envFormSaid) {
       envFormSaid = true;
-      log.log(`[integrations] ${row.id}: both VIBESPACE_INTEGRATIONS and VIBESPACE_INTEGRATION_${row.id.toUpperCase()}_* are set — the JSON form is in effect`);
+      const jsonForm = src.rung === 'file' ? 'the presets directory' : 'VIBESPACE_INTEGRATIONS';   // a word chosen here, never a read inside the journal line
+      log.log(`[integrations] ${row.id}: both ${jsonForm} and VIBESPACE_INTEGRATION_${row.id.toUpperCase()}_* are set — the JSON form is in effect`);
     }
     return json.length
       ? json.map((e) => ({ key: e.key, label: e.label || row.label, values: e.values }))
@@ -501,6 +514,41 @@ function create(deps = {}) {
   }
   const onChange = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
 
+  /** THE PRESETS MOVED (lane cluster-presets): the cluster's offers changed
+   *  under every row at once — a rotated Lark app, a withdrawn Google client.
+   *  Nothing is stored (a preset's values are never copied), so re-deriving IS
+   *  re-reading: every CARD row's recomputed view is broadcast (the 2.309.0
+   *  rule — the entry point pushes the result), and the listeners run ONCE
+   *  (`id` null — the channels engine re-asks every live adapter's
+   *  `auth.state()` and re-pushes its digest, whose account dialogs read
+   *  `presetsFor`). Returns the card ids it broadcast. */
+  function presetsChanged() {
+    const ids = [];
+    for (const row of R.ROWS) {
+      if (bindsPer(row)) continue;                 // not a card: its presets reach the dialogs through the listeners
+      try { broadcast({ type: 'integrations-updated', id: row.id, why: 'presets', integration: publicView(row.id) }); ids.push(row.id); }
+      catch (e) { log.warn(`[integrations] presets re-derive of ${row.id} failed:`, e && e.message); }
+    }
+    for (const fn of listeners) { try { fn(null, 'presets'); } catch (e) { log.warn('[integrations] listener failed:', e && e.message); } }
+    return ids;
+  }
+  /** Value-free counts of the integration presets IN EFFECT, by where they
+   *  came from: the directory's layers (from the reader's own status) or the
+   *  env — `[{kind: rowId, source, n}]` for the summary (P3). */
+  function presetItems() {
+    const src = clusterJsonEntries();
+    const fileItems = src.rung === 'file' ? presets.status().items.filter((i) => i.kind !== 'gdrive') : [];
+    const out = [];
+    for (const row of R.ROWS) {
+      if (row.delegate || !row.clusterEnv) continue;
+      const mine = fileItems.filter((i) => i.kind === row.id);
+      if (mine.length) { out.push(...mine); continue; }
+      const n = clusterPresetsFor(row).length;   // the env JSON, or the single-field form as one preset
+      if (n) out.push({ kind: row.id, source: 'env', n });
+    }
+    return out;
+  }
+
   // ── writes ───────────────────────────────────────────────────────────────
   /** Omitted = untouched · '' = cleared · else trimmed + validated FIRST. */
   function setIntegration(id, patch) {
@@ -626,7 +674,7 @@ function create(deps = {}) {
     resolveIntegration, offeredCredentials, presetsFor, legacyOwnValues, publicView, list,
     setIntegration, setClusterKey, useClusterDefault, clearUserValues,
     test, registerTest, hasTestRunner: (id) => runners.has(id),
-    onChange, file, keyFile: box.keyFile,
+    onChange, presetsChanged, presetItems, file, keyFile: box.keyFile,
     IntegrationError, TEST_TIMEOUT_MS,
   };
 }

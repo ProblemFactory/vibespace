@@ -22,9 +22,11 @@ FROM node:22-bookworm-slim
 # git/curl/ca-certificates: tooling claude commonly needs
 # python3/make/g++: node-pty native build fallback (prebuilds usually suffice)
 # fontconfig: /api/fonts (fc-list) — optional but small
+# tini: pid 1 that reaps orphans (node as pid 1 never does — every detached
+# process that dies would stay a zombie and read alive to `kill -0`)
 RUN apt-get update && apt-get install -y --no-install-recommends \
       dtach procps psmisc zip unzip tar git curl ca-certificates \
-      python3 make g++ fontconfig openssh-client rclone fuse3 \
+      python3 make g++ fontconfig openssh-client rclone fuse3 tini \
     && rm -rf /var/lib/apt/lists/*
 
 # Claude Code CLI (root install so it lands in the global PATH).
@@ -72,4 +74,5 @@ RUN mkdir -p /home/vibe/.claude
 VOLUME ["/app/data", "/home/vibe/.claude"]
 EXPOSE 3456
 
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "server.js"]

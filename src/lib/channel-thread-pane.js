@@ -169,13 +169,8 @@ export function createThreadPane(host, ctx) {
       drawn.add(rec.vendorId);
       const row = ctx.renderRecord(rec, { cont: false, inPane: true, rootVid });
       if (rec.vendorId === rootVid) { row.classList.add('chanthread-rootrow'); frag.appendChild(row); frag.appendChild(el('div', 'chanthread-rule')); continue; }
-      // pick a reply to answer (a nested reply — Lark keeps parent_id inside a topic)
-      const pick = document.createElement('button');
-      pick.type = 'button'; pick.className = 'icon-btn chanthread-pick';
-      pick.appendChild(icon('reply', 11));
-      pick.title = t('Reply to this message in the thread'); pick.setAttribute('aria-label', t('Reply to this message in the thread'));
-      pick.onclick = (ev) => { ev.stopPropagation(); if (pane.classList.contains('chanthread-noreply')) return; targets.set(cur.key, { vid: rec.vendorId, who: (rec.author && (rec.author.name || rec.author.id)) || '' }); drawFoot(true); };
-      row.appendChild(pick);
+      // a reply to answer (a nested reply — Lark keeps parent_id inside a topic) is picked from the row's hover action
+      // bar (lane reaction-hover: "Reply to this message in the thread" — `pick(rec)` below), never a button in the row
       frag.appendChild(row);
     }
     return frag;
@@ -203,10 +198,17 @@ export function createThreadPane(host, ctx) {
     if (!prepend && recs[0] && recs[0].vendorId === cur.root) cur.rootRec = recs[0];
     const replies = recs.filter((x) => x.vendorId !== cur.root);
     if (replies.length) oldest = { at: replies[0].at, vendorId: replies[0].vendorId };
+    // a reply that arrived under a "No replies yet." line (a new thread's first reply) takes the line's place
+    if (!prepend && recs.some((x) => x && x.vendorId && !drawn.has(x.vendorId))) for (const e of list.querySelectorAll(':scope > .chanwin-empty')) e.remove();
     if (prepend) { const rule = list.querySelector('.chanthread-rule'); list.insertBefore(rowsOf(recs, cur.root), rule ? rule.nextSibling : list.firstChild); }
     else list.appendChild(rowsOf(recs, cur.root));
-    if (!prepend && r.code === 'thread-not-loaded') list.appendChild(el('div', 'chanwin-empty', t('this thread is not loaded yet — opening it loads it')));
-    if (!prepend && !recs.length && r.code !== 'thread-not-loaded') list.appendChild(el('div', 'chanwin-empty', t('No replies yet.')));
+    // lane reaction-hover: a NEW thread (Reply in thread on a message that heads none yet) — the message it answers is
+    // drawn as its root from the record the window holds, and the pane says there are no replies (never "not loaded")
+    const fresh = !prepend && !recs.length && !!cur.fresh && !!cur.rootRec;
+    if (fresh && !drawn.has(cur.rootRec.vendorId)) list.appendChild(rowsOf([cur.rootRec], cur.root));
+    if (recs.length) cur.fresh = false;
+    if (!prepend && r.code === 'thread-not-loaded' && !fresh) list.appendChild(el('div', 'chanwin-empty', t('this thread is not loaded yet — opening it loads it')));
+    if (!prepend && !recs.length && (r.code !== 'thread-not-loaded' || fresh)) list.appendChild(el('div', 'chanwin-empty', t('No replies yet.')));
     if (r.refused && !recs.length) showToast(routeErrorText({ code: r.refused, retryAfterSec: r.retryAfterSec }), { type: 'warn' });
     ctx.observe && ctx.observe(list);
     drawBar();
@@ -305,15 +307,30 @@ export function createThreadPane(host, ctx) {
     if (keepFocus) ta.focus();
   }
 
-  function open(th, { from = null } = {}) {
+  /** THE REPLY TARGET (lane reaction-hover — the row's hover bar): `rec` = the reply this one answers inside the
+   *  thread, null = the thread itself (its root). Where the thread cannot be answered the foot says so; nothing here. */
+  const whoOf = (rec) => (rec && rec.author && (rec.author.name || rec.author.id)) || '';
+  function pick(rec) {
+    if (!cur || pane.classList.contains('chanthread-noreply')) return;
+    if (rec && rec.vendorId && rec.vendorId !== cur.root) targets.set(cur.key, { vid: rec.vendorId, who: whoOf(rec) });
+    else targets.delete(cur.key);
+    drawFoot(true);
+  }
+  /** `th` = the thread (`fresh` + `rootRec`: a new thread on a message that heads none — the vendor mints it with the
+   *  first reply); `target` = the reply to answer inside it (a message the main list shows inside a topic), null = the
+   *  thread itself, undefined (a chip's open) = the target this thread last had. */
+  function open(th, { from = null, target = undefined, focus = false } = {}) {
     if (!th) return;
     if (cur) { scrolls.set(cur.key, list.scrollTop); const ta = foot.querySelector('textarea'); if (ta) drafts.set(cur.key, ta.value); }
     returnFocus = from || null;
-    cur = { key: th.key, root: th.root || null, count: th.count || 0, separate: !!th.separate, walked: !!th.walked, rootRec: null };
+    cur = { key: th.key, root: th.root || null, count: th.count || 0, separate: !!th.separate, walked: !!th.walked, rootRec: th.rootRec || null, fresh: !!th.fresh };
+    if (target && target.vendorId && target.vendorId !== cur.root) targets.set(cur.key, { vid: target.vendorId, who: whoOf(target) });
+    else if (target !== undefined) targets.delete(cur.key);
     pane.hidden = false;
     pane.dataset.threadKey = th.key;
     applyMode();
-    serial(renderNow).then(() => walk()).catch(() => {});
+    // the bar's Reply in thread hands the keyboard to the pane's composer (a chip's open leaves it where it was)
+    serial(renderNow).then(() => { if (focus) { const ta = foot.querySelector('textarea'); if (ta) ta.focus({ preventScroll: true }); } return walk(); }).catch(() => {});
     if (beat) clearInterval(beat);
     // the pane's heartbeat (§3.1 b): a separately-listed thread is walked again while it is open (floored server-side)
     beat = setInterval(() => { if (!pane.hidden) walk().catch(() => {}); }, 60e3);
@@ -358,7 +375,7 @@ export function createThreadPane(host, ctx) {
   list.addEventListener('keydown', (e) => { if (isUpKey(e.key) && !isTypingTarget({ tagName: e.target && e.target.tagName, type: e.target && e.target.type, editable: !!(e.target && e.target.isContentEditable) })) { noteInput(); pageUp('key'); } });
 
   return {
-    el: pane, mode, open, close,
+    el: pane, mode, open, close, pick,
     key: () => (cur ? cur.key : null),
     isOpen: () => !pane.hidden,
     /** A conversation broadcast: new replies are appended (drawn rows untouched); the composer follows the offers. */

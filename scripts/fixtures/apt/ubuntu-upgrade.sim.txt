@@ -1,0 +1,16 @@
+NOTE: This is only a simulation!
+      apt-get needs root privileges for real execution.
+      Keep also in mind that locking is deactivated,
+      so don't depend on the relevance to the real current situation!
+Reading package lists...
+Building dependency tree...
+Reading state information...
+Calculating upgrade...
+The following upgrades have been deferred due to phasing:
+  glycin-loaders glycin-thumbnailers gnome-shell gnome-shell-common
+  libglycin-2-0 libglycin-gtk4-2-0
+The following packages will be upgraded:
+  google-chrome-stable
+1 upgraded, 0 newly installed, 0 to remove and 6 not upgraded.
+Inst google-chrome-stable [154.0.8037.57-1] (154.0.8037.92-1 Google:1.0/stable [amd64])
+Conf google-chrome-stable (154.0.8037.92-1 Google:1.0/stable [amd64])

@@ -23,6 +23,7 @@ let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 
 const { HARNESSES, harnessOf, harnessIds, chatHarnessIds, REQUIRED_DESCRIPTOR_KEYS } = require(path.join(REPO, 'src/harnesses/index.js'));
+const { CREATE_RULES } = require(path.join(REPO, 'src/harness-config.js')); // the create rule's closed set (false | 'dir-exists' — lane hooks-create)
 const { BackendAdapter } = require(path.join(REPO, 'src/adapters/base.js'));
 const { createAdapterRegistry } = require(path.join(REPO, 'src/adapters/index.js'));
 const { NORMALIZERS, createMessageManager } = require(path.join(REPO, 'src/normalizers.js'));
@@ -69,7 +70,7 @@ for (const id of harnessIds()) {
     ok(typeof h.settingsPrefix === 'string' && h.settings === HARNESS_SETTINGS[h.settingsPrefix], `${id}: settings ARE the PURE table HARNESS_SETTINGS.${h.settingsPrefix} (identity)`);
     ok(!!rowOf(h.settings, 'defaultModel') && !!rowOf(h.settings, 'defaultPermissionMode'), `${id}: table declares defaultModel + defaultPermissionMode rows`);
     ok(h.inject && ['hooks', 'wrapper', 'acp'].includes(h.inject.kind) && typeof h.inject.sessionStartHonoured === 'boolean' && Array.isArray(h.inject.hookEvents), `${id}: declares its context-injection strategy (${h.inject?.kind}, sessionStartHonoured=${h.inject?.sessionStartHonoured})`);
-    if (h.inject?.hookFile) ok(typeof h.inject.hookFile.file === 'function' && typeof h.inject.hookFile.file() === 'string' && typeof h.inject.hookFile.createIfMissing === 'boolean', `${id}: hook file declaration is well-formed (${h.inject.hookFile.file()})`);
+    if (h.inject?.hookFile) ok(typeof h.inject.hookFile.file === 'function' && typeof h.inject.hookFile.file() === 'string' && CREATE_RULES.includes(h.inject.hookFile.createIfMissing), `${id}: hook file declaration is well-formed (${h.inject.hookFile.file()}, create rule ${JSON.stringify(h.inject.hookFile.createIfMissing)})`);
     ok(typeof h.caps.streamProtocol === 'string', `${id}: caps name a stream protocol (${h.caps.streamProtocol})`);
     ok(hasConsumer(h.caps.streamProtocol), `${id}: its stream protocol has a registered stdout consumer (src/server/stdout/index.js: ${h.caps.streamProtocol}) — the descriptor NAMES it, the registry RESOLVES it (S5)`);
     ok(!('stdout' in h) && !('stream' in h), `${id}: no stdout/stream twin on the descriptor — caps.streamProtocol is the ONE source of truth`);
@@ -189,7 +190,7 @@ console.log('— settings tables');
     const adapterHas = (verb) => typeof h.Adapter.prototype[verb] === 'function';
     const errs = checkTable(h.settings, { settingsPrefix: h.settingsPrefix, configFiles: h.configFiles, adapterHas });
     ok(errs.length === 0, `${id}: checkTable passes with the descriptor's context`, errs.join('; '));
-    for (const [fid, spec] of Object.entries(h.configFiles || {})) ok(spec.rel === h.settings.files[fid].rel && typeof spec.file === 'function' && typeof spec.createIfMissing === 'boolean', `${id}: configFiles.${fid}.rel IS the table's rel array (one spelling) + file()/createIfMissing`);
+    for (const [fid, spec] of Object.entries(h.configFiles || {})) ok(spec.rel === h.settings.files[fid].rel && typeof spec.file === 'function' && CREATE_RULES.includes(spec.createIfMissing), `${id}: configFiles.${fid}.rel IS the table's rel array (one spelling) + file()/createIfMissing ∈ ${JSON.stringify(CREATE_RULES)}`);
     if (h.inject && h.inject.hookFile) ok(Object.values(h.configFiles).includes(h.inject.hookFile), `${id}: inject.hookFile IS one of configFiles (identity — the hook entries and the managed keys share the file object)`);
     for (const row of rowsOfKind(h.settings, 'cli-config')) ok(!!h.configFiles[row.apply.file] && h.configFiles[row.apply.file].writable !== false, `${id}: cli-config row ${row.key} targets a declared writable file (${row.apply.file})`);
     const ad = registry.get(id);

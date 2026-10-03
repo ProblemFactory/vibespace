@@ -363,6 +363,52 @@ else await (async () => {
       ok(off6.config === null && off6.set && /kept=yes-6/.test(off6.t0) && off6.stopped && /cookies:none/.test(off6.t1),
         `⑨ CONTROL: keeping OFF (the pre-lane rung D — the binary's throw-away directory) — the same steps lose the cookie ("${off6.t0}" → "${off6.t1}"): the leg above can go red`, off6);
     }
+    // ── ⑩ lane profile-lock-roll (2026-10-01, userW's pod roll): a lock under this machine's PREVIOUS name is taken over
+    //    and the first command after it rebinds to the relaunched Chrome's only tab ([tab_rebound], never tab_gone); a lock
+    //    naming a hostname this keeper never launched on is refused by name through the shipped CLI — nothing removed
+    {
+      const os = require('os');
+      const HOST = os.hostname();
+      const OLD = 'vibespace-pod-a-5d6f7c8b9a-x1y2z', STRANGER = 'some-other-machine';
+      const KR = 'bk-0000d00a';
+      const sR = mkSession(KR, 'Roll chat', 8); active.set('sess-8', sR); live.add(KR); conv[KR] = { turn: 'idle', name: 'Roll chat' };
+      const singletons = (dir) => ['SingletonLock', 'SingletonSocket', 'SingletonCookie'].filter((n) => { try { fs.lstatSync(path.join(dir, n)); return true; } catch { return false; } });
+      const readLock = (dir) => { try { return fs.readlinkSync(path.join(dir, 'SingletonLock')); } catch { return null; } };
+      /** The pod died: the daemon AND every Chrome process on the directory, SIGKILLed (no stop() ran) — then waited out. */
+      const killBrowser = async (prof) => { const rec = k._reg().browsers[prof.id]; const pids = new Set([rec && rec.pid].filter(Boolean)); for (const pid of fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x))) { try { if (fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ').includes(`--user-data-dir=${prof.dir} `)) pids.add(Number(pid)); } catch { /* gone */ } } for (const pid of pids) { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } } for (let i = 0; i < 50 && [...pids].some((pid) => { try { process.kill(pid, 0); return true; } catch { return false; } }); i++) await sleep(100); return [...pids]; };
+      /** The lock Chrome left (`<host>-<pid>`), re-spelled under another hostname with the same pid. */
+      const relock = (dir, host) => { const l = readLock(dir); if (!l) throw new Error('no SingletonLock left on ' + dir); const pid = l.slice(l.lastIndexOf('-') + 1); fs.unlinkSync(path.join(dir, 'SingletonLock')); fs.symlinkSync(`${host}-${pid}`, path.join(dir, 'SingletonLock')); return { was: l, now: `${host}-${pid}` }; };
+      let c = await run(sR, ['new', 'roll']);
+      const roll = k.profileByRef('roll');
+      c = await run(sR, ['use', 'roll']);
+      c = await run(sR, ['open', PAGE('ROLL1')]);
+      const t1 = await run(sR, ['get', 'title']);
+      const rec1 = k._reg().browsers[roll.id];
+      ok(c.ok && /ROLL1/.test(titleOf(t1)) && chromesOn(roll.dir) === 1 && rec1.host === HOST && (rec1.hosts || []).join() === HOST && singletons(roll.dir).length === 3, `⑩ conversation 8 browses in roll ("${titleOf(t1)}"); the record names this machine (${HOST}); Chrome left its three Singleton symlinks`, { host: rec1.host, hosts: rec1.hosts, singletons: singletons(roll.dir), c, t1 });
+      // THE ROLL: the pod died (daemon + Chrome killed, no stop() ran); the lock names the previous pod and the registry says
+      // the last launch was there (as the file the old pod wrote would)
+      await killBrowser(roll);
+      const rl = relock(roll.dir, OLD);
+      const recR = k._reg().browsers[roll.id]; recR.host = OLD; recR.hosts = [OLD];
+      const t2 = await run(sR, ['get', 'title']);
+      const lockNow = readLock(roll.dir);
+      ok(t2.ok && !/tab_gone|profile_locked/.test(t2.out + t2.err) && /\[tab_rebound\]/.test(t2.err) && /previous run is gone/.test(t2.err) && chromesOn(roll.dir) === 1 && lockNow && lockNow.startsWith(HOST + '-') && k._reg().browsers[roll.id].hosts.join() === OLD + ',' + HOST && k.profile(roll.id).renamedFrom && k.profile(roll.id).renamedFrom.host === OLD,
+        `⑩ THE ROLL on the real binary: the lock named the previous pod (${rl.now}) — taken over, ONE new Chrome on the directory (its lock now ${lockNow}), the first command rebinds to its only tab ([tab_rebound], never tab_gone), the profile says renamed from ${OLD}`, { out: t2.out.slice(-300), err: t2.err.slice(-500), lockNow, hosts: k._reg().browsers[roll.id].hosts, chromes: chromesOn(roll.dir) });
+      c = await run(sR, ['open', PAGE('ROLL2')]);
+      const t3 = await run(sR, ['get', 'title']);
+      ok(c.ok && /ROLL2/.test(titleOf(t3)) && chromesOn(roll.dir) === 1, `⑩ …and it browses on in the relaunched Chrome ("${titleOf(t3)}"), still one Chrome`, { c, t3 });
+      // THE STRANGER: a hostname this keeper never launched on — refused by name through the shipped CLI, the lock untouched,
+      // no Chrome started
+      await killBrowser(roll);
+      const rs = relock(roll.dir, STRANGER);
+      const t4 = await run(sR, ['get', 'title']);
+      const lockStill = readLock(roll.dir);
+      ok(!t4.ok && /profile_locked/.test(t4.err) && t4.err.includes(STRANGER) && t4.err.includes(HOST) && /rm -f '/.test(t4.err) && !/held by another browser process/.test(t4.err) && chromesOn(roll.dir) === 0 && lockStill === rs.now,
+        `⑩ THE STRANGER on the real binary: a lock naming a hostname this keeper never launched on (${rs.now}) is refused by name — both hostnames and the one command; no Chrome, the lock untouched`, { err: t4.err.slice(-700), lockStill, chromes: chromesOn(roll.dir) });
+      try { fs.unlinkSync(path.join(roll.dir, 'SingletonLock')); } catch { /* none */ }
+      await k.stop(roll.id, { why: 'user' }).catch(() => { });
+      active.delete('sess-8'); live.delete(KR);
+    }
     // ── ⑧ lane-cloak (2026-09-28): THE CLOAKBROWSER RUNG on the real binaries — the measured build installed by the
     //    product's own Install (the real package + the measured cache ⇒ nothing downloaded), a never-launched profile
     //    switched to cloak by the USER, the browser launched UNDER THE EGRESS PROXY (a named site admitted — resolved to

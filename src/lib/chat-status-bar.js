@@ -1000,7 +1000,21 @@ export class ChatStatusBar {
       if (!kitLine.isConnected) return;
       kitLine.replaceChildren();
       if (!k || (k.error && !k.version && k.ok === undefined)) { kitLine.textContent = t('Design kit: status unavailable'); return; }
-      kitLine.append(document.createTextNode(k.ok ? t('Design kit ready (CLI {v})', { v: k.version }) : t('Design kit not ready: {err}', { err: k.error || '?' })));
+      // lane design-kit-287: a kit taken from ANOTHER CLI version says so (Claude Code
+      // 2.1.287 ships none — the server falls back to an older installed version or a
+      // kit it stored); "no version has one" gets its own sentence with the two ways
+      // out; every other refusal is the server's own line (it names version + rung)
+      const words = k.ok
+        ? (k.donor
+          ? (k.ownShipped === false
+            ? t('Design kit ready — taken from CLI {donor}; this CLI {v} does not ship it', { donor: k.donor, v: k.version })
+            : t('Design kit ready — taken from CLI {donor}; this CLI {v} could not give its own', { donor: k.donor, v: k.version }))
+          : t('Design kit ready (CLI {v})', { v: k.version }))
+        : (k.code === 'not_shipped'
+          ? t('Claude Code {v} does not ship the design canvas kit, and no other version on this machine has one (the last that did: {last}). VibeSpace keeps looking by itself — press Retry any time; the CLI you run stays as it is, nothing is downgraded. Or use /design in a terminal session, which works through claude.ai.', { v: k.version, last: k.lastShipped || '?' })
+          : t('Design kit not ready: {err}', { err: k.error || '?' }));
+      kitLine.append(document.createTextNode(words));
+      kitLine.title = (k.ok ? k.source : k.error) || ''; // the record's own words (paths, rungs) one hover away
       kitLine.classList.toggle('chat-design-kit-bad', !k.ok);
       go.disabled = !k.ok;
       go.title = k.ok ? '' : t('The design kit is not ready — fix the reason above or retry');

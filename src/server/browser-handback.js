@@ -76,6 +76,7 @@
  * `vibespace-window`, and nothing queued there acts on a page.
  */
 const T = require('../browser-takeover.js');
+const INT = require('../browser-interrupt.js'); // lane browser-admin 2a: the relaunch's words (Change build…)
 const { addressableId } = require('../claude-lock-capture.js');   // verify r6 (lane channel-withdraw): the ONE own-id predicate
 const VERBS = require('../browser-verbs.js'); // the CLI's own verb table: a pending `vibespace-browser status` is never stale, `click` is
 
@@ -232,6 +233,31 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     return out;
   }
 
+  /**
+   * LANE BROWSER-ADMIN 2a — CHANGE BUILD… TELLS (the keeper's `onRelaunch`, one event per conversation leased on the
+   * browser it restarts): the takeover's shape — ONE conversation card through the ladder's CARD path (display only:
+   * no rung, no turn, no spend) and ONE zero-spend `browser-relaunch` notice the agent reads at its next turn, in
+   * `browser-interrupt.relaunchText`'s words (what was interrupted, its tab reopened). Never a delivery: nobody typed it.
+   */
+  function announceRelaunch(ev) {
+    const out = { sessionId: null, carded: false, noticed: false, why: null, text: null };
+    if (!ev || ev.kind !== 'relaunch') { out.why = 'not a relaunch'; return out; }
+    const sess = sessionFor(ev.sessionId, ev.browserKey);
+    if (!sess) { out.why = 'no live session carries this browser key'; return out; }
+    out.sessionId = sess.id;
+    const text = INT.relaunchText({ label: ev.label || labelOf(ev.profileId), from: ev.from, to: ev.to, n: ev.n || 0, verbs: ev.verbs || [], outcome: ev.outcome || 'changed' }); // verify r1 (F9): what happened
+    out.text = text;
+    const card = { fromName: FROM_NAME, text, kind: 'notification' };
+    const cid = conversationIdOf(sess.s);
+    try {
+      if (typeof emitCard === 'function') out.carded = emitCard(sess.s, card) !== false;
+      else if (cid && deliver && typeof deliver.emitPeerCard === 'function') { deliver.emitPeerCard(cid, card); out.carded = true; }
+    } catch (e) { log.warn?.(`[browser] relaunch card not shown — ${e && e.message}`); }
+    out.noticed = queueNotice(sess, { kind: 'browser-relaunch', label: ev.label || null, from: ev.from || '', to: ev.to || '', outcome: ev.outcome || 'changed', n: Math.max(0, Number(ev.n) || 0), verbs: (Array.isArray(ev.verbs) ? ev.verbs : []).map(String).slice(0, 20), at: Date.now() });
+    log.log?.(`[browser] build change on ${ev.profileId} told to ${sess.id}: ${ev.n ? `${ev.n} operation(s) interrupted (${(ev.verbs || []).join(', ')})` : 'nothing in flight'}${out.carded ? '; card shown' : ''}${out.noticed ? '; the notice rides the next turn' : ''} (free — nothing delivered)`);
+    return out;
+  }
+
   /** Which browser the user took, as the verdict reads it: the handles a
    *  command may name it by, and whether a command that names NONE lands on
    *  it (the default attachment / the only one / the ephemeral browser when
@@ -361,7 +387,7 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     return out;
   }
 
-  let unsubInput = null, unsubConfirm = null, unsubWindow = null;
+  let unsubInput = null, unsubConfirm = null, unsubWindow = null, unsubRelaunch = null;
   /** P9b: hang on the window-targets engine's input seam — the same announce, target 'window'. Idempotent. */
   function installWindow(engine) {
     if (!engine || typeof engine.onInput !== 'function' || unsubWindow) return false;
@@ -390,12 +416,13 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
       if (ev.cause === 'continue') return;
       announce(ev).catch((e) => log.warn?.(`[browser] handback announce failed — ${e && e.message}`));
     });
+    if (!unsubRelaunch && typeof keeper.onRelaunch === 'function') unsubRelaunch = keeper.onRelaunch((ev) => { try { announceRelaunch(ev); } catch (e) { log.warn?.(`[browser] relaunch announce failed — ${e && e.message}`); } }); // lane browser-admin 2a
     if (!unsubConfirm && typeof keeper.onConfirmation === 'function') unsubConfirm = keeper.onConfirmation((ev) => { try { noteConfirmation(ev); } catch (e) { log.warn?.(`[browser] confirmation inbox failed — ${e && e.message}`); } });
     return true;
   }
-  function shutdown() { try { unsubInput?.(); unsubConfirm?.(); unsubWindow?.(); } catch { /* */ } unsubInput = null; unsubConfirm = null; unsubWindow = null; }
+  function shutdown() { try { unsubInput?.(); unsubConfirm?.(); unsubWindow?.(); unsubRelaunch?.(); } catch { /* */ } unsubInput = null; unsubConfirm = null; unsubWindow = null; unsubRelaunch = null; }
 
-  return { announce, announceTakeover, tellProposal, noteConfirmation, install, installWindow, shutdown, announceIdle, sweepStale, takenFor, continueFor, FROM_NAME };
+  return { announce, announceTakeover, announceRelaunch, tellProposal, noteConfirmation, install, installWindow, shutdown, announceIdle, sweepStale, takenFor, continueFor, FROM_NAME };
 }
 
 module.exports = { create, FROM_NAME };

@@ -79,7 +79,7 @@ const REJECTED = `http://${HOST}:${PAGE_PORT}/v3/signin/rejected?TL=AInv3nt3d0x`
 const SIGNIN = `http://${HOST}:${PAGE_PORT}/v3/signin/identifier?TL=AInv3nt3d0y`;
 // the agent-browser home: the real browsers dir linked (nothing downloaded), the fixture host mapped to loopback for chromium
 fs.mkdirSync(path.join(fakeHome, '.agent-browser'), { recursive: true });
-const realBrowsers = path.join(os.userInfo().homedir, '.agent-browser', 'browsers');
+const realBrowsers = path.join(os.homedir(), '.agent-browser', 'browsers'); // the INSTALLED browser, read-only use (test-browser-live's rule): $HOME is the suite's home — never the passwd entry (verify r6: a pinned HOME must be the whole reach; test-architecture §68 census)
 if (fs.existsSync(realBrowsers)) fs.symlinkSync(realBrowsers, path.join(fakeHome, '.agent-browser', 'browsers'));
 fs.writeFileSync(path.join(fakeHome, '.agent-browser', 'config.json'), JSON.stringify({ args: `--no-sandbox,--host-resolver-rules=MAP ${HOST} 127.0.0.1` }));
 
@@ -307,19 +307,55 @@ try {
     check('…and the For-you item is answered', !(itemsR.open || []).some((i) => i.action && i.action.type === 'browser-proposal'), itemsR.open);
   } else {
     // ── ④b verify r1: an Approve that just APPEARED under the pointer does not count (the press-arm rule of every approval) ──
+    // lane fleet-image-2 (the fleet e2e: ④b red 3 runs of 7 on a pod — after the reload the card moved ~22 px BETWEEN the
+    // leg's position read and its press, so the press landed on an unclassed element and no toast came): the leg presses
+    // THE ELEMENT IT CHECKED. A page-side recorder names every click's target; a press that missed (the card moved under
+    // it) is pressed again at a FRESH rect of the same element handle (bounded); the verdict reads the press that landed.
     console.log('④b a press on Approve the instant the card appears under the pointer does not count — nothing runs, the card says why');
     await cdp('Page.reload', {}); await waitApp();
     await evalJs(`app.attachSession(${JSON.stringify(sid)}, 'Portal work', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
+    await evalJs(`(() => { window.__apClicks = []; window.__apToasts = []; document.addEventListener('click', (e) => { const b = window.__apBtn; window.__apClicks.push({ on: !!b && (e.target === b || b.contains(e.target)), target: String((e.target && (e.target.className || e.target.tagName)) || '').slice(0, 60) }); }, true); new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1 && n.classList && n.classList.contains('global-toast')) window.__apToasts.push(n.textContent.slice(0, 160)); }).observe(document.body, { childList: true, subtree: true }); return true; })()`);
+    // the Approve's own handle, its fresh centre, whether the point hits it, and how long ago it appeared or moved (the
+    // rule's clock — read for the evidence, never to decide). Out of the window, or covered at its centre (the chat's own
+    // scroller clips it): scrolled into view, and the NEXT read takes the rect it has then
+    const freshPoint = () => evalJs(`(() => { const b = window.__apBtn || document.querySelector('${CARD} .chat-browser-proposal-approve'); if (!b || !b.isConnected || !b.offsetParent) return null; window.__apBtn = b; const q = b.getBoundingClientRect(); if (q.bottom > window.innerHeight || q.top < 0) { b.scrollIntoView({ block: 'center' }); return null; } const x = q.left + q.width / 2, y = q.top + q.height / 2; const hit = document.elementFromPoint(x, y); if (!(hit === b || b.contains(hit))) { b.scrollIntoView({ block: 'center' }); return null; } return { x, y, top: q.top, armAge: b._armSince != null ? Math.round(performance.now() - b._armSince) : null }; })()`).catch(() => null);
+    const pressTheApprove = async (first = null) => {
+      const tries = [];
+      for (let i = 0; i < 40 && tries.length < 8; i++) {
+        const p = i === 0 && first ? first : await freshPoint();
+        if (!p) { await sleep(50); continue; }
+        const n0 = await evalJs('window.__apClicks.length');
+        await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x, y: p.y });
+        await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: p.x, y: p.y, button: 'left', clickCount: 1 });
+        await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: p.x, y: p.y, button: 'left', clickCount: 1 });
+        const clicks = await evalJs(`window.__apClicks.slice(${n0})`);
+        tries.push({ x: Math.round(p.x), y: Math.round(p.y), armAge: p.armAge, clicks });
+        if (clicks.some((c) => c.on)) return { landed: true, tries };
+      }
+      return { landed: false, tries };
+    };
+    const toastsSaid = () => evalJs(`window.__apToasts.filter((x) => /moved under the pointer just now/.test(x)).length`);
     let ap = null;
-    for (let i = 0; i < 400 && !ap; i++) { ap = await evalJs(`(() => { const b = document.querySelector('${CARD} .chat-browser-proposal-approve'); if (!b || !b.offsetParent) return null; const q = b.getBoundingClientRect(); if (q.bottom > window.innerHeight || q.top < 0) { b.scrollIntoView({ block: 'center' }); return null; } const x = q.left + q.width / 2, y = q.top + q.height / 2; const hit = document.elementFromPoint(x, y); return hit === b || b.contains(hit) ? { x, y } : null; })()`).catch(() => null); if (!ap) await sleep(20); }
+    for (let i = 0; i < 400 && !ap; i++) { ap = await freshPoint(); if (!ap) await sleep(20); }
     if (ap) {
-      await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: ap.x, y: ap.y });
-      await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: ap.x, y: ap.y, button: 'left', clickCount: 1 });
-      await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: ap.x, y: ap.y, button: 'left', clickCount: 1 });
+      const r1 = await pressTheApprove(ap);
       await sleep(1500);
       const cm = await cardState();
-      const said = await evalJs(`/moved under the pointer just now/.test(document.body.textContent)`);
-      check('④b the press the instant the card appeared under the pointer did NOT run it: the card still open, its Approve still there, and it says why', cm && cm.state === 'open' && cm.approve === 'Approve' && said, { ap, cm, said });
+      const said = await toastsSaid();
+      check('④b the press the instant the card appeared under the pointer did NOT run it: the press landed on the Approve itself, the card still open, its Approve still there, and it says why', r1.landed && cm && cm.state === 'open' && cm.approve === 'Approve' && said >= 1, { tries: r1.tries, cm, said });
+      // ④b' THE POD'S RACE, CONSTRUCTED (the dev box never shows it): the card moves 60 px between the leg's read and its
+      // press. The press at the read point misses the Approve (the recorder names what it hit), the leg presses the same
+      // element at a fresh rect — and an Approve that MOVED under the pointer does not count either. The card keeps its
+      // 60 px for the rest of the run: taking it back would be one more move, and ⑤'s press would then wait out the rule.
+      await sleep(900); // past ARM_MS: the Approve sat still and counts again — only the move below may refuse the press
+      const stale = await freshPoint();
+      await evalJs(`(() => { document.querySelector('${CARD}').style.transform = 'translateY(60px)'; return true; })()`);
+      const r2 = stale ? await pressTheApprove(stale) : { landed: false, tries: [] };
+      await sleep(1000);
+      const cm2 = await cardState();
+      const said2 = await toastsSaid();
+      check('④b\' the race constructed: the press at the point read before the card moved 60 px missed the Approve, and the leg pressed THE Approve at a fresh rect', !!stale && r2.landed && r2.tries.length >= 2 && !r2.tries[0].clicks.some((c) => c.on), { stale, tries: r2.tries });
+      check('④b\' …and a press on an Approve that moved under the pointer did NOT run it either: still open, said again', cm2 && cm2.state === 'open' && cm2.approve === 'Approve' && said2 > said, { cm2, said, said2 });
     } else skip('④b the card\'s Approve never became pressable after the reload');
     // ── ⑤ the REAL click on Approve ──
     console.log('⑤ a REAL click on Approve: the install (nothing downloaded), ONLY the host, a new CloakBrowser profile, the page reopened');

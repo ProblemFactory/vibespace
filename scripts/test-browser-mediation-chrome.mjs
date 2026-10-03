@@ -828,7 +828,10 @@ console.log('— ④ naive study 2: the real keeper + the real binary — two se
         // its page is gone instead of "Connection refused" forever; `tab new` rebinds and every verb runs (without
         // --pin-tab the first verb runs directly, measured)
         const gH = await run(axNew.env, [...pin, 'get', 'title']);
-        const answered = pin.length ? (!gH.ok && /tab_gone/.test(gH.out) && /tab new/.test(gH.out)) : gH.ok;
+        // 2.369.200 integration: lane profile-lock-roll L2 — the keeper now REBINDS a lease whose bound tab died with the old
+        // Chrome (the attach answers `rebound`, a new tab bound in the daemon) ⇒ the verb runs on it; tab_gone stays the answer
+        // of a keeper that did not rebind
+        const answered = pin.length ? ((!gH.ok && /tab_gone/.test(gH.out) && /tab new/.test(gH.out)) || (gH.ok && !!(axNew && axNew.rebound))) : gH.ok;
         const nH = pin.length ? await run(axNew.env, [...pin, 'tab', 'new', 'about:blank']) : { ok: true, out: '' };
         const oH = await run(axNew.env, [...pin, 'open', `data:text/html,<title>HEAL-${via}</title>`]); const tH = await run(axNew.env, [...pin, 'get', 'title']);
         ok(cH.length === 1 && Ff.pidAlive(recH.pid) && !dead.ok && /refused|connect failed/i.test(dead.out) && cH2.length === 1 && cH2[0] !== cH[0] && ppidOf(cH2[0]) === recH.pid && cmdOf(cH2[0]).includes(' ' + markArg + ' ') && dH && dH2 && dH2 !== dH && portOf(kk.browserOf(bank.id).cdpUrl) === dH2 && kk.browserOf(bank.id).browser && kk.browserOf(bank.id).browser.pid === cH2[0] && answered && nH.ok && oH.ok && tH.ok && tH.out.includes(`HEAL-${via}`),

@@ -319,6 +319,9 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     // lane browser-propose: the agent's browser proposal — ONE primary Approve (runs exactly what the item says), a quiet Reject
     'proposal-approve': () => actBtn('proposal-approve', UI_ICONS.check, t('Approve'), t('Runs exactly what this card says'), 'iw-act-primary iw-act-exit'),
     'proposal-reject': () => actBtn('proposal-reject', UI_ICONS.close, t('Reject'), t('Reject'), 'iw-act-exit'),
+    // Layer 0 apps: an agent's install proposal — Install… opens THE install dialog (the plan first), Not now declines
+    'app-install': () => actBtn('app-install', UI_ICONS.check, t('Install…'), t('Shows the plan first — nothing runs until you confirm'), 'iw-act-primary iw-act-exit'),
+    'app-reject': () => actBtn('app-reject', UI_ICONS.close, t('Not now'), t('Not now'), 'iw-act-exit'),
   };
   const viewOf = (it, e) => itemView(it, {
     t, words: model.wordsOf(it), detail: model.detailOf(it), name: model.nameFor(it.sessionKey, [it]),
@@ -580,6 +583,8 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
       copyText(itemView(cur, { t, words: model.wordsOf(cur), detail: model.detailOf(cur) }).copy); showToast(t('Copied')); return;
     }
     if (a === 'producer') { model.runAction(it); return; }
+    if (a === 'app-install') { model.runAction(it, 'install'); return; }
+    if (a === 'app-reject') { if (await model.runAction(it, 'reject')) advance(id); return; }
     if (a === 'clear') { model.clearContent(id); return; } // the store's broadcast repaints the pane (and drops this button)
     if (a === 'proposal-approve' || a === 'proposal-reject') {
       // lane browser-propose: an Approve on a pane shown a moment ago is not a press on what the user read (the exit ask's V1 rule)

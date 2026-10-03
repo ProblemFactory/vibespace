@@ -292,6 +292,80 @@ try {
   ok(rj.status === 401 && rjj.code === 'session_token_required' && rjj.error === 'Background Work jobs cannot use exits — run it from a live conversation', 'a jbt_ token ⇒ 401 session_token_required (attack 3)', rjj);
   const audit = (await W.api('GET', `/api/exits/audit?host=${HOST}&limit=50`)).j.lines;
   ok(audit.some((l) => l.verb === 'run' && l.ok && l.asked) && audit.some((l) => l.verb === 'ask-answered' && l.answer === 'denied') && audit.some((l) => l.refusal === 'not_granted'), 'the audit has the run, the denied ask and the refusal');
+  // ── ⑤ lane-exit-run-output E3 / E4 (2026-10-01, the owner: "执行了指令怎么看不到回复。侧边栏也看不到指令和结果历史"): the card
+  //    carries the run's output (the first lines of stderr in mono + 显示输出 holding both stored heads, toggled IN PLACE),
+  //    the machine's 最近的命令… list draws from a fresh GET and patches KEYED rows live off the exit-audit broadcast, the
+  //    row states the device's platform, the CLI's `runs` prints the same heads ──
+  console.log('⑤ lane-exit-run-output: the card\'s output block + the machine\'s command list + the platform on the row');
+  {
+    const w5 = await W.api('PATCH', `/api/hosts/${HOST}/exit-access`, { run: { mode: 'everyone', ask: false } });
+    ok(w5.status === 200, 'commands → everyone, no ask (this leg\'s world)');
+    const r5 = await runApi(S[1].token, 'echo out-line; echo ERR-LINE-1 1>&2; echo ERR-LINE-2 1>&2; exit 3');
+    ok(r5.status === 200 && r5.j.code === 3 && /ERR-LINE-1/.test(r5.j.stderr) && r5.j.interpreter === 'sh' && r5.j.platform === process.platform, 'the REAL daemon ran it as {shell} through sh -lc: exit 3, both streams, interpreter sh, the platform stated', r5.j);
+    const cardSel = `[...document.querySelectorAll('.chat-vs-notice')].find((c) => /exit 3/.test(c.textContent) && c.querySelector('.chat-exit-out'))`;
+    ok(await P.waitFor(`!!${cardSel}`, 8000), 'the chat card carries the output block');
+    const nCards = await P.evalJs(`document.querySelectorAll('.chat-vs-notice').length`);
+    const c5 = await P.evalJs(`(() => { const c = ${cardSel}; const pre = c.querySelector('.chat-exit-out'); const det = c.querySelector('.chat-exit-out-full'); return { head: c.querySelector('.chat-text')?.textContent || '', preview: pre.textContent, stream: pre.dataset.stream, mono: getComputedStyle(pre).fontFamily, summary: det && det.querySelector('summary').textContent, open: det && det.open, full: det ? [...det.querySelectorAll('.chat-exit-out-all')].map((p) => p.textContent) : [] }; })()`);
+    ok(/exit 3 · \d+\.\d s/.test(c5.head) && c5.preview === 'ERR-LINE-1\nERR-LINE-2' && c5.stream === 'stderr' && /mono/i.test(c5.mono) && c5.summary === '显示输出' && c5.open === false && c5.full.join('|') === 'out-line\n|ERR-LINE-1\nERR-LINE-2\n', 'E3: the exit line, stderr\'s lines in mono under it, 显示输出 (closed) holding both stored heads whole', c5);
+    ok(await P.realClick(`(() => { const c = ${cardSel}; return c.querySelector('.chat-exit-out-full > summary'); })()`), 'a real click on 显示输出');
+    const t5 = await P.evalJs(`(() => { const c = ${cardSel}; return { open: c.querySelector('.chat-exit-out-full').open, n: document.querySelectorAll('.chat-vs-notice').length, stdoutShown: !!c.querySelector('.chat-exit-out-all')?.getClientRects().length }; })()`);
+    ok(t5.open === true && t5.n === nCards && t5.stdoutShown, 'the expander opens IN PLACE: the same card (no second card, none re-created), the stored stdout visible', t5);
+    // the row states the device's platform (the dial headers' statement, kept on the record)
+    await openRemote(P);
+    const plat5 = await P.evalJs(`${rowOf}?.querySelector('.mounts-dial-state')?.textContent || ''`);
+    ok(/Linux/.test(plat5), 'E1: the machine row names the device\'s platform (Linux — the daemon runs on this box)', plat5);
+    // 最近的命令… from the "Who can use it" dialog: a fresh GET, keyed rows, the stderr head behind a row
+    await P.realClick(exitIcon);
+    ok(await P.waitFor(`!!document.querySelector('#exit-access-dialog .exit-access-runs')`, 8000), 'the dialog offers 最近的命令…');
+    await P.realClick('#exit-access-dialog .exit-access-runs');
+    ok(await P.waitFor(`document.querySelectorAll('#exit-runs-dialog .exit-runs-row').length >= 2`, 8000), 'E4: 最近的命令… opens the machine\'s command list with its rows');
+    const rows5 = await P.evalJs(`[...document.querySelectorAll('#exit-runs-dialog .exit-runs-row')].map((r) => ({ outcome: r.dataset.outcome, cmd: r.querySelector('.exit-runs-cmd').textContent, verdict: r.querySelector('.exit-runs-verdict').textContent, who: r.querySelector('.exit-runs-who').textContent, stderr: (r.querySelector('.exit-runs-out .exit-runs-pre') || {}).textContent || '' }))`);
+    ok(rows5[0] && rows5[0].cmd.startsWith('echo out-line') && rows5[0].verdict === '退出码 3' && rows5[0].who.length > 0 && /ERR-LINE-1/.test(rows5[0].stderr) && rows5.some((r) => r.cmd === 'echo pong' && r.verdict === '退出码 0') && rows5.some((r) => r.outcome === 'refused'), 'the rows: newest first — the conversation, the command, 退出码 3, the stderr head behind the row; the earlier run and a refused attempt listed too', rows5);
+    ok(await P.evalJs(`/命令在 sh 下运行（Linux）/.test(document.querySelector('#exit-runs-dialog .exit-runs-platform')?.textContent || '')`), 'the list says what the machine runs commands under (sh, Linux)');
+    // a row opened, then a NEW run lands on top LIVE (the exit-audit broadcast): the opened row is the SAME node, still open
+    await P.evalJs(`(() => { const r = document.querySelector('#exit-runs-dialog .exit-runs-row'); r.open = true; r._mark = 'kept'; return true; })()`);
+    const r6 = await runApi(S[1].token, 'echo second-run');
+    ok(r6.status === 200 && r6.j.code === 0, 'a second run while the list is open');
+    ok(await P.waitFor(`(document.querySelector('#exit-runs-dialog .exit-runs-row .exit-runs-cmd')?.textContent || '') === 'echo second-run'`, 6000), 'its row lands on top LIVE (the exit-audit broadcast, no re-read)');
+    const kept = await P.evalJs(`(() => { const rows = [...document.querySelectorAll('#exit-runs-dialog .exit-runs-row')]; const k = rows.find((r) => r._mark === 'kept'); return { kept: !!k, open: k && k.open, second: rows[0].querySelector('.exit-runs-verdict').textContent, stdout: (rows[0].querySelector('.exit-runs-pre') || {}).textContent || '', n: rows.length }; })()`);
+    ok(kept.kept && kept.open === true && kept.second === '退出码 0' && /second-run/.test(kept.stdout), 'the opened row is the SAME node and still open; the new row carries its stdout head', kept);
+    await P.evalJs(`document.querySelector('#exit-runs-dialog .dialog-close')?.click(); document.querySelector('#exit-access-dialog .dialog-close')?.click(); true`);
+    // the Machines card's 命令… opens the same list
+    await P.evalJs(`(() => { localStorage.setItem('vibespace.agentsTab', 'machines'); app._showAgentsDialog({ forceModal: true }); return true; })()`);
+    ok(await P.waitFor(`!!document.querySelector('.agents-mach-acc[data-host=${JSON.stringify(HOST)}] .agents-mach-runs')`, 10000), 'the Machines card has 命令…');
+    ok(await P.evalJs(`/Linux/.test(document.querySelector('.agents-mach-acc[data-host=${JSON.stringify(HOST)}] .agents-mach-line2')?.textContent || '')`), '…and its second line names the platform');
+    await P.evalJs(`document.querySelector('.agents-mach-acc[data-host=${JSON.stringify(HOST)}] .agents-mach-runs').click(); true`);
+    ok(await P.waitFor(`document.querySelectorAll('#exit-runs-dialog .exit-runs-row').length >= 3`, 8000), '命令… opens the list from the Machines card too');
+    await P.evalJs(`document.querySelector('#exit-runs-dialog .dialog-close')?.click(); document.querySelector('#agents-dialog-overlay .dialog-close')?.click(); true`);
+    // the CLI's `runs`: the conversation's OWN runs, the same heads
+    const cliR = spawn(process.execPath, [path.join(REPO, 'data/bin/vibespace-exit'), 'runs', 'exmac'], { env: { ...process.env, VIBESPACE_API: api2 || W.BASE, VIBESPACE_SESSION_TOKEN: S[1].token } });
+    const cliROut = []; cliR.stdout.on('data', (d) => cliROut.push(d)); cliR.stderr.on('data', (d) => cliROut.push(d));
+    const cliRCode = await new Promise((r) => cliR.on('exit', (code) => r(code)));
+    const cliRText = Buffer.concat(cliROut).toString();
+    ok(cliRCode === 0 && /exit 0 · [\d.]+ s · sh  echo second-run/.test(cliRText) && /exit 3 · [\d.]+ s · sh  echo out-line/.test(cliRText) && /stderr: ERR-LINE-1/.test(cliRText) && !/conv3|id\b.*refused/.test(cliRText), 'the REAL vibespace-exit `runs exmac` lists this conversation\'s runs with their verdicts and the first line of output — never another conversation\'s', cliRText);
+    const au5 = (await W.api('GET', `/api/hosts/${HOST}/exit-runs?limit=10`)).j;
+    ok(au5.runs && au5.runs[0].cmd === 'echo second-run' && au5.runs[1].stderr === 'ERR-LINE-1\nERR-LINE-2\n' && au5.machine.interpreter === 'sh', 'the owner\'s GET /api/hosts/:id/exit-runs carries the heads the daemon produced', au5.runs && au5.runs.slice(0, 2));
+    // verify r1 F4: the preview never grows the card past its bound (three lines of 1 365 bytes wrapped to ~100 rows), and
+    // a head that is only blank lines is said as such with its cut (pre-fix "no output", the cut unsaid)
+    const r7 = await runApi(S[1].token, 'head -c 3000 /dev/zero | tr "\\0" x; echo; echo second; echo third; echo fourth');
+    ok(r7.status === 200 && r7.j.code === 0, 'a run whose first line is 3 000 characters');
+    const longSel = `[...document.querySelectorAll('.chat-vs-notice .chat-exit-out')].find((p) => p.textContent.startsWith('xxxxxxxx'))`;
+    ok(await P.waitFor(`!!${longSel}`, 8000), 'its card carries the preview');
+    const g7 = await P.evalJs(`(() => { const p = ${longSel}; const cs = getComputedStyle(p); return { h: p.offsetHeight, sh: p.scrollHeight, maxH: cs.maxHeight, ov: cs.overflowY }; })()`);
+    ok(g7.h <= 170 && g7.sh > g7.h && g7.maxH === '160px' && g7.ov === 'auto', 'the preview is bounded at 160 px and scrolls (pre-fix: the card grew by the wrapped line)', g7);
+    const r8 = await runApi(S[1].token, 'yes "" | head -c 5000');
+    ok(r8.status === 200 && r8.j.code === 0, 'a run printing 5 000 newlines');
+    const blankSel = `[...document.querySelectorAll('.chat-vs-notice .chat-exit-none')].find((d) => /没有可见输出/.test(d.textContent))`;
+    ok(await P.waitFor(`!!${blankSel}`, 8000) && await P.evalJs(`/^没有可见输出 · 在 4 KiB 处截断$/.test(${blankSel}.textContent)`), 'its card says the output is blank AND cut (pre-fix "没有输出", the cut unsaid)');
+    // verify r1 V5: the command list's output block is bounded too (style.css's one pin — a row's <pre> scrolls at 320 px)
+    await P.realClick(exitIcon);
+    ok(await P.waitFor(`!!document.querySelector('#exit-access-dialog .exit-access-runs')`, 8000), 'the dialog again');
+    await P.realClick('#exit-access-dialog .exit-access-runs');
+    ok(await P.waitFor(`document.querySelectorAll('#exit-runs-dialog .exit-runs-row').length >= 3`, 8000), 'the list again');
+    const pre9 = await P.evalJs(`(() => { const rows = [...document.querySelectorAll('#exit-runs-dialog .exit-runs-row')]; const r = rows.find((x) => (x.querySelector('.exit-runs-cmd')?.title || '').startsWith('head -c 3000')); if (!r) return null; r.open = true; const p = r.querySelector('.exit-runs-pre'); const cs = getComputedStyle(p); return { maxH: cs.maxHeight, ov: cs.overflowY, h: p.offsetHeight, sh: p.scrollHeight }; })()`);
+    ok(pre9 && pre9.maxH === '320px' && pre9.ov === 'auto' && pre9.h <= 330 && pre9.sh > pre9.h, 'a row\'s output block is bounded at 320 px and scrolls', pre9);
+    await P.evalJs(`document.querySelector('#exit-runs-dialog .dialog-close')?.click(); document.querySelector('#exit-access-dialog .dialog-close')?.click(); true`);
+  }
   ok(P.errors.length === 0 && P2.errors.length === 0, 'no page exception', [...P.errors, ...P2.errors].slice(0, 3));
   try { process.kill(W.lockPid(pair.root), 'SIGTERM'); } catch { }
 } catch (e) {

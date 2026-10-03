@@ -12,7 +12,8 @@
  * client can toast it — `fetchJson` never throws, and a 200-with-nothing would
  * be a silent failure of a user action (§14.11.6).
  *
- *   GET    /api/integrations            — every row's masked view
+ *   GET    /api/integrations            — every row's masked view + `presets`, the
+ *                                          company presets' value-free summary (lane cluster-presets)
  *   GET    /api/integrations/:id        — one row's masked view
  *   PUT    /api/integrations/:id        — {values} | {use:'cluster'} | {clusterKey}
  *   POST   /api/integrations/:id/test   — the human's click; bounded
@@ -41,7 +42,12 @@ function fail(res, e) {
 }
 
 router.get('/api/integrations', (req, res) => {
-  try { res.json(store().list()); } catch (e) { fail(res, e); }
+  try {
+    const out = store().list();
+    // the company presets' source + freshness (value-free; null without a reader)
+    let presets = null; try { presets = ctx.getPresets ? ctx.getPresets() : null; } catch (e) { console.warn('[integrations] presets summary failed:', e && e.message); }
+    res.json({ ...out, presets });
+  } catch (e) { fail(res, e); }
 });
 
 router.get('/api/integrations/:id', (req, res) => {
