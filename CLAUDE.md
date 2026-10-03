@@ -767,6 +767,7 @@ stream-json 下 assistant 的 `thinking→text→thinking→tool_use` 三明治�
 
 **Full essays: docs/kb-bugfix-invariants.md (moved verbatim; ancient one-liners in docs/history-archive.md). Each entry is an incident whose FIX carries invariants — search here before re-diagnosing a familiar symptom.** Index:
 
+- ONE CHANNEL WINDOW COPIED THE WHOLE 45 MB INDEX UP TO 5× (B-f32b, userW): known() read one key via snapshot(). FIX = has/peek, an incremental chunked index write, kept row facts, a census paced to 5 s. 不变量=a read of one conversation costs that conversation ⇒ kb-bugfix-invariants.md
 - THE HUB CHOSE THE SHELL (lane-exit-run-output, a paired Windows box): every run was `sh -lc`, ENOENT folded into "exit 1", no output anywhere. FIX = the daemon plans the shell, spawnError named, 4 KiB heads + a Commands… list. 不变量=the shell is the device's fact ⇒ kb-bugfix-invariants.md
 - A POSSIBLE REPEAT DISPLACED A CERTAIN MISS; A CLOCK THAT WENT BACK HELD THE FLOOR FOR TWO HOURS (notify-retry verify r3). FIX = the copy gives way first; a future witness is dropped; one attempt in flight; the park's rule is ONE table (src/park-step.js) ⇒ kb-bugfix-invariants.md
 - THE OWNER'S OUTCOMES, THE THIRD JUDGEMENT (notify-retry verify r4): 34 scenarios through the REAL ladder + jobs engine + hand-over view — `expired` dropped, two doors missing, a clock that keeps going back. FIX = carried, the table 9 × 21 + a door census ⇒ kb-bugfix-invariants.md

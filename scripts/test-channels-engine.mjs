@@ -364,8 +364,8 @@ function dayStartClock() {
   const PRE = esrc
     .replace("      const newest = store.readTail(adapterId, convId, { limit: 1 })[0];\n      const stamp = Number.isFinite(at) ? at : (newest ? (Number(newest.at) || 0) : (en.readAt || 0));",
              "      const stamp = Number.isFinite(at) ? at : now();")
-    .replace("    if (changed) notify([convId]);", "    notify([convId]);");
-  ok(PRE !== esrc && !/const newest = store.readTail/.test(PRE) && /\n    notify\(\[convId\]\);/.test(PRE),
+    .replace("    if (changed) notify([`${adapterId}/${convId}`]);", "    notify([`${adapterId}/${convId}`]);");   // B-f32b: the broadcast names the key
+  ok(PRE !== esrc && !/const newest = store.readTail/.test(PRE) && /\n    notify\(\[`\$\{adapterId\}\/\$\{convId\}`\]\);/.test(PRE),
     'NEGATIVE CONTROL setup: the pre-fix markRead (now() + an unconditional notify) was reconstructed from the shipped bytes');
   const engCopy = patchPath('src/server', 'channels-engine');
   writeCopy(engCopy, PRE);
@@ -4274,8 +4274,8 @@ async function gateCostRun(EM, DM, tag) {
   const dsrc = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
   const MM = '        try { v = fn(cid, e, memo) || null; }';
   ok(esrc.split(LV).length === 2 && dsrc.split(MM).length === 2, 'CONTROL setup: stillSees reads the live entry once, and the ladder hands its gates one memo per pass');
-  const ctl = await gateCostRun(MUTE.load('src/server/channels-engine.js', esrc.replace(LV, '      const { en, rec } = convFor(adapterId, convId);'), 'gate-cost-clone'), MUTE.load('src/server/conversation-deliver.js', dsrc.replace(MM, '        try { v = fn(cid, e) || null; }'), 'gate-cost-nomemo'), 'ctl');
-  ok(ctl.got === 30 && ctl.clones >= 30 && ctl.rosterCalls >= 30, `CONTROL: the r3-first gate (convFor + no memo) clones the whole index ${ctl.clones}× and walks the roster ${ctl.rosterCalls}× for ONE read — the leg above would be red`, JSON.stringify(ctl));
+  const ctl = await gateCostRun(MUTE.load('src/server/channels-engine.js', esrc.replace(LV, LV.replace('store.index.live()[', 'store.index.snapshot().conversations[')), 'gate-cost-clone'), MUTE.load('src/server/conversation-deliver.js', dsrc.replace(MM, '        try { v = fn(cid, e) || null; }'), 'gate-cost-nomemo'), 'ctl');
+  ok(ctl.got === 30 && ctl.clones >= 30 && ctl.rosterCalls >= 30, `CONTROL: the r3-first gate (convFor as it was then — a whole-index clone — and no memo) clones the whole index ${ctl.clones}× and walks the roster ${ctl.rosterCalls}× for ONE read — the leg above would be red`, JSON.stringify(ctl));
 }
 
 // ⑳b verify r3 (MONEY, MEDIUM): THE REACTION CEILING COUNTS REQUESTS. Rule 20b promised "a scroll storm spends ≤ 20

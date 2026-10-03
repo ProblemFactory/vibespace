@@ -1177,6 +1177,68 @@ console.log('⑫b the custom-emoji picture cache: the account\'s attachment budg
 // a plain `git status` never saw them) and any suite scanning src/ beside this
 // one counted them as product code; they are written to this process's scratch
 // dir now (scripts/mutant-copy.mjs).
+console.log('\n⑬ the incremental index write (B-f32b verify r1): an async update, a row born past the door, the map order');
+{
+  const src = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
+  const qlog = { log() {}, info() {}, warn() {}, error() {} };
+  const RT = (k, v) => (k.startsWith('_') ? undefined : v);
+  const disk = (dir) => fs.readFileSync(path.join(dir, 'index.json'), 'utf-8');
+  // the gates' drift census (VIBESPACE_CHANNELS_INDEX_VERIFY) rewrites a drifted write whole — it would heal the controls below
+  const verifyEnv = process.env.VIBESPACE_CHANNELS_INDEX_VERIFY; delete process.env.VIBESPACE_CHANNELS_INDEX_VERIFY;
+  const legs = async (M, tag) => {
+    const res = {};
+    { // (a) an async update fn, a write inside its await, the fn changes its row after it
+      const dir = path.join(ROOT, `ir1-async-${tag}`); fs.mkdirSync(dir, { recursive: true });
+      const st = M.createChannelStore({ dir, log: qlog });
+      await st.index.update(() => { st.index.entry('a', 'c0').title = 'boot'; }); st.index.flush();
+      await st.index.update(() => { st.index.entry('a', 'c1').unread = 5; });   // a write is owed (the flush below is a real one)
+      await st.index.update(async () => { const en = st.index.entry('a', 'c2'); en.v = 1; await new Promise((r) => setTimeout(r, 1)); st.index.flush(); en.v = 2; });
+      st.index.flush();
+      res.async = JSON.parse(disk(dir)).conversations['a/c2'].v;
+      st.close();
+    }
+    { // (b) a row BORN outside entry() (the one-door rule broken): one sweep cycle writes it
+      const dir = path.join(ROOT, `ir1-born-${tag}`); fs.mkdirSync(dir, { recursive: true });
+      const st = M.createChannelStore({ dir, log: qlog });
+      await st.index.update(() => { for (let i = 0; i < 600; i++) st.index.entry('a', 'c' + i); }); st.index.flush();
+      st.index.live()['a/ghost'] = { key: 'a/ghost', id: 'ghost', adapterId: 'a', title: 'born past the door' };
+      for (let i = 0; i < 3; i++) st.index.sweep();
+      st.index.flush();
+      res.born = !!JSON.parse(disk(dir)).conversations['a/ghost'];
+      st.close();
+    }
+    { // (c) the file keeps the map's order: a row removed + re-born in one write window; a touch before a birth
+      const dir = path.join(ROOT, `ir1-order-${tag}`); fs.mkdirSync(dir, { recursive: true });
+      const st = M.createChannelStore({ dir, log: qlog });
+      await st.index.update(() => { for (let i = 0; i < 600; i++) st.index.entry('a', 'c' + i); }); st.index.flush();
+      await st.index.update(() => { const r = st.index.rows(); delete r['a/c20']; st.index.touch('a/c20'); st.index.entry('a', 'c20').title = 'reborn'; });
+      st.index.flush();
+      res.reborn = disk(dir) === JSON.stringify(st.index.snapshot(), RT, 1);
+      await st.index.update(() => { st.index.touch('a/x'); st.index.entry('a', 'y'); st.index.entry('a', 'x'); });
+      st.index.flush();
+      res.early = disk(dir) === JSON.stringify(st.index.snapshot(), RT, 1);
+      st.close();
+    }
+    return res;
+  };
+  const head = await legs(S, 'head');
+  ok(head.async === 2, `⑬ an async update fn whose await saw a write: the next write carries the row's LAST state (disk v=${head.async}, memory 2) — the update's rows are marked again at its end`);
+  ok(head.born, '⑬ a row born outside entry() reaches the disk within one sweep cycle (the cycle end counts the map against the cached chunks)');
+  ok(head.reborn && head.early, `⑬ the incremental file = the whole-file bytes when a row is removed + re-born (${head.reborn}) and when a row is touched before its birth (${head.early})`);
+  const DONE = "const done = () => { curTouch = null; if (t.all) { touchAll('update reached the whole map'); } else for (const k of t) { dirtyKeys.add(k); fire(k); } };";
+  const CYCLE = /\n    \/\/ verify r1: a row BORN outside `entry\(\)`[^\n]*\n    if \(!drift && sweepAt[^\n]*\n[^\n]*\n[^\n]*\n    \}/;
+  const REBORN = /\n      if \(layout && layout\.chunkOf\.has\(key\)\) touchAll\([^\n]*/;
+  const TOUCH = /  function touch\(key\) \{[^\n]*/;
+  ok(src.includes(DONE) && CYCLE.test(src) && REBORN.test(src) && TOUCH.test(src), '⑬ fixture: the three rules are where the controls cut them');
+  const ma = await legs(require(MUTCS.write('src/channel-store.js', src.replace(DONE, 'const done = () => { curTouch = null; if (t.all) fire(null); else for (const k of t) fire(k); };'), 'ir1-nore-mark')), 'm-async');
+  ok(ma.async === 1, `⑬ CONTROL: the rows NOT marked again at the update's end — the disk keeps the row as the await left it (v=${ma.async}) — red`);
+  const mb = await legs(require(MUTCS.write('src/channel-store.js', src.replace(CYCLE, ''), 'ir1-nocount')), 'm-born');
+  ok(!mb.born, '⑬ CONTROL: the sweep without the cycle-end count — the row born past the door never reaches the disk — red');
+  const mc = await legs(require(MUTCS.write('src/channel-store.js', src.replace(REBORN, '').replace(TOUCH, '  function touch(key) { touchKey(String(key)); }'), 'ir1-noorder')), 'm-order');
+  ok(!mc.reborn && !mc.early, `⑬ CONTROL: without the re-birth / missing-row touch rules the file's order departs from the whole-file bytes (re-born ${mc.reborn}, touched early ${mc.early}) — red`);
+  if (verifyEnv !== undefined) process.env.VIBESPACE_CHANNELS_INDEX_VERIFY = verifyEnv;
+}
+
 console.log('\n⑩ the patched copies never touch the tree');
 for (const r of copiesCensus(MUTCS.files, MUTCS.dir, REPO, { minCopies: 5 })) ok(r.pass, '⑩ ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 

@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.201 — 2026-10-02
+
+### Fixed
+- Opening Channel windows on an account with tens of thousands of conversations no longer stalls; each window shows its conversation right away.
+
 ## 2.369.200 — 2026-10-02
 
 ### Added

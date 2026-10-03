@@ -221,6 +221,13 @@ const TRIM_EVERY_MS = 6 * 3600e3;
 const AUTHORS_MAX = 30;
 /** A broadcast names at most this many conversations before it sends the whole digest. */
 const PARTIAL_MAX = 200;
+// B-f32b: the kept row facts (the digest's unread total, each account's row counts) are re-summed from every row at
+// least this often (a row written past the store's door heals here)
+const ROW_RESUM_MS = 60 * 1000;
+// B-f32b r2 (the coordinator's ruling, 2026-10-03): an account's CLOCK census (hot / warm / cold / due — every row's
+// cadence at the instant) is recomputed at most this often; a broadcast inside the window reads the last one and arms
+// ONE trailing recompute + broadcast at the window's end, so the card always settles on the exact numbers
+const CENSUS_EVERY_MS = 5 * 1000;
 /** An attachment larger than this is refused by name (Lark serves ≤ 100 MB without Range). */
 const ATTACHMENT_MAX_BYTES = 100 * 1024 * 1024;
 /** Hints a history() page may hand back (Gmail's `changed` threads) — bounded. */
@@ -402,6 +409,9 @@ function create(deps = {}) {
     // (`sealCustom`) and never answers it on a route. Optional: without it a
     // `fromMount` choice is refused by name (`no-mounts`).
     mountClients = null,
+    // B-f32b r2: the clock census's pace (ms) and its trailing timer `(fn, ms) => {cancel()}` — a suite injects both
+    censusEveryMs = CENSUS_EVERY_MS,
+    censusTimer = (fn, ms) => { const h = setTimeout(fn, Math.max(0, ms)); if (h.unref) h.unref(); return { cancel: () => clearTimeout(h) }; },
   } = deps;
   if (!dataDir) throw new Error('channels-engine: dataDir is required');
 
@@ -1153,9 +1163,9 @@ function create(deps = {}) {
       const page = await vendor(rec, e, () => e.adapter.listConversations({ limit: 100, cursor: d.cursor }));
       if (outlived(rec, e)) return { pages, complete: false };   // verify r4: a listing that outlived its entry mints no row
       const listedAt = now();
-      await store.index.update((ix) => {
+      await store.index.update(() => {
         for (const c of page.conversations || []) {
-          const isNew = !ix.conversations[`${rec.id}/${c.id}`];
+          const isNew = !store.index.has(`${rec.id}/${c.id}`);   // B-f32b: a lookup — `ix.conversations` here made every page's index write a whole one
           const en = store.index.entry(rec.id, c.id);
           en.vendorId = c.vendorId; en.title = c.title; en.kind = c.kind;
           en.participants = c.participants;
@@ -1181,9 +1191,13 @@ function create(deps = {}) {
       const found = e.feedGroups && e.feedGroups.size ? [...e.feedGroups] : [];
       if (e.feedGroups) e.feedGroups.clear();
       let unlistedHits = 0;
-      await store.index.update((ix) => {
-        for (const en of Object.values(ix.conversations)) {
-          if (en && en.adapterId === rec.id && en.listedAt && en.listedAt < started && !en.unlistedAt) en.unlistedAt = now();
+      await store.index.update(() => {
+        // B-f32b: a read-only scan that marks the rows it unlists — reaching `ix.conversations` here made every
+        // complete discovery's index write a whole one (0.5 s at 50 274 rows)
+        const rows = store.index.rows();
+        for (const k of Object.keys(rows)) {
+          const en = rows[k];
+          if (en && en.adapterId === rec.id && en.listedAt && en.listedAt < started && !en.unlistedAt) { en.unlistedAt = now(); store.index.touch(k); }
         }
         for (const [cid, g] of found) {
           const en = store.index.entry(rec.id, cid, { create: false });
@@ -1499,7 +1513,7 @@ function create(deps = {}) {
         }
       }
       for (const [cid, b] of fold.births) {
-        if (store.index.live()[`${rec.id}/${cid}`]) continue;   // born meanwhile (a push event, a discovery)
+        if (store.index.has(`${rec.id}/${cid}`)) continue;   // born meanwhile (a push event, a discovery); B-f32b: a lookup, not `live()` (a whole-map touch)
         const en = store.index.entry(rec.id, cid);
         const bf = Feed.birthFacts({ at: b.at }, { linkedAt: rec.linkedAt, backlogUntil: f.backlogUntil, catchUp: kind === 'catchUp', windowFrom: win.from });   // verify r1: every message of the window is news, not only the newest
         en.kind = 'dm'; en.title = null; en.bornBy = 'feed'; en.bornAt = t;
@@ -2162,9 +2176,9 @@ function create(deps = {}) {
     const conversations = list.map((en) => { const rec = byId.get(en.adapterId); return rec ? rowView(rec, en, ctx) : null; }).filter(Boolean);
     conversations.sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
     // THE TOTALS are over EVERY conversation, partial or not (the rail badge
-    // reads them off each broadcast).
-    let unreadTotal = 0;
-    for (const en of Object.values(liveIx)) if (en && byId.has(en.adapterId) && !en.unlistedAt) unreadTotal += Number(en.unread) || 0;
+    // reads them off each broadcast) — KEPT, not re-summed (B-f32b): a partial
+    // broadcast re-reads the rows touched since the last one, a full one re-sums
+    const unreadTotal = unreadTotalOf(liveIx, byId, !keys);
     let awaitingTotal = 0;
     for (const n of ctx.outbox.values()) awaitingTotal += n.awaiting;
     // r4: EVERY connectable type (N accounts per type) with what the
@@ -2181,6 +2195,53 @@ function create(deps = {}) {
       quarantined: (store.quarantined || []).map(({ file, to, why, at, blocked }) => ({ file, to: to || null, why, at, blocked: !!blocked })),
       at: t,
     };
+  }
+  /** THE KEPT ROW FACTS (B-f32b, lane channel-index-copy): every partial broadcast (a window's watch, its mark-read)
+   *  summed `unread` over all 50 274 rows of userW's index, and each account's census walked them all again. A row's
+   *  facts that the clock does not move — listed / unlisted, unread, paused, overridden, being read, walked — are kept
+   *  per account: the store says which rows an update touched (`index.onTouch`: a key, or null = the whole map) and
+   *  only those are re-read. A whole-map touch, a full digest or a minute without one re-sums every row — the same
+   *  numbers as the old loops (test-channels-index-scale ⑥, test-channels-census-pace). */
+  const FACTS = ['conversations', 'unread', 'unlisted', 'paused', 'overridden', 'reading', 'walked'];
+  const rowKept = { stale: null, rows: new Map(), by: new Map(), at: 0 };   // stale null = re-sum
+  store.index.onTouch((k) => { if (k === null) rowKept.stale = null; else if (rowKept.stale) rowKept.stale.add(k); });
+  function rowFacts(en) {
+    if (!en) return null;
+    if (en.unlistedAt) return { a: en.adapterId, unlisted: 1 };
+    // the census's own reading of the cadence's override (caps.cadenceFor: 'paused' / a valid refresh = source override)
+    const ov = en.refresh && typeof en.refresh === 'object' ? en.refresh.every : null;
+    const paused = ov === 'paused';
+    const reading = !paused && !(en.lane && en.lane.lastError);
+    return { a: en.adapterId, conversations: 1, unread: Number(en.unread) || 0, paused: paused ? 1 : 0, overridden: paused || caps.validRefresh(ov) ? 1 : 0, reading: reading ? 1 : 0, walked: reading && en.walkedAt ? 1 : 0 };
+  }
+  function addFacts(f, sign) {
+    if (!f) return;
+    let tot = rowKept.by.get(f.a);
+    if (!tot) { tot = Object.fromEntries(FACTS.map((k) => [k, 0])); rowKept.by.set(f.a, tot); }
+    for (const k of FACTS) if (f[k]) tot[k] += sign * f[k];
+  }
+  /** Each account's kept facts (`Map<adapterId, {conversations, unread, …}>`), brought up to date. */
+  function rowFactsNow(resum = false) {
+    const liveIx = store.index.live(), t = now();
+    if (resum || !rowKept.stale || !(t - rowKept.at < ROW_RESUM_MS)) {
+      rowKept.rows = new Map(); rowKept.by = new Map(); rowKept.at = t;
+      for (const k of Object.keys(liveIx)) { const f = rowFacts(liveIx[k]); if (f) { rowKept.rows.set(k, f); addFacts(f, 1); } }
+    } else {
+      for (const k of rowKept.stale) {
+        const was = rowKept.rows.get(k), f = rowFacts(liveIx[k]);
+        if (was) addFacts(was, -1);
+        if (f) { rowKept.rows.set(k, f); addFacts(f, 1); } else rowKept.rows.delete(k);
+      }
+    }
+    rowKept.stale = new Set();
+    return rowKept.by;
+  }
+  /** THE TOTALS' unread: the kept facts of every listed row of an account that exists (the old loop's rule). */
+  function unreadTotalOf(liveIx, byId, resum = false) {
+    const by = rowFactsNow(resum);
+    let total = 0;
+    for (const id of byId.keys()) { const f = by.get(id); if (f) total += f.unread; }
+    return total;
   }
   /** Per-digest precomputation: the outbox counts by conversation (ONE walk
    *  over the proposals, never a clone per row) and the tiers. */
@@ -2678,12 +2739,11 @@ function create(deps = {}) {
     };
   }
 
-  /** The account's scheduler census (the card's "N conversations · M
-   *  unread" line and the tiers' counts): computed from the live index. */
-  function schedulerView(rec, t = now()) {
+  /** The account's scheduler census computed from EVERY row at instant `t` (the card's "N conversations · M unread"
+   *  line and the tiers' counts) — the definition the paced census below is held to (`schedulerExact`, the gates). */
+  function schedulerScan(rec, t = now()) {
     const out = { conversations: 0, unread: 0, hot: 0, warm: 0, cold: 0, paused: 0, overridden: 0, unlisted: 0, due: 0, lastDiscoveryAt: null, discovering: false, firstIngest: null };
     let walked = 0, reading = 0;   // lane R5: the first-read census — conversations being read (not paused, not refused by the vendor) and those walked once
-    const e = live.get(rec.id) || null;
     const T = tiers();
     const c = registry.capsOf(rec.kind);
     const lane = laneOrScan(rec, {});
@@ -2699,6 +2759,10 @@ function create(deps = {}) {
       if (!cad.paused && cad.seconds && last + cad.seconds * 1000 <= t) out.due++;
       if (!cad.paused && !(en.lane && en.lane.lastError)) { reading++; if (en.walkedAt) walked++; }
     }
+    return finishCensus(rec, out, walked, reading);
+  }
+  function finishCensus(rec, out, walked, reading) {
+    const e = live.get(rec.id) || null;
     if (e) { out.lastDiscoveryAt = e.disc.lastCompleteAt || null; out.discovering = !!e.disc.cursor; }
     // lane R5: THE FIRST READ — every listed conversation's first complete walk
     // (`walkedAt`), and at the pace how long the rest takes; null once done
@@ -2708,6 +2772,43 @@ function create(deps = {}) {
       out.firstIngest = { done: walked, total: reading, etaSec: pv && pv.unitsPerSec > 0 ? Math.ceil((left * pv.fetchUnits) / pv.unitsPerSec) : null };
     }
     return out;
+  }
+  /** THE PACED CENSUS (B-f32b r2 — the coordinator's ruling, 2026-10-03): every broadcast walked every row of every
+   *  account to count its tiers by the clock — ~90 ms per broadcast at 50 274 rows, 95 % of a window open once the
+   *  index copies were gone. What a user's action moves stays EXACT on every broadcast (the kept row facts: listed,
+   *  unread, unlisted, paused, overridden, the first read); the CLOCK counts (hot / warm / cold / due) are walked at
+   *  most once per `censusEveryMs` per account. A broadcast inside the window reads the last walk and arms ONE trailing
+   *  walk + broadcast at the window's end (never from a trailing broadcast itself), so the card settles exact. */
+  const censusTimed = new Map();   // adapterId → { at, hot, warm, cold, due, timer }
+  const censusCount = new Map();   // adapterId → clock walks (the gates)
+  let censusTrailing = false;
+  function clockCensus(rec, t) {
+    let c = censusTimed.get(rec.id);
+    if (c && t >= c.at && t - c.at < censusEveryMs) {
+      if (!c.timer && !censusTrailing && !stopped) c.timer = censusTimer(() => censusTrail(rec.id), c.at + censusEveryMs - t);
+      return c;
+    }
+    if (c && c.timer) { try { c.timer.cancel(); } catch { } }
+    const s = schedulerScan(rec, t);
+    c = { at: t, hot: s.hot, warm: s.warm, cold: s.cold, due: s.due, timer: null };
+    censusTimed.set(rec.id, c);
+    censusCount.set(rec.id, (censusCount.get(rec.id) || 0) + 1);
+    return c;
+  }
+  function censusTrail(id) {
+    const c = censusTimed.get(id);
+    if (!c) return;
+    c.timer = null;
+    if (stopped) return;
+    censusTimed.delete(id);   // the trailing walk happens even when a timer fires a hair early
+    censusTrailing = true;
+    try { notify([], { full: false }); } finally { censusTrailing = false; }
+  }
+  function schedulerView(rec, t = now()) {
+    const f = rowFactsNow().get(rec.id) || {};
+    const c = clockCensus(rec, t);
+    const out = { conversations: f.conversations || 0, unread: f.unread || 0, hot: c.hot, warm: c.warm, cold: c.cold, paused: f.paused || 0, overridden: f.overridden || 0, unlisted: f.unlisted || 0, due: c.due, lastDiscoveryAt: null, discovering: false, firstIngest: null };
+    return finishCensus(rec, out, f.walked || 0, f.reading || 0);
   }
 
   /** ONE broadcast per pass, carrying the recomputed RESULT — never one per
@@ -3042,7 +3143,10 @@ function create(deps = {}) {
    */
   function known(adapterId, convId) {
     if (!adapterRecords().adapters.some((r) => r.id === adapterId)) return false;
-    return !!store.index.snapshot().conversations[`${adapterId}/${convId}`];
+    // B-f32b (lane channel-index-copy): a lookup, never `snapshot()` — that deep copy of the WHOLE index (0.5 s at
+    // 50 274 conversations) ran up to five times per Channel window opened (watch, refresh, messages, markRead, the
+    // broadcast's re-read); 19 opens queued ~40 s of server thread (userW inc-muro2wt1-e8lu)
+    return store.index.has(`${adapterId}/${convId}`);
   }
 
   // ── THE READER SURFACE (2026-09-26, design §6.5) ────────────────────────
@@ -4529,7 +4633,8 @@ function create(deps = {}) {
       en.unread = unread;
     });
     if (!found) return false;
-    if (changed) notify([convId]);
+    // B-f32b: the KEY — a bare id makes notify scan every key of the index (50 274 at userW's)
+    if (changed) notify([`${adapterId}/${convId}`]);
     return true;
   }
 
@@ -5233,7 +5338,7 @@ function create(deps = {}) {
   function referencesOf(adapterId) {
     const refs = [];
     const seenGrant = new Set();
-    for (const en of Object.values(store.index.snapshot().conversations)) {
+    for (const en of Object.values(store.index.live())) {   // B-f32b: a read-only scan of the live rows (was a whole-index copy)
       if (!en) continue;
       if (en.adapterId === adapterId) {
         for (const r of convGrainOf(en).access) refs.push({ kind: 'access', key: en.key, convId: en.id, title: en.title || en.id, scope: 'conversation', principal: { kind: r.principal.kind, id: r.principal.id, name: r.principal.name || null } });
@@ -5652,8 +5757,8 @@ function create(deps = {}) {
   function rotationsOf(ix) { if (!ix.rotations || typeof ix.rotations !== 'object') ix.rotations = {}; return ix.rotations; }
   function filterFor(filterId) {
     if (!filterId) return null;
-    const ix = store.index.snapshot();
-    const f = ix.filters && ix.filters[filterId];
+    const filters = store.index.table('filters');   // B-f32b: the one filter copied, never the index
+    const f = filters && filters[filterId];
     return f ? JSON.parse(JSON.stringify(f)) : null;
   }
   /** A conversation's OWN grain as the compatibility reader expects it (the
@@ -6157,7 +6262,7 @@ function create(deps = {}) {
     const got = batch && batch.got ? batch.got : null;
     const fresh = got ? all.filter((c) => !got.has(c)) : all;
     const members = fresh.length ? fresh : all;
-    const rot = store.index.snapshot().rotations || {};
+    const rot = store.index.table('rotations') || {};   // B-f32b: a read of one cursor
     const pick = F.pickRoundRobin(members, Number(rot[w.principal.id]) || 0);
     if (!pick.id) return { cid: null, name: null, via: 'group', live: false, cursor: null, why: `no live session in group ${w.principal.name || w.principal.id} — kept for its next turn` };
     const s = live.find((x) => x.cid === pick.id);
@@ -6558,7 +6663,7 @@ function create(deps = {}) {
     try { const s = (liveSessions() || []).find((x) => x && x.cid === cid); return s && Array.isArray(s.groups) ? s.groups.slice() : []; } catch { return []; }
   }
   function convFor(adapterId, convId) {
-    const en = store.index.snapshot().conversations[`${adapterId}/${convId}`] || null;
+    const en = store.index.peek(`${adapterId}/${convId}`);   // B-f32b: a copy of THAT row, never of the index
     const rec = en ? adapterRecords().adapters.find((r) => r.id === adapterId) || null : null;
     return { en, rec };
   }
@@ -8054,7 +8159,7 @@ function create(deps = {}) {
    */
   async function pointerSync(key) {
     if (typeof key === 'string' && key.includes('/~compose/')) return composePointerSync(key.slice(0, key.indexOf('/~compose/')));
-    const en = store.index.snapshot().conversations[key];
+    const en = store.index.peek(key);
     if (!en) return;
     const awaiting = proposalsFor(key).filter((p) => p.state === 'awaiting-approval');
     const rec = adapterRecords().adapters.find((r) => r.id === en.adapterId) || null;
@@ -8122,14 +8227,14 @@ function create(deps = {}) {
       await store.index.update(() => { const e2 = store.index.entry(adapterId, convId, { create: false }); if (!e2) return; healP2(e2); e2.reachEntries = ACL.removeGrant(e2.reachEntries, { principal: v.grant.principal, scope, origin: 'user' }); });
       try { store.audit({ kind: 'acl', op: 'revoke', principal: v.grant.principal, scope, origin: 'user', at: t, by }); } catch {}
       notify([convId]);
-      return { ok: true, reach: reachView(store.index.snapshot().conversations[key]) };
+      return { ok: true, reach: reachView(store.index.peek(key)) };
     }
     const v = ACL.validateGrant({ principal, scope, level, origin: 'user', at: t, by });
     if (!v.ok) return { ok: false, code: 'bad-grant', error: v.error };
     await store.index.update(() => { const e2 = store.index.entry(adapterId, convId, { create: false }); if (!e2) return; healP2(e2); e2.reachEntries = ACL.applyGrant(e2.reachEntries, v.grant); });
     try { store.audit({ kind: 'acl', op: 'grant', principal: v.grant.principal, scope, level, origin: 'user', at: t, by }); } catch {}
     notify([convId]);
-    return { ok: true, reach: reachView(store.index.snapshot().conversations[key]) };
+    return { ok: true, reach: reachView(store.index.peek(key)) };
   }
   function reachView(en) {
     if (!en) return null;
@@ -8179,8 +8284,11 @@ function create(deps = {}) {
     return { ok: true, request: { ...req } };
   }
   async function decideRequest(requestId, approve, by = 'user') {
-    const snap = store.index.snapshot();
-    const en = Object.values(snap.conversations).find((x) => (x.reachRequests || []).some((r) => r.id === requestId));
+    // B-f32b: the scan reads the live rows; only the row holding the request is copied
+    const live = store.index.live();
+    let hit = null;
+    for (const k in live) { const x = live[k]; if (x && (x.reachRequests || []).some((r) => r.id === requestId)) { hit = k; break; } }
+    const en = hit ? store.index.peek(hit) : null;
     if (!en) return { ok: false, code: 'not-found', error: 'No such request' };
     const req = en.reachRequests.find((r) => r.id === requestId);
     if (req.status !== 'open') return { ok: false, code: 'bad-state', error: `request already ${req.status}` };
@@ -8216,7 +8324,7 @@ function create(deps = {}) {
     const recs = adapterRecords().adapters;
     const byId = new Map(recs.map((r) => [r.id, r]));
     const out = [];
-    for (const en of Object.values(store.index.snapshot().conversations)) {
+    for (const en of Object.values(store.index.live())) {   // B-f32b: read-only — the rows are read, never kept or changed
       const rec = byId.get(en.adapterId);
       if (!rec || rec.enabled === false) continue;
       const reach = reachFor(ctx, rec, en);
@@ -8797,7 +8905,7 @@ function create(deps = {}) {
     if (!known(adapterId, convId)) return { ok: false, code: 'not-found', error: 'No such conversation' };
     const key = `${adapterId}/${convId}`;
     const t = now();
-    const en = store.index.snapshot().conversations[key];
+    const en = store.index.peek(key);
     if (input === null) {
       if (en.filterId && convGrainOf(en).watchers.some((w) => w.mode === 'filtered' && w.filterId === en.filterId)) return { ok: false, code: 'filter-in-use', error: 'this filter is what a notification wakes on — switch that notification to all messages or remove it first' };
       await store.index.update((ix) => { const e2 = store.index.entry(adapterId, convId, { create: false }); if (!e2) return; const fid = e2.filterId; e2.filterId = null; if (fid && !Object.values(ix.conversations).some((x) => x.filterId === fid)) delete filtersOf(ix)[fid]; });
@@ -8841,9 +8949,11 @@ function create(deps = {}) {
    *  — an inherited digest's leftovers as ONE scope digest per (scope,
    *  watcher). Hits nobody waits for any more are left to `prunePending`. */
   function scheduleBootPending() {
-    const snap = store.index.snapshot();
-    for (const en of Object.values(snap.conversations)) {
-      if (!Array.isArray(en.pending) || (!en.pending.length && !elidedTotal(en))) continue;
+    const live = store.index.live();
+    for (const k of Object.keys(live)) {
+      const en0 = live[k];
+      if (!en0 || !Array.isArray(en0.pending) || (!en0.pending.length && !elidedTotal(en0))) continue;
+      const en = store.index.peek(k);   // B-f32b: the rows holding hits are copied, never the index
       const eff = effectiveFor(en);
       if (!eff || !eff.watchers.length) continue;
       const rec = adapterRecords().adapters.find((r) => r.id === en.adapterId);
@@ -9030,6 +9140,7 @@ function create(deps = {}) {
   }
   function stop() {
     stopped = true;
+    for (const c of censusTimed.values()) if (c.timer) { try { c.timer.cancel(); } catch { } c.timer = null; }   // B-f32b r2
     if (offIntegrations) { try { offIntegrations(); } catch {} offIntegrations = null; }
     if (offStash) { try { offStash(); } catch {} offStash = null; }   // 2026-09-27: the receipt-fate listener
     if (offStashGate) { try { offStashGate(); } catch {} offStashGate = null; }   // verify r3: the stash gate
@@ -9071,6 +9182,9 @@ function create(deps = {}) {
       return { ...first, results };
     },
     adapterRecords, laneOrScan, start, stop,
+    // B-f32b r2: the census's definition (every row at `t`) and the paced census's clock walks, for the gates
+    schedulerExact: (adapterId, t = now()) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? schedulerScan(rec, t) : null; },
+    censusStats: () => Object.fromEntries(censusCount),
     // verify r3: a READ-ONLY count of the per-account memories on the table above (the census leg + a diagnostic)
     liveMemSizes: (adapterId) => { const e = live.get(adapterId); if (!e) return null; const out = {}; for (const [name, spec] of Object.entries(LIVE_MEMS)) { const top = e[name]; let n = 0; if (top) { if (spec.nested) { for (const m of top.values()) n += m.size; } else n = top.size; } out[name] = n; } for (const k of ['feedSeen', 'feedGroups', 'feedUnlisted']) if (e[k] && typeof e[k].size === 'number') out[k] = e[k].size; return out; },   // verify r2: + the change feed's bounded memories
     LIVE_MEM_KEEP_MS,

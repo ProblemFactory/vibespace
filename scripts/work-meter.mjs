@@ -103,6 +103,21 @@ export function measure(fn, files) {
   return { blocks, native, total: blocks + native };
 }
 
+/**
+ * The work of ONE ASYNC call (lane channel-index-copy, B-f32b — a server route awaits): the same take/patch as
+ * `measure`, held across the awaited promise. EVERYTHING the process runs meanwhile is counted, so the caller keeps
+ * timers and other I/O out of that window (an injected clock, no started loops).
+ */
+export async function measureAsync(fn, files) {
+  if (!started) throw new Error('work-meter: startWorkMeter() must run before the measured modules are loaded');
+  takeBlocks(files);
+  patchAll(); W = 0;
+  let native = 0;
+  try { await fn(); } finally { native = W; unpatchAll(); }
+  const blocks = takeBlocks(files);
+  return { blocks, native, total: blocks + native };
+}
+
 /** The work of `run(x)` in the parser's STEADY STATE: the input is built OUTSIDE the measured call (its construction
  *  is not the parser's work), and the call is measured TWICE, the second reading returned — measured: the very first
  *  measured execution of a function reads a constant more (V8 folds the counts of its lazy compile's first run into

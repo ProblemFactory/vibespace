@@ -216,16 +216,45 @@ const OUTBOX_PRUNABLE = Object.freeze(['sent', 'failed', 'rejected', 'expired', 
 const OUTBOX_PRUNE_RANK = Object.freeze({ withdrawn: 0, expired: 1, sent: 2, failed: 2, rejected: 2 });
 
 const EMPTY_INDEX = () => ({ v: 1, conversations: {}, updatedAt: 0 });
+// THE INCREMENTAL INDEX WRITE (lane channel-index-copy, B-f32b, 2026-10-03): index.json is written from cached
+// chunks of INDEX_CHUNK rows; a write re-serializes only the chunks whose rows an update touched. Measured on a
+// generated 50 274-conversation index (62 MB; userW's was 45 MB): the whole-file stringify cost 0.40–0.52 s of main
+// thread every 2 s while anything changed. SWEEP_CHUNKS = the chunks re-checked per interval tick (a row changed
+// outside `update()` reaches the disk within chunks / SWEEP_CHUNKS ticks, and is said — once, then at most every
+// DRIFT_SAY_MS, so a hot writer past the door cannot flood the log).
+const INDEX_CHUNK = 256;
+const SWEEP_CHUNKS = 2;
+const DRIFT_SAY_MS = 10 * 60 * 1000;
+/** `_`-prefixed keys are runtime-only — never on disk (both index writers use this replacer). */
+const RUNTIME_KEYS = (k, v) => (k.startsWith('_') ? undefined : v);
 
 /** Atomic JSON write (tmp + rename). `_`-prefixed keys are runtime-only. */
 function writeJsonAtomic(file, obj, { mode = null } = {}) {
   const tmp = `${file}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, JSON.stringify(obj, (k, v) => (k.startsWith('_') ? undefined : v), 1), mode == null ? undefined : { mode });
+  fs.writeFileSync(tmp, JSON.stringify(obj, RUNTIME_KEYS, 1), mode == null ? undefined : { mode });
   // `mode` only applies when the tmp file is CREATED; a leftover tmp from a
   // crashed write keeps its old bits, so the file that lands is chmod-ed too.
   if (mode != null) { try { fs.chmodSync(tmp, mode); } catch { /* a filesystem without modes */ } }
   fs.renameSync(tmp, file);
 }
+
+/** Atomic write of pre-serialized parts (tmp + rename) — the incremental index write's door. */
+function writeBuffersAtomic(file, parts) {
+  const tmp = `${file}.tmp-${process.pid}`;
+  const fd = fs.openSync(tmp, 'w');
+  try { for (const b of parts) { let o = 0; while (o < b.length) o += fs.writeSync(fd, b, o, b.length - o); } } finally { fs.closeSync(fd); }
+  fs.renameSync(tmp, file);
+}
+
+/** One row of `conversations` exactly as `JSON.stringify(ix, RUNTIME_KEYS, 1)` prints it (depth 2), or null when the
+ *  whole-file write would omit it. A JSON string never holds a raw newline, so re-indenting on '\n' is exact (a string
+ *  pattern, never a /g regex: same bytes, one linear pass). */
+function rowLine(key, value) {
+  if (key.startsWith('_')) return null;
+  const s = JSON.stringify(value, RUNTIME_KEYS, 1);
+  return s === undefined ? null : `  ${JSON.stringify(key)}: ${s.replaceAll('\n', '\n  ')}`;
+}
+const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 
 /** An adapter/conversation id may not escape its directory. Channel ids come
  *  from vendors, so this is a boundary, not a formality. */
@@ -307,6 +336,30 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   let closed = false;
   const dedup = new Map(); // `${adapterId}/${convId}` -> Set<vendorId>
 
+  // ── WHICH ROWS CHANGED (lane channel-index-copy): the incremental write and the engine's kept totals read it ──
+  // A row is touched by `entry()` (the door every row write goes through). Reaching the WHOLE map inside an update —
+  // the update's `ix.conversations`, or `live()` — touches every row (conservative: the next write is a full one).
+  let curTouch = null;         // the running update's touched keys (a Set; `.all` once it reached the whole map)
+  let allDirty = true;         // the next write re-serializes every row (boot, a whole-map update, a verify drift)
+  const dirtyKeys = new Set();
+  let layout = null;           // { chunks: [{ keys, buf, n }], chunkOf: Map<key, chunk> } — the cached rows
+  let sweepAt = 0;
+  const touchHooks = [];
+  const flushStats = { full: 0, incremental: 0, fallback: 0, swept: 0, drift: 0, lastFull: 'boot' };
+  let driftSaidAt = 0;         // the sweep's line: the first drift, then at most one per DRIFT_SAY_MS
+  // VIBESPACE_CHANNELS_INDEX_VERIFY=1|<file> (the gates' census): every incremental write is compared with the
+  // whole-file serialization; a difference is said (and appended to <file>) and the whole file is written instead
+  const verifyTo = String((process.env && process.env.VIBESPACE_CHANNELS_INDEX_VERIFY) || '');
+  const fire = (key) => { for (const h of touchHooks) { try { h(key); } catch (e) { warn('[channels] index touch hook threw:', (e && e.message) || e); } } };
+  function touchKey(key) { dirtyKeys.add(key); if (curTouch) curTouch.add(key); else fire(key); }
+  function touchAll(why) { if (!allDirty) flushStats.lastFull = why; allDirty = true; if (curTouch) curTouch.all = true; else fire(null); }
+  // the view an update's fn receives: the live root, except that reaching `conversations` through it is a whole-map touch
+  const touchView = new Proxy(ix, {
+    get(t, p) { if (p === 'conversations') touchAll('update reached ix.conversations'); return t[p]; },
+    set(t, p, v) { if (p === 'conversations') touchAll('update replaced ix.conversations'); t[p] = v; return true; },
+    deleteProperty(t, p) { if (p === 'conversations') touchAll('update deleted ix.conversations'); return delete t[p]; },
+  });
+
   const logPath = (adapterId, convId) => path.join(msgsDir, safeSeg(adapterId), `${safeSeg(convId)}.ndjson`);
 
   function markDirty() {
@@ -335,14 +388,133 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     }
   }
 
-  function flush() {
+  function flush({ full = false } = {}) {
     if (!dirty) return false;
     // every refusal is said (r3: a once-only line went silent after the first)
     if (ixBlocked) { warn('[channels] index.json not written: ' + ixBlocked); return false; }
     ix.updatedAt = now();
-    writeJsonAtomic(indexFile, ix);
+    writeIndex(full);
     dirty = false;   // only once it is on disk — a failed write stays owed (lane-dead-bridge)
     return true;
+  }
+
+  // ── THE INCREMENTAL WRITE (B-f32b): the same bytes as `writeJsonAtomic(indexFile, ix)`, from cached chunks ──
+  const plainRows = (c) => !!c && typeof c === 'object' && !Array.isArray(c);
+  function serializeChunk(c, conv) {
+    const lines = [], kept = [];
+    for (const k of c.keys) {
+      if (!hasOwn(conv, k)) { if (layout && layout.chunkOf.get(k) === c) layout.chunkOf.delete(k); continue; }
+      kept.push(k);
+      const line = rowLine(k, conv[k]);
+      if (line !== null) lines.push(line);
+    }
+    c.keys = kept; c.n = lines.length; c.buf = Buffer.from(lines.join(',\n'), 'utf8');
+  }
+  function buildLayout(conv) {
+    const keys = Object.keys(conv);
+    layout = { chunks: [], chunkOf: new Map() };
+    for (let i = 0; i < keys.length; i += INDEX_CHUNK) {
+      const c = { keys: keys.slice(i, i + INDEX_CHUNK), buf: null, n: 0 };
+      layout.chunks.push(c);
+      for (const k of c.keys) layout.chunkOf.set(k, c);
+      serializeChunk(c, conv);
+    }
+  }
+  /** The touched rows only: a known row re-serializes its chunk; a row born since the last write (`entry()` appends
+   *  it to the map, so it is LAST in key order) joins the last chunk — the file keeps the map's own order. */
+  function applyTouched(conv) {
+    const stale = new Set();
+    for (const k of dirtyKeys) {
+      let c = layout.chunkOf.get(k);
+      if (!c) {
+        if (!hasOwn(conv, k)) continue;
+        c = layout.chunks[layout.chunks.length - 1];
+        if (!c || c.keys.length >= INDEX_CHUNK) { c = { keys: [], buf: null, n: 0 }; layout.chunks.push(c); }
+        c.keys.push(k); layout.chunkOf.set(k, c);
+      }
+      stale.add(c);
+    }
+    for (const c of stale) serializeChunk(c, conv);
+  }
+  function assemble() {
+    const parts = [], top = [];
+    const flushTop = () => { if (top.length) { parts.push(Buffer.from(top.join(''), 'utf8')); top.length = 0; } };
+    let first = true;
+    for (const k of Object.keys(ix)) {
+      if (k.startsWith('_')) continue;
+      if (k === 'conversations') {
+        top.push(first ? '{\n' : ',\n'); first = false;
+        const full = layout.chunks.filter((c) => c.n > 0);
+        if (!full.length) { top.push(' "conversations": {}'); continue; }
+        top.push(' "conversations": {\n'); flushTop();
+        full.forEach((c, i) => { if (i) parts.push(Buffer.from(',\n')); parts.push(c.buf); });
+        top.push('\n }');
+        continue;
+      }
+      const s = JSON.stringify(ix[k], RUNTIME_KEYS, 1);
+      if (s === undefined) continue;
+      top.push(first ? '{\n' : ',\n', ` ${JSON.stringify(k)}: ${s.replaceAll('\n', '\n ')}`); first = false;
+    }
+    top.push(first ? '{}' : '\n}');
+    flushTop();
+    return parts;
+  }
+  function writeIndex(full) {
+    const conv = ix.conversations;
+    if (!plainRows(conv)) { flushStats.fallback++; layout = null; allDirty = true; writeJsonAtomic(indexFile, ix); allDirty = false; dirtyKeys.clear(); return; }
+    if (full || allDirty || !layout) { buildLayout(conv); flushStats.full++; } else { applyTouched(conv); flushStats.incremental++; }
+    const wasFull = full || allDirty;
+    allDirty = false; dirtyKeys.clear();   // the cache now holds memory; a failed disk write below stays owed via `dirty`
+    let parts = assemble();
+    if (verifyTo && !wasFull) {
+      const want = JSON.stringify(ix, RUNTIME_KEYS, 1);
+      const got = Buffer.concat(parts).toString('utf8');
+      if (got !== want) {
+        let at = 0; while (at < want.length && want[at] === got[at]) at++;
+        const line = `[channels] index.json incremental write DRIFTED from the whole-file serialization (a row changed without entry()) near: ${JSON.stringify(want.slice(Math.max(0, at - 120), at + 60))}`;
+        warn(line);
+        if (verifyTo !== '1') { try { fs.appendFileSync(verifyTo, line + '\n'); } catch { } }
+        buildLayout(conv); parts = [Buffer.from(want, 'utf8')];
+      }
+    }
+    writeBuffersAtomic(indexFile, parts);
+  }
+  /** THE SWEEP (every interval tick): re-serialize the next SWEEP_CHUNKS cached chunks and compare. A difference is a
+   *  row changed OUTSIDE `update()`/`entry()` (the one-door rule broken somewhere): it is written, and said once per
+   *  sweep with its first key. Returns the drifted chunk count. */
+  function sweep(n = SWEEP_CHUNKS) {
+    if (!layout || allDirty || closed || !plainRows(ix.conversations)) return 0;
+    const conv = ix.conversations;
+    let drift = 0, firstKey = null;
+    for (let i = 0; i < n && layout.chunks.length; i++) {
+      if (sweepAt >= layout.chunks.length) sweepAt = 0;
+      const c = layout.chunks[sweepAt++];
+      if (c.keys.some((k) => dirtyKeys.has(k))) continue;   // owed to the next write already
+      const old = c.buf;
+      flushStats.swept++;
+      serializeChunk(c, conv);
+      if (old && c.buf.equals(old)) continue;
+      drift++;
+      if (!firstKey) {
+        const a = old ? old.toString('utf8').split(/,\n(?=  ")/) : [], b = c.buf.toString('utf8').split(/,\n(?=  ")/);
+        const j = b.findIndex((row, x) => row !== a[x]);
+        const m = /^  ("(?:[^"\\]|\\.)*")/.exec(b[Math.max(0, j)] || '');
+        try { firstKey = m ? JSON.parse(m[1]) : (c.keys[0] || '?'); } catch { firstKey = c.keys[0] || '?'; }
+      }
+      for (const k of c.keys) fire(k);
+    }
+    // verify r1: a row BORN outside `entry()` sits in no chunk — each cycle's end counts the map against the cache
+    if (!drift && sweepAt >= layout.chunks.length && !dirtyKeys.size && Object.keys(conv).length !== layout.chunkOf.size) {
+      drift = 1; firstKey = Object.keys(conv).find((k) => !layout.chunkOf.has(k)) || '?';
+      touchAll('sweep: a row born outside entry()');
+    }
+    if (drift) {
+      flushStats.drift += drift;
+      const t = now();
+      if (!driftSaidAt || t - driftSaidAt >= DRIFT_SAY_MS) { driftSaidAt = t; warn(`[channels] index.json: a conversation row changed outside update() (first: ${firstKey}; ${flushStats.drift} chunk(s) so far) — written now; find the writer`); }
+      markDirty();
+    }
+    return drift;
   }
 
   // ── §5.1 THE SERIALIZED INDEX OWNER ─────────────────────────────────────
@@ -356,7 +528,17 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     // that resolved while the flush was refused was a user action that
     // succeeded on screen and vanished at the next restart
     if (ixBlocked) return Promise.reject(blockedError(ixBlocked));
-    const run = chain.then(() => fn(ix)).then((r) => { markDirty(); return r; });
+    const run = chain.then(() => {
+      const t = curTouch = new Set();
+      // verify r1: the rows are marked again at the update's END — a write inside an async fn's await cleared their
+      // marks, and the fn may change them after it (a no-op for a sync fn: no write can run inside it)
+      const done = () => { curTouch = null; if (t.all) { touchAll('update reached the whole map'); } else for (const k of t) { dirtyKeys.add(k); fire(k); } };
+      let r;
+      try { r = fn(touchView); } catch (e) { done(); throw e; }
+      if (r && typeof r.then === 'function') return Promise.resolve(r).finally(done);
+      done();
+      return r;
+    }).then((r) => { markDirty(); return r; });
     chain = run.then(() => {}, () => {});
     return run;
   }
@@ -367,6 +549,11 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    * policy are all PURE and take their inputs as arguments.
    */
   function snapshot() { return JSON.parse(JSON.stringify(ix)); }
+  // B-f32b (lane channel-index-copy): `snapshot()` is the WHOLE index — 0.56 s at 50 274 conversations, and opening one
+  // Channel window called it up to five times through known()/convFor(). A read of ONE conversation is `has(key)` (no
+  // copy) or `peek(key)` (that row only); a scan reads `live()`. The engine calls `snapshot()` nowhere (its census).
+  /** Is there a row for `key`? No copy (the engine's `known()`). */
+  function has(key) { return !!ix.conversations[key]; }
   /** ONE entry, cloned (2026-09-26): the per-conversation read of a pass.
    *  `snapshot()` deep-clones the WHOLE index — measured 2.8 ms at 873
    *  entries, i.e. ~2.5 s of main thread per pass when a pass asked it once
@@ -376,7 +563,12 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   /** The LIVE conversations map, for READ-ONLY iteration on the render and
    *  scheduling paths (the digest, the tick's due scan). Never mutate it
    *  outside `update()` — the one-door rule (§5.1) is unchanged. */
-  function liveConversations() { return ix.conversations; }
+  function liveConversations() { if (curTouch) touchAll('update read live()'); return ix.conversations; }
+  /** B-f32b: the live rows for a READ-ONLY scan INSIDE an update that marks each row it changes with `touch(key)` (or
+   *  re-fetches it through `entry()`) — the scan itself marks nothing, where `live()` there marks every row. */
+  function rows() { return ix.conversations; }
+  /** Mark ONE row changed (the row a `rows()` scan wrote) — the incremental write re-serializes its chunk. */
+  function touch(key) { const k = String(key); if (hasOwn(ix.conversations, k)) touchKey(k); else touchAll('touch of a row not in the map'); }   // verify r1: a removal / a touch before the birth moves the map's order
   /** The LIVE top-level table `name` (accountAssignments / patternAssignments
    *  — each grain record `{…, access:[], watchers:[]}` since R4 — /
    *  accountGrants / filters / rotations), READ-ONLY outside `update()`. */
@@ -397,6 +589,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     let e = ix.conversations[key];
     if (!e && !create) return null;
     if (!e) {
+      if (layout && layout.chunkOf.has(key)) touchAll('a row re-born before its old place was rewritten');   // verify r1: the file keeps the map's order
       e = ix.conversations[key] = {
         key, id: convId, adapterId, vendorId: convId, title: '', kind: 'group',
         participants: '', lastAt: null, unread: 0, tracked: false, anchor: null,
@@ -407,6 +600,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
         readAt: 0, createdAt: now(),
       };
     }
+    touchKey(key);
     return e;
   }
 
@@ -1241,14 +1435,17 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     return out.slice(-Math.max(1, limit));
   }
 
-  interval = setInterval(() => { if (dirty && !debounce) flushFromTimer(); }, FLUSH_INTERVAL_MS);   // the same guarded write (lane-dead-bridge)
+  interval = setInterval(() => {   // every tick sweeps (B-f32b), then the same guarded write (lane-dead-bridge)
+    try { sweep(); } catch (e) { warn('[channels] index sweep failed:', (e && e.message) || e); }
+    if (dirty && !debounce) flushFromTimer();
+  }, FLUSH_INTERVAL_MS);
   if (interval.unref) interval.unref();
 
   function close() {
     closed = true;
     if (debounce) { clearTimeout(debounce); debounce = null; }
     if (interval) { clearInterval(interval); interval = null; }
-    flush();
+    flush({ full: true });   // B-f32b: the last write is the whole serialization, not the cache
     paceFlush();
     lruFlush();
   }
@@ -1256,7 +1453,12 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   return {
     dir, indexFile, adaptersFile, auditFile, archiveDir, outboxFile, groupsFile, logPath,
     // `blocked()` = the refusal sentence while a family's file could not be set aside (null = writable)
-    index: { update, snapshot, peek, live: liveConversations, table: liveTable, entry, flush, isDirty: () => dirty, blocked: () => ixBlocked || null },
+    index: {
+      update, snapshot, peek, has, live: liveConversations, rows, touch, table: liveTable, entry, flush, isDirty: () => dirty, blocked: () => ixBlocked || null,
+      // B-f32b: `onTouch(fn)` = fn(key) after an update touched that row, fn(null) after it reached the whole map (the
+      // engine's kept unread total); `sweep()` / `flushStats()` for the gates
+      onTouch: (fn) => { if (typeof fn === 'function') touchHooks.push(fn); }, sweep, flushStats: () => ({ ...flushStats, chunks: layout ? layout.chunks.length : 0 }),
+    },
     adapters: { update: adaptersUpdate, live: () => ad, blocked: () => adLoad.blocked || null },
     outbox: { update: outboxUpdate, snapshot: outboxSnapshot, nextId: outboxNextId, live: () => ob },
     groups: { update: groupsUpdate, snapshot: groupsSnapshot, live: () => gr },
@@ -1273,7 +1475,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
 }
 
 module.exports = {
-  createChannelStore, writeJsonAtomic, safeSeg,
+  createChannelStore, writeJsonAtomic, safeSeg, INDEX_CHUNK, SWEEP_CHUNKS,
   RETENTION_DAYS, RETENTION_MAX_RECORDS, RETENTION_FLOOR_DAYS, DEDUP_MAX, TAIL_BYTES, OUTBOX_KEEP, OUTBOX_PRUNABLE, OUTBOX_PRUNE_RANK,
   SIDE_DEDUP_MAX, SIDE_READ_MAX, SIDE_DIR, SIDE_READ_BYTES, SIDE_COMPACT_BYTES, SIDE_KEEP_BYTES,
 };
